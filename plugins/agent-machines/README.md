@@ -397,7 +397,7 @@ unavailable.
 Requirement packages use a repo-owned namespace:
 
 ```text
-.agent-machines/
+.copilot-extensions/agent-machines/
 ├── all/                       # packages evaluated on every machine
 │   └── copilot-defaults.yaml
 └── machines/
@@ -419,20 +419,24 @@ gates, `per-machine` overlays, nested module/resource gates, and machine
 directory selection. Ambiguous cross-entry matches fail before reconciliation.
 Without usable topology, the raw host name remains the standalone fallback.
 
-For migration, `.github/machine-state/` remains a bounded legacy fallback only
-when `.agent-machines/` is absent. Move a repo atomically: once the canonical
-root exists, legacy files in that repo are ignored.
+The canonical root is `.copilot-extensions/agent-machines/`. Legacy
+`.agent-machines/` and `.github/machine-state/` remain bounded fallbacks only
+when the canonical root is absent. An explicit marketplace-specific overlay may
+live under `.copilot-extensions/agent-machines/marketplaces/<marketplace-id>/`.
+Move a repo atomically: once the canonical root exists, legacy files in that
+repo are ignored.
 
 Use `agent-machines doctor` to find legacy, mixed, or malformed layouts across
 adopted repos. `agent-machines migrate --repo <name-or-path>` previews a
-behavior-preserving migration: YAML files move byte-for-byte into
-`.agent-machines/all/`, preserving gates, and a legacy `README.md` moves to the
-canonical root. Re-run with `--apply` to perform it. Migration refuses mixed
+behavior-preserving migration: legacy YAML files move byte-for-byte into
+`.copilot-extensions/agent-machines/all/`, preserving gates, and a legacy
+`README.md` moves to the canonical root. Re-run with `--apply` to perform it.
+Migration refuses mixed
 layouts, destination collisions, nested content, and unknown legacy entries
 rather than guessing. Reorganizing a migrated package into `machines/<machine>/`
 is a separate explicit edit.
 
-A package under `.agent-machines/all/` has this shape. Schema v4 is required
+A package under `.copilot-extensions/agent-machines/all/` has this shape. Schema v4 is required
 only when the package uses `authority`; runtimes continue to read v1-v3
 packages that do not:
 

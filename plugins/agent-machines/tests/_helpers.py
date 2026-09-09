@@ -14,13 +14,20 @@ def write_package(
     *,
     machine: str | None = None,
     legacy: bool = False,
+    repo_legacy: bool = False,
 ) -> Path:
     if legacy:
         state = repo_root / ".github" / "machine-state"
+    elif repo_legacy:
+        state = (
+            repo_root / ".agent-machines" / "machines" / machine
+            if machine
+            else repo_root / ".agent-machines" / "all"
+        )
     elif machine:
-        state = repo_root / ".agent-machines" / "machines" / machine
+        state = repo_root / ".copilot-extensions" / "agent-machines" / "machines" / machine
     else:
-        state = repo_root / ".agent-machines" / "all"
+        state = repo_root / ".copilot-extensions" / "agent-machines" / "all"
     state.mkdir(parents=True, exist_ok=True)
     path = state / filename
     path.write_text(yaml.safe_dump(data), encoding="utf-8")

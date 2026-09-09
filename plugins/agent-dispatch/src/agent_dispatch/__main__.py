@@ -2471,6 +2471,7 @@ def _reviewer_loop_declarations(
         load_pointers,
         read_declaration_file_set,
     )
+    from . import repo_config as dispatch_repo_config
 
     path = Path(args.declaration).expanduser().resolve()
     declarations = read_declaration_file_set(path)
@@ -2484,20 +2485,22 @@ def _reviewer_loop_declarations(
     declared_owners = {declaration.owner for declaration in declarations}
     if owner is None and len(declared_owners) == 1:
         owner = next(iter(declared_owners))
+    repo_root = dispatch_repo_config.repo_root_from_surface_path(path, "registrar")
+    selected_dir = (
+        dispatch_repo_config.selected_repo_surface_dir(repo_root, "registrar").resolve()
+        if repo_root is not None
+        else None
+    )
     if owner is None:
         matching = [
             pointer.effective_owner()
             for pointer in load_pointers()
-            if pointer.resolved_location().resolve() == path.parent
+            if pointer.resolved_location().resolve() == (selected_dir or path.parent)
         ]
         if len(matching) == 1:
             owner = matching[0]
-    if (
-        owner is None
-        and path.parent.name == "registrar"
-        and path.parent.parent.name == ".agent-dispatch"
-    ):
-        owner = f"repo:{path.parent.parent.parent.name}"
+    if owner is None and repo_root is not None:
+        owner = f"repo:{repo_root.name}"
     if owner is None:
         raise ValueError(
             f"{path}: declaration owner is ambiguous; register its containing "
@@ -2520,23 +2523,23 @@ def _reviewer_loop_registrations(args: argparse.Namespace) -> list[dict]:
 
 def _reviewer_loop_setup(args: argparse.Namespace) -> int:
     from . import registrar_discovery as rd
+    from . import repo_config as dispatch_repo_config
 
     path = Path(args.declaration).expanduser().resolve()
-    if (
-        path.parent.name != "registrar"
-        or path.parent.parent.name != ".agent-dispatch"
-    ):
+    repo_root = dispatch_repo_config.repo_root_from_surface_path(path, "registrar")
+    if repo_root is None:
         raise ValueError(
             f"{path}: setup requires a declaration under "
-            "<repo>/.agent-dispatch/registrar/"
+            "<repo>/.copilot-extensions/agent-dispatch/registrar/ "
+            "(legacy <repo>/.agent-dispatch/registrar/ also accepted)"
         )
-    repo_root = path.parent.parent.parent
     _path, declarations, owner = _reviewer_loop_declarations(args)
     name = args.name or repo_root.name
     existing = next((item for item in rd.load_pointers() if item.name == name), None)
+    selected_dir = dispatch_repo_config.selected_repo_surface_dir(repo_root, "registrar")
     if (
         existing is not None
-        and existing.resolved_location().resolve() != path.parent
+        and existing.resolved_location().resolve() != selected_dir.resolve()
     ):
         raise ValueError(
             f"registrar pointer {name!r} already targets "
@@ -2947,6 +2950,7 @@ def _repository_issue_loop_declarations(
     args: argparse.Namespace,
 ) -> tuple[Path, tuple[ProfileDeclaration, ...], str]:
     from .registrar_discovery import load_pointers, read_declaration_file_set
+    from . import repo_config as dispatch_repo_config
 
     path = Path(args.declaration).expanduser().resolve()
     declarations = read_declaration_file_set(path)
@@ -2961,20 +2965,22 @@ def _repository_issue_loop_declarations(
     declared_owners = {declaration.owner for declaration in declarations}
     if owner is None and len(declared_owners) == 1:
         owner = next(iter(declared_owners))
+    repo_root = dispatch_repo_config.repo_root_from_surface_path(path, "registrar")
+    selected_dir = (
+        dispatch_repo_config.selected_repo_surface_dir(repo_root, "registrar").resolve()
+        if repo_root is not None
+        else None
+    )
     if owner is None:
         matching = [
             pointer.effective_owner()
             for pointer in load_pointers()
-            if pointer.resolved_location().resolve() == path.parent
+            if pointer.resolved_location().resolve() == (selected_dir or path.parent)
         ]
         if len(matching) == 1:
             owner = matching[0]
-    if (
-        owner is None
-        and path.parent.name == "registrar"
-        and path.parent.parent.name == ".agent-dispatch"
-    ):
-        owner = f"repo:{path.parent.parent.parent.name}"
+    if owner is None and repo_root is not None:
+        owner = f"repo:{repo_root.name}"
     if owner is None:
         raise ValueError(
             f"{path}: declaration owner is ambiguous; register its containing "
@@ -3000,23 +3006,23 @@ def _repository_issue_loop_registrations(args: argparse.Namespace) -> list[dict]
 
 def _repository_issue_loop_setup(args: argparse.Namespace) -> int:
     from . import registrar_discovery as rd
+    from . import repo_config as dispatch_repo_config
 
     path = Path(args.declaration).expanduser().resolve()
-    if (
-        path.parent.name != "registrar"
-        or path.parent.parent.name != ".agent-dispatch"
-    ):
+    repo_root = dispatch_repo_config.repo_root_from_surface_path(path, "registrar")
+    if repo_root is None:
         raise ValueError(
             f"{path}: setup requires a declaration under "
-            "<repo>/.agent-dispatch/registrar/"
+            "<repo>/.copilot-extensions/agent-dispatch/registrar/ "
+            "(legacy <repo>/.agent-dispatch/registrar/ also accepted)"
         )
-    repo_root = path.parent.parent.parent
     _path, declarations, owner = _repository_issue_loop_declarations(args)
     name = args.name or repo_root.name
     existing = next((item for item in rd.load_pointers() if item.name == name), None)
+    selected_dir = dispatch_repo_config.selected_repo_surface_dir(repo_root, "registrar")
     if (
         existing is not None
-        and existing.resolved_location().resolve() != path.parent
+        and existing.resolved_location().resolve() != selected_dir.resolve()
     ):
         raise ValueError(
             f"registrar pointer {name!r} already targets "
@@ -5059,12 +5065,14 @@ def build_parser() -> argparse.ArgumentParser:
     rp.add_argument(
         "location",
         help="directory of declaration docs, or (with --kind repo) a repo root "
-             "whose .agent-dispatch/registrar/ is read",
+             "whose .copilot-extensions/agent-dispatch/registrar/ "
+             "(legacy .agent-dispatch/registrar/) is read",
     )
     rp.add_argument(
         "--kind", choices=["dir", "repo"], default="dir",
         help="'dir' (default) reads the location directly; 'repo' reads its "
-             ".agent-dispatch/registrar/ subdir",
+             ".copilot-extensions/agent-dispatch/registrar/ subdir "
+             "(legacy .agent-dispatch/registrar/ fallback)",
     )
     rp.add_argument("--owner", help="provenance stamped on declarations read here")
     rp.set_defaults(func=_cmd_registrar)
@@ -5091,8 +5099,9 @@ def build_parser() -> argparse.ArgumentParser:
     rp.set_defaults(func=_cmd_registrar)
     rp = reg_sub.add_parser(
         "discover-repo",
-        help="read a single synced repo's in-repo .agent-dispatch/registrar/ "
-             "declarations (the repo-sync discovery unit)",
+        help="read a single synced repo's in-repo "
+             ".copilot-extensions/agent-dispatch/registrar/ declarations "
+             "(legacy .agent-dispatch/registrar/ fallback; repo-sync discovery unit)",
     )
     rp.add_argument("repo_root", help="path to the repo root to read declarations from")
     rp.add_argument("--owner", help="provenance override (default: repo:<name>)")

@@ -19,6 +19,7 @@ sibling plugin.
 
 from __future__ import annotations
 
+import json
 import os
 import platform
 import sys
@@ -30,10 +31,13 @@ import yaml
 
 from .manifest import ManifestError, RequirementPackage, load_package
 
-MACHINE_STATE_ROOT = ".agent-machines"
+CANONICAL_MACHINE_STATE_ROOT = Path(".copilot-extensions") / "agent-machines"
+LEGACY_MACHINE_STATE_ROOT = ".agent-machines"
+MACHINE_STATE_ROOT = str(CANONICAL_MACHINE_STATE_ROOT)
 ALL_PACKAGES_DIR = "all"
 MACHINES_PACKAGES_DIR = "machines"
 LEGACY_MACHINE_STATE_DIR = ".github/machine-state"
+MARKETPLACE_OVERLAYS_DIR = CANONICAL_MACHINE_STATE_ROOT / "marketplaces"
 PROJECT_CONFIG_FILE = "config.yaml"
 REPO_CONFIG_FILE = Path(".agent-worktrees") / "config.yaml"
 
@@ -168,16 +172,21 @@ def _registered_repo_entry(repos: dict, name: str) -> tuple[str, dict] | None:
 
 def _repo_requires_external_state(repo_path: Path) -> bool:
     """Return whether committed repo config activates the knowledge relationship."""
-    path = repo_path / REPO_CONFIG_FILE
-    if not path.is_file():
-        return False
-    try:
-        config = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    except (OSError, yaml.YAMLError):
-        return False
-    if not isinstance(config, dict):
-        return False
-    return bool(config.get("stateless") or config.get("requires_external_state_root"))
+    candidates = (
+        repo_path / ".copilot-extensions" / "agent-worktrees" / PROJECT_CONFIG_FILE,
+        repo_path / REPO_CONFIG_FILE,
+    )
+    for path in candidates:
+        if not path.is_file():
+            continue
+        try:
+            config = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError):
+            return False
+        if not isinstance(config, dict):
+            return False
+        return bool(config.get("stateless") or config.get("requires_external_state_root"))
+    return False
 
 
 def adopted_project_repos(
@@ -474,10 +483,41 @@ def _yaml_files(directory: Path) -> list[Path]:
     return direct
 
 
+def _load_installation_context() -> dict[str, Any] | None:
+    raw = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip()
+    if not raw:
+        return None
+    try:
+        if raw.startswith("{"):
+            value = json.loads(raw)
+        else:
+            value = json.loads(Path(raw).expanduser().read_text(encoding="utf-8"))
+    except (OSError, TypeError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _installation_marketplace_id() -> str | None:
+    context = _load_installation_context()
+    if context is None:
+        return None
+    marketplace_id = context.get("marketplaceId")
+    if not isinstance(marketplace_id, str) or not marketplace_id.strip():
+        return None
+    return marketplace_id.strip()
+
+
 def _validate_canonical_root(root: Path) -> None:
     allowed_dirs = {ALL_PACKAGES_DIR, MACHINES_PACKAGES_DIR}
     for child in sorted(root.iterdir()):
         if child.is_dir() and child.name in allowed_dirs:
+            continue
+        if (
+            child.is_dir()
+            and child.name == "marketplaces"
+            and root.name == "agent-machines"
+            and root.parent.name == ".copilot-extensions"
+        ):
             continue
         if child.is_file() and child.name.casefold() == "readme.md":
             continue
@@ -486,6 +526,58 @@ def _validate_canonical_root(root: Path) -> None:
             f"packages belong directly under {ALL_PACKAGES_DIR}/ or "
             f"{MACHINES_PACKAGES_DIR}/<machine>/"
         )
+
+
+def _selected_repo_package_root(repo_path: Path) -> tuple[Path | None, str]:
+    canonical = repo_path / MACHINE_STATE_ROOT
+    if canonical.exists():
+        return canonical, "structured"
+    legacy = repo_path / LEGACY_MACHINE_STATE_ROOT
+    if legacy.exists():
+        return legacy, "structured"
+    fallback = repo_path / LEGACY_MACHINE_STATE_DIR
+    return (fallback, "flat-legacy") if fallback.exists() else (None, "flat-legacy")
+
+
+def _marketplace_overlay_root(repo_path: Path) -> Path | None:
+    marketplace_id = _installation_marketplace_id()
+    if not marketplace_id:
+        return None
+    candidate = repo_path / MARKETPLACE_OVERLAYS_DIR / marketplace_id
+    return candidate if candidate.exists() else None
+
+
+def _structured_package_files(
+    root: Path,
+    machine: str,
+    accepted_machines: tuple[str, ...] | None = None,
+) -> list[Path]:
+    _validate_canonical_root(root)
+    files = _yaml_files(root / ALL_PACKAGES_DIR)
+    machine_dir = _machine_package_dir(root, machine, accepted_machines)
+    if machine_dir is not None:
+        files.extend(_yaml_files(machine_dir))
+    return files
+
+
+def _package_file_layers_in_repo(
+    repo_path: Path,
+    machine: str,
+    accepted_machines: tuple[str, ...] | None = None,
+) -> list[tuple[str, list[Path]]]:
+    layers: list[tuple[str, list[Path]]] = []
+    root, layout_kind = _selected_repo_package_root(repo_path)
+    if root is not None:
+        files = (
+            _structured_package_files(root, machine, accepted_machines)
+            if layout_kind == "structured"
+            else _yaml_files(root)
+        )
+        layers.append((layout_kind, files))
+    overlay = _marketplace_overlay_root(repo_path)
+    if overlay is not None:
+        layers.append(("structured", _structured_package_files(overlay, machine, accepted_machines)))
+    return layers
 
 
 def _machine_package_dir(
@@ -516,21 +608,21 @@ def package_files_in_repo(
     machine: str,
     accepted_machines: tuple[str, ...] | None = None,
 ) -> list[Path]:
-    """Resolve canonical package files, with a bounded legacy fallback.
+    """Resolve effective package files with bounded legacy fallback.
 
-    ``.agent-machines`` is authoritative whenever it exists. Adopters migrate
-    atomically; the old ``.github/machine-state`` directory is consulted only
-    when the canonical root is absent, so a moved package is never loaded twice.
+    ``.copilot-extensions/agent-machines/`` is authoritative whenever it
+    exists. Legacy ``.agent-machines/`` remains readable, and the older
+    ``.github/machine-state/`` directory is consulted only when neither newer
+    root exists. An explicit marketplace overlay under
+    ``.copilot-extensions/agent-machines/marketplaces/<marketplace-id>/`` may
+    add or replace packages on top of the selected base layer.
     """
-    root = repo_path / MACHINE_STATE_ROOT
-    if root.is_dir():
-        _validate_canonical_root(root)
-        files = _yaml_files(root / ALL_PACKAGES_DIR)
-        machine_dir = _machine_package_dir(root, machine, accepted_machines)
-        if machine_dir is not None:
-            files.extend(_yaml_files(machine_dir))
-        return files
-    return _yaml_files(repo_path / LEGACY_MACHINE_STATE_DIR)
+    files: list[Path] = []
+    for _kind, layer_files in _package_file_layers_in_repo(
+        repo_path, machine, accepted_machines
+    ):
+        files.extend(layer_files)
+    return files
 
 
 def packages_in_repo(
@@ -542,33 +634,45 @@ def packages_in_repo(
 ) -> list[RequirementPackage]:
     """Load and gate-filter the requirement packages carried by ``repo_path``."""
     out: list[RequirementPackage] = []
-    names: dict[str, Path] = {}
-    canonical = (repo_path / MACHINE_STATE_ROOT).is_dir()
-    machine_root = repo_path / MACHINE_STATE_ROOT / MACHINES_PACKAGES_DIR
-    for pkg_file in package_files_in_repo(repo_path, machine, accepted_machines):
-        pkg = load_package(
-            pkg_file,
-            source_repo=repo_name,
-            source_anchor=source_anchor or repo_path,
-        )
-        machine_scoped = canonical and pkg_file.parent.parent == machine_root
-        applies = pkg.applies_to(machine, accepted_machines)
-        if machine_scoped and not applies:
-            raise ManifestError(
-                f"{pkg_file}: package gate excludes its containing machine "
-                f"directory {pkg_file.parent.name!r}; machine-scoped packages "
-                "must omit gate, use '*', or include that machine"
+    selected: dict[str, int] = {}
+    for layout_kind, layer_files in _package_file_layers_in_repo(
+        repo_path, machine, accepted_machines
+    ):
+        layer_names: dict[str, Path] = {}
+        for pkg_file in layer_files:
+            pkg = load_package(
+                pkg_file,
+                source_repo=repo_name,
+                source_anchor=source_anchor or repo_path,
             )
-        if not applies:
-            continue
-        if canonical and pkg.name in names:
-            raise ManifestError(
-                f"{pkg_file}: package {pkg.name!r} duplicates {names[pkg.name]}; "
-                "files under all/ and machines/<machine>/ are independent complete "
-                "packages and must have unique package names"
+            machine_scoped = (
+                layout_kind == "structured"
+                and pkg_file.parent.parent.name == MACHINES_PACKAGES_DIR
             )
-        names[pkg.name] = pkg_file
-        out.append(pkg)
+            applies = pkg.applies_to(machine, accepted_machines)
+            if machine_scoped and not applies:
+                raise ManifestError(
+                    f"{pkg_file}: package gate excludes its containing machine "
+                    f"directory {pkg_file.parent.name!r}; machine-scoped packages "
+                    "must omit gate, use '*', or include that machine"
+                )
+            if not applies:
+                continue
+            if layout_kind == "structured" and pkg.name in layer_names:
+                raise ManifestError(
+                    f"{pkg_file}: package {pkg.name!r} duplicates {layer_names[pkg.name]}; "
+                    "files under all/ and machines/<machine>/ are independent complete "
+                    "packages and must have unique package names"
+                )
+            layer_names[pkg.name] = pkg_file
+            if layout_kind == "structured":
+                if pkg.name in selected:
+                    out[selected[pkg.name]] = pkg
+                else:
+                    selected[pkg.name] = len(out)
+                    out.append(pkg)
+            else:
+                out.append(pkg)
     return out
 
 
@@ -583,11 +687,13 @@ def discover(
 
     The candidate set is ``projects.yaml`` (adopted harness projects); each path
     is resolved from ``repos.yaml`` (which owns paths). A project is included when
-    it (a) carries ``.agent-machines/all/`` or
-    ``.agent-machines/machines/<machine>/`` packages that (b) gate to
-    ``machine``. Plugin-enable status is annotated; set ``require_enable`` to
-    also require the project to enable ``agent-machines``. The legacy
-    ``.github/machine-state/`` location is used only when ``.agent-machines/``
+    it (a) carries canonical
+    ``.copilot-extensions/agent-machines/all/`` or
+    ``.copilot-extensions/agent-machines/machines/<machine>/`` packages that
+    (b) gate to ``machine``. Plugin-enable status is annotated; set
+    ``require_enable`` to also require the project to enable
+    ``agent-machines``. Legacy ``.agent-machines/`` and
+    ``.github/machine-state/`` locations are used only when the canonical root
     is absent.
     """
     machine = machine or current_machine()
@@ -632,7 +738,7 @@ def _main(
     if not repos:
         print("no requirement packages discovered "
               "(no adopted projects or declared supplemental repositories carry "
-              ".agent-machines packages)")
+              ".copilot-extensions/agent-machines packages)")
         return 0
     for repo in repos:
         flag = "enabled" if repo.enabled else "not-enabled"

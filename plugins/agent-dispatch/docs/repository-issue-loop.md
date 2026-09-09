@@ -9,9 +9,12 @@ does not add a second task or policy store.
 
 ## Declaration and occurrence model
 
-The adopter owns the complete active declaration under
-`.agent-dispatch/registrar/`. The runtime does not merge an overlay. Registrar
-discovery expands it in memory into:
+The adopter owns the complete active declaration under the canonical
+`.copilot-extensions/agent-dispatch/registrar/`, with legacy
+`.agent-dispatch/registrar/` fallback. The runtime reads the canonical
+directory first and may merge an explicit marketplace-specific overlay from
+`.copilot-extensions/agent-dispatch/marketplaces/<marketplace-id>/registrar/`.
+Registrar discovery expands the effective declaration set in memory into:
 
 1. `<name>-source`, a lease-gated periodic emitter; and
 2. `<name>-workers`, a concurrency-one headless supervised lane.

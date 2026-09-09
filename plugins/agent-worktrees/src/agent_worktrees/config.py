@@ -1,7 +1,7 @@
 """Config loading and machine detection.
 
 Reads per-project config from ~/.{project}/config.yaml and provides
-typed access.  Runtime lives at ~/.agent-worktrees/ (shared across
+typed access. Runtime lives at ~/.agent-worktrees/ (shared across
 projects); per-project state at ~/.{project}/.
 
 The active project is resolved from the current working directory (git-like),
@@ -35,12 +35,17 @@ _ASSIGNMENT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 # repo-settings** (no ``anchor`` / ``worktree_root`` -- those are machine
 # paths -- and no ``repos:`` map).
 #
-# Preferred location is the **directory form**
-# ``<anchor>/.agent-worktrees/config.yaml``; the legacy single-file
-# ``<anchor>/.agent-worktrees.yaml`` (which carried only a ``pr:`` block) is
-# still read as a back-compat fallback.
-INREPO_CONFIG_DIRNAME = ".agent-worktrees"        # <anchor>/.agent-worktrees/config.yaml
+# Preferred location is the shared plugin namespace
+# ``<anchor>/.copilot-extensions/agent-worktrees/config.yaml``. Legacy
+# ``<anchor>/.agent-worktrees/config.yaml`` and the older single-file
+# ``<anchor>/.agent-worktrees.yaml`` (which carried only a ``pr:`` block) are
+# still read as back-compat fallbacks. ``.agent-worktrees/`` remains the
+# canonical home for sibling committed files such as ``machines.yaml``.
+CANONICAL_INREPO_CONFIG_DIR = Path(".copilot-extensions") / "agent-worktrees"
+LEGACY_INREPO_CONFIG_DIRNAME = ".agent-worktrees"
+INREPO_CONFIG_DIRNAME = LEGACY_INREPO_CONFIG_DIRNAME
 INREPO_CONFIG_FILENAME = ".agent-worktrees.yaml"  # legacy single-file fallback
+MARKETPLACE_OVERLAYS_DIR = CANONICAL_INREPO_CONFIG_DIR / "marketplaces"
 
 # Global, machine-wide config: the user-owned BASE layer holding only
 # machine-wide settings -- top-level ``srcroot`` / ``machine`` / ``platform`` /
@@ -827,8 +832,13 @@ def global_config_path() -> Path:
 
 
 def inrepo_config_path(anchor: str | Path) -> Path:
-    """Return the preferred in-repo config path (directory form) for an anchor."""
-    return Path(anchor) / INREPO_CONFIG_DIRNAME / GLOBAL_CONFIG_FILENAME
+    """Return the preferred in-repo config path for an anchor."""
+    return Path(anchor) / CANONICAL_INREPO_CONFIG_DIR / GLOBAL_CONFIG_FILENAME
+
+
+def legacy_inrepo_config_path(anchor: str | Path) -> Path:
+    """Return the legacy directory-form in-repo config path for an anchor."""
+    return Path(anchor) / LEGACY_INREPO_CONFIG_DIRNAME / GLOBAL_CONFIG_FILENAME
 
 
 def load_config(
@@ -853,8 +863,12 @@ def load_config(
        machine-local, so those prefs can be versioned in the knowledge repo while
        machine-local stays minimal. Machine-specifics + the binding never graft;
        ``{}`` (no effect) for a normal repo.
-    2. ``<anchor>/.agent-worktrees/config.yaml`` (in-repo; the repo's own
-       committed config -- the base for its settings).
+    2. ``<anchor>/.copilot-extensions/agent-worktrees/config.yaml`` (in-repo;
+       the repo's own committed config -- the base for its settings), with
+       legacy fallback to ``<anchor>/.agent-worktrees/config.yaml`` and
+       ``<anchor>/.agent-worktrees.yaml`` plus an explicit marketplace overlay
+       at
+       ``<anchor>/.copilot-extensions/agent-worktrees/marketplaces/<marketplace-id>/config.yaml``.
     3. ``~/.agent-worktrees/config.yaml`` (global; machine-wide defaults).
 
     Top-level fields (``srcroot``/``machine``/``platform``/``copilot_profiles``
@@ -1520,16 +1534,43 @@ def _build_repo_config(
 def _load_inrepo_config(anchor: str) -> dict[str, Any]:
     """Return the repo's in-repo flat settings dict, or ``{}``.
 
-    Reads ``<anchor>/.agent-worktrees/config.yaml`` (preferred, directory form).
-    Falls back to the legacy single-file ``<anchor>/.agent-worktrees.yaml``
-    (which carried only a ``pr:`` block -- still a valid, minimal flat
-    settings dict). Never raises: a missing or malformed file degrades to an
-    empty mapping so config loading cannot be broken by a bad committed file.
+    Reads ``<anchor>/.copilot-extensions/agent-worktrees/config.yaml`` first.
+    Falls back to legacy ``<anchor>/.agent-worktrees/config.yaml`` and then the
+    older single-file ``<anchor>/.agent-worktrees.yaml``. When explicit
+    installation context selects a marketplace, an opt-in overlay from
+    ``<anchor>/.copilot-extensions/agent-worktrees/marketplaces/<marketplace-id>/config.yaml``
+    deep-merges on top. Never raises: a missing or malformed file degrades to
+    an empty mapping so config loading cannot be broken by a bad committed
+    file.
     """
-    dir_form = _load_yaml_safe(inrepo_config_path(anchor))
-    if dir_form:
-        return dir_form
-    return _load_yaml_safe(Path(anchor) / INREPO_CONFIG_FILENAME)
+    root = Path(anchor)
+    base_path: Path | None = None
+    for candidate in (
+        inrepo_config_path(root),
+        legacy_inrepo_config_path(root),
+        root / INREPO_CONFIG_FILENAME,
+    ):
+        if candidate.exists():
+            base_path = candidate
+            break
+
+    merged = _load_yaml_safe(base_path) if base_path is not None else {}
+    context = registry_paths.installation_context()
+    marketplace_id = (
+        str(context.get("marketplaceId", "")).strip()
+        if isinstance(context, dict)
+        else ""
+    )
+    if marketplace_id:
+        overlay_path = (
+            root
+            / MARKETPLACE_OVERLAYS_DIR
+            / marketplace_id
+            / GLOBAL_CONFIG_FILENAME
+        )
+        if overlay_path.exists():
+            merged = _deep_merge(merged, _load_yaml_safe(overlay_path))
+    return merged
 
 
 def _control_plane_related_pr_map() -> dict[str, dict[str, Any]]:
@@ -1573,10 +1614,7 @@ def _control_plane_related_pr_map() -> dict[str, dict[str, Any]]:
                 )
                 cp_sources = (
                     state_root.config_source_anchors(
-                        load_config(
-                            include_control_plane_related_pr=False,
-                            project=cp_project,
-                        ),
+                        load_project_config(cp_project),
                         base_anchor=cp,
                     )
                     if cp_project

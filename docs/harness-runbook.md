@@ -473,7 +473,8 @@ harness):
 - **`machines.yaml`** — machines, platforms, SSH aliases, roles, and
   `control_plane.project`. agent-bridge **derives** its agent roster from this
   topology (machines × repos × environments) plus each repo's
-  `.agent-worktrees/related.yaml`; the hand-authored `acp-agents.json` is
+  `.copilot-extensions/agent-worktrees/related.yaml` (with legacy
+  `.agent-worktrees/related.yaml` fallback); the hand-authored `acp-agents.json` is
   deprecated (honored only if a profile's `agents_config` points at one).
 
 Then wire and start (skill: **`agent-worktrees:copilot-extensions-setup`** §3–4, or the

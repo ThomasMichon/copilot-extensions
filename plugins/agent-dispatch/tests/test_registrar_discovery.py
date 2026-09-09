@@ -10,6 +10,7 @@ from agent_dispatch.registrar import RegistrarError
 from agent_dispatch.registrar_reconcile import declared_registrations
 from agent_dispatch.registrar_discovery import (
     INREPO_SUBDIR,
+    LEGACY_INREPO_SUBDIR,
     Pointer,
     add_pointer,
     discover,
@@ -53,6 +54,13 @@ def test_repo_pointer_resolves_into_inrepo_subdir(tmp_path):
     p = repo_pointer(tmp_path)
     assert p.kind == "repo"
     assert p.resolved_location() == tmp_path / INREPO_SUBDIR
+
+
+def test_repo_pointer_falls_back_to_legacy_dir(tmp_path):
+    legacy = tmp_path / LEGACY_INREPO_SUBDIR
+    legacy.mkdir(parents=True)
+    p = repo_pointer(tmp_path)
+    assert p.resolved_location() == legacy
 
 
 def test_dir_pointer_resolves_to_location(tmp_path):
@@ -515,6 +523,42 @@ def test_discover_repo_reads_inrepo_dir(tmp_path):
     decls = discover_repo(tmp_path)
     assert [d.name for d in decls] == ["general"]
     assert decls[0].owner == f"repo:{tmp_path.name}"
+
+
+def test_discover_repo_reads_legacy_dir_when_canonical_absent(tmp_path):
+    reg = tmp_path / LEGACY_INREPO_SUBDIR
+    reg.mkdir(parents=True)
+    (reg / "general.yaml").write_text("name: general\nlabels: [general]\n", encoding="utf-8")
+    decls = discover_repo(tmp_path)
+    assert [d.name for d in decls] == ["general"]
+
+
+def test_discover_repo_marketplace_overlay_replaces_base_declaration(tmp_path, monkeypatch):
+    base = tmp_path / INREPO_SUBDIR
+    overlay = (
+        tmp_path
+        / ".copilot-extensions"
+        / "agent-dispatch"
+        / "marketplaces"
+        / "mp-test"
+        / "registrar"
+    )
+    base.mkdir(parents=True)
+    overlay.mkdir(parents=True)
+    (base / "general.json").write_text(
+        json.dumps({"name": "general", "labels": ["base"]}),
+        encoding="utf-8",
+    )
+    (overlay / "general.json").write_text(
+        json.dumps({"name": "general", "labels": ["overlay"]}),
+        encoding="utf-8",
+    )
+    (overlay / "extra.json").write_text(json.dumps({"name": "extra"}), encoding="utf-8")
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", '{"marketplaceId":"mp-test"}')
+    decls = discover_repo(tmp_path)
+    by_name = {decl.name: decl for decl in decls}
+    assert set(by_name) == {"extra", "general"}
+    assert by_name["general"].labels == ("overlay",)
 
 
 # -- Legacy env-profile back-compat bridge (Phase 4) -------------------------

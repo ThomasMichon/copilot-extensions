@@ -40,9 +40,10 @@ Discovery is implemented in `src\agent_machines\discover.py`:
    Canonical registration may resolve through an explicit platform path or the
    registry's declared source root; filesystem discovery without a registry
    entry is not accepted.
-4. Each repo contributes `*.yaml` / `*.yml` files from
-   `.agent-machines/all/` plus `.agent-machines/machines/<machine>/`; package
-   gates then apply as an additional filter.
+4. Each repo contributes `*.yaml` / `*.yml` files from the canonical
+   `.copilot-extensions/agent-machines/all/` plus
+   `.copilot-extensions/agent-machines/machines/<machine>/`; package gates
+   then apply as an additional filter.
 
 If the registries are missing or unreadable, discovery returns an empty set; the
 CLI still runs. `repo_enables_agent_machines()` annotates whether the repo has an
@@ -61,9 +62,12 @@ repository `machines.yaml` entry. The raw `platform.node()` host name (Windows
 overlay, and directory gates. Ambiguous matches fail before package loading.
 When no topology matches, the raw host remains the standalone identity.
 
-The legacy `.github/machine-state/` directory is read only when the canonical
-`.agent-machines/` root is absent. This makes migration atomic per repo and
-prevents duplicate settings, resources, or module executions.
+The canonical repo root is `.copilot-extensions/agent-machines/`. Legacy
+`.agent-machines/` and `.github/machine-state/` are read only when that newer
+root is absent. This makes migration atomic per repo and prevents duplicate
+settings, resources, or module executions. A marketplace-specific overlay may
+live under
+`.copilot-extensions/agent-machines/marketplaces/<marketplace-id>/`.
 
 `src\agent_machines\layout.py` owns layout diagnosis and migration.
 `agent-machines doctor` inspects canonical and legacy locations without

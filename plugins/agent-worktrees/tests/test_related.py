@@ -18,25 +18,31 @@ from agent_worktrees.related import Locus, RelatedConfig, RelatedEntry
 # ---------------------------------------------------------------------------
 
 def test_path_helpers(tmp_path: Path):
-    assert related.related_dir(tmp_path) == tmp_path / ".agent-worktrees"
-    assert related.related_path(tmp_path) == tmp_path / ".agent-worktrees" / "related.yaml"
-    assert related.docs_dir(tmp_path) == tmp_path / ".agent-worktrees" / "related"
+    assert related.related_dir(tmp_path) == (
+        tmp_path / ".copilot-extensions" / "agent-worktrees"
+    )
+    assert related.related_path(tmp_path) == (
+        tmp_path / ".copilot-extensions" / "agent-worktrees" / "related.yaml"
+    )
+    assert related.docs_dir(tmp_path) == (
+        tmp_path / ".copilot-extensions" / "agent-worktrees" / "related"
+    )
     assert related.default_doc_rel("example-web") == "related/example-web.md"
 
 
 def test_doc_abs_path_default_and_explicit(tmp_path: Path):
     # default for a bare name
     assert related.doc_abs_path(tmp_path, "foo") == (
-        tmp_path / ".agent-worktrees" / "related" / "foo.md"
+        tmp_path / ".copilot-extensions" / "agent-worktrees" / "related" / "foo.md"
     )
     # explicit doc on the entry wins
     e = RelatedEntry(name="foo", doc="related/custom.md")
     assert related.doc_abs_path(tmp_path, e) == (
-        tmp_path / ".agent-worktrees" / "related" / "custom.md"
+        tmp_path / ".copilot-extensions" / "agent-worktrees" / "related" / "custom.md"
     )
     # entry without doc falls back to the default
     assert related.doc_abs_path(tmp_path, RelatedEntry(name="bar")) == (
-        tmp_path / ".agent-worktrees" / "related" / "bar.md"
+        tmp_path / ".copilot-extensions" / "agent-worktrees" / "related" / "bar.md"
     )
 
 
@@ -48,8 +54,17 @@ def test_doc_abs_path_honors_origin_anchor(tmp_path: Path):
     e = RelatedEntry(name="example-web", doc="related/example-web.md",
                      origin_anchor=str(knowledge))
     assert related.doc_abs_path(base, e) == (
-        knowledge / ".agent-worktrees" / "related" / "example-web.md"
+        knowledge / ".copilot-extensions" / "agent-worktrees" / "related" / "example-web.md"
     )
+
+
+def test_plugin_anchor_path_helpers_keep_legacy_layout(tmp_path: Path):
+    plugin = tmp_path / "plugin"
+    plugin.mkdir()
+    (plugin / "plugin.json").write_text('{"name":"example"}', encoding="utf-8")
+    assert related.related_dir(plugin) == plugin / ".agent-worktrees"
+    assert related.related_path(plugin) == plugin / ".agent-worktrees" / "related.yaml"
+    assert related.docs_dir(plugin) == plugin / ".agent-worktrees" / "related"
 
 
 # ---------------------------------------------------------------------------
@@ -746,6 +761,46 @@ def test_read_non_mapping_returns_empty(tmp_path: Path):
     assert related.read_related(tmp_path) == RelatedConfig()
 
 
+def test_read_legacy_related_fallback(tmp_path: Path):
+    legacy = tmp_path / ".agent-worktrees" / "related.yaml"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("related:\n  legacy:\n    role: tooling\n", encoding="utf-8")
+    cfg = related.read_related(tmp_path)
+    assert cfg.related["legacy"].role == "tooling"
+    assert cfg.related["legacy"].doc_root == str(legacy.parent)
+
+
+def test_marketplace_overlay_overrides_related_entry(tmp_path: Path, monkeypatch):
+    base = related.related_path(tmp_path)
+    base.parent.mkdir(parents=True)
+    base.write_text(
+        "primary: base\nrelated:\n  example:\n    role: tooling\n    summary: base\n",
+        encoding="utf-8",
+    )
+    overlay = (
+        tmp_path
+        / ".copilot-extensions"
+        / "agent-worktrees"
+        / "marketplaces"
+        / "mp-test"
+        / "related.yaml"
+    )
+    overlay.parent.mkdir(parents=True)
+    overlay.write_text(
+        "primary: overlay\nrelated:\n  example:\n    role: product\n  extra:\n    role: docs\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(
+        "COPILOT_EXTENSIONS_CONTEXT",
+        json.dumps({"marketplaceId": "mp-test"}),
+    )
+    cfg = related.read_related(tmp_path)
+    assert cfg.primary == "overlay"
+    assert cfg.related["example"].role == "product"
+    assert cfg.related["extra"].role == "docs"
+    assert cfg.related["example"].doc_root == str(overlay.parent)
+
+
 # ---------------------------------------------------------------------------
 # round-trip
 # ---------------------------------------------------------------------------
@@ -1334,7 +1389,7 @@ def test_plugins_roundtrip(tmp_path: Path):
 
 
 def test_plugins_parse_shorthand_dedup_and_invalid(tmp_path: Path):
-    (tmp_path / ".agent-worktrees").mkdir()
+    related.related_path(tmp_path).parent.mkdir(parents=True)
     related.related_path(tmp_path).write_text(
         "related:\n"
         "  x:\n"
@@ -1403,7 +1458,7 @@ def test_pr_roundtrip(tmp_path: Path):
 
 
 def test_pr_parse_nonmapping_is_empty(tmp_path: Path):
-    (tmp_path / ".agent-worktrees").mkdir()
+    related.related_path(tmp_path).parent.mkdir(parents=True)
     related.related_path(tmp_path).write_text(
         "related:\n"
         "  x:\n"

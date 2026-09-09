@@ -21,8 +21,9 @@ description: >
 # restore-machinestate
 
 The agent-machines runtime converges the current machine to desired state declared in
-**requirement packages** carried by adopted repos under `.agent-machines/all/`
-and `.agent-machines/machines/<machine>/`.
+**requirement packages** carried by adopted repos under
+`.copilot-extensions/agent-machines/all/` and
+`.copilot-extensions/agent-machines/machines/<machine>/`.
 Restore is **machine-scoped**: it reconciles the union of every discovered
 package, not one anchor repo. The CLI itself is standalone; if the project
 registries are absent, discovery returns no packages instead of

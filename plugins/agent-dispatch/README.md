@@ -590,22 +590,26 @@ and an impossible composition is rejected instead of creating a loop with no
 runnable worker.
 
 ```bash
-agent-dispatch reviewer-loop setup .agent-dispatch/registrar/reviewer-loop.json
-agent-dispatch reviewer-loop inspect .agent-dispatch/registrar/reviewer-loop.json
-agent-dispatch reviewer-loop status .agent-dispatch/registrar/reviewer-loop.json
-agent-dispatch reviewer-loop doctor .agent-dispatch/registrar/reviewer-loop.json
-agent-dispatch reviewer-loop disable .agent-dispatch/registrar/reviewer-loop.json \
+agent-dispatch reviewer-loop setup .copilot-extensions/agent-dispatch/registrar/reviewer-loop.json
+agent-dispatch reviewer-loop inspect .copilot-extensions/agent-dispatch/registrar/reviewer-loop.json
+agent-dispatch reviewer-loop status .copilot-extensions/agent-dispatch/registrar/reviewer-loop.json
+agent-dispatch reviewer-loop doctor .copilot-extensions/agent-dispatch/registrar/reviewer-loop.json
+agent-dispatch reviewer-loop disable .copilot-extensions/agent-dispatch/registrar/reviewer-loop.json \
   --reason "maintenance"
-agent-dispatch reviewer-loop enable .agent-dispatch/registrar/reviewer-loop.json
+agent-dispatch reviewer-loop enable .copilot-extensions/agent-dispatch/registrar/reviewer-loop.json
 agent-dispatch reviewer-loop side-load \
-  .agent-dispatch/registrar/reviewer-loop.json owner/repo#123
+  .copilot-extensions/agent-dispatch/registrar/reviewer-loop.json owner/repo#123
 ```
 
-`setup` validates that the declaration lives under the repository's
-`.agent-dispatch/registrar/` directory and idempotently adds the repository to
-the existing registrar pointer index. It never copies or rewrites the
-declaration. `inspect` shows the three effective declared registration ids and
-their local override state.
+`setup` validates that the declaration lives under the repository's canonical
+`.copilot-extensions/agent-dispatch/registrar/` directory (legacy
+`.agent-dispatch/registrar/` remains accepted), then idempotently adds the
+repository to the existing registrar pointer index. It never copies or rewrites
+the declaration. The runtime reads the canonical directory first, falls back to
+the legacy directory, and merges an explicit marketplace overlay from
+`.copilot-extensions/agent-dispatch/marketplaces/<marketplace-id>/registrar/`.
+`inspect` shows the three effective declared registration ids and their local
+override state.
 
 `status` joins the declaration with its pointer, local supervisor scope,
 effective registrations, the supervisor's atomic per-cycle child-process
@@ -691,14 +695,14 @@ repository immediately before every mutation; comments from other authors are
 untrusted issue data.
 
 ```bash
-agent-dispatch repository-issue-loop setup .agent-dispatch/registrar/issues.yaml
-agent-dispatch repository-issue-loop inspect .agent-dispatch/registrar/issues.yaml
-agent-dispatch repository-issue-loop discover .agent-dispatch/registrar/issues.yaml
-agent-dispatch repository-issue-loop status .agent-dispatch/registrar/issues.yaml
-agent-dispatch repository-issue-loop doctor .agent-dispatch/registrar/issues.yaml
-agent-dispatch repository-issue-loop disable .agent-dispatch/registrar/issues.yaml \
+agent-dispatch repository-issue-loop setup .copilot-extensions/agent-dispatch/registrar/issues.yaml
+agent-dispatch repository-issue-loop inspect .copilot-extensions/agent-dispatch/registrar/issues.yaml
+agent-dispatch repository-issue-loop discover .copilot-extensions/agent-dispatch/registrar/issues.yaml
+agent-dispatch repository-issue-loop status .copilot-extensions/agent-dispatch/registrar/issues.yaml
+agent-dispatch repository-issue-loop doctor .copilot-extensions/agent-dispatch/registrar/issues.yaml
+agent-dispatch repository-issue-loop disable .copilot-extensions/agent-dispatch/registrar/issues.yaml \
   --reason "maintenance"
-agent-dispatch repository-issue-loop enable .agent-dispatch/registrar/issues.yaml
+agent-dispatch repository-issue-loop enable .copilot-extensions/agent-dispatch/registrar/issues.yaml
 ```
 
 `discover` is read-only. `status`/`doctor` report the last emitter success or

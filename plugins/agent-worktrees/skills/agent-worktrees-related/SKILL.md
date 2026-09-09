@@ -31,8 +31,10 @@ that raw path, quote it at each shell call site, and never search `PATH`.
 A **control-plane** repo (e.g. a dotfiles/harness repo) coordinates work across
 several OTHER repos. This skill manages the **directional, per-project** index
 of those repos -- *from the current repo's point of view* -- committed in-repo
-at `<repo>/.agent-worktrees/related.yaml`, with a plain-markdown narrative per
-related repo under `<repo>/.agent-worktrees/related/<name>.md`.
+at `<repo>/.copilot-extensions/agent-worktrees/related.yaml`, with a
+plain-markdown narrative per related repo under
+`<repo>/.copilot-extensions/agent-worktrees/related/<name>.md`. Legacy
+`.agent-worktrees/related.yaml` remains readable.
 
 It complements (does **not** duplicate) the **global** repos registry
 (`<agent-worktrees catalog argv[0]> repos`,
@@ -59,7 +61,7 @@ Full annotated example: [`references/related.yaml`](references/related.yaml).
 At a glance:
 
 ```yaml
-# <repo>/.agent-worktrees/related.yaml
+# <repo>/.copilot-extensions/agent-worktrees/related.yaml
 primary: example-web                 # the default/primary related repo
 related:
   example-web:

@@ -5,7 +5,7 @@ description: >
   restore-machinestate engine. Use this skill to enable or repair the
   self-provisioning binstub/venv, inspect runtime readiness, or change desired
   machine configuration by authoring requirement packages under a repo's
-  .agent-machines/ namespace. Fleet-wide requests such as standardizing a
+  .copilot-extensions/agent-machines/ namespace. Fleet-wide requests such as standardizing a
   setting, application, service, or default across machines are configuration
   changes and belong here; use restore-machinestate only to inspect or apply
   desired state that is already declared.
@@ -72,8 +72,8 @@ Verify:
 
 A **requirement package** is one complete YAML file under either:
 
-- `.agent-machines/all/` for shared packages; or
-- `.agent-machines/machines/<machine>/` for packages implicitly scoped to one
+- `.copilot-extensions/agent-machines/all/` for shared packages; or
+- `.copilot-extensions/agent-machines/machines/<machine>/` for packages implicitly scoped to one
   machine.
 
 Package names must be unique across the shared and selected machine folders.
@@ -85,8 +85,9 @@ directories case-insensitively. Ambiguous topology matches fail closed. Without
 a matching topology entry, the raw host name remains the standalone fallback.
 Multi-machine packages belong in `all/` with an explicit `gate`.
 Use a package-local `per-machine` block for partial overrides; files do not merge
-across folders. The legacy `.github/machine-state/` path is consulted only when
-`.agent-machines/` is absent, so migrate all of a repo's packages atomically.
+across folders. Legacy `.agent-machines/` and `.github/machine-state/` are
+consulted only when `.copilot-extensions/agent-machines/` is absent, so migrate
+all of a repo's packages atomically.
 
 Minimal shape:
 
@@ -171,7 +172,8 @@ For a legacy-only repo:
 ```
 
 Migration preserves package bytes and gates, placing YAML in
-`.agent-machines/all/`; it moves a legacy `README.md` to the canonical root.
+`.copilot-extensions/agent-machines/all/`; it moves a legacy `README.md` to the
+canonical root.
 It refuses mixed layouts, collisions, nested content, and unknown entries.
 Moving a package into `machines/<machine>/` remains a deliberate follow-up
 because the engine does not infer machine scope from a gate.

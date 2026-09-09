@@ -367,6 +367,33 @@ def test_reviewer_loop_setup_refuses_pointer_name_collision(
     assert "already targets" in capsys.readouterr().err
 
 
+def test_reviewer_loop_setup_overlay_preserves_existing_pointer_owner(
+    tmp_path, monkeypatch, capsys
+):
+    from agent_dispatch.registrar_discovery import add_pointer
+
+    repo = tmp_path / "repo"
+    declaration = (
+        repo
+        / ".copilot-extensions"
+        / "agent-dispatch"
+        / "marketplaces"
+        / "mp-test"
+        / "registrar"
+        / "review.json"
+    )
+    _write_reviewer_loop(declaration)
+    monkeypatch.setenv("AGENT_DISPATCH_REGISTRAR_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", '{"marketplaceId":"mp-test"}')
+    add_pointer("repo", repo, kind="repo", owner="custom-owner")
+
+    assert main(["reviewer-loop", "setup", str(declaration)]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["changed"] is False
+    assert payload["pointer"]["owner"] == "custom-owner"
+
+
 def test_reviewer_loop_inspect_expands_declared_units(
     tmp_path, monkeypatch, capsys
 ):

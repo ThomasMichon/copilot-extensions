@@ -683,18 +683,15 @@ class TestControlPlaneRelatedPRTier:
         )
         seen = {}
 
-        def _load_config(*args, **kwargs):
-            seen.update(kwargs)
+        def _load_project_config(project):
+            seen["project"] = project
             return object()
 
-        monkeypatch.setattr(cfg, "load_config", _load_config)
+        monkeypatch.setattr(cfg, "load_project_config", _load_project_config)
 
         got = cfg._control_plane_related_pr_map()
 
-        assert seen == {
-            "include_control_plane_related_pr": False,
-            "project": "harness",
-        }
+        assert seen == {"project": "harness"}
         assert got["ext"]["merge_actor"] == "submitter-direct"
 
     def test_cp_related_pr_map_does_not_load_unproven_project(
@@ -745,9 +742,9 @@ class TestLayeredConfig:
         )
 
     def test_inrepo_dir_form_read(self, tmp_path: Path):
-        # Preferred location: <anchor>/.agent-worktrees/config.yaml (dir form).
+        # Preferred location: <anchor>/.copilot-extensions/agent-worktrees/config.yaml.
         anchor = tmp_path / "ext"
-        (anchor / cfg.INREPO_CONFIG_DIRNAME).mkdir(parents=True)
+        cfg.inrepo_config_path(anchor).parent.mkdir(parents=True)
         cfg.inrepo_config_path(anchor).write_text(
             "default_branch: main\nremote: upstream\n"
             "pr:\n  required: true\n  strategy: keep-alive\n"
@@ -762,13 +759,22 @@ class TestLayeredConfig:
 
     def test_dir_form_wins_over_legacy_single_file(self, tmp_path: Path):
         anchor = tmp_path / "ext"
-        (anchor / cfg.INREPO_CONFIG_DIRNAME).mkdir(parents=True)
+        cfg.inrepo_config_path(anchor).parent.mkdir(parents=True)
         cfg.inrepo_config_path(anchor).write_text("pr:\n  provider: github\n")
         (anchor / cfg.INREPO_CONFIG_FILENAME).write_text("pr:\n  provider: gitea\n")
         cfgfile = tmp_path / "config.yaml"
         self._machine(cfgfile, anchor)
         repo = cfg.load_config(cfgfile).repos["ext"]
         assert repo.pr.provider == "github"  # dir form takes precedence
+
+    def test_legacy_directory_form_backcompat(self, tmp_path: Path):
+        anchor = tmp_path / "ext"
+        cfg.legacy_inrepo_config_path(anchor).parent.mkdir(parents=True)
+        cfg.legacy_inrepo_config_path(anchor).write_text("pr:\n  provider: github\n")
+        cfgfile = tmp_path / "config.yaml"
+        self._machine(cfgfile, anchor)
+        repo = cfg.load_config(cfgfile).repos["ext"]
+        assert repo.pr.provider == "github"
 
     def test_legacy_single_file_backcompat(self, tmp_path: Path):
         # Old .agent-worktrees.yaml (pr-only) still honored when no dir form.
@@ -790,7 +796,7 @@ class TestLayeredConfig:
         # the in-repo session_env (deep-merge), so both keys reach the session --
         # the vault-owns-SUDO_ASKPASS pattern.
         anchor = tmp_path / "ext"
-        (anchor / cfg.INREPO_CONFIG_DIRNAME).mkdir(parents=True)
+        cfg.inrepo_config_path(anchor).parent.mkdir(parents=True)
         cfg.inrepo_config_path(anchor).write_text(
             "session_env:\n  COPILOT_FEATURE_FLAGS: extensions\n"
         )
@@ -817,6 +823,33 @@ class TestLayeredConfig:
         (cdir / "z.yaml").write_text("repos:\n  ext:\n    remote: from-dropin\n")
         repo = cfg.load_config(cfgfile).repos["ext"]
         assert repo.remote == "from-config-yaml"
+
+    def test_marketplace_overlay_merges_on_top_of_base(self, tmp_path: Path, monkeypatch):
+        anchor = tmp_path / "ext"
+        cfg.inrepo_config_path(anchor).parent.mkdir(parents=True)
+        cfg.inrepo_config_path(anchor).write_text(
+            "remote: origin\npr:\n  provider: github\n  required: false\n",
+            encoding="utf-8",
+        )
+        overlay = (
+            anchor
+            / cfg.MARKETPLACE_OVERLAYS_DIR
+            / "mp-test"
+            / "config.yaml"
+        )
+        overlay.parent.mkdir(parents=True)
+        overlay.write_text("pr:\n  required: true\n", encoding="utf-8")
+        cfgfile = tmp_path / "config.yaml"
+        self._machine(cfgfile, anchor)
+        monkeypatch.setattr(
+            cfg.registry_paths,
+            "installation_context",
+            lambda: {"marketplaceId": "mp-test"},
+        )
+        repo = cfg.load_config(cfgfile).repos["ext"]
+        assert repo.remote == "origin"
+        assert repo.pr.provider == "github"
+        assert repo.pr.required is True
 
     def test_config_d_dropins_sorted_last_wins(self, tmp_path: Path):
         anchor = tmp_path / "ext"
