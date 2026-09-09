@@ -964,6 +964,87 @@ class TestSessionRegistration:
         deregister_session("nonexistent", "some-session")
         # Should not raise
 
+    def test_deregister_last_session_stops_fsmonitor(
+        self, tmp_tracking_dir: Path, monkeypatch_config, tmp_path, monkeypatch,
+    ):
+        """Ending a worktree's only open session stops its fsmonitor daemon.
+
+        The daemon otherwise leaks forever: nothing else reaps it, including
+        `finalize` (which deliberately leaves worktree state alone). See #2265.
+        """
+        worktree_dir = tmp_path / "live-wt"
+        worktree_dir.mkdir()
+        rec = WorktreeRecord(
+            worktree_id="fsmon-wt",
+            branch="worktree/fsmon-wt",
+            worktree_path=str(worktree_dir),
+            repo="test-repo",
+            machine="test",
+            platform="wsl",
+            started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00",
+            resume_count=0,
+            title=None,
+            status="active",
+            completed_at=None,
+            sessions=[SessionEntry("sess-only", "2026-06-01T10:00:00")],
+        )
+        save_record(rec, tmp_tracking_dir / "fsmon-wt.yaml")
+
+        calls = []
+
+        def _fake_git(*args, cwd=None, **kwargs):
+            calls.append((args, cwd))
+
+            class _Result:
+                returncode = 0
+
+            return _Result()
+
+        from agent_worktrees import git_ops
+        monkeypatch.setattr(git_ops, "git", _fake_git)
+
+        deregister_session("fsmon-wt", "sess-only")
+
+        assert calls == [
+            (("fsmonitor--daemon", "stop"), str(worktree_dir)),
+        ]
+
+    def test_deregister_keeps_fsmonitor_while_another_session_is_open(
+        self, tmp_tracking_dir: Path, monkeypatch_config, tmp_path, monkeypatch,
+    ):
+        """A still-open sibling session on the same worktree vetoes the stop."""
+        worktree_dir = tmp_path / "shared-wt"
+        worktree_dir.mkdir()
+        rec = WorktreeRecord(
+            worktree_id="fsmon-shared",
+            branch="worktree/fsmon-shared",
+            worktree_path=str(worktree_dir),
+            repo="test-repo",
+            machine="test",
+            platform="wsl",
+            started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00",
+            resume_count=0,
+            title=None,
+            status="active",
+            completed_at=None,
+            sessions=[
+                SessionEntry("sess-a", "2026-06-01T10:00:00"),
+                SessionEntry("sess-b", "2026-06-01T10:05:00"),
+            ],
+        )
+        save_record(rec, tmp_tracking_dir / "fsmon-shared.yaml")
+
+        calls = []
+        from agent_worktrees import git_ops
+        monkeypatch.setattr(
+            git_ops, "git", lambda *a, cwd=None, **kw: calls.append((a, cwd)))
+
+        deregister_session("fsmon-shared", "sess-a")
+
+        assert calls == []
+
     def test_deregister_unknown_session(self, tmp_tracking_dir: Path, monkeypatch_config):
         """Deregistering a session ID that doesn't exist is a no-op."""
         rec = WorktreeRecord(
