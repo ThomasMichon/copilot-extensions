@@ -5206,19 +5206,28 @@ def _record_has_open_session(record: WorktreeRecord) -> bool:
     )
 
 
-def _stop_fsmonitor_daemon(worktree_path: str) -> None:
+def stop_fsmonitor_daemon(worktree_path: str) -> None:
     """Best-effort ``git fsmonitor--daemon stop`` for an idled-out worktree.
 
     ``core.fsmonitor`` is commonly enabled repo-wide, so the first git command
     run in *any* worktree auto-starts a persistent background daemon for it.
-    Nothing previously stopped that daemon once the worktree's last session
-    ended, so it (and its Windows conhost) leaked indefinitely across the
-    fleet -- including past ``finalize``, which deliberately leaves the
-    directory and its process state alone for audit/handoff. This runs right
-    after the worktree goes fully session-less, which is the correct trigger:
-    unlike ``finalize`` it doesn't require (or imply) the worktree is done.
-    Never raises -- a missing git, a missing daemon, or a removed directory
-    are all silently fine outcomes here.
+    Nothing previously stopped that daemon once the worktree went idle, so it
+    (and its Windows conhost) leaked indefinitely across the fleet --
+    including past ``finalize``, which deliberately leaves the directory and
+    its process state alone for audit/handoff.
+
+    Two independent callers trigger this, neither sufficient alone (#2265,
+    #2269): :func:`deregister_session` fires on a clean ``sessionEnd`` hook,
+    which is the fast path but is NOT delivered on an abrupt kill (Windows
+    tearing down mux+Copilot on window close, a crash, `Stop-Process`, ...).
+    :mod:`session_catalog`'s resident reconciler fires on an observed
+    mux-live -> mux-dark transition once corroborated by
+    :func:`sessions.worktree_has_live_session`'s PID check (so it does not
+    fire from a stale mux snapshot, and does not fire while a bare/bound
+    Copilot process is still attached without a mux session) -- this is the
+    backstop that does not depend on any hook being delivered at all. Never
+    raises -- a missing git, a missing daemon, or a removed directory are all
+    silently fine outcomes here.
     """
     from . import git_ops
 
@@ -5263,5 +5272,5 @@ def deregister_session(
                     _next_lifecycle_revision(record, session_id)
                     save_record(record)
                     if not _record_has_open_session(record):
-                        _stop_fsmonitor_daemon(record.worktree_path)
+                        stop_fsmonitor_daemon(record.worktree_path)
                 return
