@@ -9,7 +9,10 @@
   — **vision-extending**: adds the `single-instance-lease` and
   `work-coalescing-singleton` behaviors (written in first, Phase 1), plus the
   least-privilege lifecycle tier, stable register-once launcher, and disposable
-  payload guarantees (#625). Also
+  payload guarantees (#625); PR #2300 further extended the same vision with
+  `process-count-scales-with-services-not-sessions` and
+  `hooks-and-callbacks-are-transient` — the invariant Phase 4b's design work
+  now generalizes into a shared client shape. Also
   **closes** [`visions/plugins/agent-worktrees`](../../../visions/plugins/agent-worktrees/README.md)
   §*The warm-cache accelerator — optional, on-demand, refcounted, losable* (the
   resident tracker), which is stated-but-unbuilt.
@@ -27,12 +30,16 @@
   (coalescing tier + mcp multiplexer), #1836
   (vault user-mode ensure + stable launcher/register-once), #1837
   (dispatch register-once under elevated update), #1841
-  (declare service lifecycle tiers and reconcile user-mode ensure).
+  (declare service lifecycle tiers and reconcile user-mode ensure), #2301
+  (audit + close reality gaps against the process-count-scales-with-services-not-sessions
+  invariant — Phase 4b(ii)'s per-plugin audit target).
 - **Lifecycle-policy slice:** #625 (lifecycle pecking order and conformance
   audit).
 - **Related:** #438 (bridge cutover-on-update),
   #396 (dispatch hot-reconciled supervision), #229 (worktree state store),
-  #918 (resident status monitor), #1788 (session lifecycle hook coalescing).
+  #918 (resident status monitor), #1788 (session lifecycle hook coalescing),
+  #2259 (agent-dispatch supervisor self-update, landed default-on via #2266/#2280),
+  #2300 (the vision extension this sub-phase's design realizes).
 
 ## Guiding Intent
 
@@ -148,6 +155,25 @@ cross-checked against a live host running ~7 concurrent sessions) found:
   deployment; route any separate hot path to its own issue rather than widening
   the combined client into an unbounded startup coordinator.
 
+### Phase 4b(ii) — Convergence design + adversarial mock (#2300, #2301)
+
+- Generalize agent-worktrees' own bounded-client shape (Phase 4b, above) into
+  a suite-wide **transient hook client contract** every plugin's hooks and
+  extension callbacks can follow, realizing the two Behaviors PR #2300 added
+  to `visions/plugin-services`.
+- Design + the adversarial mock harness that validates the contract in the
+  abstract (concurrent-flood, absent-daemon, mid-flight-appearance,
+  daemon-death, and daemon-election scenarios) **before** any per-plugin code
+  change — full design in
+  [`adversarial-convergence-mock.md`](adversarial-convergence-mock.md).
+- Feed the mock's evidence, plus #2301's per-plugin audit citations, into a
+  scoped decision on which plugin (if any) needs an actual code change versus
+  already conforming (agent-worktrees post-#918/#1788 is the reference
+  implementation).
+- No plugin code changes in this sub-phase; the design doc + mock harness are
+  the deliverables, each cleared through the review gate before the next
+  lands.
+
 ### Phase 5 — agent-mcp: version GC + optional multiplexer (#741, #744)
 
 - Call `versioned_runtime.gc()` on successful activation (prune non-current,
@@ -200,6 +226,18 @@ cross-checked against a live host running ~7 concurrent sessions) found:
   represented by an existing or newly filed public follow-up issue. The new
   declared-tier/escalation-rationale requirement is adopted through #1841 rather
   than treated as evidence that predates the pattern.
+- **Adversarial convergence mock (Phase 4b(ii), #2300/#2301):** the six
+  scenarios in
+  [`adversarial-convergence-mock.md`](adversarial-convergence-mock.md) —
+  `flood-against-live-daemon`, `flood-against-absent-daemon`,
+  `daemon-appears-mid-flood`, `daemon-dies-mid-packet`,
+  `concurrent-daemon-race`, and `process-count-invariant-under-repeated-floods`
+  — all PASS, with zero leftover processes (of either the mock daemon or the
+  transient client) after the full suite, verified by an OS process census
+  before/after (the same technique that found the original
+  11-coordinator/68-conhost finding). Per-plugin conformance against the mock's
+  validated contract is #2301's own audit, cited here once complete rather than
+  re-validated.
 
 ## Journal
 
@@ -340,3 +378,63 @@ per-plugin last-known-good rollout (#742).
 - Next: land this reviewed intent/pattern PR, report the evidence and follow-up
   trackers on #625, then close #625 while #1836, #1837, #1841, and #743 carry
   the remaining implementation.
+
+### 2026-09-09 — agent-dispatch supervisor self-update + Phase 4b(ii) design
+
+Landed independently of this effort's own PR sequence, then reconciled into it:
+
+- **#2259 — agent-dispatch supervisor self-update** (PR #2266, then flipped
+  default-on + clean-room validated in PR #2280). The `supervise serve`
+  singleton daemon had no live version-staleness check, unlike the coordinator
+  — a scheduled-task-launched daemon with no periodic trigger could run stale
+  indefinitely. Landed opt-in first, then corrected to **default-on / opt-out**
+  (`AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE=0`) once it became clear this
+  harness's launch paths have no protocol to ever flip an opt-in flag before a
+  daemon's first boot — an opt-in gate here would simply never activate for a
+  real operator. Validated end-to-end (real spawn, real single-instance lease
+  release/reacquire, a genuinely converging successor) by a new Tier-P
+  clean-room scenario, `agent-dispatch-supervisor-self-update`, before
+  defaulting on.
+- **PR #2300 — vision extension.** Grounded in a live process census (11
+  separate `agent_dispatch serve` coordinators, 68 `conhost.exe` on one dev
+  box) that surfaced while drafting this: extended `visions/plugin-services`
+  with **`process-count-scales-with-services-not-sessions`** and
+  **`hooks-and-callbacks-are-transient`**, and cross-referenced the invariant
+  into the agent-dispatch, agent-bridge, agent-ssh, and agent-worktrees
+  visions (the four plugins the operator named as owning exactly one per-host
+  daemon). Also fixed a real leak found while grounding the vision text: the
+  new clean-room probe's teardown never killed the coordinator it autostarts
+  for each isolated HOME (only processes matching its own `--machine` tag),
+  now fixed and verified (process count identical before/after a full probe
+  run).
+- **Reconciling #2301 (filed to track the census/audit work) against this
+  effort's own history** — most of what #2301 asks for auditing is **already
+  landed here**, just not yet cited back to #2301:
+  - #739 (this effort) already landed the agent-worktrees resident
+    status-monitor, default-on / opt-out — the exact "exactly one status
+    process regardless of session count" guarantee #2301 asks to confirm.
+  - #738 (this effort) already resolved the bridge stranded-passive leak via
+    generation self-retire (default-on / opt-out) — no code change needed
+    there for #2301's ask.
+  - #737 (this effort) already landed the shared `single-instance-lease` +
+    reaper library agent-bridge's own singleton guard is built on.
+  - The 2026-09-02 Phase 4b entry (this effort) already measured and fixed
+    agent-worktrees' hook-coalescing (nine command trees → one bounded
+    client, 76.6ms median, monitor-down fallback) — this **is**
+    `hooks-and-callbacks-are-transient` in practice, with deployed evidence.
+  - **Still genuinely open** from #2301: root-causing the *real* (not
+    probe-leak) coordinator/conhost proliferation on a live box; confirming
+    agent-ssh's `dtssh host --persist` path never starts a second instance;
+    and generalizing the *client-side* half of the contract (agent-dispatch,
+    agent-bridge, agent-ssh hooks/callbacks reaching their respective
+    daemons) the way agent-worktrees already did for its own hooks.
+- Added **Phase 4b(ii)** to this effort's Plan: a suite-wide transient-hook-
+  client design (generalizing agent-worktrees' own Phase 4b shape) plus an
+  adversarial mock harness that validates the contract in the abstract before
+  any further per-plugin code change. Full design in
+  [`adversarial-convergence-mock.md`](adversarial-convergence-mock.md).
+- Next: land this reviewed plan (README + design doc), then build the mock
+  harness as its own PR per the review gate, then use its evidence plus a
+  narrowed #2301 (comment reconciling the above) to scope any remaining
+  per-plugin work.
+
