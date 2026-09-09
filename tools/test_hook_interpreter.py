@@ -13,11 +13,18 @@ HOOKS = (ROOT / "tools" / "hooks" / "pre-commit", ROOT / "tools" / "hooks" / "pr
 
 @pytest.mark.parametrize("hook", HOOKS)
 def test_git_hooks_pin_platform_bash(hook: Path) -> None:
+    """The hooks must re-exec under a real bash before using bash-only syntax.
+
+    Testing BASH_VERSION is not enough: on a BSD host /bin/sh IS bash in sh
+    mode, which sets BASH_VERSION but disables process substitution, so the
+    guard must key off an explicit marker instead.
+    """
     lines = hook.read_text(encoding="utf-8").splitlines()
-    assert lines[:2] == [
-        "#!/bin/sh",
-        '[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"',
-    ]
+    assert lines[0] == "#!/bin/sh"
+    prologue = "\n".join(lines[1:8])
+    assert '[ -n "${COPILOT_EXTENSIONS_HOOK_BASH:-}" ] ||' in prologue
+    assert 'COPILOT_EXTENSIONS_HOOK_BASH=1 exec bash "$0" "$@"' in prologue
+    assert '[ -n "${BASH_VERSION:-}" ] ||' not in prologue
 
 
 def _git(*args: str, cwd: Path, check: bool = True) -> subprocess.CompletedProcess[str]:
