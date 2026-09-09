@@ -142,6 +142,11 @@ below-altitude) *and* check it against the **patterns** and their invariants. A
 below-altitude change (lint, typo, dependency bump) needs neither; a design change
 owes both. Guide, not gate.
 
+Before opening any PR, complete the documentation-impact review in
+`CONTRIBUTING.md` against the final diff, regardless of change classification.
+Repeat it after material scope or implementation changes. This requirement also
+applies to below-altitude work.
+
 The layered model: **vision** (`visions/`, should-be) → **patterns**
 (`docs/patterns/`, how-we-build) → **architecture** (`docs/architecture.md`,
 as-is) → **contribution** (this file + the harness skills, how-to-land).
