@@ -590,6 +590,47 @@ test("triggerHandoff stores, signals, waits, and skips manual fallback when pick
   assert.match(result.seed, /task:task-42$/);
 });
 
+test("triggerHandoff logs the predecessor pid in the handoff_requested activity", async () => {
+  const execCalls = [];
+  await triggerHandoff({
+    promptText: "stored markdown",
+    sid: "predecessor-1",
+    cwd: "C:\\repo",
+    title: "Parser follow-up",
+    execute: (bin, argv, opts) => {
+      execCalls.push({ bin, argv, opts });
+      return "";
+    },
+    store: () => ({
+      storage: "file",
+      id: "handoff-predecessor-1",
+      path: "C:\\state\\handoff-predecessor-1.json",
+      metadata: { worktree: "wt-example", title: "Parser follow-up" },
+    }),
+    writeSessionState: () => ({ ok: true, path: "C:\\state\\handoff-request.json" }),
+    noteHandoff: () => {},
+    requestBridge: () => ({ attempted: false, accepted: false }),
+    readPickupSignals: () => ({
+      pickedUp: false,
+      via: [],
+      sessionState: { path: "C:\\state\\handoff-request.json", consumed: false },
+      worktree: { pickedUp: false },
+      dispatch: { consumed: false },
+    }),
+    sleepFn: async () => {},
+    waitMs: 0,
+  });
+
+  const activityCall = execCalls.find(
+    ({ bin, argv }) => bin === "agent-worktrees" && argv[0] === "activity-log",
+  );
+  assert.ok(activityCall, "expected triggerHandoff to emit activity-log");
+  assert.ok(
+    activityCall.argv.includes(`predecessor_pid=${process.pid}`),
+    `expected predecessor_pid field in ${JSON.stringify(activityCall.argv)}`,
+  );
+});
+
 test("triggerHandoff always returns the final seed and manual fallback when nothing picks it up", async () => {
   const result = await triggerHandoff({
     promptText: "stored markdown",
