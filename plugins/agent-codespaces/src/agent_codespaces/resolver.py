@@ -174,7 +174,8 @@ def _build_spawn_command(
 ) -> list[str]:
     """Build the spawn command for a codespace agent.
 
-    The ``acp_command`` (from ``.agent-codespaces/config.yaml`` defaults) is
+    The ``acp_command`` (from
+    ``.copilot-extensions/agent-codespaces/config.yaml`` defaults) is
     written to a durable file and passed by PATH as ``--remote-cmd-file`` to
     ``agent-codespaces ssh --stdio`` -- never as a ``--remote-cmd`` string.
     Routing the payload through a file keeps argv free of shell-mangling-prone

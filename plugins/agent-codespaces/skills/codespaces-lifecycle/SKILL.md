@@ -229,7 +229,7 @@ the bridge connection instead.
 
 CodeSpace creation uses `gh codespace create` with defaults by convention
 (`largePremiumLinux`/`EastUs`); per-repo overrides from
-`.agent-codespaces/config.yaml` (machine type, location) apply automatically
+`.copilot-extensions/agent-codespaces/config.yaml` (machine type, location) apply automatically
 based on the target repository.
 
 ## Finalize — graceful close-out with session recovery
@@ -423,7 +423,8 @@ by agent-codespaces.
   `codespaces-setup` § *Readiness*, then start a new session so the provider
   manifest is registered.
 - **Session fails on start** -- check `~/.agent-bridge/agent-bridge-err.log`.
-  Common cause: wrong `ssh_user` in `.agent-codespaces/config.yaml`.
+  Common cause: wrong `ssh_user` in
+  `.copilot-extensions/agent-codespaces/config.yaml`.
 - **Credential relay not working** -- check that `--no-relay` was not
   accidentally passed, then confirm agent-bridge's relay is up
   (`agent-bridge service restart` repairs the owner daemon). <!-- marketplace-isolation: allow service-management -->

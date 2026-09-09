@@ -53,7 +53,7 @@ then re-run adoption when the machine-local projection needs refreshing.
 | `<repo>/.agent-logger.yaml` (or documented aliases) | Shared session-log location, naming/template, and optional writer voice seams | agent-logger repo setup / normal repo edit |
 | `<repo>/.agent-worktrees/related.yaml` | The related-repo index (role, locus, delegate) from this repo's POV | `related add` |
 | `machines.yaml` | SSH machine topology the mesh plugins read (control repo) | normal repo edit; agent-bridge adoption only reads it |
-| `<repo>/.agent-codespaces/config.yaml` | **Supplementary** Codespace overrides + credential-relay policy (control repo). Most repos need none — machine defaults, `/workspaces/<basename>`, and the git-credential relay are convention-derived. Legacy repo-root `codespaces.yaml` still read (relocate with `config migrate`). | `codespaces-setup` |
+| `<repo>/.copilot-extensions/agent-codespaces/config.yaml` | **Supplementary** Codespace overrides + credential-relay policy (control repo). Most repos need none — machine defaults, `/workspaces/<basename>`, and the git-credential relay are convention-derived. Legacy `.agent-codespaces/config.yaml` and repo-root `codespaces.yaml` remain readable (relocate with `config migrate`). Explicit marketplace-specific overrides live under `.copilot-extensions/agent-codespaces/marketplaces/<marketplace-id>/config.yaml`. | `codespaces-setup` |
 | `containers.yaml` | Container fleet defaults (control repo) | `containers-fleet` |
 | `.github/agents/<name>.mcp.yaml` | A **repo-scoped** agent-mcp bridge config | you (per the `agent-mcp:agent-mcp` skill) |
 | `<repo>/.context-handoff/config.yaml` | Optional repository-owned soft/hard context utilization percentages | context-handoff repo setup / normal repo edit |
@@ -119,6 +119,13 @@ repository identity rather than basename alone. Two cells may adopt the same
 repository without sharing registry, worktree, session, lease, or generated
 invocation state. A singleton committed integration surface must carry
 attributable ownership or use an intentionally composable format.
+
+For agent-codespaces specifically, namespaced adoption writes a per-repository
+receipt under
+`~/.copilot-extensions/marketplaces/<marketplace-id>/repos/<stable-repo-id>/agent-codespaces/adoption.json`
+and resolves the live checkout by stable remote identity. The legacy
+`~/.agent-codespaces/adopted-repos.yaml` manifest remains the bounded fallback
+while a repo has not yet been adopted into the active installation cell.
 
 The `~/.agent-*` and `~/.{project}` rows above document the current legacy
 layout during migration. New-first, legacy-fallback readers may preserve a

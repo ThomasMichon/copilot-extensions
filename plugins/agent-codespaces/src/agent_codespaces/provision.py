@@ -1,7 +1,8 @@
 """Repo provisioning hooks -- deploy repo-declared files on SSH connect.
 
 An adopting repo declares a ``provision`` block in its
-``.agent-codespaces/config.yaml`` to deploy its own files (e.g. shell env
+``.copilot-extensions/agent-codespaces/config.yaml`` to deploy its own files
+(e.g. shell env
 snippets) and run setup commands into a CodeSpace on every
 ``agent-codespaces ssh`` connect. This replaces bespoke per-repo SSH wrappers:
 the repo-specific extras become data the plugin applies by convention.

@@ -30,7 +30,7 @@ prereqs:
 data:
   config:
     - path: adopted-repos.yaml
-      description: Registry of repos with a .agent-codespaces/config.yaml
+      description: Registry of repos with a .copilot-extensions/agent-codespaces/config.yaml
       recovery: Re-run 'agent-codespaces config adopt' in each repo
       notes: Stored in ~/.agent-codespaces/
   internal:

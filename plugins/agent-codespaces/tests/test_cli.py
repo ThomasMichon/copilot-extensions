@@ -110,10 +110,28 @@ class TestCLI:
         )
         rc = main(["config", "migrate"])
         assert rc == 0
-        canonical = repo / ".agent-codespaces" / "config.yaml"
+        canonical = repo / ".copilot-extensions" / "agent-codespaces" / "config.yaml"
         assert canonical.exists()
         assert "machine_type: big" in canonical.read_text()
         assert not (repo / "codespaces.yaml").exists()
+        assert "Migrated" in capsys.readouterr().out
+
+    def test_config_migrate_relocates_legacy_directory_config(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        repo = tmp_path / "repo"
+        legacy = repo / ".agent-codespaces"
+        legacy.mkdir(parents=True)
+        (legacy / "config.yaml").write_text("defaults:\n  machine_type: big\n")
+        monkeypatch.setattr(
+            "agent_codespaces.__main__._resolve_repo_root", lambda: repo
+        )
+        rc = main(["config", "migrate"])
+        assert rc == 0
+        canonical = repo / ".copilot-extensions" / "agent-codespaces" / "config.yaml"
+        assert canonical.exists()
+        assert "machine_type: big" in canonical.read_text()
+        assert not (legacy / "config.yaml").exists()
         assert "Migrated" in capsys.readouterr().out
 
     def test_config_migrate_noop_without_legacy(
@@ -137,14 +155,33 @@ class TestCLI:
             runtime / "adopted-repos.yaml",
         )
         monkeypatch.setattr("agent_codespaces.__main__.RUNTIME_DIR", runtime)
-        monkeypatch.setattr(
-            "agent_codespaces.__main__.ADOPTED_REPOS_FILE",
-            runtime / "adopted-repos.yaml",
-        )
         rc = main(["status"])
         assert rc == 0
         out = capsys.readouterr().out
         assert "agent-codespaces status" in out
+
+    def test_install_path_config_migrate_does_not_touch_repo_config(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        runtime = tmp_path / ".agent-codespaces"
+        runtime.mkdir()
+        manifest = runtime / "adopted-repos.yaml"
+        manifest.write_text("# adopted repos\nrepos:\n  - path: /tmp/legacy\n", encoding="utf-8")
+        repo = tmp_path / "repo"
+        repo_config = repo / ".copilot-extensions" / "agent-codespaces" / "config.yaml"
+        repo_config.parent.mkdir(parents=True)
+        repo_config.write_text("defaults:\n  machine_type: repo-owned\n", encoding="utf-8")
+
+        monkeypatch.setattr("agent_codespaces.config.RUNTIME_DIR", runtime)
+        monkeypatch.setattr("agent_codespaces.config.ADOPTED_REPOS_FILE", manifest)
+
+        rc = main(["config-migrate"])
+
+        assert rc == 0
+        assert "config-migrate:" in capsys.readouterr().out
+        assert repo_config.read_text(encoding="utf-8") == (
+            "defaults:\n  machine_type: repo-owned\n"
+        )
 
 
 class TestDeleteSyncHook:
