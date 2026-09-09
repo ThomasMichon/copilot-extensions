@@ -13,6 +13,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from .install_paths import install_dir
 from .procutil import no_window_kwargs as _no_window_kwargs
 from .procutil import windowless_python
 
@@ -30,10 +31,7 @@ ACTIVITY_TTL_SECONDS = 90.0
 
 def _local_machine() -> str | None:
     value = os.environ.get("AGENT_DISPATCH_SUPERVISE_MACHINE")
-    root = Path(
-        os.environ.get("AGENT_DISPATCH_INSTALL_DIR")
-        or (Path.home() / ".agent-dispatch")
-    )
+    root = install_dir()
     if not value:
         try:
             value = (root / "machine").read_text(encoding="utf-8").strip()
@@ -57,10 +55,7 @@ def _endpoint() -> str:
     explicit = os.environ.get("AGENT_DISPATCH_URL")
     if explicit:
         return explicit.rstrip("/")
-    root = Path(
-        os.environ.get("AGENT_DISPATCH_ROUTING_DIR")
-        or (Path.home() / ".agent-dispatch")
-    )
+    root = Path(os.environ.get("AGENT_DISPATCH_ROUTING_DIR") or install_dir())
     try:
         data = json.loads((root / "active.json").read_text(encoding="utf-8"))
         active = data.get("active") or {}

@@ -33,6 +33,8 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
+from .install_paths import install_dir
+
 log = logging.getLogger("agent-dispatch.telemetry")
 
 #: A telemetry sink: a callable receiving one structured event dict.
@@ -66,7 +68,7 @@ def _default_config_path() -> Path:
     ``~/.agent-dispatch/telemetry.json`` -- the coordinator's runtime dir, the
     same root that holds the queue DB and the rendezvous file.
     """
-    return Path.home() / ".agent-dispatch" / CONFIG_FILENAME
+    return install_dir() / CONFIG_FILENAME
 
 
 def set_telemetry_sink(sink: TelemetrySink | None) -> None:

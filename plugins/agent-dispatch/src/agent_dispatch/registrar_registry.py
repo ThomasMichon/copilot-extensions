@@ -26,6 +26,7 @@ from dropin_registry import (
 )
 from plugin_activation import ActivationReport, ActivePlugin, resolve_active_plugins
 
+from .install_paths import install_dir, normalized_path
 from .registrar import ProfileDeclaration, RegistrarError
 from .registrar_discovery import RegistrarIndeterminateError, read_declaration_file
 
@@ -40,7 +41,7 @@ def registrar_dropins_dir() -> Path:
     override = os.environ.get(REGISTRAR_DROPINS_DIR_ENV)
     if override:
         return Path(override).expanduser()
-    return Path.home() / ".agent-dispatch" / "registrar.d"
+    return install_dir() / "registrar.d"
 
 
 @dataclass(frozen=True)
@@ -50,6 +51,7 @@ class RegistrarManifest:
     plugin: str
     plugin_root: str
     registrar: str
+    dispatch_install_dir: str | None = None
     source_path: str = ""
     schema_version: int = 1
 
@@ -137,10 +139,20 @@ def parse_manifest(data: object, *, source_path: str = "") -> RegistrarManifest:
     ):
         raise ManifestError("`registrar` must be a root-contained relative path")
 
+    dispatch_install_dir = data.get("dispatch_install_dir")
+    if dispatch_install_dir is not None:
+        if not isinstance(dispatch_install_dir, str) or not dispatch_install_dir.strip():
+            raise ManifestError("`dispatch_install_dir` must be a non-empty absolute path")
+        if not Path(dispatch_install_dir).expanduser().is_absolute():
+            raise ManifestError("`dispatch_install_dir` must be absolute on the current platform")
+
     return RegistrarManifest(
         plugin=plugin.strip(),
         plugin_root=plugin_root.strip(),
         registrar=registrar,
+        dispatch_install_dir=(
+            dispatch_install_dir.strip() if isinstance(dispatch_install_dir, str) else None
+        ),
         source_path=source_path,
     )
 
@@ -462,6 +474,7 @@ def _manifest_identity_matches(
         previous.manifest.plugin == manifest.plugin
         and previous.manifest.plugin_root == current_root
         and previous.manifest.registrar == manifest.registrar
+        and previous.manifest.dispatch_install_dir == manifest.dispatch_install_dir
     )
 
 
@@ -475,6 +488,7 @@ def _candidate(
             plugin=manifest.plugin,
             plugin_root=str(plugin_root),
             registrar=manifest.registrar,
+            dispatch_install_dir=manifest.dispatch_install_dir,
             source_path=manifest.source_path,
         ),
         declaration_entries=dict(declaration_entries),
@@ -546,6 +560,18 @@ def _classify_manifest(
         return _inactive(path, "invalid-entry", detail=str(exc))
 
     observed_sources.add(manifest.plugin)
+    if (
+        manifest.dispatch_install_dir is not None
+        and normalized_path(Path(manifest.dispatch_install_dir))
+        != normalized_path(install_dir())
+    ):
+        return _inactive(
+            path,
+            "dispatch-install-mismatch",
+            target=manifest.dispatch_install_dir,
+            owner=manifest.plugin,
+            detail="manifest targets a different agent-dispatch installation",
+        )
     activation = activation_source()
     activation_decision = activation.decisions.get(manifest.plugin)
     if activation.authority is not ScanAuthority.INDETERMINATE:

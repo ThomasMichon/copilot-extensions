@@ -34,9 +34,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+from .install_paths import install_dir
+
 # Where a WSL guest caches the last-resolved Windows coordinator base URL. A
 # per-boot NAT IP change invalidates it; a failed cached probe triggers re-probe.
-_COORD_URL_CACHE = Path.home() / ".agent-dispatch" / "coordinator-url"
+
+
+def _coord_url_cache() -> Path:
+    return install_dir() / "coordinator-url"
 
 
 # -- Guest-vs-standalone (Linux) --------------------------------------------
@@ -278,7 +283,7 @@ def _probe_health(base_url: str, timeout: float) -> bool:
 
 def _read_url_cache() -> str | None:
     try:
-        val = _COORD_URL_CACHE.read_text(encoding="utf-8").strip()
+        val = _coord_url_cache().read_text(encoding="utf-8").strip()
     except OSError:
         return None
     return val or None
@@ -286,8 +291,9 @@ def _read_url_cache() -> str | None:
 
 def _write_url_cache(url: str) -> None:
     try:
-        _COORD_URL_CACHE.parent.mkdir(parents=True, exist_ok=True)
-        _COORD_URL_CACHE.write_text(url + "\n", encoding="utf-8")
+        cache = _coord_url_cache()
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(url + "\n", encoding="utf-8")
     except OSError:
         pass
 

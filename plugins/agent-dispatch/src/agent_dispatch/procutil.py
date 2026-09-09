@@ -27,6 +27,8 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from .install_paths import install_dir
+
 # Re-exported so existing callers keep using ``from .procutil import
 # no_window_kwargs`` while the implementation is single-sourced in the shared
 # ``agent_procutil`` lib.
@@ -359,7 +361,7 @@ def runtime_root() -> Path:
     """The agent-dispatch runtime root (``~/.agent-dispatch``) -- a stable dir that
     is **never** under the Copilot plugin payload. Safe as a daemon's working
     directory and as a spawn ``cwd``."""
-    return Path.home() / ".agent-dispatch"
+    return install_dir()
 
 
 def relocate_off_payload() -> None:
