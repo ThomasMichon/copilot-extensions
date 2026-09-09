@@ -1272,7 +1272,10 @@ _activation_role() {
     repo_root="${AGENT_INDEX_REPO:-}"
     [[ -n "$repo_root" ]] || repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
     if [[ -z "$repo_root" ]]; then _machine_role; return 0; fi
-    repo_cfg="$repo_root/.agent-index/config.yaml"
+    repo_cfg="$repo_root/.copilot-extensions/agent-index/config.yaml"
+    if [[ ! -f "$repo_cfg" ]]; then
+        repo_cfg="$repo_root/.agent-index/config.yaml"
+    fi
     [[ -f "$repo_cfg" ]] || { printf 'unconfigured'; return 0; }
     me="$(printf '%s' "${AGENT_INDEX_MACHINE:-$(hostname -s)}" |
         tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"

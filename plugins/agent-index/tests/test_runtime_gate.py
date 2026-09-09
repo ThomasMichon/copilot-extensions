@@ -137,7 +137,7 @@ def _fixture(tmp_path: Path, shell: str) -> tuple[Path, dict[str, str]]:
         text=True,
     )
     config = tmp_path / ".agent-index" / "config.yaml"
-    config.parent.mkdir()
+    config.parent.mkdir(parents=True)
     config.write_text(
         "corpus:\n  sources:\n    - name: git:test\n",
         encoding="utf-8",
@@ -561,7 +561,7 @@ def test_fresh_namespaced_setup_reaches_role_writing(
     assert provisioned_role.read_text(encoding="utf-8").strip() == expected_role
     machine_config = cell_root / "config" / "config.yaml"
     assert f"role: {expected_role}" in machine_config.read_text(encoding="utf-8")
-    repo_config = repo / ".agent-index" / "config.yaml"
+    repo_config = repo / ".copilot-extensions" / "agent-index" / "config.yaml"
     assert f"machine: {expected_indexer}" in repo_config.read_text(encoding="utf-8")
 
 
@@ -1300,7 +1300,7 @@ def test_active_cell_preserves_original_repository_before_safe_cwd(
         text=True,
     )
     repo_config = repository / ".agent-index" / "config.yaml"
-    repo_config.parent.mkdir()
+    repo_config.parent.mkdir(parents=True)
     repo_config.write_text(
         "corpus:\n  sources:\n    - name: git:test\n",
         encoding="utf-8",

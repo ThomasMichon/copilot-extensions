@@ -13,10 +13,16 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-CONFIG_RELATIVE = Path(".agent-index") / "config.yaml"
+CONFIG_FILENAME = "config.yaml"
+CONFIG_RELATIVE = Path(".copilot-extensions") / "agent-index" / CONFIG_FILENAME
+LEGACY_CONFIG_RELATIVE = Path(".agent-index") / CONFIG_FILENAME
+MARKETPLACE_OVERLAYS_DIR = (
+    Path(".copilot-extensions") / "agent-index" / "marketplaces"
+)
 WORKTREES_CONFIG_RELATIVE = Path(".agent-worktrees") / "config.yaml"
 CONFIG_DATA_ENV = "AGENT_INDEX_CONFIG_DATA_B64"
 REPO_ENV = "AGENT_INDEX_REPO"
+INSTALLATION_CONTEXT_ENV = "COPILOT_EXTENSIONS_CONTEXT"
 WORKTREES_COMMAND_ENV = "AGENT_WORKTREES_COMMAND"
 MAX_CONFIG_BYTES = 256 * 1024
 MAX_FORWARDED_CONFIG_BYTES = 16 * 1024
@@ -466,6 +472,73 @@ def _load_candidate(path: Path, root: Path) -> tuple[str, dict[str, Any] | None]
         return "invalid", None
 
 
+def _deep_merge_dicts(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge_dicts(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _load_installation_context() -> dict[str, Any] | None:
+    raw = os.environ.get(INSTALLATION_CONTEXT_ENV, "").strip()
+    if not raw:
+        return None
+    try:
+        if raw.startswith("{"):
+            value = json.loads(raw)
+        else:
+            value = json.loads(Path(raw).expanduser().read_text(encoding="utf-8"))
+    except (OSError, TypeError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _installation_marketplace_id() -> str | None:
+    context = _load_installation_context()
+    if context is None:
+        return None
+    marketplace_id = context.get("marketplaceId")
+    if not isinstance(marketplace_id, str) or not marketplace_id.strip():
+        return None
+    return marketplace_id.strip()
+
+
+def _repo_config_layers(root: Path) -> list[Path]:
+    layers: list[Path] = []
+    for candidate in (root / CONFIG_RELATIVE, root / LEGACY_CONFIG_RELATIVE):
+        if candidate.exists():
+            layers.append(candidate)
+            break
+    marketplace_id = _installation_marketplace_id()
+    if marketplace_id:
+        overlay = root / MARKETPLACE_OVERLAYS_DIR / marketplace_id / CONFIG_FILENAME
+        if overlay.exists():
+            layers.append(overlay)
+    return layers
+
+
+def _load_repo_candidate(root: Path) -> tuple[str, Path | None, dict[str, Any] | None]:
+    layers = _repo_config_layers(root)
+    if not layers:
+        return "absent", None, None
+    merged: dict[str, Any] = {}
+    for layer in layers:
+        state, safe_path = _safe_file(layer, root)
+        if state != "ready" or safe_path is None:
+            return state, layer, None
+        state, data = _load_yaml_mapping(safe_path)
+        if state != "ready" or data is None:
+            return state, layer, None
+        merged = _deep_merge_dicts(merged, data)
+    try:
+        return "ready", layers[0].resolve(), _validate_config(merged)
+    except ConfigError:
+        return "invalid", layers[0], None
+
+
 def _git_root(start: Path) -> Path | None:
     git = shutil.which("git")
     if not git:
@@ -682,15 +755,14 @@ def resolve(cwd: str | os.PathLike[str] | None = None) -> dict[str, Any]:
             requires_external=False,
         )
 
-    local_path = root / CONFIG_RELATIVE
-    local_state, local = _load_candidate(local_path, root)
-    if local_state == "ready" and local is not None:
+    local_state, local_path, local = _load_repo_candidate(root)
+    if local_state == "ready" and local_path is not None and local is not None:
         policy_state, requires_external = _requires_external(root)
         return _result(
             opted_in=True,
             source="repository",
             reason="repository-config",
-            config=local_path.resolve(),
+            config=local_path,
             repo_root=root,
             requires_external=(
                 requires_external if policy_state == "ready" else False
@@ -737,14 +809,17 @@ def resolve(cwd: str | os.PathLike[str] | None = None) -> dict[str, Any]:
             repo_root=root,
             requires_external=True,
         )
-    external_path = state_root / CONFIG_RELATIVE
-    external_state, external = _load_candidate(external_path, state_root)
-    if external_state == "ready" and external is not None:
+    external_state, external_path, external = _load_repo_candidate(state_root)
+    if (
+        external_state == "ready"
+        and external_path is not None
+        and external is not None
+    ):
         return _result(
             opted_in=True,
             source="external-state-root",
             reason="external-state-root-config",
-            config=external_path.resolve(),
+            config=external_path,
             repo_root=root,
             requires_external=True,
             normalized=external,

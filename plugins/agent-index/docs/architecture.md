@@ -57,7 +57,7 @@ stays on the host and is resolved there.
 | Durable index/task data | `~/.agent-index/data/` | shared across service versions |
 | Durable engine runtime | `~/.agent-index/engine/.venv` | heavy embedding stack |
 | Machine config | `~/.agent-index/config.yaml` or `AGENT_INDEX_CONFIG` | role, device, client endpoints |
-| Repo config | `<repo>/.agent-index/config.yaml` | indexer designation and corpus scopes |
+| Repo config | `<repo>/.copilot-extensions/agent-index/config.yaml` (legacy fallback: `<repo>/.agent-index/config.yaml`) | indexer designation and corpus scopes |
 
 Host generations follow `../../../docs/patterns/managed-companion-runtime.md`.
 Plugin installers never install `[store]`, even with a host role override.
@@ -70,6 +70,7 @@ client updates or host replacement.
 Activation is repository-scoped and fail-closed:
 
 1. One resolver selects a valid current-repository
+`.copilot-extensions/agent-index/config.yaml`, falling back to legacy
 `.agent-index/config.yaml`. If none exists, and only if the repository requires
 an external state root, it may select the valid config from the bound knowledge
 repo. A present invalid local config, an unsafe path, a conflicting
@@ -195,13 +196,15 @@ operator-configured work-item queries and pull-request queries. No query means
 that side indexes nothing, by design.
 
 Corpus config is intentionally outside the runtime. A repository activates
-agent-index by carrying a valid `.agent-index/config.yaml`; mere plugin
-enablement leaves the capability inactive and does not start or probe a
-service. For a repository that requires an external state root, the bound
-knowledge repo's config is eligible only when no local config is present. For
-multi-repo harness use,
-`.agent-index/config.yaml` `corpus.sources` is swept from locally adopted
-projects via the sibling agent-worktrees registry; machine-local
+agent-index by carrying a valid
+`.copilot-extensions/agent-index/config.yaml` (legacy
+`.agent-index/config.yaml` remains readable during the compatibility window);
+mere plugin enablement leaves the capability inactive and does not start or
+probe a service. For a repository that requires an external state root, the
+bound knowledge repo's config is eligible only when no local config is
+present. For multi-repo harness use,
+`.copilot-extensions/agent-index/config.yaml` `corpus.sources` is swept from
+locally adopted projects via the sibling agent-worktrees registry; machine-local
 `~/.agent-index/config.yaml` can add supplemental sources. The session-start
 scope-binding hook reads only the effective config selected by the activation
 resolver.

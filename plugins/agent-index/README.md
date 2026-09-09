@@ -43,9 +43,14 @@ and unsupported namespaced host scopes remain inactive.
 ## Minimal setup
 
 1. Enable the plugin from the `copilot-extensions` marketplace.
-2. Opt the repository in by authoring `.agent-index/config.yaml`. A config must
-contain an `indexer`/`indexers` designation or at least one `corpus.sources`
-entry. A malformed, unsafe, ambiguous, or empty config is inactive.
+2. Opt the repository in by authoring
+   `.copilot-extensions/agent-index/config.yaml`. Legacy
+   `.agent-index/config.yaml` remains readable during the compatibility window,
+   and an explicit marketplace-specific override may live at
+   `.copilot-extensions/agent-index/marketplaces/<marketplace-id>/config.yaml`.
+   A config must contain an `indexer`/`indexers` designation or at least one
+   `corpus.sources` entry. A malformed, unsafe, ambiguous, or empty config is
+   inactive.
 3. Start a new Copilot session. The command catalog and scope guidance appear
 only for an active config. Session start publishes the companion candidate but
 performs no runtime provisioning or service startup itself.
@@ -135,13 +140,15 @@ The runtime belongs to this plugin; scope is data/config:
 (`git`) and its commit history.
 - `AGENT_INDEX_SOURCES` overrides the default with a comma-separated source list.
 - For multi-repo harness-style use, each repo may carry
-`.agent-index/config.yaml` with `corpus.sources`; the runtime grafts sources from
-locally adopted projects plus any machine-local supplement in
+`.copilot-extensions/agent-index/config.yaml` with `corpus.sources`; the runtime
+grafts sources from locally adopted projects plus any machine-local supplement in
 `~/.agent-index/config.yaml`.
 - Resolution selects a valid current-repository config first. Only when the
 repository declares `stateless: true` or `requires_external_state_root: true`
-may it fall back to the valid `.agent-index/config.yaml` in the bound knowledge
-repo. A present invalid local config never falls through.
+may it fall back to the valid
+`.copilot-extensions/agent-index/config.yaml` (or legacy
+`.agent-index/config.yaml`) in the bound knowledge repo. A present invalid
+local config never falls through.
 - The session-start scope-binding hook reads that effective config and tells
 agents which configured scopes are safe to prefer `agent-index search` for.
 

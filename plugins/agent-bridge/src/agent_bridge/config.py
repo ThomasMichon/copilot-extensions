@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import secrets
 from pathlib import Path
+from typing import cast
 
 import yaml
 from agent_procutil import no_window_kwargs
@@ -15,7 +18,12 @@ from .models import RepoBridgeConfig, ServiceConfig
 log = logging.getLogger("agent-bridge")
 
 #: In-repo agent-bridge config location, relative to a repo root.
-REPO_CONFIG_RELPATH = ".agent-bridge/config.yaml"
+CONFIG_FILENAME = "config.yaml"
+CANONICAL_REPO_CONFIG_DIR = Path(".copilot-extensions") / "agent-bridge"
+REPO_CONFIG_RELPATH = str(CANONICAL_REPO_CONFIG_DIR / CONFIG_FILENAME)
+LEGACY_REPO_CONFIG_RELPATH = ".agent-bridge/config.yaml"
+MARKETPLACE_OVERLAYS_DIR = CANONICAL_REPO_CONFIG_DIR / "marketplaces"
+INSTALLATION_CONTEXT_ENV = "COPILOT_EXTENSIONS_CONTEXT"
 
 
 def config_dir() -> Path:
@@ -45,6 +53,76 @@ def _normalize_service_config(data: dict[str, object], *, root: Path) -> dict[st
     return normalized
 
 
+def _deep_merge_dicts(
+    base: dict[str, object], override: dict[str, object]
+) -> dict[str, object]:
+    merged = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge_dicts(
+                cast(dict[str, object], merged[key]),
+                value,
+            )
+        else:
+            merged[key] = value
+    return merged
+
+
+def _load_installation_context() -> dict[str, object] | None:
+    raw = os.environ.get(INSTALLATION_CONTEXT_ENV, "").strip()
+    if not raw:
+        return None
+    try:
+        if raw.startswith("{"):
+            value = json.loads(raw)
+        else:
+            value = json.loads(Path(raw).expanduser().read_text(encoding="utf-8"))
+    except (OSError, TypeError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _installation_marketplace_id() -> str | None:
+    context = _load_installation_context()
+    if context is None:
+        return None
+    marketplace_id = context.get("marketplaceId")
+    if not isinstance(marketplace_id, str) or not marketplace_id.strip():
+        return None
+    return marketplace_id.strip()
+
+
+def _repo_base_config_path(repo_root: Path) -> Path | None:
+    for candidate in (
+        repo_root / CANONICAL_REPO_CONFIG_DIR / CONFIG_FILENAME,
+        repo_root / LEGACY_REPO_CONFIG_RELPATH,
+    ):
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _repo_marketplace_overlay_path(repo_root: Path) -> Path | None:
+    marketplace_id = _installation_marketplace_id()
+    if not marketplace_id:
+        return None
+    candidate = (
+        repo_root / MARKETPLACE_OVERLAYS_DIR / marketplace_id / CONFIG_FILENAME
+    )
+    return candidate if candidate.exists() else None
+
+
+def _repo_config_layers(repo_root: Path) -> list[Path]:
+    layers: list[Path] = []
+    base = _repo_base_config_path(repo_root)
+    if base is not None:
+        layers.append(base)
+    overlay = _repo_marketplace_overlay_path(repo_root)
+    if overlay is not None:
+        layers.append(overlay)
+    return layers
+
+
 def load_config() -> ServiceConfig:
     """Load config from YAML, falling back to defaults."""
     root = config_dir()
@@ -67,21 +145,28 @@ def load_config() -> ServiceConfig:
 
 
 def load_repo_bridge_config(repo_root: Path) -> RepoBridgeConfig | None:
-    """Load a repo's in-repo agent-bridge config (``<repo>/.agent-bridge/config.yaml``).
+    """Load a repo's in-repo agent-bridge config.
 
-    Returns ``None`` when the file is absent (the common case) or unparseable --
-    the in-repo config is purely additive, so a missing/bad file simply means "no
-    repo-provided settings", never an error. ``repo_root`` is the repo the topology
-    profile derives its roster from (the parent of its ``machines.yaml``).
+    Reads the canonical
+    ``<repo>/.copilot-extensions/agent-bridge/config.yaml`` first, falls back to
+    legacy ``<repo>/.agent-bridge/config.yaml``, and merges an explicit
+    marketplace overlay from
+    ``<repo>/.copilot-extensions/agent-bridge/marketplaces/<marketplace-id>/config.yaml``
+    on top when present. Returns ``None`` when no readable layer exists.
     """
-    cfg_path = Path(repo_root).expanduser() / REPO_CONFIG_RELPATH
-    if not cfg_path.exists():
+    root = Path(repo_root).expanduser()
+    layers = _repo_config_layers(root)
+    if not layers:
         return None
     try:
-        data = yaml.safe_load(cfg_path.read_text()) or {}
-        return RepoBridgeConfig(**data)
+        merged: dict[str, object] = {}
+        for path in layers:
+            data = yaml.safe_load(path.read_text()) or {}
+            if isinstance(data, dict):
+                merged = _deep_merge_dicts(merged, data)
+        return RepoBridgeConfig(**merged)
     except Exception:
-        log.warning("Failed to parse in-repo config %s, ignoring", cfg_path, exc_info=True)
+        log.warning("Failed to parse in-repo config %s, ignoring", layers[0], exc_info=True)
         return None
 
 
