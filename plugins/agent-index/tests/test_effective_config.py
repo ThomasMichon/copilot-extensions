@@ -25,7 +25,7 @@ def _repo(path: Path, *, requires_external: bool = False) -> Path:
     path.mkdir()
     subprocess.run(["git", "init", "-q", str(path)], check=True)
     config = path / ".agent-worktrees" / "config.yaml"
-    config.parent.mkdir()
+    config.parent.mkdir(parents=True)
     config.write_text(
         f"requires_external_state_root: {str(requires_external).lower()}\n",
         encoding="utf-8",
@@ -34,8 +34,8 @@ def _repo(path: Path, *, requires_external: bool = False) -> Path:
 
 
 def _write_active(path: Path) -> Path:
-    config = path / ".agent-index" / "config.yaml"
-    config.parent.mkdir()
+    config = path / ".copilot-extensions" / "agent-index" / "config.yaml"
+    config.parent.mkdir(parents=True)
     config.write_text(
         "indexers:\n"
         "  - machine: primary\n"
@@ -59,6 +59,7 @@ def _clean_activation_env(monkeypatch):
     monkeypatch.delenv("AGENT_INDEX_CONFIG_DATA_B64", raising=False)
     monkeypatch.delenv("AGENT_INDEX_REPO", raising=False)
     monkeypatch.delenv("AGENT_WORKTREES_COMMAND", raising=False)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
 
 
 def test_absent_config_is_inactive(tmp_path: Path) -> None:
@@ -109,8 +110,8 @@ def test_dependency_light_parser_accepts_supported_config_shape() -> None:
 def test_corpus_only_config_is_an_explicit_opt_in(tmp_path: Path) -> None:
     module = _module()
     repo = _repo(tmp_path / "repo")
-    config = repo / ".agent-index" / "config.yaml"
-    config.parent.mkdir()
+    config = repo / ".copilot-extensions" / "agent-index" / "config.yaml"
+    config.parent.mkdir(parents=True)
     config.write_text(
         "corpus:\n  sources:\n    - name: git:example\n",
         encoding="utf-8",
@@ -155,8 +156,8 @@ def test_invalid_repository_config_is_inactive(
 ) -> None:
     module = _module()
     repo = _repo(tmp_path / "repo")
-    config = repo / ".agent-index" / "config.yaml"
-    config.parent.mkdir()
+    config = repo / ".copilot-extensions" / "agent-index" / "config.yaml"
+    config.parent.mkdir(parents=True)
     config.write_text(content, encoding="utf-8")
 
     result = module.resolve(repo)
@@ -177,8 +178,8 @@ def test_invalid_repository_config_is_inactive(
 def test_unsafe_ssh_alias_is_inactive(tmp_path: Path, ssh: str) -> None:
     module = _module()
     repo = _repo(tmp_path / "repo")
-    config = repo / ".agent-index" / "config.yaml"
-    config.parent.mkdir()
+    config = repo / ".copilot-extensions" / "agent-index" / "config.yaml"
+    config.parent.mkdir(parents=True)
     config.write_text(
         f"indexer:\n  machine: primary\n  ssh: {ssh!r}\n",
         encoding="utf-8",
@@ -195,7 +196,7 @@ def test_present_unsafe_local_config_blocks_external_fallback(
 ) -> None:
     module = _module()
     repo = _repo(tmp_path / "repo", requires_external=True)
-    local = repo / ".agent-index" / "config.yaml"
+    local = repo / ".copilot-extensions" / "agent-index" / "config.yaml"
     local.mkdir(parents=True)
     knowledge = tmp_path / "knowledge"
     knowledge.mkdir()
@@ -293,8 +294,8 @@ def test_invalid_local_config_never_falls_through(
 ) -> None:
     module = _module()
     repo = _repo(tmp_path / "repo", requires_external=True)
-    local = repo / ".agent-index" / "config.yaml"
-    local.parent.mkdir()
+    local = repo / ".copilot-extensions" / "agent-index" / "config.yaml"
+    local.parent.mkdir(parents=True)
     local.write_text("indexers: [\n", encoding="utf-8")
     knowledge = tmp_path / "knowledge"
     knowledge.mkdir()
@@ -358,6 +359,79 @@ def test_valid_forwarded_config_preserves_remote_activation(monkeypatch) -> None
     assert result["opted_in"] is True
     assert result["source"] == "forwarded"
     assert result["indexers"] == [{"machine": "primary"}]
+
+
+def test_legacy_repository_config_falls_back_when_canonical_absent(
+    tmp_path: Path,
+) -> None:
+    module = _module()
+    repo = _repo(tmp_path / "repo")
+    config = repo / ".agent-index" / "config.yaml"
+    config.parent.mkdir(parents=True)
+    config.write_text("indexer:\n  machine: legacy\n", encoding="utf-8")
+
+    result = module.resolve(repo)
+
+    assert result["opted_in"] is True
+    assert Path(result["config"]) == config.resolve()
+    assert result["indexers"] == [{"machine": "legacy"}]
+
+
+def test_canonical_repository_config_wins_over_legacy(
+    tmp_path: Path,
+) -> None:
+    module = _module()
+    repo = _repo(tmp_path / "repo")
+    legacy = repo / ".agent-index" / "config.yaml"
+    legacy.parent.mkdir()
+    legacy.write_text("indexer:\n  machine: legacy\n", encoding="utf-8")
+    config = _write_active(repo)
+
+    result = module.resolve(repo)
+
+    assert result["opted_in"] is True
+    assert Path(result["config"]) == config.resolve()
+    assert [item["machine"] for item in result["indexers"]] == [
+        "primary",
+        "secondary",
+    ]
+
+
+def test_marketplace_overlay_merges_on_top_of_base(
+    tmp_path: Path, monkeypatch
+) -> None:
+    module = _module()
+    repo = _repo(tmp_path / "repo")
+    config = _write_active(repo)
+    overlay = (
+        repo
+        / ".copilot-extensions"
+        / "agent-index"
+        / "marketplaces"
+        / "example-marketplace"
+        / "config.yaml"
+    )
+    overlay.parent.mkdir(parents=True)
+    overlay.write_text(
+        "indexers:\n"
+        "  - machine: overlay\n"
+        "    ssh: overlay\n"
+        "indexer:\n"
+        "  machine: overlay\n"
+        "  ssh: overlay\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(
+        "COPILOT_EXTENSIONS_CONTEXT",
+        json.dumps({"marketplaceId": "example-marketplace"}),
+    )
+
+    result = module.resolve(repo)
+
+    assert result["opted_in"] is True
+    assert Path(result["config"]) == config.resolve()
+    assert result["indexers"] == [{"machine": "overlay", "ssh": "overlay"}]
+    assert result["sources"] == [{"name": "git:example", "repo": "example"}]
 
 
 def test_invalid_forwarded_config_never_falls_back(

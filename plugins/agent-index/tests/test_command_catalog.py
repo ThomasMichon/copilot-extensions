@@ -133,7 +133,7 @@ def test_catalog_is_empty_without_valid_opt_in(
     repo = _repo(tmp_path, active=False)
     if malformed:
         config = repo / ".agent-index" / "config.yaml"
-        config.parent.mkdir()
+        config.parent.mkdir(parents=True)
         config.write_text("indexers: [\n", encoding="utf-8")
     env = _env()
     result = subprocess.run(

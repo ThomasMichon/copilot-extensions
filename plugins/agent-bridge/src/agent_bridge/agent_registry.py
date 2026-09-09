@@ -1358,7 +1358,7 @@ def _effective_spawn_defaults(
 
     ``profile`` is the machine-local :class:`TopologyProfile`; ``repo_cfg`` is the
     optional in-repo :class:`RepoBridgeConfig` (``None`` when the repo carries no
-    ``.agent-bridge/config.yaml``). Each dimension resolves independently: if the
+    repo bridge config). Each dimension resolves independently: if the
     machine-local profile **explicitly set** the field it wins -- *including setting
     it to empty*, so a local profile can deliberately clear a repo-provided default
     (``default_env: {}``); otherwise the repo-declared default is used; otherwise
@@ -1460,10 +1460,12 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
         repo_root = Path(profile.machines_yaml).expanduser().resolve().parent
         related = _load_related_entries(repo_root)
         local_machine, local_platform = _detect_local_machine(machines)
-        # In-repo config (<repo>/.agent-bridge/config.yaml) carries the multi-machine system
-        # spawn defaults *in the repo* so they ride to every machine on sync. The
-        # machine-local topology profile still wins when it sets a default (an
-        # explicit local override); otherwise the repo-declared default is used.
+        # In-repo config (canonical
+        # <repo>/.copilot-extensions/agent-bridge/config.yaml with legacy
+        # fallback) carries the multi-machine system spawn defaults *in the
+        # repo* so they ride to every machine on sync. The machine-local
+        # topology profile still wins when it sets a default (an explicit local
+        # override); otherwise the repo-declared default is used.
         from .config import load_repo_bridge_config
 
         repo_cfg = load_repo_bridge_config(repo_root)

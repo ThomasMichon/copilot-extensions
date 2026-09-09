@@ -831,12 +831,17 @@ class TopologyProfile(BaseModel):
 
 
 class RepoBridgeConfig(BaseModel):
-    """In-repo agent-bridge config: ``<repo>/.agent-bridge/config.yaml``.
+    """In-repo agent-bridge config.
 
     A repo that a topology profile derives its roster from can carry its own
     agent-bridge settings *in the repo*, so they travel with the code to every
     machine that syncs it -- rather than being pinned in each machine's local
-    ``~/.agent-bridge/config.yaml``. Currently the multi-machine system spawn defaults
+    ``~/.agent-bridge/config.yaml``. The canonical path is
+    ``<repo>/.copilot-extensions/agent-bridge/config.yaml`` with legacy
+    ``<repo>/.agent-bridge/config.yaml`` fallback. An explicit marketplace
+    overlay can live under
+    ``<repo>/.copilot-extensions/agent-bridge/marketplaces/<marketplace-id>/config.yaml``.
+    Currently the multi-machine system spawn defaults
     (``default_copilot_args`` / ``default_env``): the repo declares the model
     target once, and every machine's derived roster inherits it on sync. Extra
     keys are ignored so the file can grow without breaking older daemons.

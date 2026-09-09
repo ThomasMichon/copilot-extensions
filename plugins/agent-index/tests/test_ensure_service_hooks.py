@@ -118,7 +118,7 @@ def _fixture(
     )
     if role is not None:
         config = repo / ".agent-index" / "config.yaml"
-        config.parent.mkdir()
+        config.parent.mkdir(parents=True)
         config.write_text(role + "\n", encoding="utf-8")
     profile = tmp_path / f"profile-{shell}"
     profile.mkdir()

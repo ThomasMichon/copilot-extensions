@@ -97,7 +97,7 @@ if (-not $Effective -or -not $Effective.opted_in) {
             version = 1
             module = 'agent-index/runtime'
             state = 'configuration-empty'
-            detail = 'No effective .agent-index/config.yaml opts this repository in; session startup remains non-mutating.'
+            detail = 'No effective .copilot-extensions/agent-index/config.yaml opts this repository in; session startup remains non-mutating.'
         } | ConvertTo-Json -Compress
         exit 0
     }

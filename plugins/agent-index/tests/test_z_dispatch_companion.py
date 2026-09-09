@@ -53,8 +53,8 @@ def _repo(path: Path, machine: str | None) -> Path:
     policy.parent.mkdir()
     policy.write_text("requires_external_state_root: false\n", encoding="utf-8")
     if machine is not None:
-        config = path / ".agent-index" / "config.yaml"
-        config.parent.mkdir()
+        config = path / ".copilot-extensions" / "agent-index" / "config.yaml"
+        config.parent.mkdir(parents=True)
         config.write_text(
             "indexers:\n"
             f"  - machine: {machine}\n"
@@ -105,7 +105,9 @@ def test_provider_activates_only_the_configured_host(tmp_path: Path, monkeypatch
     environment = module._active_environment(_request("harness"))
 
     assert environment == {
-        "AGENT_INDEX_EFFECTIVE_CONFIG": str((repo / ".agent-index" / "config.yaml").resolve()),
+        "AGENT_INDEX_EFFECTIVE_CONFIG": str(
+            (repo / ".copilot-extensions" / "agent-index" / "config.yaml").resolve()
+        ),
         "AGENT_INDEX_MACHINE": "primary",
         "AGENT_INDEX_NO_SELFPROVISION": "1",
         "AGENT_INDEX_REPO": str(repo.resolve()),
@@ -161,7 +163,7 @@ def test_malformed_local_config_blocks_host_activation(tmp_path: Path, monkeypat
     module = _module(PROVIDER, "companion_provider_invalid")
     home = tmp_path / "home"
     repo = _repo(tmp_path / "repo", "primary")
-    (repo / ".agent-index" / "config.yaml").write_text(
+    (repo / ".copilot-extensions" / "agent-index" / "config.yaml").write_text(
         "indexers: [\n",
         encoding="utf-8",
     )
@@ -676,7 +678,9 @@ def test_managed_adapter_runs_real_service_without_plugin_or_engine_provisioning
         **module._runtime_environment(),
         "AGENT_INDEX_MANAGED_PYTHON": sys.executable,
         "AGENT_INDEX_REPO": str(repo),
-        "AGENT_INDEX_EFFECTIVE_CONFIG": str(repo / ".agent-index" / "config.yaml"),
+        "AGENT_INDEX_EFFECTIVE_CONFIG": str(
+            repo / ".copilot-extensions" / "agent-index" / "config.yaml"
+        ),
         "AGENT_INDEX_MACHINE": "primary",
     }
     launcher = Path(sys.executable)

@@ -92,7 +92,7 @@ def test_posix_ensure_hook_resolves_helper_before_client_exit(tmp_path):
     repo.mkdir()
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
     config = repo / ".agent-index" / "config.yaml"
-    config.parent.mkdir()
+    config.parent.mkdir(parents=True)
     config.write_text(
         "indexer:\n  machine: another-host\n  ssh: another-host\n",
         encoding="utf-8",
