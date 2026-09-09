@@ -57,7 +57,13 @@ recoverable, or rollback reference still depends on it.
 The **bridge daemon** is the per-machine runtime that exposes the local control
 plane, hosts or represents sessions, streams session events, and participates in
 the wider mesh. Each machine may run its own bridge; together they make local
-and remote sessions visible through one coordination surface.
+and remote sessions visible through one coordination surface. Exactly **one**
+bridge daemon owns this per-machine role regardless of how many Copilot
+sessions, hooks, or extension callbacks reach it — the suite-wide
+[*process-count-scales-with-services-not-sessions*](../../plugin-services/README.md#process-count-scales-with-services-not-sessions)
+guarantee applied to the mesh. A hook or extension that needs the bridge
+resolves and reaches this one daemon; it never spawns a rival to be sure one is
+there.
 
 ### bridge CLI
 

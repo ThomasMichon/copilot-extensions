@@ -96,7 +96,17 @@ adding connectivity is installing a module rather than rewiring the core:
   reachability contract.
 - **Real-user interactive reach** — land as the **actual user** in their own
   interactive session over a persistent tunnel (for attaching to live,
-  human-owned sessions), distinct from a headless service transport.
+  human-owned sessions), distinct from a headless service transport. **No
+  persistent process is the preferred shape**: a transport that can satisfy
+  reachability without a standing host-side daemon (e.g. an on-demand tunnel
+  established per connection) carries none. Where a tunnel module genuinely
+  requires something **hosted** (as opposed to consumed) on a machine to stay
+  reachable — e.g. a Dev-Tunnel host relay that must stay up to accept
+  incoming connections — that requirement collapses to exactly **one**
+  host-side daemon per machine, never one per client reach or per mesh
+  probe. This is the transport layer's instance of the suite-wide
+  [*process-count-scales-with-services-not-sessions*](../../plugin-services/README.md#process-count-scales-with-services-not-sessions)
+  guarantee: prefer zero, and never exceed one.
 A registry entry **names** which transport carries a machine; the layers above
 address the machine the same way regardless.
 

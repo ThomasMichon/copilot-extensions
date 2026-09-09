@@ -121,6 +121,28 @@ def _kill_matching_processes(needle: str) -> None:
         pass
 
 
+def _kill_pid(pid: int | None) -> None:
+    """Best-effort: kill a single process by pid (tree-kill on Windows).
+
+    Used for the autostarted coordinator (see ``Ctx.coordinator_pid``), which
+    carries no command-line tag to match on. Never raises.
+    """
+    if not pid:
+        return
+    try:
+        if sys.platform == "win32":
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/F", "/T"],
+                capture_output=True, timeout=20,
+            )
+        else:
+            import signal
+
+            os.kill(pid, signal.SIGKILL)
+    except Exception:
+        pass
+
+
 def _uv() -> str:
     return shutil.which("uv") or "uv"
 
@@ -321,6 +343,29 @@ class Ctx:
         )
         return self._query(code) == "True"
 
+    def coordinator_pid(self) -> int | None:
+        """The pid of the coordinator autostarted for this isolated HOME, or
+        ``None``.
+
+        ``supervise serve`` autostarts its own local coordinator
+        (``_ensure_local_coordinator``) the first time it needs one, and that
+        coordinator is a **breakaway-detached** process this probe never
+        otherwise tracks. Its cmdline carries no ``--machine`` tag (only
+        ``supervise serve`` does), so ``_kill_matching_processes`` alone
+        cannot reach it -- read its pid from the zdd routing table (the same
+        source ``has_live_local_coordinator`` trusts) instead, so teardown
+        cleans it up too instead of leaking it onto the host for every check
+        this probe runs.
+        """
+        code = (
+            "from zdd.routing import read_active_endpoint;"
+            "from agent_dispatch.config import routing_dir;"
+            "ep = read_active_endpoint(routing_dir());"
+            "print(ep.pid if ep is not None else '')"
+        )
+        out = self._query(code)
+        return int(out) if out.strip().isdigit() else None
+
     def spawn_supervise(self, *, extra_env=None):
         env = dict(self.env)
         if extra_env:
@@ -445,6 +490,7 @@ def check_default_on_handoff(python: str, source_dir: str) -> Result:
             pass
         time.sleep(0.5)
         _kill_matching_processes(c.machine_tag)
+        _kill_pid(c.coordinator_pid())
         shutil.rmtree(home, ignore_errors=True)
 
 
@@ -478,6 +524,7 @@ def check_opt_out_disables(python: str, source_dir: str) -> Result:
             pass
         time.sleep(0.5)
         _kill_matching_processes(c.machine_tag)
+        _kill_pid(c.coordinator_pid())
         shutil.rmtree(home, ignore_errors=True)
 
 
@@ -509,6 +556,7 @@ def check_no_marker_fail_safe(python: str, source_dir: str) -> Result:
             pass
         time.sleep(0.5)
         _kill_matching_processes(c.machine_tag)
+        _kill_pid(c.coordinator_pid())
         shutil.rmtree(home, ignore_errors=True)
 
 
