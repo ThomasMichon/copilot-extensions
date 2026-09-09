@@ -8,6 +8,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from .install_paths import effective_config_dir
 from .protocol import HTTP_PROTOCOL_MIN_SUPPORTED, HTTP_PROTOCOL_VERSION
 
 # -- Platform defaults -------------------------------------------------------
@@ -867,7 +868,9 @@ class ServiceConfig(BaseModel):
     # clients still fall back to default_port() when no routing table exists.
     port: int = 0
     bind: str = "127.0.0.1"
-    db_path: str = "~/.agent-bridge/sessions.db"
+    db_path: str = Field(
+        default_factory=lambda: str(effective_config_dir() / "sessions.db")
+    )
     log_level: str = "info"
     topologies: dict[str, TopologyProfile] = Field(default_factory=dict)
     context_thresholds: ContextThresholds = Field(default_factory=ContextThresholds)

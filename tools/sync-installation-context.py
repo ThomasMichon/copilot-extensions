@@ -28,6 +28,7 @@ LEGACY_ENTRYPOINT_FILES = (
     "legacy-entrypoint-probe.ps1",
 )
 ADOPTERS = (
+    "agent-bridge",
     "agent-codespaces",
     "agent-containers",
     "agent-machines",

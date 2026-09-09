@@ -31,6 +31,8 @@ param(
     [ValidateSet('install', 'uninstall', 'start', 'stop', 'status', 'update', 'stamp', 'provision')]
     [string]$Action = 'status',
 
+    [string]$InstallDir,
+
     [switch]$Purge,
 
     # Opt-in: run the daemon "whether the user is logged on or not" (a headless
@@ -251,14 +253,37 @@ if (-not $env:UV_HTTP_TIMEOUT) { $env:UV_HTTP_TIMEOUT = '60' }
 
 $ScriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PluginDir  = (Resolve-Path (Join-Path $ScriptDir '..')).Path
-$InstallDir = Join-Path $env:USERPROFILE '.agent-bridge'
+$legacyInstallDir = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.agent-bridge'))
+$InstallDir = if ($InstallDir) { $InstallDir } elseif ($env:AGENT_BRIDGE_INSTALL_DIR) { $env:AGENT_BRIDGE_INSTALL_DIR } else { $legacyInstallDir }
+$InstallDir = [IO.Path]::GetFullPath($InstallDir)
+$publishGlobalBinstubs = [StringComparer]::OrdinalIgnoreCase.Equals(
+    $InstallDir,
+    $legacyInstallDir
+)
+$serviceSuffix = if ($publishGlobalBinstubs) {
+    ''
+} else {
+    $serviceSha = [Security.Cryptography.SHA256]::Create()
+    try {
+        ([BitConverter]::ToString(
+            $serviceSha.ComputeHash(
+                [Text.Encoding]::UTF8.GetBytes($InstallDir.ToLowerInvariant())
+            )
+        )).Replace('-', '').Substring(0, 12).ToLowerInvariant()
+    } finally {
+        $serviceSha.Dispose()
+    }
+}
+$env:AGENT_BRIDGE_INSTALL_DIR = $InstallDir
+$env:AGENT_BRIDGE_CONFIG_DIR = $InstallDir
+$env:AGENT_BRIDGE_CONNECT_LOG = Join-Path (Join-Path $InstallDir 'logs') 'connect.log'
 $VenvDir    = Join-Path $InstallDir 'venv'
 $LocalBin   = Join-Path $env:USERPROFILE '.local\bin'
 $BinstubCmd = Join-Path $LocalBin 'agent-bridge.cmd'
 $BinstubPs1 = Join-Path $LocalBin 'agent-bridge.ps1'
 $Binstub    = $BinstubPs1   # primary entry point (shown in summaries)
 $PidFile    = Join-Path $InstallDir 'agent-bridge.pid'
-$TaskName   = 'Agent Bridge'
+$TaskName   = if ($publishGlobalBinstubs) { 'Agent Bridge' } else { "AgentBridge-$serviceSuffix" }
 $ScheduledTaskHasNotRunResult = 267011  # 0x41303 / SCHED_S_TASK_HAS_NOT_RUN
 $Port       = 9280
 $RelayPort  = 9857   # integrated credential relay (in-process with the bridge)
@@ -1377,6 +1402,9 @@ if (-not (`$launchPy -and (Test-Path -LiteralPath `$launchPy))) { `$launchPy = G
 # inherits. We set both, and the scheduled task pins -WorkingDirectory too.
 `$runtimeHome = Split-Path `$pidFile
 Set-Location -LiteralPath `$runtimeHome
+[Environment]::SetEnvironmentVariable('AGENT_BRIDGE_INSTALL_DIR', `$runtimeHome, 'Process')
+[Environment]::SetEnvironmentVariable('AGENT_BRIDGE_CONFIG_DIR', `$runtimeHome, 'Process')
+[Environment]::SetEnvironmentVariable('AGENT_BRIDGE_CONNECT_LOG', (Join-Path (Join-Path `$runtimeHome 'logs') 'connect.log'), 'Process')
 
 if (Test-Path `$pidFile) {
     `$existingPid = Get-Content `$pidFile -ErrorAction SilentlyContinue
@@ -1612,6 +1640,10 @@ function Write-Binstubs {
         $rSrc = Join-Path $PSScriptRoot $r
         if (Test-Path $rSrc) { Copy-Item $rSrc (Join-Path $binDir $r) -Force }
     }
+    if (-not $publishGlobalBinstubs) {
+        Write-Ok 'Scoped install keeps the global compatibility binstub unchanged'
+        return
+    }
     $rootLit = $InstallDir -replace "'", "''"
     $ps1 = @'
 $env:PYTHONUTF8 = '1'
@@ -1668,7 +1700,9 @@ function Invoke-Stamp {
     Write-Host ''; Write-Host '=== agent-bridge stamp (defer runtime to first use) ===' -ForegroundColor Cyan; Write-Host ''
     if (-not $SrcVersion) { Write-Fail 'Cannot stamp: no version in pyproject.toml'; exit 1 }
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-    foreach ($dir in @($InstallDir, $LocalBin)) {
+    $dirs = @($InstallDir)
+    if ($publishGlobalBinstubs) { $dirs += $LocalBin }
+    foreach ($dir in $dirs) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     }
     $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
@@ -1685,7 +1719,11 @@ function Invoke-Stamp {
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
     Write-Ok "Snapshot: $snapDir"
     Write-Binstubs
-    Write-Ok 'Stamped: agent-bridge binstub on PATH; runtime provisions on first use.'
+    if ($publishGlobalBinstubs) {
+        Write-Ok 'Stamped: agent-bridge binstub on PATH; runtime provisions on first use.'
+    } else {
+        Write-Ok 'Stamped: scoped runtime metadata recorded; payload-local commands provision on first use.'
+    }
 }
 
 function Invoke-Install {
@@ -1913,16 +1951,22 @@ function Invoke-Install {
 
     # Ensure ~/.local/bin is on user PATH
     $userPath = Get-CopilotPersistentEnvironmentVariable -Name 'PATH' -Target 'User'
-    if ($userPath -and $userPath -notlike "*$LocalBin*") {
+    if ($publishGlobalBinstubs -and $userPath -and $userPath -notlike "*$LocalBin*") {
         Set-CopilotPersistentEnvironmentVariable -Name 'PATH' -Value "$LocalBin;$userPath" -Target 'User'
         $env:PATH = "$LocalBin;$env:PATH"
         Write-Ok "Added $LocalBin to user PATH"
+    } elseif (-not $publishGlobalBinstubs) {
+        Write-Ok 'Scoped install left the user PATH unchanged'
     }
 
     Write-Host ''
     Write-Ok 'agent-bridge installed'
     Write-Host "  Install dir: $InstallDir"
-    Write-Host "  Binstub:     $Binstub"
+    if ($publishGlobalBinstubs) {
+        Write-Host "  Binstub:     $Binstub"
+    } else {
+        Write-Host '  Binstub:     global compatibility wrapper unchanged (scoped install)'
+    }
     Write-Host "  Config:      agent-bridge config show"
     $__ep = Get-ActiveEndpoint
     Write-Host "  API:         http://$($__ep.Bind):$($__ep.Port)"
@@ -1993,11 +2037,15 @@ function Invoke-Uninstall {
         Write-Ok 'Scheduled task removed'
     }
 
-    foreach ($stub in @($BinstubPs1, $BinstubCmd)) {
-        if (Test-Path $stub) {
-            Remove-Item -Force $stub
-            Write-Ok "Binstub removed: $stub"
+    if ($publishGlobalBinstubs) {
+        foreach ($stub in @($BinstubPs1, $BinstubCmd)) {
+            if (Test-Path $stub) {
+                Remove-Item -Force $stub
+                Write-Ok "Binstub removed: $stub"
+            }
         }
+    } else {
+        Write-Ok 'Scoped install left the legacy global binstub unchanged'
     }
 
     Remove-SiblingBinstubs
@@ -2259,9 +2307,13 @@ function Invoke-Status {
     # Show scheduled task
     $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     if ($task) {
-        Write-Ok "Scheduled task: $($task.State)"
+        Write-Ok "Scheduled task: $($task.State) ($TaskName)"
     } else {
         Write-Step 'No scheduled task registered'
+    }
+
+    if (-not $publishGlobalBinstubs) {
+        Write-Step 'Global compatibility binstub left unchanged for the legacy install'
     }
 
     # Exit non-zero when not installed (used by module update orchestrator)

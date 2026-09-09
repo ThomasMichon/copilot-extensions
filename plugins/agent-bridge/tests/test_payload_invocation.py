@@ -21,23 +21,29 @@ def test_payload_manifest_describes_agent_bridge_runtime() -> None:
     )
     assert manifest == {
         "schema": "copilot-extensions.payload-invocation",
-        "version": 1,
+        "version": 2,
         "command": "agent-bridge",
         "module": "agent_bridge",
-        "runtimeRoot": ".agent-bridge",
+        "legacyRuntimeRoot": ".agent-bridge",
+        "installationContext": "required",
         "noSelfProvisionEnv": "AGENT_BRIDGE_NO_SELFPROVISION",
         "purpose": "Communicate with persistent agent sessions",
         "installer": "install",
         "windowsCatalogShim": "cmd",
         "provisionMode": "direct",
+        "payloadRootEnv": "AGENT_BRIDGE_PAYLOAD_ROOT",
+        "payloadDispatcher": {
+            "posix": "scripts/runtime-gate.sh",
+            "windows": "scripts/runtime-gate.ps1",
+        },
     }
 
     posix = (PLUGIN / "bin" / "agent-bridge").read_text(encoding="utf-8")
     powershell = (PLUGIN / "bin" / "agent-bridge.ps1").read_text(encoding="utf-8")
-    assert 'bash "$_installer" provision' in posix
-    assert "payload-dir" not in posix
-    assert "$_installer provision" in powershell
-    assert "payload-dir" not in powershell
+    assert 'scripts/runtime-gate.sh' in posix
+    assert 'AGENT_BRIDGE_PAYLOAD_ROOT' in posix
+    assert 'scripts\\runtime-gate.ps1' in powershell
+    assert 'AGENT_BRIDGE_PAYLOAD_ROOT' in powershell
 
 
 def test_session_catalog_producer_is_not_registered_as_a_hook() -> None:
@@ -153,6 +159,25 @@ async def test_session_host_strips_parent_payload_context(monkeypatch) -> None:
 def test_posix_payload_command_ignores_shadow_path_and_preserves_stdin(
     tmp_path: Path,
 ) -> None:
+    plugin = tmp_path / "plugin"
+    bin_dir = plugin / "bin"
+    bin_dir.mkdir(parents=True)
+    shutil.copy2(PLUGIN / "bin" / "agent-bridge", bin_dir / "agent-bridge")
+    shutil.copy2(PLUGIN / "plugin.json", plugin)
+    scripts = plugin / "scripts"
+    scripts.mkdir()
+    (scripts / "runtime-gate.sh").write_text(
+        "#!/usr/bin/env bash\nexec \"$(dirname \"$0\")/../fake-python\" -m agent_bridge \"$@\"\n",
+        encoding="utf-8",
+    )
+    (scripts / "runtime-gate.sh").chmod(0o755)
+    fake_python = plugin / "fake-python"
+    fake_python.write_text(
+        '#!/bin/sh\nprintf "%s|" "$*"\ncat\n',
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+
     home = tmp_path / "home"
     runtime = home / ".agent-bridge"
     python = runtime / "versions" / "test" / "bin" / "python"
@@ -185,12 +210,12 @@ def test_posix_payload_command_ignores_shadow_path_and_preserves_stdin(
     env.update(
         {
             "HOME": str(home),
-            "COPILOT_PLUGIN_ROOT": str(PLUGIN),
+            "COPILOT_PLUGIN_ROOT": str(plugin),
             "PATH": f"{shadow_bin}{os.pathsep}{env['PATH']}",
         }
     )
     result = subprocess.run(
-        [str(PLUGIN / "bin" / "agent-bridge"), "create", "example"],
+        [str(plugin / "bin" / "agent-bridge"), "create", "example"],
         input="prompt",
         env=env,
         capture_output=True,
@@ -214,9 +239,8 @@ def test_windows_catalog_cmd_preserves_native_stdin(tmp_path: Path) -> None:
 
     scripts = plugin / "scripts"
     scripts.mkdir()
-    (scripts / "resolve-runtime.ps1").write_text(
-        "$AgentRtPy = Join-Path (Split-Path -Parent $PSScriptRoot) "
-        "'fake-python.cmd'\n",
+    (scripts / "runtime-gate.ps1").write_text(
+        "& (Join-Path (Split-Path -Parent $PSScriptRoot) 'fake-python.cmd') -m agent_bridge @args\n",
         encoding="utf-8",
     )
     (plugin / "fake-python.cmd").write_text(
@@ -259,9 +283,8 @@ def test_windows_catalog_cmd_survives_oversized_path(tmp_path: Path) -> None:
 
     scripts = plugin / "scripts"
     scripts.mkdir()
-    (scripts / "resolve-runtime.ps1").write_text(
-        "$AgentRtPy = Join-Path (Split-Path -Parent $PSScriptRoot) "
-        "'fake-python.ps1'\n",
+    (scripts / "runtime-gate.ps1").write_text(
+        "& (Join-Path (Split-Path -Parent $PSScriptRoot) 'fake-python.ps1') -m agent_bridge @args\n",
         encoding="utf-8",
     )
     (plugin / "fake-python.ps1").write_text(

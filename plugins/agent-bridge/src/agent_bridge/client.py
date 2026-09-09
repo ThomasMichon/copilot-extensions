@@ -7,11 +7,11 @@ Uses only stdlib (urllib) to avoid adding runtime dependencies.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterator
 
 import yaml
@@ -198,21 +198,16 @@ class BridgeClient:
 
     @classmethod
     def from_config(cls) -> BridgeClient:
-        """Build a client from ~/.agent-bridge/ config and auth files.
+        """Build a client from the active agent-bridge config and auth files.
 
         Fails clearly if the auth token is missing (unlike the server
         path which auto-generates one).
         """
-        import os
-
+        from .config import config_dir
         from .models import default_port
 
-        config_dir = Path(
-            os.environ.get("AGENT_BRIDGE_CONFIG_DIR", "~/.agent-bridge")
-        ).expanduser()
-
         # Load config
-        cfg_path = config_dir / "config.yaml"
+        cfg_path = config_dir() / "config.yaml"
         port = default_port()
         bind = "127.0.0.1"
         if cfg_path.exists():
@@ -258,7 +253,7 @@ class BridgeClient:
                 try:
                     from zdd.routing import read_active_endpoint
 
-                    ep = read_active_endpoint(config_dir, verify_listener=True)
+                    ep = read_active_endpoint(config_dir(), verify_listener=True)
                 except Exception:
                     return None
                 return ep.base_url if ep is not None else None
@@ -267,7 +262,7 @@ class BridgeClient:
             try:
                 from zdd.routing import read_active_endpoint
 
-                ep = read_active_endpoint(config_dir)
+                ep = read_active_endpoint(config_dir())
                 if ep is not None:
                     base_url = ep.base_url
             except Exception:
@@ -289,7 +284,7 @@ class BridgeClient:
             timeout = 120
 
         # Load auth token -- fail if missing
-        auth_path = config_dir / "auth.yaml"
+        auth_path = config_dir() / "auth.yaml"
         if not auth_path.exists():
             print(
                 "[FAIL] Auth token not found at %s\n"

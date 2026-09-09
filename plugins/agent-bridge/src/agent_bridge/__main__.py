@@ -25,6 +25,7 @@ from agent_procutil import (
 )
 
 from . import __version__
+from .install_paths import effective_config_dir, scheduled_task_name, systemd_unit_name
 from .parity_harness import (
     FAILED_ACP_HANDSHAKE_FAULT,
     CONTAINER_RECREATE_FAULT,
@@ -888,12 +889,10 @@ def _cmd_token(args: argparse.Namespace) -> None:
 # Service lifecycle (control the installer-managed daemon)
 # ---------------------------------------------------------------------------
 
-_INSTALL_DIR = os.path.expanduser(
-    os.environ.get("AGENT_BRIDGE_CONFIG_DIR", "~/.agent-bridge")
-)
+_INSTALL_DIR = os.fspath(effective_config_dir())
 _PID_FILE = os.path.join(_INSTALL_DIR, "agent-bridge.pid")
-_WIN_TASK_NAME = "Agent Bridge"
-_SYSTEMD_UNIT = "agent-bridge.service"
+_WIN_TASK_NAME = scheduled_task_name()
+_SYSTEMD_UNIT = systemd_unit_name()
 _SERVICE_START_TIMEOUT_S = 120
 _SERVICE_LAUNCH_GRACE_S = 15
 

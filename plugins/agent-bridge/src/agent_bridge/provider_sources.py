@@ -62,15 +62,13 @@ from dropin_registry import (
 )
 from plugin_activation import ActivationReport, resolve_active_plugins
 
+from .install_paths import effective_config_dir, normalized_path
+
 REGISTRY_NAME = "providers.d"
 
 #: Environment override for the provider-manifest directory (tests use it for
 #: hermetic isolation; also an operator escape hatch).
 PROVIDERS_DIR_ENV = "AGENT_BRIDGE_PROVIDERS_DIR"
-
-#: Environment override for the agent-bridge config dir (shared with the rest of
-#: the daemon; ``providers.d`` lives beneath it).
-_CONFIG_DIR_ENV = "AGENT_BRIDGE_CONFIG_DIR"
 
 
 def providers_dir() -> Path:
@@ -78,10 +76,13 @@ def providers_dir() -> Path:
     override = os.environ.get(PROVIDERS_DIR_ENV)
     if override:
         return Path(override).expanduser()
-    config_dir = Path(
-        os.environ.get(_CONFIG_DIR_ENV, "~/.agent-bridge")
-    ).expanduser()
-    return config_dir / "providers.d"
+    return effective_config_dir() / "providers.d"
+
+
+def _registry_targets_current_install(root: Path) -> bool:
+    if root.name != REGISTRY_NAME:
+        return True
+    return normalized_path(root.parent) == normalized_path(effective_config_dir())
 
 
 @dataclass(frozen=True)
@@ -402,6 +403,33 @@ def scan_provider_registry(
 ) -> ProviderRegistryReport:
     """Scan, reconcile, and de-duplicate provider manifests."""
     root = Path(directory) if directory is not None else providers_dir()
+    if not _registry_targets_current_install(root):
+        detail = (
+            "provider registry targets a different agent-bridge installation: "
+            f"expected {effective_config_dir() / REGISTRY_NAME}"
+        )
+        return ProviderRegistryReport(
+            snapshot=ScanSnapshot(
+                registry=REGISTRY_NAME,
+                authority=ScanAuthority.COMPLETE,
+                decisions={},
+                findings=(),
+            ),
+            entries={},
+            manifests={},
+            findings=(
+                Finding(
+                    registry=REGISTRY_NAME,
+                    entry=str(root),
+                    status="inactive",
+                    reason="bridge-install-mismatch",
+                    target=str(root),
+                    owner=None,
+                    remedy="Run `agent-bridge doctor` from the intended installation.",
+                    detail=detail,
+                ),
+            ),
+        )
     resolved_activation = activation_report
 
     def current_activation() -> ActivationReport:

@@ -33,6 +33,16 @@ def test_constants():
     assert elevated.TASK_NAME == "agent-bridge-elevated"
 
 
+def test_scoped_task_name(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENT_BRIDGE_INSTALL_DIR", str(tmp_path / "cell"))
+    from importlib import reload
+
+    module = reload(elevated)
+    assert module.TASK_NAME.startswith("agent-bridge-elevated-")
+    monkeypatch.delenv("AGENT_BRIDGE_INSTALL_DIR", raising=False)
+    reload(module)
+
+
 def test_discovered_port_reads_active_json(tmp_path, monkeypatch):
     # dotfiles #694: the sub-daemon advertises its OS-assigned ephemeral port via
     # its own routing table (<primary>/elevated/active.json); discovered_port
