@@ -1310,6 +1310,44 @@ See [`design.md`](design.md).
   still reproduces the pre-existing failures tracked by
   [#2159](https://github.com/ThomasMichon/copilot-extensions/issues/2159)
   (`chronicle`, `rescue-sync`, and contained `install-binstub` regressions), so
-  `#1108` remains open only for the unlanded `agent-dispatch`,
+  at that point `#1108` remained open only for the unlanded `agent-dispatch`,
   `agent-bridge`, and deferred `agent-worktrees` Worktree Manager supervision
   slices.
+
+### 2026-09-09 — Agent-dispatch service-boundary increment
+
+- Merged [#2284](https://github.com/ThomasMichon/copilot-extensions/pull/2284)
+  at `bbbdefdd34e8c5f31e50d0d50609cd6f4da952bc`, landing the `agent-dispatch`
+  portion of `#1108`.
+- `agent-dispatch` now resolves installation-scoped local roots through a
+  shared helper and carries that scope through registrar drop-ins,
+  coordinator/supervisor install identities, managed-runtime materialization,
+  retention, telemetry, endpoint/runtime discovery, and remote-dispatch
+  handoff paths. Explicit installation context now makes same-named cells write
+  and read the same namespaced registrar/runtime state, while legacy execution
+  with no installation root remains exactly machine-global.
+- The same increment hardened changed-surface subprocess coverage for source-tree
+  runs: companion gate launches now normalize inherited `PYTHONPATH` entries
+  before changing CWD, the managed-retention real-subprocess test supplies the
+  exact plugin root/src search path, and the fleet SSH-fallback test now
+  explicitly disables the local bridge fast path so the fallback assertion is
+  deterministic.
+- Validation:
+  direct Windows `PYTHONPATH=plugins/agent-dispatch/src python -m pytest -q plugins/agent-dispatch/tests`
+  passed (`2203 passed, 21 skipped`);
+  `python tools/run-plugin-tests.py agent-dispatch` passed in four contained
+  sub-suites (`688/518/821/194 passed`, `5/9/1/4 skipped`);
+  focused WSL/POSIX coverage for `install_paths`, `managed_runtime`,
+  `managed_retention`, `registrar_registry`, and `supervisor_install` passed
+  (`204 passed, 1 skipped`);
+  and install-contract, version-consistency, vendored-lib,
+  installation-context, payload-invocation, installer-readiness,
+  marketplace-isolation, and changed-file ruff guards passed.
+- Audit note:
+  the first contained runner attempt hit a transient Windows `os.replace(...)`
+  access-denied during `test_configured_index_host_prepares_before_launch_and_freezes_bound_runtime`;
+  the required single retry passed cleanly, so the landed evidence is the green
+  retry plus green PR CI.
+- `#1108` remains open only for the unlanded `agent-bridge` increment and the
+  deferred `agent-worktrees` status-monitor / Worktree Manager supervision
+  slice.
