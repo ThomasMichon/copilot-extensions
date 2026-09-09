@@ -23,6 +23,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .install_paths import install_dir as runtime_install_dir
 from . import __version__
 
 RUNNING_VERSION_FILE = "running-version.json"
@@ -30,7 +31,7 @@ RUNNING_VERSION_FILE = "running-version.json"
 
 def install_dir() -> Path:
     """Runtime root for the coordinator (``~/.agent-dispatch``)."""
-    return Path.home() / ".agent-dispatch"
+    return runtime_install_dir()
 
 
 def write_running_version(directory: Path | None = None) -> None:

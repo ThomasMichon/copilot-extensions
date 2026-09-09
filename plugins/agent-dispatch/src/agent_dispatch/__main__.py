@@ -254,7 +254,9 @@ def _spawn_coordinator_process() -> None:
     ``DETACHED_PROCESS``: a detached venv ``python.exe`` launcher re-execs a base
     console interpreter that allocates a fresh DefTerm console.
     """
-    install_dir = Path.home() / ".agent-dispatch"
+    from .install_paths import install_dir as runtime_install_dir
+
+    install_dir = runtime_install_dir()
     from .procutil import detached_kwargs, resolve_own_runtime_python, windowless_python
 
     # Always the canonically-resolved current-version slot (never sys.executable
@@ -5351,7 +5353,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     cs.add_argument("--title", help="short card title")
     cs.add_argument("--status", help="one-line status overview")
-    cs.add_argument("--link", help="a link to the rich artifact (OneDrive draft / PR)")
+    cs.add_argument("--link", help="a link to the rich artifact (draft / PR)")
     cs.add_argument(
         "--body",
         help="the scrollable card body (markdown); '@path' reads a file",

@@ -13,12 +13,17 @@ from pathlib import Path
 import pytest
 
 from agent_dispatch.managed_runtime import (
+    _BUILD_DIRS,
+    _CELL_DIRS,
+    _LAYOUT_VERSION_COMPACT,
     RECEIPT_NAME,
     ManagedRuntimeError,
     ManagedRuntimeMaterializer,
+    _layout_version,
     ManagedRuntimePolicy,
     _is_reparse,
     _python_path,
+    _runtime_dir,
     _subprocess_environment,
 )
 
@@ -156,6 +161,27 @@ def _policy(tmp_path: Path, *, windows: bool = False) -> ManagedRuntimePolicy:
     )
 
 
+def _receipt(cell: Path) -> dict:
+    return json.loads((cell / RECEIPT_NAME).read_text(encoding="utf-8"))
+
+
+def _snapshot_projects_root(cell: Path) -> Path:
+    receipt = _receipt(cell)
+    project_dir = "p" if receipt.get("layout_version") == 2 else "projects"
+    snapshot_dir = "s" if receipt.get("layout_version") == 2 else "snapshot"
+    return cell / snapshot_dir / project_dir
+
+
+def _build_root(cell: Path) -> Path:
+    receipt = _receipt(cell)
+    return cell / _BUILD_DIRS[_layout_version(receipt)]
+
+
+def _cell_runtime_dir(cell: Path) -> Path:
+    receipt = _receipt(cell)
+    return _runtime_dir(cell, layout_version=_layout_version(receipt))
+
+
 def test_reparse_probe_fails_closed_when_metadata_is_unavailable(tmp_path, monkeypatch):
     path = tmp_path / "python.exe"
     path.write_bytes(b"python")
@@ -186,16 +212,18 @@ def test_materializes_snapshot_and_reuses_valid_cell(tmp_path):
     assert receipt["snapshot"]["projects"] == [
         {"path": ".", "extras": ["service"]}
     ]
+    project_prefix = "p" if receipt.get("layout_version") == 2 else "projects"
     assert {
         entry["path"]
         for entry in receipt["snapshot"]["files"]
         if entry["type"] == "file"
     } == {
-        "projects/000/example_service/__init__.py",
-        "projects/000/pyproject.toml",
+        f"{project_prefix}/000/example_service/__init__.py",
+        f"{project_prefix}/000/pyproject.toml",
     }
+    snapshot_dir = "s" if receipt.get("layout_version") == 2 else "snapshot"
     assert (
-        first.cell / "snapshot" / "projects" / "000" / "example_service" / "__init__.py"
+        first.cell / snapshot_dir / project_prefix / "000" / "example_service" / "__init__.py"
     ).read_text(encoding="utf-8") == "VALUE = 1\n"
 
 
@@ -353,8 +381,8 @@ def test_installer_mutation_is_confined_to_disposable_working_copy(tmp_path):
         _policy(tmp_path), runner=runner
     ).materialize(_registration(plugin))[0]
 
-    assert not (result.cell / "snapshot" / "projects" / "000" / "build").exists()
-    assert not (result.cell / "build-inputs").exists()
+    assert not (_snapshot_projects_root(result.cell) / "000" / "build").exists()
+    assert not _build_root(result.cell).exists()
 
 
 def test_import_validation_must_not_modify_staged_cell(tmp_path):
@@ -467,7 +495,9 @@ def test_rejects_linked_publication_descendant(tmp_path):
     external = tmp_path / "external"
     external.mkdir()
     try:
-        (policy.root / "cells").symlink_to(external, target_is_directory=True)
+        (policy.root / _CELL_DIRS[_LAYOUT_VERSION_COMPACT]).symlink_to(
+            external, target_is_directory=True
+        )
     except (OSError, NotImplementedError):
         pytest.skip("directory links are unavailable")
 
@@ -672,7 +702,7 @@ def test_windows_does_not_require_signatures_for_installed_launchers(tmp_path):
         trust_verifier=verify,
     ).materialize(_registration(plugin))[0]
 
-    assert (result.cell / "runtime" / "Scripts" / "example.exe").is_file()
+    assert (result.python.parent / "Scripts" / "example.exe").is_file()
 
 
 def test_windows_trust_manifest_excludes_uncopied_site_packages(tmp_path):
@@ -689,5 +719,5 @@ def test_windows_trust_manifest_excludes_uncopied_site_packages(tmp_path):
     ).materialize(_registration(plugin))[0]
 
     assert not (
-        result.cell / "runtime" / "Lib" / "site-packages" / "tool" / "launcher.exe"
+        _cell_runtime_dir(result.cell) / "Lib" / "site-packages" / "tool" / "launcher.exe"
     ).exists()

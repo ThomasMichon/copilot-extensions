@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING
 from dropin_registry import Finding, ScanAuthority, WarningTracker
 from plugin_activation import ActivationReport
 
+from .install_paths import install_dir as dispatch_install_dir
 from .registrar import ProfileDeclaration, RegistrarError, load_declaration
 
 if TYPE_CHECKING:
@@ -69,7 +70,7 @@ def registrar_dir() -> Path:
     override = os.environ.get(REGISTRAR_DIR_ENV)
     if override:
         return Path(override).expanduser()
-    return Path.home() / ".agent-dispatch" / "registrar"
+    return dispatch_install_dir() / "registrar"
 
 
 def pointers_file(base: Path | None = None) -> Path:
@@ -468,7 +469,7 @@ def install_dir() -> Path:
     override = os.environ.get(INSTALL_DIR_ENV)
     if override:
         return Path(override).expanduser()
-    return Path.home() / ".agent-dispatch"
+    return dispatch_install_dir()
 
 
 def _parse_env_file(path: Path) -> dict[str, str]:

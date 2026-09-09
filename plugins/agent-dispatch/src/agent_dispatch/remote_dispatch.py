@@ -27,9 +27,9 @@ import os
 import shlex
 import shutil
 import subprocess
-from pathlib import Path
 
 from .config import producer_capability
+from .install_paths import install_dir
 from .procutil import run_ssh_command
 
 
@@ -66,10 +66,7 @@ def local_machine() -> str | None:
     host node name. Returns None only when none yield a name.
     """
     configured = os.environ.get("AGENT_DISPATCH_SUPERVISE_MACHINE")
-    root = Path(
-        os.environ.get("AGENT_DISPATCH_INSTALL_DIR")
-        or (Path.home() / ".agent-dispatch")
-    )
+    root = install_dir()
     if not configured:
         try:
             configured = (root / "machine").read_text(encoding="utf-8").strip()

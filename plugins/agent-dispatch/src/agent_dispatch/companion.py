@@ -878,6 +878,12 @@ def _launch_gated(resolution: CompanionResolution) -> _GatedProcess:
     gate_read, gate_write = os.pipe()
     os.set_inheritable(gate_read, True)
     environment = dict(resolution.environment)
+    pythonpath = environment.get("PYTHONPATH") or os.environ.get("PYTHONPATH")
+    if pythonpath:
+        environment["PYTHONPATH"] = os.pathsep.join(
+            os.path.abspath(entry) if entry else entry
+            for entry in pythonpath.split(os.pathsep)
+        )
     environment["COPILOT_COMPANION_COMMAND"] = base64.urlsafe_b64encode(
         json.dumps(list(resolution.command)).encode()
     ).decode("ascii")

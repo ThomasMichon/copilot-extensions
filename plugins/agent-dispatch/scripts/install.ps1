@@ -279,6 +279,24 @@ $PkgSrcDir = Join-Path $PluginDir 'src\agent_dispatch'
 if (-not $InstallDir) {
     $InstallDir = Join-Path $env:USERPROFILE '.agent-dispatch'
 }
+$InstallDir = [IO.Path]::GetFullPath($InstallDir)
+$legacyInstallDir = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.agent-dispatch'))
+$publishLegacyNames = [StringComparer]::OrdinalIgnoreCase.Equals($InstallDir, $legacyInstallDir)
+$serviceSuffix = if ($publishLegacyNames) {
+    ''
+} else {
+    $serviceSha = [Security.Cryptography.SHA256]::Create()
+    try {
+        ([BitConverter]::ToString(
+            $serviceSha.ComputeHash(
+                [Text.Encoding]::UTF8.GetBytes($InstallDir.ToLowerInvariant())
+            )
+        )).Replace('-', '').Substring(0, 12).ToLowerInvariant()
+    } finally {
+        $serviceSha.Dispose()
+    }
+}
+$env:AGENT_DISPATCH_INSTALL_DIR = $InstallDir
 $VenvDir  = Join-Path $InstallDir '.venv'
 $LocalBin = Join-Path $env:USERPROFILE '.local\bin'
 
@@ -288,8 +306,12 @@ if ($env:OS -eq 'Windows_NT') {
     $VenvPython = Join-Path $VenvDir 'bin/python'
 }
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
-$TaskName = 'agent-dispatch'
-$SupervisorTaskName = 'agent-dispatch-supervisor'
+$TaskName = if ($publishLegacyNames) { 'agent-dispatch' } else { "agent-dispatch-$serviceSuffix" }
+$SupervisorTaskName = if ($publishLegacyNames) {
+    'agent-dispatch-supervisor'
+} else {
+    "agent-dispatch-supervisor-$serviceSuffix"
+}
 $SupervisorProfileDir = Join-Path $InstallDir 'supervisors'
 $DefaultPort = 9847
 
@@ -1531,6 +1553,7 @@ function Install-CoordinatorTask {
 # Task runs headless (conhost --headless), so console output is otherwise lost.
 `$ErrorActionPreference = 'Stop'
 `$env:PYTHONUTF8 = '1'
+`$env:AGENT_DISPATCH_INSTALL_DIR = '$($InstallDir -replace "'","''")'
 Set-Location -LiteralPath `$PSScriptRoot
 `$envFile = Join-Path `$PSScriptRoot 'service.env'
 if (Test-Path `$envFile) {
@@ -2131,6 +2154,7 @@ param([string]`$EnvFile = (Join-Path `$PSScriptRoot 'supervisor.env'))
 # Do not edit; edit supervisor.env or supervisors/<name>.env instead.
 `$ErrorActionPreference = 'Stop'
 `$env:PYTHONUTF8 = '1'
+`$env:AGENT_DISPATCH_INSTALL_DIR = '$($InstallDir -replace "'","''")'
 Set-Location -LiteralPath `$PSScriptRoot
 `$envFile = `$EnvFile
 `$labels = ''

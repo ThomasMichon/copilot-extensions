@@ -346,8 +346,12 @@ def test_spawn_fleet_headless_worker_builds_ssh_agent_bridge_argv(monkeypatch):
         captured["cmd"] = cmd
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
+    def unavailable_client():
+        raise embody.bridge_remote.RemoteBridgeUnavailable()
+
     monkeypatch.setattr(embody.shutil, "which", lambda _n: "/usr/bin/ssh")
     monkeypatch.setattr(embody, "run_ssh_command", fake_run)
+    monkeypatch.setattr(embody.bridge_remote, "LocalBridgeRemoteClient", unavailable_client)
 
     embody.spawn_fleet_headless_worker(
         "  Host-B  ",

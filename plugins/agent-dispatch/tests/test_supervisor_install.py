@@ -44,9 +44,19 @@ def test_install_sh_exists():
 
 def test_supervisor_unit_name_and_launcher_defined():
     text = _text()
-    assert 'SUPERVISOR_UNIT="agent-dispatch-supervisor.service"' in text
+    assert 'SERVICE_SUFFIX=""' in text
+    assert 'SUPERVISOR_UNIT_BASE="agent-dispatch-supervisor${SERVICE_SUFFIX:+-$SERVICE_SUFFIX}"' in text
+    assert 'SUPERVISOR_UNIT="$SUPERVISOR_UNIT_BASE.service"' in text
     assert "SUPERVISOR_LAUNCHER=" in text
     assert "_install_supervisor_service()" in text
+
+
+def test_shell_installer_scopes_service_identities_by_install_dir():
+    text = _text()
+    assert 'LEGACY_INSTALL_DIR="$HOME/.agent-dispatch"' in text
+    assert 'install_cmp="$(printf \'%s\' "$INSTALL_DIR"' in text
+    assert 'sha256sum | awk \'{print substr($1,1,12)}\'' in text
+    assert 'SYSTEMD_UNIT="agent-dispatch${SERVICE_SUFFIX:+-$SERVICE_SUFFIX}.service"' in text
 
 
 def test_supervisor_unit_and_launcher_put_local_bin_on_path():
@@ -187,7 +197,7 @@ def test_supervisor_profile_directory_referenced():
 def test_profile_units_are_named_from_safe_profile_stems_and_share_launcher():
     text = _text()
     assert '[[ "$1" =~ ^[A-Za-z0-9_-]+$ ]]' in text
-    assert "printf 'agent-dispatch-supervisor-%s.service'" in text
+    assert "printf '%s-%s.service' \"$SUPERVISOR_UNIT_BASE\" \"$name\"" in text
     assert "EnvironmentFile=-$env_file" in text
     assert "ExecStart=$SUPERVISOR_LAUNCHER" in text
     assert '_install_supervisor_unit "$SUPERVISOR_UNIT" "$SUPERVISOR_ENV_FILE"' in text
@@ -206,7 +216,7 @@ def test_profile_reconcile_removes_orphan_units():
     text = _text()
     idx = text.index("_reconcile_supervisor_profiles()")
     body = text[idx:]
-    assert '"$UNIT_DIR"/agent-dispatch-supervisor-*.service' in body
+    assert '"$UNIT_DIR"/"$SUPERVISOR_UNIT_BASE"-*.service' in body
     assert 'env_file="$SUPERVISOR_PROFILE_DIR/$name.env"' in body
     assert '[[ ! -f "$env_file" ]]' in body
     assert '_remove_supervisor_unit "$unit"' in body
@@ -214,9 +224,16 @@ def test_profile_reconcile_removes_orphan_units():
 
 def test_primary_supervisor_unit_and_env_remain_legacy_names():
     text = _text()
-    assert 'SUPERVISOR_UNIT="agent-dispatch-supervisor.service"' in text
+    assert 'SERVICE_SUFFIX=""' in text
+    assert 'SUPERVISOR_UNIT_BASE="agent-dispatch-supervisor${SERVICE_SUFFIX:+-$SERVICE_SUFFIX}"' in text
     assert 'SUPERVISOR_ENV_FILE="$INSTALL_DIR/supervisor.env"' in text
     assert '_install_supervisor_unit "$SUPERVISOR_UNIT" "$SUPERVISOR_ENV_FILE"' in text
+
+
+def test_shell_units_and_launcher_export_install_dir():
+    text = _text()
+    assert 'Environment=AGENT_DISPATCH_INSTALL_DIR=$INSTALL_DIR' in text
+    assert 'export AGENT_DISPATCH_INSTALL_DIR="$INSTALL_DIR"' in text
 
 
 # -- Windows (install.ps1) parity --------------------------------------------
@@ -231,10 +248,19 @@ class TestWindowsSupervisorInstall:
 
     def test_supervisor_task_name_and_functions_defined(self):
         text = _ps1_text()
-        assert "$SupervisorTaskName = 'agent-dispatch-supervisor'" in text
+        assert "$SupervisorTaskName = if ($publishLegacyNames)" in text
+        assert "'agent-dispatch-supervisor'" in text
         assert "function Install-SupervisorTask" in text
         assert "function Remove-SupervisorTask" in text
         assert "function Test-SupervisorLabelsConfigured" in text
+
+    def test_windows_installer_scopes_service_identities_by_install_dir(self):
+        text = _ps1_text()
+        assert "$legacyInstallDir = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.agent-dispatch'))" in text
+        assert "$publishLegacyNames = [StringComparer]::OrdinalIgnoreCase.Equals($InstallDir, $legacyInstallDir)" in text
+        assert "$TaskName = if ($publishLegacyNames)" in text
+        assert "$SupervisorTaskName = if ($publishLegacyNames)" in text
+        assert "Substring(0, 12).ToLowerInvariant()" in text
 
     def test_supervise_invocation_is_all_repos_scoped(self):
         text = _ps1_text()
@@ -339,9 +365,15 @@ class TestWindowsSupervisorInstall:
 
     def test_primary_supervisor_task_and_env_remain_legacy_names(self):
         text = _ps1_text()
-        assert "$SupervisorTaskName = 'agent-dispatch-supervisor'" in text
+        assert "$publishLegacyNames = [StringComparer]::OrdinalIgnoreCase.Equals($InstallDir, $legacyInstallDir)" in text
+        assert "$SupervisorTaskName = if ($publishLegacyNames)" in text
         assert "Join-Path $InstallDir 'supervisor.env'" in text
         assert "Install-SupervisorTaskInstance -Name $SupervisorTaskName -EnvFile $envFile" in text
+
+    def test_windows_launchers_export_install_dir(self):
+        text = _ps1_text()
+        assert "$env:AGENT_DISPATCH_INSTALL_DIR = $InstallDir" in text
+        assert "`$env:AGENT_DISPATCH_INSTALL_DIR = '" in text
 
     def test_launchers_survive_a_locked_log(self):
         """A busy/locked ``*-service.log`` must never block startup.
