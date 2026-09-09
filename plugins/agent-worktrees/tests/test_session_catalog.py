@@ -245,6 +245,72 @@ def test_mux_catalog_refreshes_hint_and_monitor_registry(
     assert reconciler.has_live_worktree_mux is True
 
 
+def test_mux_dark_transition_with_no_live_process_stops_fsmonitor(
+    tmp_path, monkeypatch
+):
+    """A worktree that goes mux-dark with no live Copilot process gets its
+    fsmonitor daemon reaped -- the backstop for an abrupt kill that never
+    delivers the sessionEnd hook at all (#2269)."""
+    rec = _record("wt-mux", str(tmp_path / "wt-mux"), sessions_list=[])
+    rec.mux_live = True  # was live as of the prior tick
+    tracking_dir, _state_dir = _wire(tmp_path, monkeypatch, [rec])
+    monkeypatch.setattr(sessions, "worktree_has_live_session", lambda record: False)
+    stopped: list[str] = []
+    monkeypatch.setattr(
+        tracking, "stop_fsmonitor_daemon", lambda path: stopped.append(path))
+
+    reconciler = session_catalog.ResidentSessionReconciler(
+        record_budget=8, session_budget=8)
+    reconciler.observe_mux(set())  # no live wt-* mux sessions this tick
+
+    reconciler.step()
+
+    assert stopped == [rec.worktree_path]
+    after = tracking.load_record(tracking_dir / "wt-mux.yaml")
+    assert after.mux_live is False
+
+
+def test_mux_dark_transition_with_live_process_does_not_stop_fsmonitor(
+    tmp_path, monkeypatch
+):
+    """A bare/bound Copilot process still holding the worktree's session lock
+    vetoes the reap even though mux itself went dark."""
+    rec = _record("wt-mux", str(tmp_path / "wt-mux"), sessions_list=[])
+    rec.mux_live = True
+    tracking_dir, _state_dir = _wire(tmp_path, monkeypatch, [rec])
+    monkeypatch.setattr(sessions, "worktree_has_live_session", lambda record: True)
+    stopped: list[str] = []
+    monkeypatch.setattr(
+        tracking, "stop_fsmonitor_daemon", lambda path: stopped.append(path))
+
+    reconciler = session_catalog.ResidentSessionReconciler(
+        record_budget=8, session_budget=8)
+    reconciler.observe_mux(set())
+
+    reconciler.step()
+
+    assert stopped == []
+
+
+def test_mux_never_seen_live_does_not_stop_fsmonitor(tmp_path, monkeypatch):
+    """No prior live->dark transition (mux_live was never True) -- don't reap;
+    this is not evidence of anything just having ended."""
+    rec = _record("wt-mux", str(tmp_path / "wt-mux"), sessions_list=[])
+    tracking_dir, _state_dir = _wire(tmp_path, monkeypatch, [rec])
+    monkeypatch.setattr(sessions, "worktree_has_live_session", lambda record: False)
+    stopped: list[str] = []
+    monkeypatch.setattr(
+        tracking, "stop_fsmonitor_daemon", lambda path: stopped.append(path))
+
+    reconciler = session_catalog.ResidentSessionReconciler(
+        record_budget=8, session_budget=8)
+    reconciler.observe_mux(set())
+
+    reconciler.step()
+
+    assert stopped == []
+
+
 def test_stale_mux_observation_is_not_restamped(tmp_path, monkeypatch):
     rec = _record("wt-mux", str(tmp_path / "wt-mux"), sessions_list=[])
     tracking_dir, _state_dir = _wire(tmp_path, monkeypatch, [rec])
