@@ -24,13 +24,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import __version__
+from .install_paths import effective_config_dir
 
 RUNNING_VERSION_FILE = "running-version.json"
 
 
 def install_dir() -> Path:
-    """Runtime root for the daemon (``~/.agent-bridge``)."""
-    return Path.home() / ".agent-bridge"
+    """Runtime root for the current daemon process."""
+    return effective_config_dir()
 
 
 def write_running_version(

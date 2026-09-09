@@ -57,9 +57,9 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/models.py",
-          "sha256": "ae71af0b435421a655709f10c9256510d69a5864d3d4f5c47e362d8a5a3b348b",
-          "semantic": true,
-          "non_semantic_reason": null
+          "sha256": "634d58e5510923125fcbeb72a784668e6ab5b9e86e2ea5c7440d71243d8f2cee",
+          "semantic": false,
+          "non_semantic_reason": "Installation-scoped runtime defaults do not alter the representative session-create wire shape."
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",

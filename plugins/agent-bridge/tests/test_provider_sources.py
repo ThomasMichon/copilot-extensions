@@ -198,6 +198,26 @@ def test_discover_missing_command_is_inactive(tmp_path):
     assert report.findings[0].reason == "missing-target"
 
 
+def test_discover_rejects_foreign_installation_registry(monkeypatch, tmp_path):
+    current = tmp_path / "cell-a"
+    foreign = tmp_path / "cell-b"
+    registry = foreign / "providers.d"
+    current.mkdir()
+    registry.mkdir(parents=True)
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(current))
+
+    _write(
+        registry,
+        "codespaces.json",
+        {"namespace": "codespace", "command": [sys.executable]},
+    )
+
+    report = scan_provider_registry(registry)
+
+    assert report.manifests == {}
+    assert report.findings[0].reason == "bridge-install-mismatch"
+
+
 def test_v1_provider_requires_current_exact_plugin_root(tmp_path):
     plugin_root = tmp_path / "plugin"
     plugin_root.mkdir()

@@ -320,7 +320,14 @@ updates rarely — in practice never — touch it:
 
 ### Deploy Manifest
 
-The installer writes `~/.agent-bridge/deploy-manifest.json` tracking:
+Legacy/default installs write `~/.agent-bridge/deploy-manifest.json`. When an
+explicit valid installation context is active, agent-bridge instead keeps its
+deploy manifest, `sessions.db`, routing table, host index, provider registry,
+relay-port record, logs, and service identities under the selected installation
+root. Cross-cell discovery rejects foreign standard `providers.d` roots, while
+legacy execution with no installation context remains machine-global.
+
+The installer writes `deploy-manifest.json` tracking:
 - Schema version, installer type (plugin vs legacy)
 - Source commit, branch, timestamp
 - Plugin directory path
@@ -581,13 +588,16 @@ an agent name, the prefix is looked up in the namespace registry and
 resolution is delegated to the matching resolver.
 
 The core bridge does not require or vendor provider packages. External provider
-plugins self-register by writing JSON manifests under
-`~/.agent-bridge/providers.d/`; the daemon scans that directory at startup and
-again on demand (throttled) and drives each provider's CLI over a process
-boundary (`namespace-list`, `namespace-resolve`, `namespace-ensure-ready`,
-`namespace-target-repo`). Missing or malformed provider manifests are skipped
-with a warning, so a bad sibling never breaks daemon startup. The built-in
-`admin:` resolver is registered in-process.
+plugins self-register by writing JSON manifests under the active install root's
+`providers.d/` directory (`~/.agent-bridge/providers.d/` in legacy mode, or the
+selected cell root in namespaced mode); the daemon scans that directory at
+startup and again on demand (throttled) and drives each provider's CLI over a
+process boundary (`namespace-list`, `namespace-resolve`,
+`namespace-ensure-ready`, `namespace-target-repo`). Missing or malformed
+provider manifests are skipped with a warning, and a foreign standard
+`providers.d` root is rejected as an install mismatch, so a bad sibling or
+cross-cell mix-up never breaks daemon startup. The built-in `admin:` resolver
+is registered in-process.
 
 `namespace-resolve` may return a versioned, provider-owned `venue` object.
 Agent-bridge preserves that object unchanged in the `SpawnTarget` and durable

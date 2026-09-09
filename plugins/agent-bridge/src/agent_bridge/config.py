@@ -1,20 +1,18 @@
-"""Configuration -- load and validate ~/.agent-bridge/config.yaml."""
+"""Configuration -- load and validate the active agent-bridge config.yaml."""
 
 from __future__ import annotations
 
 import logging
-import os
 import secrets
 from pathlib import Path
 
 import yaml
 from agent_procutil import no_window_kwargs
 
+from .install_paths import effective_config_dir, legacy_install_dir, normalized_path
 from .models import RepoBridgeConfig, ServiceConfig
 
 log = logging.getLogger("agent-bridge")
-
-_DEFAULT_CONFIG_DIR = "~/.agent-bridge"
 
 #: In-repo agent-bridge config location, relative to a repo root.
 REPO_CONFIG_RELPATH = ".agent-bridge/config.yaml"
@@ -22,16 +20,35 @@ REPO_CONFIG_RELPATH = ".agent-bridge/config.yaml"
 
 def config_dir() -> Path:
     """Resolve the agent-bridge config/state directory."""
-    d = Path(
-        os.environ.get("AGENT_BRIDGE_CONFIG_DIR", _DEFAULT_CONFIG_DIR)
-    ).expanduser()
+    d = effective_config_dir()
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
+def default_db_path(root: Path | None = None) -> Path:
+    """Default SQLite path under the current config/state root."""
+    return (root or config_dir()) / "sessions.db"
+
+
+def _uses_legacy_db_path(raw: object) -> bool:
+    if not isinstance(raw, str) or not raw.strip():
+        return False
+    return normalized_path(Path(raw).expanduser()) == normalized_path(
+        legacy_install_dir() / "sessions.db"
+    )
+
+
+def _normalize_service_config(data: dict[str, object], *, root: Path) -> dict[str, object]:
+    normalized = dict(data)
+    if not normalized.get("db_path") or _uses_legacy_db_path(normalized.get("db_path")):
+        normalized["db_path"] = str(default_db_path(root))
+    return normalized
+
+
 def load_config() -> ServiceConfig:
     """Load config from YAML, falling back to defaults."""
-    cfg_path = config_dir() / "config.yaml"
+    root = config_dir()
+    cfg_path = root / "config.yaml"
     if cfg_path.exists():
         try:
             data = yaml.safe_load(cfg_path.read_text()) or {}
@@ -41,10 +58,12 @@ def load_config() -> ServiceConfig:
             from . import config_migrations
 
             data = config_migrations.migrate_loaded(data)
+            if isinstance(data, dict):
+                data = _normalize_service_config(data, root=root)
             return ServiceConfig(**data)
         except Exception:
             log.warning("Failed to parse %s, using defaults", cfg_path)
-    return ServiceConfig()
+    return ServiceConfig(db_path=str(default_db_path(root)))
 
 
 def load_repo_bridge_config(repo_root: Path) -> RepoBridgeConfig | None:

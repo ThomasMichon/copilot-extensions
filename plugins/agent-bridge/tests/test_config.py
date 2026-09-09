@@ -10,6 +10,8 @@ import yaml
 
 from agent_bridge.config import (
     adopt_topology,
+    default_db_path,
+    config_dir,
     load_config,
     load_repo_bridge_config,
     remove_topology,
@@ -41,6 +43,23 @@ def fake_repo(tmp_path):
 
 
 class TestSaveConfig:
+    def test_default_db_path_scopes_to_active_config_dir(self, tmp_path, monkeypatch):
+        root = tmp_path / "cell"
+        monkeypatch.setenv("AGENT_BRIDGE_INSTALL_DIR", str(root))
+        monkeypatch.delenv("AGENT_BRIDGE_CONFIG_DIR", raising=False)
+        assert config_dir() == root
+        assert default_db_path() == root / "sessions.db"
+        assert ServiceConfig().db_path == str(root / "sessions.db")
+
+    def test_legacy_db_path_is_rewritten_under_scoped_root(self, tmp_path, monkeypatch):
+        root = tmp_path / "cell"
+        root.mkdir()
+        monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(root))
+        (root / "config.yaml").write_text(
+            yaml.dump({"db_path": "~/.agent-bridge/sessions.db", "port": 0})
+        )
+        assert load_config().db_path == str(root / "sessions.db")
+
     def test_roundtrip(self, config_home):
         cfg = ServiceConfig(port=9999, bind="0.0.0.0")
         save_config(cfg)
