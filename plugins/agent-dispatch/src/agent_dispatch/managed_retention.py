@@ -24,14 +24,17 @@ from .managed_runtime import (
     _assert_safe_descendant,
     _authority,
     _canonical_digest,
+    _cell_path,
     _cell_key,
     _ensure_safe_root,
     _hash_regular_file,
+    _layout_version,
     _plugin_identity,
     _python_path,
     _read_metadata,
     _reject_link,
     _RootLock,
+    _runtime_dir,
     _safe_directory,
     _tree_digest,
     _walk_error,
@@ -143,7 +146,7 @@ def _cell_owner(root: Path, cell: Path) -> Path:
     relative = cell.relative_to(root).parts
     if (
         len(relative) != 3
-        or relative[0] != "cells"
+        or relative[0] not in {"cells", "c"}
         or not re.fullmatch(r"[0-9a-f]{16}", relative[1])
         or not re.fullmatch(r"[0-9a-f]{40}", relative[2])
     ):
@@ -157,6 +160,7 @@ def _inspect_cell(root: Path, cell: Path, authority: dict | None = None) -> dict
     schema = receipt.get("schema_version")
     keys = {
         "schema_version",
+        "layout_version",
         "name",
         "version",
         "profile",
@@ -170,10 +174,11 @@ def _inspect_cell(root: Path, cell: Path, authority: dict | None = None) -> dict
     }
     if schema == 2:
         keys.add("ownership")
+    receipt_keys = set(receipt)
     if (
         type(schema) is not int
         or schema not in (1, 2)
-        or set(receipt) != keys
+        or (receipt_keys != keys and receipt_keys != keys - {"layout_version"})
         or any(
             not _digest(receipt[key])
             for key in ("content_digest", "authority_digest", "toolchain_digest", "cell_digest")
@@ -231,6 +236,11 @@ def _inspect_cell(root: Path, cell: Path, authority: dict | None = None) -> dict
             or _plugin_identity(authority) != cell.parent.name
         ):
             raise ManagedRuntimeError("managed retention cell authority is inconsistent")
+        layout_version = _layout_version(receipt)
+        if cell != _cell_path(
+            root, _plugin_identity(authority), cell.name, layout_version=layout_version
+        ):
+            raise ManagedRuntimeError("managed retention cell location is inconsistent")
         try:
             validate_registration(
                 "plugin-companion",
@@ -310,7 +320,11 @@ class ManagedRuntimeRetention:
             windows = receipt.get("ownership", {}).get("windows", os.name == "nt")
             if (
                 runtime.receipt != runtime.cell / RECEIPT_NAME
-                or runtime.python != _python_path(runtime.cell / "runtime", windows=windows)
+                or runtime.python
+                != _python_path(
+                    _runtime_dir(runtime.cell, layout_version=_layout_version(receipt)),
+                    windows=windows,
+                )
                 or any(
                     getattr(runtime, key) != receipt[key]
                     for key in ("name", "version", "profile", "content_digest")
@@ -446,7 +460,7 @@ class ManagedRuntimeRetention:
 
     def _preservation_roots(self, reference: object) -> set[Path]:
         """Exclude an invalid reference's owners, or all cells if opaque."""
-        all_cells = {self.root / "cells"}
+        all_cells = {self.root / "cells", self.root / "c"}
         if not isinstance(reference, dict):
             return all_cells
         items = reference.get("cells")
@@ -804,8 +818,9 @@ class ManagedRuntimeRetention:
                 else:
                     stale_paths.append(path)
             candidates: dict[tuple[str, str, str], list[tuple[float, Path]]] = {}
-            cells_root = root / "cells"
-            if cells_root.exists():
+            for cells_root in (root / "cells", root / "c"):
+                if not cells_root.exists():
+                    continue
                 for owner in sorted(cells_root.iterdir()):
                     if not owner.is_dir() or not re.fullmatch(r"[0-9a-f]{16}", owner.name):
                         raise ManagedRuntimeError("managed runtime owner directory is ambiguous")

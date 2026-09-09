@@ -31,12 +31,17 @@ from agent_dispatch.managed_runtime import (
     ManagedRuntimeMaterializer,
     _canonical_digest,
     _cell_key,
+    _layout_version,
     _quarantine_cell,
     _RootLock,
+    _runtime_dir,
 )
 from agent_dispatch.procutil import no_window_kwargs
 from tests.test_managed_companion import Harness, TransitionGroupHarness
 from tests.test_managed_runtime import FakeRunner, _policy, _project, _registration
+
+_PLUGIN_DIR = Path(__file__).resolve().parent.parent
+_PLUGIN_SRC_DIR = _PLUGIN_DIR / "src"
 
 
 class RetentionHarness:
@@ -82,6 +87,21 @@ class RetentionHarness:
 @pytest.fixture
 def retention_harness(tmp_path):
     return RetentionHarness(tmp_path)
+
+
+def _cell_runtime_dir(cell: Path) -> Path:
+    receipt = json.loads((cell / RECEIPT_NAME).read_text(encoding="utf-8"))
+    return _runtime_dir(cell, layout_version=_layout_version(receipt))
+
+
+def _subprocess_test_environment() -> dict[str, str]:
+    path_entries = [str(_PLUGIN_DIR), str(_PLUGIN_SRC_DIR)]
+    existing = os.environ.get("PYTHONPATH")
+    if existing:
+        path_entries.append(existing)
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(path_entries)
+    return env
 
 
 @pytest.mark.parametrize("kind", ["preparation", "process", "other-environment", "foreign-domain"])
@@ -398,7 +418,7 @@ def test_managed_retention_malformed_metadata_preserves_all_cells(retention_harn
     with pytest.raises(ManagedRuntimeError):
         h.retention.cleanup()
     assert snapshots[0].runtimes[0].cell.exists()
-    assert len(list((h.policy.root / "cells" / cell.parent.name).iterdir())) == 2
+    assert len(list(cell.parent.iterdir())) == 2
 
 
 def _link(link, target, *, directory=False):
@@ -434,10 +454,10 @@ def test_managed_retention_never_follows_linked_or_reparse_paths(
     (residue / RECEIPT_NAME).write_text("{", encoding="utf-8")
     paths = {
         "root": h.policy.root,
-        "cells": h.policy.root / "cells",
+        "cells": runtime.cell.parent.parent,
         "owner": runtime.cell.parent,
         "cell": runtime.cell,
-        "runtime": runtime.cell / "runtime",
+        "runtime": _cell_runtime_dir(runtime.cell),
         "receipt": runtime.receipt,
         "lease": h.record_paths()[0],
         "lock": h.policy.root / ".materialize.lock",
@@ -501,10 +521,11 @@ def test_managed_retention_legacy_cells_are_recoverable_but_not_reclaimable(rete
     legacy = runtime.cell.with_name(_cell_key(record))
     runtime.cell.rename(legacy)
     value = snapshot.to_dict()
+    runtime_dir = _runtime_dir(legacy, layout_version=_layout_version(record))
     value["runtimes"][0].update(
         cell=str(legacy),
         receipt=str(legacy / RECEIPT_NAME),
-        python=str(legacy / "runtime" / "bin" / "python"),
+        python=str(runtime_dir / "bin" / "python"),
     )
     value["environment"]["EXAMPLE_MANAGED_PYTHON"] = value["runtimes"][0]["python"]
     legacy_snapshot = ManagedLaunchSnapshot.from_dict(value)
@@ -1000,7 +1021,7 @@ def test_managed_retention_invalid_pin_does_not_withdraw_external_selection(tmp_
 def test_managed_retention_rejects_native_junction(retention_harness, tmp_path):
     h = retention_harness
     snapshot = h.generation("1")
-    runtime_dir = snapshot.runtimes[0].cell / "runtime"
+    runtime_dir = _cell_runtime_dir(snapshot.runtimes[0].cell)
     external = tmp_path / "external-runtime"
     runtime_dir.rename(external)
     subprocess.run(
@@ -1059,6 +1080,8 @@ def test_managed_retention_root_lock_serializes_real_materialization_process(
     worker_root.mkdir()
     worker = subprocess.Popen(
         [sys.executable, "-c", code, str(worker_root), str(h.plugin), str(marker), str(release)],
+        cwd=str(_PLUGIN_DIR),
+        env=_subprocess_test_environment(),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -1084,6 +1107,8 @@ def test_managed_retention_root_lock_serializes_real_materialization_process(
                 str(policy_root),
                 str(completed),
             ],
+            cwd=str(_PLUGIN_DIR),
+            env=_subprocess_test_environment(),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,

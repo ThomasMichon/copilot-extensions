@@ -40,9 +40,10 @@ import socket
 from dataclasses import dataclass
 from pathlib import Path
 
+from .install_paths import install_dir
+
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 9847
-DEFAULT_DB = Path.home() / ".agent-dispatch" / "tasks.db"
 DEFAULT_SWEEP_INTERVAL = 60.0
 
 #: Minimum age (seconds) before an UNOWNED proposed/queued task pinned to a
@@ -86,7 +87,12 @@ def wsl_windows_client() -> bool:
 
 def run_dir() -> Path:
     """The runtime dir that holds the rendezvous (endpoint) file."""
-    return Path(os.environ.get(RUN_DIR_ENV) or (Path.home() / ".agent-dispatch" / "run"))
+    return Path(os.environ.get(RUN_DIR_ENV) or (install_dir() / "run"))
+
+
+def default_db_path() -> Path:
+    """The default queue database path under the active install root."""
+    return install_dir() / "tasks.db"
 
 
 def overrides_path() -> Path:
@@ -101,7 +107,7 @@ def overrides_path() -> Path:
     run dir so a branded namespace carries its overrides too)."""
     return Path(
         os.environ.get(OVERRIDES_ENV)
-        or (Path.home() / ".agent-dispatch" / "overrides.json")
+        or (install_dir() / "overrides.json")
     )
 
 
@@ -117,7 +123,7 @@ def routing_dir() -> Path:
     does not read the real install's routing table.
     """
     return Path(
-        os.environ.get(ROUTING_DIR_ENV) or (Path.home() / ".agent-dispatch")
+        os.environ.get(ROUTING_DIR_ENV) or install_dir()
     )
 
 #: Wildcard bind addresses that expose the coordinator on **every** interface
@@ -141,7 +147,7 @@ class Config:
 
     host: str = DEFAULT_HOST
     port: int = DEFAULT_PORT
-    db_path: str = str(DEFAULT_DB)
+    db_path: str = ""
     token: str | None = None
     control_token: str | None = None
     sweep_interval: float = DEFAULT_SWEEP_INTERVAL
@@ -157,7 +163,7 @@ def load_config() -> Config:
     return Config(
         host=os.environ.get("AGENT_DISPATCH_HOST", DEFAULT_HOST),
         port=int(os.environ.get("AGENT_DISPATCH_PORT", str(DEFAULT_PORT))),
-        db_path=os.environ.get("AGENT_DISPATCH_DB", str(DEFAULT_DB)),
+        db_path=os.environ.get("AGENT_DISPATCH_DB", str(default_db_path())),
         token=os.environ.get("AGENT_DISPATCH_TOKEN") or None,
         control_token=os.environ.get("AGENT_DISPATCH_CONTROL_TOKEN") or None,
         sweep_interval=float(

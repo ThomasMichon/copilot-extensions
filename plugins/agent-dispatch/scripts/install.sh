@@ -212,13 +212,31 @@ while [[ $# -gt 0 ]]; do
 done
 
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.agent-dispatch}"
+if [[ "$INSTALL_DIR" != /* ]]; then
+    INSTALL_DIR="$PWD/$INSTALL_DIR"
+fi
+LEGACY_INSTALL_DIR="$HOME/.agent-dispatch"
+legacy_cmp="$(printf '%s' "$LEGACY_INSTALL_DIR" | tr '\\' '/' | tr '[:upper:]' '[:lower:]')"
+install_cmp="$(printf '%s' "$INSTALL_DIR" | tr '\\' '/' | tr '[:upper:]' '[:lower:]')"
+if [[ "$install_cmp" == "$legacy_cmp" ]]; then
+    SERVICE_SUFFIX=""
+else
+    if command -v sha256sum >/dev/null 2>&1; then
+        SERVICE_SUFFIX="$(printf '%s' "$install_cmp" | sha256sum | awk '{print substr($1,1,12)}')"
+    elif command -v shasum >/dev/null 2>&1; then
+        SERVICE_SUFFIX="$(printf '%s' "$install_cmp" | shasum -a 256 | awk '{print substr($1,1,12)}')"
+    else
+        SERVICE_SUFFIX="$(printf '%s' "$install_cmp" | cksum | awk '{print $1}')"
+    fi
+fi
 VENV_DIR="$INSTALL_DIR/.venv"
 LOCAL_BIN="$HOME/.local/bin"
 VENV_PYTHON="$VENV_DIR/bin/python"
 STUB="$LOCAL_BIN/agent-dispatch"
 BOARD_STUB="$LOCAL_BIN/agent-dispatch-board"
-SYSTEMD_UNIT="agent-dispatch.service"
-SUPERVISOR_UNIT="agent-dispatch-supervisor.service"
+SYSTEMD_UNIT="agent-dispatch${SERVICE_SUFFIX:+-$SERVICE_SUFFIX}.service"
+SUPERVISOR_UNIT_BASE="agent-dispatch-supervisor${SERVICE_SUFFIX:+-$SERVICE_SUFFIX}"
+SUPERVISOR_UNIT="$SUPERVISOR_UNIT_BASE.service"
 UNIT_DIR="$HOME/.config/systemd/user"
 ENV_FILE="$INSTALL_DIR/service.env"
 SUPERVISOR_ENV_FILE="$INSTALL_DIR/supervisor.env"
@@ -231,6 +249,7 @@ SUPERVISOR_LAUNCHER="$INSTALL_DIR/supervise-service.sh"
 # copilot-extensions#89). Placed BEFORE the EnvironmentFile in the unit so an
 # operator can still override PATH in supervisor.env.
 SUPERVISOR_PATH="$LOCAL_BIN:$HOME/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export AGENT_DISPATCH_INSTALL_DIR="$INSTALL_DIR"
 
 # === install-contract:v3 versioned-venv (agent-dispatch: .venv-as-symlink) ===
 # Immutable per-version runtime (#581): build the venv into versions/<version>
@@ -871,6 +890,7 @@ After=network.target
 
 [Service]
 Type=simple
+Environment=AGENT_DISPATCH_INSTALL_DIR=$INSTALL_DIR
 EnvironmentFile=-$ENV_FILE
 Environment=PYTHONUTF8=1
 ExecStart=$VENV_PYTHON -m agent_dispatch serve
@@ -969,7 +989,7 @@ _supervisor_profile_name_valid() {
 
 _supervisor_unit_for_profile() {
     local name="$1"
-    printf 'agent-dispatch-supervisor-%s.service' "$name"
+    printf '%s-%s.service' "$SUPERVISOR_UNIT_BASE" "$name"
 }
 
 _supervisor_profile_env_files() {
@@ -1068,6 +1088,7 @@ export PYTHONUTF8=1
 # if this launcher is run outside the unit (hand-enable / different invocation):
 # ~/.local/bin and ~/.bun/bin are prepended (copilot-extensions#89).
 export PATH="\$HOME/.local/bin:\$HOME/.bun/bin:\$PATH"
+export AGENT_DISPATCH_INSTALL_DIR="$INSTALL_DIR"
 
 labels="\${AGENT_DISPATCH_SUPERVISE_LABELS:-}"
 interval="\${AGENT_DISPATCH_SUPERVISE_INTERVAL:-30}"
@@ -1166,7 +1187,7 @@ _remove_all_supervisor_units() {
     _remove_supervisor_unit "$SUPERVISOR_UNIT"
     local unit_path unit
     if [[ -d "$UNIT_DIR" ]]; then
-        for unit_path in "$UNIT_DIR"/agent-dispatch-supervisor-*.service; do
+        for unit_path in "$UNIT_DIR"/"$SUPERVISOR_UNIT_BASE"-*.service; do
             [[ -e "$unit_path" ]] || continue
             unit="${unit_path##*/}"
             _remove_supervisor_unit "$unit"
@@ -1189,6 +1210,7 @@ Wants=$SYSTEMD_UNIT
 [Service]
 Type=simple
 Environment=PATH=$SUPERVISOR_PATH
+Environment=AGENT_DISPATCH_INSTALL_DIR=$INSTALL_DIR
 Environment=AGENT_DISPATCH_SUPERVISOR_ENV_FILE=$env_file
 EnvironmentFile=-$env_file
 Environment=PYTHONUTF8=1
@@ -1239,10 +1261,10 @@ _install_supervisor_profiles() {
 _reconcile_supervisor_profiles() {
     local unit_path unit name env_file
     [[ -d "$UNIT_DIR" ]] || return 0
-    for unit_path in "$UNIT_DIR"/agent-dispatch-supervisor-*.service; do
+    for unit_path in "$UNIT_DIR"/"$SUPERVISOR_UNIT_BASE"-*.service; do
         [[ -e "$unit_path" ]] || continue
         unit="${unit_path##*/}"
-        name="${unit#agent-dispatch-supervisor-}"
+        name="${unit#"$SUPERVISOR_UNIT_BASE"-}"
         name="${name%.service}"
         env_file="$SUPERVISOR_PROFILE_DIR/$name.env"
         if ! _supervisor_profile_name_valid "$name" || [[ ! -f "$env_file" ]]; then
@@ -1260,7 +1282,7 @@ _reconcile_supervisor_profiles() {
 _retire_supervisor_profile_units() {
     local unit_path unit
     [[ -d "$UNIT_DIR" ]] || return 0
-    for unit_path in "$UNIT_DIR"/agent-dispatch-supervisor-*.service; do
+    for unit_path in "$UNIT_DIR"/"$SUPERVISOR_UNIT_BASE"-*.service; do
         [[ -e "$unit_path" ]] || continue
         unit="${unit_path##*/}"
         _remove_supervisor_unit "$unit"

@@ -20,6 +20,7 @@ from typing import Any, Protocol
 
 from plugin_activation import read_json_object
 
+from .install_paths import install_dir, uses_legacy_install_dir
 from .procutil import no_window_kwargs
 from .registrar_reconcile import DECLARED_ID_PREFIX
 from .registrations import RegistrationKind
@@ -33,6 +34,32 @@ _LOCK_POLL_SECONDS = 0.1
 _WINDOWS_REPARSE_POINT = 0x400
 _COMMAND_TIMEOUT_SECONDS = 600.0
 _TRUST_TIMEOUT_SECONDS = 30.0
+_LAYOUT_VERSION_LEGACY = 1
+_LAYOUT_VERSION_COMPACT = 2
+_CELL_DIRS = {
+    _LAYOUT_VERSION_LEGACY: "cells",
+    _LAYOUT_VERSION_COMPACT: "c",
+}
+_RUNTIME_DIRS = {
+    _LAYOUT_VERSION_LEGACY: "runtime",
+    _LAYOUT_VERSION_COMPACT: "r",
+}
+_SNAPSHOT_DIRS = {
+    _LAYOUT_VERSION_LEGACY: "snapshot",
+    _LAYOUT_VERSION_COMPACT: "s",
+}
+_PROJECT_DIRS = {
+    _LAYOUT_VERSION_LEGACY: "projects",
+    _LAYOUT_VERSION_COMPACT: "p",
+}
+_IDENTITY_DIRS = {
+    _LAYOUT_VERSION_LEGACY: "identity",
+    _LAYOUT_VERSION_COMPACT: "i",
+}
+_BUILD_DIRS = {
+    _LAYOUT_VERSION_LEGACY: "build-inputs",
+    _LAYOUT_VERSION_COMPACT: "b",
+}
 
 log = logging.getLogger("agent-dispatch.managed-runtime")
 
@@ -125,8 +152,35 @@ def managed_runtime_root() -> Path:
     """Resolve placement without acquiring a package-manager toolchain."""
     return Path(
         os.environ.get(MANAGED_RUNTIME_ROOT_ENV)
-        or (Path.home() / ".agent-dispatch" / "managed-runtimes")
+        or (
+            Path.home() / ".agent-dispatch" / "managed-runtimes"
+            if uses_legacy_install_dir()
+            else install_dir() / "mr"
+        )
     )
+
+
+def _layout_version(payload: Mapping[str, Any] | None = None) -> int:
+    if payload is None:
+        return _LAYOUT_VERSION_LEGACY
+    value = payload.get("layout_version")
+    if value is None:
+        return _LAYOUT_VERSION_LEGACY
+    if type(value) is int and value in _CELL_DIRS:
+        return value
+    raise ManagedRuntimeError("managed runtime layout version is invalid")
+
+
+def _cell_parent(root: Path, plugin_identity: str, *, layout_version: int) -> Path:
+    return _safe_directory(root, _CELL_DIRS[layout_version], plugin_identity)
+
+
+def _cell_path(root: Path, plugin_identity: str, cell_key: str, *, layout_version: int) -> Path:
+    return _cell_parent(root, plugin_identity, layout_version=layout_version) / cell_key
+
+
+def _runtime_dir(cell: Path, *, layout_version: int) -> Path:
+    return cell / _RUNTIME_DIRS[layout_version]
 
 
 def _subprocess_environment(
@@ -915,8 +969,9 @@ class ManagedRuntimeMaterializer:
         policy: ManagedRuntimePolicy,
     ) -> MaterializedRuntime | None:
         _assert_safe_descendant(root, cell, description="managed runtime cell")
+        layout_version = _layout_version(expected)
         receipt_path = cell / RECEIPT_NAME
-        python = _python_path(cell / "runtime", windows=policy.windows)
+        python = _python_path(_runtime_dir(cell, layout_version=layout_version), windows=policy.windows)
         _assert_safe_descendant(root, receipt_path, description="managed runtime receipt")
         _assert_safe_descendant(root, python, description="managed runtime Python")
         receipt = _read_metadata(root, receipt_path)
@@ -931,7 +986,7 @@ class ManagedRuntimeMaterializer:
             return None
         if policy.windows:
             _verify_windows_runtime_trust(
-                cell / "runtime",
+                _runtime_dir(cell, layout_version=layout_version),
                 expected["windows_trust_files"],
                 self.trust_verifier,
             )
@@ -948,7 +1003,7 @@ class ManagedRuntimeMaterializer:
             return None
         if policy.windows:
             _verify_windows_runtime_trust(
-                cell / "runtime",
+                _runtime_dir(cell, layout_version=layout_version),
                 expected["windows_trust_files"],
                 self.trust_verifier,
             )
@@ -974,12 +1029,13 @@ class ManagedRuntimeMaterializer:
         policy: ManagedRuntimePolicy,
         toolchain_digest: str,
     ) -> MaterializedRuntime:
+        layout_version = _LAYOUT_VERSION_COMPACT
         staging_parent = _safe_directory(root, ".staging")
         staging = staging_parent / uuid.uuid4().hex
         staging.mkdir()
         try:
-            snapshot_root = staging / "snapshot"
-            projects_root = snapshot_root / "projects"
+            snapshot_root = staging / _SNAPSHOT_DIRS[layout_version]
+            projects_root = snapshot_root / _PROJECT_DIRS[layout_version]
             projects_root.mkdir(parents=True)
             manifest: list[dict[str, Any]] = []
             project_manifest: list[dict[str, Any]] = []
@@ -989,14 +1045,18 @@ class ManagedRuntimeMaterializer:
                 source = _contained_project(plugin_root, project_path)
                 destination = projects_root / f"{index:03d}"
                 project_manifest.extend(
-                    _copy_project(source, destination, prefix=f"projects/{index:03d}")
+                    _copy_project(
+                        source,
+                        destination,
+                        prefix=f"{_PROJECT_DIRS[layout_version]}/{index:03d}",
+                    )
                 )
                 extras = list(project.get("extras") or [])
                 project_receipts.append({"path": project_path, "extras": extras})
             identity_paths = runtime.get("identity_paths")
             if identity_paths:
                 identity_receipts: list[str] = []
-                identity_root = snapshot_root / "identity"
+                identity_root = snapshot_root / _IDENTITY_DIRS[layout_version]
                 identity_root.mkdir(parents=True, exist_ok=True)
                 for index, identity_path in enumerate(identity_paths):
                     relative = str(identity_path)
@@ -1006,7 +1066,7 @@ class ManagedRuntimeMaterializer:
                         description="managed runtime identity path",
                     )
                     destination = identity_root / f"{index:03d}"
-                    prefix = f"identity/{index:03d}"
+                    prefix = f"{_IDENTITY_DIRS[layout_version]}/{index:03d}"
                     if source.is_dir():
                         manifest.extend(_copy_project(source, destination, prefix=prefix))
                     else:
@@ -1059,14 +1119,12 @@ class ManagedRuntimeMaterializer:
                     "toolchain_digest": toolchain_digest,
                 }
             )
-            cell = (
-                root
-                / "cells"
-                / plugin_identity
-                / cell_key
+            cell = _cell_path(
+                root, plugin_identity, cell_key, layout_version=layout_version
             )
             expected = {
                 "schema_version": RECEIPT_SCHEMA_VERSION,
+                "layout_version": layout_version,
                 "name": runtime["name"],
                 "version": runtime["version"],
                 "profile": runtime["profile"],
@@ -1093,7 +1151,7 @@ class ManagedRuntimeMaterializer:
                     return ready
                 raise ManagedRuntimeError("existing managed runtime cell is invalid; preserving it")
 
-            runtime_root = staging / "runtime"
+            runtime_root = staging / _RUNTIME_DIRS[layout_version]
             if policy.windows:
                 if not self.trust_verifier(policy.base_python):
                     raise ManagedRuntimeError(
@@ -1122,7 +1180,7 @@ class ManagedRuntimeMaterializer:
                 raise ManagedRuntimeError(
                     "managed runtime environment did not create a Python executable"
                 )
-            build_projects = staging / "build-inputs" / "projects"
+            build_projects = staging / _BUILD_DIRS[layout_version] / _PROJECT_DIRS[layout_version]
             build_projects.mkdir(parents=True)
             install_targets: list[str] = []
             for index, project in enumerate(project_receipts):
@@ -1131,7 +1189,7 @@ class ManagedRuntimeMaterializer:
                 _copy_project(
                     source,
                     destination,
-                    prefix=f"projects/{index:03d}",
+                    prefix=f"{_PROJECT_DIRS[layout_version]}/{index:03d}",
                 )
                 extras = project["extras"]
                 suffix = f"[{','.join(extras)}]" if extras else ""
@@ -1148,7 +1206,7 @@ class ManagedRuntimeMaterializer:
                 snapshot_root,
                 policy.environment,
             )
-            shutil.rmtree(staging / "build-inputs")
+            shutil.rmtree(staging / _BUILD_DIRS[layout_version])
             before_validation = _tree_digest(staging)
             self._validate_imports(
                 python,
@@ -1173,11 +1231,7 @@ class ManagedRuntimeMaterializer:
                 )
                 receipt_file.flush()
                 os.fsync(receipt_file.fileno())
-            cell_parent = _safe_directory(
-                root,
-                "cells",
-                plugin_identity,
-            )
+            cell_parent = _cell_parent(root, plugin_identity, layout_version=layout_version)
             if cell.parent != cell_parent:
                 raise ManagedRuntimeError("managed runtime publication path is inconsistent")
             _assert_safe_descendant(root, cell_parent, description="managed runtime cell")
@@ -1266,6 +1320,7 @@ class ManagedRuntimeMaterializer:
                 schema = expected.get("schema_version")
                 if type(schema) is not int or schema not in (1, RECEIPT_SCHEMA_VERSION):
                     raise ManagedRuntimeError("selected managed runtime receipt version is invalid")
+                layout_version = _layout_version(expected)
                 cell_key = _cell_key(
                     {
                         "schema_version": schema,
@@ -1277,11 +1332,14 @@ class ManagedRuntimeMaterializer:
                         "toolchain_digest": toolchain_digest,
                     }
                 )
-                cell = root / "cells" / plugin_identity / cell_key
+                cell = _cell_path(
+                    root, plugin_identity, cell_key, layout_version=layout_version
+                )
                 if (
                     runtime.cell != cell
                     or runtime.receipt != cell / RECEIPT_NAME
-                    or runtime.python != _python_path(cell / "runtime", windows=policy.windows)
+                    or runtime.python
+                    != _python_path(_runtime_dir(cell, layout_version=layout_version), windows=policy.windows)
                 ):
                     raise ManagedRuntimeError("selected managed runtime location is inconsistent")
                 expected.pop("cell_digest", None)

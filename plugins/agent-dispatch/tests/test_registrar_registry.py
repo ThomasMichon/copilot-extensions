@@ -102,19 +102,21 @@ def _write_manifest(
     *,
     source: str = SOURCE,
     registrar: str = "references/agent-dispatch/registrar",
+    dispatch_install_dir: str | None = None,
     filename: str = "producer.json",
 ) -> Path:
     registry.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": 1,
+        "plugin": source,
+        "plugin_root": str(root),
+        "registrar": registrar,
+    }
+    if dispatch_install_dir is not None:
+        payload["dispatch_install_dir"] = dispatch_install_dir
     path = registry / filename
     path.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "plugin": source,
-                "plugin_root": str(root),
-                "registrar": registrar,
-            }
-        ),
+        json.dumps(payload),
         encoding="utf-8",
     )
     return path
@@ -146,6 +148,16 @@ def test_parse_manifest_requires_attributed_v1_and_root_containment(tmp_path):
                 "schema_version": 1,
                 "plugin_root": str(root),
                 "registrar": "references/registrar",
+            }
+        )
+    with pytest.raises(ManifestError, match="dispatch_install_dir"):
+        parse_manifest(
+            {
+                "schema_version": 1,
+                "plugin": SOURCE,
+                "plugin_root": str(root),
+                "registrar": "references/registrar",
+                "dispatch_install_dir": "relative/path",
             }
         )
     for escaped in ("../outside", "/outside", r"C:\outside"):
@@ -1233,3 +1245,24 @@ def test_registrar_doctor_clean_report_returns_zero(tmp_path, monkeypatch, capsy
     assert rc == 0
     assert [entry["name"] for entry in payload["dropins"]["active"]] == ["general"]
     assert payload["dropins"]["findings"] == []
+
+
+def test_manifest_bound_to_another_dispatch_install_is_rejected(tmp_path, monkeypatch):
+    root = _plugin_root(tmp_path)
+    _write_declaration(root, "general")
+    dropins = tmp_path / "registrar.d"
+    manifest = _write_manifest(
+        dropins,
+        root,
+        dispatch_install_dir=str(tmp_path / "other-install"),
+    )
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path / "this-install"))
+
+    report = scan_registrar_registry(
+        dropins,
+        activation_report=_activation({SOURCE: root}),
+    )
+
+    assert report.declarations == ()
+    assert report.findings[0].entry == str(manifest)
+    assert report.findings[0].reason == "dispatch-install-mismatch"
