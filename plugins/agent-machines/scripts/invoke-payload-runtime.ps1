@@ -185,7 +185,7 @@ function Invoke-AgentMachinesRuntime([string]$Python) {
 
 function Invoke-AgentMachinesInstaller([string]$InstallerPath, [string]$Action) {
     $installerArgs = @(
-        '-NoProfile', '-NonInteractive', '-OutputFormat', 'Text',
+        '-NoProfile', '-OutputFormat', 'Text',
         '-ExecutionPolicy', 'Bypass', '-File', "`"$InstallerPath`"",
         '-Action', $Action
     )
@@ -197,32 +197,146 @@ function Invoke-AgentMachinesInstaller([string]$InstallerPath, [string]$Action) 
     }
     $stdoutPath = $null
     $stderrPath = $null
+    $process = $null
+    $readers = @($null, $null)
+    $decoders = @($null, $null)
+    $characters = @($null, $null)
+    $prefixes = @([Collections.Generic.List[byte]]::new(), [Collections.Generic.List[byte]]::new())
+    $pending = @([Text.StringBuilder]::new(), [Text.StringBuilder]::new())
+    $boms = @(
+        @{ Bytes = [byte[]](0xFF, 0xFE, 0, 0); Encoding = [Text.Encoding]::UTF32 },
+        @{ Bytes = [byte[]](0, 0, 0xFE, 0xFF); Encoding = [Text.UTF32Encoding]::new($true, $true) },
+        @{ Bytes = [byte[]](0xEF, 0xBB, 0xBF); Encoding = [Text.Encoding]::UTF8 },
+        @{ Bytes = [byte[]](0xFF, 0xFE); Encoding = [Text.Encoding]::Unicode },
+        @{ Bytes = [byte[]](0xFE, 0xFF); Encoding = [Text.Encoding]::BigEndianUnicode }
+    )
+
+    function Write-InstallerBytes([int]$Index, [byte[]]$Bytes, [int]$Offset, [int]$Count, [bool]$Final) {
+        $count = $decoders[$Index].GetChars($Bytes, $Offset, $Count, $characters[$Index], 0, $Final)
+        if ($count -eq 0) { return }
+        $text = [string]::new($characters[$Index], 0, $count)
+        $boundary = $text.LastIndexOfAny([char[]]"`r`n")
+        if ($boundary -ge 0) {
+            $null = $pending[$Index].Append($text.Substring(0, $boundary + 1))
+            [Console]::Error.Write($pending[$Index].ToString())
+            $null = $pending[$Index].Clear()
+        }
+        $null = $pending[$Index].Append($text.Substring($boundary + 1))
+    }
+
+    function Initialize-InstallerDecoder([int]$Index, [bool]$Final) {
+        $prefix = $prefixes[$Index].ToArray()
+        $encoding = [Console]::OutputEncoding
+        $skip = 0
+        foreach ($bom in $boms) {
+            $matches = $true
+            for ($j = 0; $j -lt [Math]::Min($prefix.Length, $bom.Bytes.Length); $j++) {
+                if ($prefix[$j] -ne $bom.Bytes[$j]) { $matches = $false; break }
+            }
+            if (-not $matches) { continue }
+            if ($prefix.Length -lt $bom.Bytes.Length) {
+                if (-not $Final) { return $false }
+                continue
+            }
+            $encoding = $bom.Encoding
+            $skip = $bom.Bytes.Length
+            break
+        }
+        $decoders[$Index] = $encoding.GetDecoder()
+        $characters[$Index] = New-Object char[] ($encoding.GetMaxCharCount(4096))
+        Write-InstallerBytes $Index $prefix $skip ($prefix.Length - $skip) $false
+        return $true
+    }
+
     try {
         $stdoutPath = [IO.Path]::GetTempFileName()
         $stderrPath = [IO.Path]::GetTempFileName()
         # File redirection bypasses PS5's native-stream CLIXML/ErrorRecord parser.
         $process = Start-Process -FilePath $hostExe -ArgumentList $installerArgs `
-            -NoNewWindow -Wait -PassThru `
+            -NoNewWindow -PassThru `
             -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
-        # Keep command stdout clean and bound diagnostics from each installer stream.
-        foreach ($path in @($stdoutPath, $stderrPath)) {
-            # The child inherits the console code page, which need not be UTF-8.
-            $reader = [IO.StreamReader]::new($path, [Console]::OutputEncoding, $true)
-            try {
-                $tail = [Collections.Generic.Queue[string]]::new()
-                while ($null -ne ($line = $reader.ReadLine())) {
-                    $tail.Enqueue($line)
-                    if ($tail.Count -gt 200) { $null = $tail.Dequeue() }
+        # PS5's non-waiting Start-Process needs a retained handle to expose ExitCode.
+        $null = $process.Handle
+        $paths = @($stdoutPath, $stderrPath)
+        # This is a transfer buffer, not an output limit. Drain both streams fairly.
+        $buffer = New-Object byte[] 4096
+        while ($true) {
+            # Observe exit before draining so the final pass includes all child output.
+            $exited = $process.HasExited
+            $readCount = 0
+            for ($i = 0; $i -lt $paths.Count; $i++) {
+                if (-not $readers[$i] -and (Get-Item -LiteralPath $paths[$i]).Length -gt 0) {
+                    $readers[$i] = [IO.File]::Open(
+                        $paths[$i], [IO.FileMode]::Open, [IO.FileAccess]::Read,
+                        ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
+                    )
                 }
-                foreach ($line in $tail) { [Console]::Error.WriteLine($line) }
-            } finally {
-                $reader.Dispose()
+                if ($readers[$i]) {
+                    $count = $readers[$i].Read($buffer, 0, $buffer.Length)
+                    if ($count -gt 0) {
+                        $offset = 0
+                        if (-not $decoders[$i]) {
+                            while ($offset -lt $count -and $prefixes[$i].Count -lt 4) {
+                                $prefixes[$i].Add($buffer[$offset++])
+                            }
+                            $null = Initialize-InstallerDecoder $i $false
+                        }
+                        if ($decoders[$i] -and $offset -lt $count) {
+                            Write-InstallerBytes $i $buffer $offset ($count - $offset) $false
+                        }
+                    }
+                    $readCount += $count
+                }
             }
+            if ($exited -and $readCount -eq 0) {
+                # A growing file's temporary EOF must not flush an incomplete character.
+                for ($i = 0; $i -lt $paths.Count; $i++) {
+                    if (-not $decoders[$i] -and $prefixes[$i].Count -gt 0) {
+                        $null = Initialize-InstallerDecoder $i $true
+                    }
+                    if ($decoders[$i]) { Write-InstallerBytes $i ([byte[]]@()) 0 0 $true }
+                }
+                foreach ($text in $pending) { [Console]::Error.Write($text.ToString()) }
+                break
+            }
+            if ($readCount -eq 0) { Start-Sleep -Milliseconds 50 }
         }
+        $process.WaitForExit()
         return $process.ExitCode
     } finally {
+        if ($process) {
+            try {
+                if (-not $process.HasExited) {
+                    # Match the installer's watchdog: do not leave a staged child behind.
+                    & "$env:SystemRoot\System32\taskkill.exe" /PID $process.Id /T /F 2>&1 |
+                        ForEach-Object { [Console]::Error.WriteLine($_) }
+                    if ($LASTEXITCODE -ne 0 -and -not $process.HasExited) {
+                        throw "taskkill failed with exit code $LASTEXITCODE"
+                    }
+                }
+            } catch {
+                [Console]::Error.WriteLine(
+                    "[agent-machines] installer cleanup warning: $($_.Exception.Message)"
+                )
+            }
+        }
+        foreach ($resource in @($readers) + @($process)) {
+            if ($resource) {
+                try { $resource.Dispose() } catch {
+                    [Console]::Error.WriteLine(
+                        "[agent-machines] capture cleanup warning: $($_.Exception.Message)"
+                    )
+                }
+            }
+        }
         foreach ($path in @($stdoutPath, $stderrPath)) {
-            if ($path) { Remove-Item -LiteralPath $path -Force }
+            if ($path) {
+                try { Remove-Item -LiteralPath $path -Force -ErrorAction Stop } catch {
+                    [Console]::Error.WriteLine(
+                        "[agent-machines] could not remove capture '$path': $($_.Exception.Message)"
+                    )
+                }
+            }
         }
     }
 }
