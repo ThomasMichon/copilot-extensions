@@ -1310,7 +1310,7 @@ See [`design.md`](design.md).
   still reproduces the pre-existing failures tracked by
   [#2159](https://github.com/ThomasMichon/copilot-extensions/issues/2159)
   (`chronicle`, `rescue-sync`, and contained `install-binstub` regressions), so
-  `#1108` remains open only for the unlanded `agent-dispatch`,
+  at that point `#1108` remained open only for the unlanded `agent-dispatch`,
   `agent-bridge`, and deferred `agent-worktrees` Worktree Manager supervision
   slices.
 
