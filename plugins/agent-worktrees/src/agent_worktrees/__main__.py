@@ -2204,9 +2204,27 @@ def _handoff_cutover_spawn_result(
             else sessions.mux_binding_for_session(session_id)
         )
     expected_mux_session = mux_session if anchor_mode else sessions.mux_session_name(wt_id)
-    if predecessor_binding and predecessor_binding.get("session_name") != expected_mux_session:
+    expected_copilot_pid = getattr(args, "expected_copilot_pid", None)
+    expected_copilot_start = getattr(args, "expected_copilot_start_time", None)
+    if (
+        predecessor_binding
+        and (
+            predecessor_binding.get("session_name") != expected_mux_session
+            or (
+                expected_copilot_pid is not None
+                and predecessor_binding.get("copilot_pid") != expected_copilot_pid
+            )
+            or (
+                expected_copilot_start is not None
+                and str(predecessor_binding.get("copilot_start_time"))
+                != str(expected_copilot_start)
+            )
+        )
+    ):
         predecessor_binding = None
     predecessor_copilot_path = None
+    predecessor_pid = None
+    predecessor_start = None
     if predecessor_binding:
         predecessor_pid = predecessor_binding.get("copilot_pid")
         predecessor_start = predecessor_binding.get("copilot_start_time")
@@ -2218,6 +2236,10 @@ def _handoff_cutover_spawn_result(
                 predecessor_start
             ):
                 predecessor_copilot_path = None
+    if predecessor_pid is None:
+        predecessor_pid = expected_copilot_pid
+    if predecessor_start is None:
+        predecessor_start = expected_copilot_start
     launch_cmd = _build_launch_cmd(
         config,
         args,
@@ -2291,32 +2313,6 @@ def _handoff_cutover_spawn_result(
         return 4, failure
 
     new_pane = result.get("new_pane")
-    candidate_session = None
-    if handoff_token and record_path is not None:
-        candidate_session, candidate_status = _wait_for_handoff_candidate(
-            record_path,
-            handoff_token,
-            new_pane,
-        )
-        if not candidate_session:
-            process_tree = sessions._mux_pane_process_tree(new_pane)
-            cleanup = sessions._retire_failed_successor(
-                new_pane,
-                process_tree,
-            )
-            failure = dict(result)
-            failure.update(
-                {
-                    "ok": False,
-                    "candidate_status": candidate_status,
-                    "cleanup": cleanup,
-                    "error": (
-                        "successor did not create a token-associated Copilot "
-                        f"session (status: {candidate_status})"
-                    ),
-                }
-            )
-            return 4, failure
     activity.log_event(
         "handoff_cutover_spawn",
         worktree_id=wt_id,
@@ -2327,9 +2323,33 @@ def _handoff_cutover_spawn_result(
         new_pane=new_pane,
         seeded=bool(result.get("prompt_received")),
         seed_ready=bool(result.get("prompt_received")),
-        candidate_session=candidate_session,
+        candidate_session=None,
+        candidate_status="awaiting-session-association",
+        predecessor_copilot_pid=predecessor_pid,
+        predecessor_copilot_start_time=predecessor_start,
+        expected_mux_session=expected_mux_session,
         method="mux_new_window_interactive_argv",
     )
+    candidate_session = None
+    if handoff_token and record_path is not None:
+        candidate_session, candidate_status = _wait_for_handoff_candidate(
+            record_path,
+            handoff_token,
+            new_pane,
+        )
+        if not candidate_session:
+            failure = dict(result)
+            failure.update(
+                {
+                    "ok": False,
+                    "candidate_status": candidate_status,
+                    "error": (
+                        "successor did not create a token-associated Copilot "
+                        f"session (status: {candidate_status})"
+                    ),
+                }
+            )
+            return 4, failure
 
     response: dict[str, object] = {
         "ok": True,
@@ -2346,6 +2366,117 @@ def _handoff_cutover_spawn_result(
     if selection.assignment is not None:
         response["profile_assignment"] = profile_assignment.metadata(selection.assignment)
     return 0, response
+
+
+def _handoff_cutover_retire_result(
+    args: argparse.Namespace,
+) -> tuple[int, dict[str, object]]:
+    """Return the retire-mode ``handoff-cutover`` result without printing JSON."""
+    retire_pane = getattr(args, "retire_pane", None)
+    raw_id = getattr(args, "worktree_id", None)
+    wt_id = _resolve_worktree_id(raw_id) if raw_id else None
+    session_id = getattr(args, "session_id", None)
+    expected_mux = getattr(args, "mux_session", None)
+    require_mux_identity = bool(getattr(args, "require_mux_identity", False))
+    expected_copilot_pid = getattr(args, "expected_copilot_pid", None)
+    expected_copilot_start = getattr(args, "expected_copilot_start_time", None)
+    strict_process_identity = (
+        expected_copilot_pid is not None or expected_copilot_start is not None
+    )
+    current_mux = sessions.mux_session_for_pane(retire_pane) if expected_mux else None
+    pane_not_in_expected_mux = bool(expected_mux and current_mux != expected_mux)
+    binding = (
+        sessions.mux_binding_for_session(session_id)
+        if (strict_process_identity and session_id and not pane_not_in_expected_mux)
+        else None
+    )
+    process_identity_ok = True
+    process_identity_reason = None
+    if strict_process_identity and not pane_not_in_expected_mux:
+        if expected_copilot_pid is None or not expected_copilot_start or binding is None:
+            process_identity_ok = False
+            process_identity_reason = "process-identity-unavailable"
+        elif (
+            binding.get("pane_id") != retire_pane
+            or binding.get("copilot_pid") != expected_copilot_pid
+            or str(binding.get("copilot_start_time")) != str(expected_copilot_start)
+        ):
+            process_identity_ok = False
+            process_identity_reason = "process-identity-mismatch"
+    if not process_identity_ok:
+        result = {
+            "ok": False,
+            "pane": retire_pane,
+            "gone": False,
+            "method": process_identity_reason,
+            "expected_copilot_pid": expected_copilot_pid,
+            "expected_copilot_start_time": expected_copilot_start,
+        }
+    elif require_mux_identity and not expected_mux:
+        result = {
+            "ok": bool(session_id),
+            "pane": retire_pane,
+            "gone": True,
+            "method": "identity-unavailable-skip",
+            "expected_mux_session": None,
+            "current_mux_session": None,
+        }
+    elif expected_mux and current_mux != expected_mux:
+        result = {
+            "ok": bool(session_id),
+            "pane": retire_pane,
+            "gone": True,
+            "method": (
+                "identity-mismatch-skip" if current_mux else "identity-unresolved-skip"
+            ),
+            "expected_mux_session": expected_mux,
+            "current_mux_session": current_mux,
+        }
+    else:
+        result = sessions.mux_retire_pane(retire_pane)
+    reap = {"checked": False}
+    identity_skip = result.get("method") in {
+        "process-identity-unavailable",
+        "process-identity-mismatch",
+    }
+    if session_id and result.get("method") != "last-window-skip" and not identity_skip:
+        if strict_process_identity:
+            reap = reclaim.ensure_session_copilot_reaped(
+                session_id,
+                expected_pid=expected_copilot_pid,
+                expected_start_time=expected_copilot_start,
+            )
+        else:
+            reap = reclaim.ensure_session_copilot_reaped(session_id)
+        result["copilot"] = reap
+    proc_ok = ((not reap.get("checked")) or reap.get("survivors", 0) == 0) and reap.get(
+        "identity_verified", True
+    )
+    skipped_identity = result.get("method") == "identity-mismatch-skip"
+    overall_ok = bool(result.get("ok")) and proc_ok
+    result["ok"] = overall_ok
+    activity.log_event(
+        "handoff_predecessor_retire",
+        worktree_id=wt_id,
+        session_id=session_id,
+        source="python",
+        handoff_token=getattr(args, "handoff_token", None),
+        old_pane=retire_pane,
+        successor_verified=bool(getattr(args, "successor_verified", False)),
+        reason=getattr(args, "retire_reason", None),
+        method=result.get("method"),
+        outcome=(
+            "identity-mismatch"
+            if skipped_identity
+            else "gone"
+            if (result.get("gone") and proc_ok)
+            else "left-running"
+        ),
+        copilot_found=reap.get("found", 0),
+        copilot_reaped=reap.get("reaped", 0),
+        copilot_survivors=reap.get("survivors", 0),
+    )
+    return (0 if overall_ok else 1), result
 
 
 def cmd_handoff_cutover(args: argparse.Namespace) -> int:
@@ -2379,118 +2510,9 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
     # ── Retire mode ──────────────────────────────────────────────────────
     retire_pane = getattr(args, "retire_pane", None)
     if retire_pane:
-        raw_id = getattr(args, "worktree_id", None)
-        wt_id = _resolve_worktree_id(raw_id) if raw_id else None
-        session_id = getattr(args, "session_id", None)
-        expected_mux = getattr(args, "mux_session", None)
-        require_mux_identity = bool(getattr(args, "require_mux_identity", False))
-        expected_copilot_pid = getattr(args, "expected_copilot_pid", None)
-        expected_copilot_start = getattr(args, "expected_copilot_start_time", None)
-        strict_process_identity = (
-            expected_copilot_pid is not None or expected_copilot_start is not None
-        )
-        current_mux = sessions.mux_session_for_pane(retire_pane) if expected_mux else None
-        pane_not_in_expected_mux = bool(expected_mux and current_mux != expected_mux)
-        binding = (
-            sessions.mux_binding_for_session(session_id)
-            if (strict_process_identity and session_id and not pane_not_in_expected_mux)
-            else None
-        )
-        process_identity_ok = True
-        process_identity_reason = None
-        if strict_process_identity and not pane_not_in_expected_mux:
-            if expected_copilot_pid is None or not expected_copilot_start or binding is None:
-                process_identity_ok = False
-                process_identity_reason = "process-identity-unavailable"
-            elif (
-                binding.get("pane_id") != retire_pane
-                or binding.get("copilot_pid") != expected_copilot_pid
-                or str(binding.get("copilot_start_time")) != str(expected_copilot_start)
-            ):
-                process_identity_ok = False
-                process_identity_reason = "process-identity-mismatch"
-        if not process_identity_ok:
-            result = {
-                "ok": False,
-                "pane": retire_pane,
-                "gone": False,
-                "method": process_identity_reason,
-                "expected_copilot_pid": expected_copilot_pid,
-                "expected_copilot_start_time": expected_copilot_start,
-            }
-        elif require_mux_identity and not expected_mux:
-            result = {
-                "ok": bool(session_id),
-                "pane": retire_pane,
-                "gone": True,
-                "method": "identity-unavailable-skip",
-                "expected_mux_session": None,
-                "current_mux_session": None,
-            }
-        elif expected_mux and current_mux != expected_mux:
-            result = {
-                "ok": bool(session_id),
-                "pane": retire_pane,
-                "gone": True,
-                "method": (
-                    "identity-mismatch-skip" if current_mux else "identity-unresolved-skip"
-                ),
-                "expected_mux_session": expected_mux,
-                "current_mux_session": current_mux,
-            }
-        else:
-            result = sessions.mux_retire_pane(retire_pane)
-        # Pane death is NOT process death. A swallowed Ctrl-C or a hard kill-pane
-        # can leave the OLD Copilot running as an orphan, which the mux later
-        # restores as a reappearing pane -- a lingering parallel session after
-        # the cutover. When the predecessor session is known, authoritatively
-        # ensure its Copilot process is gone (reaping an orphan by its inuse-lock
-        # pid; the successor is a different pid, untouched) BEFORE declaring the
-        # retire a success. Skipped for the last-window guard, where the pane and
-        # its session are deliberately kept alive.
-        reap = {"checked": False}
-        identity_skip = result.get("method") in {
-            "process-identity-unavailable",
-            "process-identity-mismatch",
-        }
-        if session_id and result.get("method") != "last-window-skip" and not identity_skip:
-            if strict_process_identity:
-                reap = reclaim.ensure_session_copilot_reaped(
-                    session_id,
-                    expected_pid=expected_copilot_pid,
-                    expected_start_time=expected_copilot_start,
-                )
-            else:
-                reap = reclaim.ensure_session_copilot_reaped(session_id)
-            result["copilot"] = reap
-        proc_ok = ((not reap.get("checked")) or reap.get("survivors", 0) == 0) and reap.get(
-            "identity_verified", True
-        )
-        skipped_identity = result.get("method") == "identity-mismatch-skip"
-        overall_ok = bool(result.get("ok")) and proc_ok
-        result["ok"] = overall_ok
-        activity.log_event(
-            "handoff_predecessor_retire",
-            worktree_id=wt_id,
-            session_id=session_id,
-            source="python",
-            old_pane=retire_pane,
-            successor_verified=bool(getattr(args, "successor_verified", False)),
-            reason=getattr(args, "retire_reason", None),
-            method=result.get("method"),
-            outcome=(
-                "identity-mismatch"
-                if skipped_identity
-                else "gone"
-                if (result.get("gone") and proc_ok)
-                else "left-running"
-            ),
-            copilot_found=reap.get("found", 0),
-            copilot_reaped=reap.get("reaped", 0),
-            copilot_survivors=reap.get("survivors", 0),
-        )
+        rc, result = _handoff_cutover_retire_result(args)
         _json_output(result)
-        return 0 if overall_ok else 1
+        return rc
 
     # ── Spawn / cutover mode ─────────────────────────────────────────────
     rc, response = _handoff_cutover_spawn_result(args)
@@ -7928,6 +7950,83 @@ def _monitor_registry_dir() -> Path:
     return _aw_runtime_home() / "status-monitor.d"
 
 
+def _monitor_handoff_claim_root() -> Path:
+    return _aw_runtime_home() / "status-monitor-handoffs.d"
+
+
+def _monitor_handoff_claim_segment(value: str | None, fallback: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", str(value or "")).strip("._-")
+    return safe[:160] or fallback
+
+
+def _monitor_handoff_claim_path(worktree_id: str | None, token: str | None) -> Path:
+    return (
+        _monitor_handoff_claim_root()
+        / _monitor_handoff_claim_segment(worktree_id, "unknown-worktree")
+        / f"{_monitor_handoff_claim_segment(token, 'unknown-handoff')}.json"
+    )
+
+
+def _monitor_claim_handoff_cutover(
+    request: dict[str, object],
+) -> dict[str, object]:
+    """Atomically claim one handoff token so only one monitor pass can spawn it."""
+    token = str(request.get("token") or "").strip()
+    worktree_id = str(request.get("worktree_id") or "").strip()
+    path = _monitor_handoff_claim_path(worktree_id, token)
+    payload = {
+        "schema": 1,
+        "kind": "handoff-cutover-claim",
+        "token": token,
+        "worktree_id": worktree_id or None,
+        "session_id": str(request.get("predecessor_session_id") or "").strip() or None,
+        "pid": os.getpid(),
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "x", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=True)
+    except FileExistsError:
+        activity.log_event(
+            "handoff_cutover_claim",
+            worktree_id=worktree_id or None,
+            session_id=payload["session_id"],
+            source="python",
+            handoff_token=token or None,
+            reason="monitor-cutover",
+            outcome="already-claimed",
+        )
+        return {"ok": True, "claimed": False, "path": str(path)}
+    except OSError as exc:
+        activity.log_event(
+            "handoff_cutover_claim",
+            worktree_id=worktree_id or None,
+            session_id=payload["session_id"],
+            source="python",
+            handoff_token=token or None,
+            reason="monitor-cutover",
+            outcome="error",
+            error=str(exc),
+        )
+        return {
+            "ok": False,
+            "claimed": False,
+            "path": str(path),
+            "error": str(exc),
+        }
+    activity.log_event(
+        "handoff_cutover_claim",
+        worktree_id=worktree_id or None,
+        session_id=payload["session_id"],
+        source="python",
+        handoff_token=token or None,
+        reason="monitor-cutover",
+        outcome="acquired",
+    )
+    return {"ok": True, "claimed": True, "path": str(path)}
+
+
 def _valid_monitor_session(sess: str) -> bool:
     """A safe ``wt-*`` session name usable as a registry filename.
 
@@ -8265,20 +8364,10 @@ def _monitor_pending_handoff_request(
         )
         if str(event.get("handoff_id") or "").strip()
     }
-    triggered = {
-        str(event.get("handoff_token") or "").strip()
-        for event in activity.read_events(
-            worktree_id=worktree_id,
-            event="handoff_cutover_spawn",
-            limit=64,
-        )
-        if str(event.get("handoff_token") or "").strip()
-    }
     for handoff in reversed(record.pending_handoffs):
         token = str(getattr(handoff, "token", "") or "").strip()
         if (
             not token
-            or token in triggered
             or getattr(handoff, "candidate", None)
             or getattr(handoff, "successor", None)
         ):
@@ -8305,16 +8394,127 @@ def _monitor_pending_handoff_request(
         seed = str(request.get("seed") or "").strip()
         if not seed:
             continue
-        return {
+        predecessor_pid_raw = request_event.get("predecessor_pid")
+        predecessor_pid = None
+        if predecessor_pid_raw not in (None, ""):
+            try:
+                predecessor_pid = int(str(predecessor_pid_raw).strip())
+            except (TypeError, ValueError):
+                predecessor_pid = None
+        predecessor_start = None
+        if predecessor_pid is not None:
+            try:
+                predecessor_start = locks.process_start_time(predecessor_pid)
+            except Exception:
+                predecessor_start = None
+        request_data = {
             "token": token,
             "seed": seed,
             "worktree_id": worktree_id,
             "predecessor_session_id": predecessor_session,
+            "predecessor_pid": predecessor_pid,
+            "predecessor_start_time": predecessor_start,
             "session_state_path": session_state,
             "storage": str(request.get("storage") or request_event.get("storage") or "").strip()
             or None,
         }
+        claim = _monitor_claim_handoff_cutover(request_data)
+        if not claim.get("ok") or not claim.get("claimed"):
+            continue
+        request_data["claim_path"] = claim.get("path")
+        return request_data
     return None
+
+
+def _monitor_pending_handoff_predecessor_retire(
+    record: tracking.WorktreeRecord,
+) -> dict[str, object] | None:
+    """Return one consumed/associated handoff whose predecessor still needs retirement."""
+    if not _status_monitor_enabled():
+        return None
+    worktree_id = getattr(record, "worktree_id", None)
+    if not worktree_id:
+        return None
+    spawned = {
+        str(event.get("handoff_token") or "").strip(): event
+        for event in activity.read_events(
+            worktree_id=worktree_id,
+            event="handoff_cutover_spawn",
+            limit=64,
+        )
+        if str(event.get("handoff_token") or "").strip()
+    }
+    retired = {
+        str(event.get("handoff_token") or "").strip()
+        for event in activity.read_events(
+            worktree_id=worktree_id,
+            event="handoff_predecessor_retire",
+            limit=64,
+        )
+        if str(event.get("handoff_token") or "").strip()
+    }
+    for handoff in reversed(record.pending_handoffs):
+        token = str(getattr(handoff, "token", "") or "").strip()
+        if not token or token in retired:
+            continue
+        successor_session = str(
+            getattr(handoff, "successor", None) or getattr(handoff, "candidate", None) or ""
+        ).strip()
+        if not successor_session:
+            continue
+        spawn = spawned.get(token)
+        if not spawn:
+            continue
+        predecessor_session = str(
+            spawn.get("session_id") or getattr(handoff, "predecessor", "") or ""
+        ).strip()
+        old_pane = str(spawn.get("old_pane") or "").strip() or None
+        if not predecessor_session or not old_pane:
+            continue
+        predecessor_pid = spawn.get("predecessor_copilot_pid")
+        try:
+            predecessor_pid = (
+                int(str(predecessor_pid).strip()) if predecessor_pid not in (None, "") else None
+            )
+        except (TypeError, ValueError):
+            predecessor_pid = None
+        predecessor_start = str(spawn.get("predecessor_copilot_start_time") or "").strip() or None
+        yield_reason = "linked" if getattr(handoff, "successor", None) else "candidate"
+        return {
+            "handoff_token": token,
+            "worktree_id": worktree_id,
+            "predecessor_session_id": predecessor_session,
+            "predecessor_pid": predecessor_pid,
+            "predecessor_start_time": predecessor_start,
+            "retire_pane": old_pane,
+            "mux_session": str(spawn.get("expected_mux_session") or "").strip() or None,
+            "successor_session_id": successor_session,
+            "retire_reason": f"monitor-successor-{yield_reason}",
+        }
+    return None
+
+
+def _monitor_retire_handoff_predecessor(
+    request: dict[str, object],
+) -> tuple[int, dict[str, object]]:
+    """Invoke the existing handoff-cutover retire choreography in-process."""
+    return _handoff_cutover_retire_result(
+        argparse.Namespace(
+            worktree_id=request.get("worktree_id"),
+            session_id=request.get("predecessor_session_id"),
+            handoff_token=request.get("handoff_token"),
+            mux_session=request.get("mux_session"),
+            require_mux_identity=bool(request.get("mux_session")),
+            retire_pane=request.get("retire_pane"),
+            successor_verified=True,
+            retire_reason=request.get("retire_reason"),
+            expected_copilot_pid=request.get("predecessor_pid"),
+            expected_copilot_start_time=request.get("predecessor_start_time"),
+            seed=None,
+            dry_run=False,
+            json=True,
+        )
+    )
 
 
 def _monitor_trigger_handoff_cutover(
@@ -8322,15 +8522,28 @@ def _monitor_trigger_handoff_cutover(
 ) -> tuple[int, dict[str, object]]:
     """Invoke the existing handoff-cutover spawn choreography in-process."""
     predecessor_session = str(request.get("predecessor_session_id") or "").strip() or None
+    predecessor_pid = request.get("predecessor_pid")
+    predecessor_start = request.get("predecessor_start_time")
     old_pane = None
+    mux_session = None
     if predecessor_session:
         try:
             binding = sessions.mux_binding_for_session(predecessor_session)
         except Exception:
             binding = None
         if binding:
-            old_pane = binding.get("pane_id")
-    return _handoff_cutover_spawn_result(
+            binding_start = str(binding.get("copilot_start_time") or "").strip() or None
+            if (
+                predecessor_pid in (None, binding.get("copilot_pid"))
+                and (
+                    predecessor_start is None or binding_start == str(predecessor_start)
+                )
+            ):
+                old_pane = binding.get("pane_id")
+                mux_session = binding.get("session_name")
+                predecessor_pid = binding.get("copilot_pid")
+                predecessor_start = binding_start
+    rc, response = _handoff_cutover_spawn_result(
         argparse.Namespace(
             seed=request.get("seed"),
             worktree_id=request.get("worktree_id"),
@@ -8342,12 +8555,28 @@ def _monitor_trigger_handoff_cutover(
             retire_pane=None,
             successor_verified=False,
             retire_reason=None,
-            expected_copilot_pid=None,
-            expected_copilot_start_time=None,
+            expected_copilot_pid=predecessor_pid,
+            expected_copilot_start_time=predecessor_start,
             dry_run=False,
             json=True,
         )
     )
+    candidate_session = str(response.get("candidate_session") or "").strip() if rc == 0 else ""
+    if candidate_session and response.get("old_pane"):
+        _monitor_retire_handoff_predecessor(
+            {
+                "handoff_token": request.get("token"),
+                "worktree_id": request.get("worktree_id"),
+                "predecessor_session_id": predecessor_session,
+                "predecessor_pid": predecessor_pid,
+                "predecessor_start_time": predecessor_start,
+                "retire_pane": response.get("old_pane"),
+                "mux_session": mux_session or response.get("session"),
+                "successor_session_id": candidate_session,
+                "retire_reason": "monitor-successor-candidate",
+            }
+        )
+    return rc, response
 
 
 def _monitor_maybe_trigger_handoff_cutover(path: str) -> None:
@@ -8355,6 +8584,9 @@ def _monitor_maybe_trigger_handoff_cutover(path: str) -> None:
     record = _find_record_for_path(path)
     if record is None:
         return
+    retire_request = _monitor_pending_handoff_predecessor_retire(record)
+    if retire_request is not None:
+        _monitor_retire_handoff_predecessor(retire_request)
     request = _monitor_pending_handoff_request(record)
     if request is None:
         return

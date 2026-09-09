@@ -1327,7 +1327,7 @@ class TestCmdHandoffCutover:
         monkeypatch.setattr(
             sessions,
             "_retire_failed_successor",
-            lambda pane, tree: {"ok": True, "pane": pane, "tree": sorted(tree)},
+            lambda pane, tree: pytest.fail("verification timeout must not retire the pane"),
         )
 
         rc = m.cmd_handoff_cutover(
@@ -1342,7 +1342,7 @@ class TestCmdHandoffCutover:
         out = json.loads(capfd.readouterr().out)
         assert out["ok"] is False
         assert out["candidate_status"] == "pane-exited-before-session"
-        assert out["cleanup"]["tree"] == [100, 101]
+        assert "cleanup" not in out
 
     def test_token_launch_returns_associated_successor_session(
         self, monkeypatch, capfd, tmp_path,
