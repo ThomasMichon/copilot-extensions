@@ -126,6 +126,27 @@ class TestBuildMuxNewWindowArgv:
         ).decode("utf-8")
         assert decoded_receipt == str(receipt)
 
+    @pytest.mark.parametrize("with_wrapper", [False, True])
+    def test_native_runner_without_prompt_preserves_spaced_argv(self, tmp_path, with_wrapper):
+        wrapper = tmp_path / "profile with spaces" / "pane-wrapper.ps1"
+        if with_wrapper:
+            wrapper.parent.mkdir()
+            wrapper.write_text("# wrapper fixture\n")
+        command = [
+            "node", "C:/plugin payload/native-launch.mjs", "--checkpoint",
+            "C:/profile path/handoff-request.json", "--cli", "C:/CLI path/copilot.exe",
+            "--", "--model", "source-model",
+        ]
+        argv = sessions.build_mux_new_window_argv(
+            "owned", "C:/worktree path", command, None, mux="psmux",
+            pane_wrapper=str(wrapper), initial_prompt=None,
+        )
+        assert argv[-2] == "-EncodedCommand"
+        script = base64.b64decode(argv[-1]).decode("utf-16-le")
+        encoded = script.split("FromBase64String('")[2 if with_wrapper else 1].split("'")[0]
+        decoded = json.loads(base64.b64decode(encoded).decode("utf-8"))
+        assert decoded == (["-AwWt", "owned", *command] if with_wrapper else command)
+
     def test_explicit_mux_session_targets_adopted_anchor_session(self):
         argv = sessions.build_mux_new_window_argv(
             "@anchor",

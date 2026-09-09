@@ -31,10 +31,25 @@ install step:
   `consume_handoff` / `trigger_handoff`, plus `/handoff-continue` and
   `/resume-handoff`.
 
-The extension is intentionally **process-manager agnostic**. It does not need
-or install mux, tmux, psmux, or any other cutover runtime. External control
-planes may act on the pending-handoff signals it emits, but they are not part
-of this plugin's installation contract.
+Native live handoff requires Node.js, the tested Copilot CLI 1.0.84-3 native API,
+and either the native-aware Herdr `copilot-pane` launcher or agent-worktrees.
+This plugin does not install those hosts. Legacy text-only signal pickup does
+not require them. Do not reload an older CLI and claim that its runtime upgraded.
+
+Use official `copilot plugin list`, `install`, `update`, and `uninstall`
+commands, or the native plugin management UI, to resolve duplicate direct/
+marketplace copies; never edit an installed cache.
+For a versioned local candidate, `copilot plugin install <source-plugin-dir>`
+is the official source install. Disable the competing marketplace entry through
+the native plugin UI first.
+Verify the enabled source/version in a fresh CLI, without changing its model or
+permission defaults. Roll back through the original official install source,
+not by undoing consumed handoffs or reviving retired sessions.
+
+An empty profile may ask for native first-use trust in the extension's existing
+capabilities. This is separate from session permission mode; never widen the
+latter to make a test pass. Paused/exhausted/completed GoalPanel is intentionally
+hidden and must not be made visible by granting credits or enabling autopilot.
 
 ## How it loads
 
@@ -66,7 +81,8 @@ with the `# Context handoff session guidance` heading and an
 `[owner: context-handoff@<version>]` marker.
 
 A loaded extension exposes `generate_handoff_prompt`, `save_handoff_prompt`,
-`consume_handoff`, and `trigger_handoff`, and registers `/handoff-continue`
+`consume_handoff`, `continue_handoff`, `retry_handoff_cutover`, and
+`trigger_handoff`, and registers `/handoff-continue`
 and `/resume-handoff`. `/extensions` lists `context-handoff` with source
 **plugin**. It intentionally does **not** log a user-visible "Session started"
 breadcrumb.

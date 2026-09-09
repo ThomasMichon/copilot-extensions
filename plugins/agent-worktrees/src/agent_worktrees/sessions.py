@@ -1798,7 +1798,22 @@ def _mux_pane_cmd(
             "pane wrapper is required for native interactive prompt transport"
         )
     if not is_tmux:
-        # psmux fallback: run verbatim; keep every element single-token.
+        # Native handoff has no initial prompt, but its checkpoint and launcher
+        # paths can still contain spaces. psmux's space-join loses those argv
+        # boundaries even when there is no pane wrapper to carry them.
+        if any(any(char.isspace() for char in arg) for arg in cmd):
+            command_b64 = base64.b64encode(json.dumps(cmd).encode("utf-8")).decode("ascii")
+            script = (
+                "$j=[Text.Encoding]::UTF8.GetString("
+                f"[Convert]::FromBase64String('{command_b64}'));"
+                "$a=@(ConvertFrom-Json -InputObject $j);"
+                "$exe=$a[0];$rest=@($a | Select-Object -Skip 1);"
+                "& $exe @rest;exit $LASTEXITCODE"
+            )
+            return [
+                "pwsh.exe", "-NoProfile", "-NoLogo", "-EncodedCommand",
+                base64.b64encode(script.encode("utf-16-le")).decode("ascii"),
+            ]
         return list(cmd)
     clean = ["env"]
     for var in _IDENTITY_ENV_VARS:

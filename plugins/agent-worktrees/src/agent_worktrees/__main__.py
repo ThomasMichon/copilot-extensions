@@ -2259,6 +2259,26 @@ def _handoff_cutover_spawn_result(
     handoff_token = getattr(args, "handoff_token", None)
     if handoff_token:
         env[_SESSION_HANDOFF_TOKEN] = handoff_token
+    native_checkpoint = getattr(args, "native_handoff", None)
+    native_launcher = getattr(args, "native_launcher", None)
+    if native_checkpoint or native_launcher:
+        if not native_checkpoint or not native_launcher:
+            return 1, {"ok": False, "error": "Native handoff requires both checkpoint and launcher."}
+        try:
+            native_record = json.loads(Path(native_checkpoint).read_text(encoding="utf-8"))
+            native_goal = native_record["nativeGoal"]
+            native_successor = native_goal["successorSessionId"]
+            if native_record["sessionId"] != session_id:
+                raise ValueError("Native checkpoint source does not match the cutover owner.")
+            if native_goal["phase"] != "frozen":
+                raise ValueError("Native successor is already being prepared; do not replay.")
+        except (OSError, ValueError, KeyError) as exc:
+            return 1, {"ok": False, "error": str(exc)}
+        launch_cmd = [
+            "node", native_launcher, "--checkpoint", native_checkpoint,
+            "--cli", launch_cmd[0], "--", *launch_cmd[1:],
+            "--session-id", native_successor,
+        ]
     # Keep the multi-word seed OUT of the pane command argv: psmux space-joins
     # that argv before CreateProcess and irreversibly splits it. mux_new_window
     # sends base64 control tokens to the platform wrapper instead; the wrapper
@@ -2303,7 +2323,7 @@ def _handoff_cutover_spawn_result(
         work_dir,
         launch_cmd,
         env,
-        initial_prompt=seed,
+        initial_prompt=None if native_checkpoint else seed,
         session_name=mux_session,
     )
     if not result.get("ok"):
@@ -2329,6 +2349,7 @@ def _handoff_cutover_spawn_result(
         predecessor_copilot_start_time=predecessor_start,
         expected_mux_session=expected_mux_session,
         method="mux_new_window_interactive_argv",
+        **({"native_handoff": native_checkpoint} if native_checkpoint else {}),
     )
     candidate_session = None
     if handoff_token and record_path is not None:
@@ -2360,6 +2381,7 @@ def _handoff_cutover_spawn_result(
         "seeded": bool(result.get("prompt_received")),
         "seed_ready": bool(result.get("prompt_received")),
         "seed_method": "interactive-argv",
+        **({"native_handoff": native_checkpoint, "startup_pending": True} if native_checkpoint else {}),
     }
     if candidate_session:
         response["candidate_session"] = candidate_session
@@ -8385,6 +8407,10 @@ def _monitor_pending_handoff_request(
         request = _monitor_read_session_state_handoff(session_state)
         if request is None or request.get("consumed"):
             continue
+        if request.get("nativeGoal") or request.get("liveCutover"):
+            # The source extension owns native freeze/provision/launch. A
+            # pending saved goal is not a signal-only monitor launch request.
+            continue
         request_token = str(request.get("handoffId") or "").strip()
         if request_token and request_token != token:
             continue
@@ -8471,6 +8497,16 @@ def _monitor_pending_handoff_predecessor_retire(
         old_pane = str(spawn.get("old_pane") or "").strip() or None
         if not predecessor_session or not old_pane:
             continue
+        if spawn.get("native_handoff"):
+            native_request = _monitor_read_session_state_handoff(spawn["native_handoff"])
+            native_goal = (native_request or {}).get("nativeGoal") or {}
+            if (
+                not native_goal.get("admissionComplete")
+                or native_goal.get("hydratedBySession") != successor_session
+                or getattr(handoff, "successor", None) != successor_session
+                or record.resolved_head_session != successor_session
+            ):
+                continue
         predecessor_pid = spawn.get("predecessor_copilot_pid")
         try:
             predecessor_pid = (
@@ -8562,7 +8598,7 @@ def _monitor_trigger_handoff_cutover(
         )
     )
     candidate_session = str(response.get("candidate_session") or "").strip() if rc == 0 else ""
-    if candidate_session and response.get("old_pane"):
+    if candidate_session and response.get("old_pane") and not response.get("native_handoff"):
         _monitor_retire_handoff_predecessor(
             {
                 "handoff_token": request.get("token"),
@@ -20870,6 +20906,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Pending handoff token to associate with the successor "
         "after its initial prompt creates a real session",
     )
+    p.add_argument("--native-handoff", default=None, help="Frozen native-goal handoff checkpoint.")
+    p.add_argument("--native-launcher", default=None, help="Payload-local native preparation/resume runner.")
     p.add_argument(
         "--mux-session",
         dest="mux_session",

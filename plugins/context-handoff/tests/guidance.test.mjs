@@ -31,7 +31,8 @@ test("skill and README distinguish context-pressure auto-trigger from follow-up 
   ).replace(/\s+/g, " ");
 
   for (const source of [skill, readme]) {
-    assert.match(source, /process-manager agnostic/i);
+    assert.match(source, /native.*(?:goal|`\/goal`)/i);
+    assert.match(source, /continue_handoff/);
     assert.match(source, /save_handoff_prompt/);
     assert.match(source, /trigger_handoff/);
     assert.match(source, /context-pressure-driven handoff/i);
@@ -44,7 +45,7 @@ test("skill and README distinguish context-pressure auto-trigger from follow-up 
   assert.match(skill, /Only this turn-end follow-up path is skippable via \*\*autopilot\*\*/);
 });
 
-test("extension guidance no longer exposes live-cutover tools", () => {
+test("native live handoff is explicit and preserves the signal-only trigger surface", () => {
   const extension = readFileSync(
     join(plugin, "extensions", "context-handoff", "extension.mjs"),
     "utf8",
@@ -52,8 +53,9 @@ test("extension guidance no longer exposes live-cutover tools", () => {
   assert.match(extension, /name: "save_handoff_prompt"/);
   assert.match(extension, /name: "trigger_handoff"/);
   assert.match(extension, /name: "consume_handoff"/);
-  assert.doesNotMatch(extension, /name: "continue_handoff"/);
-  assert.doesNotMatch(extension, /name: "retry_handoff_cutover"/);
+  assert.match(extension, /name: "continue_handoff"/);
+  assert.match(extension, /name: "retry_handoff_cutover"/);
+  assert.match(extension, /final native usage will be frozen at session.idle/);
   assert.match(extension, /It NEVER checks panes or PIDs/);
   assert.match(extension, /Final short handoff prompt\/seed/);
 });
