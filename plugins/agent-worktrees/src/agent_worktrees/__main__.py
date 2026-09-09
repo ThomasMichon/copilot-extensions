@@ -2338,17 +2338,11 @@ def _handoff_cutover_spawn_result(
             new_pane,
         )
         if not candidate_session:
-            process_tree = sessions._mux_pane_process_tree(new_pane)
-            cleanup = sessions._retire_failed_successor(
-                new_pane,
-                process_tree,
-            )
             failure = dict(result)
             failure.update(
                 {
                     "ok": False,
                     "candidate_status": candidate_status,
-                    "cleanup": cleanup,
                     "error": (
                         "successor did not create a token-associated Copilot "
                         f"session (status: {candidate_status})"
@@ -7956,6 +7950,83 @@ def _monitor_registry_dir() -> Path:
     return _aw_runtime_home() / "status-monitor.d"
 
 
+def _monitor_handoff_claim_root() -> Path:
+    return _aw_runtime_home() / "status-monitor-handoffs.d"
+
+
+def _monitor_handoff_claim_segment(value: str | None, fallback: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", str(value or "")).strip("._-")
+    return safe[:160] or fallback
+
+
+def _monitor_handoff_claim_path(worktree_id: str | None, token: str | None) -> Path:
+    return (
+        _monitor_handoff_claim_root()
+        / _monitor_handoff_claim_segment(worktree_id, "unknown-worktree")
+        / f"{_monitor_handoff_claim_segment(token, 'unknown-handoff')}.json"
+    )
+
+
+def _monitor_claim_handoff_cutover(
+    request: dict[str, object],
+) -> dict[str, object]:
+    """Atomically claim one handoff token so only one monitor pass can spawn it."""
+    token = str(request.get("token") or "").strip()
+    worktree_id = str(request.get("worktree_id") or "").strip()
+    path = _monitor_handoff_claim_path(worktree_id, token)
+    payload = {
+        "schema": 1,
+        "kind": "handoff-cutover-claim",
+        "token": token,
+        "worktree_id": worktree_id or None,
+        "session_id": str(request.get("predecessor_session_id") or "").strip() or None,
+        "pid": os.getpid(),
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "x", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=True)
+    except FileExistsError:
+        activity.log_event(
+            "handoff_cutover_claim",
+            worktree_id=worktree_id or None,
+            session_id=payload["session_id"],
+            source="python",
+            handoff_token=token or None,
+            reason="monitor-cutover",
+            outcome="already-claimed",
+        )
+        return {"ok": True, "claimed": False, "path": str(path)}
+    except OSError as exc:
+        activity.log_event(
+            "handoff_cutover_claim",
+            worktree_id=worktree_id or None,
+            session_id=payload["session_id"],
+            source="python",
+            handoff_token=token or None,
+            reason="monitor-cutover",
+            outcome="error",
+            error=str(exc),
+        )
+        return {
+            "ok": False,
+            "claimed": False,
+            "path": str(path),
+            "error": str(exc),
+        }
+    activity.log_event(
+        "handoff_cutover_claim",
+        worktree_id=worktree_id or None,
+        session_id=payload["session_id"],
+        source="python",
+        handoff_token=token or None,
+        reason="monitor-cutover",
+        outcome="acquired",
+    )
+    return {"ok": True, "claimed": True, "path": str(path)}
+
+
 def _valid_monitor_session(sess: str) -> bool:
     """A safe ``wt-*`` session name usable as a registry filename.
 
@@ -8293,20 +8364,10 @@ def _monitor_pending_handoff_request(
         )
         if str(event.get("handoff_id") or "").strip()
     }
-    triggered = {
-        str(event.get("handoff_token") or "").strip()
-        for event in activity.read_events(
-            worktree_id=worktree_id,
-            event="handoff_cutover_spawn",
-            limit=64,
-        )
-        if str(event.get("handoff_token") or "").strip()
-    }
     for handoff in reversed(record.pending_handoffs):
         token = str(getattr(handoff, "token", "") or "").strip()
         if (
             not token
-            or token in triggered
             or getattr(handoff, "candidate", None)
             or getattr(handoff, "successor", None)
         ):
@@ -8346,7 +8407,7 @@ def _monitor_pending_handoff_request(
                 predecessor_start = locks.process_start_time(predecessor_pid)
             except Exception:
                 predecessor_start = None
-        return {
+        request_data = {
             "token": token,
             "seed": seed,
             "worktree_id": worktree_id,
@@ -8357,6 +8418,11 @@ def _monitor_pending_handoff_request(
             "storage": str(request.get("storage") or request_event.get("storage") or "").strip()
             or None,
         }
+        claim = _monitor_claim_handoff_cutover(request_data)
+        if not claim.get("ok") or not claim.get("claimed"):
+            continue
+        request_data["claim_path"] = claim.get("path")
+        return request_data
     return None
 
 

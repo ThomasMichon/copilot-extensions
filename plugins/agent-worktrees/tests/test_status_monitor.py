@@ -737,8 +737,9 @@ def _wire_monitor_handoff_session(tmp_path, monkeypatch):
     _capture_set(monkeypatch)
 
 
-def test_monitor_pending_handoff_request_returns_actionable_request(monkeypatch):
+def test_monitor_pending_handoff_request_returns_actionable_request(tmp_path, monkeypatch):
     monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
 
     def read_events(**kwargs):
         event = kwargs.get("event")
@@ -790,11 +791,13 @@ def test_monitor_pending_handoff_request_returns_actionable_request(monkeypatch)
         "predecessor_start_time": "old-process",
         "session_state_path": r"C:\state\handoff-request.json",
         "storage": "file",
+        "claim_path": str(tmp_path / "status-monitor-handoffs.d" / "a" / "handoff-1.json"),
     }
 
 
-def test_monitor_pending_handoff_request_skips_already_triggered(monkeypatch):
+def test_monitor_pending_handoff_request_skips_already_claimed(tmp_path, monkeypatch):
     monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
 
     def read_events(**kwargs):
         event = kwargs.get("event")
@@ -806,11 +809,10 @@ def test_monitor_pending_handoff_request_skips_already_triggered(monkeypatch):
                     "session_state": r"C:\state\handoff-request.json",
                 }
             ]
-        if event == "handoff_cutover_spawn":
-            return [{"handoff_token": "handoff-1"}]
         return []
 
     monkeypatch.setattr(m.activity, "read_events", read_events)
+    monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: None)
     monkeypatch.setattr(
         m,
         "_monitor_read_session_state_handoff",
@@ -833,11 +835,42 @@ def test_monitor_pending_handoff_request_skips_already_triggered(monkeypatch):
         ],
     )
 
+    assert m._monitor_pending_handoff_request(record) is not None
     assert m._monitor_pending_handoff_request(record) is None
 
 
-def test_monitor_pending_handoff_request_skips_timed_out_spawn_marker(monkeypatch):
+def test_monitor_claim_handoff_cutover_is_atomic_one_shot(tmp_path, monkeypatch):
+    monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
+    logged = []
+    monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: logged.append((a, k)))
+
+    request = {
+        "token": "handoff-1",
+        "worktree_id": "a",
+        "predecessor_session_id": "session-1",
+    }
+    first = m._monitor_claim_handoff_cutover(request)
+    second = m._monitor_claim_handoff_cutover(request)
+
+    assert first == {
+        "ok": True,
+        "claimed": True,
+        "path": str(tmp_path / "status-monitor-handoffs.d" / "a" / "handoff-1.json"),
+    }
+    assert second == {
+        "ok": True,
+        "claimed": False,
+        "path": str(tmp_path / "status-monitor-handoffs.d" / "a" / "handoff-1.json"),
+    }
+    assert (tmp_path / "status-monitor-handoffs.d" / "a" / "handoff-1.json").exists()
+    assert logged[0][1]["outcome"] == "acquired"
+    assert logged[1][1]["outcome"] == "already-claimed"
+
+
+def test_sweep_does_not_retry_after_verification_timeout(tmp_path, monkeypatch):
     monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
+    _wire_monitor_handoff_session(tmp_path, monkeypatch)
 
     def read_events(**kwargs):
         event = kwargs.get("event")
@@ -849,14 +882,10 @@ def test_monitor_pending_handoff_request_skips_timed_out_spawn_marker(monkeypatc
                     "session_state": r"C:\state\handoff-request.json",
                 }
             ]
-        if event == "handoff_cutover_spawn":
-            return [{
-                "handoff_token": "handoff-1",
-                "candidate_status": "session-association-timeout",
-            }]
         return []
 
     monkeypatch.setattr(m.activity, "read_events", read_events)
+    monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: None)
     monkeypatch.setattr(
         m,
         "_monitor_read_session_state_handoff",
@@ -867,19 +896,22 @@ def test_monitor_pending_handoff_request_skips_timed_out_spawn_marker(monkeypatc
             "consumed": False,
         },
     )
-    record = types.SimpleNamespace(
-        worktree_id="a",
-        pending_handoffs=[
-            types.SimpleNamespace(
-                token="handoff-1",
-                predecessor="session-1",
-                candidate=None,
-                successor=None,
-            )
-        ],
+    triggered = []
+
+    def trigger(item):
+        assert m.Path(item["claim_path"]).exists()
+        triggered.append(item)
+        return 4, {"ok": False, "candidate_status": "session-association-timeout"}
+
+    monkeypatch.setattr(
+        m,
+        "_monitor_trigger_handoff_cutover",
+        trigger,
     )
 
-    assert m._monitor_pending_handoff_request(record) is None
+    assert m._monitor_sweep("tmux", "T", "P", set()) == 1
+    assert m._monitor_sweep("tmux", "T", "P", set()) == 1
+    assert len(triggered) == 1
 
 
 def test_monitor_pending_handoff_predecessor_retire_uses_logged_predecessor_binding(

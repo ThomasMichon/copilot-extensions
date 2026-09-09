@@ -37,6 +37,7 @@ Events are intentionally high-level:
   finalize_skipped_removal  finalize left the worktree/branch/session in place
                             (running inside it, or a live session was detected)
   worktree_reaped           cleanup removed a worktree's dir/branch/session
+  handoff_cutover_claim     monitor atomically claimed a pending handoff token
   handoff_cutover_spawn     live handoff spawned a successor pane
   handoff_predecessor_retire
                             a consumed handoff retired the predecessor pane
