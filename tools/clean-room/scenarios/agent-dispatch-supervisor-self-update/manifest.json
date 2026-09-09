@@ -1,0 +1,27 @@
+{
+  "name": "agent-dispatch-supervisor-self-update",
+  "description": "Tier-P F1 scenario: install + provision agent-dispatch on a fresh box, then drive the `supervise serve` singleton daemon's own live version-staleness check (#2259) through a battery of real process-level checks -- (default-on-handoff) with NO env var set, a stale `current-version` marker triggers a real self-triggered handoff: the daemon winds down, releases its single-instance lease, spawns a successor on the newer interpreter, and exits with the distinct self-update code, and the singleton lease ends up held by a genuinely different, live successor process; (opt-out-disables) the same stale marker with the opt-out env var set keeps the ORIGINAL daemon alive with no handoff; (no-marker-fail-safe) with no `current-version` marker at all the daemon also stays alive (fail-safe default). Proves the check is armed WITHOUT any opt-in step -- this harness has no launch-path protocol to flip an opt-in flag before a daemon's first boot, so default-on is the only shape that actually activates for real operators. The heavy orchestration lives in a portable stdlib-only probe so it is verifiable off-Docker too. Name-free / public.",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "prereqs": { "present": ["git", "python3", "node", "uv"], "provisioned_by_flow": [] },
+  "auth": { "copilot": "required", "gh": "optional", "ado": "none" },
+  "validates": "service-lifecycle-supervision",
+  "config": {
+    "CR_MARKETPLACE_REPO": "ThomasMichon/copilot-extensions",
+    "CR_MARKETPLACE_NAME": "copilot-extensions",
+    "CR_UV_INDEX": "(opt-in uv-index fixture)",
+    "CR_SUPERVISOR_SELF_UPDATE_CHECKS": "comma-separated subset of: default-on-handoff,opt-out-disables,no-marker-fail-safe"
+  },
+  "expected_artifacts": [
+    "~/.copilot/installed-plugins/<marketplace>/agent-dispatch",
+    "~/.agent-dispatch/versions/<ver>/bin/python (built slot)",
+    "~/.local/bin/agent-dispatch (self-provisioning binstub)"
+  ],
+  "stages": [
+    { "n": 0, "title": "environment (fresh machine)" },
+    { "n": 1, "title": "install agent-dispatch" },
+    { "n": 2, "title": "runtime provisions on first session" },
+    { "n": 3, "title": "supervisor self-update battery (default-on, opt-out, fail-safe)" }
+  ]
+}
