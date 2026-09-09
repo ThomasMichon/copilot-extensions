@@ -292,11 +292,11 @@ because they provide tools or services.
 
 ### Phase 5 — Repository configuration and adoption state ([#1109](https://github.com/ThomasMichon/copilot-extensions/issues/1109))
 
-- [ ] Move committed plugin configuration toward
+- [x] Move committed plugin configuration toward
   `.copilot-extensions/<plugin>/...` with new-first, legacy-fallback reads.
-- [ ] Keep committed repository policy distribution-neutral; require an explicit
+- [x] Keep committed repository policy distribution-neutral; require an explicit
   overlay for genuinely marketplace-specific behavior.
-- [ ] Move machine-local project state beneath the adopting installation cell,
+- [x] Move machine-local project state beneath the adopting installation cell,
   keyed by stable remote identity rather than repository basename alone.
 
 ### Phase 6 — Migration, enforcement, and cleanup ([#1110](https://github.com/ThomasMichon/copilot-extensions/issues/1110))
@@ -1509,3 +1509,60 @@ See [`design.md`](design.md).
   repository-configuration surfaces in `agent-worktrees`, `agent-dispatch`, and
   `agent-machines`; no new version-skew enforcement or migration work was
   started here, so the Phase 6 boundary remains unchanged.
+
+### 2026-09-09 — Phase 5 completion: agent-worktrees, agent-dispatch, and agent-machines
+
+- Merged [#2296](https://github.com/ThomasMichon/copilot-extensions/pull/2296)
+  at `94f5f09f309f5d7c5a9f7186179bae79d755e657`, completing the remaining
+  committed repository-configuration scope in `#1109`.
+- `agent-worktrees` now reads repository-owned settings from
+  `.copilot-extensions/agent-worktrees/config.yaml` first, keeps legacy
+  `.agent-worktrees/config.yaml` and `.agent-worktrees.yaml` readable, and
+  reads related-repo config from
+  `.copilot-extensions/agent-worktrees/related.yaml` first while preserving
+  legacy `.agent-worktrees/related.yaml` compatibility. Both surfaces accept
+  explicit opt-in overlays under
+  `.copilot-extensions/agent-worktrees/marketplaces/<marketplace-id>/...`.
+  Phase 4's machine-local cell-owned project state remains unchanged.
+- `agent-dispatch` now reads repo-owned registrar declarations and worker
+  identities from `.copilot-extensions/agent-dispatch/registrar/` and
+  `.copilot-extensions/agent-dispatch/identities/`, keeps legacy
+  `.agent-dispatch/registrar/` and `.agent-dispatch/identities/` readable, and
+  accepts explicit opt-in overlays under
+  `.copilot-extensions/agent-dispatch/marketplaces/<marketplace-id>/...`.
+- `agent-machines` now treats `.copilot-extensions/agent-machines/` as the
+  canonical committed package root, keeps legacy `.agent-machines/` and
+  `.github/machine-state/` as bounded fallbacks, accepts explicit opt-in
+  overlays under
+  `.copilot-extensions/agent-machines/marketplaces/<marketplace-id>/`, and
+  preserves supplemental knowledge-repo grafting after the
+  `agent-worktrees` repo-config move.
+- Inventory closure for `#1109`:
+  committed plugin configuration now uses the `.copilot-extensions/<plugin>/`
+  namespace across all applicable Phase 5 plugins; committed repository policy
+  remains distribution-neutral with explicit marketplace overlays only; and the
+  machine-local project-state item was already satisfied by the earlier
+  `agent-worktrees` / `agent-codespaces` adoption-state work.
+- Validation:
+  `python tools/run-plugin-tests.py agent-machines`
+  (`507 passed, 20 skipped`);
+  `python tools/run-plugin-tests.py agent-dispatch`
+  reproduced the unchanged pre-existing
+  `test_agent_index_managed.py::test_shipped_index_declaration_preserves_version_and_source_authority`
+  failure tracked in [#2295](https://github.com/ThomasMichon/copilot-extensions/issues/2295),
+  with the failing declaration/version files unchanged in this branch relative
+  to `origin/main`;
+  `python tools/run-plugin-tests.py agent-worktrees`
+  again hit the existing contained-runner wall-clock limit during sub-suite 5/7
+  after the changed surfaces passed;
+  focused Windows and WSL/POSIX changed-surface coverage passed for all three
+  plugins; and install-contract, version-consistency, vendored-lib,
+  installation-context, payload-invocation, installer-readiness,
+  marketplace-isolation, docs-consistency, diff-check, and changed-file ruff
+  guards all passed.
+- No new version-skew activation or migration enforcement was started here; the
+  remaining maintenance, migration, rollback, and cleanup work stays in
+  `#1110`.
+- `#1109` is now complete and closed. Phase 5 complete; Phase 6 (Migration,
+  enforcement, and cleanup, [#1110](https://github.com/ThomasMichon/copilot-extensions/issues/1110))
+  is next.
