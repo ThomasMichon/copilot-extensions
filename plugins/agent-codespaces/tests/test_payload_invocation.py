@@ -68,6 +68,69 @@ def test_invoke_runtime_root_falls_back_to_agent_home(monkeypatch, tmp_path) -> 
     assert _invoke._runtime_root() == tmp_path / "sandbox-home" / ".agent-codespaces"
 
 
+# -- _venv_python / _resolve_runtime_python (the versioned-runtime resolver) --
+# Regression coverage for the same class of bug procutil.resolve_own_runtime_python
+# fixed in agent-dispatch: a self-relaunch/module-argv spawn site must resolve
+# the installed CURRENT-VERSION slot, never a stale hard-coded legacy path (the
+# old ``.venv/`` layout no longer exists once a runtime migrates to
+# ``versions/<version>/``) and never fall through to whatever interpreter
+# happens to be running the current process.
+
+
+def _make_slot(root, version: str, *, complete: bool = False):
+    sub = "Scripts/python.exe" if sys.platform == "win32" else "bin/python"
+    py = root / "versions" / version / sub
+    py.parent.mkdir(parents=True)
+    py.write_text("")
+    if complete:
+        (root / "versions" / version / ".install-complete.json").write_text("{}")
+    return py
+
+
+def test_resolve_runtime_python_prefers_current_version_marker(tmp_path) -> None:
+    from agent_codespaces import _invoke
+
+    root = tmp_path / ".agent-codespaces"
+    py = _make_slot(root, "0.4.0-dev118")
+    _make_slot(root, "0.4.0-dev999")  # newer slot exists but marker wins
+    (root / "current-version").write_text("0.4.0-dev118")
+    assert _invoke._resolve_runtime_python(root) == py
+
+
+def test_resolve_runtime_python_ignores_legacy_venv_layout(tmp_path) -> None:
+    """A bare ``.venv/`` dir (the old hard-coded path) is NOT a versioned slot
+    and must never resolve -- the exact layout that silently degraded every
+    self-relaunch to ``sys.executable`` once a runtime migrated away from it."""
+    from agent_codespaces import _invoke
+
+    root = tmp_path / ".agent-codespaces"
+    venv_py = root / ".venv" / "Scripts" / "python.exe"
+    venv_py.parent.mkdir(parents=True)
+    venv_py.write_text("")
+    assert _invoke._resolve_runtime_python(root) is None
+
+
+def test_venv_python_uses_installed_slot_over_sys_executable(
+    monkeypatch, tmp_path,
+) -> None:
+    from agent_codespaces import _invoke
+
+    root = tmp_path / ".agent-codespaces"
+    py = _make_slot(root, "0.4.0-dev118")
+    (root / "current-version").write_text("0.4.0-dev118")
+    monkeypatch.setattr(_invoke, "_runtime_root", lambda: root)
+    assert _invoke._venv_python() == str(py)
+
+
+def test_venv_python_falls_back_to_sys_executable_when_unresolved(
+    monkeypatch, tmp_path,
+) -> None:
+    from agent_codespaces import _invoke
+
+    monkeypatch.setattr(_invoke, "_runtime_root", lambda: tmp_path / "empty")
+    assert _invoke._venv_python() == sys.executable
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX payload command test")
 def test_posix_payload_command_ignores_shadow_path_and_selects_cell_runtime(
     tmp_path: Path,
