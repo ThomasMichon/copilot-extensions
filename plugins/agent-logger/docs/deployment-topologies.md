@@ -36,11 +36,21 @@ Configure the target with the `session-sync-setup` skill, or edit
 `sync.repo_denylist`, and `sync.repo_allowlist_fail_closed` when a machine
 should archive only particular repos (or everything except particular repos).
 
-Session `files/` may contain tool-generated Chromium user-data directories.
-Session-sync identifies these from their on-disk profile structure, omits the
-whole profile across all transports, and removes an older copied profile from
-filesystem-backed destinations. It never deletes the original local session
-artifact; the latest omission footprint is visible in `session-sync status`.
+Session `files/` may accumulate generated artifacts that should never be
+archived or synced: tool-generated Chromium user-data directories (which can
+carry live cookies/auth state), Python venvs, git clones/worktrees, and
+`node_modules` trees. Session-sync identifies each of these from its on-disk
+signature (a Chromium profile structure, a `pyvenv.cfg`, a `.git` entry, or a
+`node_modules` directory name), omits the whole subtree across all
+transports, and removes an older copied copy from filesystem-backed
+destinations. It never deletes the original local session artifact; the
+latest omission footprint is visible in `session-sync status`.
+
+This is detection, not prevention -- it keeps such artifacts out of the
+synced archive, but does not stop an agent from writing them into `files/` in
+the first place. Session guidance should still steer agents toward ephemeral
+workdirs / existing tool caches for installs and clones rather than the
+session `files/` directory.
 
 ## 3. Fleet hub (many machines, one shared folder)
 
