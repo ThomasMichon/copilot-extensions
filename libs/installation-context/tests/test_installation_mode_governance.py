@@ -2133,20 +2133,71 @@ def test_provenance_blocked_cli_retains_plugin_id(
 
 
 def _bsd_userland_path(tmp_path: Path) -> str:
-    """PATH whose ``realpath``/``readlink`` cannot canonicalize at all.
+    """PATH that models a BSD userland's path-resolution gaps.
 
-    A BSD userland (macOS) ships a ``realpath`` without ``-m`` and a
-    ``readlink -f`` that refuses a leaf that does not exist yet, so the shell
-    adapter must canonicalize a not-yet-created cell path on its own. Shadowing
-    both tools with always-failing stubs reproduces that on any platform.
+    macOS ships a ``realpath`` with no ``-m`` and a ``readlink -f`` that refuses
+    a leaf which does not exist yet, so the shell adapter must canonicalize a
+    not-yet-created path itself. Only those two invocations are made to fail;
+    every other use of the tools still works, because the fallback legitimately
+    relies on a plain one-level ``readlink`` to follow symlinks.
     """
     tool_dir = tmp_path / "bsd-bin"
-    tool_dir.mkdir()
-    for name in ("realpath", "readlink"):
+    tool_dir.mkdir(parents=True, exist_ok=True)
+    for name, rejected in (("realpath", "-m"), ("readlink", "-f")):
+        real = shutil.which(name)
+        if real is None:  # pragma: no cover - both exist on supported hosts
+            pytest.skip(f"required POSIX tool is unavailable: {name}")
         stub = tool_dir / name
-        stub.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+        stub.write_text(
+            "#!/bin/sh\n"
+            "for arg in \"$@\"; do\n"
+            f'    [ "$arg" = "{rejected}" ] && exit 1\n'
+            "done\n"
+            f'exec "{real}" "$@"\n',
+            encoding="utf-8",
+        )
         stub.chmod(0o755)
     return os.pathsep.join([str(tool_dir), os.environ.get("PATH", "")])
+
+
+def _status_arguments(tmp_path: Path, legacy: Path) -> list[str]:
+    vector = _source_vector()
+    payload = tmp_path / "payload" / PLUGIN_ID
+    payload.mkdir(parents=True, exist_ok=True)
+    return [
+        "status",
+        "--payload-root",
+        str(payload),
+        "--plugin-id",
+        PLUGIN_ID,
+        "--source-json",
+        json.dumps(vector["descriptor"], separators=(",", ":")),
+        "--marketplace-key",
+        str(vector["marketplaceKey"]),
+        "--durable-home",
+        str(tmp_path / "durable"),
+        "--legacy-root",
+        str(legacy),
+        "--policy-path",
+        str(tmp_path / "missing-policy.json"),
+    ]
+
+
+def _run_posix_status_on_bsd_userland(
+    tmp_path: Path, legacy: Path
+) -> subprocess.CompletedProcess[str]:
+    environment = os.environ.copy()
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    environment.pop("COPILOT_PLUGIN_ROOT", None)
+    environment["PATH"] = _bsd_userland_path(tmp_path)
+    return subprocess.run(
+        _runner_command("posix", _status_arguments(tmp_path, legacy)),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=environment,
+        check=False,
+    )
 
 
 @pytest.mark.installation_context_smoke
@@ -2158,250 +2209,83 @@ def test_posix_status_resolves_when_userland_cannot_canonicalize_missing_paths(
     must not need GNU coreutils, or every payload invocation on macOS aborts."""
     if BASH is None:
         pytest.skip("Bash runner is unavailable")
-    vector = _source_vector()
-    payload = tmp_path / "payload" / PLUGIN_ID
     legacy = tmp_path / "legacy"
-    payload.mkdir(parents=True)
     legacy.mkdir()
-    arguments = [
-        "status",
-        "--payload-root",
-        str(payload),
-        "--plugin-id",
-        PLUGIN_ID,
-        "--source-json",
-        json.dumps(vector["descriptor"], separators=(",", ":")),
-        "--marketplace-key",
-        str(vector["marketplaceKey"]),
-        "--durable-home",
-        str(tmp_path / "durable"),
-        "--legacy-root",
-        str(legacy),
-        "--policy-path",
-        str(tmp_path / "missing-policy.json"),
-    ]
-    environment = os.environ.copy()
-    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
-    environment.pop("COPILOT_PLUGIN_ROOT", None)
-    environment["PATH"] = _bsd_userland_path(tmp_path)
-    result = subprocess.run(
-        _runner_command("posix", arguments),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        env=environment,
-        check=False,
-    )
+    result = _run_posix_status_on_bsd_userland(tmp_path, legacy)
     assert result.returncode == 0, result.stderr
     assert "Cannot resolve path" not in result.stderr
     value = json.loads(result.stdout)
-    assert value["marketplaceId"] == vector["marketplaceId"]
+    assert value["marketplaceId"] == _source_vector()["marketplaceId"]
     assert value["actualMode"] == "legacy"
     assert value["runtimeRoot"] == str(legacy)
 
 
-@pytest.mark.installation_context_smoke
-@pytest.mark.skipif(os.name == "nt", reason="Windows paths cannot contain '*'")
-def test_posix_missing_path_fallback_keeps_glob_metacharacters_verbatim(
-    tmp_path: Path,
-) -> None:
-    """A path component may legitimately contain a glob metacharacter.
-
-    The fallback splits the unresolved remainder on '/', so it must disable
-    pathname expansion first -- otherwise a component like ``mi*sing`` is
-    silently rewritten to whatever it happens to match.
-    """
-    if BASH is None:
-        pytest.skip("Bash runner is unavailable")
-    vector = _source_vector()
-    payload = tmp_path / "payload" / PLUGIN_ID
-    legacy = tmp_path / "leg*acy"
-    payload.mkdir(parents=True)
-    legacy.mkdir()
-    # A sibling that a careless glob would match instead of the literal name.
-    (tmp_path / "legXacy").mkdir()
-    arguments = [
-        "status",
-        "--payload-root",
-        str(payload),
-        "--plugin-id",
-        PLUGIN_ID,
-        "--source-json",
-        json.dumps(vector["descriptor"], separators=(",", ":")),
-        "--marketplace-key",
-        str(vector["marketplaceKey"]),
-        "--durable-home",
-        str(tmp_path / "dur*able"),
-        "--legacy-root",
-        str(legacy),
-        "--policy-path",
-        str(tmp_path / "missing-policy.json"),
+def _canonicalization_cases(root: Path) -> list[tuple[str, Path]]:
+    """Build the shared corpus for the cross-adapter canonicalization table."""
+    outside = root / "outside"
+    allowed = root / "allowed"
+    outside.mkdir()
+    allowed.mkdir()
+    (allowed / "link").symlink_to(outside, target_is_directory=True)
+    (allowed / "dangling").symlink_to(outside / "never-created")
+    (allowed / "relative").symlink_to(Path("..") / "outside")
+    return [
+        # A '..' can pop back to a symlink that the walk had already stepped
+        # past; it must still be followed.
+        ("dotdot-reveals-symlink", allowed / "missing" / ".." / "link" / "child"),
+        # A symlink is followed even when its target does not exist yet.
+        ("dangling-symlink", allowed / "dangling" / "child"),
+        ("relative-symlink", allowed / "relative" / "child"),
+        ("symlink-leaf", allowed / "link"),
+        ("plain-missing", allowed / "missing" / "leaf"),
+        ("glob-metacharacter", allowed / "mi*sing" / "leaf"),
+        ("dotdot-only", allowed / ".." / "outside" / "leaf"),
     ]
-    environment = os.environ.copy()
-    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
-    environment.pop("COPILOT_PLUGIN_ROOT", None)
-    environment["PATH"] = _bsd_userland_path(tmp_path)
-    result = subprocess.run(
-        _runner_command("posix", arguments),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        env=environment,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
-    value = json.loads(result.stdout)
-    assert value["runtimeRoot"] == str(legacy)
 
 
 @pytest.mark.installation_context_smoke
 @pytest.mark.skipif(os.name == "nt", reason="POSIX adapter only")
-def test_posix_missing_path_fallback_resolves_symlinked_ancestors(
+def test_posix_missing_path_canonicalization_matches_the_reference_adapter(
     tmp_path: Path,
 ) -> None:
-    """Every ancestor that exists must be followed physically.
+    """The shell fallback must agree with the reference resolver, component for
+    component.
 
-    A containment check is only sound if the resolved prefix is physical, so
-    the fallback must not leave a symlinked ancestor lexical.
+    Hand-written expectations would only restate whatever the shell happens to
+    do. The Python adapter's ``Path.resolve(strict=False)`` is the contract the
+    adapters are required to share, so it is the oracle here: any divergence is
+    a real parity break, and the symlink cases are exactly where a divergence
+    lets a containment check accept a path that resolves somewhere else.
     """
     if BASH is None:
         pytest.skip("Bash runner is unavailable")
-    vector = _source_vector()
-    payload = tmp_path / "payload" / PLUGIN_ID
-    payload.mkdir(parents=True)
-    physical = tmp_path / "physical-legacy"
-    physical.mkdir()
-    linked = tmp_path / "linked-legacy"
-    linked.symlink_to(physical, target_is_directory=True)
-    arguments = [
-        "status",
-        "--payload-root",
-        str(payload),
-        "--plugin-id",
-        PLUGIN_ID,
-        "--source-json",
-        json.dumps(vector["descriptor"], separators=(",", ":")),
-        "--marketplace-key",
-        str(vector["marketplaceKey"]),
-        "--durable-home",
-        str(tmp_path / "durable"),
-        "--legacy-root",
-        str(linked / "missing-leaf"),
-        "--policy-path",
-        str(tmp_path / "missing-policy.json"),
-    ]
-    environment = os.environ.copy()
-    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
-    environment.pop("COPILOT_PLUGIN_ROOT", None)
-    environment["PATH"] = _bsd_userland_path(tmp_path)
-    result = subprocess.run(
-        _runner_command("posix", arguments),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        env=environment,
-        check=False,
+    root = tmp_path / "corpus"
+    root.mkdir()
+    mismatches = []
+    for name, candidate in _canonicalization_cases(root):
+        expected = Path(candidate).resolve(strict=False)
+        result = _run_posix_status_on_bsd_userland(
+            tmp_path / f"case-{name}", candidate
+        )
+        if result.returncode != 0:
+            mismatches.append(f"{name}: adapter failed: {result.stderr.strip()}")
+            continue
+        actual = json.loads(result.stdout)["runtimeRoot"]
+        if actual != str(expected):
+            mismatches.append(f"{name}: bash={actual!r} reference={str(expected)!r}")
+    assert not mismatches, "canonicalization diverged from the reference:\n" + "\n".join(
+        mismatches
     )
-    assert result.returncode == 0, result.stderr
-    value = json.loads(result.stdout)
-    assert value["runtimeRoot"] == str(physical.resolve() / "missing-leaf")
 
 
 @pytest.mark.installation_context_smoke
 @pytest.mark.skipif(os.name == "nt", reason="POSIX adapter only")
-def test_posix_missing_path_fallback_fails_closed_on_unresolvable_symlink(
-    tmp_path: Path,
-) -> None:
-    """A reachable component that cannot be resolved physically must fail.
-
-    With no usable resolver a symlink to a regular file cannot be followed.
-    Returning the link name lexically would let a containment check accept a
-    path that really lives somewhere else, so the adapter must refuse instead.
-    """
+def test_posix_missing_path_fallback_reports_a_symlink_loop(tmp_path: Path) -> None:
+    """A symlink cycle must be reported, not followed until the shell dies."""
     if BASH is None:
         pytest.skip("Bash runner is unavailable")
-    vector = _source_vector()
-    payload = tmp_path / "payload" / PLUGIN_ID
-    payload.mkdir(parents=True)
-    target = tmp_path / "regular-file"
-    target.write_text("target\n", encoding="utf-8")
-    linked = tmp_path / "linked-file"
-    linked.symlink_to(target)
-    arguments = [
-        "status",
-        "--payload-root",
-        str(payload),
-        "--plugin-id",
-        PLUGIN_ID,
-        "--source-json",
-        json.dumps(vector["descriptor"], separators=(",", ":")),
-        "--marketplace-key",
-        str(vector["marketplaceKey"]),
-        "--durable-home",
-        str(tmp_path / "durable"),
-        "--legacy-root",
-        str(linked / "missing-leaf"),
-        "--policy-path",
-        str(tmp_path / "missing-policy.json"),
-    ]
-    environment = os.environ.copy()
-    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
-    environment.pop("COPILOT_PLUGIN_ROOT", None)
-    environment["PATH"] = _bsd_userland_path(tmp_path)
-    result = subprocess.run(
-        _runner_command("posix", arguments),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        env=environment,
-        check=False,
-    )
+    loop = tmp_path / "loop"
+    loop.symlink_to(tmp_path / "loop")
+    result = _run_posix_status_on_bsd_userland(tmp_path, loop / "child")
     assert result.returncode != 0
-    assert "Cannot resolve path" in result.stderr
-
-
-@pytest.mark.installation_context_smoke
-@pytest.mark.skipif(os.name == "nt", reason="POSIX adapter only")
-def test_posix_missing_path_fallback_keeps_dangling_symlinks_lexical(
-    tmp_path: Path,
-) -> None:
-    """A dangling symlink does not exist, so it stays lexical like `realpath -m`."""
-    if BASH is None:
-        pytest.skip("Bash runner is unavailable")
-    vector = _source_vector()
-    payload = tmp_path / "payload" / PLUGIN_ID
-    payload.mkdir(parents=True)
-    dangling = tmp_path / "dangling"
-    dangling.symlink_to(tmp_path / "never-created")
-    arguments = [
-        "status",
-        "--payload-root",
-        str(payload),
-        "--plugin-id",
-        PLUGIN_ID,
-        "--source-json",
-        json.dumps(vector["descriptor"], separators=(",", ":")),
-        "--marketplace-key",
-        str(vector["marketplaceKey"]),
-        "--durable-home",
-        str(tmp_path / "durable"),
-        "--legacy-root",
-        str(dangling),
-        "--policy-path",
-        str(tmp_path / "missing-policy.json"),
-    ]
-    environment = os.environ.copy()
-    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
-    environment.pop("COPILOT_PLUGIN_ROOT", None)
-    environment["PATH"] = _bsd_userland_path(tmp_path)
-    result = subprocess.run(
-        _runner_command("posix", arguments),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        env=environment,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
-    value = json.loads(result.stdout)
-    assert value["runtimeRoot"] == str(dangling)
+    assert "Too many levels of symbolic links" in result.stderr
