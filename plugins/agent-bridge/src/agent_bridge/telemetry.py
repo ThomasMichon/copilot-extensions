@@ -72,8 +72,9 @@ def _default_config_path() -> Path:
     (``~/.agent-bridge`` by default, honoring ``AGENT_BRIDGE_CONFIG_DIR``), the
     same root that holds ``config.yaml``.
     """
-    base = Path(os.environ.get("AGENT_BRIDGE_CONFIG_DIR", "~/.agent-bridge")).expanduser()
-    return base / CONFIG_FILENAME
+    from .install_paths import effective_config_dir
+
+    return effective_config_dir() / CONFIG_FILENAME
 
 
 #: Event types that represent a session lifecycle/health transition worth

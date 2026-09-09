@@ -166,7 +166,41 @@ fi
 # is the authoritative TOTAL bound, this just shortens single-request stalls.
 if [[ -z "${UV_HTTP_TIMEOUT:-}" ]]; then export UV_HTTP_TIMEOUT=60; fi
 
-INSTALL_DIR="$HOME/.agent-bridge"
+_scoped_identity_suffix() {
+    local normalized="$1"
+    if command -v sha256sum >/dev/null 2>&1; then
+        printf '%s' "$normalized" | sha256sum | awk '{print substr($1,1,12)}'
+        return 0
+    fi
+    if command -v shasum >/dev/null 2>&1; then
+        printf '%s' "$normalized" | shasum -a 256 | awk '{print substr($1,1,12)}'
+        return 0
+    fi
+    printf '%s' "$normalized" | cksum | awk '{printf "%012x\n", $1}'
+}
+
+_normalize_install_dir() {
+    local raw="$1" py
+    for py in python3 python; do
+        if command -v "$py" >/dev/null 2>&1; then
+            "$py" -c 'import os, sys; print(os.path.normpath(os.path.abspath(os.path.expanduser(sys.argv[1]))))' "$raw"
+            return 0
+        fi
+    done
+    if [[ "$raw" == "~" ]]; then
+        raw="$HOME"
+    elif [[ "$raw" == "~/"* ]]; then
+        raw="$HOME/${raw#~/}"
+    fi
+    case "$raw" in
+        /*) ;;
+        *) raw="$PWD/$raw" ;;
+    esac
+    printf '%s\n' "$raw"
+}
+
+LEGACY_INSTALL_DIR="$HOME/.agent-bridge"
+INSTALL_DIR="$LEGACY_INSTALL_DIR"
 VENV_DIR="$INSTALL_DIR/venv"
 LOCAL_BIN="$HOME/.local/bin"
 BINSTUB="$LOCAL_BIN/agent-bridge"
@@ -236,9 +270,43 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --purge) PURGE=true; shift ;;
         --force) FORCE=true; shift ;;
+        --install-dir)
+            [[ $# -ge 2 ]] || { echo "[FAIL] Missing value for --install-dir" >&2; exit 1; }
+            INSTALL_DIR="$2"
+            shift 2
+            ;;
         *)       echo "[FAIL] Unknown option: $1" >&2; exit 1 ;;
     esac
 done
+
+INSTALL_DIR="$(_normalize_install_dir "$INSTALL_DIR")"
+
+PUBLISH_GLOBAL_BINSTUBS=true
+SERVICE_SUFFIX=""
+if [[ "$INSTALL_DIR" != "$LEGACY_INSTALL_DIR" ]]; then
+    PUBLISH_GLOBAL_BINSTUBS=false
+    SERVICE_SUFFIX="$(_scoped_identity_suffix "$INSTALL_DIR")"
+    SYSTEMD_UNIT="agent-bridge-${SERVICE_SUFFIX}.service"
+fi
+
+export AGENT_BRIDGE_INSTALL_DIR="$INSTALL_DIR"
+export AGENT_BRIDGE_CONFIG_DIR="$INSTALL_DIR"
+export AGENT_BRIDGE_CONNECT_LOG="$INSTALL_DIR/logs/connect.log"
+PID_FILE="$INSTALL_DIR/agent-bridge.pid"
+_cfg_yaml="$INSTALL_DIR/config.yaml"
+PORT=""
+if [[ -f "$_cfg_yaml" ]]; then
+    PORT="$(sed -n 's/^[[:space:]]*port:[[:space:]]*\([0-9]\{1,\}\).*/\1/p' "$_cfg_yaml" | head -1)"
+fi
+if [[ -z "$PORT" ]]; then
+    if [[ -n "${WSL_DISTRO_NAME:-}" ]] || grep -qiE 'microsoft|wsl' /proc/sys/kernel/osrelease 2>/dev/null; then
+        PORT=9281
+    else
+        PORT=9280
+    fi
+fi
+LINK_DIR="$INSTALL_DIR/venv"
+VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
 
 # -- Helpers -----------------------------------------------------------------
 
@@ -800,6 +868,9 @@ ExecStopPost=/bin/sleep 2
 Restart=on-failure
 RestartSec=5
 WorkingDirectory=$INSTALL_DIR
+Environment=AGENT_BRIDGE_INSTALL_DIR=$INSTALL_DIR
+Environment=AGENT_BRIDGE_CONFIG_DIR=$INSTALL_DIR
+Environment=AGENT_BRIDGE_CONNECT_LOG=$INSTALL_DIR/logs/connect.log
 Environment=PYTHONUTF8=1
 
 [Install]
@@ -890,12 +961,20 @@ _ensure_uv_index() {
 # line + a machine-readable ::agent-provisioning:: signal so a caller can extend
 # its timeout), lock-serialized, fail-fast. Replaces the old thin exec stub.
 deploy_binstub() {
-    mkdir -p "$LOCAL_BIN" "$INSTALL_DIR/bin"
+    mkdir -p "$INSTALL_DIR/bin"
+    if $PUBLISH_GLOBAL_BINSTUBS; then
+        mkdir -p "$LOCAL_BIN"
+    fi
     # Co-deploy the canonical marker-only resolver so the binstub resolves the
     # interpreter the ONE uniform way (uniform-runtime-resolution, #765).
     for r in resolve-runtime.sh resolve-runtime.ps1; do
         [ -f "$SCRIPT_DIR/$r" ] && cp -f "$SCRIPT_DIR/$r" "$INSTALL_DIR/bin/$r"
     done
+    if ! $PUBLISH_GLOBAL_BINSTUBS; then
+        _ok "Scoped install keeps the global compatibility binstub unchanged"
+        return 0
+    fi
+
     cat > "$BINSTUB" << 'STUB'
 #!/usr/bin/env bash
 # agent-bridge binstub -- self-provisioning (install-on-first-use).
@@ -958,10 +1037,17 @@ STUB
 # binstub -- NO venv, NO uv. The runtime builds itself on the binstub's first use.
 do_stamp() {
     echo ""; echo "=== agent-bridge stamp (defer runtime to first use) ==="; echo ""
-    mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
+    mkdir -p "$INSTALL_DIR"
+    if $PUBLISH_GLOBAL_BINSTUBS; then
+        mkdir -p "$LOCAL_BIN"
+    fi
     printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
     deploy_binstub
-    _ok "Stamped: binstub on PATH; runtime provisions on first use."
+    if $PUBLISH_GLOBAL_BINSTUBS; then
+        _ok "Stamped: binstub on PATH; runtime provisions on first use."
+    else
+        _ok "Stamped: scoped runtime metadata recorded; payload-local commands provision on first use."
+    fi
 }
 
 # Cross-process install serialization (ce#776/#777 follow-up; ce#802 review): a
@@ -1003,7 +1089,10 @@ do_install() {
         return 0
     fi
 
-    mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
+    mkdir -p "$INSTALL_DIR"
+    if $PUBLISH_GLOBAL_BINSTUBS; then
+        mkdir -p "$LOCAL_BIN"
+    fi
 
     # #935: toss an INCOMPLETE prior slot first so we never `uv venv
     # --allow-existing` over a half-built corpse (the current/active slot is
@@ -1138,7 +1227,11 @@ do_install() {
     echo ""
     _ok "agent-bridge installed"
     echo "  Install dir: $INSTALL_DIR"
-    echo "  Binstub:     $BINSTUB"
+    if $PUBLISH_GLOBAL_BINSTUBS; then
+        echo "  Binstub:     $BINSTUB"
+    else
+        echo "  Binstub:     global compatibility wrapper unchanged (scoped install)"
+    fi
     echo "  Config:      agent-bridge config show"
     echo "  API:         http://127.0.0.1:$PORT"
 
@@ -1163,8 +1256,12 @@ do_uninstall() {
         _ok "systemd unit removed"
     fi
 
-    rm -f "$BINSTUB"
-    _ok "Binstub removed"
+    if $PUBLISH_GLOBAL_BINSTUBS; then
+        rm -f "$BINSTUB"
+        _ok "Binstub removed"
+    else
+        _ok "Scoped install left the legacy global binstub unchanged"
+    fi
 
     _remove_sibling_binstubs
 
@@ -1363,7 +1460,9 @@ do_status() {
     if command -v systemctl &>/dev/null && [[ -f "$HOME/.config/systemd/user/$SYSTEMD_UNIT" ]]; then
         local state
         state=$(systemctl --user is-enabled "$SYSTEMD_UNIT" 2>/dev/null || echo "not found")
-        _ok "systemd unit: $state"
+        _ok "systemd unit: $state ($SYSTEMD_UNIT)"
+    elif ! $PUBLISH_GLOBAL_BINSTUBS; then
+        _step "No scoped systemd unit registered"
     fi
 
     # Exit non-zero when not installed (used by module update orchestrator)

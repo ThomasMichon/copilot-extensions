@@ -1,12 +1,18 @@
 {
   "schema": "copilot-extensions.payload-invocation",
-  "version": 1,
+  "version": 2,
   "command": "agent-bridge",
   "module": "agent_bridge",
-  "runtimeRoot": ".agent-bridge",
+  "legacyRuntimeRoot": ".agent-bridge",
+  "installationContext": "required",
   "noSelfProvisionEnv": "AGENT_BRIDGE_NO_SELFPROVISION",
   "purpose": "Communicate with persistent agent sessions",
   "installer": "install",
   "windowsCatalogShim": "cmd",
-  "provisionMode": "direct"
+  "provisionMode": "direct",
+  "payloadRootEnv": "AGENT_BRIDGE_PAYLOAD_ROOT",
+  "payloadDispatcher": {
+    "posix": "scripts/runtime-gate.sh",
+    "windows": "scripts/runtime-gate.ps1"
+  }
 }
