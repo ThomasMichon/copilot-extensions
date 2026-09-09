@@ -3806,6 +3806,10 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
 
         declared_source = registrar_discovery.read_legacy_env_profiles
 
+    from .supervisor_daemon import _self_update_settings
+
+    _su_enabled, _su_poll, _su_cooldown = _self_update_settings()
+
     with _client(args) as c:
         daemon = SupervisorDaemon(
             c, machine, env, poll_interval=getattr(args, "interval", 5.0),
@@ -3814,6 +3818,15 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
             # connection failure -- the coordinator's ephemeral port moves on
             # restart, so a cached one would wedge the daemon (#3825).
             client_factory=lambda: _client(args, ensure=False),
+            # Live self-update (#2259): opt-in via
+            # AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE. Reuses this process's own
+            # sys.argv[1:] to respawn the successor with the identical
+            # `supervise serve ...` invocation (flags included), so no manual
+            # argv reconstruction can silently drop one.
+            self_update_enabled=_su_enabled,
+            self_update_poll_interval=_su_poll,
+            self_update_cooldown=_su_cooldown,
+            self_update_argv=list(sys.argv[1:]) if _su_enabled else None,
         )
 
         def _on_cycle(summary) -> None:
