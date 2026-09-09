@@ -47,3 +47,36 @@ def test_sync_repairs_missing_and_drifted_copies(tmp_path: Path) -> None:
         assert any("mode differs" in problem for problem in module.verify())
         assert destination.relative_to(tmp_path).as_posix() in module.sync()
         assert module.verify() == []
+
+
+def test_verify_flags_a_plugin_that_vendors_without_being_registered(
+    tmp_path: Path,
+) -> None:
+    """A vendored copy outside ADOPTERS never receives foundation updates.
+
+    The plugin still executes that copy, so the drift is invisible until the
+    stale bytes fail. Verification must name it rather than report all-in-sync.
+    """
+    module = _load_tool()
+    canonical = tmp_path / "libs" / "installation-context"
+    plugins = tmp_path / "plugins"
+    canonical.mkdir(parents=True)
+    for name in (*module.FILES, *module.LEGACY_ENTRYPOINT_FILES):
+        (canonical / name).write_text(f"{name}\n", encoding="utf-8")
+
+    module.REPO = tmp_path
+    module.CANONICAL_DIR = canonical
+    module.ADOPTERS = ("plugin-a",)
+    module.LEGACY_ENTRYPOINT_ADOPTERS = ()
+    module.sync()
+    assert module.verify() == []
+
+    # A plugin that vendors the foundation but was never registered.
+    (plugins / "plugin-unregistered" / "scripts" / "installation-context").mkdir(
+        parents=True
+    )
+    assert module.unregistered_adopters() == ["plugin-unregistered"]
+    problems = module.verify()
+    assert any(
+        "plugin-unregistered" in problem and "not" in problem for problem in problems
+    ), problems

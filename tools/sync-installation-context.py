@@ -36,6 +36,7 @@ ADOPTERS = (
     "agent-logger",
     "agent-mcp",
     "agent-ssh",
+    "agent-vault",
     "agent-worktrees",
 )
 LEGACY_ENTRYPOINT_ADOPTERS = ("agent-machines", "agent-index")
@@ -59,8 +60,32 @@ def vendor_pairs() -> list[tuple[Path, Path]]:
     ]
 
 
+def unregistered_adopters() -> list[str]:
+    """Plugins that vendor the foundation but are absent from ``ADOPTERS``.
+
+    A plugin that ships ``scripts/installation-context/`` executes it, so a copy
+    outside the adopter list never receives foundation updates while this tool
+    still reports everything in sync. That drift is invisible until the stale
+    copy fails, so name it as a problem instead.
+    """
+    plugins_root = REPO / "plugins"
+    if not plugins_root.is_dir():
+        return []
+    return sorted(
+        candidate.name
+        for candidate in plugins_root.iterdir()
+        if candidate.name not in ADOPTERS
+        and (candidate / "scripts" / "installation-context").is_dir()
+    )
+
+
 def verify() -> list[str]:
     problems: list[str] = []
+    for plugin in unregistered_adopters():
+        problems.append(
+            f"plugins/{plugin} vendors scripts/installation-context/ but is not "
+            "listed in ADOPTERS, so its copy never receives updates"
+        )
     for source, destination in vendor_pairs():
         relative = destination.relative_to(REPO).as_posix()
         if not source.is_file():
