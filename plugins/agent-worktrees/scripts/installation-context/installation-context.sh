@@ -444,16 +444,43 @@ is_absolute() {
     [[ "$1" == /* ]]
 }
 
-# Canonicalize the nearest existing ancestor of a path whose leaf does not exist
-# yet, then re-append the unresolved remainder lexically. This reproduces GNU
-# `realpath -m` semantics on a BSD userland, where `realpath` has no `-m` and
-# `readlink -f` refuses a missing leaf. Directory symlinks are still resolved
-# physically via `cd -P`; only components that do not exist stay lexical.
+# Resolve a path that already exists, preferring the platform's own resolver so
+# symlinked components are followed physically rather than kept lexically.
+canonical_existing_path() {
+    local value="$1" result
+    if command -v realpath >/dev/null 2>&1 &&
+        result="$(realpath -- "$value" 2>/dev/null)"; then
+        printf '%s' "$result"
+        return 0
+    fi
+    if command -v readlink >/dev/null 2>&1 &&
+        result="$(readlink -f -- "$value" 2>/dev/null)"; then
+        printf '%s' "$result"
+        return 0
+    fi
+    [[ -d "$value" ]] || return 1
+    result="$(cd -P -- "$value" 2>/dev/null && pwd -P)" || return 1
+    printf '%s' "$result"
+}
+
+# Canonicalize a path whose leaf does not exist yet: resolve the nearest
+# existing ancestor physically, then re-append the unresolved remainder
+# lexically. This reproduces GNU `realpath -m` semantics on a BSD userland,
+# where `realpath` has no `-m` and `readlink -f` refuses a missing leaf.
+# A dangling symlink is not an existing ancestor, so it stays lexical exactly as
+# `realpath -m` leaves it; every ancestor that does resolve is followed
+# physically, so containment checks cannot be fooled by an unresolved link.
 canonical_missing_path() {
-    local value="$1" base tail="" segment resolved out part
+    local value="$1" base tail="" segment resolved="" out part
+    local glob_was_disabled=0
     base="$value"
     [[ "$base" == /* ]] || base="$PWD/$base"
-    while [[ "$base" != "/" && ! -d "$base" ]]; do
+    while :; do
+        if [[ -e "$base" ]] && resolved="$(canonical_existing_path "$base")"; then
+            break
+        fi
+        resolved=""
+        [[ "$base" != "/" ]] || fail "Cannot resolve path: $value"
         segment="${base##*/}"
         base="${base%/*}"
         [[ -n "$base" ]] || base="/"
@@ -462,11 +489,15 @@ canonical_missing_path() {
             *) tail="$segment${tail:+/$tail}" ;;
         esac
     done
-    resolved="$(cd -P -- "$base" 2>/dev/null && pwd -P)" ||
-        fail "Cannot resolve path: $value"
     [[ -n "$resolved" ]] || fail "Cannot resolve path: $value"
     out="$resolved"
     [[ "$out" != "/" ]] || out=""
+    # Split the remainder on '/' with pathname expansion disabled: a component
+    # may legitimately contain a glob metacharacter and must survive verbatim.
+    if [[ "$-" == *f* ]]; then
+        glob_was_disabled=1
+    fi
+    set -f
     local IFS=/
     for part in $tail; do
         case "$part" in
@@ -475,6 +506,9 @@ canonical_missing_path() {
             *) out="$out/$part" ;;
         esac
     done
+    if ((glob_was_disabled == 0)); then
+        set +f
+    fi
     printf '%s' "${out:-/}"
 }
 
