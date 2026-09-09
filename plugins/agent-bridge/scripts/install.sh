@@ -181,7 +181,7 @@ _scoped_identity_suffix() {
 }
 
 LEGACY_INSTALL_DIR="$HOME/.agent-bridge"
-INSTALL_DIR="${AGENT_BRIDGE_INSTALL_DIR:-$LEGACY_INSTALL_DIR}"
+INSTALL_DIR="$LEGACY_INSTALL_DIR"
 VENV_DIR="$INSTALL_DIR/venv"
 LOCAL_BIN="$HOME/.local/bin"
 BINSTUB="$LOCAL_BIN/agent-bridge"
@@ -262,8 +262,8 @@ done
 
 if [[ "$INSTALL_DIR" == "~" ]]; then
     INSTALL_DIR="$HOME"
-elif [[ "$INSTALL_DIR" == ~/* ]]; then
-    INSTALL_DIR="$HOME/${INSTALL_DIR#\~/}"
+elif [[ "$INSTALL_DIR" == "~/"* ]]; then
+    INSTALL_DIR="$HOME/${INSTALL_DIR#~/}"
 fi
 
 PUBLISH_GLOBAL_BINSTUBS=true

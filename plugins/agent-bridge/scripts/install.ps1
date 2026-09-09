@@ -254,7 +254,7 @@ if (-not $env:UV_HTTP_TIMEOUT) { $env:UV_HTTP_TIMEOUT = '60' }
 $ScriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PluginDir  = (Resolve-Path (Join-Path $ScriptDir '..')).Path
 $legacyInstallDir = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.agent-bridge'))
-$InstallDir = if ($InstallDir) { $InstallDir } elseif ($env:AGENT_BRIDGE_INSTALL_DIR) { $env:AGENT_BRIDGE_INSTALL_DIR } else { $legacyInstallDir }
+$InstallDir = if ($InstallDir) { $InstallDir } else { $legacyInstallDir }
 $InstallDir = [IO.Path]::GetFullPath($InstallDir)
 $publishGlobalBinstubs = [StringComparer]::OrdinalIgnoreCase.Equals(
     $InstallDir,
