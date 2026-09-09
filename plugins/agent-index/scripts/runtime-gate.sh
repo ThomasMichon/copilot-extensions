@@ -67,7 +67,7 @@ print(value.get("source") if isinstance(value.get("source"), str) else "")
 if [ "${EFFECTIVE_FIELDS[0]:-0}" != 1 ]; then
     if [ "$COMMAND" = installer-readiness ]; then
         printf '%s\n' \
-            '{"detail":"No effective .agent-index/config.yaml opts this repository in; session startup remains non-mutating.","module":"agent-index/runtime","schema":"copilot-extensions.module-readiness","state":"configuration-empty","version":1}'
+            '{"detail":"No effective .copilot-extensions/agent-index/config.yaml opts this repository in; session startup remains non-mutating.","module":"agent-index/runtime","schema":"copilot-extensions.module-readiness","state":"configuration-empty","version":1}'
         exit 0
     fi
     _emit_inactive

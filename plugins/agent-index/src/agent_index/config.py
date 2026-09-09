@@ -26,7 +26,12 @@ MACHINE_ENV = "AGENT_INDEX_MACHINE"
 REPO_ENV = "AGENT_INDEX_REPO"
 VALID_ROLES = ("host", "client")
 UNCONFIGURED_ROLE = "unconfigured"
-REPO_CONFIG_RELPATH = ".agent-index/config.yaml"
+CONFIG_FILENAME = "config.yaml"
+CANONICAL_CONFIG_DIR = Path(".copilot-extensions") / "agent-index"
+REPO_CONFIG_RELPATH = str(CANONICAL_CONFIG_DIR / CONFIG_FILENAME)
+LEGACY_REPO_CONFIG_RELPATH = ".agent-index/config.yaml"
+MARKETPLACE_OVERLAYS_DIR = CANONICAL_CONFIG_DIR / "marketplaces"
+INSTALLATION_CONTEXT_ENV = "COPILOT_EXTENSIONS_CONTEXT"
 
 
 def install_dir() -> Path:
@@ -97,15 +102,112 @@ def _load_inline_config() -> dict | None:
     return value if isinstance(value, dict) else None
 
 
+def _deep_merge_dicts(base: dict, override: dict) -> dict:
+    merged = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge_dicts(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _load_installation_context() -> dict | None:
+    raw = os.environ.get(INSTALLATION_CONTEXT_ENV, "").strip()
+    if not raw:
+        return None
+    try:
+        if raw.startswith("{"):
+            value = json.loads(raw)
+        else:
+            value = json.loads(Path(raw).expanduser().read_text(encoding="utf-8"))
+    except (OSError, TypeError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _installation_marketplace_id() -> str | None:
+    context = _load_installation_context()
+    if context is None:
+        return None
+    marketplace_id = context.get("marketplaceId")
+    if not isinstance(marketplace_id, str) or not marketplace_id.strip():
+        return None
+    return marketplace_id.strip()
+
+
+def _repo_base_config_path(root: Path) -> Path | None:
+    for candidate in (
+        root / CANONICAL_CONFIG_DIR / CONFIG_FILENAME,
+        root / LEGACY_REPO_CONFIG_RELPATH,
+    ):
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _repo_marketplace_overlay_path(root: Path) -> Path | None:
+    marketplace_id = _installation_marketplace_id()
+    if not marketplace_id:
+        return None
+    candidate = root / MARKETPLACE_OVERLAYS_DIR / marketplace_id / CONFIG_FILENAME
+    return candidate if candidate.exists() else None
+
+
+def _repo_config_layers(root: Path) -> list[Path]:
+    layers: list[Path] = []
+    base = _repo_base_config_path(root)
+    if base is not None:
+        layers.append(base)
+    overlay = _repo_marketplace_overlay_path(root)
+    if overlay is not None:
+        layers.append(overlay)
+    return layers
+
+
+def _repo_root_for_effective_config_path(path: Path) -> Path | None:
+    normalized = path.expanduser()
+    parts = normalized.parts
+    if len(parts) >= 3 and parts[-3:] == (
+        ".copilot-extensions",
+        "agent-index",
+        CONFIG_FILENAME,
+    ):
+        return normalized.parents[2]
+    if len(parts) >= 2 and parts[-2:] == (".agent-index", CONFIG_FILENAME):
+        return normalized.parents[1]
+    return None
+
+
+def _load_effective_config_path(path: Path) -> dict:
+    repo_root = _repo_root_for_effective_config_path(path)
+    if repo_root is None:
+        return _load_yaml(path)
+    merged: dict = {}
+    for layer in _repo_config_layers(repo_root):
+        loaded = _load_yaml(layer)
+        if isinstance(loaded, dict):
+            merged = _deep_merge_dicts(merged, loaded)
+    return merged
+
+
 def _load_effective_repo_config(root: Path | None) -> dict:
     if CONFIG_DATA_ENV in os.environ:
         return _load_inline_config() or {}
     effective = os.environ.get(EFFECTIVE_CONFIG_ENV)
     if effective:
-        return _load_yaml(Path(effective).expanduser())
+        return _load_effective_config_path(Path(effective).expanduser())
     if root is None:
         return {}
-    return _load_yaml(repo_config_path(root))
+    layers = _repo_config_layers(root)
+    if not layers:
+        return {}
+    merged: dict = {}
+    for layer in layers:
+        loaded = _load_yaml(layer)
+        if isinstance(loaded, dict):
+            merged = _deep_merge_dicts(merged, loaded)
+    return merged
 
 
 def _read_config_role(path: Path) -> str | None:
@@ -169,8 +271,13 @@ def repo_root(explicit: str | None = None) -> Path | None:
 
 
 def repo_config_path(root: Path) -> Path:
-    """The repo-committed adoption config: ``<repo>/.agent-index/config.yaml``."""
-    return root / REPO_CONFIG_RELPATH
+    """The canonical repo-committed adoption config path."""
+    return root / CANONICAL_CONFIG_DIR / CONFIG_FILENAME
+
+
+def repo_has_config(root: Path) -> bool:
+    """Whether the repo carries a base config or an explicit marketplace overlay."""
+    return bool(_repo_config_layers(root))
 
 
 def read_indexer(root: Path | None) -> dict | None:
@@ -226,7 +333,7 @@ def read_indexers(root: Path | None) -> list[dict]:
 
 def read_corpus_sources() -> list[dict]:
     """Return the effective ``corpus.sources`` — a **virtual config grafted** from
-    every adopted local project's own ``.agent-index/config.yaml``.
+    every adopted local project's own repo config.
 
     Read **dynamically** (no caching) so edits are picked up on the next reindex
     without a service restart (each reindex runs in a fresh worker process). The
@@ -236,8 +343,10 @@ def read_corpus_sources() -> list[dict]:
        registry (``~/.agent-worktrees/projects.yaml`` — the set of repos that have
        a project binstub), resolving each to its checkout path via
        ``repos.yaml``.
-    2. Read each project's committed ``<repo>/.agent-index/config.yaml`` and graft
-       its ``corpus.sources`` into one list, deduped by source ``name`` (first
+    2. Read each project's committed canonical
+       ``<repo>/.copilot-extensions/agent-index/config.yaml`` with legacy
+       ``<repo>/.agent-index/config.yaml`` fallback, then graft its
+       ``corpus.sources`` into one list, deduped by source ``name`` (first
        contributor wins). The originating project's checkout path is attached as
        ``_repo_path`` so a ``git`` source resolves without a second lookup.
     3. Also graft the **machine-local** config's own ``corpus.sources``
@@ -274,7 +383,7 @@ def read_corpus_sources() -> list[dict]:
 
     # (1)+(2) adopted projects, each self-declaring its index targets
     for name, root in _local_project_roots().items():
-        for spec in _sources_of(repo_config_path(root)):
+        for spec in _sources_of_data(_load_effective_repo_config(root)):
             spec = dict(spec)
             spec.setdefault("_repo_path", str(root))
             spec.setdefault("_contributed_by", name)
@@ -385,10 +494,10 @@ def machine_device() -> str | None:
 def write_indexer_designation(
     root: Path, machine: str, *, ssh: str | None = None, endpoint: str | None = None
 ) -> Path:
-    """Record the shared indexer designation into ``<repo>/.agent-index/config.yaml``
-    (merging existing keys). Returns the repo config path."""
+    """Record the shared indexer designation into the canonical repo config."""
     path = repo_config_path(root)
-    data = _load_yaml(path)
+    source = _repo_base_config_path(root) or path
+    data = _load_yaml(source)
     ind: dict = {"machine": machine}
     if ssh:
         ind["ssh"] = ssh
@@ -400,14 +509,10 @@ def write_indexer_designation(
 
 
 def write_indexers_designation(root: Path, indexers: list[dict]) -> Path:
-    """Record an **ordered** multi-indexer designation (``indexers:`` list, primary
-    first) into ``<repo>/.agent-index/config.yaml`` (merging other keys). Each entry
-    is normalized to ``{machine, ssh?, endpoint?}``; entries without a ``machine`` are
-    dropped. The singular ``indexer:`` key is removed so the plural list is the single
-    source of truth. Returns the repo config path
-    (vision §adoption-designates-ordered-indexers)."""
+    """Record an ordered multi-indexer designation into the canonical repo config."""
     path = repo_config_path(root)
-    data = _load_yaml(path)
+    source = _repo_base_config_path(root) or path
+    data = _load_yaml(source)
     norm: list[dict] = []
     for it in indexers:
         if not isinstance(it, dict):

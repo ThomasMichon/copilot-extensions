@@ -917,11 +917,13 @@ def _setup_multi(cfg, args, this: str, root, indexers: list[dict]) -> int:
 def cmd_setup(args: argparse.Namespace) -> int:
     """Adopt agent-index: designate one indexer, then write role + designation config.
 
-    Records the shared indexer designation into ``<repo>/.agent-index/config.yaml``
-    and this machine's concrete ``role:`` into the machine-local config (which the
-    installer reads). Running setup on the designated machine makes it the ``host``;
-    everywhere else it is a ``client`` (effort agent-index-engine-daemon, Phase 6;
-    vision §adoption-designates-one-indexer).
+    Records the shared indexer designation into the canonical repo config
+    (``<repo>/.copilot-extensions/agent-index/config.yaml`` with legacy config
+    preserved as a read-only fallback) and this machine's concrete ``role:``
+    into the machine-local config (which the installer reads). Running setup on
+    the designated machine makes it the ``host``; everywhere else it is a
+    ``client`` (effort agent-index-engine-daemon, Phase 6; vision
+    §adoption-designates-one-indexer).
     """
     from agent_index import config as cfg
 
