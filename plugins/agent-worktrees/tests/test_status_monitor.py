@@ -577,6 +577,19 @@ def test_anchor_policy_cache_reloads_when_registry_changes(tmp_path, monkeypatch
     assert seen_roots and set(seen_roots) == {selected_root}
 
 
+def test_load_hook_client_module_prefers_selected_runtime_bin(tmp_path, monkeypatch):
+    runtime = tmp_path / "cell-runtime"
+    target = runtime / "bin" / "hook_client.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("SELECTED = 'cell-runtime'\n", encoding="utf-8")
+    monkeypatch.setattr(m.cfg, "install_dir", lambda: runtime)
+
+    module = m._load_hook_client_module()
+
+    assert module is not None
+    assert module.SELECTED == "cell-runtime"
+
+
 def test_resident_agent_bridge_policy_denies_guarded_write(tmp_path, monkeypatch):
     from agent_worktrees import related, repos
 

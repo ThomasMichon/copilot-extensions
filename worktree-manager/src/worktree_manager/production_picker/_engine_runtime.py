@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import os
 import sys
 from pathlib import Path
@@ -15,9 +16,31 @@ class EngineRuntimeError(RuntimeError):
     """The production Picker's temporary engine compatibility layer is absent."""
 
 
+def _context_runtime_root() -> Path | None:
+    context = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip()
+    if not context:
+        return None
+    pointer = Path(context).expanduser()
+    if not pointer.is_absolute():
+        raise EngineRuntimeError(
+            "COPILOT_EXTENSIONS_CONTEXT must be an absolute install receipt"
+        )
+    try:
+        install = json.loads(pointer.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError, TypeError) as error:
+        raise EngineRuntimeError(
+            "the selected agent-worktrees installation context is invalid"
+        ) from error
+    if not isinstance(install, dict) or install.get("pluginId") != "agent-worktrees":
+        raise EngineRuntimeError(
+            "the selected installation context does not own agent-worktrees"
+        )
+    return pointer.parent
+
+
 def _active_runtime_source() -> Path | None:
     home = Path(os.environ.get("USERPROFILE") or Path.home())
-    root = home / ".agent-worktrees"
+    root = _context_runtime_root() or (home / ".agent-worktrees")
     marker = root / "current-version"
     try:
         version = marker.read_text(encoding="utf-8").strip()
@@ -49,7 +72,10 @@ def _checkout_source() -> Path | None:
 def ensure_engine_runtime() -> Path:
     """Make the attributable engine package importable for compatibility calls."""
     override = os.environ.get(ENGINE_SOURCE_ENV)
-    source = Path(override) if override else (_checkout_source() or _active_runtime_source())
+    source = Path(override) if override else (
+        _active_runtime_source() if os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip()
+        else (_checkout_source() or _active_runtime_source())
+    )
     if source is None or not (source / "agent_worktrees").is_dir():
         raise EngineRuntimeError(
             "the production Picker needs an installed agent-worktrees runtime; "
