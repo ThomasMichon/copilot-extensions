@@ -121,10 +121,17 @@ host that should run it; a client-only host opts out (`--no-service` /
   daemon with no in-flight request to drain (agent-dispatch's `supervise
   serve`, #2259), the lighter shape: wind down owned units, release the
   single-instance lease, spawn a successor on the new interpreter with the
-  same argv, then exit. Don't rely on the Scheduled Task's own
-  `RestartCount`/`RestartInterval` crash-restart policy for this — it retries
-  a **failed** launch on the *same* (stale) interpreter a bounded number of
-  times, it does not know about a newer published slot.
+  same argv, then exit. Make it **default-ON with an opt-out env var**, not
+  opt-in — this harness's launch paths have no protocol for flipping an
+  opt-in flag before a daemon's first boot, so an opt-in gate here simply
+  never activates for anyone. Validate the handoff mechanism end-to-end (real
+  process spawn, real single-instance lease release/reacquire, real successor
+  argv) with a Tier-P clean-room scenario — a fully deterministic, agent-free
+  simulation of a stale marker + an installed successor slot — *before*
+  flipping the default on; see `validating-in-clean-room`. Don't rely on the
+  Scheduled Task's own `RestartCount`/`RestartInterval` crash-restart policy
+  for this — it retries a **failed** launch on the *same* (stale) interpreter
+  a bounded number of times, it does not know about a newer published slot.
 - **Guard a legacy-migration stop on the real link path, not the built slot.** If
   the installer stops the daemon to release a *legacy* runtime dir before the first
   versioned migration, gate that stop on the **actual link path** (e.g. `.venv`),

@@ -3822,8 +3822,8 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
             # connection failure -- the coordinator's ephemeral port moves on
             # restart, so a cached one would wedge the daemon (#3825).
             client_factory=lambda: _client(args, ensure=False),
-            # Live self-update (#2259): opt-in via
-            # AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE. Reuses this process's own
+            # Live self-update (#2259): default-ON / opt-out via
+            # AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE=0. Reuses this process's own
             # sys.argv[1:] to respawn the successor with the identical
             # `supervise serve ...` invocation (flags included), so no manual
             # argv reconstruction can silently drop one.

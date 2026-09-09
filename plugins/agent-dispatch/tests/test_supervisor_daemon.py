@@ -1141,20 +1141,28 @@ def test_self_update_respects_poll_interval():
     assert len(checks) == 2
 
 
-def test_self_update_settings_default_off(monkeypatch):
+def test_self_update_settings_default_on(monkeypatch):
     from agent_dispatch.supervisor_daemon import _self_update_settings
 
     monkeypatch.delenv("AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE", raising=False)
     enabled, poll, cooldown = _self_update_settings()
-    assert enabled is False
+    assert enabled is True
     assert poll == 60.0
     assert cooldown == 900.0
 
 
-def test_self_update_settings_opt_in(monkeypatch):
+def test_self_update_settings_falsy_values_disable(monkeypatch):
     from agent_dispatch.supervisor_daemon import _self_update_settings
 
-    monkeypatch.setenv("AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE", "1")
+    for value in ("0", "false", "FALSE", "no", "off"):
+        monkeypatch.setenv("AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE", value)
+        enabled, *_ = _self_update_settings()
+        assert enabled is False, value
+
+
+def test_self_update_settings_overrides(monkeypatch):
+    from agent_dispatch.supervisor_daemon import _self_update_settings
+
     monkeypatch.setenv("AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE_POLL_S", "5")
     monkeypatch.setenv("AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE_COOLDOWN_S", "10")
     enabled, poll, cooldown = _self_update_settings()
@@ -1166,7 +1174,6 @@ def test_self_update_settings_opt_in(monkeypatch):
 def test_self_update_settings_invalid_values_fall_back(monkeypatch):
     from agent_dispatch.supervisor_daemon import _self_update_settings
 
-    monkeypatch.setenv("AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE", "1")
     monkeypatch.setenv("AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE_POLL_S", "nan")
     monkeypatch.setenv("AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE_COOLDOWN_S", "not-a-number")
     _enabled, poll, cooldown = _self_update_settings()
