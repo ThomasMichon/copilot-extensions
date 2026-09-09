@@ -45,26 +45,27 @@ author.
 
 Add a **supplementary** config only when a repo deviates from convention (a
 split CodeSpaces-vs-product repo, a pinned devcontainer, an ADO host, a
-provision hook). It lives in the **adopting repo**, in the canonical in-repo
-location aligned with the sibling `agent-*` plugins:
+provision hook). It lives in the **adopting repo**, in the canonical
+`.copilot-extensions/<plugin>/` namespace:
 
 ```
-<repo>/.agent-codespaces/config.yaml
+<repo>/.copilot-extensions/agent-codespaces/config.yaml
 ```
 
 Scaffold and adopt it in one step from inside the repo:
 
 ```bash
-agent-codespaces config init      # writes .agent-codespaces/config.yaml (+ auto-adopts)
+agent-codespaces config init      # writes .copilot-extensions/agent-codespaces/config.yaml (+ auto-adopts)
 ```
 
 Running a command inside a repo that carries the file **auto-discovers** it (no
 manual `config adopt`); adoption persists it for the detached daemon and for
-extra/multi-repo setups. A **legacy** repo-root `codespaces.yaml` is still read
-as a fallback -- relocate it with `agent-codespaces config migrate`.
+extra/multi-repo setups. Legacy `.agent-codespaces/config.yaml` and repo-root
+`codespaces.yaml` are still read as fallbacks -- relocate them with
+`agent-codespaces config migrate`.
 
 ```yaml
-# .agent-codespaces/config.yaml -- SUPPLEMENTARY, in-repo. Add ONLY what
+# .copilot-extensions/agent-codespaces/config.yaml -- SUPPLEMENTARY, in-repo. Add ONLY what
 # deviates from convention; everything omitted is derived.
 repos:
   org/my-app-codespaces:
@@ -147,9 +148,9 @@ agent-codespaces finalize <name>      # Recover, stop, mark recovered/reusable
 agent-codespaces finalize <name> --delete  # Recover, verify off-box safety, delete
 agent-codespaces verify <name>        # Publish git-cleanliness safety verdict
 agent-codespaces delete <name>        # Delete a CodeSpace (--force to skip prompt)
-agent-codespaces config init          # Scaffold .agent-codespaces/config.yaml (+ auto-adopt)
+agent-codespaces config init          # Scaffold .copilot-extensions/agent-codespaces/config.yaml (+ auto-adopt)
 agent-codespaces config adopt         # Register a repo's config for the daemon
-agent-codespaces config migrate       # Relocate legacy codespaces.yaml -> .agent-codespaces/config.yaml
+agent-codespaces config migrate       # Relocate legacy config -> .copilot-extensions/agent-codespaces/config.yaml
 agent-codespaces config show          # Show resolved config
 agent-codespaces config validate      # Validate resolved config
 agent-codespaces cleanup              # Remove stale local state (SSH configs, sockets)
@@ -177,7 +178,7 @@ agent-codespaces create <owner/repo> \
 ```
 
 Machine type and location default by convention (`largePremiumLinux` / `EastUs`)
-and can be overridden per-repo in `.agent-codespaces/config.yaml`. After the
+and can be overridden per-repo in `.copilot-extensions/agent-codespaces/config.yaml`. After the
 CodeSpace is Available, any `on_create` provisioning hooks from that config run
 automatically. Without `--force-create`, `create` first consults the pool
 planner: it reuses a suitable idle CodeSpace or refuses when the configured core
@@ -289,7 +290,8 @@ To avoid the failure mode where a missing/expired credential causes a CodeSpace
 ## Local identifier guard
 
 This is a **public** repo, so internal org/account/repo names and personal
-aliases must never land in it. The generated `.agent-codespaces/config.yaml`
+aliases must never land in it. The generated
+`.copilot-extensions/agent-codespaces/config.yaml`
 scaffold is checked for such leaks by `tests/test_config_init.py`, and the whole
 working tree by [`tools/check-no-internal-identifiers.py`](../../tools/check-no-internal-identifiers.py)
 (wire it up as a git `pre-push` hook).
