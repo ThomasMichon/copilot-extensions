@@ -541,10 +541,32 @@ def _resolve_python() -> str:
     not select an unrelated interpreter from a long-lived daemon's inherited
     ``PATH``; the provisioned runtime already owns a working cross-platform
     Python executable.
+
+    **Never resolves to a windowless (``pythonw``) launcher.** The resident
+    ``serve`` daemon deliberately runs under ``pythonw.exe`` on Windows (see
+    :func:`agent_procutil.windowless_python`) so it never flashes a console --
+    but that makes ``sys.executable`` inside the daemon ``pythonw.exe`` too. A
+    ``pythonw.exe`` parent's stdout is not a usable pipe: a *grandchild*
+    process this interpreter spawns (e.g. a credential-mint helper invoked via
+    ``${python} <script> ...`` in a bridge's ``auth.command``) that inherits
+    stdout rather than having it explicitly captured writes into a dangling
+    handle -- the process still exits 0, but every byte it wrote is silently
+    lost. That surfaced as a real, reproducible bug: a bridge's vault-backed
+    auth command returned an empty (but "successful") token under the serve
+    daemon, so the bridge sent no ``Authorization`` header and every request
+    got HTTP 401 -- while the identical command run directly under
+    ``python.exe`` (any non-daemon invocation) worked every time. Substituting
+    the sibling console interpreter here fixes it at the one place every
+    ``${python}``-templated command shares, rather than requiring each
+    config-local helper script to re-implement explicit-pipe subprocess I/O.
     """
     if not sys.executable:
         raise ConfigError("agent-mcp runtime interpreter is unavailable")
     executable = Path(os.path.abspath(sys.executable))
+    if executable.name.lower() == "pythonw.exe":
+        console_sibling = executable.with_name("python.exe")
+        if console_sibling.is_file():
+            executable = console_sibling
     if not executable.is_file():
         raise ConfigError(f"agent-mcp runtime interpreter is not a file: {executable}")
     return str(executable)
