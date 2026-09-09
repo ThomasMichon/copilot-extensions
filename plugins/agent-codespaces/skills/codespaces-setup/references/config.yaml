@@ -1,4 +1,4 @@
-# .agent-codespaces/config.yaml -- SUPPLEMENTARY CodeSpace config (reference example)
+# .copilot-extensions/agent-codespaces/config.yaml -- SUPPLEMENTARY CodeSpace config (reference example)
 #
 # Most repos need NO file here. agent-codespaces derives by convention:
 #   * machine_type=largePremiumLinux, location=EastUs
@@ -10,9 +10,9 @@
 # copilot-extensions plugin. Field-by-field docs: the codespaces-setup SKILL.md
 # "Config Reference" section.
 #
-# Location: this file is the canonical in-repo home, aligned with the sibling
-# agent-* plugins (e.g. .agent-worktrees/config.yaml). A legacy repo-root
-# codespaces.yaml is still read as a fallback -- relocate it with
+# Location: this file is the canonical in-repo home under the shared
+# .copilot-extensions/<plugin>/ namespace. Legacy .agent-codespaces/config.yaml
+# and repo-root codespaces.yaml are still read as fallbacks -- relocate them with
 # `agent-codespaces config migrate`.
 
 # --- defaults (override convention only if needed) -------------------------

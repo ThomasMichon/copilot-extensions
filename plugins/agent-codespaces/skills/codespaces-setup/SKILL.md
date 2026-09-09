@@ -2,7 +2,8 @@
 name: codespaces-setup
 description: >
   GitHub Codespaces setup and adoption -- work out of the box on standard
-  CodeSpaces, or add supplementary .agent-codespaces/config.yaml for repos that
+  CodeSpaces, or add supplementary
+  .copilot-extensions/agent-codespaces/config.yaml for repos that
   deviate (split CodeSpaces-vs-product repos, pinned devcontainers, ADO hosts,
   provision hooks). Use for first-time setup or config changes, not day-to-day
   operations.
@@ -99,14 +100,13 @@ is about that supplementary config.
   CLI/binstub itself remains standalone; lifecycle commands and relay-free
   diagnostic SSH (`--no-relay`) still work without a bridge daemon.
 
-## When you DO need config -- `.agent-codespaces/config.yaml`
+## When you DO need config -- `.copilot-extensions/agent-codespaces/config.yaml`
 
-Supplementary config lives **in the adopting repo**, in the canonical in-repo
-location aligned with the sibling `agent-*` plugins (e.g.
-`.agent-worktrees/config.yaml`):
+Supplementary config lives **in the adopting repo**, in the canonical
+`.copilot-extensions/<plugin>/` namespace:
 
 ```
-<repo>/.agent-codespaces/config.yaml
+<repo>/.copilot-extensions/agent-codespaces/config.yaml
 ```
 
 It carries **only** the CodeSpace-specific bits convention can't derive. The
@@ -130,9 +130,11 @@ cd /path/to/your/repo
 
 `config init`:
 
-- writes a **supplementary-only** `.agent-codespaces/config.yaml` (deriving what
+- writes a **supplementary-only**
+  `.copilot-extensions/agent-codespaces/config.yaml` (deriving what
   it can from your existing CodeSpaces via `gh codespace list`), and
 - **auto-adopts** the repo (registers its path in
+  the active cell-local adoption store, falling back to
   `~/.agent-codespaces/adopted-repos.yaml`) so the detached agent-bridge daemon
   reads it too. No separate `config adopt` step.
 
@@ -141,11 +143,12 @@ file it writes is safe to delete.
 
 **Or author it by hand:** copy the annotated example,
 [`references/config.yaml`](references/config.yaml), to
-`.agent-codespaces/config.yaml` and adapt. Then run
+`.copilot-extensions/agent-codespaces/config.yaml` and adapt. Then run
 `<agent-codespaces catalog argv[0]> config adopt`.
 
 > **Auto-discovery.** Running any `agent-codespaces` command *inside* a repo that
-> carries `.agent-codespaces/config.yaml` picks it up automatically -- adoption
+> carries `.copilot-extensions/agent-codespaces/config.yaml` picks it up
+> automatically -- adoption
 > only persists it for the daemon and for extra/multi-repo setups.
 
 ### 2. Migrate a legacy `codespaces.yaml`
@@ -229,8 +232,9 @@ defaults:
 
 ## Config Reference
 
-Config is read live from the repo (canonical `.agent-codespaces/config.yaml`, or
-legacy `codespaces.yaml`) -- no generated intermediate file.
+Config is read live from the repo (canonical
+`.copilot-extensions/agent-codespaces/config.yaml`, with legacy fallbacks) --
+no generated intermediate file.
 
 ### `defaults`
 
@@ -355,7 +359,8 @@ repos:
 ```
 
 `provision.files.src` is resolved relative to the **repo root**, regardless of
-whether the config lives at `.agent-codespaces/config.yaml` or the legacy
+whether the config lives at
+`.copilot-extensions/agent-codespaces/config.yaml` or the legacy
 repo-root `codespaces.yaml`.
 
 ## Multi-Repo Adoption

@@ -1,4 +1,4 @@
-"""Tests for CodeSpace config loading and validation (.agent-codespaces/config.yaml)."""
+"""Tests for CodeSpace config loading and validation."""
 
 from __future__ import annotations
 
@@ -13,10 +13,13 @@ from agent_codespaces.config import (
     CodespacesConfig,
     CredentialSourceConfig,
     CredentialsConfig,
+    adoption_storage_path,
+    load_adopted_repos,
     load_merged_config,
     load_repo_config,
     cwd_repo_root,
     repo_copilot_settings,
+    repo_config_path,
     save_adopted_repos,
     validate_config,
 )
@@ -138,6 +141,33 @@ def _write_codespaces_yaml(repo_dir: Path, data: dict) -> None:
     (repo_dir / "codespaces.yaml").write_text(yaml.safe_dump(data))
 
 
+def _write_repo_config(repo_dir: Path, data: dict) -> None:
+    path = repo_dir / ".copilot-extensions" / "agent-codespaces" / "config.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(data))
+
+
+def _write_legacy_dir_config(repo_dir: Path, data: dict) -> None:
+    path = repo_dir / ".agent-codespaces" / "config.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(data))
+
+
+def _write_context(tmp_path: Path, *, marketplace: str = "example-marketplace") -> Path:
+    cell_root = tmp_path / "durable" / "marketplaces" / marketplace
+    context = tmp_path / f"{marketplace}.json"
+    context.write_text(
+        json.dumps(
+            {
+                "marketplaceId": marketplace,
+                "cellRoot": str(cell_root),
+            }
+        ),
+        encoding="utf-8",
+    )
+    return context
+
+
 class TestLoadRepoConfig:
     def test_loads_existing(self, tmp_path):
         _write_codespaces_yaml(tmp_path, {"defaults": {"machine_type": "big"}})
@@ -150,25 +180,78 @@ class TestLoadRepoConfig:
         assert result is None
 
     def test_loads_canonical_in_repo(self, tmp_path):
-        cfg_dir = tmp_path / ".agent-codespaces"
-        cfg_dir.mkdir()
-        (cfg_dir / "config.yaml").write_text(
-            yaml.safe_dump({"defaults": {"machine_type": "canon"}})
-        )
+        _write_repo_config(tmp_path, {"defaults": {"machine_type": "canon"}})
         result = load_repo_config(tmp_path)
         assert result is not None
         assert result["defaults"]["machine_type"] == "canon"
 
     def test_canonical_wins_over_legacy(self, tmp_path):
         _write_codespaces_yaml(tmp_path, {"defaults": {"machine_type": "legacy"}})
-        cfg_dir = tmp_path / ".agent-codespaces"
-        cfg_dir.mkdir()
-        (cfg_dir / "config.yaml").write_text(
-            yaml.safe_dump({"defaults": {"machine_type": "canon"}})
+        _write_legacy_dir_config(tmp_path, {"defaults": {"machine_type": "dir-legacy"}})
+        _write_repo_config(tmp_path, {"defaults": {"machine_type": "canon"}})
+        assert repo_config_path(tmp_path) == (
+            tmp_path / ".copilot-extensions" / "agent-codespaces" / "config.yaml"
         )
-        from agent_codespaces.config import repo_config_path
-        assert repo_config_path(tmp_path) == cfg_dir / "config.yaml"
         assert load_repo_config(tmp_path)["defaults"]["machine_type"] == "canon"
+
+    def test_marketplace_overlay_merges_above_neutral_repo_policy(
+        self, tmp_path, monkeypatch
+    ):
+        _write_repo_config(
+            tmp_path,
+            {
+                "defaults": {
+                    "machine_type": "neutral",
+                    "location": "EastUs",
+                },
+                "credentials": {
+                    "sources": {
+                        "git-credential": {
+                            "enabled": True,
+                            "allowed_hosts": ["github.com"],
+                        }
+                    }
+                },
+            },
+        )
+        overlay = (
+            tmp_path
+            / ".copilot-extensions"
+            / "agent-codespaces"
+            / "marketplaces"
+            / "example-marketplace"
+            / "config.yaml"
+        )
+        overlay.parent.mkdir(parents=True, exist_ok=True)
+        overlay.write_text(
+            yaml.safe_dump(
+                {
+                    "defaults": {"machine_type": "overlay"},
+                    "credentials": {
+                        "sources": {
+                            "git-credential": {
+                                "allowed_hosts": ["github.com", "dev.azure.com"],
+                            }
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv(
+            "COPILOT_EXTENSIONS_CONTEXT",
+            str(_write_context(tmp_path)),
+        )
+
+        loaded = load_repo_config(tmp_path)
+
+        assert loaded is not None
+        assert loaded["defaults"]["machine_type"] == "overlay"
+        assert loaded["defaults"]["location"] == "EastUs"
+        assert loaded["credentials"]["sources"]["git-credential"]["allowed_hosts"] == [
+            "github.com",
+            "dev.azure.com",
+        ]
 
 
 class TestCwdAutoDiscovery:
@@ -177,11 +260,7 @@ class TestCwdAutoDiscovery:
     ):
         # A repo carrying a canonical config, NOT adopted, is picked up from cwd.
         repo = config_dir / "product"
-        cfg_dir = repo / ".agent-codespaces"
-        cfg_dir.mkdir(parents=True)
-        (cfg_dir / "config.yaml").write_text(
-            yaml.safe_dump({"defaults": {"machine_type": "from-cwd"}})
-        )
+        _write_repo_config(repo, {"defaults": {"machine_type": "from-cwd"}})
         monkeypatch.setattr(
             "agent_codespaces.config.cwd_repo_root", lambda: repo
         )
@@ -191,11 +270,7 @@ class TestCwdAutoDiscovery:
 
     def test_include_cwd_false_ignores_cwd(self, config_dir, monkeypatch):
         repo = config_dir / "product"
-        cfg_dir = repo / ".agent-codespaces"
-        cfg_dir.mkdir(parents=True)
-        (cfg_dir / "config.yaml").write_text(
-            yaml.safe_dump({"defaults": {"machine_type": "from-cwd"}})
-        )
+        _write_repo_config(repo, {"defaults": {"machine_type": "from-cwd"}})
         monkeypatch.setattr(
             "agent_codespaces.config.cwd_repo_root", lambda: repo
         )
@@ -217,12 +292,9 @@ class TestCwdAutoDiscovery:
         # dotfiles#1221: credentials.feed_token_env is read from config so the
         # launch prelude exports env-token feed auth (npm/nuget/rush).
         repo = config_dir / "product"
-        cfg_dir = repo / ".agent-codespaces"
-        cfg_dir.mkdir(parents=True)
-        (cfg_dir / "config.yaml").write_text(
-            yaml.safe_dump(
-                {"credentials": {"feed_token_env": ["EXAMPLE_NPM_AUTH_TOKEN"]}}
-            )
+        _write_repo_config(
+            repo,
+            {"credentials": {"feed_token_env": ["EXAMPLE_NPM_AUTH_TOKEN"]}},
         )
         monkeypatch.setattr(
             "agent_codespaces.config.cwd_repo_root", lambda: repo
@@ -250,6 +322,123 @@ class TestAdoptedRepos:
         loaded = load_adopted_repos()
         assert len(loaded) == 1
         assert loaded[0].path == Path("/some/repo")
+
+    def test_namespaced_adoption_uses_cell_local_remote_identity(
+        self, config_dir, monkeypatch
+    ):
+        repo = config_dir / "repo"
+        repo.mkdir()
+        context = _write_context(config_dir, marketplace="cell-a")
+        monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(context))
+        monkeypatch.setattr(
+            "agent_codespaces.config._git_origin_remote",
+            lambda path: "https://github.com/Example/Repo.git",
+        )
+
+        save_adopted_repos([AdoptedRepo(path=repo, adopted_at="2026-06-04T00:00:00Z")])
+
+        receipt = adoption_storage_path(repo)
+        assert receipt.parent.name == "agent-codespaces"
+        assert receipt.name == "adoption.json"
+        assert receipt.parent.parent.name.startswith("repo-")
+        stored = json.loads(receipt.read_text(encoding="utf-8"))
+        assert stored["normalizedRemote"] == "network:github.com/example/repo"
+        assert stored["marketplaceId"] == "cell-a"
+        loaded = load_adopted_repos()
+        assert loaded == [
+            AdoptedRepo(
+                path=repo,
+                adopted_at="2026-06-04T00:00:00Z",
+                normalized_remote="network:github.com/example/repo",
+            )
+        ]
+
+    def test_namespaced_adoption_resolves_relocated_repo_by_remote_identity(
+        self, config_dir, monkeypatch
+    ):
+        original = config_dir / "original"
+        relocated = config_dir / "relocated"
+        original.mkdir()
+        relocated.mkdir()
+        monkeypatch.setenv(
+            "COPILOT_EXTENSIONS_CONTEXT",
+            str(_write_context(config_dir, marketplace="cell-a")),
+        )
+        monkeypatch.setattr(
+            "agent_codespaces.config._git_origin_remote",
+            lambda path: "https://github.com/Example/Repo.git",
+        )
+        save_adopted_repos([AdoptedRepo(path=original, adopted_at="2026-06-04T00:00:00Z")])
+        monkeypatch.setattr(
+            "agent_codespaces.config._registered_repo_paths",
+            lambda normalized: [relocated],
+        )
+
+        loaded = load_adopted_repos()
+
+        assert loaded[0].path == relocated
+        assert loaded[0].normalized_remote == "network:github.com/example/repo"
+
+    def test_namespaced_adoption_distinguishes_same_basename_different_remotes(
+        self, config_dir, monkeypatch
+    ):
+        first = config_dir / "alpha" / "shared"
+        second = config_dir / "beta" / "shared"
+        first.mkdir(parents=True)
+        second.mkdir(parents=True)
+        monkeypatch.setenv(
+            "COPILOT_EXTENSIONS_CONTEXT",
+            str(_write_context(config_dir, marketplace="cell-a")),
+        )
+
+        def remote_for(path: Path) -> str:
+            path = Path(path)
+            if path == first:
+                return "https://github.com/Example/One.git"
+            return "https://github.com/Example/Two.git"
+
+        monkeypatch.setattr("agent_codespaces.config._git_origin_remote", remote_for)
+
+        save_adopted_repos(
+            [
+                AdoptedRepo(path=first, adopted_at="2026-06-04T00:00:00Z"),
+                AdoptedRepo(path=second, adopted_at="2026-06-05T00:00:00Z"),
+            ]
+        )
+
+        loaded = load_adopted_repos()
+
+        assert {repo.normalized_remote for repo in loaded} == {
+            "network:github.com/example/one",
+            "network:github.com/example/two",
+        }
+        assert {repo.path for repo in loaded} == {first, second}
+
+    def test_same_repo_isolated_between_cells(self, config_dir, monkeypatch):
+        repo = config_dir / "shared-repo"
+        repo.mkdir()
+        monkeypatch.setattr(
+            "agent_codespaces.config._git_origin_remote",
+            lambda path: "https://github.com/Example/Repo.git",
+        )
+
+        monkeypatch.setenv(
+            "COPILOT_EXTENSIONS_CONTEXT",
+            str(_write_context(config_dir, marketplace="cell-a")),
+        )
+        save_adopted_repos([AdoptedRepo(path=repo, adopted_at="2026-06-04T00:00:00Z")])
+        first = adoption_storage_path(repo)
+
+        monkeypatch.setenv(
+            "COPILOT_EXTENSIONS_CONTEXT",
+            str(_write_context(config_dir, marketplace="cell-b")),
+        )
+        save_adopted_repos([AdoptedRepo(path=repo, adopted_at="2026-06-05T00:00:00Z")])
+        second = adoption_storage_path(repo)
+
+        assert first != second
+        assert json.loads(first.read_text(encoding="utf-8"))["marketplaceId"] == "cell-a"
+        assert json.loads(second.read_text(encoding="utf-8"))["marketplaceId"] == "cell-b"
 
 
 class TestMergedConfig:

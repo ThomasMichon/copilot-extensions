@@ -3,24 +3,28 @@
 Most repos need no config: agent-codespaces derives machine/location defaults,
 the ``/workspaces/<basename>`` checkout, and the git-credential relay by
 convention. Supplementary, CodeSpace-specific config can live **in the adopting
-repo** at the canonical ``.agent-codespaces/config.yaml`` or be exposed by an
-active plugin's ``codespaceConfig`` manifest declaration. The legacy repo-root
-``codespaces.yaml`` and user-level ``config.d`` providers remain compatibility
-inputs. Provider declarations merge below adopted-repo and current-repo config.
-On every start/reload the service reads each source live and merges in memory.
+repo** at the canonical ``.copilot-extensions/agent-codespaces/config.yaml`` or
+be exposed by an active plugin's ``codespaceConfig`` manifest declaration.
+Legacy ``.agent-codespaces/config.yaml``, repo-root ``codespaces.yaml``, and
+user-level ``config.d`` providers remain compatibility inputs. Provider
+declarations merge below adopted-repo and current-repo config. On every
+start/reload the service reads each source live and merges in memory.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import re
 import stat
+import subprocess
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, cast
+from urllib.parse import urlsplit, urlunsplit
 
 import yaml
 from dropin_registry import (
@@ -32,7 +36,12 @@ from dropin_registry import (
     WarningTracker,
     scan_directory,
 )
-from plugin_activation import ActivationReport, ActivePlugin, resolve_active_plugins
+from plugin_activation import (
+    ActivationReport,
+    ActivePlugin,
+    normalize_remote,
+    resolve_active_plugins,
+)
 
 log = logging.getLogger("agent-codespaces")
 
@@ -64,25 +73,31 @@ ADOPTED_REPOS_FILE = RUNTIME_DIR / "adopted-repos.yaml"
 SOCKET_DIR = RUNTIME_DIR / "sockets"
 LOG_FILE = RUNTIME_DIR / "agent-codespaces.log"
 
-# In-repo config, aligned with the sibling agent-* plugins' ``.agent-<name>/``
-# convention (e.g. ``.agent-worktrees/config.yaml``). This is the **canonical**
-# home for a repo's CodeSpace config; it carries only the *supplementary*,
-# CodeSpace-specific bits that convention can't derive (workspace_repo/split-repo
-# mapping, devcontainer pin, ado_host, provision hooks). A repo that matches
-# convention (machine defaults, ``/workspaces/<basename>`` checkout, git-credential
-# relay) needs no file at all.
-CONFIG_DIR_NAME = ".agent-codespaces"
+# In-repo config moves toward the shared ``.copilot-extensions/<plugin>/``
+# namespace. The neutral base config remains repo-owned and distribution-neutral;
+# a marketplace-specific override is an explicit opt-in overlay beneath the same
+# plugin namespace. Legacy locations remain readable during the compatibility
+# window.
+CONFIG_DIR_NAME = str(Path(".copilot-extensions") / "agent-codespaces")
 CONFIG_FILE_IN_DIR = "config.yaml"
 CANONICAL_CONFIG_REL = f"{CONFIG_DIR_NAME}/{CONFIG_FILE_IN_DIR}"
+LEGACY_CONFIG_DIR_NAME = ".agent-codespaces"
+LEGACY_CONFIG_REL = f"{LEGACY_CONFIG_DIR_NAME}/{CONFIG_FILE_IN_DIR}"
+MARKETPLACE_OVERLAYS_DIR = (
+    Path(".copilot-extensions") / "agent-codespaces" / "marketplaces"
+)
 
 # Legacy repo-root config filename, still read as a back-compat fallback.
 # ``agent-codespaces config migrate`` relocates it to CANONICAL_CONFIG_REL.
 CONFIG_FILENAME = "codespaces.yaml"
 NO_SUPPLEMENTAL_CONFIG_ADVISORY = (
-    "No CodeSpace config found (no .agent-codespaces/config.yaml in the "
-    "current repo and no adopted repos). Standard repos need none; add "
+    "No CodeSpace config found (no .copilot-extensions/agent-codespaces/"
+    "config.yaml in the current repo and no adopted repos). Standard repos need none; add "
     "one only for supplementary CodeSpace-specific config."
 )
+ADOPTION_RECEIPT_SCHEMA = "agent-codespaces/repo-adoption"
+ADOPTION_RECEIPT_VERSION = 1
+ADOPTION_RECEIPT_NAME = "adoption.json"
 
 # ── Supplementary config providers ──────────────────────────────────────────
 # An active plugin can expose its shipped CodeSpace target config directly from
@@ -804,12 +819,18 @@ def _legacy_target(entry: Path, text: str) -> Path | None:
     target = Path(candidates[0]).expanduser()
     if not target.is_absolute():
         return None
-    if (
-        target.name != CONFIG_FILE_IN_DIR
-        or target.parent.name != CONFIG_DIR_NAME.removeprefix(".")
-        or target.parent.parent.name != "references"
-    ):
+    canonical_tail = Path("references") / CONFIG_DIR_NAME / CONFIG_FILE_IN_DIR
+    legacy_tail = Path("references") / "agent-codespaces" / CONFIG_FILE_IN_DIR
+    if target.name != CONFIG_FILE_IN_DIR:
         return None
+    try:
+        tail = Path(*target.parts[-len(canonical_tail.parts) :])
+    except TypeError:
+        return None
+    if tail != canonical_tail:
+        tail = Path(*target.parts[-len(legacy_tail.parts) :])
+        if tail != legacy_tail:
+            return None
     return target
 
 
@@ -1348,30 +1369,25 @@ def discover_dropin_configs() -> list[Path]:
 def repo_config_path(repo_path: Path) -> Path | None:
     """Return a repo's CodeSpace config file, or ``None`` if it has none.
 
-    Prefers the canonical ``.agent-codespaces/config.yaml``; falls back to the
-    legacy repo-root ``codespaces.yaml`` (back-compat). The returned path is the
-    *file*; the repo root (used to resolve provision ``src`` paths) stays
-    ``repo_path`` regardless of which location the file lives in.
+    Prefers the canonical ``.copilot-extensions/agent-codespaces/config.yaml``;
+    falls back to legacy ``.agent-codespaces/config.yaml`` and repo-root
+    ``codespaces.yaml``. If no neutral base config exists but an explicit
+    marketplace overlay does, returns that overlay path.
     """
-    canonical = repo_path / CONFIG_DIR_NAME / CONFIG_FILE_IN_DIR
-    if canonical.exists():
-        return canonical
-    legacy = repo_path / CONFIG_FILENAME
-    if legacy.exists():
-        return legacy
-    return None
+    layers = _repo_config_layers(repo_path)
+    return layers[0] if layers else None
 
 
 def repo_has_config(repo_path: Path) -> bool:
-    """Whether ``repo_path`` carries a CodeSpace config (canonical or legacy)."""
-    return repo_config_path(repo_path) is not None
+    """Whether ``repo_path`` carries a CodeSpace config or explicit overlay."""
+    return bool(_repo_config_layers(repo_path))
 
 
 def cwd_repo_root() -> Path | None:
     """The git repo root for the current directory, or ``None`` when not in one.
 
     Backs config **auto-discovery**: a CLI run inside a repo that carries a
-    ``.agent-codespaces/config.yaml`` picks it up without a manual ``config
+    ``.copilot-extensions/agent-codespaces/config.yaml`` picks it up without a manual ``config
     adopt`` (the adoption manifest remains for extra/multi repos and for the
     detached daemon paths, which pass ``include_cwd=False``).
     """
@@ -1845,10 +1861,272 @@ class AdoptedRepo:
 
     path: Path
     adopted_at: str | None = None
+    normalized_remote: str | None = None
+
+
+def _deep_merge_dicts(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge_dicts(
+                cast(dict[str, Any], merged[key]),
+                cast(dict[str, Any], value),
+            )
+        else:
+            merged[key] = value
+    return merged
+
+
+def _load_installation_context() -> dict[str, Any] | None:
+    raw = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip()
+    if not raw:
+        return None
+    try:
+        if raw.startswith("{"):
+            data = json.loads(raw)
+        else:
+            data = json.loads(Path(raw).expanduser().read_text(encoding="utf-8"))
+    except (OSError, TypeError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _installation_marketplace_id() -> str | None:
+    context = _load_installation_context()
+    if context is None:
+        return None
+    marketplace_id = context.get("marketplaceId")
+    if not isinstance(marketplace_id, str) or not marketplace_id.strip():
+        return None
+    return marketplace_id.strip()
+
+
+def _cell_root() -> Path | None:
+    context = _load_installation_context()
+    if context is None:
+        return None
+    cell_root = context.get("cellRoot")
+    if not isinstance(cell_root, str) or not cell_root.strip():
+        return None
+    path = Path(cell_root).expanduser()
+    return path if path.is_absolute() else None
+
+
+def _repo_base_config_path(repo_path: Path) -> Path | None:
+    for candidate in (
+        repo_path / CONFIG_DIR_NAME / CONFIG_FILE_IN_DIR,
+        repo_path / LEGACY_CONFIG_DIR_NAME / CONFIG_FILE_IN_DIR,
+        repo_path / CONFIG_FILENAME,
+    ):
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _repo_marketplace_overlay_path(repo_path: Path) -> Path | None:
+    marketplace_id = _installation_marketplace_id()
+    if not marketplace_id:
+        return None
+    candidate = repo_path / MARKETPLACE_OVERLAYS_DIR / marketplace_id / CONFIG_FILE_IN_DIR
+    return candidate if candidate.exists() else None
+
+
+def _repo_config_layers(repo_path: Path) -> list[Path]:
+    layers: list[Path] = []
+    base = _repo_base_config_path(repo_path)
+    if base is not None:
+        layers.append(base)
+    overlay = _repo_marketplace_overlay_path(repo_path)
+    if overlay is not None:
+        layers.append(overlay)
+    return layers
+
+
+def _git_origin_remote(repo_path: Path) -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "config", "--get", "remote.origin.url"],
+            cwd=str(repo_path),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    remote = (result.stdout or "").strip()
+    return remote if result.returncode == 0 and remote else None
+
+
+def _normalize_repository_remote(raw_remote: str) -> str | None:
+    remote = raw_remote.strip()
+    if not remote:
+        return None
+    try:
+        parsed = urlsplit(remote)
+        default_port = {
+            "http": 80,
+            "https": 443,
+            "ssh": 22,
+            "git": 9418,
+        }.get(parsed.scheme.casefold())
+        if default_port is not None and parsed.port == default_port:
+            host = parsed.hostname or ""
+            if ":" in host and not host.startswith("["):
+                host = f"[{host}]"
+            if parsed.username:
+                host = f"{parsed.username}@{host}"
+            remote = urlunsplit(
+                (parsed.scheme, host, parsed.path, parsed.query, parsed.fragment)
+            )
+    except ValueError:
+        pass
+    normalized = normalize_remote(remote)
+    if not normalized or normalized.startswith("file-relative:"):
+        return None
+    if normalized.startswith("network:github.com/"):
+        return normalized.casefold()
+    return normalized
+
+
+def _normalized_repository_remote(repo_path: Path) -> str | None:
+    remote = _git_origin_remote(repo_path)
+    if not remote:
+        return None
+    return _normalize_repository_remote(remote)
+
+
+def _repo_identity_components(repo_path: Path) -> tuple[str, str, Path] | None:
+    normalized_remote = _normalized_repository_remote(repo_path)
+    cell_root = _cell_root()
+    marketplace_id = _installation_marketplace_id()
+    if not normalized_remote or cell_root is None or not marketplace_id:
+        return None
+    digest = hashlib.sha256(normalized_remote.encode("utf-8")).hexdigest()[:24]
+    repository_id = f"repo-{digest}"
+    return normalized_remote, marketplace_id, cell_root / "repos" / repository_id
+
+
+def _namespaced_adoption_path(repo_path: Path) -> Path | None:
+    components = _repo_identity_components(repo_path)
+    if components is None:
+        return None
+    _normalized, _marketplace, repository_root = components
+    return repository_root / "agent-codespaces" / ADOPTION_RECEIPT_NAME
+
+
+def adoption_storage_path(repo_path: Path | None = None) -> Path:
+    if repo_path is not None:
+        namespaced = _namespaced_adoption_path(repo_path)
+        if namespaced is not None:
+            return namespaced
+    return ADOPTED_REPOS_FILE
+
+
+def adoption_storage_summary() -> str:
+    cell_root = _cell_root()
+    if cell_root is None:
+        return str(ADOPTED_REPOS_FILE)
+    return str(cell_root / "repos" / "<stable-repo-id>" / "agent-codespaces" / ADOPTION_RECEIPT_NAME)
+
+
+def _repo_matches_identity(path: Path, normalized_remote: str) -> bool:
+    try:
+        return _normalized_repository_remote(path) == normalized_remote
+    except OSError:
+        return False
+
+
+def _registered_repo_paths(normalized_remote: str) -> list[Path]:
+    try:
+        from agent_worktrees import repos as worktree_repos
+    except ImportError:
+        return []
+    matches: list[Path] = []
+    seen: set[str] = set()
+    for entry in worktree_repos.read_registry().repos.values():
+        local = entry.local_path()
+        if not local:
+            continue
+        if _normalize_repository_remote(entry.remote or "") != normalized_remote:
+            continue
+        candidate = Path(local).expanduser()
+        key = os.path.normcase(str(candidate))
+        if key in seen:
+            continue
+        seen.add(key)
+        matches.append(candidate)
+    return matches
+
+
+def _resolve_namespaced_repo_path(
+    normalized_remote: str,
+    last_path: Path,
+) -> Path:
+    candidates = _registered_repo_paths(normalized_remote)
+    last_key = os.path.normcase(str(last_path))
+    for candidate in candidates:
+        if os.path.normcase(str(candidate)) == last_key:
+            return candidate
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    if _repo_matches_identity(last_path, normalized_remote):
+        return last_path
+    return candidates[0] if candidates else last_path
+
+
+def _load_namespaced_adopted_repos() -> list[AdoptedRepo] | None:
+    cell_root = _cell_root()
+    marketplace_id = _installation_marketplace_id()
+    if cell_root is None or not marketplace_id:
+        return None
+    repos_root = cell_root / "repos"
+    if not repos_root.is_dir():
+        return None
+    adopted: list[AdoptedRepo] = []
+    found = False
+    for receipt_path in sorted(
+        repos_root.glob(f"*/agent-codespaces/{ADOPTION_RECEIPT_NAME}"),
+        key=lambda path: os.path.normcase(str(path)),
+    ):
+        try:
+            raw = json.loads(receipt_path.read_text(encoding="utf-8"))
+        except (OSError, TypeError, ValueError):
+            continue
+        if not isinstance(raw, dict):
+            continue
+        if raw.get("schema") != ADOPTION_RECEIPT_SCHEMA:
+            continue
+        if raw.get("version") != ADOPTION_RECEIPT_VERSION:
+            continue
+        if raw.get("marketplaceId") != marketplace_id:
+            continue
+        normalized_remote = raw.get("normalizedRemote")
+        last_path = raw.get("path")
+        if not isinstance(normalized_remote, str) or not normalized_remote.strip():
+            continue
+        if not isinstance(last_path, str) or not last_path.strip():
+            continue
+        found = True
+        resolved = _resolve_namespaced_repo_path(
+            normalized_remote.strip(),
+            Path(last_path).expanduser(),
+        )
+        adopted.append(
+            AdoptedRepo(
+                path=resolved,
+                adopted_at=cast(str | None, raw.get("adoptedAt")),
+                normalized_remote=normalized_remote.strip(),
+            )
+        )
+    return adopted if found else None
 
 
 def load_adopted_repos() -> list[AdoptedRepo]:
-    """Load the adoption manifest from the runtime directory."""
+    """Load adopted repos from the active cell, with legacy fallback."""
+    namespaced = _load_namespaced_adopted_repos()
+    if namespaced is not None:
+        return namespaced
     if not ADOPTED_REPOS_FILE.exists():
         return []
 
@@ -1867,12 +2145,42 @@ def load_adopted_repos() -> list[AdoptedRepo]:
         repos.append(AdoptedRepo(
             path=Path(entry["path"]),
             adopted_at=entry.get("adopted_at"),
+            normalized_remote=entry.get("normalized_remote"),
         ))
     return repos
 
 
 def save_adopted_repos(repos: list[AdoptedRepo]) -> None:
-    """Write the adoption manifest to the runtime directory."""
+    """Persist adopted repos to the active cell, or the legacy manifest."""
+    if _cell_root() is not None and _installation_marketplace_id():
+        for repo in repos:
+            receipt_path = _namespaced_adoption_path(repo.path)
+            if receipt_path is None:
+                raise ValueError(
+                    f"repository {repo.path} has no stable remote identity"
+                )
+            normalized_remote = repo.normalized_remote or _normalized_repository_remote(
+                repo.path
+            )
+            if not normalized_remote:
+                raise ValueError(
+                    f"repository {repo.path} has no stable remote identity"
+                )
+            receipt_path.parent.mkdir(parents=True, exist_ok=True)
+            receipt = {
+                "schema": ADOPTION_RECEIPT_SCHEMA,
+                "version": ADOPTION_RECEIPT_VERSION,
+                "marketplaceId": _installation_marketplace_id(),
+                "normalizedRemote": normalized_remote,
+                "path": str(repo.path),
+                "adoptedAt": repo.adopted_at,
+            }
+            receipt_path.write_text(
+                json.dumps(receipt, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+        return
+
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     from . import config_migrations
 
@@ -1892,16 +2200,23 @@ def save_adopted_repos(repos: list[AdoptedRepo]) -> None:
 def load_repo_config(repo_path: Path) -> dict[str, Any] | None:
     """Load a repo's CodeSpace config. Returns None if missing.
 
-    Reads the canonical ``.agent-codespaces/config.yaml`` or the legacy
-    repo-root ``codespaces.yaml`` (see :func:`repo_config_path`).
+    Reads the canonical ``.copilot-extensions/agent-codespaces/config.yaml``
+    first, then legacy fallbacks. When an explicit installation context names a
+    marketplace-specific overlay, it is merged on top of the neutral base
+    config.
     """
-    config_file = repo_config_path(repo_path)
-    if config_file is None:
+    config_files = _repo_config_layers(repo_path)
+    if not config_files:
         log.warning("No %s found in %s", CANONICAL_CONFIG_REL, repo_path)
         return None
 
-    with open(config_file) as f:
-        return yaml.safe_load(f) or {}
+    merged: dict[str, Any] = {}
+    for config_file in config_files:
+        with open(config_file) as f:
+            loaded = yaml.safe_load(f) or {}
+        if isinstance(loaded, dict):
+            merged = _deep_merge_dicts(merged, loaded)
+    return merged
 
 
 def _state_root_config_dir(repo_path: Path) -> Path | None:
@@ -1913,7 +2228,8 @@ def _state_root_config_dir(repo_path: Path) -> Path | None:
     ``agent-worktrees state-root`` (run with cwd=repo_path) only to LOCATE the
     knowledge checkout -- the config-READ axis, distinct from where personal state
     is written -- returning it only when it actually declares a CodeSpace config
-    (canonical ``.agent-codespaces/config.yaml`` or legacy ``codespaces.yaml``).
+    (canonical ``.copilot-extensions/agent-codespaces/config.yaml`` or legacy
+    fallbacks).
 
     Best-effort + fail-open: a missing ``agent-worktrees`` binstub, a
     non-stateless / unbound repo, or any error yields ``None``. Never raises.
@@ -2036,13 +2352,15 @@ def load_merged_config(
 ) -> CodespacesConfig:
     """Load and merge CodeSpace config from all adopted repos.
 
-    Reads each repo's config (``.agent-codespaces/config.yaml``, or legacy
-    ``codespaces.yaml``) live. First repo's values win on conflicts (except
+    Reads each repo's config (``.copilot-extensions/agent-codespaces/config.yaml``,
+    with legacy fallbacks and optional marketplace overlay) live. First repo's
+    neutral values win on conflicts (except
     credential sources, which are unioned).
 
     ``include_cwd`` (default True) also **auto-discovers** the current git repo:
     if the cwd's repo carries a config and isn't already adopted, it is merged
-    last -- so a CLI run inside a repo picks up its ``.agent-codespaces/config.yaml``
+    last -- so a CLI run inside a repo picks up its
+    ``.copilot-extensions/agent-codespaces/config.yaml``
     with no manual ``config adopt``. Detached daemon paths (relay/resolver) pass
     ``include_cwd=False`` so they stay driven purely by the adoption manifest.
     """

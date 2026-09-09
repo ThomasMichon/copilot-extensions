@@ -4,7 +4,7 @@ Subcommands:
   ssh <name>            SSH into a CodeSpace (interactive or --stdio)
   list                  List active CodeSpaces
   config adopt          Register current repo for config
-  config init           Scaffold .agent-codespaces/config.yaml (+ auto-adopt)
+  config init           Scaffold .copilot-extensions/agent-codespaces/config.yaml (+ auto-adopt)
   config show           Show resolved config
   config validate       Validate config
   delete <name>         Delete a CodeSpace (recovers sessions first)
@@ -37,14 +37,15 @@ from . import pool as pool_mod
 from . import relay_launch
 from .codespace_config import CodespaceSource
 from .config import (
-    ADOPTED_REPOS_FILE,
     CANONICAL_CONFIG_REL,
-    CONFIG_DIR_NAME,
     CONFIG_FILE_IN_DIR,
     CONFIG_FILENAME,
+    LEGACY_CONFIG_DIR_NAME,
     NO_SUPPLEMENTAL_CONFIG_ADVISORY,
     RUNTIME_DIR,
     AdoptedRepo,
+    adoption_storage_path,
+    adoption_storage_summary,
     load_adopted_repos,
     load_merged_config,
     repo_config_path,
@@ -182,7 +183,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--project", "-p", dest="project", default=None, metavar="REPO",
         help="Resolve as if the cwd were inside REPO's checkout: repo-root "
-             "discovery (e.g. .agent-codespaces/config.yaml) targets REPO "
+             "discovery (e.g. .copilot-extensions/agent-codespaces/config.yaml) targets REPO "
              "instead of the "
              "actual cwd. Injected by the `<repo> <slug>` router (e.g. `<repo> "
              "codespaces …`). A harmless no-op for verbs that take an explicit "
@@ -307,11 +308,11 @@ def main(argv: list[str] | None = None) -> int:
     config_sub.add_parser(
         "migrate",
         help="Relocate a legacy repo-root codespaces.yaml to "
-             ".agent-codespaces/config.yaml",
+             ".copilot-extensions/agent-codespaces/config.yaml",
     )
     config_init_p = config_sub.add_parser(
         "init",
-        help="Scaffold .agent-codespaces/config.yaml in the current repo "
+        help="Scaffold .copilot-extensions/agent-codespaces/config.yaml in the current repo "
              "(supplementary-only; most repos need none)",
     )
     config_init_p.add_argument(
@@ -320,7 +321,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     config_init_p.add_argument(
         "--force", action="store_true",
-        help="Overwrite an existing .agent-codespaces/config.yaml",
+        help="Overwrite an existing .copilot-extensions/agent-codespaces/config.yaml",
     )
     config_init_p.add_argument(
         "--adopt", action="store_true",
@@ -1311,7 +1312,8 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
                 )
 
             # Run repo-declared provision hooks (by-convention extras from the
-            # adopted repo's .agent-codespaces/config.yaml). Best-effort, idempotent.
+            # adopted repo's .copilot-extensions/agent-codespaces/config.yaml).
+            # Best-effort, idempotent.
             await _provision_repo_hooks(
                 manager, args.name, config, getattr(args, "repo", None),
             )
@@ -1776,7 +1778,7 @@ async def _register_codespace_plugins(
     - **user settings (interactive lane):** resolves the harness's
       ``codespacePlugins`` for this CodeSpace's workspace repo -- both those
       swept from installed harness plugins AND the operator-declared
-      ``.agent-codespaces/config.yaml`` ``codespace_plugins`` list
+      ``.copilot-extensions/agent-codespaces/config.yaml`` ``codespace_plugins`` list
       (:func:`codespace_plugins.resolve_codespace_plugins`) -- and writes them
       into the CodeSpace's user ``~/.copilot/settings.json`` + pre-installs the
       payloads (see :mod:`codespace_register`). Honored by interactive /
@@ -1825,7 +1827,7 @@ async def _register_codespace_plugins(
         enabled_names = plugin_names_from_enabled(repo_settings.get("enabledPlugins"))
         marketplaces = repo_settings.get("extraKnownMarketplaces") or {}
 
-        # Merge the operator-declared globals (.agent-codespaces/config.yaml
+        # Merge the operator-declared globals (.copilot-extensions/agent-codespaces/config.yaml
         # `codespace_plugins`)
         # with the set swept from installed harness plugins.
         operator_specs = parse_operator_plugins(
@@ -2596,7 +2598,7 @@ def _derive_codespaces_defaults(
 
 
 def _render_codespaces_yaml(defaults: dict | None) -> str:
-    """Render a ``.agent-codespaces/config.yaml``.
+    """Render a ``.copilot-extensions/agent-codespaces/config.yaml``.
 
     The file is **supplementary-only**: it carries just the CodeSpace-specific
     bits convention can't derive. A repo that matches convention (machine
@@ -2605,7 +2607,7 @@ def _render_codespaces_yaml(defaults: dict | None) -> str:
     keeps every block commented unless a discovered CodeSpace supplies a value.
     """
     header = (
-        "# .agent-codespaces/config.yaml -- SUPPLEMENTARY CodeSpace config.\n"
+        "# .copilot-extensions/agent-codespaces/config.yaml -- SUPPLEMENTARY CodeSpace config.\n"
         "#\n"
         "# Most repos need NO file here. agent-codespaces derives by convention:\n"
         "#   * machine_type=largePremiumLinux, location=EastUs\n"
@@ -2908,18 +2910,20 @@ def _account_login_remedy(login: str) -> str:
 def _config_init(
     *, from_codespace: str | None, force: bool, also_adopt: bool
 ) -> int:
-    """Scaffold ``.agent-codespaces/config.yaml``, deriving from existing CodeSpaces.
+    """Scaffold ``.copilot-extensions/agent-codespaces/config.yaml``, deriving from existing CodeSpaces.
 
     Most repos need no file at all -- the scaffold is supplementary-only. Writing
     it also auto-adopts the repo (so the detached daemon picks it up); pass a
     repo that matches convention and you can simply skip this entirely.
     """
     repo_root = _resolve_repo_root()
-    canonical = repo_root / CONFIG_DIR_NAME / CONFIG_FILE_IN_DIR
+    canonical = repo_root / CANONICAL_CONFIG_REL
+    legacy_dir = repo_root / LEGACY_CONFIG_DIR_NAME / CONFIG_FILE_IN_DIR
     legacy = repo_root / CONFIG_FILENAME
 
-    if legacy.exists() and not canonical.exists():
-        print(f"A legacy {CONFIG_FILENAME} exists at {legacy}.")
+    if (legacy.exists() or legacy_dir.exists()) and not canonical.exists():
+        legacy_path = legacy if legacy.exists() else legacy_dir
+        print(f"A legacy config exists at {legacy_path}.")
         print(f"Run `agent-codespaces config migrate` to move it to "
               f"{CANONICAL_CONFIG_REL}.")
         return 0
@@ -2997,42 +3001,50 @@ def _config_adopt() -> int:
         path=repo_root,
         adopted_at=datetime.now(tz=timezone.utc).isoformat(),
     ))
-    save_adopted_repos(repos)
+    try:
+        save_adopted_repos(repos)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
     print(f"Adopted: {repo_root}")
     print(f"Config:   {repo_config_path(repo_root)}")
-    print(f"Manifest: {ADOPTED_REPOS_FILE}")
+    print(f"Manifest: {adoption_storage_path(repo_root)}")
     return 0
 
 
 def _config_migrate_file() -> int:
     """Relocate a legacy repo-root ``codespaces.yaml`` to the canonical location.
 
-    Moves ``<repo>/codespaces.yaml`` -> ``<repo>/.agent-codespaces/config.yaml``
-    (idempotent). Content is copied verbatim; adoption is unaffected (the manifest
-    tracks the repo root, not the file). A no-op when the repo already uses the
-    canonical location or carries no config.
+    Moves ``<repo>/codespaces.yaml`` or ``<repo>/.agent-codespaces/config.yaml``
+    to ``<repo>/.copilot-extensions/agent-codespaces/config.yaml`` (idempotent).
+    Content is copied verbatim; adoption is unaffected (machine-local adoption
+    keys by repo identity, not by the committed file path). A no-op when the
+    repo already uses the canonical location or carries no config.
     """
     repo_root = _resolve_repo_root()
-    canonical = repo_root / CONFIG_DIR_NAME / CONFIG_FILE_IN_DIR
+    canonical = repo_root / CANONICAL_CONFIG_REL
+    legacy_dir = repo_root / LEGACY_CONFIG_DIR_NAME / CONFIG_FILE_IN_DIR
     legacy = repo_root / CONFIG_FILENAME
 
     if canonical.exists():
-        if legacy.exists():
-            print(f"Both {CANONICAL_CONFIG_REL} and legacy {CONFIG_FILENAME} "
-                  f"exist. The canonical file wins; remove {legacy} when ready.")
+        if legacy.exists() or legacy_dir.exists():
+            legacy_path = legacy if legacy.exists() else legacy_dir
+            print(f"Both {CANONICAL_CONFIG_REL} and legacy config {legacy_path} "
+                  f"exist. The canonical file wins; remove {legacy_path} when ready.")
             return 0
         print(f"Already migrated: {canonical}")
         return 0
 
-    if not legacy.exists():
+    source = legacy_dir if legacy_dir.exists() else legacy
+    if not source.exists():
         print(f"No legacy {CONFIG_FILENAME} to migrate in {repo_root} "
               "(nothing to do).")
         return 0
 
     canonical.parent.mkdir(parents=True, exist_ok=True)
-    canonical.write_text(legacy.read_text(encoding="utf-8"), encoding="utf-8")
-    legacy.unlink()
-    print(f"Migrated {legacy}")
+    canonical.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+    source.unlink()
+    print(f"Migrated {source}")
     print(f"      -> {canonical}")
     print("Commit the move; adoption is unchanged (the manifest tracks the repo "
           "root, not the file).")
@@ -4223,7 +4235,7 @@ def _cmd_status() -> int:
     """Show service status overview."""
     print("=== agent-codespaces status ===")
     print(f"Runtime dir: {RUNTIME_DIR}")
-    print(f"Adopted repos: {ADOPTED_REPOS_FILE}")
+    print(f"Adopted repos: {adoption_storage_summary()}")
 
     repos = load_adopted_repos()
     print(f"Adopted repo count: {len(repos)}")
@@ -4458,7 +4470,8 @@ def _cmd_config_migrate() -> int:
     """Migrate machine-local config schema (adopted-repos.yaml) in place.
 
     Idempotent + atomic; machine-local only (never touches the repo-committed
-    ``.agent-codespaces/config.yaml`` -- that is an adopt concern). Safe no-op
+    ``.copilot-extensions/agent-codespaces/config.yaml`` -- that is an adopt
+    concern). Safe no-op
     when the vendored ``config_migrate`` library is absent. Invoked once from the
     installer's install/update flow.
     """
