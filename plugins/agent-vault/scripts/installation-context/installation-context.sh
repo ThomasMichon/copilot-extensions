@@ -17,6 +17,10 @@ HELD_LOCK_TOKENS=()
 RUNTIME_SLOT_LOCK_TIMEOUT_SECONDS=30
 RUNTIME_SLOT_COMPLETION_LOCK_TIMEOUT_SECONDS=300
 MAX_SNAPSHOT_ENTRIES=100000
+# Symlink-following budget for the pure-shell canonicalizer, matching the limit
+# a libc path resolver applies before reporting a loop.
+CANONICAL_PATH_MAX_LINK_DEPTH=40
+CANONICAL_PATH_PARTS=()
 MAX_SNAPSHOT_PATH_BYTES=4096
 MAX_SNAPSHOT_CONTENT_BYTES=4294967296
 MAIN_BASHPID="$BASHPID"
@@ -444,25 +448,126 @@ is_absolute() {
     [[ "$1" == /* ]]
 }
 
+# Split a path into components on '/' with pathname expansion disabled, so a
+# component containing a glob metacharacter survives verbatim. Results are
+# appended to the CANONICAL_PATH_PARTS array.
+canonical_split_path() {
+    local value="$1" glob_was_disabled=0 part
+    if [[ "$-" == *f* ]]; then
+        glob_was_disabled=1
+    fi
+    set -f
+    local IFS=/
+    for part in $value; do
+        CANONICAL_PATH_PARTS+=("$part")
+    done
+    if ((glob_was_disabled == 0)); then
+        set +f
+    fi
+}
+
+# Canonicalize a path whose leaf does not exist yet, reproducing GNU
+# `realpath -m` on a BSD userland where `realpath` has no `-m` and
+# `readlink -f` refuses a missing leaf.
+#
+# Components are resolved incrementally, exactly as `realpath -m` does: '..'
+# pops the already-resolved prefix, and any component that is a symlink is
+# followed even when its target does not exist yet. Resolving one component at
+# a time is what makes this safe -- resolving a prefix once and then appending
+# the remainder lexically misses a symlink that only becomes reachable after a
+# '..' pops back to it, which lets a containment check accept a path that later
+# traverses somewhere else entirely.
+canonical_missing_path() {
+    local value="$1" out="" part target link_depth=0 index=0
+    local -a pending=()
+    [[ "$value" == /* ]] || value="$PWD/$value"
+    CANONICAL_PATH_PARTS=()
+    canonical_split_path "$value"
+    pending=("${CANONICAL_PATH_PARTS[@]}")
+    while ((index < ${#pending[@]})); do
+        part="${pending[index]}"
+        index=$((index + 1))
+        case "$part" in
+            "" | ".")
+                continue
+                ;;
+            "..")
+                out="${out%/*}"
+                continue
+                ;;
+        esac
+        # A symlink is followed whether or not its target exists, which is what
+        # keeps this in step with `realpath -m` and the Python adapter.
+        if [[ -L "$out/$part" ]]; then
+            link_depth=$((link_depth + 1))
+            if ((link_depth > CANONICAL_PATH_MAX_LINK_DEPTH)); then
+                fail "Too many levels of symbolic links: $value"
+            fi
+            # Prefer `realpath` while the target still exists: it resolves the
+            # component completely and, unlike `readlink`, its output preserves
+            # a trailing newline in the resolved path. The sentinel keeps that
+            # newline through command substitution.
+            if command -v realpath >/dev/null 2>&1 &&
+                target="$(realpath "$out/$part" 2>/dev/null && printf 'x')"; then
+                target="${target%x}"
+                out="${target%$'\n'}"
+                continue
+            fi
+            # Dangling target: only `readlink` can report it. On a BSD userland
+            # `readlink` prints a target that ends in a newline identically to
+            # one that does not, so a trailing newline cannot be recovered here
+            # -- the platform's own `readlink -f` loses it the same way.
+            command -v readlink >/dev/null 2>&1 ||
+                fail "Cannot resolve path: $value"
+            # `readlink` is invoked without `--`: the operand is always absolute
+            # here, so it can never be mistaken for an option, and not every
+            # BSD `readlink` is guaranteed to accept the separator.
+            target="$(
+                readlink "$out/$part" 2>/dev/null && printf 'x'
+            )" || fail "Cannot resolve path: $value"
+            target="${target%x}"
+            target="${target%$'\n'}"
+            CANONICAL_PATH_PARTS=()
+            canonical_split_path "$target"
+            if [[ "$target" == /* ]]; then
+                out=""
+            fi
+            pending=(
+                "${CANONICAL_PATH_PARTS[@]}"
+                "${pending[@]:index}"
+            )
+            index=0
+            continue
+        fi
+        out="$out/$part"
+    done
+    printf '%s' "${out:-/}"
+}
+
 canonical_path() {
-    local value="$1" must_exist="${2:-false}" result
+    local value="$1" must_exist="${2:-false}" result have_tool=false
     [[ -n "${value//[[:space:]]/}" ]] || fail "A required path is empty."
     value="${value/#\~/$HOME}"
     if [[ "$must_exist" == true && ! -e "$value" ]]; then
         fail "Path does not exist: $value"
     fi
     if command -v realpath >/dev/null 2>&1; then
+        have_tool=true
         if result="$(realpath -m -- "$value" 2>/dev/null)"; then
             printf '%s' "$result"
             return
         fi
     fi
     if command -v readlink >/dev/null 2>&1; then
-        result="$(readlink -f -- "$value")" || fail "Cannot resolve path: $value"
-    else
-        fail "Cannot canonicalize paths: realpath or readlink is required."
+        have_tool=true
+        if result="$(readlink -f -- "$value" 2>/dev/null)"; then
+            printf '%s' "$result"
+            return
+        fi
     fi
-    printf '%s' "$result"
+    [[ "$have_tool" == true ]] ||
+        fail "Cannot canonicalize paths: realpath or readlink is required."
+    canonical_missing_path "$value"
 }
 
 paths_equal() {
