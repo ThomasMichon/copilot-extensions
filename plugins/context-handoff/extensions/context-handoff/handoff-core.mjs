@@ -1293,6 +1293,7 @@ function logHandoffActivity(
       "--field", `handoff_id=${stored.id}`,
       "--field", `storage=${stored.storage}`,
       "--field", `session_state=${sessionStatePath}`,
+      "--field", `predecessor_pid=${process.pid}`,
     ], {
       cwd,
       timeout: 5000,

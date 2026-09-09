@@ -59,6 +59,12 @@ def _bash_honors_pipefail() -> bool:
                            text=True, timeout=30)
     except (OSError, subprocess.SubprocessError):
         return False
+    bash_path = Path(_BASH)
+    if (
+        bash_path.name.lower() == "bash.exe"
+        and bash_path.parent.name.lower() == "system32"
+    ):
+        return False
     return r.returncode != 0 and "REACHED" not in r.stdout
 
 

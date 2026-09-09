@@ -737,8 +737,9 @@ def _wire_monitor_handoff_session(tmp_path, monkeypatch):
     _capture_set(monkeypatch)
 
 
-def test_monitor_pending_handoff_request_returns_actionable_request(monkeypatch):
+def test_monitor_pending_handoff_request_returns_actionable_request(tmp_path, monkeypatch):
     monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
 
     def read_events(**kwargs):
         event = kwargs.get("event")
@@ -749,6 +750,7 @@ def test_monitor_pending_handoff_request_returns_actionable_request(monkeypatch)
                     "session_id": "session-1",
                     "session_state": r"C:\state\handoff-request.json",
                     "storage": "file",
+                    "predecessor_pid": "77",
                 }
             ]
         if event == "handoff_cutover_spawn":
@@ -767,6 +769,7 @@ def test_monitor_pending_handoff_request_returns_actionable_request(monkeypatch)
             "consumed": False,
         },
     )
+    monkeypatch.setattr(m.locks, "process_start_time", lambda pid: "old-process")
     record = types.SimpleNamespace(
         worktree_id="a",
         pending_handoffs=[
@@ -784,13 +787,17 @@ def test_monitor_pending_handoff_request_returns_actionable_request(monkeypatch)
         "seed": "HANDOFF_SEED",
         "worktree_id": "a",
         "predecessor_session_id": "session-1",
+        "predecessor_pid": 77,
+        "predecessor_start_time": "old-process",
         "session_state_path": r"C:\state\handoff-request.json",
         "storage": "file",
+        "claim_path": str(tmp_path / "status-monitor-handoffs.d" / "a" / "handoff-1.json"),
     }
 
 
-def test_monitor_pending_handoff_request_skips_already_triggered(monkeypatch):
+def test_monitor_pending_handoff_request_skips_already_claimed(tmp_path, monkeypatch):
     monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
 
     def read_events(**kwargs):
         event = kwargs.get("event")
@@ -802,11 +809,10 @@ def test_monitor_pending_handoff_request_skips_already_triggered(monkeypatch):
                     "session_state": r"C:\state\handoff-request.json",
                 }
             ]
-        if event == "handoff_cutover_spawn":
-            return [{"handoff_token": "handoff-1"}]
         return []
 
     monkeypatch.setattr(m.activity, "read_events", read_events)
+    monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: None)
     monkeypatch.setattr(
         m,
         "_monitor_read_session_state_handoff",
@@ -829,7 +835,227 @@ def test_monitor_pending_handoff_request_skips_already_triggered(monkeypatch):
         ],
     )
 
+    assert m._monitor_pending_handoff_request(record) is not None
     assert m._monitor_pending_handoff_request(record) is None
+
+
+def test_monitor_claim_handoff_cutover_is_atomic_one_shot(tmp_path, monkeypatch):
+    monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
+    logged = []
+    monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: logged.append((a, k)))
+
+    request = {
+        "token": "handoff-1",
+        "worktree_id": "a",
+        "predecessor_session_id": "session-1",
+    }
+    first = m._monitor_claim_handoff_cutover(request)
+    second = m._monitor_claim_handoff_cutover(request)
+
+    assert first == {
+        "ok": True,
+        "claimed": True,
+        "path": str(tmp_path / "status-monitor-handoffs.d" / "a" / "handoff-1.json"),
+    }
+    assert second == {
+        "ok": True,
+        "claimed": False,
+        "path": str(tmp_path / "status-monitor-handoffs.d" / "a" / "handoff-1.json"),
+    }
+    assert (tmp_path / "status-monitor-handoffs.d" / "a" / "handoff-1.json").exists()
+    assert logged[0][1]["outcome"] == "acquired"
+    assert logged[1][1]["outcome"] == "already-claimed"
+
+
+def test_sweep_does_not_retry_after_verification_timeout(tmp_path, monkeypatch):
+    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
+    _wire_monitor_handoff_session(tmp_path, monkeypatch)
+
+    def read_events(**kwargs):
+        event = kwargs.get("event")
+        if event == "handoff_requested":
+            return [
+                {
+                    "handoff_id": "handoff-1",
+                    "session_id": "session-1",
+                    "session_state": r"C:\state\handoff-request.json",
+                }
+            ]
+        return []
+
+    monkeypatch.setattr(m.activity, "read_events", read_events)
+    monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: None)
+    monkeypatch.setattr(
+        m,
+        "_monitor_read_session_state_handoff",
+        lambda path: {
+            "handoffId": "handoff-1",
+            "seed": "HANDOFF_SEED",
+            "worktree": "a",
+            "consumed": False,
+        },
+    )
+    triggered = []
+
+    def trigger(item):
+        assert m.Path(item["claim_path"]).exists()
+        triggered.append(item)
+        return 4, {"ok": False, "candidate_status": "session-association-timeout"}
+
+    monkeypatch.setattr(
+        m,
+        "_monitor_trigger_handoff_cutover",
+        trigger,
+    )
+
+    assert m._monitor_sweep("tmux", "T", "P", set()) == 1
+    assert m._monitor_sweep("tmux", "T", "P", set()) == 1
+    assert len(triggered) == 1
+
+
+def test_monitor_pending_handoff_predecessor_retire_uses_logged_predecessor_binding(
+    monkeypatch,
+):
+    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+
+    def read_events(**kwargs):
+        event = kwargs.get("event")
+        if event == "handoff_cutover_spawn":
+            return [{
+                "handoff_token": "handoff-1",
+                "session_id": "session-1",
+                "old_pane": "%9",
+                "expected_mux_session": "wt-a",
+                "predecessor_copilot_pid": 77,
+                "predecessor_copilot_start_time": "old-process",
+            }]
+        if event == "handoff_predecessor_retire":
+            return []
+        return []
+
+    monkeypatch.setattr(m.activity, "read_events", read_events)
+    record = types.SimpleNamespace(
+        worktree_id="a",
+        pending_handoffs=[
+            types.SimpleNamespace(
+                token="handoff-1",
+                predecessor="session-1",
+                candidate="successor-1",
+                successor=None,
+            )
+        ],
+    )
+
+    assert m._monitor_pending_handoff_predecessor_retire(record) == {
+        "handoff_token": "handoff-1",
+        "worktree_id": "a",
+        "predecessor_session_id": "session-1",
+        "predecessor_pid": 77,
+        "predecessor_start_time": "old-process",
+        "retire_pane": "%9",
+        "mux_session": "wt-a",
+        "successor_session_id": "successor-1",
+        "retire_reason": "monitor-successor-candidate",
+    }
+
+
+def test_monitor_trigger_handoff_cutover_retires_confirmed_successor(monkeypatch):
+    monkeypatch.setattr(
+        m.sessions,
+        "mux_binding_for_session",
+        lambda sid: {
+            "pane_id": "%9",
+            "copilot_pid": 77,
+            "copilot_start_time": "old-process",
+            "session_name": "wt-a",
+        },
+    )
+    captured = {}
+
+    def spawn(args):
+        captured["spawn"] = args
+        return 0, {
+            "ok": True,
+            "session": "wt-a",
+            "old_pane": "%9",
+            "new_pane": "%10",
+            "candidate_session": "successor-1",
+        }
+
+    def retire(request):
+        captured["retire"] = request
+        return 0, {"ok": True}
+
+    monkeypatch.setattr(m, "_handoff_cutover_spawn_result", spawn)
+    monkeypatch.setattr(m, "_monitor_retire_handoff_predecessor", retire)
+
+    rc, response = m._monitor_trigger_handoff_cutover(
+        {
+            "token": "handoff-1",
+            "seed": "HANDOFF_SEED",
+            "worktree_id": "a",
+            "predecessor_session_id": "session-1",
+            "predecessor_pid": 77,
+            "predecessor_start_time": "old-process",
+        }
+    )
+
+    assert rc == 0
+    assert response["candidate_session"] == "successor-1"
+    assert captured["spawn"].old_pane == "%9"
+    assert captured["spawn"].expected_copilot_pid == 77
+    assert captured["spawn"].expected_copilot_start_time == "old-process"
+    assert captured["retire"] == {
+        "handoff_token": "handoff-1",
+        "worktree_id": "a",
+        "predecessor_session_id": "session-1",
+        "predecessor_pid": 77,
+        "predecessor_start_time": "old-process",
+        "retire_pane": "%9",
+        "mux_session": "wt-a",
+        "successor_session_id": "successor-1",
+        "retire_reason": "monitor-successor-candidate",
+    }
+
+
+def test_monitor_retire_handoff_predecessor_preserves_identity_guard(
+    monkeypatch,
+):
+    monkeypatch.setattr(m, "_resolve_worktree_id", lambda raw: raw)
+    monkeypatch.setattr(m.sessions, "mux_session_for_pane", lambda pane: "wt-a")
+    monkeypatch.setattr(
+        m.sessions,
+        "mux_binding_for_session",
+        lambda sid: {
+            "pane_id": "%9",
+            "copilot_pid": 77,
+            "copilot_start_time": "new-process",
+        },
+    )
+    monkeypatch.setattr(
+        m.sessions,
+        "mux_retire_pane",
+        lambda *a, **k: pytest.fail("must not retire an unverified process"),
+    )
+    monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: None)
+
+    rc, result = m._monitor_retire_handoff_predecessor(
+        {
+            "handoff_token": "handoff-1",
+            "worktree_id": "a",
+            "predecessor_session_id": "session-1",
+            "predecessor_pid": 77,
+            "predecessor_start_time": "old-process",
+            "retire_pane": "%9",
+            "mux_session": "wt-a",
+            "successor_session_id": "successor-1",
+            "retire_reason": "monitor-successor-linked",
+        }
+    )
+
+    assert rc == 1
+    assert result["method"] == "process-identity-mismatch"
 
 
 def test_sweep_triggers_pending_handoff_cutover_once(tmp_path, monkeypatch):
