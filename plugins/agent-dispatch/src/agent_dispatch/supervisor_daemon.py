@@ -97,6 +97,118 @@ def supervisor_lease_scope(machine: str | None, env: str) -> str:
     return f"supervisor:{machine or 'local'}:{env or 'default'}"
 
 
+# Live self-update: the daemon notices its own running version has been
+# superseded by a newer, fully-installed one (the ``current-version`` marker --
+# see ``self_update.py``, shared with the coordinator's own analogous loop in
+# ``coordinator.py``) and hands off to it by spawning a successor daemon from
+# that version's interpreter, then exiting.
+#
+# Unlike the coordinator, the daemon has no HTTP routing table or in-flight
+# request to race: ``reconcile_once`` runs to completion before the next tick,
+# so every tick boundary is already a safe cutover point and no confirmation
+# counter is needed -- ``stale_target`` itself already fails safe on a torn
+# marker or an incomplete slot.
+#
+# Opt-in (default-OFF), like the coordinator's: ``AGENT_DISPATCH_SUPERVISOR_
+# SELF_UPDATE``. Deliberately a *separate* flag from the coordinator's
+# ``AGENT_DISPATCH_SELF_UPDATE`` -- one arms the coordinator's routing-table
+# cutover, the other this daemon's respawn; sharing a flag would couple two
+# independently-soaked mechanisms.
+_SELF_UPDATE_DEFAULT_POLL_S = 60.0
+_SELF_UPDATE_DEFAULT_COOLDOWN_S = 900.0
+#: Distinct exit code ``serve()`` returns after handing off to a spawned
+#: successor -- lets an external supervisor loop (if one is watching exit
+#: codes) tell an intentional version handoff apart from a crash, though the
+#: primary mechanism is the spawn itself, not this code.
+SELF_UPDATE_EXIT_CODE = 42
+
+
+def _self_update_settings() -> tuple[bool, float, float]:
+    """``(enabled, poll_seconds, cooldown_seconds)`` for the daemon's own
+    self-update loop.
+
+    ``enabled`` is False unless ``AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE`` is
+    explicitly truthy (opt-in). Poll cadence and the cooldown between spawn
+    attempts (so a spawn that fails to land isn't retried every tick) are
+    overridable via ``AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE_POLL_S`` and
+    ``AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE_COOLDOWN_S``. A value that fails to
+    parse, or parses to a non-finite float (``nan``/``inf``), falls back to the
+    default.
+    """
+    import math
+    import os
+
+    enabled = os.environ.get(
+        "AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE", ""
+    ).strip().lower() in ("1", "true", "yes", "on")
+    try:
+        poll = float(
+            os.environ.get("AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE_POLL_S", "")
+            or _SELF_UPDATE_DEFAULT_POLL_S
+        )
+        if not math.isfinite(poll):
+            raise ValueError(poll)
+        poll = max(1.0, poll)
+    except ValueError:
+        poll = _SELF_UPDATE_DEFAULT_POLL_S
+    try:
+        cooldown = float(
+            os.environ.get("AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE_COOLDOWN_S", "")
+            or _SELF_UPDATE_DEFAULT_COOLDOWN_S
+        )
+        if not math.isfinite(cooldown):
+            raise ValueError(cooldown)
+        cooldown = max(0.0, cooldown)
+    except ValueError:
+        cooldown = _SELF_UPDATE_DEFAULT_COOLDOWN_S
+    return enabled, poll, cooldown
+
+
+def _spawn_self_update_successor(python_path: Any, respawn_argv: list[str]) -> None:
+    """Fire-and-forget spawn of a successor daemon from *python_path*.
+
+    ``python_path`` is the newer version's own interpreter (resolved by
+    :func:`agent_dispatch.self_update.stale_target`); ``respawn_argv`` is this
+    process's own ``sys.argv[1:]`` (the exact ``supervise serve ...`` CLI
+    invocation, flags included), so the successor reconciles the identical
+    scope this daemon was reconciling -- reusing this argv, rather than
+    rebuilding one from parsed options, is what guarantees no flag (e.g.
+    ``--machine``) is silently dropped.
+
+    Does **not** itself swallow failures -- a bad *python_path* or a
+    ``Popen``/exec error raises straight out of this function; the caller
+    catches and logs it. Uses ``breakaway=True`` so the successor survives a
+    Job-contained launch mode (this daemon may itself live in a Windows Job the
+    OS can tear down as a whole tree when this process exits) -- mirrors
+    ``coordinator._spawn_self_deploy``.
+
+    Scrubs ``PYTHONPATH``/``PYTHONHOME`` from the child's environment before
+    spawning. Unlike the coordinator's one-shot ``deploy`` (which exits after a
+    single cutover), this loop re-evaluates the same staleness check on every
+    successor -- if either var leaked in from this (stale) process and caused
+    ``-m agent_dispatch`` to resolve the *old* package from the new
+    interpreter, the successor would see itself as still-stale and spawn
+    another successor, unbounded. The versioned slot's own interpreter already
+    resolves its own site-packages without either var set.
+    """
+    import os
+
+    from agent_procutil import detached_kwargs, windowless_python
+
+    cmd = [windowless_python(python_path), "-m", "agent_dispatch", *respawn_argv]
+    env = {
+        k: v for k, v in os.environ.items() if k not in ("PYTHONPATH", "PYTHONHOME")
+    }
+    kwargs: dict[str, Any] = {
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "env": env,
+    }
+    kwargs.update(detached_kwargs(breakaway=True))
+    subprocess.Popen(cmd, **kwargs)  # noqa: S603
+
+
 def _spec_fingerprint(reg: dict) -> str:
     """A stable fingerprint of a registration's runtime-relevant identity.
 
@@ -506,6 +618,14 @@ class SupervisorDaemon:
         companion_controller: CompanionController | None = None,
         runtime_materializer: RuntimeMaterializer | None = None,
         runtime_executor: Executor | None = None,
+        self_update_enabled: bool = False,
+        self_update_poll_interval: float = _SELF_UPDATE_DEFAULT_POLL_S,
+        self_update_cooldown: float = _SELF_UPDATE_DEFAULT_COOLDOWN_S,
+        self_update_argv: list[str] | None = None,
+        self_update_install_dir: Callable[[], Path] | None = None,
+        self_update_running_version: str | None = None,
+        self_update_stale_target: Callable[[Path, str], Path | None] | None = None,
+        self_update_spawn: Callable[[Any, list[str]], None] | None = None,
     ):
         self.client = client
         #: Rebuilds the coordinator client by **re-resolving** its endpoint (the
@@ -566,6 +686,33 @@ class SupervisorDaemon:
         self._managed_cleanup_future: Future | None = None
         self._managed_cleanup_after = 0.0
         self._units: dict[str, ManagedUnit] = {}
+        #: Live self-update wiring (see the module-level notes above
+        #: ``supervisor_lease_scope``). ``self_update_argv`` is this process's
+        #: own ``sys.argv[1:]`` -- required (along with ``enabled``) to arm the
+        #: loop; ``None`` leaves it permanently disabled regardless of the
+        #: ``AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE`` env var, since there is
+        #: nothing safe to respawn with.
+        self.self_update_enabled = bool(self_update_enabled and self_update_argv)
+        self.self_update_poll_interval = max(1.0, float(self_update_poll_interval))
+        self.self_update_cooldown = max(0.0, float(self_update_cooldown))
+        self._self_update_argv = self_update_argv
+        if self_update_install_dir is None:
+            from .runtime_version import install_dir as self_update_install_dir
+        self._self_update_install_dir = self_update_install_dir
+        if self_update_running_version is None:
+            from . import __version__ as self_update_running_version
+        self._self_update_running_version = self_update_running_version
+        if self_update_stale_target is None:
+            from .self_update import stale_target as self_update_stale_target
+        self._self_update_stale_target = self_update_stale_target
+        self._self_update_spawn = self_update_spawn or _spawn_self_update_successor
+        #: Initialized to "never checked" so the very first tick is always
+        #: eligible (rather than waiting a full poll interval after startup).
+        self._self_update_last_check = float("-inf")
+        self._self_update_last_spawn: float | None = None
+        #: Set by ``_maybe_self_update`` the tick it triggers a handoff; read by
+        #: ``serve`` to break its loop and pick the distinct return code.
+        self.self_update_triggered = False
 
     # -- registry view -------------------------------------------------------
 
@@ -1698,6 +1845,69 @@ class SupervisorDaemon:
         if self._runtime_executor is not None and self._owns_runtime_executor:
             self._runtime_executor.shutdown(wait=False, cancel_futures=True)
 
+    def _maybe_self_update(self) -> bool:
+        """Check for a newer installed version and hand off to it if found.
+
+        Fail-safe and non-blocking: a no-op unless ``self_update_enabled`` and
+        the poll cadence has elapsed since the last check; a staleness-check
+        failure (a marker read raising, etc.) never propagates. Returns
+        ``True`` once a successor daemon has been spawned and this process
+        should exit; ``False`` otherwise, including when the spawn itself
+        failed (in which case this daemon reclaims its singleton lease and
+        keeps running rather than exiting into a void).
+        """
+        if not self.self_update_enabled:
+            return False
+        now = self.clock()
+        if now - self._self_update_last_check < self.self_update_poll_interval:
+            return False
+        self._self_update_last_check = now
+        if (
+            self._self_update_last_spawn is not None
+            and now - self._self_update_last_spawn < self.self_update_cooldown
+        ):
+            return False
+        try:
+            root = self._self_update_install_dir()
+            target = self._self_update_stale_target(
+                root, self._self_update_running_version
+            )
+        except Exception:
+            log.debug("supervisor self-update staleness check failed", exc_info=True)
+            return False
+        if target is None:
+            return False
+        self._self_update_last_spawn = now
+        # Every reconcile tick already runs to completion before the next one
+        # starts, so this is always a safe cutover point (unlike the
+        # coordinator, there is no in-flight request to drain). Wind down
+        # every managed unit and release the singleton lease *before* spawning
+        # the successor, so its own `acquire_singleton()` never races this
+        # daemon's still-held lock.
+        self.shutdown()
+        self.release_singleton()
+        try:
+            self._self_update_spawn(target, self._self_update_argv)
+        except Exception:
+            log.warning(
+                "supervisor self-update: failed to spawn a successor daemon "
+                "at %s; reclaiming the singleton lease to stay on this version",
+                target, exc_info=True,
+            )
+            if not self.acquire_singleton():
+                log.error(
+                    "supervisor self-update: spawn failed AND could not "
+                    "reclaim %s -- this host now has no supervisor daemon",
+                    supervisor_lease_scope(self.machine, self.env),
+                )
+            return False
+        log.info(
+            "supervisor self-update: detected a newer installed version at "
+            "%s -- spawned a successor daemon and handing off",
+            target,
+        )
+        return True
+
     def _reconnect(self) -> bool:
         """Rebuild the coordinator client by re-resolving its endpoint.
 
@@ -1734,8 +1944,10 @@ class SupervisorDaemon:
     ) -> int:
         """Run the daemon: reconcile each tick until interrupted.
 
-        Returns ``0`` normally, or ``3`` if it stood down because another daemon
-        already holds this scope's singleton lease. With ``once`` it runs a single
+        Returns ``0`` normally, ``3`` if it stood down because another daemon
+        already holds this scope's singleton lease, or ``SELF_UPDATE_EXIT_CODE``
+        if it handed off to a spawned successor running a newer installed
+        version (see ``self_update_enabled``). With ``once`` it runs a single
         reconcile and returns (still lease-guarded). ``single_instance=False``
         skips the election (for tests / a deliberately unguarded run).
         """
@@ -1751,6 +1963,9 @@ class SupervisorDaemon:
                     summary = self.reconcile_once()
                     if on_cycle is not None:
                         on_cycle(summary)
+                    if self._maybe_self_update():
+                        self.self_update_triggered = True
+                        break
                 except KeyboardInterrupt:
                     break
                 except Exception as exc:  # pragma: no cover -- never die on a blip
@@ -1775,4 +1990,6 @@ class SupervisorDaemon:
                         close()
             if single_instance:
                 self.release_singleton()
+        if self.self_update_triggered:
+            return SELF_UPDATE_EXIT_CODE
         return 0

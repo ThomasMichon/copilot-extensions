@@ -107,6 +107,24 @@ host that should run it; a client-only host opts out (`--no-service` /
   the service installer or launcher creates a process that outlives the
   invocation. Payload-local shims and hooks follow the corresponding rule in
   [`runtime-agent-plugin` § Give the agent an attributable command](runtime-agent-plugin.md#3-give-the-agent-an-attributable-command).
+- **A tier-1/2 daemon on a logon-trigger-only schedule needs to cycle itself,
+  not wait for a reboot.** A user-mode Scheduled Task registered with
+  `MultipleInstancesPolicy=IgnoreNew` and no periodic trigger only relaunches
+  the daemon at the next logon/reboot — an operator can easily go a long time
+  between those, leaving a stale daemon (and every subprocess it spawns)
+  running an old version well after a new one is published. Give the daemon
+  its own live version-staleness check (poll the `current-version` marker, see
+  [`durable-vs-versioned-runtime`](durable-vs-versioned-runtime.md)) and, once
+  stale, hand off to the newer interpreter itself — either the full
+  [`graceful-daemon-cutover`](graceful-daemon-cutover.md) protocol when the
+  daemon owns a shared endpoint/routing table, or, for a plain singleton
+  daemon with no in-flight request to drain (agent-dispatch's `supervise
+  serve`, #2259), the lighter shape: wind down owned units, release the
+  single-instance lease, spawn a successor on the new interpreter with the
+  same argv, then exit. Don't rely on the Scheduled Task's own
+  `RestartCount`/`RestartInterval` crash-restart policy for this — it retries
+  a **failed** launch on the *same* (stale) interpreter a bounded number of
+  times, it does not know about a newer published slot.
 - **Guard a legacy-migration stop on the real link path, not the built slot.** If
   the installer stops the daemon to release a *legacy* runtime dir before the first
   versioned migration, gate that stop on the **actual link path** (e.g. `.venv`),
