@@ -1,4 +1,11 @@
-"""Bounded detection of generated session artifacts that should not be synced."""
+"""Bounded detection of generated session artifacts that should not be synced.
+
+Detected categories: Chromium browser profiles (may carry live cookies/auth
+state), Python venvs, git clones/worktrees, and ``node_modules`` trees. These
+are the recurring "scope creep" patterns where a session's ``files/`` ends up
+holding a full tool install or repo clone instead of small artifacts -- see
+``docs/deployment-topologies.md`` and the harness issue that motivated this.
+"""
 
 from __future__ import annotations
 
@@ -83,7 +90,57 @@ def _is_chromium_profile_root(
     return False
 
 
+def _is_venv_root(entries: list[tuple[str, Path, int, int]]) -> bool:
+    """Return whether *entries* (a directory's own contents) is a Python venv.
+
+    ``python -m venv``/``virtualenv`` always write a ``pyvenv.cfg`` file at
+    the environment root, regardless of platform or the tool that created it
+    (``venv``, ``virtualenv``, ``uv venv``). This is the one signature
+    reliable enough to exclude the whole tree -- installed packages
+    (``site-packages``/``Lib``/``bin``/``Scripts``) live below it.
+    """
+    root_entries = {name: mode for name, _path, mode, _size in entries}
+    return stat.S_ISREG(root_entries.get("pyvenv.cfg", 0))
+
+
+def _is_git_worktree_root(entries: list[tuple[str, Path, int, int]]) -> bool:
+    """Return whether *entries* (a directory's own contents) is a git clone.
+
+    A ``.git`` entry is a directory for a normal clone, or a regular
+    ``gitdir:``-pointer file for a linked worktree checkout. Either shape
+    identifies the containing directory as a git working tree root.
+    """
+    root_entries = {name: mode for name, _path, mode, _size in entries}
+    git_mode = root_entries.get(".git")
+    if git_mode is None:
+        return False
+    return stat.S_ISDIR(git_mode) or stat.S_ISREG(git_mode)
+
+
+def _is_detritus_root(
+    name: str, entries: list[tuple[str, Path, int, int]]
+) -> bool:
+    """Return whether a directory (by name and its own contents) should be
+    excluded wholesale rather than descended into."""
+    if name == "node_modules":
+        return True
+    return (
+        _is_chromium_profile_root(entries)
+        or _is_venv_root(entries)
+        or _is_git_worktree_root(entries)
+    )
+
+
 def _measure_tree(root: Path) -> tuple[int, int, bool]:
+    """Size an already-detected detritus root, best-effort.
+
+    Detected roots (especially ``node_modules``) can be far larger than a
+    Chromium profile. Hitting the same bounded-scan limits used elsewhere
+    must not raise here: the root is already identified for exclusion, so a
+    size limit only means the reported byte/file count is a partial
+    estimate (``measurement_complete=False``), never a reason to abort the
+    surrounding sync.
+    """
     files = 0
     nbytes = 0
     complete = True
@@ -94,25 +151,27 @@ def _measure_tree(root: Path) -> tuple[int, int, bool]:
         directory = pending.pop()
         directories += 1
         if directories > MAX_DETRITUS_DIRECTORIES:
-            raise OSError(
-                f"detritus scan exceeds {MAX_DETRITUS_DIRECTORIES} directories"
-            )
+            complete = False
+            break
         try:
             entries = _scan_entries(directory)
         except OSError:
             complete = False
             continue
+        limit_hit = False
         for _name, path, mode, size in entries:
             entries_seen += 1
             if entries_seen > MAX_DETRITUS_ENTRIES:
-                raise OSError(
-                    f"detritus scan exceeds {MAX_DETRITUS_ENTRIES} entries"
-                )
+                complete = False
+                limit_hit = True
+                break
             if stat.S_ISDIR(mode):
                 pending.append(path)
             elif stat.S_ISREG(mode):
                 files += 1
                 nbytes += size
+        if limit_hit:
+            break
     return files, nbytes, complete
 
 
@@ -120,7 +179,13 @@ def discover_session_detritus(
     source: Path,
     include_sessions: set[str] | None,
 ) -> DetritusSummary:
-    """Find generated browser profiles under ``session-state/<id>/files``."""
+    """Find generated tool artifacts under ``session-state/<id>/files``.
+
+    Detects Chromium browser profiles, Python venvs, git clones, and
+    ``node_modules`` trees -- the recurring "scope creep" categories that get
+    written into session ``files/`` and should never be archived/synced (see
+    ``docs/deployment-topologies.md``).
+    """
     state = source / "session-state"
     try:
         session_entries = _scan_entries(state)
@@ -147,7 +212,7 @@ def discover_session_detritus(
 
 
 def discover_session_tree_detritus(session: Path) -> DetritusSummary:
-    """Find generated browser profiles below one session's ``files`` tree."""
+    """Find generated tool artifacts below one session's ``files`` tree."""
     files_root = session / "files"
     try:
         files_mode = os.lstat(windows_extended_path(files_root)).st_mode
@@ -176,7 +241,7 @@ def discover_session_tree_detritus(session: Path) -> DetritusSummary:
             raise OSError(
                 f"detritus discovery exceeds {MAX_DETRITUS_ENTRIES} entries"
             )
-        if _is_chromium_profile_root(entries):
+        if _is_detritus_root(directory.name, entries):
             roots.append(directory.relative_to(session))
             if len(roots) > MAX_DETRITUS_ROOTS:
                 raise OSError(
