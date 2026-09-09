@@ -66,6 +66,7 @@ def test_all_installers_deploy_every_py_hook():
         "statelessness_guard.py",
         "cross_repo_guard.py",
         "anchor_write_guard.py",
+        "pr_supersede_guard.py",
         "nudge_status.py",
         "bind_nudge.py",
     }

@@ -799,6 +799,7 @@ def _fallback_pre(payload: dict, home: Path) -> dict:
         "statelessness_guard.py",
         "cross_repo_guard.py",
         "anchor_write_guard.py",
+        "pr_supersede_guard.py",
     ):
         module = _load_sibling(name)
         if module is None:
