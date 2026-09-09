@@ -168,7 +168,6 @@ if [[ -z "${UV_HTTP_TIMEOUT:-}" ]]; then export UV_HTTP_TIMEOUT=60; fi
 
 _scoped_identity_suffix() {
     local normalized="$1"
-    normalized="$(printf '%s' "$normalized" | tr '\\' '/' | tr '[:upper:]' '[:lower:]')"
     if command -v sha256sum >/dev/null 2>&1; then
         printf '%s' "$normalized" | sha256sum | awk '{print substr($1,1,12)}'
         return 0
@@ -177,7 +176,27 @@ _scoped_identity_suffix() {
         printf '%s' "$normalized" | shasum -a 256 | awk '{print substr($1,1,12)}'
         return 0
     fi
-    printf '%s' "$normalized" | cksum | awk '{print $1}'
+    printf '%s' "$normalized" | cksum | awk '{printf "%012x\n", $1}'
+}
+
+_normalize_install_dir() {
+    local raw="$1" py
+    for py in python3 python; do
+        if command -v "$py" >/dev/null 2>&1; then
+            "$py" -c 'import os, sys; print(os.path.normpath(os.path.abspath(os.path.expanduser(sys.argv[1]))))' "$raw"
+            return 0
+        fi
+    done
+    if [[ "$raw" == "~" ]]; then
+        raw="$HOME"
+    elif [[ "$raw" == "~/"* ]]; then
+        raw="$HOME/${raw#~/}"
+    fi
+    case "$raw" in
+        /*) ;;
+        *) raw="$PWD/$raw" ;;
+    esac
+    printf '%s\n' "$raw"
 }
 
 LEGACY_INSTALL_DIR="$HOME/.agent-bridge"
@@ -260,11 +279,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ "$INSTALL_DIR" == "~" ]]; then
-    INSTALL_DIR="$HOME"
-elif [[ "$INSTALL_DIR" == "~/"* ]]; then
-    INSTALL_DIR="$HOME/${INSTALL_DIR#~/}"
-fi
+INSTALL_DIR="$(_normalize_install_dir "$INSTALL_DIR")"
 
 PUBLISH_GLOBAL_BINSTUBS=true
 SERVICE_SUFFIX=""
