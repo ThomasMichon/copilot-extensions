@@ -539,4 +539,86 @@ other phases actually land in.
   `check-install-contract.py` / `check-version-consistency.py` /
   `check-docs-consistency.py` all pass.
 
+### 2026-09-08 (cont.) - Production incident: duplicate coordinator/supervisor tree under the wrong interpreter
+
+- Live incident on this machine: 116+ `conhost.exe` processes, traced to a
+  full **duplicate** coordinator + supervisor + emitter process tree running
+  under the machine's system-wide Python install
+  (`AppData\Local\Programs\Python\Python312\python.exe`) alongside the
+  correct tree running under the installed versioned-runtime slot
+  (`~\.agent-dispatch\versions\<current>\Scripts\python.exe`) -- every
+  supervised lane and emitter doubled, each pair spawned within the same
+  second.
+- Mitigated immediately: identified which of each duplicate pair actually
+  held the live listening port (`Get-NetTCPConnection` cross-referenced
+  against `running-version.json`), killed only the inert losers, restarted
+  the `agent-dispatch`/`agent-dispatch-supervisor` Scheduled Tasks, confirmed
+  `agent-dispatch health` recovered.
+- Root-caused the underlying class of bug (not fully pinned to a single
+  reproducible trigger, but conclusively identified and closed every known
+  spawn site of this shape): several places in `agent_dispatch` spawn a
+  **new copy of a long-lived daemon component** (a coordinator, a supervisor,
+  or a registration child) using either a stale hard-coded legacy `.venv`
+  path or a bare `sys.executable` as the interpreter -- neither is guaranteed
+  to match the canonically-resolved current-version slot the binstubs and
+  service launchers actually use, and because a detached child inherits
+  whatever its parent resolved, a single wrong resolution silently
+  compounds into a full duplicate tree.
+- Fix: added `agent_dispatch.procutil.resolve_own_runtime_python()` -- a
+  thin wrapper over the plugin's own already-existing
+  `resolve_runtime_python()` (the same three-tier current-version-marker
+  resolver the binstubs/`versioned_runtime.py` use), falling back to
+  `sys.executable` only when no runtime is installed at all (dev/test).
+  Replaced every self-relaunch spawn site with it:
+  - `_spawn_coordinator_process()`: removed the stale legacy `.venv`
+    existence check + `sys.executable` fallback entirely.
+  - `_spawn_supervisor_daemon_detached()`: replaced its bare
+    `sys.executable`.
+  - `SupervisorDaemon`: resolves its own canonical interpreter **once**
+    (cached, since the slot cannot change without a daemon restart anyway)
+    and passes it explicitly to every `build_command(reg, python=...)` call
+    for a registration child, instead of relying on `build_command`'s own
+    `sys.executable` default.
+  - Left `_cmd_cutover`'s passive-spawn (`_sys.executable`) and
+    `_spawn_detached_waiter`'s re-exec (`sys.executable`) unchanged --
+    both are deliberately "continue running under THIS SAME interpreter"
+    cases (the self-update loop already resolves the *target* version's own
+    interpreter before invoking `deploy`; a detached `run --detach` waiter
+    is meant to literally continue the current invocation), not
+    self-relaunch-under-the-canonical-slot cases.
+- Added regression tests: `test_procutil.py` (`resolve_own_runtime_python`
+  resolves the installed slot over a stale legacy `.venv`, and degrades to
+  `sys.executable` when nothing is installed), `test_lazy_start.py` and
+  `test_registrations.py` (the coordinator's and supervisor's own spawn
+  sites resolve the canonical slot, not `sys.executable`, even with a stale
+  legacy `.venv` present), `test_supervisor_daemon.py` (a registration
+  child is spawned via the daemon's own resolved interpreter; the
+  resolution is cached, not repeated every reconcile tick).
+- Bumped `agent-dispatch` to `0.1.2-dev51`. Full targeted suite plus the
+  complete plugin suite (2217 tests) pass; the only failure is the
+  pre-existing, unrelated `test_fleet.py::test_spawn_fleet_headless_worker_
+  builds_ssh_agent_bridge_argv` (confirmed failing identically on `main`
+  without this change).
+- **Not fully closed:** despite closing every known spawn site of this
+  *shape*, the exact trigger for the ORIGINAL incident's very-first
+  duplicate pair (a live coordinator/supervisor tree that was ALREADY
+  running correctly under its versioned slot, yet still had a full wrong-
+  interpreter twin) was not conclusively reproduced in isolation -- direct
+  `subprocess.Popen([sys.executable, ...])` from the dev49 slot correctly
+  spawns dev49 children, so the precise moment/mechanism that first
+  produced a Python312 sibling for an already-correctly-running dev49
+  process remains unconfirmed. The fix closes the entire known class
+  (every self-relaunch site in this plugin's own code now resolves
+  canonically, never trusts `sys.executable`/a legacy path), which is
+  sufficient to prevent recurrence regardless of the unconfirmed original
+  trigger; flagging for anyone who sees this pattern again to capture a
+  process-creation ETW trace (`Get-CimInstance -ClassName
+  Win32_ProcessStartTrace` or Sysinternals Process Monitor) at the moment
+  of the NEXT occurrence, since after-the-fact WMI snapshots proved
+  insufficient to pin the exact call site with certainty.
+- Sibling plugins (agent-bridge, agent-index, agent-mcp, agent-vault, etc.)
+  were **not** audited for the same anti-pattern this leg -- flagged as a
+  worthwhile follow-up given each vendors its own `procutil.py` copy with
+  the same `resolve_runtime_python()` primitive already available.
+
 

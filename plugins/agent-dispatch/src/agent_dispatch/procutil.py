@@ -45,6 +45,7 @@ __all__ = [
     "no_window_flags",
     "no_window_kwargs",
     "relocate_off_payload",
+    "resolve_own_runtime_python",
     "resolve_runtime_python",
     "run_agent_worktrees_capture",
     "run_background_capture",
@@ -138,6 +139,39 @@ def resolve_runtime_python(root: Path) -> Path | None:
         if p is not None:
             return p
     return None
+
+
+def resolve_own_runtime_python() -> str:
+    """Canonically resolve **this plugin's own** current-version interpreter.
+
+    A self-relaunch/detached-spawn site (a daemon spawning a sibling daemon, a
+    supervisor spawning a registration child, a lazy-start helper spawning a
+    coordinator) must always target the SAME slot the binstubs/installer would
+    pick today -- never whatever interpreter happened to be running the
+    *current* process. Trusting ``sys.executable`` for that decision is a
+    footgun: a legacy pre-versioned-runtime code path, a stale cached path, or
+    simply invoking the CLI directly via a non-canonical interpreter during
+    debugging can all make ``sys.executable`` diverge from the installed
+    current-version slot -- and because a detached child inherits whatever its
+    parent resolved, that divergence then silently propagates and compounds
+    down an entire spawn tree (observed in production: a live coordinator and
+    supervisor, each correctly resolved, both parented a full duplicate
+    tree -- coordinator, emitters, and all -- running the system Python
+    install instead of the versioned slot, because one spawn site fell back to
+    ``sys.executable`` after a legacy path check failed).
+
+    Delegates to :func:`resolve_runtime_python` against this plugin's own
+    ``~/.agent-dispatch`` root (the same three-tier resolution the binstubs and
+    service launchers use), falling back to ``sys.executable`` **only** when
+    that resolution finds no installed runtime at all (e.g. a dev/test
+    environment with no real install) -- so this degrades exactly like
+    ``resolve_runtime_python`` for a normal sibling-plugin lookup, it simply
+    never returns ``None`` to a caller that needs *some* interpreter to spawn.
+    """
+    from .runtime_version import install_dir
+
+    resolved = resolve_runtime_python(install_dir())
+    return str(resolved) if resolved is not None else sys.executable
 
 
 def agent_worktrees_launch_prefix() -> list[str] | None:

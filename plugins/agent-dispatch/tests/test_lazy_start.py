@@ -112,3 +112,36 @@ def test_coordinator_spawn_uses_windowless_interpreter(monkeypatch, tmp_path):
     m._spawn_coordinator_process()
 
     assert calls[0][0] == ["PYTHONW", "-m", "agent_dispatch", "serve"]
+
+
+def test_coordinator_spawn_resolves_installed_slot_not_sys_executable(
+    monkeypatch, tmp_path,
+):
+    """Regression test for a production incident: a stale legacy `.venv` path
+    check + sys.executable fallback let a self-relaunch site silently spawn
+    under whatever interpreter happened to be running the CLI, instead of the
+    canonically-resolved current-version slot -- and because a detached child
+    inherits whatever its parent resolved, that divergence compounded down an
+    entire spawn tree. `_spawn_coordinator_process` must always resolve via
+    `resolve_own_runtime_python` (the canonical, current-version-marker-driven
+    resolver), never a hard-coded legacy path or a bare `sys.executable`."""
+    monkeypatch.setattr(m.Path, "home", lambda: tmp_path)
+    install_dir = tmp_path / ".agent-dispatch"
+    slot_py = install_dir / "versions" / "0.1.2-dev49" / "Scripts" / "python.exe"
+    slot_py.parent.mkdir(parents=True)
+    slot_py.write_text("")
+    (install_dir / "current-version").write_text("0.1.2-dev49")
+    # A stale legacy `.venv` also present must NOT win over the versioned slot.
+    legacy = install_dir / ".venv" / "Scripts" / "python.exe"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("")
+
+    calls = []
+    monkeypatch.setattr(
+        "agent_dispatch.procutil.windowless_python", lambda python: python
+    )
+    monkeypatch.setattr(m.subprocess, "Popen", lambda argv, **kwargs: calls.append((argv, kwargs)))
+
+    m._spawn_coordinator_process()
+
+    assert calls[0][0][0] == str(slot_py)

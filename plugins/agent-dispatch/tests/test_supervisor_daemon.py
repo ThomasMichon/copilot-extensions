@@ -60,10 +60,12 @@ class FakeProc:
 class FakeLauncher:
     def __init__(self):
         self.launched: list[tuple[str, FakeProc]] = []
+        self.commands: list[tuple[str, list[str]]] = []
 
     def launch(self, reg: dict, cmd: list[str]) -> FakeProc:
         proc = FakeProc()
         self.launched.append((reg["id"], proc))
+        self.commands.append((reg["id"], cmd))
         return proc
 
     def proc_for(self, rid: str) -> FakeProc:
@@ -474,6 +476,38 @@ def test_reconcile_starts_a_unit_per_registration():
     summary2 = d.reconcile_once()
     assert summary2.started == []
     assert summary2.running == ["a", "b"]
+
+
+def test_reconcile_spawns_registration_children_via_own_canonical_python(
+    monkeypatch,
+):
+    """Regression test: a registration child must run under this daemon's own
+    canonically-resolved current-version slot, never a bare sys.executable --
+    the sibling fix to the coordinator's/supervisor-launcher's own spawn sites
+    (see agent_dispatch.procutil.resolve_own_runtime_python)."""
+    monkeypatch.setattr(
+        "agent_dispatch.procutil.resolve_own_runtime_python",
+        lambda: "CANONICAL-SLOT-PYTHON",
+    )
+    client = FakeClient([_reg("a")])
+    launcher = FakeLauncher()
+    d = _daemon(client, launcher)
+    d.reconcile_once()
+    assert launcher.commands[0][1][0] == "CANONICAL-SLOT-PYTHON"
+
+
+def test_own_python_is_resolved_once_and_cached(monkeypatch):
+    calls = []
+
+    def _fake():
+        calls.append(1)
+        return "PY"
+
+    monkeypatch.setattr("agent_dispatch.procutil.resolve_own_runtime_python", _fake)
+    d = _daemon(FakeClient([]), FakeLauncher())
+    assert d._own_python() == "PY"
+    assert d._own_python() == "PY"
+    assert len(calls) == 1
 
 
 def test_companion_provider_active_starts_and_inactive_winds_down():

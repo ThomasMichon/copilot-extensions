@@ -713,6 +713,23 @@ class SupervisorDaemon:
         #: Set by ``_maybe_self_update`` the tick it triggers a handoff; read by
         #: ``serve`` to break its loop and pick the distinct return code.
         self.self_update_triggered = False
+        #: Cached canonical interpreter for spawning registration children --
+        #: resolved once (not per-registration/per-tick) since the current-version
+        #: slot cannot change without a full daemon cutover/restart anyway. See
+        #: :func:`agent_dispatch.procutil.resolve_own_runtime_python`: every
+        #: registration child MUST run under the same installed slot this daemon
+        #: itself does, never whatever interpreter happened to launch it -- a raw
+        #: ``sys.executable`` default here was one of the sites behind a production
+        #: incident where an entire duplicate coordinator+supervisor process tree
+        #: ran under the system Python instead of the versioned runtime.
+        self._own_python_cached: str | None = None
+
+    def _own_python(self) -> str:
+        if self._own_python_cached is None:
+            from .procutil import resolve_own_runtime_python
+
+            self._own_python_cached = resolve_own_runtime_python()
+        return self._own_python_cached
 
     # -- registry view -------------------------------------------------------
 
@@ -1611,7 +1628,9 @@ class SupervisorDaemon:
             proc = launched.process
         else:
             try:
-                cmd = build_command(reg, materialize=self._materializer(reg))
+                cmd = build_command(
+                    reg, python=self._own_python(), materialize=self._materializer(reg),
+                )
             except UnsupportedKind as exc:
                 log.warning("skipping registration %s: %s", rid, exc)
                 summary.skipped.append(rid)

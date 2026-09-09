@@ -336,3 +336,29 @@ def test_resolve_runtime_python_ignores_venv_junction_layout(tmp_path):
     (root / "venv" / "Scripts").mkdir(parents=True)
     (root / "venv" / "Scripts" / "python.exe").write_text("")
     assert procutil.resolve_runtime_python(root) is None
+
+
+# -- resolve_own_runtime_python (this plugin's own canonical spawn target) ----
+
+
+def test_resolve_own_runtime_python_uses_installed_slot(tmp_path, monkeypatch):
+    """The canonical resolver's result must win over sys.executable: this is the
+    exact fix for the production incident where a self-relaunch site fell back
+    to whatever interpreter happened to be running instead of the installed
+    current-version slot."""
+    root = tmp_path / ".agent-dispatch"
+    py = _make_slot(root, "0.1.2-dev49")
+    (root / "current-version").write_text("0.1.2-dev49")
+    monkeypatch.setattr("agent_dispatch.runtime_version.install_dir", lambda: root)
+    assert procutil.resolve_own_runtime_python() == str(py)
+
+
+def test_resolve_own_runtime_python_falls_back_to_sys_executable_when_unresolved(
+    tmp_path, monkeypatch,
+):
+    """No installed runtime at all (e.g. a dev/test environment) must degrade to
+    sys.executable rather than raise or return None -- callers need *some*
+    interpreter to spawn."""
+    root = tmp_path / ".agent-dispatch-empty"
+    monkeypatch.setattr("agent_dispatch.runtime_version.install_dir", lambda: root)
+    assert procutil.resolve_own_runtime_python() == procutil.sys.executable
