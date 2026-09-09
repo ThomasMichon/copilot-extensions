@@ -7938,7 +7938,7 @@ def _status_monitor_enabled() -> bool:
 
 
 def _aw_runtime_home() -> Path:
-    """The shared runtime root (``~/.agent-worktrees``)."""
+    """The selected legacy or installation-cell runtime/state root."""
     return cfg.install_dir()
 
 
@@ -9350,10 +9350,12 @@ def _run_session_lifecycle(
 def _load_hook_client_module():
     import importlib.util
 
-    candidates = (
-        Path.home() / ".agent-worktrees" / "bin" / "hook_client.py",
-        Path(__file__).resolve().parents[2] / "scripts" / "hook_client.py",
-    )
+    candidates = []
+    try:
+        candidates.append(cfg.install_dir() / "bin" / "hook_client.py")
+    except Exception:
+        pass
+    candidates.append(Path(__file__).resolve().parents[2] / "scripts" / "hook_client.py")
     for path in candidates:
         if not path.is_file():
             continue
@@ -9656,6 +9658,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     from . import locks as _locks
     from . import monitor_roots
     from . import pane_reaper
+    from . import registry_paths
     from . import session_catalog
     from .hook_ipc import HookIpcServer, HookUnavailable
 
@@ -9708,6 +9711,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     hook_policy = _ResidentHookPolicy(hook_client)
     if hook_policy.ready():
         hook_policy.plugin_related_anchors()
+    installation_context = registry_paths.installation_context()
 
     def _decide(kind: str, payload: dict, deadline: float) -> dict:
         nonlocal lifecycle_count
@@ -9770,6 +9774,14 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
 
     def _lock_extra() -> dict:
         extra = {"prefix": my_prefix, "mux": bool(mux_bin)}
+        if isinstance(installation_context, dict):
+            extra.update(
+                {
+                    "marketplaceId": str(installation_context.get("marketplaceId") or ""),
+                    "installReceipt": str(installation_context.get("installReceipt") or ""),
+                    "pluginRoot": str(installation_context.get("pluginRoot") or ""),
+                }
+            )
         if hook_server is not None:
             extra.update(hook_server.rendezvous())
         return extra
