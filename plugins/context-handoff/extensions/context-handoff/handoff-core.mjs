@@ -67,6 +67,15 @@ function resolveSystemCliDescriptor(bin) {
       runtimeRoot: ".agent-dispatch",
       payloadRootEnv: null,
     },
+    "agent-bridge": {
+      relative:
+        process.platform === "win32"
+          ? join("bin", "agent-bridge.ps1")
+          : join("bin", "agent-bridge"),
+      module: "agent_bridge",
+      runtimeRoot: ".agent-bridge",
+      payloadRootEnv: null,
+    },
   };
   const layout = layouts[bin];
   if (!layout) return { path: bin, pluginRoot: null };

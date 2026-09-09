@@ -19,6 +19,7 @@ import {
   isolatedPythonArgs,
   manualFallbackInstructions,
   normalizeHandoffTitle,
+  resolveSystemCli,
   runtimeEnvironment,
   safePathSegment,
   sessionBindingForSession,
@@ -149,6 +150,25 @@ test("runtime invocation isolates imports and forces UTF-8", () => {
       PYTHONUTF8: "1",
     },
   );
+});
+
+test("resolveSystemCli resolves agent-bridge via its sibling payload, not bare PATH", () => {
+  // Regression test: trigger_handoff's best-effort agent-bridge ping used to
+  // fall through to the bare command name (execFileSync("agent-bridge", ...))
+  // because resolveSystemCliDescriptor's layout map only covered
+  // agent-worktrees and agent-dispatch. On Windows, "agent-bridge" is only
+  // reachable via .cmd/.ps1 shims, so the bare-name spawn failed with ENOENT
+  // even when the agent-bridge plugin was genuinely installed as a sibling.
+  const resolved = resolveSystemCli("agent-bridge");
+  assert.ok(
+    resolved.endsWith(
+      process.platform === "win32"
+        ? join("bin", "agent-bridge.ps1")
+        : join("bin", "agent-bridge"),
+    ),
+    `expected a sibling-payload path, got: ${resolved}`,
+  );
+  assert.notEqual(resolved, "agent-bridge");
 });
 
 test("session-state handoff records can be written and marked consumed", () => {
