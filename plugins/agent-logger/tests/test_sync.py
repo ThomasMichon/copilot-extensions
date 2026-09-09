@@ -164,6 +164,45 @@ def test_chromium_signature_requires_expected_names_and_types(
     assert result.excluded_roots == ()
 
 
+def test_local_target_excludes_venv_git_clone_and_node_modules(
+    tmp_path: Path,
+) -> None:
+    src = _make_source(tmp_path)
+    session = src / "session-state" / "abc-123"
+    files = session / "files"
+
+    venv = files / "install-probe"
+    certifi = venv / "Lib" / "site-packages" / "pip" / "_vendor" / "certifi"
+    certifi.mkdir(parents=True)
+    (certifi / "cacert.pem").write_bytes(b"-----BEGIN CERTIFICATE-----")
+    (venv / "pyvenv.cfg").write_text("home = /usr/bin\n", encoding="utf-8")
+
+    clone = files / "harness-clone"
+    (clone / ".git").mkdir(parents=True)
+    (clone / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    (clone / "README.md").write_text("hello\n", encoding="utf-8")
+
+    modules = files / "tool" / "node_modules"
+    pkg = modules / "left-pad"
+    pkg.mkdir(parents=True)
+    (pkg / "index.js").write_text("module.exports = {}\n", encoding="utf-8")
+
+    dest_root = tmp_path / "dest"
+
+    result = LocalTarget({"path": str(dest_root)}).push(src, "m1")
+
+    assert result.ok
+    published = dest_root / "m1" / "session-state" / "abc-123" / "files"
+    assert not (published / "install-probe").exists()
+    assert not (published / "harness-clone").exists()
+    assert not (published / "tool" / "node_modules").exists()
+    assert set(result.excluded_roots) == {
+        str(Path("session-state/abc-123/files/install-probe")),
+        str(Path("session-state/abc-123/files/harness-clone")),
+        str(Path("session-state/abc-123/files/tool/node_modules")),
+    }
+
+
 def test_detritus_measurement_race_does_not_block_exclusion(
     monkeypatch,
     tmp_path: Path,
