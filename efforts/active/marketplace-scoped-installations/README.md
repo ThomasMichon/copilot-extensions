@@ -1466,3 +1466,46 @@ See [`design.md`](design.md).
 - `#1109` remains open for the remaining repository-configuration readers and
   adoption surfaces outside `agent-codespaces`, so Phase 5 is still in
   progress and all three plan checkboxes remain open.
+
+### 2026-09-09 — Agent-bridge and agent-index repository configuration increment
+
+- Merged [#2293](https://github.com/ThomasMichon/copilot-extensions/pull/2293)
+  at `cc336c01e02961d818c07bcc27d49954fb784b6c`, landing the
+  `agent-bridge` and `agent-index` repository-configuration portion of `#1109`.
+- `agent-bridge` now reads repo-owned spawn defaults from
+  `.copilot-extensions/agent-bridge/config.yaml` first, falls back to legacy
+  `.agent-bridge/config.yaml`, and accepts an explicit
+  `.copilot-extensions/agent-bridge/marketplaces/<marketplace-id>/config.yaml`
+  overlay so marketplace-specific behavior stays opt-in and separate from the
+  neutral base policy file.
+- `agent-index` now reads repo-owned indexer designation and corpus scope from
+  `.copilot-extensions/agent-index/config.yaml` first, falls back to legacy
+  `.agent-index/config.yaml`, and accepts an explicit
+  `.copilot-extensions/agent-index/marketplaces/<marketplace-id>/config.yaml`
+  overlay. Setup and runtime helper paths now publish the canonical file while
+  preserving legacy reads, and install/update still never rewrites committed
+  repository configuration.
+- Inventory follow-up for this slice confirmed that `efforts` already uses the
+  neutral `.copilot-extensions/efforts/config.json` path; `visions` and
+  `harness-knowledge` do not own committed plugin config or plugin-local
+  adoption state; `agent-machines` still carries an unconverted committed
+  `.agent-machines/` repo layout; `agent-dispatch` still carries unconverted
+  committed `.agent-dispatch/registrar/` and `.agent-dispatch/identities/`
+  surfaces; and `agent-worktrees` already covers cell-local adoption-state
+  keying from Phase 4 but still has unconverted committed `.agent-worktrees/`
+  repo config surfaces.
+- Validation:
+  `python tools/run-plugin-tests.py agent-index`;
+  `python tools/run-plugin-tests.py agent-bridge`;
+  focused WSL/POSIX coverage
+  (`agent-index` repo-config and bash runtime-gate cases, `agent-bridge`
+  in-repo config cases);
+  install-contract, version-consistency, vendored-lib,
+  installation-context, payload-invocation, installer-readiness,
+  marketplace-isolation, docs-consistency, diff-check, changed-file ruff, and
+  `check-agent-bridge-contracts --base origin/main` all passed; GitHub Actions
+  checks for `#2293` also passed before merge.
+- `#1109` remains open. Phase 5 still needs the remaining committed
+  repository-configuration surfaces in `agent-worktrees`, `agent-dispatch`, and
+  `agent-machines`; no new version-skew enforcement or migration work was
+  started here, so the Phase 6 boundary remains unchanged.
