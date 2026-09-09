@@ -1179,12 +1179,30 @@ def _parse_session_backend(raw: Any) -> SessionBackendConfig:
     )
 
 
-def load_project_config(name: str) -> Config:
-    """Load one project's layered config without inheriting caller identity."""
+def load_project_config(
+    name: str, *, include_control_plane_related_pr: bool = True
+) -> Config:
+    """Load one project's layered config without inheriting caller identity.
+
+    Args:
+        name: Project identity to load.
+        include_control_plane_related_pr: Forwarded to :func:`load_config`.
+            Callers resolving the *control-plane project itself* (see
+            ``_control_plane_related_pr_map``) must pass ``False`` here --
+            otherwise, when the control-plane anchor is the same project
+            already being loaded (the common case: a harness resolving
+            itself as its own control plane), this recurses into
+            ``_control_plane_related_pr_map`` -> ``load_project_config`` ->
+            ``load_config`` -> ``_control_plane_related_pr_map`` without end.
+    """
     previous = active_project()
     set_active_project(name)
     try:
-        return load_config(project_dir(name) / "config.yaml", project=name)
+        return load_config(
+            project_dir(name) / "config.yaml",
+            project=name,
+            include_control_plane_related_pr=include_control_plane_related_pr,
+        )
     finally:
         set_active_project(previous)
 
@@ -1614,7 +1632,9 @@ def _control_plane_related_pr_map() -> dict[str, dict[str, Any]]:
                 )
                 cp_sources = (
                     state_root.config_source_anchors(
-                        load_project_config(cp_project),
+                        load_project_config(
+                            cp_project, include_control_plane_related_pr=False
+                        ),
                         base_anchor=cp,
                     )
                     if cp_project
