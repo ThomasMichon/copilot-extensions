@@ -54,6 +54,7 @@ __all__ = [
     "run_ssh_capture",
     "run_ssh_command",
     "ssh_subprocess_kwargs",
+    "terminate_process_tree",
     "terminate_ssh_process_tree",
     "runtime_root",
     "windowless_daemon_kwargs",
@@ -228,27 +229,53 @@ def run_background_capture(
     ``CREATE_NO_WINDOW`` is intentionally applied to the console-subsystem root,
     not to ``pythonw.exe`` and not combined with ``DETACHED_PROCESS``. This keeps
     later console descendants (for example ``git.exe``) from allocating a new
-    Default Terminal console while preserving stdout/stderr pipes and normal
-    ``subprocess.run`` timeout handling. POSIX receives no creation flags, so its
-    process behavior is unchanged.
+    Default Terminal console while preserving stdout/stderr pipes.
+
+    Uses ``Popen`` + :func:`terminate_process_tree` rather than a bare
+    ``subprocess.run(timeout=)``: on Windows the latter's ``TimeoutExpired``
+    handling kills only the immediate child, but a venv ``python.exe`` launcher
+    re-execs the base interpreter as a NEW child process (no true ``exec`` on
+    Windows) -- so a bare timeout kill leaks that re-exec'd grandchild (and its
+    own ``conhost.exe``) running indefinitely. This was a real, observed leak:
+    a periodic caller (e.g. a GC/reap loop) whose probe stalls past its timeout
+    accumulates one orphaned process pair per cycle, unbounded.
     """
-    creation_kwargs = no_window_kwargs() if os.name == "nt" else {}
+    args = [os.fspath(arg) for arg in argv]
     try:
-        return subprocess.run(  # noqa: S603 -- fixed module argv
-            [os.fspath(arg) for arg in argv],
-            check=False,
-            capture_output=True,
+        proc = subprocess.Popen(  # noqa: S603 -- fixed module argv
+            args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             stdin=subprocess.DEVNULL,
             text=True,
-            timeout=timeout,
-            **creation_kwargs,
+            **_process_tree_kwargs(),
         )
-    except (OSError, subprocess.SubprocessError):
+    except OSError:
         return None
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        terminate_process_tree(proc)
+        return None
+    except subprocess.SubprocessError:
+        terminate_process_tree(proc)
+        return None
+    return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)
 
 
 def ssh_subprocess_kwargs() -> dict[str, object]:
     """Contain SSH and ProxyCommand descendants in a windowless process tree."""
+    return _process_tree_kwargs()
+
+
+def _process_tree_kwargs() -> dict[str, object]:
+    """``Popen`` kwargs that make the whole descendant tree killable as one unit.
+
+    Windows: ``CREATE_NO_WINDOW`` (no process-group semantics needed --
+    :func:`terminate_process_tree` uses ``taskkill /T`` there, which walks the
+    tree by parent-PID rather than by process group). POSIX: a new session so
+    ``os.killpg`` can reap every descendant, not just the immediate child.
+    """
     if sys.platform == "win32":
         return {"creationflags": no_window_flags()}
     return {"start_new_session": True}
@@ -261,12 +288,23 @@ def _signal_ssh_process(proc: subprocess.Popen[object], method: str) -> None:
         pass
 
 
-def terminate_ssh_process_tree(
+def terminate_process_tree(
     proc: subprocess.Popen[object],
     *,
     grace: float = 5.0,
 ) -> None:
-    """Terminate an SSH root and the ProxyCommand descendants it spawned."""
+    """Terminate ``proc`` and every descendant it spawned, not just itself.
+
+    On Windows, a plain ``proc.kill()`` (what a bare ``subprocess.run(timeout=)``
+    does on ``TimeoutExpired``) only terminates the immediate child. A venv
+    ``python.exe`` launcher is a console-subsystem stub that re-execs the base
+    interpreter as a NEW child process (Windows has no true ``exec``) -- so
+    killing the launcher leaves that re-exec'd grandchild running indefinitely,
+    each with its own ``conhost.exe``. ``taskkill /T`` walks the process tree by
+    parent PID and kills it as a unit, which reaps the grandchild too. POSIX
+    uses the process-group kill this proc's session leader owns (see
+    :func:`_process_tree_kwargs`).
+    """
     if proc.poll() is not None:
         return
     pid = getattr(proc, "pid", None)
@@ -310,6 +348,21 @@ def terminate_ssh_process_tree(
         proc.wait(timeout=2.0)
     except subprocess.TimeoutExpired:
         pass
+
+
+def terminate_ssh_process_tree(
+    proc: subprocess.Popen[object],
+    *,
+    grace: float = 5.0,
+) -> None:
+    """Terminate an SSH root and the ProxyCommand descendants it spawned.
+
+    Thin, name-stable wrapper over :func:`terminate_process_tree` -- the two
+    process trees (SSH/ProxyCommand vs. a captured background probe) need the
+    identical kill strategy, but existing callers/tests reference this SSH
+    name specifically.
+    """
+    terminate_process_tree(proc, grace=grace)
 
 
 def run_ssh_capture(
