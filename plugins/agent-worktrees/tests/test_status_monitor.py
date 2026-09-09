@@ -750,7 +750,8 @@ def _wire_monitor_handoff_session(tmp_path, monkeypatch):
     _capture_set(monkeypatch)
 
 
-def test_monitor_pending_handoff_request_returns_actionable_request(tmp_path, monkeypatch):
+@pytest.mark.parametrize("native_mode", [None, "manual", "assisted", "allow-all"])
+def test_monitor_pending_handoff_request_returns_actionable_request(tmp_path, monkeypatch, native_mode):
     monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
     monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
 
@@ -780,6 +781,7 @@ def test_monitor_pending_handoff_request_returns_actionable_request(tmp_path, mo
             "worktree": "a",
             "storage": "file",
             "consumed": False,
+            **({"nativeGoal": {"permissionMode": native_mode}} if native_mode else {}),
         },
     )
     monkeypatch.setattr(m.locks, "process_start_time", lambda pid: "old-process")
@@ -795,6 +797,12 @@ def test_monitor_pending_handoff_request_returns_actionable_request(tmp_path, mo
         ],
     )
 
+    if native_mode:
+        # The signal-only fallback must leave native launch with the source
+        # extension, even when invoked for an old unsupported-mode checkpoint.
+        assert m._monitor_pending_handoff_request(record) is None
+        assert not (tmp_path / "status-monitor-handoffs.d").exists()
+        return
     assert m._monitor_pending_handoff_request(record) == {
         "token": "handoff-1",
         "seed": "HANDOFF_SEED",

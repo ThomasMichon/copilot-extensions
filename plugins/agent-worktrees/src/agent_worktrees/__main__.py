@@ -2082,6 +2082,26 @@ def _handoff_cutover_spawn_result(
 
     raw_id = getattr(args, "worktree_id", None)
     session_id = getattr(args, "session_id", None)
+    native_checkpoint = getattr(args, "native_handoff", None)
+    native_launcher = getattr(args, "native_launcher", None)
+    if native_checkpoint or native_launcher:
+        if not native_checkpoint or not native_launcher:
+            return 1, {"ok": False, "error": "Native handoff requires both checkpoint and launcher."}
+        try:
+            native_record = json.loads(Path(native_checkpoint).read_text(encoding="utf-8"))
+            native_goal = native_record["nativeGoal"]
+            native_successor = native_goal["successorSessionId"]
+            if native_goal.get("permissionMode") != "allow-all":
+                raise ValueError(
+                    f"Native handoff cannot preserve {native_goal.get('permissionMode')}; "
+                    "no pane was created."
+                )
+            if native_record["sessionId"] != session_id:
+                raise ValueError("Native checkpoint source does not match the cutover owner.")
+            if native_goal["phase"] != "frozen":
+                raise ValueError("Native successor is already being prepared; do not replay.")
+        except (OSError, ValueError, KeyError) as exc:
+            return 1, {"ok": False, "error": str(exc)}
     config = None
     if raw_id:
         wt_id = _resolve_worktree_id(raw_id)
@@ -2259,21 +2279,7 @@ def _handoff_cutover_spawn_result(
     handoff_token = getattr(args, "handoff_token", None)
     if handoff_token:
         env[_SESSION_HANDOFF_TOKEN] = handoff_token
-    native_checkpoint = getattr(args, "native_handoff", None)
-    native_launcher = getattr(args, "native_launcher", None)
-    if native_checkpoint or native_launcher:
-        if not native_checkpoint or not native_launcher:
-            return 1, {"ok": False, "error": "Native handoff requires both checkpoint and launcher."}
-        try:
-            native_record = json.loads(Path(native_checkpoint).read_text(encoding="utf-8"))
-            native_goal = native_record["nativeGoal"]
-            native_successor = native_goal["successorSessionId"]
-            if native_record["sessionId"] != session_id:
-                raise ValueError("Native checkpoint source does not match the cutover owner.")
-            if native_goal["phase"] != "frozen":
-                raise ValueError("Native successor is already being prepared; do not replay.")
-        except (OSError, ValueError, KeyError) as exc:
-            return 1, {"ok": False, "error": str(exc)}
+    if native_checkpoint:
         launch_cmd = [
             "node", native_launcher, "--checkpoint", native_checkpoint,
             "--cli", launch_cmd[0], "--", *launch_cmd[1:],

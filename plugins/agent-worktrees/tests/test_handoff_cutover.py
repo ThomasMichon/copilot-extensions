@@ -569,6 +569,40 @@ def _ns(**kw):
 
 
 class TestCmdHandoffCutover:
+    @pytest.mark.parametrize("permission_mode", ["manual", "assisted"])
+    def test_native_permission_rejected_before_launch(
+        self, monkeypatch, capfd, tmp_path, permission_mode,
+    ):
+        checkpoint = tmp_path / "native-checkpoint.json"
+        checkpoint.write_text(json.dumps({
+            "sessionId": "source",
+            "seed": "owned seed",
+            "nativeGoal": {
+                "successorSessionId": "target", "phase": "frozen",
+                "permissionMode": permission_mode,
+            },
+        }))
+        monkeypatch.setattr(m, "_resolve_worktree_id", lambda raw: "wt-owned")
+        monkeypatch.setattr(sessions, "has_mux_session", lambda wt: True)
+        monkeypatch.setattr(
+            m.cfg, "load_config",
+            lambda: pytest.fail("Native permission rejection must precede launch planning"),
+        )
+        monkeypatch.setattr(
+            sessions, "mux_new_window",
+            lambda *a, **k: pytest.fail("Unsupported native mode must never create a pane"),
+        )
+        before = checkpoint.read_text()
+        rc = m.cmd_handoff_cutover(_ns(
+            seed="owned seed", worktree_id="wt-owned", session_id="source",
+            native_handoff=str(checkpoint), native_launcher="native-launch.mjs",
+        ))
+        assert rc == 1
+        result = json.loads(capfd.readouterr().out)
+        assert result["ok"] is False
+        assert "cannot preserve" in result["error"]
+        assert checkpoint.read_text() == before
+
     def test_wait_for_handoff_candidate_observes_session_start(
         self, monkeypatch, tmp_path,
     ):
@@ -1118,7 +1152,8 @@ class TestCmdHandoffCutover:
         out = json.loads(capfd.readouterr().out)
         assert out["old_pane"] == "%bound"
 
-    def test_spawn_success_opens_window(self, monkeypatch, capfd, tmp_path):
+    @pytest.mark.parametrize("native", [False, True])
+    def test_spawn_success_opens_window(self, monkeypatch, capfd, tmp_path, native):
         monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", lambda: "wtZ")
         monkeypatch.setattr(sessions, "has_mux_session", lambda w: True)
         monkeypatch.setattr(sessions, "mux_active_pane", lambda w: "%2")
@@ -1156,10 +1191,25 @@ class TestCmdHandoffCutover:
             "_wait_for_handoff_candidate",
             lambda *a, **k: ("successor-session", "session-associated"),
         )
+        native_args = {}
+        if native:
+            checkpoint = tmp_path / "native-checkpoint.json"
+            checkpoint.write_text(json.dumps({
+                "sessionId": "source",
+                "nativeGoal": {
+                    "successorSessionId": "target", "phase": "frozen",
+                    "permissionMode": "allow-all",
+                },
+            }))
+            native_args = {
+                "session_id": "source", "native_handoff": str(checkpoint),
+                "native_launcher": "native-launch.mjs",
+            }
         rc = m.cmd_handoff_cutover(_ns(
             seed="resume the multi word work",
             old_pane="%2",
             handoff_token="task-123",
+            **native_args,
         ))
         assert rc == 0
         out = json.loads(capfd.readouterr().out)
@@ -1170,10 +1220,16 @@ class TestCmdHandoffCutover:
         assert out["seeded"] is True
         # The launch cmd carries NO seed arg; the wrapper receives base64 through
         # the mux window environment and appends native --interactive afterward.
-        assert captured["cmd"] == ["copilot"]
+        assert captured["cmd"] == ([
+            "node", "native-launch.mjs", "--checkpoint", str(checkpoint),
+            "--cli", "copilot", "--", "--session-id", "target",
+        ] if native else ["copilot"])
         assert captured["kwargs"]["initial_prompt"] == (
-            "resume the multi word work"
+            None if native else "resume the multi word work"
         )
+        if native:
+            assert out["native_handoff"] == str(checkpoint)
+            assert out["startup_pending"] is True
         assert captured["env"]["AGENT_WORKTREES_HANDOFF_TOKEN"] == "task-123"
         assert out["seed_method"] == "interactive-argv"
 

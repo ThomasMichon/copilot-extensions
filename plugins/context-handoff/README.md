@@ -55,10 +55,19 @@ completed modes intentionally hide it; do not add credits or enable autopilot
 just to display a panel.
 
 The runtime preserves the source model, reasoning effort, context tier, agent,
-`COPILOT_HOME`, and permission mode. The current Herdr launcher supports only
-`allow-all`; manual/assisted sources are rejected **before pane creation**, not
-silently widened. First use in an empty profile can require native extension
+`COPILOT_HOME`, and permission mode. Native handoffs on both Herdr and mux
+currently support only `allow-all`; manual/assisted sources are rejected
+**before pausing the source or creating a pane**, not silently widened.
+The direct native mux CLI and prepare/resume launcher enforce the same limit.
+Ordinary non-native handoff behavior is unchanged.
+First use in an empty profile can require native extension
 trust confirmation for the plugin's existing capabilities.
+
+Install context-handoff, agent-worktrees, and agent-dispatch as sibling plugin
+payloads in the same installation root. The shared core resolves its runtime
+peers relative to that root; installing only context-handoff in a different
+root from its peers does not provide a working mux/task fallback. Use the
+official plugin manager for all three payloads, not installed-cache copies.
 
 Linux Herdr/file-backed two-CLI handoffs, repeat handoffs, and native retry/
 conflict boundaries have real-runtime coverage. Task/mux ownership and psmux
@@ -76,6 +85,13 @@ real Windows acceptance.
   writing its own checkpoint. Startup/trust can finish while this event-driven
   wait is pending. An unknown host launch requires inspection of that receiver,
   not another spawn.
+- A nonzero mux CLI exit can still carry a retained `new_pane` receipt
+  (for example, exit 4 while session association is pending). Publish that
+  receipt and reuse the receiver; retry must not create another pane.
+  Structured pre-spawn rejections (exit 1/2/3, including no live mux) clear the
+  launch request so an explicit retry is possible. A mux timeout, missing
+  receipt, or malformed response leaves the request unresolved and the source
+  preserved; a missing pane ID alone is not permission to respawn.
 - A known queued send waits for its exact native event without resending.
   A lost acknowledgement reconciles the unique continuation from public events;
   an unknown outcome with no matching event stops and preserves the source.

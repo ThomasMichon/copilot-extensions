@@ -9,6 +9,9 @@ export function nativeLaunchArguments(record, phase, args = [], { receiverExists
   if (!goal?.successorSessionId || !record.seed) {
     throw new Error("Native handoff launch requires a frozen successor identity and seed.");
   }
+  if (goal.permissionMode !== "allow-all") {
+    throw new Error(`Native handoff cannot preserve ${goal.permissionMode}; no CLI was launched.`);
+  }
   const launchArgs = [];
   const profileOptions = new Set(["--model", "--effort", "--context", "--agent"]);
   for (let index = 0; index < args.length; index++) {

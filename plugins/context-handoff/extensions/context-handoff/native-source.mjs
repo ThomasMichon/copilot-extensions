@@ -92,6 +92,10 @@ export async function requestNativeCutover(session, seed) {
   if (record.consumed || goal.admissionComplete) {
     throw new Error("This handoff is already admitted; do not resume the source.");
   }
+  const permissionMode = (await session.rpc.permissions.getMode()).mode;
+  if (permissionMode !== "allow-all") {
+    throw new Error(`Native handoff cannot preserve ${permissionMode} with the installed launch contract; no pane was created.`);
+  }
   if (goal.launch) return { path, launch: goal.launch };
   if (goal.launchRequested) {
     if (["prepared", "hydrated"].includes(goal.phase)) {
@@ -110,10 +114,6 @@ export async function requestNativeCutover(session, seed) {
     throw new Error("The source objective changed after save; preserve it and save a new handoff.");
   }
   const mode = await session.rpc.mode.get();
-  const permissionMode = (await session.rpc.permissions.getMode()).mode;
-  if (isHerdrPane() && permissionMode !== "allow-all") {
-    throw new Error(`Herdr cannot preserve ${permissionMode} with the installed launch contract; no pane was created.`);
-  }
   const profile = {
     model: await session.rpc.model.getCurrent(),
     agentId: (await session.rpc.agent.getCurrent()).agent?.id || null,
@@ -166,6 +166,9 @@ export async function freezeAndLaunchNative(session, path) {
   const found = readSessionStateHandoff(session.sessionId);
   if (!found || found.path !== path) throw new Error("Source checkpoint is unavailable.");
   const receipt = found.record.nativeGoal || found.record;
+  if (found.record.nativeGoal && receipt.permissionMode !== "allow-all") {
+    throw new Error(`Native handoff cannot preserve ${receipt.permissionMode}; no pane was created.`);
+  }
   if (receipt.launch) return receipt.launch;
   if (receipt.launchRequested) throw new Error("Existing receiver launch is unresolved; do not replay.");
   let record = await freezeNativeSource(session, path);
@@ -190,18 +193,36 @@ export async function freezeAndLaunchNative(session, path) {
   };
   record = { ...record, nativeGoal: goal };
   writeJsonAtomic(path, record);
-  const launch = isHerdrPane()
-    ? launchHerdrSuccessor(goal.cwd, record.seed, runCli, goal.permissionMode, {
+  let launch;
+  let exitStatus = 0;
+  if (isHerdrPane()) {
+    launch = launchHerdrSuccessor(goal.cwd, record.seed, runCli, goal.permissionMode, {
       checkpoint: path, launcher: NATIVE_LAUNCHER,
-    })
-    : JSON.parse(runCli("agent-worktrees", [
-      "handoff-cutover", "--seed", record.seed,
-      "--session-id", session.sessionId, "--handoff-token", record.handoffId,
-      "--native-handoff", path, "--native-launcher", NATIVE_LAUNCHER,
-      ...(record.worktree ? ["--worktree-id", record.worktree] : []),
-    ], { cwd: goal.cwd, timeout: 180000 }));
+    });
+  } else {
+    let stdout;
+    try {
+      stdout = runCli("agent-worktrees", [
+        "handoff-cutover", "--seed", record.seed,
+        "--session-id", session.sessionId, "--handoff-token", record.handoffId,
+        "--native-handoff", path, "--native-launcher", NATIVE_LAUNCHER,
+        ...(record.worktree ? ["--worktree-id", record.worktree] : []),
+      ], { cwd: goal.cwd, timeout: 180000 });
+    } catch (error) {
+      // execFileSync throws even when the mux command returned its structured
+      // receipt. Transport errors with no exit status remain unresolved.
+      if (!Number.isInteger(error.status)) throw error;
+      exitStatus = error.status;
+      stdout = error.stdout;
+    }
+    launch = JSON.parse(stdout);
+  }
   if (!launch.ok && !launch.new_pane) {
-    writeJsonAtomic(path, { ...record, nativeGoal: { ...goal, launchRequested: false } });
+    // CLI statuses 1/2/3 are pre-spawn rejections. Status 4 can include a mux
+    // timeout: a missing pane ID there does not prove that no pane exists.
+    if (launch.ok === false && (isHerdrPane() || [1, 2, 3].includes(exitStatus))) {
+      writeJsonAtomic(path, { ...record, nativeGoal: { ...goal, launchRequested: false } });
+    }
     throw new Error(`Native handoff launch failed: ${launch.error || launch.reason}`);
   }
   // The successor can hydrate while the launch command is returning; merge
