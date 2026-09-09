@@ -392,6 +392,7 @@ class ResidentSessionReconciler:
         )
         if mux_fresh:
             live = sessions.mux_session_name(record.worktree_id) in self._live_mux
+            was_live = record.mux_live
             tracking.stamp_mux_live(
                 record.worktree_id, live, refresh=live, sync=True)
             result["mux"] = 1
@@ -401,6 +402,19 @@ class ResidentSessionReconciler:
                     record.worktree_path,
                 ):
                     result["registered_mux"] = 1
+            elif (
+                was_live and not live
+                and not sessions.worktree_has_live_session(record)
+            ):
+                # An authoritative (fresh) mux snapshot just went from live to
+                # dark for this worktree, AND no bound/registered Copilot
+                # process is holding an active session lock either -- both
+                # lifetimes this worktree could still be "live" through have
+                # now ended. Reap its fsmonitor daemon here rather than
+                # relying solely on the sessionEnd hook (#2269): an abrupt
+                # kill -- Windows tearing down mux+Copilot on window close, a
+                # crash, `Stop-Process` -- never delivers that hook at all.
+                tracking.stop_fsmonitor_daemon(record.worktree_path)
         return result
 
     def _scan_records(self) -> dict:
