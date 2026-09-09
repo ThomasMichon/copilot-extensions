@@ -505,7 +505,10 @@ canonical_missing_path() {
             fi
             command -v readlink >/dev/null 2>&1 ||
                 fail "Cannot resolve path: $value"
-            target="$(readlink -- "$out/$part" 2>/dev/null)" ||
+            # `readlink` is invoked without `--`: the operand is always absolute
+            # here, so it can never be mistaken for an option, and not every
+            # BSD `readlink` is guaranteed to accept the separator.
+            target="$(readlink "$out/$part" 2>/dev/null)" ||
                 fail "Cannot resolve path: $value"
             CANONICAL_PATH_PARTS=()
             canonical_split_path "$target"
