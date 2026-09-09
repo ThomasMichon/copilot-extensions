@@ -964,3 +964,177 @@ def test_serve_does_not_reconnect_without_factory():
     d.serve(once=True)
     assert d.client is dead  # unchanged
     assert dead.closed is False
+
+
+# -- live self-update (#2259) -------------------------------------------------
+
+
+def test_self_update_disabled_by_default():
+    """With no argv supplied, self-update stays off even if the caller passes
+    enabled=True -- there is nothing safe to respawn with."""
+    client = FakeClient([_reg("a")])
+    launcher = FakeLauncher()
+    d = _daemon(client, launcher, lock=FakeLock(granted=True), self_update_enabled=True)
+    assert d.self_update_enabled is False
+
+
+def test_self_update_not_triggered_when_not_stale():
+    client = FakeClient([_reg("a")])
+    launcher = FakeLauncher()
+    spawned: list[tuple[object, list[str]]] = []
+    d = _daemon(
+        client, launcher, lock=FakeLock(granted=True),
+        self_update_enabled=True,
+        self_update_argv=["supervise", "serve"],
+        self_update_stale_target=lambda _root, _v: None,
+        self_update_spawn=lambda target, argv: spawned.append((target, argv)),
+    )
+    rc = d.serve(once=True)
+    assert rc == 0
+    assert spawned == []
+
+
+def test_self_update_spawns_successor_and_hands_off():
+    """A stale target triggers: units stop, the lease releases, the successor
+    spawns with this daemon's own argv, and serve() returns the distinct code."""
+    from agent_dispatch.supervisor_daemon import SELF_UPDATE_EXIT_CODE
+
+    client = FakeClient([_reg("a")])
+    launcher = FakeLauncher()
+    lock = FakeLock(granted=True)
+    spawned: list[tuple[object, list[str]]] = []
+    target = object()
+    d = _daemon(
+        client, launcher, lock=lock,
+        self_update_enabled=True,
+        self_update_argv=["supervise", "serve", "--machine", "anomalous-potato"],
+        self_update_stale_target=lambda _root, _v: target,
+        self_update_spawn=lambda t, argv: spawned.append((t, argv)),
+    )
+    rc = d.serve(once=False)  # the self-update break exits the loop itself
+    assert rc == SELF_UPDATE_EXIT_CODE
+    assert spawned == [(target, ["supervise", "serve", "--machine", "anomalous-potato"])]
+    assert launcher.proc_for("a").terminated is True  # units wound down
+    assert lock.released is True  # lease released before the spawn
+
+
+def test_self_update_ordering_releases_lease_before_spawn():
+    """The lease must be released *before* the successor spawns, so the
+    successor's own acquire never races this daemon's still-held lock."""
+    client = FakeClient([_reg("a")])
+    launcher = FakeLauncher()
+    lock = FakeLock(granted=True)
+    order: list[str] = []
+    real_release = lock.release
+
+    def tracked_release():
+        order.append("release")
+        real_release()
+
+    lock.release = tracked_release  # type: ignore[method-assign]
+
+    def spawn(_t, _argv):
+        order.append("spawn")
+
+    d = _daemon(
+        client, launcher, lock=lock,
+        self_update_enabled=True,
+        self_update_argv=["supervise", "serve"],
+        self_update_stale_target=lambda _root, _v: object(),
+        self_update_spawn=spawn,
+    )
+    d.serve(once=False)
+    assert order == ["release", "spawn", "release"]  # finally's redundant release is harmless
+
+
+def test_self_update_reclaims_lease_when_spawn_fails():
+    """A spawn failure must not leave the daemon believing it still owns the
+    lease it already released -- it reclaims the lease and keeps running."""
+    client = FakeClient([_reg("a")])
+    launcher = FakeLauncher()
+    lock = FakeLock(granted=True)
+    acquire_calls = []
+    real_acquire = lock.acquire
+
+    def counted_acquire():
+        acquire_calls.append(1)
+        return real_acquire()
+
+    lock.acquire = counted_acquire  # type: ignore[method-assign]
+
+    def failing_spawn(_t, _argv):
+        raise OSError("no such file or directory")
+
+    d = _daemon(
+        client, launcher, lock=lock,
+        self_update_enabled=True,
+        self_update_argv=["supervise", "serve"],
+        self_update_stale_target=lambda _root, _v: object(),
+        self_update_spawn=failing_spawn,
+    )
+    rc = d.serve(once=True)
+    assert rc == 0  # did not hand off -- stayed on this version
+    # once for serve()'s initial election, once more for the post-failure reclaim
+    assert len(acquire_calls) == 2
+
+
+def test_self_update_respects_poll_interval():
+    """The staleness check itself is throttled to the poll cadence, not run
+    every tick."""
+    client = FakeClient([_reg("a")])
+    launcher = FakeLauncher()
+    checks: list[float] = []
+
+    def stale_target(_root, _v):
+        checks.append(1)
+        return None
+
+    clock = Clock(0.0)
+    d = _daemon(
+        client, launcher, lock=FakeLock(granted=True), clock=clock,
+        self_update_enabled=True,
+        self_update_argv=["supervise", "serve"],
+        self_update_poll_interval=100.0,
+        self_update_stale_target=stale_target,
+    )
+    d._maybe_self_update()
+    assert len(checks) == 1
+    clock.t = 10.0
+    d._maybe_self_update()
+    assert len(checks) == 1  # still within the poll window -- not re-checked
+    clock.t = 200.0
+    d._maybe_self_update()
+    assert len(checks) == 2
+
+
+def test_self_update_settings_default_off(monkeypatch):
+    from agent_dispatch.supervisor_daemon import _self_update_settings
+
+    monkeypatch.delenv("AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE", raising=False)
+    enabled, poll, cooldown = _self_update_settings()
+    assert enabled is False
+    assert poll == 60.0
+    assert cooldown == 900.0
+
+
+def test_self_update_settings_opt_in(monkeypatch):
+    from agent_dispatch.supervisor_daemon import _self_update_settings
+
+    monkeypatch.setenv("AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE", "1")
+    monkeypatch.setenv("AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE_POLL_S", "5")
+    monkeypatch.setenv("AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE_COOLDOWN_S", "10")
+    enabled, poll, cooldown = _self_update_settings()
+    assert enabled is True
+    assert poll == 5.0
+    assert cooldown == 10.0
+
+
+def test_self_update_settings_invalid_values_fall_back(monkeypatch):
+    from agent_dispatch.supervisor_daemon import _self_update_settings
+
+    monkeypatch.setenv("AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE", "1")
+    monkeypatch.setenv("AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE_POLL_S", "nan")
+    monkeypatch.setenv("AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE_COOLDOWN_S", "not-a-number")
+    _enabled, poll, cooldown = _self_update_settings()
+    assert poll == 60.0
+    assert cooldown == 900.0
