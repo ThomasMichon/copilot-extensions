@@ -1351,3 +1351,43 @@ See [`design.md`](design.md).
 - `#1108` remains open only for the unlanded `agent-bridge` increment and the
   deferred `agent-worktrees` status-monitor / Worktree Manager supervision
   slice.
+
+### 2026-09-09 — Agent-bridge service-boundary increment
+
+- Merged [#2287](https://github.com/ThomasMichon/copilot-extensions/pull/2287)
+  at `b44ddcb5f263a341f324334e9942f5d7cb4c345f`, landing the `agent-bridge`
+  portion of `#1108`.
+- `agent-bridge` now routes its payload-local command surface through the shared
+  installation-context runtime gate and, when an explicit valid installation
+  context is active, scopes its runtime root, `sessions.db`, routing table,
+  host index, relay-port record, logs, provider registry, and lifecycle
+  identities to the selected installation cell. Legacy execution with no
+  installation context keeps the historical machine-global root and compatibility
+  wrappers unchanged.
+- The same increment adds install-root helpers that keep runtime and supervision
+  naming aligned across Python, PowerShell, and POSIX install paths; the
+  elevated sub-daemon now inherits the primary install identity; provider
+  discovery rejects foreign standard `providers.d` roots; and scoped installs no
+  longer claim the legacy global binstub reserved for legacy fallback.
+- Validation:
+  direct changed-surface Windows tests passed (`98 passed`);
+  `python tools/run-plugin-tests.py agent-bridge` passed in six contained
+  sub-suites (`567/307/320/622/377/29 passed`, `2/2/8/1/1/3 skipped`);
+  `python tools/check-agent-bridge-contracts.py` and
+  `python -m pytest -q tools/test_check_agent_bridge_contracts.py` passed
+  (`16 passed`);
+  focused WSL/POSIX changed-surface coverage passed (`48 passed, 3 skipped`);
+  CI-targeted POSIX installer/payload coverage passed (`22 passed, 2 skipped`);
+  consumer spot checks passed for `agent-codespaces` and `agent-containers`
+  (`2 passed` each);
+  and install-contract, version-consistency, vendored-lib,
+  installation-context, payload-invocation, installer-readiness,
+  marketplace-isolation, and changed-file ruff guards passed.
+- Audit note:
+  the exact direct Windows command
+  `PYTHONPATH=plugins/agent-bridge/src python -m pytest -q plugins/agent-bridge/tests`
+  still reproduces an unrelated host-environment import mismatch (`ssh_manager`
+  missing `CarrierRemoteError`) from unchanged collection paths; this is now
+  tracked in [#2286](https://github.com/ThomasMichon/copilot-extensions/issues/2286).
+- `#1108` remains open only for the deferred `agent-worktrees` status-monitor /
+  Worktree Manager supervision slice.
