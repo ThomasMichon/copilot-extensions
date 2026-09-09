@@ -255,13 +255,14 @@ def _spawn_coordinator_process() -> None:
     console interpreter that allocates a fresh DefTerm console.
     """
     install_dir = Path.home() / ".agent-dispatch"
-    if os.name == "nt":
-        venv_py = install_dir / ".venv" / "Scripts" / "python.exe"
-    else:
-        venv_py = install_dir / ".venv" / "bin" / "python"
-    from .procutil import detached_kwargs, windowless_python
+    from .procutil import detached_kwargs, resolve_own_runtime_python, windowless_python
 
-    python = windowless_python(str(venv_py) if venv_py.is_file() else sys.executable)
+    # Always the canonically-resolved current-version slot (never sys.executable
+    # directly, and never a legacy `.venv` path -- see resolve_own_runtime_python's
+    # docstring for the production incident this class of bug caused: a stale
+    # fallback here silently spawned an entire duplicate coordinator+supervisor
+    # tree under the system Python instead of the installed slot).
+    python = windowless_python(resolve_own_runtime_python())
 
     # Honor service.env (token, host/port pins) if present -- parity with the
     # installed launcher, which loads it before running `serve`.
@@ -3711,9 +3712,12 @@ def _spawn_supervisor_daemon_detached(machine: str | None, env: str) -> bool:
     single-instance election stands it down cleanly (pin-not-failover), so a double
     launch is self-correcting. Returns whether the spawn was issued.
     """
-    from .procutil import runtime_root, windowless_daemon_kwargs
+    from .procutil import resolve_own_runtime_python, runtime_root, windowless_daemon_kwargs
 
-    argv = [sys.executable, "-m", "agent_dispatch", "supervise", "serve"]
+    # Canonically-resolved current-version slot, not sys.executable -- see
+    # resolve_own_runtime_python's docstring for why a raw sys.executable here is
+    # a footgun (this is the sibling spawn site to _spawn_coordinator_process).
+    argv = [resolve_own_runtime_python(), "-m", "agent_dispatch", "supervise", "serve"]
     if machine:
         argv += ["--machine", machine]
     if env:
