@@ -2229,6 +2229,9 @@ def _canonicalization_cases(root: Path) -> list[tuple[str, Path]]:
     (allowed / "link").symlink_to(outside, target_is_directory=True)
     (allowed / "dangling").symlink_to(outside / "never-created")
     (allowed / "relative").symlink_to(Path("..") / "outside")
+    newline_target = root / "outside-with-newline\n"
+    newline_target.mkdir()
+    (allowed / "newline").symlink_to(newline_target, target_is_directory=True)
     return [
         # A '..' can pop back to a symlink that the walk had already stepped
         # past; it must still be followed.
@@ -2240,6 +2243,9 @@ def _canonicalization_cases(root: Path) -> list[tuple[str, Path]]:
         ("plain-missing", allowed / "missing" / "leaf"),
         ("glob-metacharacter", allowed / "mi*sing" / "leaf"),
         ("dotdot-only", allowed / ".." / "outside" / "leaf"),
+        # A symlink target may legally end in a newline; resolving it must not
+        # quietly trim one, or containment compares a different path.
+        ("newline-symlink-target", allowed / "newline" / "child"),
     ]
 
 

@@ -503,13 +503,30 @@ canonical_missing_path() {
             if ((link_depth > CANONICAL_PATH_MAX_LINK_DEPTH)); then
                 fail "Too many levels of symbolic links: $value"
             fi
+            # Prefer `realpath` while the target still exists: it resolves the
+            # component completely and, unlike `readlink`, its output preserves
+            # a trailing newline in the resolved path. The sentinel keeps that
+            # newline through command substitution.
+            if command -v realpath >/dev/null 2>&1 &&
+                target="$(realpath "$out/$part" 2>/dev/null && printf 'x')"; then
+                target="${target%x}"
+                out="${target%$'\n'}"
+                continue
+            fi
+            # Dangling target: only `readlink` can report it. On a BSD userland
+            # `readlink` prints a target that ends in a newline identically to
+            # one that does not, so a trailing newline cannot be recovered here
+            # -- the platform's own `readlink -f` loses it the same way.
             command -v readlink >/dev/null 2>&1 ||
                 fail "Cannot resolve path: $value"
             # `readlink` is invoked without `--`: the operand is always absolute
             # here, so it can never be mistaken for an option, and not every
             # BSD `readlink` is guaranteed to accept the separator.
-            target="$(readlink "$out/$part" 2>/dev/null)" ||
-                fail "Cannot resolve path: $value"
+            target="$(
+                readlink "$out/$part" 2>/dev/null && printf 'x'
+            )" || fail "Cannot resolve path: $value"
+            target="${target%x}"
+            target="${target%$'\n'}"
             CANONICAL_PATH_PARTS=()
             canonical_split_path "$target"
             if [[ "$target" == /* ]]; then
