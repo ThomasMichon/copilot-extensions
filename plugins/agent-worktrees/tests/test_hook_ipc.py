@@ -812,25 +812,113 @@ def test_explicit_context_pre_and_post_hooks_use_payload_client_only():
         assert '${COPILOT_PLUGIN_ROOT:-}/scripts' not in entry["bash"]
 
 
-def test_explicit_context_bypasses_legacy_resident(monkeypatch, tmp_path):
+def test_explicit_context_uses_matching_resident_monitor(monkeypatch, tmp_path):
     monkeypatch.setenv(
         "COPILOT_EXTENSIONS_CONTEXT",
         str(tmp_path / "cell" / "install.json"),
     )
+    seen = []
     monkeypatch.setattr(
         hook_client,
         "_request",
-        lambda *_args, **_kwargs: pytest.fail("legacy resident must not be called"),
+        lambda *_args, **_kwargs: seen.append(True) or {"permissionDecision": "allow"},
     )
     monkeypatch.setattr(
         hook_client,
         "_fallback_pre",
-        lambda *_args, **_kwargs: {"permissionDecision": "allow"},
+        lambda *_args, **_kwargs: pytest.fail("scoped resident should answer first"),
     )
 
     result = hook_client.decide("preToolUse", {}, home=tmp_path)
 
     assert result == {"permissionDecision": "allow"}
+    assert seen == [True]
+
+
+def test_explicit_context_request_reads_selected_cell_lock(monkeypatch, tmp_path):
+    cell = tmp_path / "cell"
+    runtime = tmp_path / ".agent-worktrees"
+    runtime.mkdir(parents=True)
+    server = HookIpcServer(lambda kind, payload, deadline: {"additionalContext": "cell"})
+    server.start()
+    try:
+        (runtime / "status-monitor.lock").write_text(
+            json.dumps(server.rendezvous()),
+            encoding="utf-8",
+        )
+        endpoint = {
+            **server.rendezvous(),
+            "marketplaceId": "cell-a",
+            "installReceipt": str(cell / "install.json"),
+            "pluginRoot": str(cell),
+        }
+        cell.mkdir(parents=True)
+        (cell / "status-monitor.lock").write_text(json.dumps(endpoint), encoding="utf-8")
+        monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(cell / "install.json"))
+
+        class RegistryRoot:
+            @staticmethod
+            def resolve_registry_root(**_kwargs):
+                return cell
+
+            @staticmethod
+            def resolve_registry_context(**_kwargs):
+                return {
+                    "marketplaceId": "cell-a",
+                    "installReceipt": str(cell / "install.json"),
+                    "pluginRoot": str(cell),
+                }
+
+        monkeypatch.setattr(
+            hook_client,
+            "_load_sibling",
+            lambda name: RegistryRoot if name == "registry_root.py" else None,
+        )
+
+        assert hook_client._request("preToolUse", {}, tmp_path) == {
+            "additionalContext": "cell"
+        }
+    finally:
+        server.close()
+
+
+def test_explicit_context_request_rejects_mismatched_monitor(monkeypatch, tmp_path):
+    cell = tmp_path / "cell"
+    cell.mkdir(parents=True)
+    server = HookIpcServer(lambda kind, payload, deadline: {"additionalContext": "cell"})
+    server.start()
+    try:
+        endpoint = {
+            **server.rendezvous(),
+            "marketplaceId": "other-cell",
+            "installReceipt": str(tmp_path / "other" / "install.json"),
+            "pluginRoot": str(tmp_path / "other"),
+        }
+        (cell / "status-monitor.lock").write_text(json.dumps(endpoint), encoding="utf-8")
+        monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(cell / "install.json"))
+
+        class RegistryRoot:
+            @staticmethod
+            def resolve_registry_root(**_kwargs):
+                return cell
+
+            @staticmethod
+            def resolve_registry_context(**_kwargs):
+                return {
+                    "marketplaceId": "cell-a",
+                    "installReceipt": str(cell / "install.json"),
+                    "pluginRoot": str(cell),
+                }
+
+        monkeypatch.setattr(
+            hook_client,
+            "_load_sibling",
+            lambda name: RegistryRoot if name == "registry_root.py" else None,
+        )
+
+        assert hook_client._request("preToolUse", {}, tmp_path) is None
+    finally:
+        server.close()
 
 
 def test_explicit_context_session_start_selects_cell_runtime(
@@ -864,6 +952,49 @@ def test_explicit_context_session_start_selects_cell_runtime(
     )
 
     assert hook_client._runtime_python(tmp_path) == executable
+
+
+def test_explicit_context_registration_context_uses_cell_session_context(
+    monkeypatch, tmp_path
+):
+    cell = tmp_path / "cell"
+    cell.mkdir(parents=True)
+    monkeypatch.setenv(
+        "COPILOT_EXTENSIONS_CONTEXT",
+        str(cell / "install.json"),
+    )
+
+    class RegistryRoot:
+        @staticmethod
+        def resolve_registry_root(**_kwargs):
+            return cell
+
+    monkeypatch.setattr(
+        hook_client,
+        "_load_sibling",
+        lambda name: RegistryRoot if name == "registry_root.py" else None,
+    )
+    payload = {
+        "sessionId": "session-1",
+        "cwd": str(tmp_path),
+        "source": "resume",
+        "timestamp": 1_800_000_000.25,
+        "_agentWorktrees": {"pluginVersion": "1.5.3-dev759"},
+    }
+    launch_key = hook_client._session_launch_key(payload)
+    snapshots = cell / ".session-context"
+    snapshots.mkdir(parents=True)
+    (snapshots / f"register-session-{launch_key}.json").write_text(
+        json.dumps(
+            {
+                "launchKey": launch_key,
+                "output": '{"additionalContext":"cell-guidance"}',
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert hook_client._registration_context(payload, tmp_path) == "cell-guidance"
 
 
 def test_explicit_context_session_start_never_uses_legacy_fallback(

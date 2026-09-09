@@ -12,6 +12,7 @@ import pytest
 
 from worktree_manager import __main__ as entrypoint
 from worktree_manager.production_picker import runner
+from worktree_manager.production_picker import _engine_runtime as engine_runtime
 
 
 def test_transplanted_picker_sources_match_production_copy():
@@ -118,6 +119,44 @@ def test_production_runner_activates_project_and_uses_transplanted_ui(monkeypatc
         ("finished",),
         ("picker", True),
     ]
+
+
+def test_engine_runtime_prefers_explicit_context_over_checkout(monkeypatch, tmp_path):
+    root = (
+        tmp_path
+        / "durable"
+        / "marketplaces"
+        / "cell-a"
+        / "plugins"
+        / "agent-worktrees"
+    )
+    slot = root / "versions" / "1.2.3"
+    source = (
+        slot / "Lib" / "site-packages"
+        if engine_runtime.os.name == "nt"
+        else slot / "lib" / "python3.10" / "site-packages"
+    )
+    package = source / "agent_worktrees"
+    package.mkdir(parents=True)
+    (root / "current-version").write_text("1.2.3", encoding="utf-8")
+    (root / "install.json").write_text(
+        json.dumps({"pluginId": "agent-worktrees"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(root / "install.json"))
+    monkeypatch.delenv(engine_runtime.ENGINE_SOURCE_ENV, raising=False)
+    monkeypatch.setattr(engine_runtime, "_checkout_source", lambda: tmp_path / "checkout")
+
+    assert engine_runtime._active_runtime_source() == source
+
+
+def test_engine_runtime_rejects_foreign_explicit_context(monkeypatch, tmp_path):
+    install = tmp_path / "install.json"
+    install.write_text(json.dumps({"pluginId": "agent-bridge"}), encoding="utf-8")
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(install))
+
+    with pytest.raises(engine_runtime.EngineRuntimeError, match="does not own agent-worktrees"):
+        engine_runtime.ensure_engine_runtime()
 
 
 def test_production_runner_mock_skips_mutating_startup(monkeypatch):

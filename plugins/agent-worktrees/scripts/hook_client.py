@@ -46,9 +46,62 @@ def _read_json(path: Path) -> dict | None:
     return value if isinstance(value, dict) else None
 
 
+def _selected_registry_context(home: Path) -> dict | None:
+    if not os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip():
+        return None
+    helper = _load_sibling("registry_root.py")
+    if helper is None:
+        return None
+    try:
+        value = helper.resolve_registry_context(environment=os.environ)
+    except Exception:
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _selected_runtime_root(home: Path) -> Path | None:
+    legacy = home / ".agent-worktrees"
+    if not os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip():
+        return legacy
+    helper = _load_sibling("registry_root.py")
+    if helper is None:
+        return None
+    try:
+        return Path(
+            helper.resolve_registry_root(
+                legacy_root=legacy,
+                environment=os.environ,
+            )
+        )
+    except Exception:
+        return None
+
+
+def _lock_matches_context(lock: dict, home: Path) -> bool:
+    context = _selected_registry_context(home)
+    if context is None:
+        return not (
+            str(lock.get("installReceipt") or "").strip()
+            or str(lock.get("marketplaceId") or "").strip()
+        )
+    return (
+        str(lock.get("installReceipt") or "").strip()
+        == str(context.get("installReceipt") or "").strip()
+        and str(lock.get("marketplaceId") or "").strip()
+        == str(context.get("marketplaceId") or "").strip()
+        and str(lock.get("pluginRoot") or "").strip()
+        == str(context.get("pluginRoot") or "").strip()
+    )
+
+
 def _request(kind: str, payload: dict, home: Path) -> dict | None:
-    endpoint = _read_json(home / ".agent-worktrees" / "status-monitor.lock")
+    runtime = _selected_runtime_root(home)
+    if runtime is None:
+        return None
+    endpoint = _read_json(runtime / "status-monitor.lock")
     if not endpoint:
+        return None
+    if not _lock_matches_context(endpoint, home):
         return None
     if endpoint.get("hook_transport") != "tcp":
         return None
@@ -126,13 +179,11 @@ def _plugin_version() -> str:
             )
         )
     except (OSError, UnicodeError, ValueError, TypeError):
+        runtime = _selected_runtime_root(Path.home())
+        if runtime is None:
+            return ""
         try:
-            return (
-                Path.home()
-                .joinpath(".agent-worktrees", "current-version")
-                .read_text(encoding="utf-8")
-                .strip()
-            )
+            return (runtime / "current-version").read_text(encoding="utf-8").strip()
         except (OSError, UnicodeError):
             return ""
     version = value.get("version") if isinstance(value, dict) else None
@@ -221,7 +272,10 @@ def _registration_context(payload: dict, home: Path) -> str:
     launch_key = _session_launch_key(payload)
     if not launch_key:
         return ""
-    root = home / ".agent-worktrees" / ".session-context"
+    runtime = _selected_runtime_root(home)
+    if runtime is None:
+        return ""
+    root = runtime / ".session-context"
     json_path = root / f"register-session-{launch_key}.json"
     try:
         raw = _read_bounded_text(json_path)
@@ -387,12 +441,10 @@ def _resident_started(payload: dict, home: Path) -> bool:
     launch_key = _session_launch_key(payload)
     if not launch_key:
         return False
-    receipt = (
-        home
-        / ".agent-worktrees"
-        / ".session-context"
-        / f"lifecycle-{launch_key}.json"
-    )
+    runtime = _selected_runtime_root(home)
+    if runtime is None:
+        return False
+    receipt = runtime / ".session-context" / f"lifecycle-{launch_key}.json"
     try:
         value = json.loads(receipt.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, ValueError, TypeError):
@@ -437,15 +489,9 @@ def _version_key(version: str) -> tuple:
 
 
 def _runtime_python(home: Path) -> Path | None:
-    runtime = home / ".agent-worktrees"
-    if os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip():
-        helper = _load_sibling("registry_root.py")
-        if helper is None:
-            return None
-        runtime = helper.resolve_registry_root(
-            legacy_root=runtime,
-            environment=os.environ,
-        )
+    runtime = _selected_runtime_root(home)
+    if runtime is None:
+        return None
     for marker_name in ("current-version", "last-known-good"):
         try:
             version = (runtime / marker_name).read_text("utf-8").strip()
@@ -812,7 +858,7 @@ def decide(kind: str, payload: dict, *, home: Path | None = None) -> dict:
         and not isinstance(payload.get("_agentWorktrees"), dict)
     ):
         payload = _enrich_session_payload(payload)
-    remote = None if contextual else _request(kind, payload, home)
+    remote = _request(kind, payload, home)
     if remote is not None:
         return remote
     if kind == "sessionStart" and not contextual and _resident_started(payload, home):
