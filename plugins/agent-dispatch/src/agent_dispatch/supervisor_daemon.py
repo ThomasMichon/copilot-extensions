@@ -109,11 +109,18 @@ def supervisor_lease_scope(machine: str | None, env: str) -> str:
 # counter is needed -- ``stale_target`` itself already fails safe on a torn
 # marker or an incomplete slot.
 #
-# Opt-in (default-OFF), like the coordinator's: ``AGENT_DISPATCH_SUPERVISOR_
-# SELF_UPDATE``. Deliberately a *separate* flag from the coordinator's
-# ``AGENT_DISPATCH_SELF_UPDATE`` -- one arms the coordinator's routing-table
-# cutover, the other this daemon's respawn; sharing a flag would couple two
-# independently-soaked mechanisms.
+# Default-ON / opt-out, like the coordinator's generation self-retire
+# (``AGENT_DISPATCH_SELF_RETIRE``) -- NOT opt-in like the coordinator's own
+# self-update loop. There is no operator-facing protocol in this harness's
+# launch paths to set an opt-in env var before a daemon's first boot, so an
+# opt-in flag here would simply never get flipped and the gap in #2259 would
+# persist unfixed for everyone. ``AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE=0`` (or
+# false/no/off) is the escape hatch. Deliberately a *separate* flag from the
+# coordinator's ``AGENT_DISPATCH_SELF_UPDATE`` -- one arms the coordinator's
+# routing-table cutover, the other this daemon's respawn; sharing a flag would
+# couple two independently-soaked mechanisms. Validated end-to-end (real
+# process spawn, real single-instance lease handoff) by the clean-room
+# ``agent-dispatch-supervisor-self-update`` scenario before defaulting on.
 _SELF_UPDATE_DEFAULT_POLL_S = 60.0
 _SELF_UPDATE_DEFAULT_COOLDOWN_S = 900.0
 #: Distinct exit code ``serve()`` returns after handing off to a spawned
@@ -127,10 +134,13 @@ def _self_update_settings() -> tuple[bool, float, float]:
     """``(enabled, poll_seconds, cooldown_seconds)`` for the daemon's own
     self-update loop.
 
-    ``enabled`` is False unless ``AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE`` is
-    explicitly truthy (opt-in). Poll cadence and the cooldown between spawn
-    attempts (so a spawn that fails to land isn't retried every tick) are
-    overridable via ``AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE_POLL_S`` and
+    ``enabled`` is True (default-ON / opt-out) unless
+    ``AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE`` is explicitly falsy
+    (``0``/``false``/``no``/``off``) -- when disabled, the check never runs (see
+    ``self_update_enabled`` on ``SupervisorDaemon``). Poll cadence and the
+    cooldown between spawn attempts (so a spawn that fails to land isn't
+    retried every tick) are overridable via
+    ``AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE_POLL_S`` and
     ``AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE_COOLDOWN_S``. A value that fails to
     parse, or parses to a non-finite float (``nan``/``inf``), falls back to the
     default.
@@ -140,7 +150,7 @@ def _self_update_settings() -> tuple[bool, float, float]:
 
     enabled = os.environ.get(
         "AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE", ""
-    ).strip().lower() in ("1", "true", "yes", "on")
+    ).strip().lower() not in ("0", "false", "no", "off")
     try:
         poll = float(
             os.environ.get("AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE_POLL_S", "")
