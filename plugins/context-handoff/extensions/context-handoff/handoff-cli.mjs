@@ -241,7 +241,10 @@ function cmdConsume(args) {
     ? consumeDispatchHandoffTask(cwd, taskId, sid, deferComplete)
     : consumeFileHandoff(cwd, sid, handoffId, args.path || null);
   if (!consumed.ok) {
-    process.stderr.write(`handoff-cli consume: ${consumed.message}\n`);
+    if (args.json) return emit(consumed, args);
+    process.stderr.write(
+      `handoff-cli consume: ${formatConsumeResult(consumed, { deferComplete })}\n`,
+    );
     process.exit(1);
   }
   if (args.json) return emit(consumed, args);
