@@ -932,12 +932,17 @@ def test_cli_register_ensure_flag():
 
 
 def test_supervisor_daemon_root_hosts_recurring_children_windowlessly(
-    monkeypatch,
+    monkeypatch, tmp_path,
 ):
     from agent_dispatch import __main__ as cli
     from agent_dispatch import procutil
 
     observed = {}
+    # No installed runtime under this fake home -> resolve_own_runtime_python
+    # degrades to sys.executable (its documented fallback), keeping this test
+    # isolated from whatever runtime happens to be installed on the machine
+    # actually running the suite.
+    monkeypatch.setattr(cli.Path, "home", lambda: tmp_path)
     monkeypatch.setattr(cli.sys, "executable", "python.exe")
     monkeypatch.setattr(
         procutil,
@@ -953,6 +958,35 @@ def test_supervisor_daemon_root_hosts_recurring_children_windowlessly(
     assert cli._spawn_supervisor_daemon_detached("host-a", "default")
     assert observed["argv"][0] == "python.exe"
     assert observed["kwargs"]["creationflags"] == 0x08000000
+
+
+def test_supervisor_daemon_root_resolves_installed_slot_not_sys_executable(
+    monkeypatch, tmp_path,
+):
+    """Regression test (sibling to the coordinator's own): the supervisor's
+    detached self-relaunch must resolve the canonical current-version slot, not
+    sys.executable, so it can never diverge from what the daemon it is meant to
+    replace/join is actually running."""
+    from agent_dispatch import __main__ as cli
+    from agent_dispatch import procutil
+
+    monkeypatch.setattr(cli.Path, "home", lambda: tmp_path)
+    install_dir = tmp_path / ".agent-dispatch"
+    slot_py = install_dir / "versions" / "0.1.2-dev49" / "Scripts" / "python.exe"
+    slot_py.parent.mkdir(parents=True)
+    slot_py.write_text("")
+    (install_dir / "current-version").write_text("0.1.2-dev49")
+    monkeypatch.setattr(cli.sys, "executable", "WRONG-INTERPRETER")
+    monkeypatch.setattr(procutil, "windowless_daemon_kwargs", lambda: {})
+    observed = {}
+    monkeypatch.setattr(
+        cli.subprocess,
+        "Popen",
+        lambda argv, **kwargs: observed.update(argv=argv),
+    )
+
+    assert cli._spawn_supervisor_daemon_detached("host-a", "default")
+    assert observed["argv"][0] == str(slot_py)
 
 
 def test_cli_build_spec_evaluator_convenience():
