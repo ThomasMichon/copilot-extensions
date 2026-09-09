@@ -458,9 +458,23 @@ canonical_existing_path() {
         printf '%s' "$result"
         return 0
     fi
-    [[ -d "$value" ]] || return 1
-    result="$(cd -P -- "$value" 2>/dev/null && pwd -P)" || return 1
-    printf '%s' "$result"
+    if [[ -d "$value" ]]; then
+        result="$(cd -P -- "$value" 2>/dev/null && pwd -P)" || return 1
+        printf '%s' "$result"
+        return 0
+    fi
+    # A non-directory is canonicalized through its parent, but only when it is
+    # not itself a symlink: with no resolver available we cannot follow it, and
+    # returning the link name would hand a containment check a non-physical
+    # path. Report failure instead so the caller fails closed.
+    if [[ -L "$value" ]]; then
+        return 1
+    fi
+    local parent="${value%/*}"
+    [[ -n "$parent" ]] || parent="/"
+    result="$(cd -P -- "$parent" 2>/dev/null && pwd -P)" || return 1
+    [[ "$result" != "/" ]] || result=""
+    printf '%s' "$result/${value##*/}"
 }
 
 # Canonicalize a path whose leaf does not exist yet: resolve the nearest
@@ -476,7 +490,13 @@ canonical_missing_path() {
     base="$value"
     [[ "$base" == /* ]] || base="$PWD/$base"
     while :; do
-        if [[ -e "$base" ]] && resolved="$(canonical_existing_path "$base")"; then
+        # A reachable component must be resolved physically or the whole
+        # canonicalization fails closed; only a component that does not exist
+        # (including a dangling symlink, exactly as `realpath -m` treats one)
+        # is allowed to stay lexical.
+        if [[ -e "$base" ]]; then
+            resolved="$(canonical_existing_path "$base")" ||
+                fail "Cannot resolve path: $value"
             break
         fi
         resolved=""
