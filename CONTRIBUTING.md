@@ -40,6 +40,7 @@ blocked.** This is enforced on three layers that agree:
 ```bash
 copilot-extensions create            # isolated worktree (no mux/session)
 #   …edit in the returned worktree path…
+#   Complete the documentation-impact review below.
 copilot-extensions create-pr         # squashes the worktree, pushes pr/<slug>,
                                      # and (auto_open) opens the GitHub PR
 #   → Copilot posts its review on the PR (non-blocking)
@@ -60,6 +61,27 @@ copilot-extensions finalize          # clean up the worktree
 - **Never** `git push origin main` or `push-changes` direct-to-`main`; both the
   tooling and the branch policy reject it. Break-glass (a genuine recovery)
   means temporarily relaxing the ruleset — not routing around it.
+
+### Documentation impact (required before opening a PR)
+
+Assess the final diff and repeat the assessment after material scope or
+implementation changes. Apply this review to every change classification,
+including bug fixes, compatibility repairs, and below-altitude work.
+
+1. Update the authoritative documentation affected by changes to behavior,
+   guarantees, interfaces, configuration, output/error handling, process
+   lifecycle, operating procedures, or platform support. Keep already-accurate
+   documentation unchanged.
+2. Reconcile architectural changes with their governing vision and patterns.
+   Revise a vision when intended behavior or guarantees change; put
+   implementation details in architecture or operating documentation.
+3. Include a **Documentation impact** statement in the PR description, linking
+   the documentation updated or explaining why existing documentation remains
+   accurate and complete.
+
+Reviewers confirm that the statement and documentation match the final diff.
+Treat a missing assessment or inaccurate affected documentation as unfinished
+work.
 
 ## Release & Versioning
 
