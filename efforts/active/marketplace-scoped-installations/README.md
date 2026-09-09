@@ -286,7 +286,7 @@ because they provide tools or services.
 - [x] Convert remote venue and transport plugins, carrying installation identity
   through SSH, CodeSpace, container, and staged-plugin boundaries
   ([#1107](https://github.com/ThomasMichon/copilot-extensions/issues/1107)).
-- [ ] Convert service-bearing plugins, qualifying service, lease, endpoint,
+- [x] Convert service-bearing plugins, qualifying service, lease, endpoint,
   provider, log, and process identity
   ([#1108](https://github.com/ThomasMichon/copilot-extensions/issues/1108)).
 
@@ -1391,3 +1391,44 @@ See [`design.md`](design.md).
   tracked in [#2286](https://github.com/ThomasMichon/copilot-extensions/issues/2286).
 - `#1108` remains open only for the deferred `agent-worktrees` status-monitor /
   Worktree Manager supervision slice.
+
+### 2026-09-09 — Agent-worktrees service-boundary completion
+
+- Merged [#2289](https://github.com/ThomasMichon/copilot-extensions/pull/2289)
+  at `33772a7141e0f277b20ab5b234347551afdf4ca6`, landing the deferred
+  `agent-worktrees` status-monitor / Worktree Manager supervision slice and
+  completing the final remaining implementation scope in `#1108`.
+- `agent-worktrees` now scopes the resident status-monitor lock, hook-IPC
+  rendezvous record, hook-client runtime selection, and session-lifecycle
+  snapshot reads/writes to the validated installation cell whenever explicit
+  installation context is active. Cross-cell rendezvous records are rejected
+  before dialing, while legacy execution with no installation context keeps the
+  historical machine-global monitor and hook behavior unchanged.
+- The same increment aligns the Worktree Manager compatibility runtime with the
+  selected installation receipt, so the transplanted Picker reads the same
+  cell-local `current-version` marker as the resident monitor and its hook
+  clients instead of falling back to a checkout or legacy global runtime.
+- Validation:
+  direct Windows changed-surface coverage passed with
+  `PYTHONPATH=plugins/agent-worktrees/src python -m pytest -q plugins/agent-worktrees/tests -k "hook_ipc or status_monitor or registry_paths or session_context_companions"`
+  (`151 passed, 9 skipped`) plus the narrower hook/monitor rerun
+  (`127 passed, 4 skipped`);
+  targeted Worktree Manager compatibility coverage passed with
+  `PYTHONPATH=worktree-manager/src python -m pytest -q worktree-manager/tests/test_production_picker_transplant.py -k "engine_runtime or explicit_context"`
+  (`2 passed`);
+  focused WSL/POSIX coverage passed with
+  `uv run --directory plugins/agent-worktrees --extra dev python -m pytest -q tests -k 'hook_ipc or status_monitor or registry_paths or session_context_companions'`
+  (`157 passed, 3 skipped`);
+  and install-contract, version-consistency, vendored-lib,
+  installation-context, payload-invocation, installer-readiness,
+  marketplace-isolation, and changed-file ruff guards passed.
+- Audit note:
+  `python tools/run-plugin-tests.py agent-worktrees` was attempted and again hit
+  the known contained-runner wall-clock limit (`[LIMIT] wall-clock limit exceeded (300s)`)
+  after sub-suite 5/7, matching the effort's existing validation notes for the
+  `agent-worktrees` runner seam rather than a changed-surface test regression.
+- No additional version-skew deferral was required for this slice; the Phase 4
+  transfer of cell-qualified Git-ref leases to `#1110` remains unchanged.
+- `#1108` is now complete and closed. Phase 4 complete; Phase 5 (Repository
+  configuration and adoption state, [#1109](https://github.com/ThomasMichon/copilot-extensions/issues/1109))
+  is next.
