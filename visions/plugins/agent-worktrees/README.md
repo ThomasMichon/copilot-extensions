@@ -88,7 +88,14 @@ Overall status is a reduction over independently owned facts: source-control
 state, claims and obligations, asserted disposition, effort focus, relationships,
 and fresh provider observations. No observer writes the aggregate verdict.
 Stale or absent execution observations reduce fidelity without erasing durable
-responsibility.
+responsibility. Computing this reduction is always available **on demand**; an
+optional resident status-monitor may keep it warm and proactively surface
+changes instead of every reader recomputing cold, but it is an accelerator over
+the same durable facts, never a second writer of the aggregate and never new
+process-management authority. Where one runs, it is exactly **one** per host
+regardless of how many worktrees or sessions it watches — the suite-wide
+[*process-count-scales-with-services-not-sessions*](../../plugin-services/README.md#process-count-scales-with-services-not-sessions)
+guarantee.
 
 ### Declarative presentation contribution
 

@@ -36,6 +36,16 @@ vision exists to abolish is the manual deconfliction of shared machine resources
 service owns which address" bookkeeping — that turns adding or moving a service
 into a coordination problem.
 
+A third force sits alongside those two, guarding against a different failure
+mode: **process count must never scale with agent activity.** A user running
+one Copilot session and a user running ten concurrent sessions across as many
+worktrees see the **same** set of long-lived service daemons on their machine —
+never a process, console, or subprocess tree that multiplies per session, per
+worktree, or per hook/extension invocation. Every session-lifecycle hook and
+extension callback is **transient by contract**: it resolves identity, reaches
+the one live daemon it needs, and exits — it is never itself the long-running
+thing, and it never spawns one just to be sure.
+
 ## Concepts & Components
 
 - **Plugin runtime** — the self-contained versioned runtime and invocation
@@ -78,6 +88,12 @@ into a coordination problem.
   daemon (consolidating the warm runtime and shared upstream, never the callers'
   isolated state), instead of each caller spawning its own worker. A convenience
   over the always-correct inline path, never a dependency.
+- **Transient hook / extension callback** — the code Copilot CLI itself invokes
+  at a session-lifecycle point (session start, a tool call, an agent-host
+  event) or through an injected extension. It is host-launched per invocation
+  and by nature short-lived; the service model requires it to **stay** that way
+  — resolve identity, reach the live daemon it needs, hand off, exit — rather
+  than becoming, or spawning, a long-running process of its own.
 - **Install contract** — the uniform deploy/version/footprint agreement every
   runtime plugin follows, so services deploy, update, and are audited the same
   way. See [`docs/install-contract.md`](../../docs/install-contract.md).
@@ -417,6 +433,32 @@ one shape: **consolidate the warm runtime and shared upstream, never the callers
 isolated state, and only across callers that share the same identity and
 credentials.** Guarded by the *single-instance-lease*, cut over by
 *zero-downtime-cutover*, discovered by rendezvous.
+
+### process-count-scales-with-services-not-sessions
+The number of long-lived processes a host is running scales with the number of
+**distinct services** installed and active on it, and **never** with the number
+of active Copilot sessions, worktrees, hooks, or extension invocations. A host
+running five, or fifty, concurrent agent sessions has the **same** count of
+long-lived service daemons as a host running one — each service's
+*single-instance-lease* still bounds it to one live daemon per installation
+cell regardless of how many sessions ask it for work. A hook or extension
+callback that fires once per session, once per tool call, or once per worktree
+is exactly the caller shape the *work-coalescing-singleton* and
+*single-instance-lease* exist to absorb, never a trigger for a new daemon (or
+a new console/subprocess tree under one) per invocation.
+
+### hooks-and-callbacks-are-transient
+A **transient hook / extension callback** is not itself a long-lived process
+and never becomes one. Its entire job is: resolve its own session/worktree
+identity, locate the live daemon for the service it needs (through
+discovery/rendezvous — never by **spawning one to make sure**), post its
+packet, optionally read back follow-up guidance, and **exit**. Any actual
+long-running work it wants performed is *registered* with an already-running
+daemon (see *work-coalescing-singleton*) rather than carried out inline by a
+process the hook keeps alive or supervises. When no daemon is reachable, the
+hook degrades to inline/no-op behavior consistent with *degrade-gracefully* —
+it does not block waiting for one to appear, and it does not promote itself
+into the missing daemon.
 
 ## Non-Goals / Boundaries
 
