@@ -22,6 +22,13 @@ _DEFAULT_PROJECTION_BUDGET = 16
 _MAX_VERIFIED_PROJECTIONS = 1024
 _LIVE_RETRY_STEPS = 4
 
+# fsmonitor reap throttling (see _maybe_reap_fsmonitor): bound how often a
+# persistently-dark record re-spawns `git fsmonitor--daemon stop`, and cap the
+# per-worktree cooldown map so an ever-growing fleet of worktree_ids across a
+# long-lived resident monitor cannot leak memory.
+_FSMONITOR_REAP_COOLDOWN_S = 300.0
+_MAX_FSMONITOR_REAP_TRACKED = 2048
+
 
 def _path_key(path: str) -> str:
     return os.path.normcase(os.path.normpath(path))
@@ -124,6 +131,7 @@ class ResidentSessionReconciler:
         ] = {}
         self._projection_cooldown: dict[tuple[str, str, str], int] = {}
         self._step_number = 0
+        self._fsmonitor_reap_checked: dict[str, float] = {}
 
     def observe_mux(self, session_names: set[str]) -> None:
         """Publish a successful full mux observation for later record stamps."""
@@ -356,15 +364,67 @@ class ResidentSessionReconciler:
                 )
         return result
 
+    def _maybe_reap_fsmonitor(
+        self, record: tracking.WorktreeRecord, live: bool,
+    ) -> None:
+        """Best-effort, cooldown-throttled fsmonitor reap for a dark worktree.
+
+        **Level-triggered, not edge-triggered**: acts on whatever the
+        CURRENT fresh mux observation says, not on whether it *changed*
+        since the last tick. An edge-only check (this reconciler's first cut,
+        #2270) misses every worktree that was *already* dark before the
+        reconciler ever started watching it -- overwhelmingly the common
+        case: a `finalized` worktree deliberately keeps its directory (see
+        `ephemeral-process-reaping.md`), and `core.fsmonitor=true` means any
+        later *incidental* git command against that path (an unrelated
+        doctor/status probe, a stray `git -C <path> ...`) quietly restarts
+        its daemon with nothing left watching for that worktree ever again
+        (confirmed live: a worktree finalized 2026-08-28 still had its daemon
+        running under the edge-triggered version). Runs for every record
+        status -- unlike the rest of `_index_record`'s active-only
+        bookkeeping -- since a finalized record is exactly the case this
+        must still catch.
+
+        Corroborates with `sessions.worktree_has_live_session` (a real PID
+        check) before reaping, and throttles via `_fsmonitor_reap_checked` so
+        a persistently-dark record costs one `git` invocation per cooldown
+        window, not one per tick.
+        """
+        if live:
+            return
+        now = time.monotonic()
+        last = self._fsmonitor_reap_checked.get(record.worktree_id)
+        if last is not None and now - last < _FSMONITOR_REAP_COOLDOWN_S:
+            return
+        self._fsmonitor_reap_checked[record.worktree_id] = now
+        while len(self._fsmonitor_reap_checked) > _MAX_FSMONITOR_REAP_TRACKED:
+            self._fsmonitor_reap_checked.pop(
+                next(iter(self._fsmonitor_reap_checked)))
+        if sessions.worktree_has_live_session(record):
+            return
+        tracking.stop_fsmonitor_daemon(record.worktree_path)
+
     def _index_record(self, project: str, yaml_path: Path) -> dict:
         result = {"records": 0, "heads": 0, "mux": 0, "registered_mux": 0}
         try:
             record = tracking.load_record(yaml_path)
         except Exception:
             return result
-        if (record.platform != cfg.detect_platform()
-                or record.status != "active"
-                or not record.worktree_path):
+        if record.platform != cfg.detect_platform() or not record.worktree_path:
+            return result
+
+        mux_fresh = (
+            self._live_mux is not None
+            and self._live_mux_at is not None
+            and time.monotonic() - self._live_mux_at <= self.mux_max_age
+        )
+        live = False
+        if mux_fresh:
+            live = sessions.mux_session_name(record.worktree_id) in self._live_mux
+            # Runs regardless of record.status -- see docstring.
+            self._maybe_reap_fsmonitor(record, live)
+
+        if record.status != "active":
             return result
         result["records"] = 1
         key = _path_key(record.worktree_path)
@@ -385,14 +445,7 @@ class ResidentSessionReconciler:
             except Exception:
                 pass
 
-        mux_fresh = (
-            self._live_mux is not None
-            and self._live_mux_at is not None
-            and time.monotonic() - self._live_mux_at <= self.mux_max_age
-        )
         if mux_fresh:
-            live = sessions.mux_session_name(record.worktree_id) in self._live_mux
-            was_live = record.mux_live
             tracking.stamp_mux_live(
                 record.worktree_id, live, refresh=live, sync=True)
             result["mux"] = 1
@@ -402,19 +455,6 @@ class ResidentSessionReconciler:
                     record.worktree_path,
                 ):
                     result["registered_mux"] = 1
-            elif (
-                was_live and not live
-                and not sessions.worktree_has_live_session(record)
-            ):
-                # An authoritative (fresh) mux snapshot just went from live to
-                # dark for this worktree, AND no bound/registered Copilot
-                # process is holding an active session lock either -- both
-                # lifetimes this worktree could still be "live" through have
-                # now ended. Reap its fsmonitor daemon here rather than
-                # relying solely on the sessionEnd hook (#2269): an abrupt
-                # kill -- Windows tearing down mux+Copilot on window close, a
-                # crash, `Stop-Process` -- never delivers that hook at all.
-                tracking.stop_fsmonitor_daemon(record.worktree_path)
         return result
 
     def _scan_records(self) -> dict:
