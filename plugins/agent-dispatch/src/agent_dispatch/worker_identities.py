@@ -9,9 +9,13 @@ improves every declaration that selects it.
 
 Resolution order for a named identity (first hit wins):
 
-1. A repo-local override: ``<repo>/.agent-dispatch/identities/<name>.identity.md``
-   under the current working directory, so an adopting repository can carry
-   its own private identity without touching this package.
+1. A repo-local override: the canonical
+   ``<repo>/.copilot-extensions/agent-dispatch/identities/<name>.identity.md``,
+   then the legacy ``<repo>/.agent-dispatch/identities/<name>.identity.md``,
+   with an explicit marketplace overlay under
+   ``<repo>/.copilot-extensions/agent-dispatch/marketplaces/<marketplace-id>/identities/``.
+   This lets an adopting repository carry its own private identity without
+   touching this package.
 2. The packaged built-in identities shipped inside this package:
    ``agent_dispatch/identities/<name>.identity.md`` -- included as package
    data so they resolve the same way from an editable checkout and an
@@ -26,9 +30,11 @@ from pathlib import Path
 import yaml
 
 from .registrar import RegistrarError
+from . import repo_config
 
 _FRONTMATTER = "---"
-_REPO_LOCAL_SUBDIR = Path(".agent-dispatch") / "identities"
+_REPO_LOCAL_SUBDIR = repo_config.CANONICAL_REPO_CONFIG_DIR / "identities"
+_LEGACY_REPO_LOCAL_SUBDIR = repo_config.LEGACY_REPO_CONFIG_DIR / "identities"
 # Package data: src/agent_dispatch/worker_identities.py -> src/agent_dispatch/identities.
 # Must live *inside* the agent_dispatch package (not a plugin-root sibling of
 # src/) so it is actually included in the built wheel and resolves identically
@@ -101,7 +107,18 @@ def _parse_identity_file(path: Path) -> WorkerIdentity:
 def _candidate_paths(name: str, *, cwd: Path | None = None) -> list[Path]:
     filename = f"{name}.identity.md"
     base = cwd if cwd is not None else Path.cwd()
-    return [base / _REPO_LOCAL_SUBDIR / filename, _BUILTIN_DIR / filename]
+    overlay = repo_config.overlay_repo_surface_dir(base, "identities")
+    paths: list[Path] = []
+    if overlay is not None:
+        paths.append(overlay / filename)
+    paths.extend(
+        [
+            base / _REPO_LOCAL_SUBDIR / filename,
+            base / _LEGACY_REPO_LOCAL_SUBDIR / filename,
+            _BUILTIN_DIR / filename,
+        ]
+    )
+    return paths
 
 
 def load_worker_identity(name: str, *, cwd: Path | None = None) -> WorkerIdentity:

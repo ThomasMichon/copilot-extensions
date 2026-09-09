@@ -7,10 +7,12 @@ which other repos are relevant, why, and -- crucially -- **where to actually
 work on them**.
 
 The data lives **in-repo and committed**, at
-``<anchor>/.agent-worktrees/related.yaml`` (alongside the in-repo
-``config.yaml``), with a plain-markdown narrative per related repo under
-``<anchor>/.agent-worktrees/related/<name>.md``.  Because it is committed, it
-travels with the repo and is shared across machines and collaborators.
+``<anchor>/.copilot-extensions/agent-worktrees/related.yaml`` (alongside the
+in-repo ``config.yaml``), with a plain-markdown narrative per related repo
+under ``<anchor>/.copilot-extensions/agent-worktrees/related/<name>.md``.
+Legacy ``.agent-worktrees/related.yaml`` remains readable for compatibility.
+Because it is committed, it travels with the repo and is shared across
+machines and collaborators.
 
 Design intent (so we never duplicate the registry):
 
@@ -24,7 +26,7 @@ Design intent (so we never duplicate the registry):
   global registry is intentionally *not* extended with per-machine paths.
 * A top-level ``primary:`` marker names the default/primary project repo.
 
-Schema (``<anchor>/.agent-worktrees/related.yaml``)::
+Schema (``<anchor>/.copilot-extensions/agent-worktrees/related.yaml``)::
 
     primary: example-web
     related:
@@ -64,12 +66,14 @@ import yaml
 from dropin_registry import ScanAuthority
 from plugin_activation import resolve_active_plugins
 
-# The in-repo ``.agent-worktrees/`` directory name.  Kept in sync with
-# ``config.INREPO_CONFIG_DIRNAME``; defined locally so this module has no
-# import-time dependency on the config layer.
+# Repo-owned related-repo config moves toward the shared plugin namespace while
+# installed plugin payload contributions retain the legacy in-payload
+# ``.agent-worktrees/`` location.
 INREPO_DIRNAME = ".agent-worktrees"
-RELATED_FILENAME = "related.yaml"      # <anchor>/.agent-worktrees/related.yaml
-RELATED_DOCS_DIRNAME = "related"       # <anchor>/.agent-worktrees/related/<name>.md
+CANONICAL_RELATED_DIR = Path(".copilot-extensions") / "agent-worktrees"
+RELATED_FILENAME = "related.yaml"
+RELATED_DOCS_DIRNAME = "related"
+MARKETPLACE_OVERLAYS_DIR = CANONICAL_RELATED_DIR / "marketplaces"
 
 # Descriptive roles a related repo can play, *from the current repo's POV*.
 # Stored verbatim (lower-cased) -- unknown values are kept, not coerced, since
@@ -183,11 +187,15 @@ class RelatedEntry:
     # entry's narrative ``doc`` -- which is relative to ITS source repo's
     # ``.agent-worktrees/`` -- still resolves against that repo, not the harness
     # base. ``None`` for a plain single-anchor read; never serialized.
-    origin_anchor: str | None = None
+    origin_anchor: str | None = field(default=None, compare=False)
     # Effective graft source, populated alongside ``origin_anchor`` and never
     # serialized to related.yaml. Empty means the entry bypassed grafting.
-    origin_layer: str = ""
-    origin_plugin: str = ""
+    origin_layer: str = field(default="", compare=False)
+    origin_plugin: str = field(default="", compare=False)
+    # Absolute directory the entry's narrative doc resolves relative to. Set by
+    # the loader so canonical, legacy, and marketplace-overlay entries each keep
+    # their own doc root without callers needing to know which committed path won.
+    doc_root: str | None = field(default=None, compare=False)
 
 
 @dataclass
@@ -202,18 +210,36 @@ class RelatedConfig:
 # Path helpers
 # ---------------------------------------------------------------------------
 
+def _looks_like_plugin_anchor(anchor: Path) -> bool:
+    """Whether ``anchor`` is an installed plugin payload root."""
+    return _has_plugin_manifest(anchor)
+
+
 def related_dir(anchor: str | Path) -> Path:
-    """The in-repo ``<anchor>/.agent-worktrees`` directory."""
+    """The preferred related-config directory for ``anchor``."""
+    root = Path(anchor)
+    if _looks_like_plugin_anchor(root):
+        return root / INREPO_DIRNAME
+    return root / CANONICAL_RELATED_DIR
+
+
+def legacy_related_dir(anchor: str | Path) -> Path:
+    """The legacy repo-local related-config directory for ``anchor``."""
     return Path(anchor) / INREPO_DIRNAME
 
 
 def related_path(anchor: str | Path) -> Path:
-    """Path to ``<anchor>/.agent-worktrees/related.yaml``."""
+    """Path to the preferred related.yaml for ``anchor``."""
     return related_dir(anchor) / RELATED_FILENAME
 
 
+def legacy_related_path(anchor: str | Path) -> Path:
+    """Path to the legacy ``<anchor>/.agent-worktrees/related.yaml``."""
+    return legacy_related_dir(anchor) / RELATED_FILENAME
+
+
 def docs_dir(anchor: str | Path) -> Path:
-    """The narrative docs directory ``<anchor>/.agent-worktrees/related``."""
+    """The preferred narrative docs directory for ``anchor``."""
     return related_dir(anchor) / RELATED_DOCS_DIRNAME
 
 
@@ -233,6 +259,8 @@ def doc_abs_path(anchor: str | Path, entry_or_name: RelatedEntry | str) -> Path:
     """
     if isinstance(entry_or_name, RelatedEntry):
         rel = entry_or_name.doc or default_doc_rel(entry_or_name.name)
+        if entry_or_name.doc_root:
+            return Path(entry_or_name.doc_root) / rel
         if entry_or_name.origin_anchor:
             anchor = entry_or_name.origin_anchor
     else:
@@ -367,16 +395,8 @@ def _parse_related_pr(raw: Any) -> dict[str, Any]:
     return dict(raw) if isinstance(raw, dict) else {}
 
 
-def read_related(anchor: str | Path) -> RelatedConfig:
-    """Load ``<anchor>/.agent-worktrees/related.yaml``.
-
-    Returns an empty :class:`RelatedConfig` if the file is missing, empty, or
-    malformed -- never raises on bad content.
-    """
-    path = related_path(anchor)
-    if not path.exists():
-        return RelatedConfig()
-
+def _parse_related_file(path: Path) -> RelatedConfig:
+    """Load one related.yaml file, or an empty config when unreadable."""
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
     except Exception:
@@ -406,9 +426,74 @@ def read_related(anchor: str | Path) -> RelatedConfig:
                 owner=str(entry.get("owner", "")).strip(),
                 plugins=_parse_plugins(entry.get("plugins")),
                 pr=_parse_related_pr(entry.get("pr")),
+                doc_root=str(path.parent),
             )
 
     return RelatedConfig(primary=primary, related=related)
+
+
+def _repo_base_related_path(anchor: Path) -> Path | None:
+    for candidate in (anchor / CANONICAL_RELATED_DIR / RELATED_FILENAME, legacy_related_path(anchor)):
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _repo_marketplace_overlay_related_path(anchor: Path) -> Path | None:
+    raw = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip()
+    if not raw:
+        return None
+    try:
+        if raw.startswith("{"):
+            context = json.loads(raw)
+        else:
+            context = json.loads(Path(raw).expanduser().read_text(encoding="utf-8"))
+    except (OSError, TypeError, ValueError):
+        return None
+    if not isinstance(context, dict):
+        return None
+    marketplace_id = str(context.get("marketplaceId") or "").strip()
+    if not marketplace_id:
+        return None
+    candidate = (
+        anchor
+        / MARKETPLACE_OVERLAYS_DIR
+        / marketplace_id
+        / RELATED_FILENAME
+    )
+    return candidate if candidate.exists() else None
+
+
+def read_related(anchor: str | Path) -> RelatedConfig:
+    """Load a repo or plugin anchor's effective related-repo config.
+
+    Repo anchors read the canonical
+    ``<anchor>/.copilot-extensions/agent-worktrees/related.yaml`` first, fall
+    back to legacy ``<anchor>/.agent-worktrees/related.yaml``, then overlay the
+    explicit marketplace-specific file from
+    ``<anchor>/.copilot-extensions/agent-worktrees/marketplaces/<marketplace-id>/related.yaml``
+    when present. Installed plugin payload anchors keep their historical
+    ``.agent-worktrees/related.yaml`` location. Missing, empty, or malformed
+    files yield an empty :class:`RelatedConfig`.
+    """
+    root = Path(anchor)
+    if _looks_like_plugin_anchor(root):
+        return _parse_related_file(legacy_related_path(root))
+
+    merged = RelatedConfig()
+    layers: list[Path] = []
+    base = _repo_base_related_path(root)
+    if base is not None:
+        layers.append(base)
+    overlay = _repo_marketplace_overlay_related_path(root)
+    if overlay is not None:
+        layers.append(overlay)
+    for path in layers:
+        loaded = _parse_related_file(path)
+        if loaded.primary:
+            merged.primary = loaded.primary
+        merged.related.update(loaded.related)
+    return merged
 
 
 def _quote(v: str) -> str:
@@ -481,7 +566,7 @@ def write_related(anchor: str | Path, cfg: RelatedConfig) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
     lines = [
-        "# <repo>/.agent-worktrees/related.yaml",
+        "# <repo>/.copilot-extensions/agent-worktrees/related.yaml",
         "# Directional, per-project related-repos index (this repo's POV).",
         "# Keys are names in the global repos registry (~/.agent-worktrees/repos.yaml);",
         "# this file adds relationship + locus + delegate + ownership -- never checkout paths.",

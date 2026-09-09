@@ -116,7 +116,7 @@ def _anchor_from_cwd(cwd: str | Path) -> Path | None:
 
 
 def _inrepo(cwd: str | Path) -> dict:
-    """Read the repo's committed ``.agent-worktrees/config.yaml`` from *cwd*.
+    """Read the repo's committed agent-worktrees config from *cwd*.
 
     Resolves the anchor from git-common-dir and reads the in-repo config
     directly, bypassing the ambient project-discovery ``load_config()`` (which

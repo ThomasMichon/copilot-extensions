@@ -1,8 +1,9 @@
 """Requirement-package manifest parsing, validation, and per-machine layering.
 
-A **requirement package** is one YAML file under a repo's
-``.agent-machines/all/`` or ``.agent-machines/machines/<machine>/``. It declares
-desired machine state as a set of
+A **requirement package** is one YAML file under a repo's canonical
+``.copilot-extensions/agent-machines/all/`` or
+``.copilot-extensions/agent-machines/machines/<machine>/`` surface, with
+legacy repo-local fallbacks. It declares desired machine state as a set of
 ``manage`` entries, each governed by a **disposition** (see ``DISPOSITIONS``).
 The plugin defines this schema; each repo supplies the data.
 
@@ -173,6 +174,8 @@ class RequirementPackage:
         if self.source_path is None:
             return None
         for parent in self.source_path.absolute().parents:
+            if parent.name == "agent-machines" and parent.parent.name == ".copilot-extensions":
+                return parent.parent.parent
             if parent.name == ".agent-machines":
                 return parent.parent
             if parent.name == "machine-state" and parent.parent.name == ".github":
