@@ -42,7 +42,7 @@ carry live cookies/auth state), Python venvs, git clones/worktrees, and
 `node_modules` trees. Session-sync identifies each of these from its on-disk
 signature (a Chromium profile structure, a `pyvenv.cfg`, a `.git` entry, or a
 `node_modules` directory name), omits the whole subtree across all
-transports, and removes an older copied copy from filesystem-backed
+transports, and removes any stale copy already present on filesystem-backed
 destinations. It never deletes the original local session artifact; the
 latest omission footprint is visible in `session-sync status`.
 

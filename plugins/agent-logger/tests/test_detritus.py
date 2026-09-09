@@ -80,3 +80,56 @@ def test_does_not_flag_plain_directories(tmp_path: Path) -> None:
 
     assert summary.roots == ()
     assert summary.file_count == 0
+
+
+def test_measure_tree_is_best_effort_when_entries_limit_is_hit(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A large already-detected root (e.g. node_modules) must not raise when
+    it exceeds the bounded-scan limits -- exclusion still proceeds, only the
+    reported size becomes a partial estimate."""
+    monkeypatch.setattr(detritus, "MAX_DETRITUS_ENTRIES", 2)
+    root = tmp_path / "node_modules"
+    root.mkdir()
+    for i in range(5):
+        (root / f"file{i}.js").write_text("x", encoding="utf-8")
+
+    files, nbytes, complete = detritus._measure_tree(root)
+
+    assert complete is False
+    assert files < 5
+    assert nbytes >= 0
+
+
+def test_measure_tree_is_best_effort_when_directories_limit_is_hit(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(detritus, "MAX_DETRITUS_DIRECTORIES", 1)
+    root = tmp_path / "node_modules"
+    (root / "pkg-a").mkdir(parents=True)
+    (root / "pkg-b").mkdir(parents=True)
+
+    _files, _nbytes, complete = detritus._measure_tree(root)
+
+    assert complete is False
+
+
+def test_discover_excludes_oversized_node_modules_without_raising(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """End-to-end: discovery must still succeed and exclude the root even
+    when its measurement hits the bounded-scan limit. Uses a single
+    top-level package (so the outer discovery walk's own, separate entry
+    bound is never touched) whose nested files are numerous enough to trip
+    only ``_measure_tree``'s bound."""
+    monkeypatch.setattr(detritus, "MAX_DETRITUS_ENTRIES", 5)
+    session = _make_session_files(tmp_path)
+    pkg = session / "files" / "node_modules" / "pkg"
+    pkg.mkdir(parents=True)
+    for i in range(10):
+        (pkg / f"file{i}.js").write_text("x", encoding="utf-8")
+
+    summary = detritus.discover_session_tree_detritus(session)
+
+    assert summary.roots == (Path("files/node_modules"),)
+    assert summary.measurement_complete is False

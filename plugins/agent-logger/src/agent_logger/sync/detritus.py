@@ -132,6 +132,15 @@ def _is_detritus_root(
 
 
 def _measure_tree(root: Path) -> tuple[int, int, bool]:
+    """Size an already-detected detritus root, best-effort.
+
+    Detected roots (especially ``node_modules``) can be far larger than a
+    Chromium profile. Hitting the same bounded-scan limits used elsewhere
+    must not raise here: the root is already identified for exclusion, so a
+    size limit only means the reported byte/file count is a partial
+    estimate (``measurement_complete=False``), never a reason to abort the
+    surrounding sync.
+    """
     files = 0
     nbytes = 0
     complete = True
@@ -142,25 +151,27 @@ def _measure_tree(root: Path) -> tuple[int, int, bool]:
         directory = pending.pop()
         directories += 1
         if directories > MAX_DETRITUS_DIRECTORIES:
-            raise OSError(
-                f"detritus scan exceeds {MAX_DETRITUS_DIRECTORIES} directories"
-            )
+            complete = False
+            break
         try:
             entries = _scan_entries(directory)
         except OSError:
             complete = False
             continue
+        limit_hit = False
         for _name, path, mode, size in entries:
             entries_seen += 1
             if entries_seen > MAX_DETRITUS_ENTRIES:
-                raise OSError(
-                    f"detritus scan exceeds {MAX_DETRITUS_ENTRIES} entries"
-                )
+                complete = False
+                limit_hit = True
+                break
             if stat.S_ISDIR(mode):
                 pending.append(path)
             elif stat.S_ISREG(mode):
                 files += 1
                 nbytes += size
+        if limit_hit:
+            break
     return files, nbytes, complete
 
 
