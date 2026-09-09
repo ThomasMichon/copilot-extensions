@@ -245,14 +245,15 @@ def test_mux_catalog_refreshes_hint_and_monitor_registry(
     assert reconciler.has_live_worktree_mux is True
 
 
-def test_mux_dark_transition_with_no_live_process_stops_fsmonitor(
+def test_dark_worktree_with_no_live_process_stops_fsmonitor(
     tmp_path, monkeypatch
 ):
-    """A worktree that goes mux-dark with no live Copilot process gets its
-    fsmonitor daemon reaped -- the backstop for an abrupt kill that never
-    delivers the sessionEnd hook at all (#2269)."""
+    """A worktree observed mux-dark right now, with no live Copilot process,
+    gets its fsmonitor daemon reaped -- level-triggered, so it also covers a
+    worktree that was ALREADY dark before this reconciler ever started
+    watching it (the common case for a long-finalized worktree whose daemon
+    `git` quietly restarted from an unrelated later command; #2270)."""
     rec = _record("wt-mux", str(tmp_path / "wt-mux"), sessions_list=[])
-    rec.mux_live = True  # was live as of the prior tick
     tracking_dir, _state_dir = _wire(tmp_path, monkeypatch, [rec])
     monkeypatch.setattr(sessions, "worktree_has_live_session", lambda record: False)
     stopped: list[str] = []
@@ -266,17 +267,14 @@ def test_mux_dark_transition_with_no_live_process_stops_fsmonitor(
     reconciler.step()
 
     assert stopped == [rec.worktree_path]
-    after = tracking.load_record(tracking_dir / "wt-mux.yaml")
-    assert after.mux_live is False
 
 
-def test_mux_dark_transition_with_live_process_does_not_stop_fsmonitor(
+def test_dark_worktree_with_live_process_does_not_stop_fsmonitor(
     tmp_path, monkeypatch
 ):
     """A bare/bound Copilot process still holding the worktree's session lock
-    vetoes the reap even though mux itself went dark."""
+    vetoes the reap even though mux itself is dark."""
     rec = _record("wt-mux", str(tmp_path / "wt-mux"), sessions_list=[])
-    rec.mux_live = True
     tracking_dir, _state_dir = _wire(tmp_path, monkeypatch, [rec])
     monkeypatch.setattr(sessions, "worktree_has_live_session", lambda record: True)
     stopped: list[str] = []
@@ -292,10 +290,14 @@ def test_mux_dark_transition_with_live_process_does_not_stop_fsmonitor(
     assert stopped == []
 
 
-def test_mux_never_seen_live_does_not_stop_fsmonitor(tmp_path, monkeypatch):
-    """No prior live->dark transition (mux_live was never True) -- don't reap;
-    this is not evidence of anything just having ended."""
-    rec = _record("wt-mux", str(tmp_path / "wt-mux"), sessions_list=[])
+def test_finalized_worktree_still_gets_reaped(tmp_path, monkeypatch):
+    """A finalized record is exactly the case the level-triggered check exists
+    for: its directory is deliberately kept, so a daemon can (and does, in
+    practice) come back after finalization from an unrelated incidental git
+    command. The active-only bookkeeping (heads/projections/mux registration)
+    must still be skipped for it."""
+    rec = _record("wt-done", str(tmp_path / "wt-done"), sessions_list=[])
+    rec.status = "finalized"
     tracking_dir, _state_dir = _wire(tmp_path, monkeypatch, [rec])
     monkeypatch.setattr(sessions, "worktree_has_live_session", lambda record: False)
     stopped: list[str] = []
@@ -306,9 +308,41 @@ def test_mux_never_seen_live_does_not_stop_fsmonitor(tmp_path, monkeypatch):
         record_budget=8, session_budget=8)
     reconciler.observe_mux(set())
 
+    report = reconciler.step()
+
+    assert stopped == [rec.worktree_path]
+    assert report["records"] == 0  # active-only bookkeeping correctly skipped
+
+
+def test_fsmonitor_reap_is_cooldown_throttled(tmp_path, monkeypatch):
+    """A persistently-dark record costs one reap attempt per cooldown window,
+    not one per tick -- otherwise a stale worktree left forever would spawn
+    `git fsmonitor--daemon stop` on every ~15s resident-monitor tick."""
+    rec = _record("wt-mux", str(tmp_path / "wt-mux"), sessions_list=[])
+    _wire(tmp_path, monkeypatch, [rec])
+    monkeypatch.setattr(sessions, "worktree_has_live_session", lambda record: False)
+    stopped: list[str] = []
+    monkeypatch.setattr(
+        tracking, "stop_fsmonitor_daemon", lambda path: stopped.append(path))
+    now = {"value": 1000.0}
+    monkeypatch.setattr(
+        session_catalog.time, "monotonic", lambda: now["value"])
+
+    reconciler = session_catalog.ResidentSessionReconciler(
+        record_budget=8, session_budget=8)
+    reconciler.observe_mux(set())
+
+    reconciler.step()
+    now["value"] += 1.0  # well within the cooldown window
     reconciler.step()
 
-    assert stopped == []
+    assert stopped == [rec.worktree_path]  # only the first tick reaped
+
+    now["value"] += session_catalog._FSMONITOR_REAP_COOLDOWN_S + 1.0
+    reconciler.observe_mux(set())  # refresh the mux snapshot's freshness window
+    reconciler.step()
+
+    assert stopped == [rec.worktree_path, rec.worktree_path]  # cooldown elapsed
 
 
 def test_stale_mux_observation_is_not_restamped(tmp_path, monkeypatch):
