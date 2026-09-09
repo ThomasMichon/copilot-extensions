@@ -176,6 +176,48 @@ cross-checked against a live host running ~7 concurrent sessions) found:
   the deliverables, each cleared through the review gate before the next
   lands.
 
+### Phase 4c — agent-worktrees: single-instance lease over the classify pass
+
+- **Problem, evidence-grounded.** `_classify_records` (the ~5-git-calls-per-
+  worktree batch classification) is the shared entry point behind BOTH the
+  Picker's in-process `data_local.load(classify=True)` Phase 2 AND a standalone
+  `list --json --classify` CLI invocation. Nothing today keeps two callers from
+  running it **concurrently for the same project** — e.g. an open Worktree
+  Manager's own populate racing an independently launched `resolve`/`list
+  --classify` (observed live: two distinct process trees, different parent
+  PIDs, touching the same tracking directory at once). `_RecordLock` prevents
+  torn writes, but not duplicated work, and a caller that arrives mid-pass has
+  nothing to wait on today.
+- **Symptom this produces.** While a project's `state` is transiently
+  unavailable to a reader (mid-race, or any other cause), `derive._state()`'s
+  fallback (`status == "active" -> WIP if turn_count > 0`) renders a **freshly
+  invented, potentially wrong** interim label instead of the row's last-known
+  correct value — the "cache renders, then jumps to something completely
+  different" flicker an operator can observe in the Picker.
+- **Fix, placement decided.** Wrap the batch classify pass — at
+  `_classify_records`, the lower/shared entry point, so both the Picker and any
+  standalone CLI classify call inherit it automatically — with a **per-project**
+  `single_instance_lease.SingleInstance` (Phase 2's primitive; a short-lived
+  critical-section use, not a persistent daemon lease). Keyed on the project's
+  tracking dir, mirroring the existing lease's `port`-keying idiom for "two
+  processes, same identity, must not run set at once."
+- **Contention policy, chosen deliberately (do not default to skip).** A caller
+  that loses the race must **wait (bounded, on the order of a typical classify
+  pass) for the winner to finish, then re-read the now-repaired session-render
+  cache** — never fall back to computing its own competing/incomplete answer,
+  and never simply skip-and-render-stale (that reproduces the exact reported
+  symptom: the loser renders a worse answer and never gets the winner's
+  repair). This realizes the operator's framing directly: one process does the
+  (more expensive, authoritative) recompute; every other caller's job is to
+  read the result it produces, not race it.
+- **Scope discipline.** This is a narrow, single-consumer application of the
+  Phase 2 primitive to a real, evidence-grounded race in agent-worktrees's own
+  classify path — not a new cross-cutting cache layer, and not the same
+  problem Phase 4b(ii) governs (that phase is about hook/callback transience;
+  this is about two independent *batch classification* callers). No plugin
+  code change lands in this design entry; the design clears review first, per
+  this effort's standing convention.
+
 ### Phase 5 — agent-mcp: version GC + optional multiplexer (#741, #744)
 
 - Call `versioned_runtime.gc()` on successful activation (prune non-current,
@@ -240,6 +282,14 @@ cross-checked against a live host running ~7 concurrent sessions) found:
   11-coordinator/68-conhost finding). Per-plugin conformance against the mock's
   validated contract is #2301's own audit, cited here once complete rather than
   re-validated.
+- **Classify-pass single-instance lease (Phase 4c):** a concurrent-caller test
+  driving two threads/processes through `_classify_records` for the same
+  project at once, asserting (a) exactly one performs the actual git
+  classification, (b) the other blocks and then observes the winner's
+  repaired session-render cache rather than computing (or falling back to) its
+  own answer, and (c) neither corrupts the tracking YAML (existing
+  `_RecordLock` coverage extended, not replaced). Live reproduction case:
+  Picker populate racing an independently-launched `list --json --classify`.
 
 ## Journal
 
@@ -467,4 +517,40 @@ Landed independently of this effort's own PR sequence, then reconciled into it:
   #2301's per-plugin audit (citing #737/#738/#739/the Phase 4b measurement as
   already-conforming evidence, and scoping what's genuinely still open) is
   the remaining work this effort's Phase 4b(ii) hands off to.
+
+### 2026-09-09 (later still) — Phase 4c: classify-pass race found and designed
+
+- **Grounded in a live reproduction**, not a hypothetical: opening a harness
+  project's Worktree Manager showed several rows briefly render `WIP`
+  then correct themselves to their true state on the very next paint — no app
+  reload involved, purely within one open session. Traced to
+  `derive._state()`'s fallback (`status == "active" -> WIP if turn_count > 0`),
+  which fires whenever a row's `state` field is momentarily absent.
+- Disproved the first two hypotheses empirically before settling on this one:
+  (1) the session-render-cache write-back (`_stamp_from_raw` /
+  `_apply_session_state_stamp`) does land and does so promptly -- confirmed by
+  reading a live tracking YAML's `session_state_at` immediately after a
+  populate pass matched the observed timing; (2) calling
+  `data_local.load(classify=False)` in-process, live, for the exact rows that
+  flashed `WIP` returned their correct cached states with no fallback firing --
+  so Phase 1 was not the culprit either.
+- What *was* found live: a second, independently-parented `agent-worktrees
+  ... resolve` -> `list --json --classify` process chain running against the
+  same project's tracking directory at the same moment as the Picker's own
+  populate -- i.e. two callers of the shared `_classify_records` batch
+  classification, for the same project, concurrently, with nothing serializing
+  them.
+- Added **Phase 4c** to this effort's Plan: apply the Phase 2
+  `single-instance-lease` primitive (already vendored, already proven by
+  agent-bridge/agent-vault) as a **short critical-section lock** around
+  `_classify_records`, per-project, so a second concurrent classify caller
+  waits for the winner's pass and re-reads its cache rather than computing (or
+  worse, falling back to a wrong heuristic for) its own answer.
+- Design-only entry; no plugin code in this PR, per the effort's standing
+  convention. The follow-up implementation PR wraps `_classify_records`,
+  extends `TestControlPlaneRelatedPRTier`-adjacent coverage with a
+  concurrent-caller test (two threads/processes racing the same project,
+  asserting the loser observes the winner's repaired cache rather than
+  computing its own), and updates the Picker/`cmd_list` call sites only if
+  either needs the wait-vs-immediate-return choice made explicit at its layer.
 
