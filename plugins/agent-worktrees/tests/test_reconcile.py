@@ -2334,3 +2334,110 @@ def test_hook_shims_drifted_false_when_dirs_absent(tmp_path, monkeypatch):
     monkeypatch.setattr(reconcile, "_home", lambda: home)
     # No scripts/ and no bin/ -> nothing to compare, never force a redeploy.
     assert reconcile.hook_shims_drifted(tmp_path / "plugin") is False
+
+
+# ---------------------------------------------------------------------------
+# build_uninstall_plan / apply_uninstall_plan -- teardown sweep
+# ---------------------------------------------------------------------------
+
+def test_uninstall_plan_sweeps_deployed_runtime(env):
+    """A plugin with a deployed runtime -> its own uninstall action, no purge."""
+    env.install_payload("agent-bridge", "1.0.0", scope="universal")
+    env.deploy_runtime("agent-bridge", "1.0.0")
+    plan = reconcile.build_uninstall_plan(home=env.home)
+    assert plan["action"] == "uninstall"
+    upd = [u for u in plan["updates"] if u["service"] == "agent-bridge"]
+    assert len(upd) == 1
+    assert upd[0]["argv"] == ["bash", str(env.home / ".copilot" / "installed-plugins"
+                                           / MKT / "agent-bridge" / "scripts" / "install.sh"),
+                               "uninstall"]
+    assert "purge" not in upd[0]["argv"] and "--purge" not in upd[0]["argv"]
+
+
+def test_uninstall_plan_skips_payload_only_plugin(env):
+    """No deploy-manifest.json -> not swept (nothing was ever deployed)."""
+    env.install_payload("ai-attribution", "1.0.0", scope="none")
+    plan = reconcile.build_uninstall_plan(home=env.home)
+    assert plan["action"] == "continue"
+    assert plan["updates"] == []
+
+
+def test_uninstall_plan_sweeps_scope_none_with_deployed_runtime(env):
+    """runtimeScope 'none' (lazy/self-provisioned) still gets swept when a
+    runtime IS deployed -- scope governs proactive install, not teardown."""
+    env.install_payload("agent-ssh", "1.0.0", scope="none")
+    env.deploy_runtime("agent-ssh", "1.0.0")
+    plan = reconcile.build_uninstall_plan(home=env.home)
+    services = {u["service"] for u in plan["updates"]}
+    assert "agent-ssh" in services
+
+
+def test_uninstall_plan_init_only_plugin_emits_diagnostic(env):
+    """A plugin deployed only via init.* (no install.{sh,ps1}) can't be
+    uninstalled by this sweep -- must be a named diagnostic, never a silent skip."""
+    env.install_payload("agent-mcp", "1.0.0", scope="machine-gated", installer="init.sh")
+    env.deploy_runtime("agent-mcp", "1.0.0")
+    plan = reconcile.build_uninstall_plan(home=env.home)
+    assert plan["action"] == "continue"
+    diag = [d for d in plan.get("diagnostics", []) if d["service"] == "agent-mcp"]
+    assert diag and diag[0]["reason"] == "uninstall-unsupported"
+
+
+def test_uninstall_plan_cascades_dtssh_host(env):
+    """agent-ssh's own uninstall doesn't remove the dtssh Startup listener --
+    the sweep must cascade to install-host.sh explicitly."""
+    pdir = env.install_payload("agent-ssh", "1.0.0", scope="none")
+    env.deploy_runtime("agent-ssh", "1.0.0")
+    host_scripts = pdir / "transports" / "dtssh" / "scripts"
+    host_scripts.mkdir(parents=True)
+    (host_scripts / "install-host.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+
+    plan = reconcile.build_uninstall_plan(home=env.home)
+    cascaded = [u for u in plan["updates"] if u["service"] == "agent-ssh:dtssh-host"]
+    assert len(cascaded) == 1
+    assert cascaded[0]["argv"] == ["bash", str(host_scripts / "install-host.sh"), "uninstall"]
+
+
+def test_uninstall_plan_dtssh_host_missing_emits_diagnostic(env):
+    """No dtssh install-host script in the payload -> diagnostic, not silence."""
+    env.install_payload("agent-ssh", "1.0.0", scope="none")
+    env.deploy_runtime("agent-ssh", "1.0.0")
+    plan = reconcile.build_uninstall_plan(home=env.home)
+    diag = [d for d in plan.get("diagnostics", []) if d["service"] == "agent-ssh:dtssh-host"]
+    assert diag and diag[0]["reason"] == "dtssh-host-script-missing"
+
+
+def test_uninstall_plan_wsl_setup_diagnostic_when_payload_present(env):
+    """wsl-setup's keepalive scheduled task isn't in the deploy-manifest
+    convention this sweep discovers -- must still be named, not dropped."""
+    env.install_payload("wsl-setup", "1.0.0", scope="none")
+    plan = reconcile.build_uninstall_plan(home=env.home)
+    diag = [d for d in plan.get("diagnostics", []) if d["service"] == "wsl-setup"]
+    assert diag and diag[0]["reason"] == "manual-cleanup-required"
+
+
+def test_uninstall_plan_excludes_self(env):
+    """agent-worktrees itself is never swept here -- it has its own top-level
+    `uninstall` verb."""
+    env.install_payload("agent-worktrees", "1.0.0", scope="universal")
+    env.deploy_runtime("agent-worktrees", "1.0.0")
+    plan = reconcile.build_uninstall_plan(home=env.home)
+    assert all(u["service"] != "agent-worktrees" for u in plan["updates"])
+
+
+def test_apply_uninstall_plan_runs_and_records(env):
+    env.install_payload("agent-bridge", "1.0.0", scope="universal")
+    env.deploy_runtime("agent-bridge", "1.0.0")
+    calls: list = []
+    summary = reconcile.apply_uninstall_plan(
+        home=env.home, runner=lambda argv: calls.append(list(argv)) or 0
+    )
+    assert summary["action"] == "uninstall"
+    assert len(calls) == 1 and calls[0][-1] == "uninstall"
+    assert summary["executed"][0]["ok"] is True
+
+
+def test_apply_uninstall_plan_noop_when_nothing_deployed(env):
+    summary = reconcile.apply_uninstall_plan(home=env.home)
+    assert summary["action"] == "continue"
+    assert summary["executed"] == []

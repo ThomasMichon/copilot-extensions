@@ -1400,6 +1400,291 @@ def runtime_installer_argv(
     return None
 
 
+def runtime_uninstall_argv(plugin_dir: Path) -> tuple[str, list[str]] | None:
+    """Build the (display, argv) to remove a plugin's deployed runtime.
+
+    Unlike :func:`runtime_installer_argv`, this **never** falls back to
+    ``init.{sh,ps1}`` -- an idempotent bootstrap script, not an uninstaller.
+    Invoking it with an unsupported ``uninstall`` action would misfire. Only
+    ``scripts/install.{sh,ps1} uninstall`` is a recognized uninstall action;
+    a plugin whose runtime deploys only via ``init.*`` has none, and the
+    caller (:func:`build_uninstall_plan`) surfaces that as a diagnostic
+    rather than silently skipping it.
+
+    No purge/remove-config flag is ever appended: every plugin's own
+    ``uninstall`` action already preserves its durable state/history/DB by
+    default (only an explicit ``-Purge``/``--purge`` opt-in deletes that), so
+    the default sweep only removes executables, autorun registrations, and
+    recomputable runtime state -- matching the harness's "guaranteed, legible
+    teardown" intent (visions/stateless-harness/plugins).
+    """
+    scripts = plugin_dir / "scripts"
+    if platform.system() == "Windows":
+        p = scripts / "install.ps1"
+        if p.is_file():
+            argv = ["pwsh", "-File", str(p), "uninstall"]
+            return " ".join(argv), argv
+        return None
+    p = scripts / "install.sh"
+    if p.is_file():
+        argv = ["bash", str(p), "uninstall"]
+        return " ".join(argv), argv
+    return None
+
+
+def dtssh_host_uninstall_argv(agent_ssh_dir: Path) -> tuple[str, list[str]] | None:
+    """Build the (display, argv) to remove the dtssh Startup-folder host listener.
+
+    ``agent-ssh``'s own ``scripts/install.{sh,ps1} uninstall`` removes only the
+    core agent-ssh runtime; it does NOT cascade into the separate dtssh
+    transport's ``transports/dtssh/scripts/install-host.{ps1,sh}``, which is
+    what actually creates the ``agent-ssh-dtssh-host.lnk`` Startup-folder
+    autorun (or the POSIX host launcher). Both scripts' own ``uninstall``
+    action is idempotent/``Test-Path``-guarded, so it is safe to invoke even
+    when the dtssh host was never installed. Returns ``None`` only when the
+    script itself is missing from the payload (nothing to cascade to).
+    """
+    host_scripts = agent_ssh_dir / "transports" / "dtssh" / "scripts"
+    if platform.system() == "Windows":
+        p = host_scripts / "install-host.ps1"
+        if p.is_file():
+            argv = ["pwsh", "-File", str(p), "uninstall"]
+            return " ".join(argv), argv
+        return None
+    p = host_scripts / "install-host.sh"
+    if p.is_file():
+        argv = ["bash", str(p), "uninstall"]
+        return " ".join(argv), argv
+    return None
+
+
+def discover_core_payload_dirs() -> list[tuple[str, Path]]:
+    """List every installed core copilot-extensions marketplace plugin payload.
+
+    Unlike :func:`read_enabled_plugins`, this is **not** scoped to any repo's
+    ``enabledPlugins`` -- an uninstall sweep must find a plugin whose runtime a
+    repo has since stopped enabling too (disabling a plugin does not, by
+    itself, remove its already-deployed runtime/autorun state). Excludes
+    ``agent-worktrees`` itself, which has its own top-level ``uninstall`` verb
+    (:func:`cmd_uninstall` in ``__main__``).
+    """
+    base = _copilot_home() / "installed-plugins" / MARKETPLACE
+    if not base.is_dir():
+        return []
+    out: list[tuple[str, Path]] = []
+    for d in sorted(base.iterdir()):
+        if not d.is_dir() or d.name == SELF_PLUGIN:
+            continue
+        if (d / "plugin.json").is_file():
+            out.append((d.name, d))
+    return out
+
+
+def build_uninstall_plan(*, home: Path | None = None) -> dict[str, Any]:
+    """Return a sweep plan to remove every deployed core plugin runtime.
+
+    Symmetric counterpart to :func:`build_plan`, but for teardown rather than
+    reconciliation: it discovers every core-marketplace plugin payload
+    actually installed on this machine (:func:`discover_core_payload_dirs`)
+    and, for each with evidence of a deployed runtime (a
+    ``deploy-manifest.json``), builds the ``argv`` to invoke that plugin's own
+    ``uninstall`` action. The discovery predicate is deliberately **not**
+    gated on ``runtimeScope`` -- that field governs whether the reconciler
+    proactively installs/updates a runtime, not whether one is deployed.
+    Several plugins (``agent-ssh``, historically) declare ``runtimeScope:
+    "none"`` (self-provisioned lazily / not reconciler-managed) yet still
+    deploy a real runtime that needs the same teardown; gating discovery on
+    scope would silently skip them.
+
+    A plugin whose runtime deploys only via an idempotent ``init.*`` bootstrap
+    script (no ``install.{sh,ps1}``, e.g. ``agent-containers``, ``agent-mcp``,
+    ``agent-machines``) has no supported uninstall action; it is surfaced as a
+    ``diagnostics`` entry (reason ``uninstall-unsupported``), never silently
+    skipped -- callers asked for an inventory, and a sweep that quietly leaves
+    a known runtime behind is the exact failure this exists to prevent.
+
+    ``agent-ssh`` gets one additional cascaded step: its own ``uninstall``
+    does not remove the separate dtssh transport's Startup-folder host
+    listener (see :func:`dtssh_host_uninstall_argv`), so that step is appended
+    whenever agent-ssh's runtime is in the plan.
+
+    Known gap (deliberately out of scope for this sweep, not silently
+    dropped): ``wsl-setup``'s ``WSL-Keepalive-Ubuntu`` scheduled task is
+    installed via ``skills/setting-up-wsl/references/wsl-keepalive.ps1``, not
+    the ``install.{sh,ps1}``/``deploy-manifest.json`` convention this sweep is
+    built on, so it never appears in ``discover_core_payload_dirs``'
+    deploy-manifest evidence; it is reported as a ``diagnostics`` entry
+    (reason ``manual-cleanup-required``) pointing at that script's own
+    ``uninstall`` action.
+    """
+    updates: list[dict[str, Any]] = []
+    diagnostics: list[dict[str, Any]] = []
+
+    for name, pdir in discover_core_payload_dirs():
+        if runtime_deployed_version(name, home=home) is None:
+            continue
+        try:
+            runtime_env, _selected_runtime_root = runtime_installer_environment(
+                name, pdir, home=home
+            )
+        except ValueError as error:
+            diagnostics.append({
+                "service": name,
+                "phase": "uninstall",
+                "reason": "installation-context-invalid",
+                "message": str(error),
+            })
+            continue
+        built = runtime_uninstall_argv(pdir)
+        if built is None:
+            diagnostics.append({
+                "service": name,
+                "phase": "uninstall",
+                "reason": "uninstall-unsupported",
+                "message": (
+                    f"{name}'s runtime deploys only via an init bootstrap "
+                    "script (no install.{sh,ps1} uninstall action available)"
+                ),
+            })
+            continue
+        cmd, argv = built
+        updates.append({
+            "service": name,
+            "phase": "uninstall",
+            "command": cmd,
+            "argv": argv,
+            "environment": {
+                key: runtime_env[key]
+                for key in ("COPILOT_EXTENSIONS_CONTEXT",)
+                if key in runtime_env
+            },
+            "unset_environment": list(_RUNTIME_ENV_UNSET),
+        })
+        if name == "agent-ssh":
+            extra = dtssh_host_uninstall_argv(pdir)
+            if extra is not None:
+                dcmd, dargv = extra
+                updates.append({
+                    "service": "agent-ssh:dtssh-host",
+                    "phase": "uninstall",
+                    "command": dcmd,
+                    "argv": dargv,
+                })
+            else:
+                diagnostics.append({
+                    "service": "agent-ssh:dtssh-host",
+                    "phase": "uninstall",
+                    "reason": "dtssh-host-script-missing",
+                    "message": (
+                        "agent-ssh's own uninstall does not remove the dtssh "
+                        "Startup-folder host listener, and "
+                        "transports/dtssh/scripts/install-host.{ps1,sh} was "
+                        "not found in this payload"
+                    ),
+                })
+
+    wsl_setup_dir = core_installed_payload_dir("wsl-setup")
+    if wsl_setup_dir is not None:
+        diagnostics.append({
+            "service": "wsl-setup",
+            "phase": "uninstall",
+            "reason": "manual-cleanup-required",
+            "message": (
+                "wsl-setup's WSL-Keepalive-Ubuntu scheduled task is installed "
+                "via skills/setting-up-wsl/references/wsl-keepalive.ps1, not "
+                "the install.{sh,ps1}/deploy-manifest.json convention this "
+                "sweep discovers; run that script's own 'uninstall' action "
+                "directly to remove it"
+            ),
+        })
+
+    result: dict[str, Any] = {
+        "action": "uninstall" if updates else "continue",
+        "updates": updates,
+    }
+    if diagnostics:
+        result["diagnostics"] = diagnostics
+    return result
+
+
+def apply_uninstall_plan(
+    *,
+    home: Path | None = None,
+    log: Callable[[str], None] | None = None,
+    runner: Callable[[Sequence[str]], int] | None = None,
+) -> dict[str, Any]:
+    """Execute :func:`build_uninstall_plan` **in-process**.
+
+    Mirrors :func:`apply_plan`'s single-pass execution shape (a step failure
+    is logged and the sweep continues; nothing here raises for a bad step),
+    but for one pass only -- uninstall has no "freshly installed payload"
+    second-pass concern. Returns ``{"action": "uninstall"|"continue",
+    "executed": [...]}`` plus any ``diagnostics`` from the plan.
+    """
+    _log = log or (lambda _m: None)
+
+    def _default_runner(argv: Sequence[str], update: dict[str, Any]) -> int:
+        child_environment = os.environ.copy()
+        for key in update.get("unset_environment", _RUNTIME_ENV_UNSET):
+            child_environment.pop(str(key), None)
+        for key, value in update.get("environment", {}).items():
+            child_environment[str(key)] = str(value)
+        proc = subprocess.run(  # noqa: S603 -- argv from our own plan builder
+            list(argv),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            env=child_environment,
+        )
+        if proc.stdout:
+            for line in proc.stdout.splitlines():
+                _log(f"    {line}")
+        return proc.returncode
+
+    plan = build_uninstall_plan(home=home)
+    for diagnostic in plan.get("diagnostics", []):
+        _log(
+            "uninstall: "
+            f"{diagnostic.get('service', '?')} "
+            f"[{diagnostic.get('reason', 'diagnostic')}] "
+            f"{diagnostic.get('message', '')}".rstrip()
+        )
+
+    executed: list[dict[str, Any]] = []
+    for upd in plan.get("updates", []):
+        service = upd.get("service", "?")
+        argv = list(upd.get("argv") or [])
+        if not argv:
+            continue
+        _log(f"uninstall: {service} -> {' '.join(argv)}")
+        try:
+            rc = runner(argv) if runner is not None else _default_runner(argv, upd)
+        except Exception as exc:  # never raise from a best-effort sweep
+            _log(f"uninstall: step FAILED for {service}: {exc}")
+            executed.append({
+                "service": service,
+                "argv": argv,
+                "ok": False,
+                "error": str(exc),
+            })
+            continue
+        ok = rc == 0
+        if not ok:
+            _log(f"uninstall: step for {service} exited {rc}")
+        executed.append({
+            "service": service,
+            "argv": argv,
+            "ok": ok,
+            "returncode": rc,
+        })
+
+    return {
+        "action": plan.get("action", "continue"),
+        "executed": executed,
+        "diagnostics": plan.get("diagnostics", []),
+    }
+
+
 # --------------------------------------------------------------------------
 # Machine gate (control-harness manifest -> per-plugin deploy_machines)
 # --------------------------------------------------------------------------
