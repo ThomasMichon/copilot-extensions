@@ -44,6 +44,32 @@ ENGINE_ARGV_ENV = "WORKTREE_MANAGER_ENGINE_ARGV"
 #: A generous ceiling: a cold engine self-provisions on first use, and a classify
 #: pass can enumerate many worktrees. Kept bounded so the Manager never hangs.
 _DEFAULT_TIMEOUT = 120
+_PYTHON_PARENT_ENV = {
+    "PYTHONHOME",
+    "PYTHONPATH",
+    "PYTHONEXECUTABLE",
+    "VIRTUAL_ENV",
+    "UV_INTERNAL__PYTHONHOME",
+    "__PYVENV_LAUNCHER__",
+}
+
+
+def _is_parent_python_variable(name: str, *, windows: bool) -> bool:
+    candidate = name.upper() if windows else name
+    return candidate in _PYTHON_PARENT_ENV
+
+
+def _engine_environment() -> dict[str, str]:
+    """Build a clean environment for the independently installed engine."""
+    windows = os.name == "nt"
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not _is_parent_python_variable(key, windows=windows)
+    }
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONSAFEPATH"] = "1"
+    return env
 
 
 class EngineError(RuntimeError):
@@ -304,11 +330,7 @@ def _run(
                 "text": True,
                 "timeout": timeout,
                 "check": False,
-                "env": {
-                    **os.environ,
-                    "PYTHONUTF8": "1",
-                    "PYTHONSAFEPATH": "1",
-                },
+                "env": _engine_environment(),
                 "stdin": subprocess.DEVNULL,
             }
             if os.name == "nt":
@@ -389,11 +411,7 @@ def run_engine_passthrough(project: str | None, args: list[str], *,
     try:
         return subprocess.run(
             cmd, timeout=timeout, check=False,
-            env={
-                **os.environ,
-                "PYTHONUTF8": "1",
-                "PYTHONSAFEPATH": "1",
-            },
+            env=_engine_environment(),
         ).returncode
     except subprocess.TimeoutExpired as e:
         raise EngineError(f"{ENGINE_BIN} {' '.join(args)} timed out") from e
@@ -437,11 +455,7 @@ def run_project_passthrough(
             argv,
             timeout=timeout,
             check=False,
-            env={
-                **os.environ,
-                "PYTHONUTF8": "1",
-                "PYTHONSAFEPATH": "1",
-            },
+            env=_engine_environment(),
         ).returncode
     except subprocess.TimeoutExpired as e:
         raise EngineError(f"{project} {' '.join(args)} timed out") from e

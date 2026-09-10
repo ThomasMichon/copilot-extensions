@@ -1725,6 +1725,7 @@ class _FakeStreamProc:
         self._err = err
         self.returncode = rc
 
+
     def communicate(self, timeout=None):
         return ("", self._err)
 
@@ -1733,6 +1734,33 @@ class _FakeStreamProc:
 
     def kill(self):
         pass
+
+
+def test_tracked_runners_remove_parent_python_runtime(monkeypatch):
+    seen = []
+
+    class FakeProc:
+        returncode = 0
+
+        def communicate(self, timeout=None):
+            return "", ""
+
+    def fake_popen(argv, **kwargs):
+        seen.append(kwargs["env"])
+        return FakeProc()
+
+    monkeypatch.setenv("PYTHONHOME", "/parent/python")
+    monkeypatch.setenv("UV_INTERNAL__PYTHONHOME", "/uv/python")
+    monkeypatch.setattr(data_ssh.subprocess, "Popen", fake_popen)
+    loader = data_ssh.LiveLoader([])
+
+    loader._spawn(["engine"], 1)
+    stream = loader._spawn_stream(["engine", "--stream"])
+    loader._procs.remove(stream)
+
+    assert len(seen) == 2
+    assert all("PYTHONHOME" not in env for env in seen)
+    assert all("UV_INTERNAL__PYTHONHOME" not in env for env in seen)
 
 
 def _nd(obj):
