@@ -41,6 +41,7 @@ DEACTIVATION_SCHEMA = "copilot-extensions.installation-deactivation"
 TOMBSTONE_SCHEMA = "copilot-extensions.legacy-installation-ownership"
 MAINTENANCE_SCHEMA = "copilot-extensions.installation-maintenance"
 RESOLUTION_SCHEMA = "copilot-extensions.installation-resolution"
+LOOP_BASELINE_SCHEMA = "copilot-extensions.installation-loop-baseline"
 SNAPSHOT_PROVENANCE_SCHEMA = "copilot-extensions.snapshot-provenance"
 SNAPSHOT_PROVENANCE_FILE = "snapshot-provenance.json"
 RUNTIME_SLOT_OWNERSHIP_SCHEMA = "copilot-extensions.runtime-slot-ownership"
@@ -7274,6 +7275,258 @@ def probe_remote_maintenance(
         if "reason" in payload
         else None,
     }
+
+
+def _loop_baseline(
+    *,
+    context: str,
+    marketplace_id: str,
+    plugin_id: str,
+    actual_mode: str | None,
+    namespace_generation: int | None,
+    install_generation: int | None,
+    activation_generation: int | None,
+    legacy: Mapping[str, Any],
+) -> dict[str, Any]:
+    tombstone_path = legacy.get("tombstone")
+    tombstone_digest: str | None = None
+    if isinstance(tombstone_path, str) and tombstone_path:
+        try:
+            canonical_tombstone = canonical_path(tombstone_path, must_exist=True)
+            content, validated_stat = _read_regular_file(
+                canonical_tombstone,
+                label="legacy ownership tombstone",
+                require_stable_identity=True,
+            )
+            tombstone_digest = _cache_validated_file_digest(
+                canonical_tombstone,
+                content,
+                validated_stat,
+            )
+            tombstone_path = str(canonical_tombstone)
+        except InstallationContextError:
+            tombstone_digest = None
+    else:
+        tombstone_path = None
+    return {
+        "schema": LOOP_BASELINE_SCHEMA,
+        "version": 1,
+        "context": context,
+        "marketplaceId": marketplace_id,
+        "pluginId": plugin_id,
+        "actualMode": actual_mode,
+        "namespaceGeneration": namespace_generation,
+        "installGeneration": install_generation,
+        "activationGeneration": activation_generation,
+        "legacy": {
+            "tombstone": tombstone_path,
+            "disposition": legacy.get("disposition"),
+            "ownerMarketplaceId": legacy.get("ownerMarketplaceId"),
+            "digest": tombstone_digest,
+        },
+    }
+
+
+def _validated_loop_baseline(
+    baseline: Mapping[str, Any] | None,
+    *,
+    context: str,
+    marketplace_id: str,
+    plugin_id: str,
+) -> Mapping[str, Any] | None:
+    if baseline is None:
+        return None
+    if not isinstance(baseline, Mapping):
+        _fail("Loop baseline must be a JSON object.")
+    if _required_string(baseline, "schema", "loop baseline") != LOOP_BASELINE_SCHEMA:
+        _fail(f"Loop baseline schema must be '{LOOP_BASELINE_SCHEMA}'.")
+    version = _required_integer(baseline, "version", "loop baseline")
+    if version != 1:
+        _fail("Loop baseline version must be 1.")
+    if _required_string(baseline, "context", "loop baseline") != context:
+        _fail("Loop baseline context does not match the requested installation.")
+    if (
+        _required_string(baseline, "marketplaceId", "loop baseline")
+        != marketplace_id
+    ):
+        _fail("Loop baseline marketplaceId does not match the requested installation.")
+    if _required_string(baseline, "pluginId", "loop baseline") != plugin_id:
+        _fail("Loop baseline pluginId does not match the requested installation.")
+    actual_mode = _property(baseline, "actualMode")
+    if actual_mode is not None and actual_mode not in {"legacy", "namespaced"}:
+        _fail("Loop baseline actualMode must be 'legacy', 'namespaced', or null.")
+    for field in (
+        "namespaceGeneration",
+        "installGeneration",
+        "activationGeneration",
+    ):
+        value = _property(baseline, field)
+        if value is not None and (
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+        ):
+            _fail(f"Loop baseline {field} must be a non-negative integer or null.")
+    legacy = _property(baseline, "legacy")
+    if not isinstance(legacy, Mapping):
+        _fail("Loop baseline legacy must be a JSON object.")
+    for field in ("tombstone", "disposition", "ownerMarketplaceId", "digest"):
+        value = _property(legacy, field)
+        if value is not None and not isinstance(value, str):
+            _fail(f"Loop baseline legacy.{field} must be a string or null.")
+    digest = _property(legacy, "digest")
+    if digest is not None and not LOWER_SHA256.fullmatch(digest):
+        _fail("Loop baseline legacy.digest must be a lowercase SHA-256 hex digest.")
+    return baseline
+
+
+@_validation_scope
+def recheck_loop_governance(
+    *,
+    context: str | os.PathLike[str],
+    expected_marketplace_id: str,
+    expected_plugin_id: str,
+    legacy_root: str | os.PathLike[str],
+    durable_home: str | os.PathLike[str] | None = None,
+    baseline: Mapping[str, Any] | None = None,
+    environment: Mapping[str, str] | None = None,
+    os_profile: str | os.PathLike[str] | None = None,
+    platform: str | None = None,
+    wsl_distro: str | None = None,
+    current_time: datetime | str | None = None,
+    host: str | None = None,
+    pid_is_live: Callable[[int], bool] | None = None,
+) -> dict[str, Any]:
+    """Recheck loop mutation governance for one installation context."""
+
+    _validate_marketplace_id(expected_marketplace_id)
+    _assert_plugin_id(expected_plugin_id)
+    environment = environment if environment is not None else os.environ
+    current_environment, profile = _current_environment(
+        environment=environment,
+        os_profile=os_profile,
+        platform=platform,
+        wsl_distro=wsl_distro,
+    )
+    now = _coerce_current_time(current_time)
+    current_host = host or socket.gethostname()
+    liveness = pid_is_live or _pid_is_live
+    durable = canonical_path(durable_home or profile / ".copilot-extensions")
+    validated = validate_context_receipt(
+        context,
+        durable,
+        expected_marketplace_id=expected_marketplace_id,
+        expected_plugin_id=expected_plugin_id,
+        environment={},
+    )
+    marketplace_id = _string_property(validated, "marketplaceId")
+    plugin_id = _string_property(validated, "pluginId")
+    context_path = str(canonical_path(validated["installReceipt"]))
+    resolved = resolve_installation_mode(
+        legacy_root=legacy_root,
+        durable_home=durable,
+        context=context_path,
+        expected_marketplace_id=marketplace_id,
+        expected_plugin_id=plugin_id,
+        environment=environment,
+        os_profile=profile,
+        platform=platform,
+        wsl_distro=wsl_distro,
+        current_time=now,
+        host=current_host,
+        pid_is_live=liveness,
+    )
+    baseline_now = _loop_baseline(
+        context=context_path,
+        marketplace_id=marketplace_id,
+        plugin_id=plugin_id,
+        actual_mode=(
+            str(resolved["actualMode"])
+            if isinstance(resolved.get("actualMode"), str)
+            else None
+        ),
+        namespace_generation=int(validated["namespaceGeneration"]),
+        install_generation=int(validated["generation"]),
+        activation_generation=(
+            int(resolved["activationGeneration"])
+            if isinstance(resolved.get("activationGeneration"), int)
+            else None
+        ),
+        legacy=resolved["legacy"],
+    )
+    expected_baseline = _validated_loop_baseline(
+        baseline,
+        context=context_path,
+        marketplace_id=marketplace_id,
+        plugin_id=plugin_id,
+    )
+    result = {
+        "action": "loop-recheck",
+        "marketplaceId": marketplace_id,
+        "pluginId": plugin_id,
+        "context": context_path,
+        "actualMode": resolved["actualMode"],
+        "status": "ready",
+        "reason": "current" if expected_baseline is not None else "baseline-established",
+        "maintenance": resolved["maintenance"],
+        "activation": resolved["activation"],
+        "activationGeneration": baseline_now["activationGeneration"],
+        "namespaceGeneration": baseline_now["namespaceGeneration"],
+        "installGeneration": baseline_now["installGeneration"],
+        "legacy": {
+            "root": resolved["legacy"]["root"],
+            "tombstone": baseline_now["legacy"]["tombstone"],
+            "disposition": baseline_now["legacy"]["disposition"],
+            "ownerMarketplaceId": baseline_now["legacy"]["ownerMarketplaceId"],
+            "digest": baseline_now["legacy"]["digest"],
+        },
+        "baseline": baseline_now,
+    }
+    if resolved["status"] == "maintenance-blocked":
+        result["status"] = "backoff"
+        result["reason"] = str(resolved["reason"])
+        return result
+    if expected_baseline is None:
+        if resolved["status"] == "revalidation-required":
+            result["status"] = "revalidation-required"
+            result["reason"] = "generation-changed"
+            return result
+        if resolved["status"] != "ready":
+            result["status"] = "backoff"
+            result["reason"] = str(resolved["reason"])
+            return result
+        return result
+    if (
+        baseline_now["namespaceGeneration"] != expected_baseline.get("namespaceGeneration")
+        or baseline_now["installGeneration"] != expected_baseline.get("installGeneration")
+        or baseline_now["activationGeneration"] != expected_baseline.get("activationGeneration")
+    ):
+        result["status"] = "revalidation-required"
+        result["reason"] = "generation-changed"
+        return result
+    if result["actualMode"] != expected_baseline.get("actualMode"):
+        result["status"] = "revalidation-required"
+        result["reason"] = "mode-changed"
+        return result
+    expected_legacy = _property(expected_baseline, "legacy")
+    if not isinstance(expected_legacy, Mapping):
+        _fail("Loop baseline legacy must be a JSON object.")
+    if (
+        baseline_now["legacy"]["tombstone"] != _property(expected_legacy, "tombstone")
+        or baseline_now["legacy"]["disposition"] != _property(expected_legacy, "disposition")
+        or baseline_now["legacy"]["ownerMarketplaceId"]
+        != _property(expected_legacy, "ownerMarketplaceId")
+        or baseline_now["legacy"]["digest"] != _property(expected_legacy, "digest")
+    ):
+        result["status"] = "revalidation-required"
+        result["reason"] = "tombstone-changed"
+        return result
+    if resolved["status"] == "revalidation-required":
+        result["status"] = "revalidation-required"
+        result["reason"] = "generation-changed"
+        return result
+    if resolved["status"] != "ready":
+        result["status"] = "backoff"
+        result["reason"] = str(resolved["reason"])
+    return result
 
 
 def _trusted_plugin_id(

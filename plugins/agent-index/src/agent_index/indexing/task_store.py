@@ -545,6 +545,27 @@ class TaskStore:
         finally:
             conn.close()
 
+    def release_processing(self, task_id: str) -> bool:
+        """Return an unowned processing task to the queued state."""
+        now = time.time()
+        conn = self._connect()
+        try:
+            affected = conn.execute(
+                """UPDATE tasks
+                   SET status = 'queued',
+                       started_at = NULL,
+                       worker_pid = NULL,
+                       worker_host = NULL,
+                       worker_version = NULL,
+                       updated_at = ?
+                   WHERE id = ? AND status = 'processing'""",
+                (now, task_id),
+            ).rowcount
+            conn.commit()
+            return affected > 0
+        finally:
+            conn.close()
+
     def get_running_with_worker(self, host: str) -> list[TaskRecord]:
         """Return 'processing' tasks whose worker was spawned on ``host``.
 

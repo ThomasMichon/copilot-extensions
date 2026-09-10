@@ -1949,6 +1949,250 @@ def test_deactivate_installation_allows_successor_cell_after_rollback(
     assert tombstone["marketplaceId"] == successor["marketplace_id"]
 
 
+def test_loop_recheck_establishes_baseline_and_proceeds_when_unchanged(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    layout = _cell_layout(tmp_path)
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    environment = _profile_environment(profile)
+    legacy = profile / f".{PLUGIN_ID}"
+    legacy.mkdir()
+    policy_path = profile / ".copilot-extensions" / "installation-mode.json"
+    _write_json(policy_path, _policy(True, str(layout["marketplace_id"])))
+    _activation(layout, environment=environment)
+
+    first = module.recheck_loop_governance(
+        context=layout["install"],
+        expected_marketplace_id=layout["marketplace_id"],
+        expected_plugin_id=PLUGIN_ID,
+        legacy_root=legacy,
+        durable_home=layout["durable"],
+        environment={},
+        os_profile=profile,
+        platform=str(environment["platform"]),
+        wsl_distro=environment["wslDistro"],
+    )
+    second = module.recheck_loop_governance(
+        context=layout["install"],
+        expected_marketplace_id=layout["marketplace_id"],
+        expected_plugin_id=PLUGIN_ID,
+        legacy_root=legacy,
+        durable_home=layout["durable"],
+        baseline=first["baseline"],
+        environment={},
+        os_profile=profile,
+        platform=str(environment["platform"]),
+        wsl_distro=environment["wslDistro"],
+    )
+
+    assert first["status"] == "ready"
+    assert first["reason"] == "baseline-established"
+    assert second["status"] == "ready"
+    assert second["reason"] == "current"
+
+
+def test_loop_recheck_backs_off_for_active_maintenance(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    layout = _cell_layout(tmp_path)
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    environment = _profile_environment(profile)
+    legacy = profile / f".{PLUGIN_ID}"
+    legacy.mkdir()
+    policy_path = profile / ".copilot-extensions" / "installation-mode.json"
+    _write_json(policy_path, _policy(True, str(layout["marketplace_id"])))
+    _activation(layout, environment=environment)
+    module.enter_maintenance(
+        scope="plugin",
+        owner="test-owner",
+        reason="upgrade",
+        expected_duration_seconds=300,
+        durable_home=layout["durable"],
+        context=layout["install"],
+        expected_marketplace_id=layout["marketplace_id"],
+        expected_plugin_id=PLUGIN_ID,
+        environment={},
+        os_profile=profile,
+        platform=str(environment["platform"]),
+        wsl_distro=environment["wslDistro"],
+    )
+
+    result = module.recheck_loop_governance(
+        context=layout["install"],
+        expected_marketplace_id=layout["marketplace_id"],
+        expected_plugin_id=PLUGIN_ID,
+        legacy_root=legacy,
+        durable_home=layout["durable"],
+        environment={},
+        os_profile=profile,
+        platform=str(environment["platform"]),
+        wsl_distro=environment["wslDistro"],
+    )
+
+    assert result["status"] == "backoff"
+    assert result["reason"] == "maintenance-active"
+
+
+def test_loop_recheck_detects_concurrent_deactivation_generation_change(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    layout = _cell_layout(tmp_path)
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    environment = _profile_environment(profile)
+    legacy = profile / f".{PLUGIN_ID}"
+    legacy.mkdir()
+    policy_path = profile / ".copilot-extensions" / "installation-mode.json"
+    _write_json(policy_path, _policy(True, str(layout["marketplace_id"])))
+    command = profile / ".local" / "bin" / PLUGIN_ID
+    command.parent.mkdir(parents=True)
+    command.write_text("legacy wrapper\n", encoding="utf-8")
+    attributed = module.attribute_legacy_state(
+        context=layout["install"],
+        expected_marketplace_id=layout["marketplace_id"],
+        expected_plugin_id=PLUGIN_ID,
+        legacy_root=legacy,
+        legacy_items=_legacy_items(profile),
+        legacy_lock=nullcontext(),
+        durable_home=layout["durable"],
+        environment={},
+        os_profile=profile,
+        platform=str(environment["platform"]),
+        wsl_distro=environment["wslDistro"],
+    )
+    baseline = module.recheck_loop_governance(
+        context=layout["install"],
+        expected_marketplace_id=layout["marketplace_id"],
+        expected_plugin_id=PLUGIN_ID,
+        legacy_root=legacy,
+        durable_home=layout["durable"],
+        environment={},
+        os_profile=profile,
+        platform=str(environment["platform"]),
+        wsl_distro=environment["wslDistro"],
+    )["baseline"]
+    module.deactivate_installation(
+        context=layout["install"],
+        expected_marketplace_id=layout["marketplace_id"],
+        expected_plugin_id=PLUGIN_ID,
+        expected_namespace_generation=layout["namespace_generation"],
+        expected_install_generation=layout["install_generation"],
+        expected_activation_generation=attributed["activationGeneration"],
+        legacy_root=legacy,
+        legacy_probe={
+            "declared": True,
+            "result": "present",
+            "checkedAt": "2026-01-01T00:10:00Z",
+        },
+        expected_tombstone_activation_generation=attributed["activationGeneration"],
+        legacy_lock=nullcontext(),
+        durable_home=layout["durable"],
+        environment={},
+        os_profile=profile,
+        platform=str(environment["platform"]),
+        wsl_distro=environment["wslDistro"],
+    )
+
+    result = module.recheck_loop_governance(
+        context=layout["install"],
+        expected_marketplace_id=layout["marketplace_id"],
+        expected_plugin_id=PLUGIN_ID,
+        legacy_root=legacy,
+        durable_home=layout["durable"],
+        baseline=baseline,
+        environment={},
+        os_profile=profile,
+        platform=str(environment["platform"]),
+        wsl_distro=environment["wslDistro"],
+    )
+
+    assert result["status"] == "revalidation-required"
+    assert result["reason"] == "generation-changed"
+
+
+def test_loop_recheck_detects_tombstone_ownership_change(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    current = _cell_layout(tmp_path, vector_index=0)
+    successor = _cell_layout(tmp_path, vector_index=1)
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    environment = _profile_environment(profile)
+    legacy = profile / f".{PLUGIN_ID}"
+    legacy.mkdir()
+    policy_path = profile / ".copilot-extensions" / "installation-mode.json"
+    _write_json(policy_path, _policy(True, str(current["marketplace_id"])))
+    command = profile / ".local" / "bin" / PLUGIN_ID
+    command.parent.mkdir(parents=True)
+    command.write_text("legacy wrapper\n", encoding="utf-8")
+    module.attribute_legacy_state(
+        context=current["install"],
+        expected_marketplace_id=current["marketplace_id"],
+        expected_plugin_id=PLUGIN_ID,
+        legacy_root=legacy,
+        legacy_items=_legacy_items(profile),
+        legacy_lock=nullcontext(),
+        durable_home=current["durable"],
+        environment={},
+        os_profile=profile,
+        platform=str(environment["platform"]),
+        wsl_distro=environment["wslDistro"],
+    )
+    baseline = module.recheck_loop_governance(
+        context=current["install"],
+        expected_marketplace_id=current["marketplace_id"],
+        expected_plugin_id=PLUGIN_ID,
+        legacy_root=legacy,
+        durable_home=current["durable"],
+        environment={},
+        os_profile=profile,
+        platform=str(environment["platform"]),
+        wsl_distro=environment["wslDistro"],
+    )["baseline"]
+    successor_activation = _activation(
+        successor,
+        environment=environment,
+        generation=7,
+    )
+    _write_json(
+        legacy / ".installation-ownership.json",
+        {
+            "schema": "copilot-extensions.legacy-installation-ownership",
+            "version": 1,
+            "marketplaceId": successor["marketplace_id"],
+            "pluginId": PLUGIN_ID,
+            "activation": {
+                "path": str(successor_activation.resolve()),
+                "generation": 7,
+            },
+            "environment": environment,
+            "transferredAt": "2026-01-01T00:00:00Z",
+        },
+    )
+
+    result = module.recheck_loop_governance(
+        context=current["install"],
+        expected_marketplace_id=current["marketplace_id"],
+        expected_plugin_id=PLUGIN_ID,
+        legacy_root=legacy,
+        durable_home=current["durable"],
+        baseline=baseline,
+        environment={},
+        os_profile=profile,
+        platform=str(environment["platform"]),
+        wsl_distro=environment["wslDistro"],
+    )
+
+    assert result["status"] == "revalidation-required"
+    assert result["reason"] == "tombstone-changed"
+
+
 def test_stale_maintenance_status_reports_dead_owner_without_clearing_marker(
     tmp_path: Path,
 ) -> None:
