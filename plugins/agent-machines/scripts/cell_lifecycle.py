@@ -152,11 +152,15 @@ def _legacy_path_items(profile: Path) -> tuple[Path, list[dict[str, str]]]:
         if not isinstance(entry, str) or not entry:
             ic._fail("legacyFootprint.paths entries must be non-empty strings.")
         raw = Path(entry)
-        resolved = ic.canonical_path(raw if ic._path_is_fully_qualified(raw) else profile / raw)
-        record = {"kind": "path", "identity": entry, "path": str(resolved)}
+        absolute = raw if ic._path_is_fully_qualified(raw) else profile / raw
+        record = {
+            "kind": "path",
+            "identity": entry,
+            "path": str(Path(os.path.abspath(os.fspath(absolute)))),
+        }
         items.append(record)
         if entry == ".agent-machines":
-            legacy_root = resolved
+            legacy_root = Path(record["path"])
     if legacy_root is None:
         ic._fail("payload-invocation.json must declare .agent-machines in legacyFootprint.paths.")
     return legacy_root, items

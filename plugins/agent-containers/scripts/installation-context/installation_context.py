@@ -367,16 +367,22 @@ def _validate_legacy_attribution_items(
         candidate = Path(path_text)
         if not _path_is_fully_qualified(candidate):
             _fail("Legacy attribution item paths must be absolute.")
-        resolved = canonical_path(candidate)
-        key = _file_cache_key(resolved)
+        raw_path = Path(os.path.abspath(os.fspath(candidate)))
+        resolved = (
+            raw_path
+            if os.path.lexists(raw_path) and _is_link_or_junction(raw_path)
+            else canonical_path(raw_path)
+        )
+        key = os.path.normcase(os.path.abspath(os.fspath(raw_path)))
         if key in seen_paths:
-            _fail(f"Legacy attribution item path '{resolved}' is duplicated.")
+            _fail(f"Legacy attribution item path '{raw_path}' is duplicated.")
         seen_paths.add(key)
         validated.append(
             {
                 "kind": kind,
                 "identity": identity,
-                "path": resolved,
+                "path": raw_path,
+                "canonicalPath": resolved,
             }
         )
     return validated
@@ -5432,7 +5438,10 @@ def attribute_legacy_state(
     context_path = Path(context)
     if not _path_is_fully_qualified(context_path):
         _fail("Legacy attribution context must be absolute.")
-    resolved_legacy_root = canonical_path(legacy_root)
+    legacy_root_path = Path(legacy_root)
+    if not _path_is_fully_qualified(legacy_root_path):
+        _fail("Legacy attribution legacy root must be absolute.")
+    legacy_root_path = Path(os.path.abspath(os.fspath(legacy_root_path)))
     items = _validate_legacy_attribution_items(legacy_items)
     validated_context = validate_context_receipt(
         context_path,
@@ -5447,7 +5456,50 @@ def attribute_legacy_state(
     plugin_root = canonical_path(_string_property(validated_context, "pluginRoot"))
     install_path = canonical_path(_string_property(validated_context, "installReceipt"))
     activation_path = plugin_root / "installation-activation.json"
-    tombstone_path = resolved_legacy_root / ".installation-ownership.json"
+    present_items = [
+        item for item in items if os.path.lexists(Path(item["path"]))
+    ]
+    absent_items = [
+        {
+            "kind": "path",
+            "identity": item["identity"],
+            "path": str(item["path"]),
+            "classification": "absent",
+            "reason": "legacy-absent",
+        }
+        for item in items
+        if not os.path.lexists(Path(item["path"]))
+    ]
+    if os.path.lexists(legacy_root_path) and _is_link_or_junction(legacy_root_path):
+        return {
+            "action": "attribute-legacy",
+            "status": "preserved",
+            "reason": "linked-root",
+            "legacyRoot": str(legacy_root_path),
+            "context": str(install_path),
+            "tombstone": None,
+            "tombstoneChanged": False,
+            "activation": None,
+            "activationChanged": False,
+            "activationGeneration": 0,
+            "namespaceGeneration": None,
+            "installGeneration": None,
+            "attributedItems": [],
+            "preservedItems": [
+                {
+                    "kind": "path",
+                    "identity": item["identity"],
+                    "path": str(item["path"]),
+                    "classification": "ambiguous",
+                    "reason": "linked-root",
+                }
+                for item in present_items
+            ],
+            "absentItems": absent_items,
+            "operative": False,
+        }
+    resolved_legacy_root = canonical_path(legacy_root_path)
+    tombstone_path = legacy_root_path / ".installation-ownership.json"
 
     genesis_lock = _DirectoryLock(
         durable / "marketplaces" / ".locks" / f"{marketplace_id}.genesis",
@@ -5517,19 +5569,58 @@ def attribute_legacy_state(
             current_marketplace_id=marketplace_id,
             current_environment=current_environment,
         )
-        absent_items = [
-            {
-                "kind": "path",
-                "identity": item["identity"],
-                "path": str(item["path"]),
-                "classification": "absent",
-                "reason": "legacy-absent",
-            }
-            for item in items
-            if not os.path.lexists(Path(item["path"]))
-        ]
         if legacy["disposition"] == "owned-by-current-cell":
-            present_items = [
+            present_paths = {
+                str(item["path"])
+                for item in present_items
+                if not _is_link_or_junction(Path(item["path"]))
+            }
+            tombstone_value = read_json(tombstone_path)
+            recorded_items: set[str] | None = None
+            if isinstance(tombstone_value, Mapping):
+                attribution = _property(tombstone_value, "attribution")
+                recorded = _property(attribution, "items") if isinstance(attribution, Mapping) else None
+                if isinstance(recorded, Sequence) and not isinstance(recorded, (str, bytes, bytearray)):
+                    parsed: set[str] = set()
+                    for entry in recorded:
+                        if not isinstance(entry, Mapping):
+                            recorded_items = None
+                            break
+                        if _required_string(entry, "kind", "legacy attribution") != "path":
+                            recorded_items = None
+                            break
+                        parsed.add(_required_string(entry, "path", "legacy attribution"))
+                    else:
+                        recorded_items = parsed
+            if recorded_items is not None and recorded_items != present_paths:
+                return {
+                    "action": "attribute-legacy",
+                    "status": "preserved",
+                    "reason": "attribution-mismatch",
+                    "legacyRoot": str(legacy_root_path),
+                    "context": str(install_path),
+                    "tombstone": legacy["tombstone"],
+                    "tombstoneChanged": False,
+                    "activation": activation["path"] if activation["state"] == "valid" else None,
+                    "activationChanged": False,
+                    "activationGeneration": actual_activation_generation,
+                    "namespaceGeneration": actual_namespace_generation,
+                    "installGeneration": actual_install_generation,
+                    "attributedItems": [],
+                    "preservedItems": [
+                        {
+                            "kind": "path",
+                            "identity": item["identity"],
+                            "path": str(item["path"]),
+                            "classification": "ambiguous",
+                            "reason": "attribution-mismatch",
+                        }
+                        for item in present_items
+                    ],
+                    "absentItems": absent_items,
+                    "operative": False,
+                }
+            already_attributed = [
                 {
                     "kind": "path",
                     "identity": item["identity"],
@@ -5537,14 +5628,13 @@ def attribute_legacy_state(
                     "classification": "already-attributed",
                     "reason": "owned-by-current-cell",
                 }
-                for item in items
-                if os.path.lexists(Path(item["path"]))
+                for item in present_items
             ]
             return {
                 "action": "attribute-legacy",
                 "status": "ready",
                 "reason": "already-attributed",
-                "legacyRoot": str(resolved_legacy_root),
+                "legacyRoot": str(legacy_root_path),
                 "context": str(install_path),
                 "tombstone": legacy["tombstone"],
                 "tombstoneChanged": False,
@@ -5553,7 +5643,7 @@ def attribute_legacy_state(
                 "activationGeneration": actual_activation_generation,
                 "namespaceGeneration": actual_namespace_generation,
                 "installGeneration": actual_install_generation,
-                "attributedItems": present_items,
+                "attributedItems": already_attributed,
                 "preservedItems": [],
                 "absentItems": absent_items,
                 "operative": False,
@@ -5616,7 +5706,7 @@ def attribute_legacy_state(
                 "action": "attribute-legacy",
                 "status": "preserved",
                 "reason": preserved_reason or "preserved-for-diagnosis",
-                "legacyRoot": str(resolved_legacy_root),
+                "legacyRoot": str(legacy_root_path),
                 "context": str(install_path),
                 "tombstone": legacy["tombstone"],
                 "tombstoneChanged": False,
@@ -5636,7 +5726,7 @@ def attribute_legacy_state(
                 "action": "attribute-legacy",
                 "status": "ready",
                 "reason": "no-legacy-state",
-                "legacyRoot": str(resolved_legacy_root),
+                "legacyRoot": str(legacy_root_path),
                 "context": str(install_path),
                 "tombstone": None,
                 "tombstoneChanged": False,
@@ -5651,6 +5741,11 @@ def attribute_legacy_state(
                 "operative": False,
             }
 
+        if actual_activation_generation >= MAX_RECEIPT_GENERATION:
+            _fail(
+                "installation-activation.json generation cannot be incremented; "
+                "explicit repair is required."
+            )
         now = _utc_now()
         tombstone = {
             "schema": TOMBSTONE_SCHEMA,
@@ -5665,7 +5760,7 @@ def attribute_legacy_state(
             "transferredAt": now,
             "attribution": {
                 "kind": "explicit-legacy-attribution",
-                "legacyRoot": str(resolved_legacy_root),
+                "legacyRoot": str(legacy_root_path),
                 "context": str(install_path),
                 "items": [
                     {
@@ -5677,40 +5772,33 @@ def attribute_legacy_state(
                 ],
             },
         }
-        tombstone_written = False
-        try:
-            _atomic_write_json(
-                tombstone_path,
-                tombstone,
-                lock=(genesis_lock, install_lock),
-            )
-            tombstone_written = True
-            activation_result = _publish_activation_receipt_locked(
-                activation_path=activation_path,
-                plugin_root=plugin_root,
-                durable=durable,
-                marketplace_id=marketplace_id,
-                plugin_id=plugin_id,
-                current_environment=current_environment,
-                resolved_legacy_root=resolved_legacy_root,
-                actual_namespace_generation=actual_namespace_generation,
-                actual_install_generation=actual_install_generation,
-                actual_activation_generation=actual_activation_generation,
-                activation_mode="namespaced",
-                activation_state="active",
-                legacy_disposition="retained-inert",
-                recorded_probe={
-                    "declared": True,
-                    "result": "present",
-                    "checkedAt": now,
-                },
-                existing=existing,
-                locks=(genesis_lock, install_lock),
-            )
-        except BaseException:
-            if tombstone_written:
-                tombstone_path.unlink(missing_ok=True)
-            raise
+        _atomic_write_json(
+            tombstone_path,
+            tombstone,
+            lock=(genesis_lock, install_lock),
+        )
+        activation_result = _publish_activation_receipt_locked(
+            activation_path=activation_path,
+            plugin_root=plugin_root,
+            durable=durable,
+            marketplace_id=marketplace_id,
+            plugin_id=plugin_id,
+            current_environment=current_environment,
+            resolved_legacy_root=resolved_legacy_root,
+            actual_namespace_generation=actual_namespace_generation,
+            actual_install_generation=actual_install_generation,
+            actual_activation_generation=actual_activation_generation,
+            activation_mode="namespaced",
+            activation_state="active",
+            legacy_disposition="retained-inert",
+            recorded_probe={
+                "declared": True,
+                "result": "present",
+                "checkedAt": now,
+            },
+            existing=existing,
+            locks=(genesis_lock, install_lock),
+        )
         published_legacy = _tombstone_result(
             legacy_root=resolved_legacy_root,
             durable_home=durable,
@@ -5724,9 +5812,9 @@ def attribute_legacy_state(
             "action": "attribute-legacy",
             "status": "ready",
             "reason": "legacy-attributed",
-            "legacyRoot": str(resolved_legacy_root),
+            "legacyRoot": str(legacy_root_path),
             "context": str(install_path),
-            "tombstone": str(canonical_path(tombstone_path)),
+            "tombstone": str(legacy_root_path / ".installation-ownership.json"),
             "tombstoneChanged": True,
             "activation": activation_result["activation"],
             "activationChanged": True,
