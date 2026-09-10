@@ -1763,6 +1763,35 @@ def test_tracked_runners_remove_parent_python_runtime(monkeypatch):
     assert all("UV_INTERNAL__PYTHONHOME" not in env for env in seen)
 
 
+def test_default_run_removes_parent_python_runtime(monkeypatch):
+    """The module-level ``_run`` is the *local* source's fallback runner
+    (``_fetch``'s ``runner = runner or _run`` runs before the ``source.local``
+    branch), so a leaked ``PYTHONHOME``/``UV_INTERNAL__PYTHONHOME`` here would
+    otherwise force the local agent-worktrees venv's own interpreter to load a
+    foreign-architecture stdlib and crash on ``import socket``, exactly like
+    ``_spawn``/``_spawn_stream`` are already guarded above (#2359)."""
+    seen = []
+
+    class FakeCompleted:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(argv, **kwargs):
+        seen.append(kwargs["env"])
+        return FakeCompleted()
+
+    monkeypatch.setenv("PYTHONHOME", "/parent/python")
+    monkeypatch.setenv("UV_INTERNAL__PYTHONHOME", "/uv/python")
+    monkeypatch.setattr(data_ssh.subprocess, "run", fake_run)
+
+    data_ssh._run(["engine"], 1)
+
+    assert len(seen) == 1
+    assert "PYTHONHOME" not in seen[0]
+    assert "UV_INTERNAL__PYTHONHOME" not in seen[0]
+
+
 def _nd(obj):
     return _json.dumps(obj) + "\n"
 
