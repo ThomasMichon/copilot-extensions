@@ -556,6 +556,86 @@ def test_current_generation_stream_failure_is_recorded(monkeypatch):
     assert loader.state_for_source(source.cache_key) == "failed"
 
 
+def test_stale_generation_local_phase1_failure_does_not_clobber_fresher_ready_state(
+    monkeypatch,
+):
+    """Same guard, applied to ``_load_local_two_phase``'s Phase 1 failure branch
+    (the in-process seam reached by a local ``Source`` with no ``argv`` --
+    synthetic/older-fixture sources; the production local source streams
+    through ``_load_remote_stream`` instead, already covered above). Mirrors
+    ``#2347``'s fix to the sibling remote-stream function: a stale-generation
+    Phase 1 failure must never overwrite a newer generation's already-committed
+    ``ready`` state/records."""
+    from agent_worktrees.picker_tui import data_ssh
+
+    source = data_ssh.Source("host", "Win", None, local=True)
+    loader = data_ssh.LiveLoader([source])
+    loader._gen[source.cache_key] = 0  # this call's own (soon-to-be-stale) gen
+
+    def _fetch_then_supersede(*_a, **_k):
+        # Simulate a newer reload() superseding this call's generation WHILE
+        # its own fetch is still in flight, then this (stale) call fails.
+        loader._gen[source.cache_key] = 1
+        loader._state[source.cache_key] = "ready"
+        loader._records[source.cache_key] = [{"id4": "real-content"}]
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(data_ssh, "_fetch", _fetch_then_supersede)
+
+    loader._load_local_two_phase(source)
+
+    # The stale failure must not have clobbered the newer, real success.
+    assert loader.state_for_source(source.cache_key) == "ready"
+    assert loader._records[source.cache_key] == [{"id4": "real-content"}]
+
+
+def test_stale_generation_local_phase1_success_does_not_clobber_fresher_state(
+    monkeypatch,
+):
+    """Same guard for Phase 1's SUCCESS write: a stale-generation Phase 1 that
+    completes successfully must not stomp a newer generation's ready records
+    either (the pre-existing generation check already covered Phase 2's swap;
+    this closes the matching gap in Phase 1's own success write)."""
+    from agent_worktrees.picker_tui import data_ssh
+
+    source = data_ssh.Source("host", "Win", None, local=True)
+    loader = data_ssh.LiveLoader([source])
+    loader._gen[source.cache_key] = 0  # this call's own (soon-to-be-stale) gen
+
+    def _fetch_then_supersede(*_a, **_k):
+        # Simulate a newer reload() superseding this call's generation WHILE
+        # its own fetch is still in flight, then this (stale) call succeeds
+        # with now-outdated content.
+        loader._gen[source.cache_key] = 1
+        loader._state[source.cache_key] = "ready"
+        loader._records[source.cache_key] = [{"id4": "real-content"}]
+        return [{"id4": "stale-content"}]
+
+    monkeypatch.setattr(data_ssh, "_fetch", _fetch_then_supersede)
+
+    loader._load_local_two_phase(source)
+
+    assert loader.state_for_source(source.cache_key) == "ready"
+    assert loader._records[source.cache_key] == [{"id4": "real-content"}]
+
+
+def test_current_generation_local_phase1_failure_is_recorded(monkeypatch):
+    """Sanity counterpart: a genuine (non-superseded) Phase 1 failure still
+    sets the failed state."""
+    from agent_worktrees.picker_tui import data_ssh
+
+    source = data_ssh.Source("host", "Win", None, local=True)
+    loader = data_ssh.LiveLoader([source])
+    monkeypatch.setattr(
+        data_ssh, "_fetch",
+        lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    loader._load_local_two_phase(source)
+
+    assert loader.state_for_source(source.cache_key) == "failed"
+
+
 def test_local_live_source_uses_streaming_subprocess(monkeypatch):
     from agent_worktrees.picker_tui import data_ssh
 
