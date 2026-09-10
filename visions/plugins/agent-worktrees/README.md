@@ -5,7 +5,7 @@
   obligations, disposition, and source-control completion.
 - **Scope:** leaf (concrete component; child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-09-04
+- **Last revised:** 2026-09-09
 - **Reality docs:** the agent-worktrees plugin `docs/`
 - **Supersedes / superseded by:** none
 
@@ -88,14 +88,23 @@ Overall status is a reduction over independently owned facts: source-control
 state, claims and obligations, asserted disposition, effort focus, relationships,
 and fresh provider observations. No observer writes the aggregate verdict.
 Stale or absent execution observations reduce fidelity without erasing durable
-responsibility. Computing this reduction is always available **on demand**; an
-optional resident status-monitor may keep it warm and proactively surface
-changes instead of every reader recomputing cold, but it is an accelerator over
-the same durable facts, never a second writer of the aggregate and never new
+responsibility. Computing this reduction is always available **on demand** —
+direct, in-process computation is a correct degrade path, never a failure — but
+it is not the steady-state target: whenever a resident accelerator is
+reachable, a reader is a **thin, ref-counted subscriber** of it rather than an
+independent computer of the same facts. A reader that finds none running boots
+one on demand, waits for it to publish its reachable address, subscribes, reads
+the answer, and exits; the accelerator's own lifetime is governed by its
+subscriber count plus a bounded linger (not a fixed idle timer alone), so a
+burst of callers shares one warm computation instead of each paying the cost —
+and racing each other — independently. It remains an accelerator over the same
+durable facts, never a second writer of the aggregate and never new
 process-management authority. Where one runs, it is exactly **one** per host
-regardless of how many worktrees or sessions it watches — the suite-wide
+regardless of how many worktrees, sessions, or CLI invocations reach it — the
+suite-wide
 [*process-count-scales-with-services-not-sessions*](../../plugin-services/README.md#process-count-scales-with-services-not-sessions)
-guarantee.
+guarantee, generalized here from session-lifecycle hooks to every ordinary
+reader.
 
 ### Declarative presentation contribution
 
@@ -240,6 +249,16 @@ manager, or session-host implementation.
 
 ## Provenance
 
+- **2026-09-09** — Strengthened "Derived status" from an optional accelerator
+  to an explicit thin-client/ref-counted-subscriber expectation: an ordinary
+  reader (CLI invocation or Picker), not only a session-lifecycle hook, should
+  reach a reachable resident accelerator rather than independently recompute,
+  boot one on demand when absent, and let the accelerator's own lifetime be
+  governed by subscriber count plus a bounded linger. Direct computation
+  remains the correct degrade path, never the steady-state target. Mined from
+  a live-reproduced race: two independently-launched agent-worktrees
+  invocations recomputing the same project's classification concurrently,
+  racing each other, with no shared accelerator either could have deferred to.
 - **2026-09-04** — Reframed agent-worktrees around durable worktree-lifetime
   agency state rather than Copilot process ownership. The revision separates
   repository/worktree identity, claims, relationships, status, and completion

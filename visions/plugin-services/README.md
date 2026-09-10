@@ -5,7 +5,7 @@
   local services on a user's machine.
 - **Scope:** branch (links cross-cutting and per-plugin child visions)
 - **Status:** Active
-- **Last revised:** 2026-09-04
+- **Last revised:** 2026-09-09
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -460,6 +460,18 @@ hook degrades to inline/no-op behavior consistent with *degrade-gracefully* —
 it does not block waiting for one to appear, and it does not promote itself
 into the missing daemon.
 
+This transience is not special to Copilot-invoked hooks — it is the general
+shape every **repeated, on-demand caller** of a *work-coalescing singleton*
+follows, hook or not. An ordinary CLI invocation that repeatedly recomputes the
+same expensive, shareable answer (a status reduction, a classification pass) is
+the identical caller shape: it should reach the singleton as a thin,
+ref-counted subscriber — boot one on demand if none is reachable, wait for it
+to publish its address, read the answer, exit — rather than compute its own
+competing copy inline every time. Direct in-process computation remains the
+correct, always-available degrade path when no daemon is reachable or reachable
+in time; it is the *steady-state* default this behavior argues against, not the
+fallback.
+
 ## Non-Goals / Boundaries
 
 - **No shared-infrastructure dependency.** The suite does **not** assume — and a
@@ -495,6 +507,14 @@ into the missing daemon.
 
 ## Provenance
 
+- **2026-09-09** — Generalized *hooks-and-callbacks-are-transient* beyond
+  Copilot-invoked hooks: any repeated, on-demand caller of a
+  *work-coalescing-singleton* (an ordinary CLI invocation recomputing an
+  expensive shareable answer, not only a session-lifecycle hook) should reach
+  it as a thin, ref-counted subscriber rather than compute its own competing
+  copy. Direct in-process computation stays the correct degrade path, not the
+  steady-state default. Paired with the same-day agent-worktrees vision
+  revision this generalizes into a concrete plugin instance.
 - **2026-09-03** — Added the **lifecycle tier** and **stable lifecycle launcher**
   concepts, the **least-privilege-lifecycle-tier** feature, and the
   **register-once-cutover-on-update** and **payload-remains-replaceable**
