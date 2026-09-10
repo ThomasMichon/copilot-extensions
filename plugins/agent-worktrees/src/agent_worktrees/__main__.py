@@ -487,6 +487,54 @@ def _classify_records(
     carries its own worktree states in ``list --json`` over SSH (the local
     picker cannot git-classify a remote worktree). No fetch (``behind`` reflects
     the last fetch); ~5 git calls per existing worktree, hence opt-in.
+
+    Guarded by a per-project :class:`single_instance_lease.SingleInstance`
+    (plugin-process-hygiene Phase 4c, #2315): this is the shared entry point
+    behind BOTH the Picker's in-process classify pass and a standalone
+    ``list --json --classify`` invocation, so two independently-launched
+    callers for the same project can otherwise race this same batch of ~5
+    git-calls-per-worktree concurrently -- observed live as a Worktree Manager
+    display flicker (a row's ``state`` transiently absent mid-race renders a
+    generic, potentially wrong heuristic instead of its last-known-correct
+    value). A caller that loses the race waits (bounded) for the winner to
+    finish, then re-reads its repaired session-render cache -- see
+    :func:`_classify_records_wait_then_cache` -- rather than computing its own
+    competing pass or rendering a worse answer than before. The lease is
+    advisory only: any lease-layer failure (not contention) degrades to
+    classifying live, exactly as before this guard existed.
+    """
+    try:
+        lock_dir = cfg.project_dir()
+    except Exception:
+        lock_dir = None
+    if lock_dir is None:
+        return _classify_records_live(records, session_ctx)
+
+    from single_instance_lease import AlreadyRunningError, SingleInstance
+
+    lease = SingleInstance(lock_dir, service="classify")
+    try:
+        lease.acquire()
+    except AlreadyRunningError:
+        return _classify_records_wait_then_cache(records, session_ctx, lease)
+    except OSError:
+        # The lease layer itself failed (e.g. can't create the lock file) --
+        # never let an advisory optimization block correctness.
+        return _classify_records_live(records, session_ctx)
+    try:
+        return _classify_records_live(records, session_ctx)
+    finally:
+        lease.release()
+
+
+def _classify_records_live(
+    records: list[tracking.WorktreeRecord],
+    session_ctx: sessions.SessionContext | None = None,
+) -> dict[str, git_ops.WorktreeStateInfo]:
+    """The actual ~5-git-calls-per-worktree batch classification.
+
+    Factored out of :func:`_classify_records` so the lease wrapper can call it
+    only when it actually won the race; a losing caller never reaches this.
     """
     config = cfg.load_config()
     repo = config.default_repo
@@ -497,6 +545,77 @@ def _classify_records(
         )
         for rec in records
     }
+
+
+def _classify_records_wait_then_cache(
+    records: list[tracking.WorktreeRecord],
+    session_ctx: sessions.SessionContext | None,
+    lease,
+    *,
+    timeout: float = 15.0,
+    poll: float = 0.25,
+) -> dict[str, git_ops.WorktreeStateInfo]:
+    """Wait for the lease winner, then answer from its repaired cache.
+
+    Polls the same lease non-blockingly (the library has no blocking-wait
+    primitive) until it becomes free -- meaning the winner released it, i.e.
+    finished its pass and (best-effort) stamped the session-render cache --
+    or ``timeout`` elapses. Either way, answers from **cache**, never by
+    running a competing live classification: a timeout degrades to whatever is
+    currently cached (possibly still the pre-race value), which is never worse
+    than what this caller had before, unlike the "state absent -> WIP" fallback
+    it replaces.
+    """
+    from single_instance_lease import AlreadyRunningError
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            lease.acquire()
+        except AlreadyRunningError:
+            time.sleep(poll)
+            continue
+        else:
+            lease.release()  # We don't do the work; just detected completion.
+            break
+    return _classify_from_cache(records, session_ctx)
+
+
+def _classify_from_cache(
+    records: list[tracking.WorktreeRecord],
+    session_ctx: sessions.SessionContext | None = None,
+) -> dict[str, git_ops.WorktreeStateInfo]:
+    """Build a classification map from each record's on-disk cached state.
+
+    Re-reads every record fresh (not the possibly-stale in-memory copy the
+    caller already held before waiting) so a just-completed winner's stamp is
+    visible. Degrades to ``UNKNOWN`` only when a record has genuinely never
+    been classified before -- never invents ``WIP`` or another guessed state.
+    """
+    out: dict[str, git_ops.WorktreeStateInfo] = {}
+    for rec in records:
+        try:
+            fresh = tracking.load_record(
+                cfg.tracking_dir() / f"{rec.worktree_id}.yaml"
+            )
+        except Exception:
+            fresh = rec
+        cached = fresh.git_state
+        if cached:
+            try:
+                state = git_ops.WorktreeState(cached)
+            except ValueError:
+                state = git_ops.WorktreeState.UNKNOWN
+        elif fresh.status == "finalized":
+            state = git_ops.WorktreeState.COMPLETED
+        else:
+            state = git_ops.WorktreeState.UNKNOWN
+        if session_ctx is not None:
+            state = git_ops.refine_state_with_session(
+                state, fresh.session_turns or 0
+            )
+        out[rec.worktree_id] = git_ops.WorktreeStateInfo(state=state)
+    return out
 
 
 def _classify_one_record(

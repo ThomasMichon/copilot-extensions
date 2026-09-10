@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-single-instance-lease"
+version = "0.1.0-dev1"
+description = "Single-instance lease + supersession self-retire + reconcile-set reaper: one live daemon per service per host, for Copilot CLI plugins and multi-machine services"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Thomas Michon" }
+]
+# No runtime dependencies beyond stdlib -- pure library
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 99
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "S", "B", "A", "RUF"]
+ignore = ["S104"]  # comparing a bind string to "0.0.0.0" is not a bind
+
+[tool.ruff.lint.per-file-ignores]
+# Tests legitimately use `assert` (pytest) and hardcoded fixtures.
+"tests/**" = ["S101"]

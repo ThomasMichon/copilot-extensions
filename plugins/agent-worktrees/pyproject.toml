@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-worktrees"
-version = "1.5.5-dev44"
+version = "1.5.5-dev45"
 description = "Worktree isolation system for concurrent Copilot CLI sessions"
 readme = "README.md"
 license = "MIT"
@@ -21,6 +21,7 @@ dependencies = [
     "agent-procutil",
     "agent-dropin-registry",
     "agent-plugin-activation",
+    "agent-single-instance-lease",
 ]
 
 [tool.uv.sources]
@@ -41,6 +42,13 @@ agent-dropin-registry = { path = "libs/dropin-registry" }
 # Effective global-or-adopted-project plugin eligibility and identity-verified
 # roots for attributed registry entries (module ``plugin_activation``).
 agent-plugin-activation = { path = "libs/plugin-activation" }
+# Single-instance lease (module ``single_instance_lease``). Vendored per
+# plugin; byte-identical src across copies. Guards "one active classify pass
+# per project per host" (plugin-process-hygiene Phase 4c, #2315): a losing
+# caller waits for the winner's pass to finish, then reads its repaired
+# session-render cache instead of racing it or falling back to a wrong
+# heuristic.
+agent-single-instance-lease = { path = "libs/single-instance-lease" }
 
 [project.scripts]
 agent-worktrees = "agent_worktrees.__main__:main"
