@@ -7,7 +7,39 @@ import os
 import signal
 import subprocess
 import sys
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
+
+
+@dataclass
+class _ProcessCleanup:
+    process: asyncio.subprocess.Process
+    close: Callable[[], Awaitable[None]]
+    task: asyncio.Task | None = None
+
+
+_CLEANUPS: dict[int, _ProcessCleanup] = {}
+
+
+def register_process_cleanup(
+    process: asyncio.subprocess.Process,
+    close: Callable[[], Awaitable[None]],
+) -> None:
+    _CLEANUPS[id(process)] = _ProcessCleanup(process, close)
+
+
+async def run_process_cleanup(process: asyncio.subprocess.Process) -> None:
+    entry = _CLEANUPS.get(id(process))
+    if entry is None:
+        return
+    if entry.task is None:
+        entry.task = asyncio.create_task(entry.close())
+    try:
+        await asyncio.shield(entry.task)
+    finally:
+        if entry.task.done() and _CLEANUPS.get(id(process)) is entry:
+            del _CLEANUPS[id(process)]
 
 
 def _kill_process(proc: asyncio.subprocess.Process) -> None:
@@ -18,12 +50,12 @@ def _kill_process(proc: asyncio.subprocess.Process) -> None:
 
 
 def ssh_subprocess_kwargs(**kwargs: Any) -> dict[str, Any]:
-    """Return kwargs that keep an SSH process tree invisible and isolated.
+    """Return isolation kwargs for an SSH root process.
 
     Native OpenSSH can still surface a Default Terminal window when launched
     with ``CREATE_NO_WINDOW`` from a consoleless service. ``DETACHED_PROCESS``
-    gives the non-interactive SSH tree no console to hand off while preserving
-    redirected stdio and the root PID used for tree teardown.
+    isolates the non-interactive root while preserving redirected stdio and its
+    PID. Use ``proxy.create_ssh_subprocess`` to also own native proxy children.
     """
     if sys.platform == "win32":
         kwargs["creationflags"] = subprocess.DETACHED_PROCESS
@@ -38,6 +70,15 @@ async def terminate_ssh_process_tree(
     grace: float = 5.0,
 ) -> None:
     """Terminate an SSH root and the ProxyCommand descendants it spawned."""
+    try:
+        await _terminate_ssh_process_tree(proc, grace=grace)
+    finally:
+        await run_process_cleanup(proc)
+
+
+async def _terminate_ssh_process_tree(
+    proc: asyncio.subprocess.Process, *, grace: float,
+) -> None:
     if proc.returncode is not None:
         return
     pid = getattr(proc, "pid", None)

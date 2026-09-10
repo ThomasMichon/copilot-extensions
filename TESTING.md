@@ -81,6 +81,23 @@ scenario-style test that validates several related observable features over
 many process-launching micro-tests that repeat the same setup and failure
 boundary.
 
+## Local Windows SSH proxy regression
+
+After preparing the isolated `agent-bridge` test environment with the turn-key
+runner, the opt-in native smoke test exercises two SSH/proxy cycles from a
+consoleless parent with native Windows OpenSSH and, when installed, Git for
+Windows. It checks displayed terminal windows and foreground changes using a
+synthetic proxy, without remote hosts or credentials:
+
+```powershell
+$env:PYTHONPATH = Join-Path $PWD 'plugins\agent-bridge\libs\ssh-manager\src'
+$env:SSH_MANAGER_WINDOWS_PROXY_TEST = '1'
+& .\.test-venvs\win32\agent-bridge\Scripts\python.exe -m pytest -q libs\ssh-manager\tests\test_proxy_windows.py
+```
+
+The portable proxy contracts cover binary forwarding, routing identity, and
+timeout/cancellation cleanup and run in the Agent Bridge CI lane.
+
 ## Test portfolio invariants
 
 Required pull-request CI is a fast regression gate, not the complete test

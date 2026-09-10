@@ -29,7 +29,8 @@ import logging
 import socket
 
 from .config_sources import SSHConfig
-from .process import ssh_subprocess_kwargs, terminate_ssh_process_tree
+from .process import terminate_ssh_process_tree
+from .proxy import create_ssh_subprocess
 
 log = logging.getLogger("ssh-manager.forward")
 
@@ -167,12 +168,12 @@ class LocalForward:
             )
             log.debug("Establishing local forward (attempt %d): %s",
                       attempt, " ".join(args))
-            proc = await asyncio.create_subprocess_exec(
+            proc = await create_ssh_subprocess(
                 *args,
+                config=self._config,
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                **ssh_subprocess_kwargs(),
             )
             self._proc = proc
             self.local_port = port

@@ -24,7 +24,8 @@ from dataclasses import dataclass
 
 from .config_sources import SSHConfig
 from .forward import build_forward_ssh_args
-from .process import ssh_subprocess_kwargs, terminate_ssh_process_tree
+from .process import terminate_ssh_process_tree
+from .proxy import create_ssh_subprocess
 
 log = logging.getLogger("ssh-manager.relay")
 
@@ -146,12 +147,12 @@ class SupervisedRelayForward:
                 _ESTABLISH_ATTEMPTS,
                 " ".join(args),
             )
-            proc = await asyncio.create_subprocess_exec(
+            proc = await create_ssh_subprocess(
                 *args,
+                config=self._config,
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.PIPE,
-                **ssh_subprocess_kwargs(),
             )
             self._proc = proc
             try:

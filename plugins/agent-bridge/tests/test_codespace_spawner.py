@@ -820,7 +820,7 @@ async def test_endpoint_serving_probe_serves(monkeypatch):
         return _FakeProbeProc(0, b"OK\n")
 
     monkeypatch.setattr(
-        "agent_bridge.session_host.endpoints.asyncio.create_subprocess_exec",
+        "agent_bridge.session_host.endpoints.create_ssh_subprocess",
         fake_exec,
     )
     probe = endpoints_mod.endpoint_serving_probe_factory(_relay_endpoint())(50629)
@@ -840,7 +840,7 @@ async def test_endpoint_serving_probe_false_on_unserved_port(monkeypatch):
         return _FakeProbeProc(124, b"")  # timeout/refused -> no OK
 
     monkeypatch.setattr(
-        "agent_bridge.session_host.endpoints.asyncio.create_subprocess_exec",
+        "agent_bridge.session_host.endpoints.create_ssh_subprocess",
         fake_exec,
     )
     probe = endpoints_mod.endpoint_serving_probe_factory(_relay_endpoint())(50629)
@@ -853,7 +853,7 @@ async def test_endpoint_serving_probe_transport_error_is_healthy(monkeypatch):
         raise RuntimeError("ssh spawn failed")
 
     monkeypatch.setattr(
-        "agent_bridge.session_host.endpoints.asyncio.create_subprocess_exec",
+        "agent_bridge.session_host.endpoints.create_ssh_subprocess",
         fake_exec,
     )
     probe = endpoints_mod.endpoint_serving_probe_factory(_relay_endpoint())(50629)
