@@ -750,7 +750,8 @@ def _wire_monitor_handoff_session(tmp_path, monkeypatch):
     _capture_set(monkeypatch)
 
 
-def test_monitor_pending_handoff_request_returns_actionable_request(tmp_path, monkeypatch):
+@pytest.mark.parametrize("native_mode", [None, "manual", "assisted", "allow-all"])
+def test_monitor_pending_handoff_request_returns_actionable_request(tmp_path, monkeypatch, native_mode):
     monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
     monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
 
@@ -780,6 +781,7 @@ def test_monitor_pending_handoff_request_returns_actionable_request(tmp_path, mo
             "worktree": "a",
             "storage": "file",
             "consumed": False,
+            **({"nativeGoal": {"permissionMode": native_mode}} if native_mode else {}),
         },
     )
     monkeypatch.setattr(m.locks, "process_start_time", lambda pid: "old-process")
@@ -795,6 +797,12 @@ def test_monitor_pending_handoff_request_returns_actionable_request(tmp_path, mo
         ],
     )
 
+    if native_mode:
+        # The signal-only fallback must leave native launch with the source
+        # extension, even when invoked for an old unsupported-mode checkpoint.
+        assert m._monitor_pending_handoff_request(record) is None
+        assert not (tmp_path / "status-monitor-handoffs.d").exists()
+        return
     assert m._monitor_pending_handoff_request(record) == {
         "token": "handoff-1",
         "seed": "HANDOFF_SEED",
@@ -971,6 +979,47 @@ def test_monitor_pending_handoff_predecessor_retire_uses_logged_predecessor_bind
         "successor_session_id": "successor-1",
         "retire_reason": "monitor-successor-candidate",
     }
+
+
+@pytest.mark.parametrize(
+    "admitted,hydrated,linked,head,expected",
+    [
+        (False, "successor-1", "successor-1", "successor-1", False),
+        (True, "other", "successor-1", "successor-1", False),
+        (True, "successor-1", None, "successor-1", False),
+        (True, "successor-1", "successor-1", "other", False),
+        (True, "successor-1", "successor-1", "successor-1", True),
+    ],
+)
+def test_monitor_native_retirement_requires_admitted_hydrated_linked_head(
+    monkeypatch, admitted, hydrated, linked, head, expected,
+):
+    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    monkeypatch.setattr(
+        m.activity, "read_events",
+        lambda **kwargs: [{
+            "handoff_token": "handoff-1", "session_id": "source-1",
+            "old_pane": "%9", "native_handoff": "owned-checkpoint",
+        }] if kwargs.get("event") == "handoff_cutover_spawn" else [],
+    )
+    monkeypatch.setattr(
+        m, "_monitor_read_session_state_handoff",
+        lambda path: {"nativeGoal": {
+            "admissionComplete": admitted, "hydratedBySession": hydrated,
+        }},
+    )
+    record = types.SimpleNamespace(
+        worktree_id="a", resolved_head_session=head,
+        pending_handoffs=[types.SimpleNamespace(
+            token="handoff-1", predecessor="source-1",
+            candidate="successor-1", successor=linked,
+        )],
+    )
+    result = m._monitor_pending_handoff_predecessor_retire(record)
+    assert bool(result) is expected
+    if expected:
+        assert result["successor_session_id"] == "successor-1"
+        assert result["predecessor_session_id"] == "source-1"
 
 
 def test_monitor_trigger_handoff_cutover_retires_confirmed_successor(monkeypatch):

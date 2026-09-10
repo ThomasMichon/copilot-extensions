@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, budget posture, coordinator-first delegation, publication safety, WSL environment setup, and CLI customization",
-    "version": "1.7.7-dev40"
+    "version": "1.7.7-dev41"
   },
   "plugins": [
     {
       "name": "agent-worktrees",
       "description": "Worktree isolation system for concurrent Copilot CLI sessions - lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
-      "version": "1.5.5-dev44",
+      "version": "1.5.5-dev45",
       "source": "plugins/agent-worktrees"
     },
     {
@@ -53,8 +53,8 @@
     },
     {
       "name": "context-handoff",
-      "description": "Context window monitoring and session handoff - a session-start continuity kernel plus a Copilot CLI extension that tracks token utilization, stores handoffs as worktree-pinned agent-dispatch tasks when available or one-time worktree-state files otherwise, and signals pending handoff pickup without performing process management",
-      "version": "0.1.1-dev10",
+      "description": "Context window monitoring and native goal continuity - durable task/file handoffs, exact remaining soft caps, profile-preserving admission, and identity-checked live cutover through Herdr or agent-worktrees",
+      "version": "0.1.1-dev13",
       "source": "plugins/context-handoff"
     },
     {

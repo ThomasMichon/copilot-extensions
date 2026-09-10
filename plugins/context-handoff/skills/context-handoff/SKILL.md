@@ -33,17 +33,18 @@ as the boundary of the objective**.
 
 ## The core rule
 
-Context-handoff is **process-manager agnostic**.
+Context-handoff stores the brief and preserves native `/goal` continuity.
+After an authorized save, call `continue_handoff` with the exact returned
+`HANDOFF_SEED`; `/handoff-continue` requests this live path. End the source turn
+so final usage can settle before launch. Herdr or agent-worktrees creates the
+fixed successor; the extension restores and admits it before identity-checked
+retirement. Save alone does not launch.
 
-- It tracks context pressure.
-- It teaches the continuation rules.
-- It stores the baton.
-- It can signal that a pickup is requested.
-
-It does **not** spawn a successor, inspect mux state, retire panes, or perform
-cutover choreography. If a worktree manager, agent-bridge, or another control
-system wants to act on the pending handoff, it can. Otherwise a human can use
-the short seed manually.
+Requires Node.js and the tested Copilot CLI 1.0.84-3 native API. Do not use a
+plain text pickup to bypass native restoration. Running goals continue once
+with their exact remaining soft cap; paused, exhausted, completed, and no-goal
+handoffs submit no automatic business message. Hidden stopped GoalPanel is
+native behavior, not grounds to enable autopilot or grant credits.
 
 ## Continuity contract
 
@@ -86,7 +87,7 @@ more work left to do:
    open active effort exists, otherwise the full standalone shape.
 3. **Call `save_handoff_prompt`.** This safely stores the baton and returns the
    short handoff seed.
-4. **Call `trigger_handoff` immediately.**
+4. **Call `continue_handoff` with the saved seed immediately.**
 
 Do **not** ask the user for confirmation first on this path. Running low on
 context while work remains is sufficient justification by itself.
@@ -101,7 +102,7 @@ listing a set of follow-up ideas or questions:
 3. **Call `save_handoff_prompt`.**
 4. **Replace the usual follow-up list** with one short, low-friction offer to
    continue via handoff.
-5. **Call `trigger_handoff` only after the user says yes.**
+5. **Call `continue_handoff` only after the user says yes.**
 
 Only this turn-end follow-up path is skippable via **autopilot** or prior
 explicit pre-authorization.
@@ -123,7 +124,8 @@ blockers, decisions, in-flight work, and required confirmations.
 
 ## `trigger_handoff`
 
-`trigger_handoff` is the explicit "arm pickup" step.
+`trigger_handoff` retains the older signal-only pickup path. New native-aware
+records (including no-goal saves) are directed to `continue_handoff`.
 
 - For a **context-pressure-driven** handoff with work still left to do, call it
   immediately after `save_handoff_prompt`.
@@ -148,6 +150,18 @@ Its contract is:
 8. always end with the short handoff prompt/seed.
 
 ## Resume flow
+
+An explicitly launched successor restores the native snapshot by normal cold
+resume, writes `context-handoff.md` through the public workspace API, and
+consumes its assigned task/file without a model admission turn. Preserve the
+source model, effort, context tier, agent, home and permissions. Herdr rejects
+unsupported manual/assisted launch modes before creating a pane.
+
+Use `retry_handoff_cutover` for the existing request, not a second save/spawn.
+Unknown launches or sends with no reconcilable public receipt preserve the
+source; never blindly replay. A queued send is not complete until its exact
+native user event exists. Identical goal text does not authorize overwriting a
+new user goal. Ordinary already-admitted deliveries never recreate goals.
 
 `/consume-handoff` is the canonical resume surface.
 

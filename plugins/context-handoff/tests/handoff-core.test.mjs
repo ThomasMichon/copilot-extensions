@@ -34,6 +34,8 @@ function withTempHome(fn) {
   const dir = mkdtempSync(join(tmpdir(), "context-handoff-home-"));
   const oldHome = process.env.HOME;
   const oldUserProfile = process.env.USERPROFILE;
+  const oldHerdrEnv = process.env.HERDR_ENV;
+  delete process.env.HERDR_ENV;
   process.env.HOME = dir;
   process.env.USERPROFILE = dir;
   try {
@@ -43,6 +45,8 @@ function withTempHome(fn) {
     else process.env.HOME = oldHome;
     if (oldUserProfile === undefined) delete process.env.USERPROFILE;
     else process.env.USERPROFILE = oldUserProfile;
+    if (oldHerdrEnv === undefined) delete process.env.HERDR_ENV;
+    else process.env.HERDR_ENV = oldHerdrEnv;
     rmSync(dir, { recursive: true, force: true });
   }
 }

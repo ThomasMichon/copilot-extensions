@@ -683,15 +683,19 @@ class TestControlPlaneRelatedPRTier:
         )
         seen = {}
 
-        def _load_project_config(project):
+        def _load_project_config(project, *, include_control_plane_related_pr):
             seen["project"] = project
+            seen["include_control_plane_related_pr"] = include_control_plane_related_pr
             return object()
 
         monkeypatch.setattr(cfg, "load_project_config", _load_project_config)
 
         got = cfg._control_plane_related_pr_map()
 
-        assert seen == {"project": "harness"}
+        assert seen == {
+            "project": "harness",
+            "include_control_plane_related_pr": False,
+        }
         assert got["ext"]["merge_actor"] == "submitter-direct"
 
     def test_cp_related_pr_map_does_not_load_unproven_project(

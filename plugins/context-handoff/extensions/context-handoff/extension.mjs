@@ -33,8 +33,7 @@ import {
 } from "node:fs";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
-import { approveAll } from "@github/copilot-sdk";
-import { joinSession } from "@github/copilot-sdk/extension";
+import { pathToFileURL } from "node:url";
 import {
   agentDispatchAvailable,
   agentWorktreesGet,
@@ -43,18 +42,38 @@ import {
   collectAdvisoryGitFacts,
   consumeDispatchHandoffTask,
   consumeFileHandoff,
+  describeCliError,
   findHandoffFile,
   findHandoffTask,
   findTaskDeliveryCheckpoint,
   formatConsumeResult,
   markDeliveryPromptInjected,
   normalizeHandoffTitle,
+  readSessionStateHandoff,
   runCli,
   storeHandoff,
   triggerHandoff,
 } from "./handoff-core.mjs";
 import { loadContextHandoffConfig } from "./config.mjs";
 import { contextPressure, formatContextUsage } from "./thresholds.mjs";
+import { runNativeBridge, readNativeGoal } from "./native-transport.mjs";
+import { bootstrapNativeHandoff, continueNativeAfterAdmission, nativeCheckpoint } from "./native-runtime.mjs";
+import { saveNativeBaton, requestNativeCutover, requestPlainCutover, freezeAndLaunchNative, recoverPendingHandoff } from "./native-source.mjs";
+
+if (process.env.CONTEXT_HANDOFF_NATIVE_WORKER !== "1") {
+  process.exit(await runNativeBridge(import.meta.url));
+}
+
+const sdkPath = process.env.COPILOT_SDK_PATH;
+if (!sdkPath) throw new Error("Native handoff requires the CLI-provided public SDK path.");
+const { approveAll } = await import(pathToFileURL(join(sdkPath, "index.js")).href);
+const { joinSession } = await import(pathToFileURL(join(sdkPath, "extension.js")).href);
+
+let nativeStartup;
+let nativeStartupError = null;
+let nativeAdmissionPath = null;
+let nativeCutoverPath = null;
+let nativeReceiptPath = null;
 
 // --- State ---
 const handoffConfig = loadContextHandoffConfig(process.cwd());
@@ -389,7 +408,7 @@ const session = await joinSession({
 
         const cwd = state.cwd || process.cwd();
         const title = normalizeHandoffTitle(args?.title);
-        const stored = storeHandoff({ promptText: text, sid, cwd, title });
+        const stored = await saveNativeBaton(session, { promptText: text, cwd, title });
         if (!stored?.storage) {
           return (
             "Cannot save handoff: no safe task or file store was available. " +
@@ -402,12 +421,16 @@ const session = await joinSession({
           token: stored.id,
           storage: stored.storage,
           worktree: stored.metadata?.worktree || null,
+          nativeGoalCheckpoint: stored.metadata?.nativeGoalCheckpoint || null,
+          stored,
+          promptText: text,
         };
         return (
           `Handoff stored (${stored.storage}: ${stored.id}). This preserves the ` +
           "baton without arming the pickup flow.\n\n" +
-          "If this handoff exists because context pressure is rising and work " +
-          "still remains, call `trigger_handoff` directly now.\n\n" +
+          (stored.metadata?.nativeGoalCheckpoint
+            ? "This baton contains a native goal. Call `continue_handoff` with the exact seed below; do not use a plain text pickup.\n\n"
+            : "If this handoff exists because context pressure is rising and work still remains, call `trigger_handoff` directly now.\n\n") +
           "If this is a turn-end follow-up handoff, ask the user whether to " +
           "continue via handoff and call `trigger_handoff` only after they say " +
           "yes, unless autopilot or prior authorization already covers that path.\n\n" +
@@ -418,6 +441,47 @@ const session = await joinSession({
           `HANDOFF_SEED: ${handoffSeed}\n` +
           `HANDOFF_TOKEN: ${stored.id}`
         );
+      },
+    },
+    {
+      name: "continue_handoff",
+      description:
+        "Continue a saved native-goal handoff through a fresh successor. The source " +
+        "is paused now, but its objective is frozen and the successor is launched " +
+        "only after this turn settles. Pass the exact HANDOFF_SEED from save.",
+      skipPermission: true,
+      parameters: {
+        type: "object", properties: { seed: { type: "string" } }, required: ["seed"],
+      },
+      handler: async args => {
+        state.pendingHandoff ||= recoverPendingHandoff(session.sessionId);
+        if (state.pendingHandoff?.seed && state.pendingHandoff.seed !== args.seed) {
+          throw new Error("Use the exact current saved handoff seed; no receiver was created.");
+        }
+        const requested = state.pendingHandoff?.nativeGoalCheckpoint
+          ? await requestNativeCutover(session, args.seed)
+          : await requestPlainCutover(session, state.pendingHandoff, state.cwd || process.cwd());
+        if (requested.launch) return `Successor already launched: ${JSON.stringify(requested.launch)}. Do not replay.`;
+        nativeCutoverPath = requested.path;
+        return "Native handoff requested. Source automatic execution is paused. End this turn; final native usage will be frozen at session.idle before the successor is launched.";
+      },
+    },
+    {
+      name: "retry_handoff_cutover",
+      description: "Retry the existing saved native handoff identity, without creating another goal or receiver.",
+      skipPermission: true,
+      parameters: { type: "object", properties: {} },
+      handler: async () => {
+        state.pendingHandoff ||= recoverPendingHandoff(session.sessionId);
+        if (!state.pendingHandoff?.seed) {
+          throw new Error("No in-session saved handoff seed is available; recover the existing baton instead of creating another receiver.");
+        }
+        const requested = state.pendingHandoff.nativeGoalCheckpoint
+          ? await requestNativeCutover(session, state.pendingHandoff.seed)
+          : await requestPlainCutover(session, state.pendingHandoff, state.cwd || process.cwd());
+        if (requested.launch) return `Existing successor: ${JSON.stringify(requested.launch)}. Do not launch another.`;
+        nativeCutoverPath = requested.path;
+        return "Existing native handoff will resume at this turn's idle boundary.";
       },
     },
     {
@@ -462,6 +526,11 @@ const session = await joinSession({
         const path = (args?.path ?? "").toString().trim();
         const deferComplete = Boolean(args?.defer_complete);
 
+        await nativeStartup;
+        if (nativeStartupError) {
+          return { resultType: "error", textResultForLlm: `Native restoration failed: ${nativeStartupError.message}. Predecessor preserved.` };
+        }
+
         let result;
         if (taskId) {
           result = consumeDispatchHandoffTask(cwd, taskId, sid, deferComplete);
@@ -472,6 +541,10 @@ const session = await joinSession({
             "Cannot consume handoff: pass task_id for an agent-dispatch handoff " +
             "or handoff_id/path for a file-backed handoff."
           );
+        }
+
+        if (result?.ok && result.metadata?.nativeGoalCheckpoint) {
+          nativeAdmissionPath = result.metadata.nativeGoalCheckpoint;
         }
 
         return {
@@ -544,6 +617,19 @@ const session = await joinSession({
           );
         }
         const title = normalizeHandoffTitle(args?.title);
+        if ((await readNativeGoal(sid)).state && !state.pendingHandoff?.nativeGoalCheckpoint) {
+          if (!text) throw new Error("Save the current native goal with save_handoff_prompt before continuing.");
+          const stored = await saveNativeBaton(session, { promptText: text, cwd, title });
+          if (!stored.storage) throw new Error(stored.error);
+          state.pendingHandoff = {
+            seed: buildSeedForStored(stored), token: stored.id, storage: stored.storage,
+            nativeGoalCheckpoint: stored.metadata.nativeGoalCheckpoint,
+            worktree: stored.metadata.worktree, stored, promptText: text,
+          };
+        }
+        if (state.pendingHandoff?.nativeGoalCheckpoint) {
+          return `Native goal migration requires continue_handoff, not a signal-only pickup. Use the already-saved seed:\nHANDOFF_SEED: ${state.pendingHandoff.seed}`;
+        }
         const result = await triggerHandoff({
           promptText: text || null,
           sid,
@@ -598,11 +684,9 @@ const session = await joinSession({
     {
       name: "handoff-continue",
       description:
-        "Generate a handoff for THIS session, store it, and trigger the " +
-        "pending-handoff signal flow. This is the explicit human yes-path: it " +
-        "does NOT spawn or retire sessions, but it does arm the baton for any " +
-        "human or control system watching the worktree, dispatch task, or " +
-        "session-state marker.",
+        "Save a handoff for THIS session and request a live successor through " +
+        "Herdr or agent-worktrees. Preserve native goal, remaining soft cap and " +
+        "execution intent; retire the recorded predecessor only after admission.",
       handler: async (ctx) => {
         void ctx;
         await session.send({
@@ -612,11 +696,10 @@ const session = await joinSession({
             "generate_handoff_prompt to collect session facts; (2) compose " +
             "continuation markdown per the context-handoff skill -- use its " +
             "compact effort-backed shape when a valid open active effort exists, " +
-            "otherwise the full standalone shape; (3) call trigger_handoff with " +
-            "that markdown as `prompt_text` and a short specific `title`. " +
-            "trigger_handoff stores or refreshes the baton, signals pending " +
-            "handoff state across the available systems, waits briefly for a " +
-            "pickup, and always ends with the final short handoff prompt/seed. " +
+            "otherwise the full standalone shape; (3) call save_handoff_prompt with " +
+            "that markdown as `prompt_text` and a short specific `title`; " +
+            "(4) call continue_handoff with the exact returned HANDOFF_SEED. " +
+            "End this turn so native usage can settle before the successor launches. " +
             "Do NOT claim the baton auto-loads on restart; if no control system " +
             "picks it up, follow the manual instructions it printed.",
           displayPrompt: "Trigger handoff pickup (/handoff-continue)",
@@ -630,6 +713,8 @@ const session = await joinSession({
         "prompt into THIS session (foreground). Consumes the agent-dispatch " +
         "handoff task if present, else the newest matching worktree handoff file.",
       handler: async (ctx) => {
+        await nativeStartup;
+        if (nativeStartupError) throw nativeStartupError;
         const cwd = state.cwd || process.cwd();
         const sid = state.sessionId || ctx?.sessionId || "unknown";
 
@@ -655,6 +740,10 @@ const session = await joinSession({
                 return;
               }
               try {
+                if (consumed.metadata?.nativeGoalCheckpoint) {
+                  await continueNativeAfterAdmission(session, consumed.metadata.nativeGoalCheckpoint);
+                  return;
+                }
                 await session.send({
                   prompt: buildResumePrompt(
                     body,
@@ -686,6 +775,10 @@ const session = await joinSession({
             true,
           );
           if (resumed?.ok) {
+            if (resumed.metadata?.nativeGoalCheckpoint) {
+              await continueNativeAfterAdmission(session, resumed.metadata.nativeGoalCheckpoint);
+              return;
+            }
             await session.send({
               prompt: buildResumePrompt(
                 resumed.payload,
@@ -709,6 +802,10 @@ const session = await joinSession({
               consumed?.message || "Found a handoff file but could not consume it.",
               { level: "warning" },
             );
+            return;
+          }
+          if (consumed.metadata?.nativeGoalCheckpoint) {
+            await continueNativeAfterAdmission(session, consumed.metadata.nativeGoalCheckpoint);
             return;
           }
           await session.send({
@@ -760,6 +857,23 @@ const session = await joinSession({
 state.sessionId = session.sessionId ?? state.sessionId ?? null;
 state.cwd = state.cwd || process.cwd();
 state.turnCount = 0;
+// Keep startup non-blocking: the native UI selects --agent only after the
+// extension initialization returns. Bootstrap subscribes before checking the
+// current agent and waits for selection without holding initialization open.
+nativeStartup = bootstrapNativeHandoff(session).then(result => {
+  nativeReceiptPath = result?.preparing ? null : result?.path || null;
+  const pending = recoverPendingHandoff(session.sessionId);
+  state.pendingHandoff ||= pending;
+  if (pending?.nativeGoalCheckpoint) {
+    const request = readSessionStateHandoff(session.sessionId)?.record;
+    if (request?.nativeGoal.cutoverRequested && !request.nativeGoal.launchRequested) {
+      nativeCutoverPath = pending.nativeGoalCheckpoint;
+    }
+  }
+}).catch(error => {
+  nativeStartupError = error;
+  session.log(`[Context Handoff] Native restoration failed: ${describeCliError(error)}. Predecessor preserved.`, { level: "error" });
+});
 if (handoffConfig.warning) {
   session.log(`[Context Handoff] ${handoffConfig.warning}`, { level: "warning" });
 }
@@ -844,8 +958,57 @@ session.on("tool.execution_complete", (event) => {
 // on compaction). session.send() inside an idle handler does not loop: the
 // queue is cleared before sending and the guard flags prevent re-queueing.
 let pendingNudge = null;  // null | "soft" | "hard"
+let nativeIdleInFlight = false;
+
+session.on("user.message", () => {
+  if (!nativeReceiptPath || nativeIdleInFlight || nativeStartupError) return;
+  nativeIdleInFlight = true;
+  continueNativeAfterAdmission(session, nativeReceiptPath).catch(error => {
+    session.log(`[Context Handoff] ${error.message}; predecessor preserved.`, { level: "error" });
+  }).finally(() => {
+    nativeIdleInFlight = false;
+  });
+});
 
 session.on("session.idle", () => {
+  if (nativeIdleInFlight || nativeStartupError) return;
+  if (nativeCutoverPath) {
+    const path = nativeCutoverPath;
+    nativeCutoverPath = null;
+    pendingNudge = null;
+    nativeIdleInFlight = true;
+    freezeAndLaunchNative(session, path).then(launch => {
+      session.log(`[Context Handoff] Native successor launched: ${JSON.stringify(launch)}. Keep this source paused.`, { level: "info" });
+    }).catch(error => {
+      session.log(`[Context Handoff] Native handoff stopped: ${error.message}. Source remains paused and preserved.`, { level: "error" });
+    }).finally(() => {
+      nativeIdleInFlight = false;
+    });
+    return;
+  }
+  if (!nativeAdmissionPath && nativeReceiptPath) {
+    try {
+      const goal = nativeCheckpoint(nativeReceiptPath, session.sessionId).nativeGoal;
+      if (goal.consumedBySession === session.sessionId && !goal.admissionComplete) {
+        nativeAdmissionPath = nativeReceiptPath;
+      }
+    } catch (error) {
+      session.log(`[Context Handoff] ${error.message}; predecessor preserved.`, { level: "error" });
+      return;
+    }
+  }
+  if (nativeAdmissionPath) {
+    const path = nativeAdmissionPath;
+    nativeAdmissionPath = null;
+    pendingNudge = null;
+    nativeIdleInFlight = true;
+    continueNativeAfterAdmission(session, path).catch(error => {
+      session.log(`[Context Handoff] ${error.message}`, { level: "error" });
+    }).finally(() => {
+      nativeIdleInFlight = false;
+    });
+    return;
+  }
   if (!pendingNudge) return;
   const level = pendingNudge;
   pendingNudge = null;
