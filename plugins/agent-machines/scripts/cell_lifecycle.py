@@ -6,10 +6,12 @@ import argparse
 import importlib.util
 import json
 import os
+import socket
 import stat
 import sys
 import time
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -214,7 +216,15 @@ def lifecycle(arguments: argparse.Namespace) -> dict[str, Any]:
                         raise RevalidationRequired("installation-inventory-changed")
                 for path in maintenance:
                     if os.path.lexists(path):
-                        ic._fail("Lifecycle management refuses applicable maintenance.")
+                        ic.require_management_authorization(
+                            profile=profile,
+                            plugin_root=root,
+                            maintenance_token=getattr(a, "maintenance_token", None),
+                            current_time=datetime.now(timezone.utc),
+                            host=socket.gethostname(),
+                            pid_is_live=ic._pid_is_live,
+                        )
+                        break
                 if ic._path_evidence(activation_path) != activation_evidence:
                     raise RevalidationRequired("activation-changed")
                 if activation_evidence is not None:
@@ -498,6 +508,7 @@ def lifecycle(arguments: argparse.Namespace) -> dict[str, Any]:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("cell-repair", "cell-uninstall"))
+    parser.add_argument("--maintenance-token")
     for name in ("context", "durable-home", "expected-marketplace-id", "expected-payload-root",
                  "expected-payload-version", "snapshot-id", "runtime-version"):
         parser.add_argument(f"--{name}", required=True)

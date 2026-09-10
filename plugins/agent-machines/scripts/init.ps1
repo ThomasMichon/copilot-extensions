@@ -34,6 +34,7 @@ param(
     [string]$ExpectedPayloadVersion,
     [string]$SnapshotId,
     [string]$RuntimeVersion,
+    [string]$MaintenanceToken,
     [switch]$Force
 )
 
@@ -48,7 +49,7 @@ if ($Action -in @('cell-repair', 'cell-uninstall')) {
         ExpectedCurrentVersion = 'expected-current-version'; ExpectCurrentAbsent = 'expect-current-absent'
         ExpectedLastKnownGoodVersion = 'expected-last-known-good-version'; ExpectLastKnownGoodAbsent = 'expect-last-known-good-absent'
         ExpectedPayloadRoot = 'expected-payload-root'; ExpectedPayloadVersion = 'expected-payload-version'
-        SnapshotId = 'snapshot-id'; RuntimeVersion = 'runtime-version'
+        SnapshotId = 'snapshot-id'; RuntimeVersion = 'runtime-version'; MaintenanceToken = 'maintenance-token'
     }
     foreach ($key in $PSBoundParameters.Keys) {
         if ($key -eq 'Action') { continue }

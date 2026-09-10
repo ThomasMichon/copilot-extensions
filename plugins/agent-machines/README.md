@@ -118,6 +118,7 @@ Both require every value below explicitly:
 | `--expected-namespace-generation`, `--expected-install-generation` | `-ExpectedNamespaceGeneration`, `-ExpectedInstallGeneration` |
 | `--expected-current-version` or `--expect-current-absent` | `-ExpectedCurrentVersion` or `-ExpectCurrentAbsent` |
 | `--expected-last-known-good-version` or `--expect-last-known-good-absent` | `-ExpectedLastKnownGoodVersion` or `-ExpectLastKnownGoodAbsent` |
+| `--maintenance-token` | `-MaintenanceToken` |
 
 Repair recreates only the derived schema-4 deploy manifest and exact intended
 current/LKG selection, from validated immutable completion and snapshot evidence.
@@ -143,6 +144,10 @@ migration are separate operations. Repeated repair reports
 Generation or selection drift reports `status: revalidation-required`; callers
 must inspect JSON status, not merely exit 0. Interrupted reservation release is
 the shared library's explicit `slot-release`, never automatic cleanup.
+When applicable user-wide or plugin-scoped maintenance is active, repair and
+uninstall also require the exact token returned by the shared
+`maintenance-enter` action; a missing or mismatched token is refused without
+mutating the cell.
 
 Verify:
 

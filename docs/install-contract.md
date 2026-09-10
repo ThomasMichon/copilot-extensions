@@ -793,6 +793,12 @@ or dead-owner sidecar reports `maintenance-stale` and is never auto-cleared.
 Read-only doctor/status remains available. Repair or maintenance mutation
 requires an explicit authorization flag on the invoked management command;
 environment variables and inherited context cannot authorize it.
+The canonical Python primitive now provides explicit `maintenance-enter`,
+`maintenance-status`, and `maintenance-release` actions. Entering maintenance
+returns a random token recorded only in the sidecar; a management command may
+proceed during applicable maintenance only when it presents that exact token,
+and release removes the marker only when the token still matches the active
+owner.
 
 Remote dispatchers query target maintenance before provisioning. If target
 state cannot be determined, they treat the target as quiesced and do not
