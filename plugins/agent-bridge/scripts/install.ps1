@@ -48,7 +48,12 @@ param(
     # automatically (invariant #1), so this opt-in is no longer required. The switch
     # is still ACCEPTED (so existing callers, e.g. the launch-path reconciler, don't
     # break) but has no effect; it will be removed in a later cleanup.
-    [switch]$ZeroDowntime
+    [switch]$ZeroDowntime,
+
+    # Preview mode for the 'uninstall' action: print what WOULD be removed (or
+    # preserved) without touching the filesystem, scheduled task, or registry.
+    # No other action honors this switch.
+    [switch]$DryRun
 )
 
 Set-StrictMode -Version 2.0
@@ -2026,44 +2031,61 @@ function Invoke-Provision {
 function Invoke-Uninstall {
     Write-Host ''
     Write-Host '=== agent-bridge uninstall ===' -ForegroundColor Cyan
+    if ($DryRun) { Write-Host '(dry run -- nothing will be changed)' -ForegroundColor Yellow }
     Write-Host ''
 
-    Invoke-Stop
+    if ($DryRun) {
+        $proc = Get-RunningProcess
+        if ($proc) { Write-Host "[dry-run] would stop agent-bridge (pid=$($proc.Id))" }
+        else { Write-Skip 'agent-bridge not running' }
+    } else {
+        Invoke-Stop
+    }
 
-    # Remove scheduled task
+    # Scheduled task
     $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     if ($existing) {
-        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
-        Write-Ok 'Scheduled task removed'
+        if ($DryRun) {
+            Write-Host "[dry-run] would remove scheduled task: $TaskName"
+        } else {
+            Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+            Write-Ok 'Scheduled task removed'
+        }
+    } else {
+        Write-Skip "Scheduled task not present: $TaskName"
     }
 
     if ($publishGlobalBinstubs) {
         foreach ($stub in @($BinstubPs1, $BinstubCmd)) {
             if (Test-Path $stub) {
-                Remove-Item -Force $stub
-                Write-Ok "Binstub removed: $stub"
+                if ($DryRun) { Write-Host "[dry-run] would remove binstub: $stub" }
+                else { Remove-Item -Force $stub; Write-Ok "Binstub removed: $stub" }
             }
         }
     } else {
         Write-Ok 'Scoped install left the legacy global binstub unchanged'
     }
 
-    Remove-SiblingBinstubs
+    if (-not $DryRun) { Remove-SiblingBinstubs }
 
     if (Test-Path $VenvDir) {
-        Remove-Item -Recurse -Force $VenvDir
-        Write-Ok 'Venv removed'
+        if ($DryRun) { Write-Host "[dry-run] would remove venv: $VenvDir" }
+        else { Remove-Item -Recurse -Force $VenvDir; Write-Ok 'Venv removed' }
+    } else {
+        Write-Skip "Venv not present: $VenvDir"
     }
 
     if ($Purge -and (Test-Path $InstallDir)) {
-        Write-Warn 'Purging config, DB, and auth'
-        Remove-Item -Recurse -Force $InstallDir
+        if ($DryRun) { Write-Host "[dry-run] would PURGE config/DB/auth at: $InstallDir" }
+        else { Write-Warn 'Purging config, DB, and auth'; Remove-Item -Recurse -Force $InstallDir }
     } else {
         Write-Skip "Preserved config/DB at $InstallDir (use -Purge to remove)"
     }
 
-    Write-Ok 'agent-bridge uninstalled'
+    if ($DryRun) { Write-Host 'agent-bridge uninstall dry run complete -- nothing was changed' -ForegroundColor Yellow }
+    else { Write-Ok 'agent-bridge uninstalled' }
 }
+
 
 function Get-PwshPath {
     $pwshPath = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\pwsh.exe'

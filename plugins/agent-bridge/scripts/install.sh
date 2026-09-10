@@ -261,6 +261,7 @@ ACTION="${1:-status}"
 shift || true
 
 PURGE=false
+DRY_RUN=false
 # Bypass the downgrade guard (#1790). Env var lets the marketplace/ZDD paths
 # opt in without threading a flag; the CLI flag is the interactive escape hatch.
 FORCE="${AGENT_BRIDGE_ALLOW_DOWNGRADE:-false}"
@@ -270,6 +271,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --purge) PURGE=true; shift ;;
         --force) FORCE=true; shift ;;
+        --dry-run) DRY_RUN=true; shift ;;
         --install-dir)
             [[ $# -ge 2 ]] || { echo "[FAIL] Missing value for --install-dir" >&2; exit 1; }
             INSTALL_DIR="$2"
@@ -1244,47 +1246,81 @@ do_install() {
 do_uninstall() {
     echo ""
     echo "=== agent-bridge uninstall ==="
+    $DRY_RUN && echo "(dry run -- nothing will be changed)"
     echo ""
 
-    do_stop
+    if $DRY_RUN; then
+        if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE" 2>/dev/null)" 2>/dev/null; then
+            echo "[dry-run] would stop agent-bridge (pid=$(cat "$PID_FILE"))"
+        else
+            _skip "agent-bridge not running"
+        fi
+    else
+        do_stop
+    fi
 
-    # Remove systemd unit
+    # systemd unit
     if command -v systemctl &>/dev/null; then
-        systemctl --user disable "$SYSTEMD_UNIT" 2>/dev/null || true
-        rm -f "$HOME/.config/systemd/user/$SYSTEMD_UNIT"
-        systemctl --user daemon-reload 2>/dev/null || true
-        _ok "systemd unit removed"
+        if $DRY_RUN; then
+            echo "[dry-run] would disable + remove systemd unit: $SYSTEMD_UNIT"
+        else
+            systemctl --user disable "$SYSTEMD_UNIT" 2>/dev/null || true
+            rm -f "$HOME/.config/systemd/user/$SYSTEMD_UNIT"
+            systemctl --user daemon-reload 2>/dev/null || true
+            _ok "systemd unit removed"
+        fi
     fi
 
     if $PUBLISH_GLOBAL_BINSTUBS; then
-        rm -f "$BINSTUB"
-        _ok "Binstub removed"
+        if $DRY_RUN; then
+            echo "[dry-run] would remove binstub: $BINSTUB"
+        else
+            rm -f "$BINSTUB"
+            _ok "Binstub removed"
+        fi
     else
         _ok "Scoped install left the legacy global binstub unchanged"
     fi
 
-    _remove_sibling_binstubs
+    $DRY_RUN || _remove_sibling_binstubs
 
     # Remove the runtime venv. In the versioned layout this means the `venv`
     # symlink AND the whole versions/ tree; otherwise the single real venv dir.
     if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
-        [[ -L "$LINK_DIR" ]] && rm -f "$LINK_DIR"
-        [[ -d "$LINK_DIR" && ! -L "$LINK_DIR" ]] && rm -rf "$LINK_DIR"
-        [[ -d "$INSTALL_DIR/versions" ]] && rm -rf "$INSTALL_DIR/versions"
-        _ok "Venv removed"
+        if $DRY_RUN; then
+            [[ -L "$LINK_DIR" || -d "$LINK_DIR" ]] && echo "[dry-run] would remove: $LINK_DIR"
+            [[ -d "$INSTALL_DIR/versions" ]] && echo "[dry-run] would remove: $INSTALL_DIR/versions"
+        else
+            [[ -L "$LINK_DIR" ]] && rm -f "$LINK_DIR"
+            [[ -d "$LINK_DIR" && ! -L "$LINK_DIR" ]] && rm -rf "$LINK_DIR"
+            [[ -d "$INSTALL_DIR/versions" ]] && rm -rf "$INSTALL_DIR/versions"
+            _ok "Venv removed"
+        fi
     elif [[ -d "$VENV_DIR" ]]; then
-        rm -rf "$VENV_DIR"
-        _ok "Venv removed"
+        if $DRY_RUN; then
+            echo "[dry-run] would remove venv: $VENV_DIR"
+        else
+            rm -rf "$VENV_DIR"
+            _ok "Venv removed"
+        fi
     fi
 
     if $PURGE; then
-        _warn "Purging config, DB, and auth"
-        rm -rf "$INSTALL_DIR"
+        if $DRY_RUN; then
+            echo "[dry-run] would PURGE config/DB/auth at: $INSTALL_DIR"
+        else
+            _warn "Purging config, DB, and auth"
+            rm -rf "$INSTALL_DIR"
+        fi
     else
         _skip "Preserved config/DB at $INSTALL_DIR (use --purge to remove)"
     fi
 
-    _ok "agent-bridge uninstalled"
+    if $DRY_RUN; then
+        echo "agent-bridge uninstall dry run complete -- nothing was changed"
+    else
+        _ok "agent-bridge uninstalled"
+    fi
 }
 
 do_start() {
