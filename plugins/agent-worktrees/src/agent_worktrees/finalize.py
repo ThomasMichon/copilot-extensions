@@ -69,10 +69,13 @@ def _has_live_session(record) -> bool:
     """
     if record is None:
         return False
-    if getattr(record, "session_backend_opaque", False):
+    if (
+        getattr(record, "session_backend_opaque", False)
+        or getattr(record, "execution_leg_opaque", False)
+    ):
         return True
-    backend = getattr(record, "session_backend", None)
-    if backend is not None and backend.state in {"active", "unknown"}:
+    execution_leg = tracking.derive_execution_leg(record)
+    if execution_leg is not None and execution_leg.state in {"active", "unknown"}:
         return True
     if sessions.worktree_has_live_session(record):
         return True

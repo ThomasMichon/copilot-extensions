@@ -3144,10 +3144,77 @@ def test_submenu_nomux_offered_for_resume_and_open():
     m = SubMenuScreen(rec, ["Resume", "Messages", "Stop"])
     assert m._has_nomux is True
     assert m._nomux_index == 3
+    assert m._has_ahp is True
+    assert m._ahp_index == 4
+    assert m.no_mux is False
+    assert m.ahp is False
     # No launch verb -> not offered.
     assert SubMenuScreen(rec, ["Messages", "Sync"])._has_nomux is False
     # Bare resume WITHOUT Open/Resume -> not offered (it already makes a mux).
     assert SubMenuScreen(rec, ["Bare resume", "Messages"])._has_nomux is False
+
+
+def test_remote_submenu_does_not_offer_ahp():
+    from worktree_manager.production_picker.picker_tui.engine import SubMenuScreen
+
+    rec = {
+        "raw": {"id": "wtX"},
+        "id4": "wtX",
+        "title": "t",
+        "is_local": False,
+    }
+    menu = SubMenuScreen(rec, ["Resume", "Messages"])
+
+    assert menu._has_nomux is True
+    assert menu._has_ahp is False
+    assert menu._ahp_index is None
+
+
+def test_ahp_owned_worktree_offers_explicit_disposal_action():
+    src = _verb_fixture_source()
+    screen = PickerScreen(src, live=False)
+    screen.setup()
+    rec = screen.list_records()[0]
+    rec["execution_leg"] = {
+        "provider": "ahp",
+        "state": "active",
+        "binding_revision": 2,
+        "blob": {"session_id": "session-1"},
+    }
+
+    actions, _extensions = screen._wt_submenu_verbs(rec)
+
+    assert "Dispose hosted session" in actions
+
+
+def test_open_submenu_ahp_toggle_is_arrow_reachable():
+    src = _verb_fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            recs = scr.list_records()
+            by_id4 = {w["id4"]: i for i, w in enumerate(recs)}
+            scr.sel = ("L", by_id4["stop"])
+            scr._open_submenu()
+            await pilot.pause()
+            menu = _sub_menu(scr)
+            assert menu.ahp is False
+            for _ in range(menu._ahp_index):
+                await pilot.press("down")
+            await pilot.press("space")
+            assert menu.ahp is True
+            for _ in range(menu._ahp_index):
+                await pilot.press("up")
+            await pilot.press("enter")
+            await pilot.pause()
+        assert app.result["options"]["ahp"] is True
+        assert "no_mux" not in app.result["options"]
+
+    asyncio.run(run())
 
 
 def test_open_submenu_no_mux_toggle_on_resume():
@@ -3388,7 +3455,7 @@ def test_new_worktree_decision_exits():
         assert app.result["is_local"] is True
         assert app.result["options"] == {
             "anchor": False, "bare": False,
-            "no_mux": False, "local_model": False,
+            "no_mux": False, "ahp": False, "local_model": False,
         }
 
     asyncio.run(run())
@@ -3427,6 +3494,53 @@ def test_new_worktree_no_mux_option():
             await pilot.pause()
         assert app.result["action"] == "new"
         assert app.result["options"]["no_mux"] is True
+
+    asyncio.run(run())
+
+
+def test_new_worktree_ahp_option_defaults_off_and_toggles():
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.htab = 0
+            scr.btn_idx = 0
+            scr.sel = ("BTN", 0)
+            scr._activate()
+            await pilot.pause()
+            dlg = _scope_dlg(scr)
+            labels = [o["label"] for o in dlg._dlg["opts"]]
+            ahp = labels.index("AHP")
+            assert dlg._dlg["opts"][ahp]["on"] is False
+            await pilot.press("tab")
+            for _ in range(ahp):
+                await pilot.press("down")
+            await pilot.press("space")
+            await pilot.press("tab")
+            await pilot.press("enter")
+            await pilot.pause()
+        assert app.result["options"]["ahp"] is True
+        assert app.result["options"]["no_mux"] is False
+
+    asyncio.run(run())
+
+
+def test_remote_new_worktree_options_hide_ahp():
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.create_target = lambda: ("remote-host", "WSL")
+            scr._open_optmenu()
+            await pilot.pause()
+            dlg = _scope_dlg(scr)
+            assert dlg is not None
+            labels = [o["label"] for o in dlg._dlg["opts"]]
+            assert "AHP" not in labels
 
     asyncio.run(run())
 

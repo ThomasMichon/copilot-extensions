@@ -134,15 +134,17 @@ repos:
 | `new_picker` | bool | `true` | Use the Textual picker. `picker disable` writes `false` to opt the machine out to the legacy picker. |
 | `copilot_profiles` | list | `[]` | Selectable Copilot backend profiles (Tab-cycle in the picker). |
 | `profile_assignment` | map | absent/off | Optional balanced assignment policy over existing `copilot_profiles`. Only a user-owned global, knowledge-overlay, or machine-local/per-project block can set `armed: true`. |
-| `session_backend` | map | `{kind: direct}` | Machine-local interactive session host. `direct` preserves one ordinary Copilot process per launched terminal; `ahp` binds worktrees to a same-machine `copilotd`. Not accepted from in-repo config or a knowledge overlay. |
+| `session_backend` | map | `{kind: direct}` | Legacy machine-local AHP configuration retained temporarily for the old `session-backend` launcher path. New Picker launches configure AHP in Worktree Manager's user-owned TOML. Not accepted from in-repo config or a knowledge overlay. |
 | `repos` | map | `{}` | Per-repo configuration, keyed by repo name. |
 
-### Same-machine AHP session backend — `session_backend`
+### Legacy same-machine AHP session backend — `session_backend`
 
-This experimental opt-in hosts durable worktree sessions in an externally
-managed same-machine `copilotd`. Agent-worktrees still creates, tracks, lands,
-and finalizes the exact worktree. AHP owns the Copilot conversation and lets
-terminal clients detach and later reattach to the same session.
+This block remains readable and operational for the legacy launcher during the
+Phase 3b cutover. New Worktree Manager launches use
+`~/.worktree-manager/config.toml` `[ahp]` and persist provider-neutral
+`execution_leg` records through the public
+`execution-leg get/reserve/set/release/clear` verbs.
+Do not add this block to new configurations.
 
 ```yaml
 session_backend:
@@ -185,6 +187,12 @@ terminal and permits normal finalization. Switching configuration back to
 a duplicate local Copilot process. The initial backend is wired only through the
 normal Worktree Manager launcher; `embody` and `handoff-cutover` fail closed
 instead of starting an unbound direct client.
+
+The provider-neutral path reserves each create/verify/dispose operation under
+the same finalize fence before contacting the host. Concurrent lifecycle
+operations fail closed while the reservation is `unknown`; publication requires
+the reservation token. A newly created session is disposed before a failed
+publication is rolled back, so stale or dead bindings are never advertised.
 
 ### Config drop-ins — `~/.{project}/config.d/`
 

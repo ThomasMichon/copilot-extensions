@@ -93,18 +93,46 @@ def _render(repo: str | None, ref: str | None) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _without_source_table(content: str) -> str:
+    lines = content.splitlines()
+    kept: list[str] = []
+    skipping = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped == "[source]":
+            skipping = True
+            continue
+        if skipping and stripped.startswith("[") and stripped.endswith("]"):
+            skipping = False
+        if not skipping:
+            kept.append(line)
+    return "\n".join(kept).strip()
+
+
 def _write(repo: str | None, ref: str | None, root: Path | None = None) -> None:
-    """Persist (or, when nothing is set, remove) the ``[source]`` config atomically."""
+    """Persist the ``[source]`` table without clobbering other Manager config."""
     p = config_path(root)
+    try:
+        remainder = _without_source_table(p.read_text(encoding="utf-8"))
+    except OSError:
+        remainder = ""
     if not (repo or ref):
-        try:
-            p.unlink()
-        except OSError:
-            pass
+        if not remainder:
+            try:
+                p.unlink()
+            except OSError:
+                pass
+            return
+        content = remainder + "\n"
+    else:
+        content = _render(repo, ref)
+        if remainder:
+            content += "\n" + remainder + "\n"
+    if not content:
         return
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_name(p.name + ".tmp")
-    tmp.write_text(_render(repo, ref), encoding="utf-8")
+    tmp.write_text(content, encoding="utf-8")
     tmp.replace(p)  # atomic publish
 
 

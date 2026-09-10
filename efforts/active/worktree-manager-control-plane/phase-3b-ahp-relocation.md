@@ -11,8 +11,7 @@
   liveness reducers (`sessions.py`, `procs.py`) and to three platform-specific
   launcher scripts, so it is deliberately sequenced after this smaller,
   more self-contained slice proves the pattern.
-- **Status:** Planned — not started. This document is the reviewed plan; no
-  code has moved yet.
+- **Status:** In progress — Steps 1-4 implemented; legacy deletion remains.
 
 ## Why this slice first
 
@@ -163,30 +162,30 @@ records exist (tracked as a follow-up, not blocking this slice).
 
 ## Ordered implementation steps (each independently landable)
 
-1. **Add the generic `execution_leg` read path to `tracking.py`**, additive
+1. [x] **Add the generic `execution_leg` read path to `tracking.py`**, additive
    only: parse `execution_leg:` when present, else fall back to translating
    legacy `session_backend:` in memory. Both old and new callers keep working
    unchanged (no behavior change yet). Land + version-bump agent-worktrees.
-2. **Add `execution-leg set/get/clear` CLI verbs to `agent-worktrees`**,
+2. [x] **Add `execution-leg set/get/clear` CLI verbs to `agent-worktrees`**,
    alongside the existing `session-backend` verb (not yet removed). New verbs
    write only the new `execution_leg:` shape. Land + version-bump.
-3. **Move `ahp_backend.py` + config + `websocket-client` dependency into
+3. [x] **Move `ahp_backend.py` + config + `websocket-client` dependency into
    `worktree-manager`**, updated to call the new `execution-leg set/get/clear`
    verbs via the pinned engine `--json` **subprocess** boundary (not the
    `_engine_runtime.py` in-process import) instead of the direct in-process
    `tracking`/`fin` calls `cmd_session_backend` makes today. Land + version-bump
    worktree-manager. At this point both the old and new paths work; nothing in
    `agent-worktrees` is deleted yet.
-4. **Cut Worktree Manager's launch/resume/create actions over** to call the
+4. [x] **Cut Worktree Manager's launch/resume/create actions over** to call the
    relocated AHP provider instead of shelling into `agent-worktrees
    session-backend`. Land + version-bump worktree-manager.
-5. **Remove `cmd_session_backend`, `ahp_backend.py`, `SessionBackendConfig`,
+5. [ ] **Remove `cmd_session_backend`, `ahp_backend.py`, `SessionBackendConfig`,
    the `config_dropins.py` validation block, and the `websocket-client`
    dependency from `agent-worktrees`.** Keep only the legacy-record read
    shim from step 1 until the back-compat retirement follow-up. Land +
    version-bump agent-worktrees (this is the actual deletion commit — kept
    last and separate so it's trivially revertable if steps 3-4 surface a gap).
-6. **Update `test_ahp_launcher_contract.py` and any other `session_backend`-
+6. [ ] **Update `test_ahp_launcher_contract.py` and any other `session_backend`-
    asserting test** to the new generic shape/verb names; add worktree-manager
    tests for the relocated provider (reusing the existing AHP contract tests'
    assertions where they test protocol behavior, not location).

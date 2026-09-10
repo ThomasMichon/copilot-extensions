@@ -21,6 +21,8 @@ dependencies = [
     # Read the harness's own YAML registries/config (repos.yaml, projects.yaml,
     # per-project config.yaml) for the Manager state views.
     "pyyaml>=6",
+    # Manager-owned same-machine Agent Host Protocol provider.
+    "websocket-client>=1.8.0",
 ]
 
 [project.scripts]

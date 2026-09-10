@@ -440,6 +440,9 @@ ACTION_DESC = {
     "Cleanup": "Remove this worktree (safe once merged/idle).",
     "Finalize": "Wrap up this conversation-only / unused worktree: verify "
                 "nothing is unpushed (there is nothing) and remove it.",
+    "Dispose hosted session": "Explicitly dispose this worktree's AHP-hosted "
+                              "Copilot session and mark its execution leg "
+                              "terminal so the worktree can be finalized.",
     "Stop": "Stop this worktree's Mux/Copilot wrapper now (graceful "
             "double-Ctrl-C, then a hard mux kill) so a following Open "
             "starts a fresh TMux/PSMux + Copilot.",
@@ -3991,6 +3994,7 @@ class PickerScreen(Widget):
                 "anchor": "Anchor repo" in on,
                 "bare": "Bare" in on,
                 "no_mux": "No Mux" in on,
+                "ahp": "AHP" in on,
                 "local_model": "Local model" in on,
             },
         })
@@ -4277,7 +4281,7 @@ class PickerScreen(Widget):
         self.app.result = decision
         self.app.exit()
 
-    def _resume_decision(self, rec, no_mux=False, bare_resume=False):
+    def _resume_decision(self, rec, no_mux=False, ahp=False, bare_resume=False):
         """Build the resume decision for a worktree row/submenu selection.
 
         ``no_mux`` (the Open sub-menu toggle, #1343) launches directly without
@@ -4300,6 +4304,8 @@ class PickerScreen(Widget):
         opts = {}
         if no_mux:
             opts["no_mux"] = True
+        if ahp:
+            opts["ahp"] = True
         if bare_resume:
             opts["bare_resume"] = True
         if opts:
@@ -4392,6 +4398,12 @@ class PickerScreen(Widget):
              "hint": "new worktree, no Copilot bootstrap"},
             {"label": "No Mux", "on": False, "hint": "skip PSMux/TMux wrapper"},
         ]
+        if (tm, te) == self.src.LOCAL:
+            opts.append({
+                "label": "AHP",
+                "on": False,
+                "hint": "host Copilot through the configured same-machine AHP endpoint",
+            })
         if tm in self._local_model_hosts():
             opts.append({"label": "Local model", "on": False,
                          "hint": f"run the agent on {tm}'s GPU"})
@@ -4648,6 +4660,17 @@ class PickerScreen(Widget):
         # ``_session_action_verbs`` (unit-tested #4058); the bridge/system nav +
         # cross-plugin verbs below need engine state, so they are appended here.
         acts = self._session_action_verbs(rec)
+        execution_leg = rec.get("execution_leg")
+        if not isinstance(execution_leg, dict):
+            execution_leg = (rec.get("raw") or {}).get("execution_leg")
+        if (
+            isinstance(execution_leg, dict)
+            and execution_leg.get("provider") == "ahp"
+            and execution_leg.get("state", "unknown") in {"active", "unknown"}
+            and rec.get("source_kind", "machine-ssh") == "machine-ssh"
+            and (rec.get("machine"), rec.get("env")) == self.src.LOCAL
+        ):
+            acts.append("Dispose hosted session")
         if rec.get("source_kind", "machine-ssh") != "machine-ssh":
             return acts, {}
         if self._reciprocal_target_row(rec) is not None:
@@ -4720,7 +4743,7 @@ class PickerScreen(Widget):
         acts, ext = self._wt_submenu_verbs(rec)
         self._wt_submenu_ext = ext
         # Migrated to a native Textual ``ModalScreen`` (#88 F4): the modal returns
-        # the chosen ``(action_label, no_mux)`` via ``dismiss`` (or ``None`` on
+        # the chosen ``(action_label, no_mux, ahp)`` via ``dismiss`` (or ``None`` on
         # cancel); ``_wt_submenu_dispatch`` runs the selected verb.
         self.app.push_screen(
             SubMenuScreen(rec, acts, loading=loading, engine=self),
@@ -4743,19 +4766,19 @@ class PickerScreen(Widget):
         live in-place verb refine stays consistent."""
         if result is None:
             return
-        cur, no_mux = result
+        cur, no_mux, ahp = result
         ext = getattr(self, "_wt_submenu_ext", {}) or {}
         if cur in ext:
             # A cross-plugin contributed action (#B): run it and rescan.
             self._run_wt_action(ext[cur], rec)
             return
         if cur == "Open":
-            self._decide(self._resume_decision(rec, no_mux=no_mux))
+            self._decide(self._resume_decision(rec, no_mux=no_mux, ahp=ahp))
         elif cur == "Resume":
             # #4043: No-Mux now rides Resume too (a stopped worktree can be
             # resumed without the mux wrapper for troubleshooting), not just
             # Open. no_mux is inert unless the toggle was flipped.
-            self._decide(self._resume_decision(rec, no_mux=no_mux))
+            self._decide(self._resume_decision(rec, no_mux=no_mux, ahp=ahp))
         elif cur == "Bare resume":
             # Two-step restore: mux + Copilot in HOME, no --resume (#outage).
             self._decide(self._resume_decision(rec, bare_resume=True))
@@ -4786,6 +4809,15 @@ class PickerScreen(Widget):
         elif cur == "Finalize":
             # Wrap up a conversation-only / unused worktree (#2258 follow-up).
             self._start_finalize([rec])
+        elif cur == "Dispose hosted session":
+            self._decide({
+                "action": "dispose-hosted-session",
+                "worktree_id": (rec.get("raw") or {}).get("id") or rec.get("id4"),
+                "title": rec.get("title"),
+                "is_local": rec.get("is_local", True),
+                "machine": rec.get("machine"),
+                "env": rec.get("env"),
+            })
         elif cur == "Stop":
             # Stop the worktree's Mux/Copilot wrapper on demand (#1343),
             # freeing it to be re-Opened/Resumed with a fresh Mux + Copilot.
@@ -5917,7 +5949,8 @@ class SubMenuScreen(ModalScreen[tuple]):
     ``ModalScreen``. It renders the focused worktree's header (title + meta) and
     its available verbs (Open/Resume, Messages, Sync, Cleanup, Finalize, Stop,
     Jump to host/caller, plus any contributed actions), and returns the chosen
-    ``(action_label, no_mux)`` via ``dismiss(tuple)`` -- or ``dismiss(None)`` on
+    ``(action_label, no_mux, ahp)`` via ``dismiss(tuple)`` -- or
+    ``dismiss(None)`` on
     cancel; the caller dispatches the verb.
 
     **Native-focus internals (#88 NF1):** the verbs are a native Textual
@@ -5957,17 +5990,33 @@ class SubMenuScreen(ModalScreen[tuple]):
     BINDINGS = [
         Binding("escape", "cancel", show=False),
         Binding("q", "cancel", show=False),
-        Binding("space", "toggle_nomux", show=False),
+        Binding("space", "toggle_modifier", show=False),
     ]
 
     _NOMUX_DESC = ("Launch (Open/Resume) WITHOUT the PSMux/TMux wrapper (for "
                    "troubleshooting). Enter/Space toggles this row.")
+    _AHP_DESC = ("Launch (Open/Resume) through the configured same-machine "
+                 "Agent Host Protocol endpoint. Enter/Space toggles this row.")
 
     def __init__(self, rec, actions, *, loading=False, engine=None) -> None:
         super().__init__()
         self._rec = rec
         self._actions = actions
         self._no_mux = False
+        self._ahp = False
+        explicit_local = rec.get("is_local")
+        self._is_local = (
+            bool(explicit_local)
+            if explicit_local is not None
+            else (
+                True
+                if engine is None
+                else (
+                    rec.get("source_kind", "machine-ssh") == "machine-ssh"
+                    and (rec.get("machine"), rec.get("env")) == engine.src.LOCAL
+                )
+            )
+        )
         # Always-async: the menu opens IMMEDIATELY from cached liveness; when an
         # authoritative re-verify is in flight, ``loading`` shows the shared
         # animated spinner in the footer and the caller calls ``refresh_actions``
@@ -5984,12 +6033,18 @@ class SubMenuScreen(ModalScreen[tuple]):
         # mux-in-HOME, which no-mux would contradict).
         self._has_nomux = ("Open" in actions) or ("Resume" in actions)
         self._nomux_index = len(actions) if self._has_nomux else None
+        self._has_ahp = self._has_nomux and self._is_local
+        self._ahp_index = len(actions) + 1 if self._has_ahp else None
 
     @property
     def no_mux(self) -> bool:
         """The live No-mux toggle -- plain screen state, flipped from the
         arrow-reachable ``No Mux`` row."""
         return self._no_mux
+
+    @property
+    def ahp(self) -> bool:
+        return self._ahp
 
     def _nomux_prompt(self) -> Text:
         glyph, gstyle = ("☑", "green") if self._no_mux else ("☐", "#5f5f5f")
@@ -5998,10 +6053,19 @@ class SubMenuScreen(ModalScreen[tuple]):
         t.append("No Mux")
         return t
 
+    def _ahp_prompt(self) -> Text:
+        glyph, gstyle = ("☑", "green") if self._ahp else ("☐", "#5f5f5f")
+        t = Text()
+        t.append(glyph + " ", style=gstyle)
+        t.append("AHP")
+        return t
+
     def _prompts(self):
         prompts = [Text(a) for a in self._actions]
         if self._has_nomux:
             prompts.append(self._nomux_prompt())
+        if self._has_ahp:
+            prompts.append(self._ahp_prompt())
         return prompts
 
     def compose(self) -> ComposeResult:
@@ -6095,6 +6159,8 @@ class SubMenuScreen(ModalScreen[tuple]):
         self._actions = list(new_actions)
         self._has_nomux = ("Open" in self._actions) or ("Resume" in self._actions)
         self._nomux_index = len(self._actions) if self._has_nomux else None
+        self._has_ahp = self._has_nomux and self._is_local
+        self._ahp_index = len(self._actions) + 1 if self._has_ahp else None
         try:
             ol = self.query_one("#sub-list", OptionList)
         except Exception:
@@ -6111,6 +6177,8 @@ class SubMenuScreen(ModalScreen[tuple]):
     def _set_desc(self, i) -> None:
         if i == self._nomux_index:
             self.query_one("#sub-desc", Static).update(self._NOMUX_DESC)
+        elif i == self._ahp_index:
+            self.query_one("#sub-desc", Static).update(self._AHP_DESC)
         elif self._actions and 0 <= i < len(self._actions):
             self.query_one("#sub-desc", Static).update(
                 ACTION_DESC.get(self._actions[i], ""))
@@ -6120,6 +6188,12 @@ class SubMenuScreen(ModalScreen[tuple]):
         ol = self.query_one("#sub-list", OptionList)
         ol.replace_option_prompt_at_index(self._nomux_index, self._nomux_prompt())
         self._set_desc(self._nomux_index)
+
+    def _toggle_ahp(self) -> None:
+        self._ahp = not self._ahp
+        ol = self.query_one("#sub-list", OptionList)
+        ol.replace_option_prompt_at_index(self._ahp_index, self._ahp_prompt())
+        self._set_desc(self._ahp_index)
 
     def on_option_list_option_highlighted(
             self, event: "OptionList.OptionHighlighted") -> None:
@@ -6132,16 +6206,20 @@ class SubMenuScreen(ModalScreen[tuple]):
         if event.option_index == self._nomux_index:
             self._toggle_nomux()
             return
-        self.dismiss((self._actions[event.option_index], self._no_mux))
-
-    def action_toggle_nomux(self) -> None:
-        # Space also toggles, but only while the No-mux row is highlighted (so a
-        # stray Space on a verb is an inert no-op, never a launch).
-        if self._nomux_index is None:
+        if event.option_index == self._ahp_index:
+            self._toggle_ahp()
             return
+        self.dismiss((self._actions[event.option_index], self._no_mux, self._ahp))
+
+    def action_toggle_modifier(self) -> None:
         ol = self.query_one("#sub-list", OptionList)
         if ol.highlighted == self._nomux_index:
             self._toggle_nomux()
+        elif ol.highlighted == self._ahp_index:
+            self._toggle_ahp()
+
+    def action_toggle_nomux(self) -> None:
+        self.action_toggle_modifier()
 
     def action_cancel(self) -> None:
         self.dismiss(None)
