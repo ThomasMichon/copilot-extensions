@@ -436,6 +436,38 @@ scenarios.
 
 ## Journal
 
+### 2026-09-10 - Phase 9: second slice landed (provider/PR-target machine)
+
+- Landed the second implementation slice: the provider/PR-target state
+  machine declared as checkable data tables
+  (`plugins/agent-dispatch/src/agent_dispatch/provider_state_machine.py`).
+  Approval status and mergeability are declared as two independent
+  dimensions rather than one flattened enum -- they move on separate
+  schedules and combining them would make a reachability check assert
+  nothing but "the cross product was declared." Hold (draft/WIP/blocking
+  threads) is a flag set plus a pure `merge_blocked_by_hold` predicate, not
+  a third state dimension, since holds co-occur and clear independently of
+  both machines. Both dimensions reuse the task machine's `RecoveryMode`
+  taxonomy rather than redeclaring it.
+- Declared the per-provider capability table (GitHub, Azure DevOps, Gitea)
+  covering automated-identity approval eligibility, per-event-type
+  notification fidelity, and conflict policy -- every provider defaults to
+  Phase 9's resolved **hand-back** conflict policy; branch-mutating
+  (rebase + force-push) is only reachable via an explicit
+  `(provider, repo)` entry in `REPOSITORY_OVERRIDES`. `capability_for`
+  resolves provider defaults with repo overrides applied, raising on an
+  undeclared provider rather than silently defaulting.
+- Added structural tests
+  (`plugins/agent-dispatch/tests/test_provider_state_machine.py`, 31
+  passing) proving both dimensions fully reachable and exit-checked, every
+  provider declaring fidelity for every event type, every provider
+  defaulting to hand-back, and the override/no-override capability
+  resolution paths. Deterministic, in-process fixtures -- no live
+  provider, no adapter code yet, per this phase's declared slice order.
+- Next slice: the bridge/session state machine, coordinating with the
+  companion agent-bridge vision's verb-vocabulary work rather than
+  re-declaring bridge verbs independently.
+
 ### 2026-09-10 - Phase 9: opened the implementation coordination issue; first slice landed
 
 - Opened
