@@ -72,7 +72,22 @@ the work.
   thresholds.
 - The user explicitly asks for a handoff or continuation prompt.
 - You reach a natural stopping point and want to preserve a baton before the
-  conversation gets tighter.
+  conversation gets tighter. This is a reason to *hand off*, never a reason to
+  simply end the turn with outstanding work unhandled -- see **Ending a turn
+  with outstanding work** below.
+
+## Ending a turn with outstanding work
+
+If the assigned effort or task still has outstanding work, the final action
+before ending a turn is always to save and trigger a handoff -- never to stop
+and leave the remaining work implicit. "This is a suitable stopping point,"
+"this session has run long," and "it's getting late" are not, by themselves,
+reasons to end a turn short of that. Legitimate reasons to stop short of
+driving further are a genuine crossroads (a design decision only the operator
+can make), an error that needs diagnosis before continuing, a design
+contradiction, or a step that requires confirmation before a potentially
+destructive action. Even then, the correct close is still to save and trigger
+a handoff naming the blocker -- not a silent stop.
 
 ## Two triggers, two gates
 
@@ -263,3 +278,8 @@ Compose the appropriate shape and pass it to `save_handoff_prompt` as
 - Separate the handoff leg's completion gate from the broader objective's
   completion gate.
 - Never claim auto-pickup. A handoff is not loaded automatically on restart.
+- Never end a turn with outstanding work and no handoff. "Suitable stopping
+  point," "session ran long," and "getting late" do not excuse it; only a
+  genuine crossroads, an error, a design contradiction, or a confirmation-gated
+  destructive step does -- and even those close with a handoff naming the
+  blocker, not a silent stop.
