@@ -100,13 +100,24 @@ reconcile. Cell snapshot copy is staged in an owned sibling and atomically
 published before provenance stamping. Retry cleans only a marker-proven
 unfinished publication and never removes a pre-existing snapshot.
 
-### Explicit cell repair and uninstall
+### Explicit legacy attribution, cell repair, and uninstall
 
-`scripts/init.sh cell-repair` and `cell-uninstall` (PowerShell:
-`scripts\init.ps1 -Action cell-repair` or `cell-uninstall`) use the same
-stdlib-only management engine and an existing Python 3.10+ interpreter.
-They never self-provision a toolchain or trust an inherited context/action.
-Both require every value below explicitly:
+`scripts/init.sh cell-attribute-legacy`, `cell-repair`, and `cell-uninstall`
+(PowerShell: `scripts\init.ps1 -Action cell-attribute-legacy`,
+`cell-repair`, or `cell-uninstall`) use the same stdlib-only management engine
+and an existing Python 3.10+ interpreter. They never self-provision a
+toolchain or trust an inherited context/action.
+
+Legacy attribution requires these explicit inputs:
+
+| Bash argument | PowerShell parameter |
+|---|---|
+| `--context` | `-Context` |
+| `--durable-home` | `-DurableHome` |
+| `--expected-marketplace-id` | `-ExpectedMarketplaceId` |
+| `--maintenance-token` | `-MaintenanceToken` |
+
+Repair and uninstall require every value below explicitly:
 
 | Bash argument | PowerShell parameter |
 |---|---|
@@ -127,6 +138,16 @@ historical runtime. Missing completion refuses repair. Agent Machines owns no
 additional cell-local launch metadata: commands remain in the payload, so repair
 does not invent launchers. It never rebuilds payloads, snapshots, ownership,
 completion, state, caches, services, tasks, endpoints, or external resources.
+
+Legacy attribution is explicit and idempotent. Under the legacy provisioning
+lock, the marketplace genesis lock, the cell install lock, and any applicable
+maintenance token, it inventories the declared legacy filesystem footprint,
+attributes only clearly owned entries to the named destination cell, writes the
+legacy ownership tombstone with an explicit item list, and publishes a
+generation-pinned namespaced activation with `legacy.disposition:
+retained-inert`. If the legacy root is missing, linked/reparsed, already owned
+by another cell, or otherwise ambiguous/orphaned, the command preserves that
+state unchanged and reports it for deliberate resolution.
 
 Uninstall requires an absent or explicitly deactivated activation and no live
 owned runtime processes. It preflights the entire owned inventory, CAS-clears

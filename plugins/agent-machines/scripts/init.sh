@@ -364,7 +364,7 @@ while [[ $# -gt 0 ]]; do
         --expected-current-version) EXPECTED_CURRENT_VERSION="${2:-}"; shift 2 ;;
         --expect-current-absent) EXPECT_CURRENT_ABSENT=1; shift ;;
         --maintenance-token) MAINTENANCE_TOKEN="${2:-}"; shift 2 ;;
-        stamp|provision|init|cell-provision|cell-repair|cell-uninstall|slot-provision|slot-validate|slot-complete|slot-completion-validate|slot-cutover) ACTION="$1"; shift ;;
+        stamp|provision|init|cell-provision|cell-repair|cell-uninstall|cell-attribute-legacy|slot-provision|slot-validate|slot-complete|slot-completion-validate|slot-cutover) ACTION="$1"; shift ;;
         *) shift ;;
     esac
 done
@@ -373,7 +373,7 @@ export AGENT_MACHINES_ACTION="$ACTION"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-if [[ "$ACTION" == cell-repair || "$ACTION" == cell-uninstall ]]; then
+if [[ "$ACTION" == cell-repair || "$ACTION" == cell-uninstall || "$ACTION" == cell-attribute-legacy ]]; then
     [[ "${ORIGINAL_ARGS[0]:-}" == "$ACTION" ]] || {
         _fail 'Cell lifecycle actions must be explicit, not inherited'
         exit 2
