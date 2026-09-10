@@ -27,6 +27,7 @@ import logging
 import os
 import shlex
 import shutil
+import stat
 import sys
 import time
 from collections.abc import Awaitable, Callable
@@ -189,6 +190,41 @@ def _normalize_remote_cmd_file(
         pass
 
 
+_STDIN_FILE_MAX_BYTES = 16 * 1024 * 1024
+
+
+def _normalize_stdin_file(
+    parser: argparse.ArgumentParser, args: argparse.Namespace,
+) -> None:
+    """Snapshot diagnostic stdin before acquiring any remote resources."""
+    args.stdin_bytes = None
+    path = getattr(args, "stdin_file", None)
+    if path is None:
+        return
+    if (
+        getattr(args, "stdio", False)
+        or getattr(args, "interactive_command", None) is not None
+        or not (getattr(args, "remote_cmd", None) or "").strip()
+    ):
+        parser.error("--stdin-file requires a non-stdio --remote-cmd or --remote-cmd-file")
+    try:
+        source = Path(path)
+        if not path or not stat.S_ISREG(source.stat().st_mode):
+            raise ValueError("expected a regular file")
+        with source.open("rb") as stream:
+            metadata = os.fstat(stream.fileno())
+            if not stat.S_ISREG(metadata.st_mode):
+                raise ValueError("expected a regular file")
+            if metadata.st_size > _STDIN_FILE_MAX_BYTES:
+                raise ValueError("file exceeds the 16 MiB limit")
+            payload = stream.read(_STDIN_FILE_MAX_BYTES + 1)
+        if len(payload) > _STDIN_FILE_MAX_BYTES:
+            raise ValueError("file exceeds the 16 MiB limit")
+    except (OSError, ValueError) as exc:
+        parser.error(f"--stdin-file {path!r} could not be read ({exc})")
+    args.stdin_bytes = payload
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -231,6 +267,13 @@ def main(argv: list[str] | None = None) -> int:
              "clean file-path token (no shell arg-mangling), which lets the "
              "persisted spawn route through the version-stable binstub. "
              "Mutually exclusive with --remote-cmd.",
+    )
+    ssh_parser.add_argument(
+        "--stdin-file", metavar="PATH",
+        help="Send the exact bytes of a regular file (at most 16 MiB) to a "
+             "non-stdio --remote-cmd or --remote-cmd-file, then close stdin. "
+             "Validated before claims or connections; empty files send EOF. "
+             "Not available for interactive or structured stdio sessions.",
     )
     ssh_parser.add_argument(
         "--interactive-command-file", metavar="PATH",
@@ -868,6 +911,7 @@ def main(argv: list[str] | None = None) -> int:
     # string, so no shell (cmd.exe %VAR% expansion in particular) can mangle it.
     # Fold it into args.remote_cmd so every downstream consumer is unchanged.
     _normalize_remote_cmd_file(parser, args)
+    _normalize_stdin_file(parser, args)
 
     # Logging setup
     level = logging.DEBUG if args.verbose else logging.INFO
@@ -1599,8 +1643,11 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
         if remote_cmd:
             # Non-interactive command execution
             tracker.started(ConnectStage.LAUNCH_ACP, "remote command")
+            stdin_options = {}
+            if getattr(args, "stdin_bytes", None) is not None:
+                stdin_options["input_bytes"] = args.stdin_bytes
             result = await manager.exec_command(
-                args.name, remote_cmd, timeout=args.timeout
+                args.name, remote_cmd, timeout=args.timeout, **stdin_options
             )
             tracker.reached(ConnectStage.LAUNCH_ACP)
             return _emit_remote_cmd_result(result, args.timeout)

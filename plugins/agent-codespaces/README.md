@@ -168,6 +168,27 @@ There are also bridge-facing seams (`namespace-list`, `namespace-resolve`,
 `relay-launch-env`, `provision-command`, `acp-model-flags`). They are invoked by
 agent-bridge and are not the normal human/operator surface.
 
+### Diagnostic command input
+
+For a diagnostic command whose input exceeds local shell command-line limits,
+send a file through the managed command channel instead of embedding its content:
+
+```bash
+agent-codespaces ssh example-space --effort /path/to/owner \
+  --remote-cmd "node --input-type=module" --stdin-file preparation.mjs \
+  --no-plugin-staging --require-relay --timeout 900 --connect-timeout 1200
+```
+
+`--stdin-file PATH` requires a non-stdio `--remote-cmd` or `--remote-cmd-file`.
+The regular file is read and bounded to **16 MiB before claims or connections**.
+Its bytes are sent unchanged, including BOMs, NULs, non-UTF-8 data, and line
+endings; an empty file sends EOF. The input is a local snapshot, so later file
+changes do not change the submitted bytes. Neither input nor file metadata is
+rewritten. Interactive sessions, structured stdio, and missing/blank commands
+are rejected. Existing command timeout, relay, fencing, ownership, exit-code and
+cleanup behavior is unchanged. The usual minimal diagnostic provisioning default
+still applies; this is not native execution hosting or an ACP fallback.
+
 ### Caller-owned interactive SSH
 
 Use a local UTF-8 command file when a terminal owner needs a startup command,
