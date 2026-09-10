@@ -314,7 +314,7 @@ because they provide tools or services.
 - [x] Make every long-running legacy and namespaced loop recheck maintenance,
   tombstone ownership, and activation/install generations at iteration
   boundaries and before mutation.
-- [ ] Migrate or retire legacy services and global generic binstubs only after
+- [x] Migrate or retire legacy services and global generic binstubs only after
   ownership is proven and the new cell passes health checks.
 - [ ] Turn the report-only guards blocking after all runtime plugins conform.
 - [ ] Document rollback and retention of legacy state and inactive cells.
@@ -371,6 +371,59 @@ because they provide tools or services.
 See [`design.md`](design.md).
 
 ## Journal
+
+### 2026-09-10 — Phase 6 item 5: ownership- and health-gated legacy wrapper retirement
+
+- Merged [#2367](https://github.com/ThomasMichon/copilot-extensions/pull/2367)
+  at `772eb13917e61f1dd6a61fccb0153bc91eb1c7a3`, landing the legacy retirement
+  gate for [#1110](https://github.com/ThomasMichon/copilot-extensions/issues/1110).
+- The shared `installation-context` primitive now exposes
+  `retire_legacy_compatibility(...)`, which fails closed unless the current
+  cell can still prove all of the following at retirement time: the install and
+  activation generations still match the caller's explicit target, the legacy
+  tombstone still belongs to the current active namespaced activation, and the
+  replacement runtime contributes an explicit `health.status: "ready"` report.
+  On success it removes only the ownership-matched legacy compatibility
+  artifacts and writes a durable `legacy-retirement` record under
+  `retirements/`; replay of the same target is an idempotent no-op.
+- `agent-machines` is now the first concrete exemplar via the explicit
+  `cell-retire-legacy` management action. It reuses the command-only exemplar's
+  existing health evidence — current/LKG markers, immutable runtime-slot
+  completion, and schema-4 deploy-manifest validation — and retires only the
+  ownership-matched global generic `agent-machines` binstub compatibility
+  surface under `~/.local/bin/` (`agent-machines`, `agent-machines.cmd`, and
+  `agent-machines.ps1`, removing only the files actually present and claimed by
+  the tombstone).
+- Validation:
+  `python -m pytest -q libs/installation-context/tests`
+  (`17 failed, 510 passed, 130 skipped` on native Windows, with the exact same
+  17 failing node IDs reproduced in a detached `origin/main` worktree and still
+  tracked under [#2352](https://github.com/ThomasMichon/copilot-extensions/issues/2352));
+  `python tools/run-plugin-tests.py agent-machines`
+  (`515 passed, 20 skipped`);
+  `python tools/check-install-contract.py`,
+  `python tools/check-version-consistency.py`,
+  `python tools/check-vendored-libs-sync.py`,
+  `python tools/sync-installation-context.py --check`,
+  `python libs/payload-invocation/generate.py --all --check`,
+  `python -m pytest -q libs/installer-readiness/tests`
+  (`46 passed, 1 skipped`),
+  `python tools/check-marketplace-isolation.py` (report-only; 684 findings),
+  `python tools/check-docs-consistency.py`,
+  changed-file `ruff check --select F,E9`, and `git diff --check` all passed.
+  WSL/POSIX changed-surface coverage also passed via
+  `python3 tools/run-plugin-tests.py agent-machines -k retire_legacy`
+  (`1 passed, 1 skipped, 531 deselected`) and
+  `./.test-venvs/linux/agent-machines/bin/python -m pytest -q libs/installation-context/tests/test_installation_mode_governance.py -k retire_legacy_compatibility`
+  (`3 passed, 117 deselected`).
+- This checks off the Phase 6 legacy-retirement plan item because the shared
+  fail-closed retirement gate now exists and is proven end-to-end on one real
+  generic wrapper. It does **not** check off the older Phase 2 launcher
+  retirement item: the rest of the `phase-2-launcher-contracts.md` inventory
+  (generic wrapper publication across other runtime plugins, mixed
+  `agent-worktrees` project-command surfaces, durable provider manifests,
+  readiness fallbacks, remote transport callers, bootstrap/nudge/generated
+  launchers, and credential/askpass fallbacks) remains pending.
 
 ### 2026-09-10 — Phase 6 item 4 completion: remaining loop adopters
 
