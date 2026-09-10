@@ -1563,13 +1563,16 @@ export async function triggerHandoff(
     title = "",
     preferTask = true,
     handoffToken = null,
-    // Ceiling only -- in practice the loop below exits far sooner, as soon as
-    // `handoff_cutover_spawn` marks a spawn in flight (typically 10-25s).
-    // 30s used to be BOTH the ceiling and the only signal checked, so a real
-    // Copilot cold-start (40-90s+ before the successor's sessionStart hook
-    // flips the head session) meant this almost always timed out reporting
-    // "no pickup" even though an automatic cutover was already under way.
-    waitMs = 120000,
+    // Waits only long enough for the CUTOVER to start (the resident
+    // status-monitor's `handoff_cutover_spawn` marker, typically 10-25s),
+    // not for the successor to actually finish cold-starting and consume the
+    // handoff -- that part legitimately takes 40-90s+ and blocking on it
+    // would make every real handoff feel hung. 30s used to be the ceiling
+    // AND the only signal checked (full pickup), so a real cold-start meant
+    // this almost always timed out reporting "no pickup" even when a cutover
+    // was already under way; now the loop exits the moment a spawn is
+    // observed, so 30s comfortably covers that without needing to grow.
+    waitMs = 30000,
     execute = runCli,
     store = storeHandoff,
     writeSessionState = writeSessionStateHandoff,
