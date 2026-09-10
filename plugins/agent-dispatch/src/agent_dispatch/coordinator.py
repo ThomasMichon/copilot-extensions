@@ -39,6 +39,7 @@ from pydantic_core import PydanticCustomError
 from . import __version__, telemetry
 from .config import DEFAULT_ORPHAN_GRACE
 from .events import EventBus, sse_format
+from .loop_governance import LoopGovernance
 from .queue import (
     CompletionOutcome,
     ProducerFenceError,
@@ -61,6 +62,7 @@ from .satellites import (
 )
 
 log = logging.getLogger("agent-dispatch.coordinator")
+_GOVERNANCE_BACKOFF_SECONDS = 10.0
 
 
 def _strict_structured_result(value: Any) -> Any:
@@ -459,6 +461,28 @@ def _reap_orphans(queue: TaskQueue, grace: float) -> int:
     return counts.get("reaped", 0)
 
 
+async def _governance_backoff(
+    governance: LoopGovernance | None,
+    checkpoint: str,
+    *,
+    loop_name: str,
+) -> bool:
+    if governance is None:
+        return False
+    result = governance.recheck(checkpoint)
+    if result is None or result.get("status") == "ready":
+        return False
+    log.warning(
+        "%s backing off at %s: %s (%s)",
+        loop_name,
+        result.get("checkpoint"),
+        result.get("reason"),
+        result.get("status"),
+    )
+    await asyncio.sleep(_GOVERNANCE_BACKOFF_SECONDS)
+    return True
+
+
 async def _gc_loop(
     queue: TaskQueue,
     interval: float,
@@ -466,6 +490,7 @@ async def _gc_loop(
     *,
     health: LoopHealth,
     cycle_timeout: float | None = None,
+    governance: LoopGovernance | None = None,
 ) -> None:
     """Periodically garbage-collect tasks by **liveness**.
 
@@ -480,6 +505,18 @@ async def _gc_loop(
     """
     while True:
         await asyncio.sleep(health.current_interval)
+        if await _governance_backoff(
+            governance,
+            "iteration-boundary:liveness-gc",
+            loop_name="liveness GC",
+        ):
+            continue
+        if await _governance_backoff(
+            governance,
+            "pre-mutation:reconcile-liveness",
+            loop_name="liveness GC",
+        ):
+            continue
         counts = await _run_supervised_cycle(
             health,
             queue.reconcile_liveness,
@@ -504,6 +541,7 @@ async def _orphan_reap_loop(
     orphan_grace: float,
     health: LoopHealth,
     cycle_timeout: float | None = None,
+    governance: LoopGovernance | None = None,
 ) -> None:
     """Reap orphaned target pins without blocking held-task liveness GC.
 
@@ -512,6 +550,18 @@ async def _orphan_reap_loop(
     """
     while True:
         await asyncio.sleep(health.current_interval)
+        if await _governance_backoff(
+            governance,
+            "iteration-boundary:orphan-reap",
+            loop_name="orphan reaper",
+        ):
+            continue
+        if await _governance_backoff(
+            governance,
+            "pre-mutation:reap-orphans",
+            loop_name="orphan reaper",
+        ):
+            continue
         reaped = await _run_supervised_cycle(
             health,
             lambda: _reap_orphans(queue, orphan_grace),
@@ -997,6 +1047,7 @@ def create_app(
         bus.bind_loop(loop)
         from .wake import drain_wake_outbox
 
+        governance = LoopGovernance()
         wake_signal: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
         if wake_interval > 0:
             def _signal_wake() -> None:
@@ -1032,7 +1083,13 @@ def create_app(
         }
         sweeper = (
             asyncio.create_task(
-                _gc_loop(queue, sweep_interval, bus, health=sweeper_health)
+                _gc_loop(
+                    queue,
+                    sweep_interval,
+                    bus,
+                    health=sweeper_health,
+                    governance=governance,
+                )
             )
             if sweep_interval and sweep_interval > 0
             else None
@@ -1045,6 +1102,7 @@ def create_app(
                     bus,
                     orphan_grace=orphan_grace,
                     health=orphan_health,
+                    governance=governance,
                 )
             )
             if sweep_interval and sweep_interval > 0
@@ -1091,6 +1149,12 @@ def create_app(
                 my_gen: int | None = None
                 for _ in range(600):  # ~5 min ceiling to see our own publish
                     await asyncio.sleep(0.5)
+                    if await _governance_backoff(
+                        governance,
+                        "iteration-boundary:self-retire-arm",
+                        loop_name="self-retire",
+                    ):
+                        continue
                     data = await asyncio.to_thread(routing.read_table, routing_dir())
                     raw = data.get("active") if isinstance(data, dict) else None
                     ep = Endpoint.from_dict(raw) if isinstance(raw, dict) else None
@@ -1103,6 +1167,13 @@ def create_app(
                 confirms = 0
                 while True:
                     await asyncio.sleep(_sr_poll)
+                    if await _governance_backoff(
+                        governance,
+                        "iteration-boundary:self-retire",
+                        loop_name="self-retire",
+                    ):
+                        confirms = 0
+                        continue
                     try:
                         superseded = await asyncio.to_thread(
                             is_superseded, routing_dir(), my_pid, my_gen
@@ -1121,6 +1192,13 @@ def create_app(
                         continue
                     confirms += 1
                     if confirms >= _sr_confirmations:
+                        if await _governance_backoff(
+                            governance,
+                            "pre-mutation:self-retire",
+                            loop_name="self-retire",
+                        ):
+                            confirms = 0
+                            continue
                         log.info(
                             "superseded by a live newer generation at a safe cutover "
                             "point -- self-retiring (was gen %d, pid %d)",
@@ -1160,6 +1238,12 @@ def create_app(
                 my_gen: int | None = None
                 for _ in range(600):  # ~5 min ceiling to see our own publish
                     await asyncio.sleep(0.5)
+                    if await _governance_backoff(
+                        governance,
+                        "iteration-boundary:self-update-arm",
+                        loop_name="self-update",
+                    ):
+                        continue
                     data = await asyncio.to_thread(routing.read_table, routing_dir())
                     raw = data.get("active") if isinstance(data, dict) else None
                     ep = Endpoint.from_dict(raw) if isinstance(raw, dict) else None
@@ -1173,6 +1257,13 @@ def create_app(
                 last_trigger: float | None = None
                 while True:
                     await asyncio.sleep(_su_poll)
+                    if await _governance_backoff(
+                        governance,
+                        "iteration-boundary:self-update",
+                        loop_name="self-update",
+                    ):
+                        confirms = 0
+                        continue
                     try:
                         if await asyncio.to_thread(
                             is_superseded, routing_dir(), my_pid, my_gen
@@ -1210,6 +1301,12 @@ def create_app(
                         continue
                     confirms = 0
                     try:
+                        if await _governance_backoff(
+                            governance,
+                            "pre-mutation:self-update",
+                            loop_name="self-update",
+                        ):
+                            continue
                         _spawn_self_deploy(target)
                         last_trigger = now
                         log.info(

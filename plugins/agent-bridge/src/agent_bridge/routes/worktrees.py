@@ -20,6 +20,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 
 from ..agent_registry import AgentConfig, AgentResolver
+from ..loop_governance import LoopGovernance
 from ..models import SessionInfo, SessionStatus, WorktreeHandoffRequest
 from ..session_manager import DaemonDrainingError, ProviderTargetRefreshError
 
@@ -28,6 +29,7 @@ log = logging.getLogger("agent-bridge")
 router = APIRouter(tags=["worktrees"])
 
 _CMD_TIMEOUT = 30.0
+_GOVERNANCE_BACKOFF_SECONDS = 10.0
 
 #: Per-worktree locks serializing the fresh-start spawn (#1683) so two
 #: concurrent resumes can't each create a second owned controller in a worktree
@@ -146,14 +148,21 @@ class WorktreeDiscoveryCache:
         self._task: asyncio.Task[None] | None = None
         self._resolver: AgentResolver | None = None
         self._crawl_lock = asyncio.Lock()
+        self._governance: LoopGovernance | None = None
 
     def configure(self, *, interval: float) -> None:
         """Update the discovery interval (must be called before start)."""
         self._interval = interval
 
-    def start(self, resolver: AgentResolver) -> None:
+    def start(
+        self,
+        resolver: AgentResolver,
+        *,
+        governance: LoopGovernance | None = None,
+    ) -> None:
         """Start periodic discovery in the background (if interval > 0)."""
         self._resolver = resolver
+        self._governance = governance
         if self._interval > 0:
             self._task = asyncio.create_task(
                 self._loop(resolver), name="worktree-discovery",
@@ -230,6 +239,12 @@ class WorktreeDiscoveryCache:
             *(self._crawl_agent(name, cfg, resolver) for name, cfg in eligible),
             return_exceptions=True,
         )
+        result = self._governance.recheck("pre-mutation:update-worktree-cache") if self._governance else None
+        if result is not None and result.get("status") != "ready":
+            raise RuntimeError(
+                "worktree discovery governance changed before cache update: "
+                f"{result.get('reason')}"
+            )
 
         for (name, _), result in zip(eligible, results):
             if isinstance(result, Exception):
@@ -276,15 +291,27 @@ class WorktreeDiscoveryCache:
         return _parse_worktree_list(raw, agent_name)
 
     async def _loop(self, resolver: AgentResolver) -> None:
-        # Initial crawl
-        await self.crawl(resolver)
-        log.info("Worktree discovery started -- %d agents", len(self._cache))
+        first_pass = True
         while True:
-            await asyncio.sleep(self._interval)
+            if not first_pass:
+                await asyncio.sleep(self._interval)
+            result = self._governance.recheck("iteration-boundary:worktree-discovery") if self._governance else None
+            if result is not None and result.get("status") != "ready":
+                log.warning(
+                    "Periodic worktree discovery backing off at %s: %s (%s)",
+                    result.get("checkpoint"),
+                    result.get("reason"),
+                    result.get("status"),
+                )
+                await asyncio.sleep(_GOVERNANCE_BACKOFF_SECONDS)
+                continue
             try:
                 await self.crawl(resolver)
+                if first_pass:
+                    log.info("Worktree discovery started -- %d agents", len(self._cache))
             except Exception:
                 log.exception("Periodic worktree discovery failed")
+            first_pass = False
 
 
 # -- Subprocess helpers -------------------------------------------------------

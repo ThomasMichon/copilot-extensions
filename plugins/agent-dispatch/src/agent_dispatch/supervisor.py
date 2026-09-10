@@ -43,9 +43,11 @@ from typing import Any
 
 from .bridge_events import BridgeSubscription, SupervisorEventWake
 from .client import DispatchClient, DispatchError
+from .loop_governance import LoopGovernance
 from .queue import SpawnState, Status
 
 log = logging.getLogger("agent-dispatch.supervisor")
+_GOVERNANCE_BACKOFF_SECONDS = 10.0
 
 
 class SpawnPreparationRetained(RuntimeError):
@@ -869,6 +871,17 @@ class Supervisor:
         #: Last compact dead-letter signature emitted by this process. Unchanged
         #: task ids, failed counts, and caps stay quiet across poll cycles.
         self._dead_letter_signature: tuple[tuple[str, int, int], ...] = ()
+        self._governance = LoopGovernance()
+
+    def set_governance_recheck_fn(
+        self,
+        fn: Callable[[str], dict[str, Any]] | None,
+    ) -> None:
+        """Override the loop-governance recheck callback (tests)."""
+        self._governance.set_recheck_fn(fn)
+
+    def _recheck_governance(self, checkpoint: str) -> dict[str, Any] | None:
+        return self._governance.recheck(checkpoint)
 
     # -- helpers -------------------------------------------------------------
 
@@ -3902,6 +3915,15 @@ class Supervisor:
                 # burned toward the dead-letter bound -- it is retried next cycle.
                 continue
             try:
+                before_reserve = self._recheck_governance("pre-mutation:reserve-spawn")
+                if before_reserve is not None and before_reserve.get("status") != "ready":
+                    log.warning(
+                        "supervisor refused reservation at %s: %s (%s)",
+                        before_reserve.get("checkpoint"),
+                        before_reserve.get("reason"),
+                        before_reserve.get("status"),
+                    )
+                    break
                 resp = self.client.reserve_spawn(task["id"], reserved_by=self.supervisor_id)
             except DispatchError:
                 continue
@@ -3943,6 +3965,36 @@ class Supervisor:
                     exc,
                 )
                 continue
+            before_spawn = self._recheck_governance("pre-mutation:spawn")
+            if before_spawn is not None and before_spawn.get("status") != "ready":
+                try:
+                    if spawn_task.get("spawn_worktree_ownership") == "created":
+                        self.client.request_spawn_release(
+                            key,
+                            detail=(
+                                "installation governance changed before spawn: "
+                                f"{before_spawn.get('reason')}"
+                            ),
+                            disposition="failed",
+                        )
+                    else:
+                        self.client.fail_spawn(
+                            key,
+                            detail=(
+                                "installation governance changed before spawn: "
+                                f"{before_spawn.get('reason')}"
+                            ),
+                        )
+                except DispatchError:
+                    log.exception("bookkeeping failed for reservation %s", key)
+                log.warning(
+                    "supervisor released reservation %s after %s: %s (%s)",
+                    key,
+                    before_spawn.get("checkpoint"),
+                    before_spawn.get("reason"),
+                    before_spawn.get("status"),
+                )
+                break
             ok, handle = self.spawn_fn(spawn_task)
             try:
                 if ok:
@@ -4005,6 +4057,19 @@ class Supervisor:
         """
         try:
             while True:
+                boundary = self._recheck_governance("iteration-boundary")
+                if boundary is not None and boundary.get("status") != "ready":
+                    log.warning(
+                        "supervisor backing off at %s: %s (%s)",
+                        boundary.get("checkpoint"),
+                        boundary.get("reason"),
+                        boundary.get("status"),
+                    )
+                    try:
+                        self.wait_for_turn_end(_GOVERNANCE_BACKOFF_SECONDS)
+                    except KeyboardInterrupt:
+                        return
+                    continue
                 try:
                     spawned = self.poll_once()
                     if on_cycle is not None:

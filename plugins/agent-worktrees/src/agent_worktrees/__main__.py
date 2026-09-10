@@ -103,6 +103,7 @@ from . import claimant as claimant_mod
 from . import config as cfg
 from . import finalize as fin
 from . import installer as inst
+from . import loop_governance as loop_governance_mod
 from . import session_context as session_context_mod
 from . import services as svc
 from . import state_root as state_root_mod
@@ -118,6 +119,7 @@ from .update_stage import cmd_stage_update, discover_plugin_dir
 _SESSION_BIND_PROJECT = "AGENT_WORKTREES_BIND_PROJECT"
 _SESSION_BIND_WORKTREE = "AGENT_WORKTREES_BIND_WORKTREE_ID"
 _SESSION_BIND_SESSION = "AGENT_WORKTREES_BIND_SESSION_ID"
+_GOVERNANCE_BACKOFF_SECONDS = 10.0
 _SESSION_HANDOFF_TOKEN = "AGENT_WORKTREES_HANDOFF_TOKEN"
 
 
@@ -9295,17 +9297,19 @@ def _monitor_trigger_handoff_cutover(
     return rc, response
 
 
-def _monitor_maybe_trigger_handoff_cutover(path: str) -> None:
+def _monitor_maybe_trigger_handoff_cutover(path: str, *, governance=None) -> None:
     """Pick up one actionable pending handoff for ``path`` if the monitor owns it."""
     record = _find_record_for_path(path)
     if record is None:
         return
     retire_request = _monitor_pending_handoff_predecessor_retire(record)
     if retire_request is not None:
+        _status_monitor_recheck(governance, "pre-mutation:handoff-predecessor-retire")
         _monitor_retire_handoff_predecessor(retire_request)
     request = _monitor_pending_handoff_request(record)
     if request is None:
         return
+    _status_monitor_recheck(governance, "pre-mutation:handoff-cutover")
     _monitor_trigger_handoff_cutover(request)
 
 
@@ -9324,6 +9328,7 @@ def _monitor_sweep(
     session_projects: dict[str, str] | None = None,
     project_lock=None,
     lifecycle_priority=None,
+    governance=None,
 ) -> int:
     """One coalescing pass over all live, registered ``wt-*`` sessions.
 
@@ -9345,7 +9350,10 @@ def _monitor_sweep(
         if catalog_observer is not None:
             catalog_observer(set(live))
         live_wt = {n for n in live if n.startswith("wt-")}
-        for sess in [s for s in registry if s not in live_wt]:
+        stale_sessions = [s for s in registry if s not in live_wt]
+        if stale_sessions:
+            _status_monitor_recheck(governance, "pre-mutation:prune-registry")
+        for sess in stale_sessions:
             _remove_monitor_entry(reg_dir, sess)
             registry.pop(sess, None)
             ctx_done.discard(sess)
@@ -9410,14 +9418,19 @@ def _monitor_sweep(
                 if segment_cache is not None:
                     segment_value = segment_cache.get(path)
                 else:
+                    _status_monitor_recheck(governance, "pre-mutation:render-status")
                     segment_value = _render_status_segment(
                         path, fetch=False, plain=False, no_title=False, persist_title=True
                     )
+            except _StatusMonitorGovernanceDeferred:
+                raise
             except Exception:
                 pass
             if mux_bin:
                 try:
-                    _monitor_maybe_trigger_handoff_cutover(path)
+                    _monitor_maybe_trigger_handoff_cutover(path, governance=governance)
+                except _StatusMonitorGovernanceDeferred:
+                    raise
                 except Exception:
                     pass
 
@@ -9433,6 +9446,7 @@ def _monitor_sweep(
                 published[key] = value
             return success
 
+        _status_monitor_recheck(governance, "pre-mutation:publish-status")
         _publish("@aw_updater", token)
         _publish("@aw_updater_prefix", prefix)
         if context_value is not None and _publish("@aw_ctx", context_value):
@@ -9442,11 +9456,32 @@ def _monitor_sweep(
         _wait_for_lifecycle_priority(lifecycle_priority)
         with project_lock if project_lock is not None else contextlib.nullcontext():
             try:
+                _status_monitor_recheck(governance, "pre-mutation:warm-list-cache")
                 cfg.set_active_project(project)
                 _warm_list_cache_for_active_project(interval=interval)
+            except _StatusMonitorGovernanceDeferred:
+                raise
             except Exception:
                 pass
     return len(served)
+
+
+class _StatusMonitorGovernanceDeferred(RuntimeError):
+    """Raised when loop governance blocks a status-monitor mutation."""
+
+    def __init__(self, result: dict):
+        super().__init__(str(result.get("reason") or "governance blocked"))
+        self.result = result
+
+
+def _status_monitor_recheck(governance, checkpoint: str) -> dict | None:
+    """Return the recheck result or raise when mutation is no longer allowed."""
+    if governance is None:
+        return None
+    result = governance.recheck(checkpoint)
+    if result is not None and result.get("status") != "ready":
+        raise _StatusMonitorGovernanceDeferred(result)
+    return result
 
 
 class _StatusSegmentCache:
@@ -10427,6 +10462,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     lifecycle_count_lock = threading.Lock()
     lifecycle_count = 0
     lifecycle_claims: dict[str, float] = {}
+    governance = loop_governance_mod.LoopGovernance()
     hook_client = _load_hook_client_module()
     hook_policy = _ResidentHookPolicy(hook_client)
     if hook_policy.ready():
@@ -10458,6 +10494,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             try:
                 if is_lifecycle and deadline - time.time() < _RESIDENT_LIFECYCLE_RUNWAY_S:
                     raise HookUnavailable
+                _status_monitor_recheck(governance, "pre-mutation:hook-response")
                 result = _resident_hook_decision(
                     kind,
                     payload,
@@ -10472,6 +10509,14 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 state_lock.release()
                 if provisioning_start_event is not None:
                     provisioning_start_event.set()
+        except _StatusMonitorGovernanceDeferred as exc:
+            print(
+                "resident hook refused "
+                f"{kind} at {exc.result.get('checkpoint')}: "
+                f"{exc.result.get('reason')} ({exc.result.get('status')})",
+                file=sys.stderr,
+            )
+            raise HookUnavailable from exc
         finally:
             if is_lifecycle:
                 with lifecycle_count_lock:
@@ -10515,37 +10560,56 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 break  # a newer runtime took over -> retire; it re-spawns current
             if _other_current_monitor():
                 return 0  # a current successor claimed the lock -> stand down
-            _locks.write_lock(lock, extra=_lock_extra())
+            try:
+                _status_monitor_recheck(governance, "iteration-boundary")
+                _status_monitor_recheck(governance, "pre-mutation:lock-renewal")
+                _locks.write_lock(lock, extra=_lock_extra())
 
-            picker_projects = monitor_roots.live_picker_projects()
-            demand_projects = list_cache.recent_demand_projects()
-            external_projects = picker_projects | demand_projects
-            served = _monitor_sweep(
-                mux_bin,
-                token,
-                my_prefix,
-                ctx_done,
-                interval=interval,
-                picker_projects=external_projects,
-                catalog_observer=reconciler.observe_mux,
-                pane_observer=pane_reconciler.observe,
-                segment_cache=segment_cache,
-                published=published,
-                incarnations=incarnations,
-                session_projects=session_projects,
-                project_lock=state_lock,
-                lifecycle_priority=lifecycle_priority,
-            )
-            _wait_for_lifecycle_priority(lifecycle_priority)
-            with state_lock:
-                try:
-                    reconciler.step()
-                except Exception:
-                    pass
-                try:
-                    pane_reconciler.step(mux_bin)
-                except Exception:
-                    pass
+                picker_projects = monitor_roots.live_picker_projects()
+                demand_projects = list_cache.recent_demand_projects()
+                external_projects = picker_projects | demand_projects
+                served = _monitor_sweep(
+                    mux_bin,
+                    token,
+                    my_prefix,
+                    ctx_done,
+                    interval=interval,
+                    picker_projects=external_projects,
+                    catalog_observer=reconciler.observe_mux,
+                    pane_observer=pane_reconciler.observe,
+                    segment_cache=segment_cache,
+                    published=published,
+                    incarnations=incarnations,
+                    session_projects=session_projects,
+                    project_lock=state_lock,
+                    lifecycle_priority=lifecycle_priority,
+                    governance=governance,
+                )
+                _wait_for_lifecycle_priority(lifecycle_priority)
+                with state_lock:
+                    try:
+                        _status_monitor_recheck(governance, "pre-mutation:reconcile-sessions")
+                        reconciler.step()
+                    except _StatusMonitorGovernanceDeferred:
+                        raise
+                    except Exception:
+                        pass
+                    try:
+                        _status_monitor_recheck(governance, "pre-mutation:reap-panes")
+                        pane_reconciler.step(mux_bin)
+                    except _StatusMonitorGovernanceDeferred:
+                        raise
+                    except Exception:
+                        pass
+            except _StatusMonitorGovernanceDeferred as exc:
+                print(
+                    "status-monitor backing off at "
+                    f"{exc.result.get('checkpoint')}: "
+                    f"{exc.result.get('reason')} ({exc.result.get('status')})",
+                    file=sys.stderr,
+                )
+                time.sleep(_GOVERNANCE_BACKOFF_SECONDS)
+                continue
             if served < 0:
                 time.sleep(interval)  # transient mux failure: hold, don't exit
                 continue
