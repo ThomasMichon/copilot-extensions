@@ -13,6 +13,14 @@
 # records each attempt to ~/.<name>/reconcile-status.json and tees the
 # installer's output to ~/.<name>/reconcile.log so a failed auto-update is
 # diagnosable.
+#
+# OPT-IN GATE (reference implementation -- fan out to sibling plugins as a
+# follow-up, see tools/check-bootstrap-sync.py FAMILIES): gated the same way as
+# the .ps1 counterpart -- requires a checked-in
+# <project>/.copilot-extensions/config.yaml with a top-level
+# `background_reconcile: true` line (plain regex match, no yaml parser -- this
+# hook has no python/venv yet). No opt-in -> no background spawn. Deliberate
+# behavior change: previously every session silently self-healed drift.
 ScriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PluginDir="$(cd "$ScriptDir/.." && pwd)"
 session_start_json_emitted=0
@@ -53,6 +61,22 @@ fi
 # few (agent-bridge); accept EITHER so this early-exit actually fires instead of
 # re-launching the installer on every session start.
 if { [ -e "$InstallDir/.venv" ] || [ -e "$InstallDir/venv" ]; } && [ "$deployed" = "$current" ]; then exit 0; fi
+
+# OPT-IN GATE: drift exists, so we'd normally reconcile -- but only when the
+# current project has explicitly opted in. COPILOT_PROJECT_DIR is the
+# session's project checkout, injected by the CLI at session start; fall back
+# to cwd if unset.
+ProjectDir="${COPILOT_PROJECT_DIR:-$(pwd)}"
+optInFile="$ProjectDir/.copilot-extensions/config.yaml"
+optedIn=0
+if [ -f "$optInFile" ] && grep -qE '^[[:space:]]*background_reconcile:[[:space:]]*true[[:space:]]*$' "$optInFile" 2>/dev/null; then
+  optedIn=1
+fi
+if [ "$optedIn" -ne 1 ]; then
+  echo "[$name] runtime $deployed -> $current; background reconcile SKIPPED (no opt-in -- add 'background_reconcile: true' to $optInFile to enable)" >&2
+  exit 0
+fi
+
 if [ -f "$PluginDir/scripts/init.sh" ]; then
   target=("$PluginDir/scripts/init.sh")
 elif [ -f "$PluginDir/scripts/install.sh" ]; then
