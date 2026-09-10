@@ -37,7 +37,11 @@ param(
     # still ACCEPTED (so a caller such as the launch-path reconciler, which
     # appends it whenever a plugin declares `"zeroDowntimeUpdate": true`,
     # doesn't break) but has no effect.
-    [switch]$ZeroDowntime
+    [switch]$ZeroDowntime,
+
+    # Preview mode for the 'uninstall' action: print what WOULD be removed
+    # without touching the filesystem, scheduled tasks, or services.
+    [switch]$DryRun
 )
 
 Set-StrictMode -Version 2.0
@@ -2148,6 +2152,28 @@ function Invoke-Stop {
 }
 
 function Invoke-Uninstall {
+    if ($DryRun) {
+        Write-Host '(dry run -- nothing will be changed)' -ForegroundColor Yellow
+        Write-Host '[dry-run] would stop agent-index'
+        if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
+            Write-Host "[dry-run] would remove scheduled task: $TaskName"
+        }
+        if (Get-ScheduledTask -TaskName $EngineTaskName -ErrorAction SilentlyContinue) {
+            Write-Host "[dry-run] would stop + remove scheduled task: $EngineTaskName"
+        }
+        foreach ($stub in @('agent-index.ps1', 'agent-index.cmd')) {
+            $p = Join-Path $LocalBin $stub
+            if (Test-Path $p) { Write-Host "[dry-run] would remove binstub: $p" }
+        }
+        if ($Purge) {
+            if (Test-Path $EngineHome) { Write-Host "[dry-run] would PURGE engine home: $EngineHome" }
+            if (Test-Path $InstallDir) { Write-Host "[dry-run] would PURGE: $InstallDir" }
+        } else {
+            Write-Host "[dry-run] engine home + install dir would be kept (-Purge to delete)"
+        }
+        Write-Host 'agent-index uninstall dry run complete -- nothing was changed' -ForegroundColor Yellow
+        return
+    }
     Invoke-Stop
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
         Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue

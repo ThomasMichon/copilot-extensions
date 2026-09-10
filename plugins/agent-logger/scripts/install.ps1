@@ -30,7 +30,11 @@ param(
     [string]$Action = 'status',
 
     [Alias('install-dir')]
-    [string]$InstallDir
+    [string]$InstallDir,
+
+    # Preview mode for the 'uninstall' action: print what WOULD be removed
+    # without touching the scheduled task or binstubs.
+    [switch]$DryRun
 )
 
 Set-StrictMode -Version Latest
@@ -1202,22 +1206,36 @@ switch ($Action) {
         Update-SyncTaskBinding
     }
     'uninstall' {
+        if ($DryRun) { Write-Host '(dry run -- nothing will be changed)' -ForegroundColor Yellow }
         if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
-            Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
-            Write-Changed "scheduled task removed (config at $InstallDir kept)"
+            if ($DryRun) {
+                Write-Host "[dry-run] would remove scheduled task: $TaskName"
+            } else {
+                Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+                Write-Changed "scheduled task removed (config at $InstallDir kept)"
+            }
         } else {
             Write-Warn2 "no scheduled task found"
         }
         if ($publishGlobalBinstubs) {
+            $anyStub = $false
             foreach ($name in $BinstubNames) {
                 foreach ($ext in 'ps1', 'cmd') {
                     $f = Join-Path $LocalBin "$name.$ext"
-                    if (Test-Path $f) { Remove-Item $f -Force -ErrorAction SilentlyContinue }
+                    if (Test-Path $f) {
+                        $anyStub = $true
+                        if ($DryRun) { Write-Host "[dry-run] would remove binstub: $f" }
+                        else { Remove-Item $f -Force -ErrorAction SilentlyContinue }
+                    }
                 }
             }
-            Write-Changed "binstubs removed from $LocalBin"
+            if (-not $DryRun) { Write-Changed "binstubs removed from $LocalBin" }
         } else {
             Write-Changed 'scoped install left legacy global binstubs unchanged'
+        }
+        if ($DryRun) {
+            Write-Host "[dry-run] config/session-state at $InstallDir would be kept (agent-logger uninstall never removes it)"
+            Write-Host 'agent-logger uninstall dry run complete -- nothing was changed' -ForegroundColor Yellow
         }
     }
     'status' {

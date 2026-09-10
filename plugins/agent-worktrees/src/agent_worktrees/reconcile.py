@@ -1400,7 +1400,9 @@ def runtime_installer_argv(
     return None
 
 
-def runtime_uninstall_argv(plugin_dir: Path) -> tuple[str, list[str]] | None:
+def runtime_uninstall_argv(
+    plugin_dir: Path, *, dry_run: bool = False
+) -> tuple[str, list[str]] | None:
     """Build the (display, argv) to remove a plugin's deployed runtime.
 
     Unlike :func:`runtime_installer_argv`, this **never** falls back to
@@ -1417,22 +1419,35 @@ def runtime_uninstall_argv(plugin_dir: Path) -> tuple[str, list[str]] | None:
     the default sweep only removes executables, autorun registrations, and
     recomputable runtime state -- matching the harness's "guaranteed, legible
     teardown" intent (visions/stateless-harness/plugins).
+
+    ``dry_run=True`` appends each installer's own real preview switch
+    (``-DryRun`` on PowerShell, ``--dry-run`` on bash) -- not a guess: every
+    uninstall-capable plugin's ``uninstall`` action supports it, walking the
+    same code paths and reporting what it would remove/preserve without
+    touching anything, so this is safe to actually execute for a validated
+    preview rather than merely displaying the argv.
     """
     scripts = plugin_dir / "scripts"
     if platform.system() == "Windows":
         p = scripts / "install.ps1"
         if p.is_file():
             argv = ["pwsh", "-File", str(p), "uninstall"]
+            if dry_run:
+                argv.append("-DryRun")
             return " ".join(argv), argv
         return None
     p = scripts / "install.sh"
     if p.is_file():
         argv = ["bash", str(p), "uninstall"]
+        if dry_run:
+            argv.append("--dry-run")
         return " ".join(argv), argv
     return None
 
 
-def dtssh_host_uninstall_argv(agent_ssh_dir: Path) -> tuple[str, list[str]] | None:
+def dtssh_host_uninstall_argv(
+    agent_ssh_dir: Path, *, dry_run: bool = False
+) -> tuple[str, list[str]] | None:
     """Build the (display, argv) to remove the dtssh Startup-folder host listener.
 
     ``agent-ssh``'s own ``scripts/install.{sh,ps1} uninstall`` removes only the
@@ -1443,17 +1458,24 @@ def dtssh_host_uninstall_argv(agent_ssh_dir: Path) -> tuple[str, list[str]] | No
     action is idempotent/``Test-Path``-guarded, so it is safe to invoke even
     when the dtssh host was never installed. Returns ``None`` only when the
     script itself is missing from the payload (nothing to cascade to).
+
+    ``dry_run=True`` appends the same real preview switch as
+    :func:`runtime_uninstall_argv` (see there for why executing it is safe).
     """
     host_scripts = agent_ssh_dir / "transports" / "dtssh" / "scripts"
     if platform.system() == "Windows":
         p = host_scripts / "install-host.ps1"
         if p.is_file():
             argv = ["pwsh", "-File", str(p), "uninstall"]
+            if dry_run:
+                argv.append("-DryRun")
             return " ".join(argv), argv
         return None
     p = host_scripts / "install-host.sh"
     if p.is_file():
         argv = ["bash", str(p), "uninstall"]
+        if dry_run:
+            argv.append("--dry-run")
         return " ".join(argv), argv
     return None
 
@@ -1480,7 +1502,9 @@ def discover_core_payload_dirs() -> list[tuple[str, Path]]:
     return out
 
 
-def build_uninstall_plan(*, home: Path | None = None) -> dict[str, Any]:
+def build_uninstall_plan(
+    *, home: Path | None = None, dry_run: bool = False
+) -> dict[str, Any]:
     """Return a sweep plan to remove every deployed core plugin runtime.
 
     Symmetric counterpart to :func:`build_plan`, but for teardown rather than
@@ -1516,6 +1540,12 @@ def build_uninstall_plan(*, home: Path | None = None) -> dict[str, Any]:
     deploy-manifest evidence; it is reported as a ``diagnostics`` entry
     (reason ``manual-cleanup-required``) pointing at that script's own
     ``uninstall`` action.
+
+    ``dry_run=True`` builds every step's argv with each installer's own real
+    ``-DryRun``/``--dry-run`` preview switch appended (see
+    :func:`runtime_uninstall_argv`) -- safe to actually execute, since every
+    covered plugin's uninstall action walks the same code paths under that
+    switch without touching the filesystem, scheduled tasks, or services.
     """
     updates: list[dict[str, Any]] = []
     diagnostics: list[dict[str, Any]] = []
@@ -1535,7 +1565,7 @@ def build_uninstall_plan(*, home: Path | None = None) -> dict[str, Any]:
                 "message": str(error),
             })
             continue
-        built = runtime_uninstall_argv(pdir)
+        built = runtime_uninstall_argv(pdir, dry_run=dry_run)
         if built is None:
             diagnostics.append({
                 "service": name,
@@ -1561,7 +1591,7 @@ def build_uninstall_plan(*, home: Path | None = None) -> dict[str, Any]:
             "unset_environment": list(_RUNTIME_ENV_UNSET),
         })
         if name == "agent-ssh":
-            extra = dtssh_host_uninstall_argv(pdir)
+            extra = dtssh_host_uninstall_argv(pdir, dry_run=dry_run)
             if extra is not None:
                 dcmd, dargv = extra
                 updates.append({
@@ -1610,6 +1640,7 @@ def build_uninstall_plan(*, home: Path | None = None) -> dict[str, Any]:
 def apply_uninstall_plan(
     *,
     home: Path | None = None,
+    dry_run: bool = False,
     log: Callable[[str], None] | None = None,
     runner: Callable[[Sequence[str]], int] | None = None,
 ) -> dict[str, Any]:
@@ -1620,6 +1651,13 @@ def apply_uninstall_plan(
     but for one pass only -- uninstall has no "freshly installed payload"
     second-pass concern. Returns ``{"action": "uninstall"|"continue",
     "executed": [...]}`` plus any ``diagnostics`` from the plan.
+
+    ``dry_run=True`` (the CLI's ``--verify`` mode) executes each covered
+    plugin's own real ``-DryRun``/``--dry-run`` preview instead of the actual
+    removal -- safe by construction (see :func:`build_uninstall_plan`), so
+    this validates the plan against live system state without mutating
+    anything. ``dry_run=False`` (the default -- the CLI's ``--apply``) is the
+    real, mutating uninstall.
     """
     _log = log or (lambda _m: None)
 
@@ -1641,7 +1679,7 @@ def apply_uninstall_plan(
                 _log(f"    {line}")
         return proc.returncode
 
-    plan = build_uninstall_plan(home=home)
+    plan = build_uninstall_plan(home=home, dry_run=dry_run)
     for diagnostic in plan.get("diagnostics", []):
         _log(
             "uninstall: "

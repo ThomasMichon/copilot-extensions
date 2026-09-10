@@ -22092,6 +22092,16 @@ def build_parser() -> argparse.ArgumentParser:
         "dry-run: print the plan (and any diagnostics naming what this "
         "sweep cannot remove) without touching anything.",
     )
+    sp.add_argument(
+        "--verify",
+        action="store_true",
+        help="Actually EXECUTE each covered plugin's own -DryRun/--dry-run "
+        "preview against live system state (safe -- every covered plugin's "
+        "uninstall walks the same code paths under that switch without "
+        "touching anything) and fold its real captured output into the "
+        "JSON, instead of only displaying the argv that would run. Mutually "
+        "exclusive with --apply.",
+    )
 
     # reconcile-binstubs (project launchers in ~/.local/bin vs projects.yaml)
     reconcile_binstubs_parser = sub.add_parser(
@@ -24899,16 +24909,25 @@ def cmd_uninstall_plugins(args: argparse.Namespace) -> int:
 
     Dry-run by default (``build_uninstall_plan`` -- prints the JSON plan plus
     any diagnostics naming what the sweep found it cannot remove, without
-    touching anything). ``--apply`` executes it in-process
+    touching anything). ``--verify`` actually executes each covered plugin's
+    own real ``-DryRun``/``--dry-run`` preview against live system state
+    (safe by construction) and folds its captured output into the JSON.
+    ``--apply`` executes the real, mutating uninstall in-process
     (``apply_uninstall_plan``) and exits non-zero if any step failed.
     """
     from . import reconcile
 
-    if getattr(args, "apply", False):
+    apply_ = getattr(args, "apply", False)
+    verify = getattr(args, "verify", False)
+    if apply_ and verify:
+        print(json.dumps({"error": "--apply and --verify are mutually exclusive"}))
+        return 2
+
+    if apply_ or verify:
         def _log(msg: str) -> None:
             print(msg, file=sys.stderr, flush=True)
 
-        summary = reconcile.apply_uninstall_plan(log=_log)
+        summary = reconcile.apply_uninstall_plan(dry_run=verify, log=_log)
         failed = [item for item in summary.get("executed", []) if not item.get("ok", False)]
         print(json.dumps(summary))
         return 1 if failed else 0

@@ -8,6 +8,7 @@ port="2222"
 tunnel=""
 user_name=""
 skip_login=0
+dry_run=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -16,6 +17,7 @@ while [[ $# -gt 0 ]]; do
     --tunnel) tunnel="$2"; shift ;;
     --user) user_name="$2"; shift ;;
     --skip-login) skip_login=1 ;;
+    --dry-run) dry_run=1 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
   shift
@@ -68,7 +70,12 @@ case "$action" in
     dtssh service restart 2>/dev/null || true
     ;;
   uninstall)
-    dtssh service uninstall
+    if [[ "$dry_run" -eq 1 ]]; then
+      echo "(dry run -- nothing will be changed)"
+      echo "[dry-run] would run: dtssh service uninstall"
+    else
+      dtssh service uninstall
+    fi
     ;;
   start|stop|restart|status|logs)
     dtssh service "$action"
