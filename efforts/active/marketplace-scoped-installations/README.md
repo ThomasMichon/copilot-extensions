@@ -372,7 +372,7 @@ See [`design.md`](design.md).
 
 ## Journal
 
-### 2026-09-09 — Phase 6 item 1: maintenance gates and ownership sidecars
+### 2026-09-10 — Phase 6 item 1: maintenance gates and ownership sidecars
 
 - Merged [#2329](https://github.com/ThomasMichon/copilot-extensions/pull/2329)
   at `f1087819216159ee241b875147a92d24198ea715`, landing the first operative
