@@ -149,20 +149,34 @@ Its contract is:
    available,
 3. reuse the existing `agent-dispatch` task-backed storage path when available,
 4. best-effort ping `agent-bridge` if present,
-5. wait up to 30 seconds for pickup,
-6. check whether the session-state marker was consumed, the worktree recorded a
-   successor, or the dispatch task moved out of `proposed` / `queued`,
-7. if nothing picked it up, print manual continuation instructions,
+5. wait (up to 2 minutes) for either full pickup, or -- much sooner in
+   practice -- an acknowledgement that an automatic cutover has already
+   started,
+6. check whether the session-state marker was consumed, the worktree recorded
+   a successor, the dispatch task moved out of `proposed` / `queued`, or (the
+   earlier signal) the resident status-monitor has already logged a
+   `handoff_cutover_spawn` for this token,
+7. if nothing at all happened, print manual continuation instructions; if a
+   spawn is merely in flight, print a distinct "already under way" note
+   instead of implying failure,
 8. always end by printing the final short handoff prompt/seed.
 
 That final seed is the "if your download doesn't start, click here" fallback:
 it gives a human or control system enough to continue even if none of the
 signaling paths responded during the grace window.
 
+A real successor's Copilot cold-start (loading MCP servers/skills before it
+can even run its own `sessionStart` hook) routinely takes 40-90+ seconds --
+much longer than a short fixed wait. `trigger_handoff` treats the resident
+status-monitor's `handoff_cutover_spawn` activity marker as an earlier,
+weaker "spawn acknowledged" signal distinct from full pickup, so the
+predecessor can report real progress instead of a false "nothing happened"
+after 30 seconds.
+
 ## Storage
 
 `save_handoff_prompt` and `trigger_handoff` use the same durable store
-selection:
+selection: 
 
 | Coordinator availability | Storage |
 |---|---|

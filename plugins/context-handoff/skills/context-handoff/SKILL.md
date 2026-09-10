@@ -142,9 +142,13 @@ Its contract is:
    available,
 3. reuse the existing agent-dispatch task path when available,
 4. best-effort ping `agent-bridge` if present,
-5. wait up to 30 seconds,
-6. check for any pickup signal,
-7. print manual instructions if nothing picked it up,
+5. wait (up to 2 minutes) for full pickup, or -- typically much sooner -- an
+   acknowledgement that an automatic cutover has already started (a real
+   successor's Copilot cold-start routinely takes 40-90+ seconds),
+6. check for any pickup signal, including the earlier "spawn acknowledged"
+   marker,
+7. print manual instructions only if nothing at all happened; print a
+   distinct "already under way" note when a spawn is merely in flight,
 8. always end with the short handoff prompt/seed.
 
 ## Resume flow
