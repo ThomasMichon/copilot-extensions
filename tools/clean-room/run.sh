@@ -9,6 +9,9 @@
 #   ./run.sh --image pristine shell             # drop into a pristine fresh box
 #   ./run.sh --until 1 --then shell run         # install the plugin, then hand off
 #   ./run.sh --uv-index https://…/pypi/simple/  # opt-in uv-index fixture (governed box)
+#   ./run.sh --block-public-feeds --uv-index https://…  # reproduce a network-
+#                                                 # blocked machine (book2) from
+#                                                 # an unrestricted dev box
 #   ./run.sh --image pristine down              # remove the pristine container
 #
 # The --scenario seam mounts a scenario dir (scenarios/<name>/ or an explicit
@@ -20,9 +23,20 @@
 # Copilot CLI prereq on a governed box (a build-time given, not the experiment).
 # --uv-index is the RUNTIME analog: opt-in, points the deploy stage's uv at an
 # internal index; default off so the governed uv jam surfaces.
+# --block-public-feeds (aperture-labs feed-neutral-build-config effort, #6755
+# Phase 3) is the inverse control: it null-routes pypi.org/
+# files.pythonhosted.org/registry.npmjs.org/download.pytorch.org via Docker
+# --add-host, regardless of the HOST's real connectivity, so an unrestricted
+# dev box can still exercise "public feed genuinely unreachable" -- the same
+# condition a governed box like book2 already produces naturally. Combine with
+# --uv-index (a real substitute) to prove installs still succeed under the
+# block; omit --uv-index to prove the harness catches a hardcoded straggler
+# (the existing "toolchain-uv" jam detection already greps scenario logs for
+# `pythonhosted|HandshakeFailure|SSL|TLS` and fires on exactly this failure).
 #
 # Env overrides: CR_MARKETPLACE_REPO CR_MARKETPLACE_NAME CR_PRIMARY_PLUGIN
 #                CR_EXPECT_DEPS CR_RESULTS_DIR CR_NPM_REGISTRY CR_UV_INDEX
+#                CR_BLOCK_PUBLIC_FEEDS
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -33,6 +47,7 @@ THEN=none
 SCENARIO=generic-single-plugin
 NPM_REGISTRY="${CR_NPM_REGISTRY:-}"
 UV_INDEX="${CR_UV_INDEX:-}"
+BLOCK_PUBLIC_FEEDS="${CR_BLOCK_PUBLIC_FEEDS:-0}"
 TOKEN_ACCOUNT=""
 NO_TOKEN=0
 PASS_ENV=()
@@ -49,6 +64,7 @@ while [ $# -gt 0 ]; do
         --scenario) SCENARIO="$2"; shift 2 ;;
         --npm-registry) NPM_REGISTRY="$2"; shift 2 ;;
         --uv-index) UV_INDEX="$2"; shift 2 ;;
+        --block-public-feeds) BLOCK_PUBLIC_FEEDS=1; shift ;;
         --token-account) TOKEN_ACCOUNT="$2"; shift 2 ;;
         --pass-env) PASS_ENV+=("$2"); shift 2 ;;
         --harness-mount) HARNESS_MOUNT="$2"; shift 2 ;;
@@ -56,7 +72,7 @@ while [ $# -gt 0 ]; do
         --skip-tier-p-gate) SKIP_TIER_P=1; shift ;;
         --no-token) NO_TOKEN=1; shift ;;
         build|auth|run|eval|shell|down|bridge-register|bridge-unregister|all) MODE="$1"; shift ;;
-        *) echo "usage: $0 [--image base|pristine] [--name-suffix SUFFIX] [--scenario NAME|DIR] [--until N|all] [--then shell|down] [--npm-registry URL] [--uv-index URL] [--token-account USER] [--pass-env NAME]... [--harness-mount DIR] [--runs N] [--skip-tier-p-gate] [--no-token] {build|auth|run|eval|shell|down|bridge-register|bridge-unregister|all}" >&2; exit 2 ;;
+        *) echo "usage: $0 [--image base|pristine] [--name-suffix SUFFIX] [--scenario NAME|DIR] [--until N|all] [--then shell|down] [--npm-registry URL] [--uv-index URL] [--block-public-feeds] [--token-account USER] [--pass-env NAME]... [--harness-mount DIR] [--runs N] [--skip-tier-p-gate] [--no-token] {build|auth|run|eval|shell|down|bridge-register|bridge-unregister|all}" >&2; exit 2 ;;
     esac
 done
 
@@ -270,12 +286,32 @@ print("true" if manifest.get("tier") == "P" and manifest.get("auth", {}).get("co
         harness_args=(-v "$HARNESS_MOUNT:/harness:ro" -e "CR_HARNESS_MOUNT=/harness")
         echo "harness bind: $HARNESS_MOUNT -> /harness (ro)  [CR_HARNESS_MOUNT=/harness]"
     fi
+    # --block-public-feeds (feed-neutral-build-config, aperture-labs #6755
+    # Phase 3): null-route the known public package-feed hostnames at the
+    # container network layer via Docker's --add-host, regardless of what
+    # the HOST machine can actually reach. This reproduces a network-blocked
+    # machine (like book2) from an unrestricted dev box, so a hardcoded
+    # public-feed straggler fails loudly here instead of only surfacing on
+    # book2 itself. Still routes through --uv-index/CR_UV_INDEX (the
+    # existing runtime substitute), so a scenario given a real internal feed
+    # still succeeds -- only an UNsubstituted hardcoded pin fails.
+    local block_args=()
+    if [ "$BLOCK_PUBLIC_FEEDS" = "1" ]; then
+        block_args=(
+            --add-host "pypi.org:127.0.0.1"
+            --add-host "files.pythonhosted.org:127.0.0.1"
+            --add-host "registry.npmjs.org:127.0.0.1"
+            --add-host "download.pytorch.org:127.0.0.1"
+        )
+        echo "block-public-feeds: pypi.org, files.pythonhosted.org, registry.npmjs.org, download.pytorch.org null-routed"
+    fi
     docker run -d --name "$CONTAINER" \
         -v "$SCENARIO_DIR:/home/operator/scenario:ro" \
         -v "$LIB_DIR:/home/operator/lib:ro" \
         -v "$RESULTS:/home/operator/out" \
         "${scen_lib_args[@]}" \
         "${harness_args[@]}" \
+        "${block_args[@]}" \
         -e "CR_LIB=/home/operator/lib/clean-room-lib.sh" \
         -e "CR_SCENARIO_NAME=$SCENARIO_NAME" \
         -e "CR_MARKETPLACE_REPO=${CR_MARKETPLACE_REPO:-ThomasMichon/copilot-extensions}" \

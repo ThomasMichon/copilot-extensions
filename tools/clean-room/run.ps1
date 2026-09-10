@@ -62,6 +62,10 @@
   ./run.ps1 -Until 1 -Then shell              # install the plugin, then hand off
 .EXAMPLE
   ./run.ps1 -UvIndex https://…/pypi/simple/   # opt-in uv-index fixture (governed box)
+.EXAMPLE
+  ./run.ps1 -BlockPublicFeeds -UvIndex https://…  # reproduce a network-blocked
+                                                    # machine (book2) from an
+                                                    # unrestricted dev box
 #>
 [CmdletBinding()]
 param(
@@ -87,6 +91,16 @@ param(
     # (governed box). Empty = off, so the governed uv jam surfaces. Runtime
     # analog of -NpmRegistry (which is build-time). Also $env:CR_UV_INDEX.
     [string]$UvIndex = '',
+    # Null-route the known public package-feed hostnames (pypi.org,
+    # files.pythonhosted.org, registry.npmjs.org, download.pytorch.org) at the
+    # container network layer via Docker --add-host, regardless of the HOST's
+    # real connectivity -- reproduces a network-blocked machine (book2) from an
+    # unrestricted dev box. Combine with -UvIndex to prove installs still
+    # succeed under a real substitute feed. Also $env:CR_BLOCK_PUBLIC_FEEDS.
+    # Linux arm (-Os linux, the default) only -- errors if combined with
+    # -Os windows, which is not wired into this flag.
+    # (aperture-labs feed-neutral-build-config effort, #6755 Phase 3)
+    [switch]$BlockPublicFeeds,
     # Auth: by default the runner injects a Copilot token grabbed from the host
     # `gh` (COPILOT_GITHUB_TOKEN) so NO interactive device-code login is needed.
     # -TokenAccount picks which gh account (must have Copilot entitlement);
@@ -147,6 +161,17 @@ $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 # --- Until validation: 'all' or a non-negative integer ------------------------
 if ($Until -ne 'all' -and $Until -notmatch '^\d+$') {
     throw "-Until must be 'all' or a non-negative integer (got '$Until')"
+}
+
+# --block-public-feeds env fallback (mirrors -NpmRegistry's $env: pattern).
+if (-not $BlockPublicFeeds -and $env:CR_BLOCK_PUBLIC_FEEDS -eq '1') {
+    $BlockPublicFeeds = $true
+}
+# Only wired into the Linux arm's Start-Container (below) via --add-host.
+# The Windows arm (-Os windows) uses a different container networking model
+# and does not consume this flag -- fail loudly rather than silently no-op.
+if ($BlockPublicFeeds -and $Os -eq 'windows') {
+    throw "-BlockPublicFeeds is not supported with -Os windows (not wired into the Windows-container arm)"
 }
 
 # =============================================================================
@@ -427,12 +452,29 @@ function Start-Container {
         )
         Write-Host "harness bind: $hm -> /harness (ro)  [CR_HARNESS_MOUNT=/harness]" -ForegroundColor DarkGray
     }
+    # --block-public-feeds (feed-neutral-build-config, aperture-labs #6755
+    # Phase 3): null-route the known public package-feed hostnames at the
+    # container network layer via Docker --add-host, regardless of the HOST's
+    # real connectivity. Combine with -UvIndex (a real substitute) to prove
+    # installs still succeed under the block; omit it to prove the harness's
+    # existing "toolchain-uv" jam detection catches a hardcoded straggler.
+    $blockArgs = @()
+    if ($BlockPublicFeeds) {
+        $blockArgs = @(
+            '--add-host', 'pypi.org:127.0.0.1',
+            '--add-host', 'files.pythonhosted.org:127.0.0.1',
+            '--add-host', 'registry.npmjs.org:127.0.0.1',
+            '--add-host', 'download.pytorch.org:127.0.0.1'
+        )
+        Write-Host "block-public-feeds: pypi.org, files.pythonhosted.org, registry.npmjs.org, download.pytorch.org null-routed" -ForegroundColor DarkGray
+    }
     docker run -d --name $Container `
         -v "${scenDir}:/home/operator/scenario:ro" `
         -v "${libDir}:/home/operator/lib:ro" `
         -v "${res}:/home/operator/out" `
         @scenLibArgs `
         @harnessArgs `
+        @blockArgs `
         -e "CR_LIB=/home/operator/lib/clean-room-lib.sh" `
         -e "CR_SCENARIO_NAME=$ScenarioName" `
         -e "CR_MARKETPLACE_REPO=$MarketplaceRepo" `
