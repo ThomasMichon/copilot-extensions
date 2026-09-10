@@ -168,12 +168,14 @@ ACTION="${1:-status}"
 shift || true
 
 FORCE=false
+DRY_RUN=false
 INSTALL_DIR=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --install-dir) INSTALL_DIR="$2"; shift 2 ;;
         --force) FORCE=true; shift ;;
+        --dry-run) DRY_RUN=true; shift ;;
         *)       echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
@@ -800,44 +802,65 @@ do_install() {
 
 do_uninstall() {
     _header "$SERVICE_NAME Uninstall"
+    $DRY_RUN && echo "(dry run -- nothing will be changed)"
 
-    # Remove the Connection Owner systemd unit (if provisioned).
-    _remove_owner_service
+    if $DRY_RUN; then
+        [[ -f "$HOME/.config/systemd/user/agent-codespaces-owner.service" ]] && \
+            echo "[dry-run] would stop + remove Connection Owner systemd unit"
+        local socket_dir="$INSTALL_DIR/sockets"
+        [[ -d "$socket_dir" ]] && echo "[dry-run] would stop managed SSH connections under: $socket_dir"
+    else
+        # Remove the Connection Owner systemd unit (if provisioned).
+        _remove_owner_service
 
-    # Stop managed SSH ControlMaster connections before removing files. They
-    # multiplex connections to CodeSpaces via sockets under
-    # ~/.agent-codespaces/sockets. Close each via `ssh -O exit` (best-effort),
-    # then kill any lingering ssh master referencing the socket dir.
-    local socket_dir="$INSTALL_DIR/sockets"
-    if [[ -d "$socket_dir" ]]; then
-        for sock in "$socket_dir"/*; do
-            [[ -e "$sock" ]] || continue
-            ssh -o "ControlPath=$sock" -O exit placeholder >/dev/null 2>&1 || true
-        done
-    fi
-    if command -v pkill &>/dev/null; then
-        pkill -f "ControlPath=$INSTALL_DIR/sockets" 2>/dev/null && \
-            _changed "Stopped managed SSH ControlMaster processes" || true
+        # Stop managed SSH ControlMaster connections before removing files. They
+        # multiplex connections to CodeSpaces via sockets under
+        # ~/.agent-codespaces/sockets. Close each via `ssh -O exit` (best-effort),
+        # then kill any lingering ssh master referencing the socket dir.
+        local socket_dir="$INSTALL_DIR/sockets"
+        if [[ -d "$socket_dir" ]]; then
+            for sock in "$socket_dir"/*; do
+                [[ -e "$sock" ]] || continue
+                ssh -o "ControlPath=$sock" -O exit placeholder >/dev/null 2>&1 || true
+            done
+        fi
+        if command -v pkill &>/dev/null; then
+            pkill -f "ControlPath=$INSTALL_DIR/sockets" 2>/dev/null && \
+                _changed "Stopped managed SSH ControlMaster processes" || true
+        fi
     fi
 
     # Remove binstub
     local stub_path="$LOCAL_BIN/agent-codespaces"
     if [[ -f "$stub_path" ]]; then
-        rm -f "$stub_path"
-        _changed "Removed binstub: $stub_path"
+        if $DRY_RUN; then
+            echo "[dry-run] would remove binstub: $stub_path"
+        else
+            rm -f "$stub_path"
+            _changed "Removed binstub: $stub_path"
+        fi
     else
         _skip "Binstub not found"
     fi
 
-    # Remove install directory
+    # Remove install directory (config, DB, venv -- agent-codespaces has no
+    # --purge distinction; uninstall always removes the whole install dir).
     if [[ -d "$INSTALL_DIR" ]]; then
-        rm -rf "$INSTALL_DIR"
-        _changed "Removed: $INSTALL_DIR"
+        if $DRY_RUN; then
+            echo "[dry-run] would remove (config + DB + venv): $INSTALL_DIR"
+        else
+            rm -rf "$INSTALL_DIR"
+            _changed "Removed: $INSTALL_DIR"
+        fi
     else
         _skip "Install directory not found"
     fi
 
-    _ok "$SERVICE_NAME uninstalled"
+    if $DRY_RUN; then
+        echo "$SERVICE_NAME uninstall dry run complete -- nothing was changed"
+    else
+        _ok "$SERVICE_NAME uninstalled"
+    fi
 }
 
 do_status() {

@@ -2425,6 +2425,52 @@ def test_uninstall_plan_excludes_self(env):
     assert all(u["service"] != "agent-worktrees" for u in plan["updates"])
 
 
+def test_uninstall_plan_dry_run_appends_preview_flag(env):
+    """dry_run=True appends each installer's own real preview switch (POSIX
+    --dry-run pinned by this suite's platform mock), never guessed argv."""
+    env.install_payload("agent-bridge", "1.0.0", scope="universal")
+    env.deploy_runtime("agent-bridge", "1.0.0")
+    plan = reconcile.build_uninstall_plan(home=env.home, dry_run=True)
+    upd = [u for u in plan["updates"] if u["service"] == "agent-bridge"]
+    assert upd[0]["argv"][-1] == "--dry-run"
+
+
+def test_uninstall_plan_default_omits_preview_flag(env):
+    """dry_run defaults to False -- the real (mutating) uninstall argv."""
+    env.install_payload("agent-bridge", "1.0.0", scope="universal")
+    env.deploy_runtime("agent-bridge", "1.0.0")
+    plan = reconcile.build_uninstall_plan(home=env.home)
+    upd = [u for u in plan["updates"] if u["service"] == "agent-bridge"]
+    assert upd[0]["argv"][-1] == "uninstall"
+
+
+def test_uninstall_plan_dtssh_cascade_dry_run_appends_preview_flag(env):
+    pdir = env.install_payload("agent-ssh", "1.0.0", scope="none")
+    env.deploy_runtime("agent-ssh", "1.0.0")
+    host_scripts = pdir / "transports" / "dtssh" / "scripts"
+    host_scripts.mkdir(parents=True)
+    (host_scripts / "install-host.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+
+    plan = reconcile.build_uninstall_plan(home=env.home, dry_run=True)
+    cascaded = [u for u in plan["updates"] if u["service"] == "agent-ssh:dtssh-host"]
+    assert cascaded[0]["argv"][-1] == "--dry-run"
+
+
+def test_apply_uninstall_plan_dry_run_uses_preview_argv(env):
+    """apply_uninstall_plan(dry_run=True) -- the CLI's --verify -- executes
+    the PREVIEW argv (with the flag), not the real removal argv."""
+    env.install_payload("agent-bridge", "1.0.0", scope="universal")
+    env.deploy_runtime("agent-bridge", "1.0.0")
+    calls: list = []
+    summary = reconcile.apply_uninstall_plan(
+        home=env.home, dry_run=True,
+        runner=lambda argv: calls.append(list(argv)) or 0,
+    )
+    assert summary["action"] == "uninstall"
+    assert calls[0][-1] == "--dry-run"
+    assert summary["executed"][0]["ok"] is True
+
+
 def test_apply_uninstall_plan_runs_and_records(env):
     env.install_payload("agent-bridge", "1.0.0", scope="universal")
     env.deploy_runtime("agent-bridge", "1.0.0")

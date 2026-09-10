@@ -25,19 +25,22 @@ _install_agent_ssh_package() {
 
 ACTION="${AGENT_SSH_ACTION:-install}"
 FORCE=0
+DRY_RUN="${AGENT_SSH_DRY_RUN:-0}"
 INSTALL_DIR=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         install|update|status|uninstall|stamp|provision) ACTION="$1"; shift ;;
         --force) FORCE=1; shift ;;
+        --dry-run) DRY_RUN=1; shift ;;
         --install-dir) INSTALL_DIR="$2"; shift 2 ;;
         *) _fail "unknown argument: $1"; exit 2 ;;
     esac
 done
-# Honor an inherited action across the install-contract:v4 self-stage: the arg
-# loop above shifts "$@" empty before the self-stage re-execs, so a positional
-# action would be lost. Carry it through the exec via the env.
+# Honor an inherited action/flags across the install-contract:v4 self-stage:
+# the arg loop above shifts "$@" empty before the self-stage re-execs, so a
+# positional action (or --dry-run) would be lost. Carry them through via env.
 export AGENT_SSH_ACTION="$ACTION"
+export AGENT_SSH_DRY_RUN="$DRY_RUN"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -456,6 +459,13 @@ if [[ "$ACTION" == "status" ]]; then
 fi
 
 if [[ "$ACTION" == "uninstall" ]]; then
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        echo '(dry run -- nothing will be changed)'
+        [[ -e "$STUB" ]] && echo "[dry-run] would remove binstub: $STUB"
+        [[ -d "$INSTALL_DIR" ]] && echo "[dry-run] would remove (config + DB + venv): $INSTALL_DIR"
+        echo "agent-ssh uninstall dry run complete -- nothing was changed"
+        exit 0
+    fi
     rm -f "$STUB"
     rm -rf "$INSTALL_DIR"
     _ok 'agent-ssh runtime removed'

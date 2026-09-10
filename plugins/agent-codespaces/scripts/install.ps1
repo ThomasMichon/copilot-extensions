@@ -27,7 +27,11 @@ param(
 
     [string]$InstallDir,
 
-    [switch]$Force
+    [switch]$Force,
+
+    # Preview mode for the 'uninstall' action: print what WOULD be removed
+    # without touching the filesystem, scheduled task, or SSH connections.
+    [switch]$DryRun
 )
 
 Set-StrictMode -Version Latest
@@ -1055,12 +1059,25 @@ function Stop-ManagedSshConnections {
 
 function Invoke-Uninstall {
     Write-ServiceHeader "$ServiceName Uninstall"
+    if ($DryRun) { Write-Host '(dry run -- nothing will be changed)' -ForegroundColor Yellow }
 
-    # Remove the Connection Owner scheduled task (if provisioned).
-    Unregister-ConnectionOwnerService
+    if ($DryRun) {
+        if (Get-ScheduledTask -TaskName $OwnerTaskName -ErrorAction SilentlyContinue) {
+            Write-Host "[dry-run] would stop + remove scheduled task: $OwnerTaskName"
+        } else {
+            Write-ServiceSkipped "Connection Owner scheduled task not present: $OwnerTaskName"
+        }
+        $socketDir = Join-Path $InstallDir 'sockets'
+        if (Test-Path $socketDir) {
+            Write-Host "[dry-run] would stop managed SSH connections under: $socketDir"
+        }
+    } else {
+        # Remove the Connection Owner scheduled task (if provisioned).
+        Unregister-ConnectionOwnerService
 
-    # Stop managed SSH ControlMaster connections before removing files.
-    Stop-ManagedSshConnections
+        # Stop managed SSH ControlMaster connections before removing files.
+        Stop-ManagedSshConnections
+    }
 
     # A marketplace invocation self-stages below the runtime tree. Leave that
     # working directory before removing the tree so uninstall never deletes its
@@ -1068,8 +1085,10 @@ function Invoke-Uninstall {
     $cwd = [IO.Directory]::GetCurrentDirectory()
     $installPrefix = [IO.Path]::GetFullPath($InstallDir).TrimEnd('\', '/')
     if ($cwd.StartsWith($installPrefix, [StringComparison]::OrdinalIgnoreCase)) {
-        Set-Location -LiteralPath $env:USERPROFILE
-        [IO.Directory]::SetCurrentDirectory($env:USERPROFILE)
+        if (-not $DryRun) {
+            Set-Location -LiteralPath $env:USERPROFILE
+            [IO.Directory]::SetCurrentDirectory($env:USERPROFILE)
+        }
     }
 
     # Remove binstub
@@ -1077,8 +1096,12 @@ function Invoke-Uninstall {
     foreach ($stub in @('agent-codespaces.ps1', 'agent-codespaces.cmd')) {
         $stubPath = Join-Path $LocalBin $stub
         if (Test-Path $stubPath) {
-            Remove-Item $stubPath -Force
-            Write-ServiceChanged "Removed binstub: $stubPath"
+            if ($DryRun) {
+                Write-Host "[dry-run] would remove binstub: $stubPath"
+            } else {
+                Remove-Item $stubPath -Force
+                Write-ServiceChanged "Removed binstub: $stubPath"
+            }
             $removedStub = $true
         }
     }
@@ -1086,15 +1109,24 @@ function Invoke-Uninstall {
         Write-ServiceSkipped "Binstub not found"
     }
 
-    # Remove install directory
+    # Remove install directory (config, DB, venv -- agent-codespaces has no
+    # -Purge distinction; uninstall always removes the whole install dir).
     if (Test-Path $InstallDir) {
-        Remove-Item $InstallDir -Recurse -Force
-        Write-ServiceChanged "Removed: $InstallDir"
+        if ($DryRun) {
+            Write-Host "[dry-run] would remove (config + DB + venv): $InstallDir"
+        } else {
+            Remove-Item $InstallDir -Recurse -Force
+            Write-ServiceChanged "Removed: $InstallDir"
+        }
     } else {
         Write-ServiceSkipped "Install directory not found"
     }
 
-    Write-ServiceOk "$ServiceName uninstalled"
+    if ($DryRun) {
+        Write-Host "$ServiceName uninstall dry run complete -- nothing was changed" -ForegroundColor Yellow
+    } else {
+        Write-ServiceOk "$ServiceName uninstalled"
+    }
 }
 
 function Invoke-Status {

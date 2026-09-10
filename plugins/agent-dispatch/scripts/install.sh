@@ -197,6 +197,7 @@ shift || true
 NO_SERVICE=0
 NO_SUPERVISOR=0
 PURGE=0
+DRY_RUN=0
 INSTALL_DIR=""
 FORCE="${AGENT_DISPATCH_ALLOW_DOWNGRADE:-0}"
 [[ "$FORCE" == "1" ]] && FORCE=1 || FORCE=0
@@ -206,6 +207,7 @@ while [[ $# -gt 0 ]]; do
         --no-supervisor) NO_SUPERVISOR=1; shift ;;
         --purge) PURGE=1; shift ;;
         --force) FORCE=1; shift ;;
+        --dry-run) DRY_RUN=1; shift ;;
         --install-dir) INSTALL_DIR="$2"; shift 2 ;;
         *) shift ;;
     esac
@@ -1482,31 +1484,59 @@ do_status() {
 }
 
 do_uninstall() {
-    echo ''; echo '=== agent-dispatch uninstall ==='; echo ''
+    echo ''; echo '=== agent-dispatch uninstall ==='
+    [[ "$DRY_RUN" -eq 1 ]] && echo '(dry run -- nothing will be changed)'
+    echo ''
     if command -v systemctl >/dev/null 2>&1; then
-        _remove_all_supervisor_units
-        _ok "Embody supervisor services removed"
-        systemctl --user stop "$SYSTEMD_UNIT" 2>/dev/null || true
-        systemctl --user disable "$SYSTEMD_UNIT" 2>/dev/null || true
-        rm -f "$UNIT_DIR/$SYSTEMD_UNIT"
-        systemctl --user daemon-reload 2>/dev/null || true
-        _ok "Coordinator service removed"
+        if [[ "$DRY_RUN" -eq 1 ]]; then
+            echo "[dry-run] would stop supervisors + remove supervisor systemd units"
+            [[ -f "$UNIT_DIR/$SYSTEMD_UNIT" ]] && echo "[dry-run] would stop + disable + remove coordinator unit: $SYSTEMD_UNIT"
+        else
+            _remove_all_supervisor_units
+            _ok "Embody supervisor services removed"
+            systemctl --user stop "$SYSTEMD_UNIT" 2>/dev/null || true
+            systemctl --user disable "$SYSTEMD_UNIT" 2>/dev/null || true
+            rm -f "$UNIT_DIR/$SYSTEMD_UNIT"
+            systemctl --user daemon-reload 2>/dev/null || true
+            _ok "Coordinator service removed"
+        fi
     fi
-    rm -f "$STUB" "$BOARD_STUB"; _ok "Binstubs removed"
-    rm -f "$HOME/.agent-worktrees/pivots/agent-dispatch.json" 2>/dev/null || true
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        [[ -e "$STUB" || -e "$BOARD_STUB" ]] && echo "[dry-run] would remove binstubs: $STUB $BOARD_STUB"
+        [[ -f "$HOME/.agent-worktrees/pivots/agent-dispatch.json" ]] && \
+            echo "[dry-run] would remove pivot: $HOME/.agent-worktrees/pivots/agent-dispatch.json"
+    else
+        rm -f "$STUB" "$BOARD_STUB"; _ok "Binstubs removed"
+        rm -f "$HOME/.agent-worktrees/pivots/agent-dispatch.json" 2>/dev/null || true
+    fi
     if [[ "$PURGE" -eq 1 ]]; then
-        rm -rf "$INSTALL_DIR"; _ok "Runtime purged: $INSTALL_DIR (config + DB deleted)"
+        if [[ "$DRY_RUN" -eq 1 ]]; then
+            echo "[dry-run] would PURGE (config + DB): $INSTALL_DIR"
+        else
+            rm -rf "$INSTALL_DIR"; _ok "Runtime purged: $INSTALL_DIR (config + DB deleted)"
+        fi
     else
         # Versioned: the `.venv` link + the versions/ tree; else the real venv dir.
-        if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
-            [[ -L "$LINK_DIR" ]] && rm -f "$LINK_DIR"
-            [[ -d "$LINK_DIR" && ! -L "$LINK_DIR" ]] && rm -rf "$LINK_DIR"
-            [[ -d "$INSTALL_DIR/versions" ]] && rm -rf "$INSTALL_DIR/versions"
+        if [[ "$DRY_RUN" -eq 1 ]]; then
+            if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
+                [[ -e "$LINK_DIR" ]] && echo "[dry-run] would remove: $LINK_DIR"
+                [[ -d "$INSTALL_DIR/versions" ]] && echo "[dry-run] would remove: $INSTALL_DIR/versions"
+            else
+                [[ -d "$VENV_DIR" ]] && echo "[dry-run] would remove venv: $VENV_DIR"
+            fi
+            echo "[dry-run] config + DB at $INSTALL_DIR would be kept (--purge to delete)"
         else
-            rm -rf "$VENV_DIR"
+            if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
+                [[ -L "$LINK_DIR" ]] && rm -f "$LINK_DIR"
+                [[ -d "$LINK_DIR" && ! -L "$LINK_DIR" ]] && rm -rf "$LINK_DIR"
+                [[ -d "$INSTALL_DIR/versions" ]] && rm -rf "$INSTALL_DIR/versions"
+            else
+                rm -rf "$VENV_DIR"
+            fi
+            _ok "Venv removed (config + DB kept; --purge to delete)"
         fi
-        _ok "Venv removed (config + DB kept; --purge to delete)"
     fi
+    [[ "$DRY_RUN" -eq 1 ]] && echo "agent-dispatch uninstall dry run complete -- nothing was changed"
 }
 
 case "$ACTION" in

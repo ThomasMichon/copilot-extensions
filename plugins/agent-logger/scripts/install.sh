@@ -158,11 +158,16 @@ if [[ -z "${UV_HTTP_TIMEOUT:-}" ]]; then export UV_HTTP_TIMEOUT=60; fi
 if [[ $# -gt 0 ]]; then
     shift
 fi
+DRY_RUN=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --install-dir)
             INSTALL_DIR="${2:?--install-dir requires a directory}"
             shift 2
+            ;;
+        --dry-run)
+            DRY_RUN=1
+            shift
             ;;
         *)
             printf 'ERROR: unknown option: %s\n' "$1" >&2
@@ -853,17 +858,32 @@ case "${ACTION}" in
     ok "package + units updated"
     ;;
   uninstall)
-    systemctl --user disable --now "${TIMER_NAME}.timer" 2>/dev/null || true
-    rm -f "${UNIT_DIR}/${TIMER_NAME}.service" "${UNIT_DIR}/${TIMER_NAME}.timer"
-    systemctl --user daemon-reload || true
-    chg "timer removed (config at ${INSTALL_DIR} kept)"
-    if [[ "$PUBLISH_GLOBAL_BINSTUBS" == 1 ]]; then
-      for name in session-sync agent-logger collate-session read-session-digest prepare-session-log ramp-up-session; do
-        rm -f "${LOCAL_BIN}/${name}"
-      done
-      chg "binstubs removed from ${LOCAL_BIN}"
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      echo "(dry run -- nothing will be changed)"
+      if systemctl --user is-enabled "${TIMER_NAME}.timer" >/dev/null 2>&1 || \
+         [[ -f "${UNIT_DIR}/${TIMER_NAME}.timer" ]]; then
+        echo "[dry-run] would disable + remove: ${TIMER_NAME}.service / .timer"
+      fi
+      if [[ "$PUBLISH_GLOBAL_BINSTUBS" == 1 ]]; then
+        for name in session-sync agent-logger collate-session read-session-digest prepare-session-log ramp-up-session; do
+          [[ -e "${LOCAL_BIN}/${name}" ]] && echo "[dry-run] would remove binstub: ${LOCAL_BIN}/${name}"
+        done
+      fi
+      echo "[dry-run] config/session-state at ${INSTALL_DIR} would be kept (agent-logger uninstall never removes it)"
+      echo "agent-logger uninstall dry run complete -- nothing was changed"
     else
-      chg "scoped install left legacy global binstubs unchanged"
+      systemctl --user disable --now "${TIMER_NAME}.timer" 2>/dev/null || true
+      rm -f "${UNIT_DIR}/${TIMER_NAME}.service" "${UNIT_DIR}/${TIMER_NAME}.timer"
+      systemctl --user daemon-reload || true
+      chg "timer removed (config at ${INSTALL_DIR} kept)"
+      if [[ "$PUBLISH_GLOBAL_BINSTUBS" == 1 ]]; then
+        for name in session-sync agent-logger collate-session read-session-digest prepare-session-log ramp-up-session; do
+          rm -f "${LOCAL_BIN}/${name}"
+        done
+        chg "binstubs removed from ${LOCAL_BIN}"
+      else
+        chg "scoped install left legacy global binstubs unchanged"
+      fi
     fi
     ;;
   status)

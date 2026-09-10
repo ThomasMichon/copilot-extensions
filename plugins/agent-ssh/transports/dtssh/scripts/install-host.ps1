@@ -15,7 +15,11 @@ param(
     [switch]$SkipLogin,
     [switch]$ForegroundLauncher,
     [string]$DtsshVersion,
-    [string]$HostKeyBackupRoot
+    [string]$HostKeyBackupRoot,
+
+    # Preview mode for the 'uninstall' action: print what WOULD be removed
+    # without touching the launcher, Startup shortcut, or dispatch config.
+    [switch]$DryRun
 )
 
 $ErrorActionPreference = 'Stop'
@@ -746,11 +750,20 @@ switch ($Action) {
         Write-Host "Done. On clients: dtssh discover; ssh $Alias"
     }
     'uninstall' {
-        Stop-Launcher
-        Stop-HostLauncher
-        if (Test-Path $StartupLnk) { Remove-Item $StartupLnk -Force }
-        Remove-DispatchCompanionConfig
-        Write-Host "Removed launcher. Existing dtssh tunnel/client state is left intact."
+        if ($DryRun) {
+            Write-Host '(dry run -- nothing will be changed)' -ForegroundColor Yellow
+            Write-Host '[dry-run] would stop launcher + host launcher'
+            if (Test-Path $StartupLnk) { Write-Host "[dry-run] would remove Startup shortcut: $StartupLnk" }
+            if (Test-Path $CompanionConfigPath) { Write-Host "[dry-run] would remove dispatch companion config: $CompanionConfigPath" }
+            Write-Host "[dry-run] existing dtssh tunnel/client state would be left intact"
+            Write-Host 'dtssh host uninstall dry run complete -- nothing was changed' -ForegroundColor Yellow
+        } else {
+            Stop-Launcher
+            Stop-HostLauncher
+            if (Test-Path $StartupLnk) { Remove-Item $StartupLnk -Force }
+            Remove-DispatchCompanionConfig
+            Write-Host "Removed launcher. Existing dtssh tunnel/client state is left intact."
+        }
     }
     'start' {
         Install-HostIdentityValidationTools

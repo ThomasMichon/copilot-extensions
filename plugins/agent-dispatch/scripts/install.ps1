@@ -67,7 +67,11 @@ param(
     # ACCEPTED (so a caller such as the launch-path reconciler, which appends
     # it whenever a plugin declares `"zeroDowntimeUpdate": true`, doesn't
     # break) but has no effect.
-    [switch]$ZeroDowntime
+    [switch]$ZeroDowntime,
+
+    # Preview mode for the 'uninstall' action: print what WOULD be removed
+    # without touching the filesystem, scheduled task, autostart, or firewall.
+    [switch]$DryRun
 )
 
 Set-StrictMode -Version 2.0
@@ -2781,51 +2785,109 @@ function Invoke-Status {
 }
 
 function Invoke-Uninstall {
-    Write-Host ''; Write-Host '=== agent-dispatch uninstall ===' -ForegroundColor Cyan; Write-Host ''
-    Invoke-SupervisorsStop
-    $retired = Retire-SupervisorProcesses
-    if ($retired -gt 0) { Write-Ok "Embody supervisor stopped ($retired process(es))" }
-    Remove-AllSupervisorTasks
-    Write-Ok 'Embody supervisor tasks removed'
-    if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
-        Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
-        Write-Ok 'Coordinator task removed'
+    Write-Host ''; Write-Host '=== agent-dispatch uninstall ===' -ForegroundColor Cyan
+    if ($DryRun) { Write-Host '(dry run -- nothing will be changed)' -ForegroundColor Yellow }
+    Write-Host ''
+
+    if ($DryRun) {
+        Write-Host '[dry-run] would stop supervisors + retire supervisor processes'
+        if (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) {
+            $supervisorTasks = @(Get-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue) +
+                @(Get-ScheduledTask -TaskName "$SupervisorTaskName-*" -ErrorAction SilentlyContinue)
+            foreach ($t in $supervisorTasks) { Write-Host "[dry-run] would remove supervisor task: $($t.TaskName)" }
+        }
+        $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+        if (Get-ItemProperty -Path $runKey -Name $SupervisorTaskName -ErrorAction SilentlyContinue) {
+            Write-Host "[dry-run] would remove supervisor autostart (HKCU Run): $SupervisorTaskName"
+        }
+    } else {
+        Invoke-SupervisorsStop
+        $retired = Retire-SupervisorProcesses
+        if ($retired -gt 0) { Write-Ok "Embody supervisor stopped ($retired process(es))" }
+        Remove-AllSupervisorTasks
+        Write-Ok 'Embody supervisor tasks removed'
     }
-    if (Remove-CoordinatorAutostart) { Write-Ok 'Coordinator logon auto-start (HKCU Run) removed' }
+
+    if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
+        if ($DryRun) {
+            Write-Host "[dry-run] would remove scheduled task: $TaskName"
+        } else {
+            Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+            Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+            Write-Ok 'Coordinator task removed'
+        }
+    }
+
+    $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+    if (Get-ItemProperty -Path $runKey -Name $TaskName -ErrorAction SilentlyContinue) {
+        if ($DryRun) {
+            Write-Host "[dry-run] would remove coordinator logon auto-start (HKCU Run): $TaskName"
+        } elseif (Remove-CoordinatorAutostart) {
+            Write-Ok 'Coordinator logon auto-start (HKCU Run) removed'
+        }
+    }
+
     if (Get-Command Get-NetFirewallRule -ErrorAction SilentlyContinue) {
         $fwRule = 'agent-dispatch coordinator (WSL)'
         if (Get-NetFirewallRule -DisplayName $fwRule -ErrorAction SilentlyContinue) {
-            Remove-NetFirewallRule -DisplayName $fwRule -ErrorAction SilentlyContinue
-            Write-Ok 'Coordinator firewall rule removed'
+            if ($DryRun) {
+                Write-Host "[dry-run] would remove firewall rule: $fwRule"
+            } else {
+                Remove-NetFirewallRule -DisplayName $fwRule -ErrorAction SilentlyContinue
+                Write-Ok 'Coordinator firewall rule removed'
+            }
         }
     }
+
     foreach ($n in @(
         'agent-dispatch.cmd', 'agent-dispatch.ps1', 'agent-dispatch',
         'agent-dispatch-board.cmd'
     )) {
         $p = Join-Path $LocalBin $n
-        if (Test-Path $p) { Remove-Item $p -Force -ErrorAction SilentlyContinue }
+        if (Test-Path $p) {
+            if ($DryRun) { Write-Host "[dry-run] would remove binstub: $p" }
+            else { Remove-Item $p -Force -ErrorAction SilentlyContinue }
+        }
     }
-    Write-Ok 'Binstub removed'
+    if (-not $DryRun) { Write-Ok 'Binstub removed' }
+
     $pivot = Join-Path $env:USERPROFILE '.agent-worktrees\pivots\agent-dispatch.json'
-    if (Test-Path $pivot) { Remove-Item $pivot -Force -ErrorAction SilentlyContinue }
+    if (Test-Path $pivot) {
+        if ($DryRun) { Write-Host "[dry-run] would remove pivot: $pivot" }
+        else { Remove-Item $pivot -Force -ErrorAction SilentlyContinue }
+    }
+
     if ($Purge) {
-        if (Test-Path $InstallDir) { Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue }
-        Write-Ok "Runtime purged: $InstallDir (config + DB deleted)"
+        if (Test-Path $InstallDir) {
+            if ($DryRun) { Write-Host "[dry-run] would PURGE (config + DB): $InstallDir" }
+            else { Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue; Write-Ok "Runtime purged: $InstallDir (config + DB deleted)" }
+        }
     } else {
         # Remove the runtime venv. Versioned: the `.venv` link + the versions/
         # tree; otherwise the single real venv dir.
         if ($VersionedRuntime) {
-            if (Test-VenvIsLink $LinkDir) { & cmd /c rmdir "$LinkDir" 2>$null }
-            elseif (Test-Path $LinkDir) { Remove-Item -Recurse -Force $LinkDir -ErrorAction SilentlyContinue }
-            $verRoot = Join-Path $InstallDir 'versions'
-            if (Test-Path $verRoot) { Remove-Item -Recurse -Force $verRoot -ErrorAction SilentlyContinue }
+            if ($DryRun) {
+                if ((Test-VenvIsLink $LinkDir) -or (Test-Path $LinkDir)) { Write-Host "[dry-run] would remove: $LinkDir" }
+                $verRoot = Join-Path $InstallDir 'versions'
+                if (Test-Path $verRoot) { Write-Host "[dry-run] would remove: $verRoot" }
+            } else {
+                if (Test-VenvIsLink $LinkDir) { & cmd /c rmdir "$LinkDir" 2>$null }
+                elseif (Test-Path $LinkDir) { Remove-Item -Recurse -Force $LinkDir -ErrorAction SilentlyContinue }
+                $verRoot = Join-Path $InstallDir 'versions'
+                if (Test-Path $verRoot) { Remove-Item -Recurse -Force $verRoot -ErrorAction SilentlyContinue }
+            }
         } elseif (Test-Path $VenvDir) {
-            Remove-Item -Recurse -Force $VenvDir -ErrorAction SilentlyContinue
+            if ($DryRun) { Write-Host "[dry-run] would remove venv: $VenvDir" }
+            else { Remove-Item -Recurse -Force $VenvDir -ErrorAction SilentlyContinue }
         }
-        Write-Ok 'Venv removed (config + DB kept; -Purge to delete)'
+        if ($DryRun) {
+            Write-Host "[dry-run] config + DB at $InstallDir would be kept (-Purge to delete)"
+        } else {
+            Write-Ok 'Venv removed (config + DB kept; -Purge to delete)'
+        }
     }
+
+    if ($DryRun) { Write-Host 'agent-dispatch uninstall dry run complete -- nothing was changed' -ForegroundColor Yellow }
 }
 
 switch ($Action) {

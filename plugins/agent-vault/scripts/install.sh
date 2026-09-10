@@ -160,6 +160,7 @@ shift || true
 
 NO_SERVICE=0
 PURGE=0
+DRY_RUN=0
 INSTALL_DIR=""
 FORCE="${AGENT_VAULT_ALLOW_DOWNGRADE:-0}"
 [[ "$FORCE" == "1" ]] && FORCE=1 || FORCE=0
@@ -168,6 +169,7 @@ while [[ $# -gt 0 ]]; do
         --no-service) NO_SERVICE=1; shift ;;
         --purge) PURGE=1; shift ;;
         --force) FORCE=1; shift ;;
+        --dry-run) DRY_RUN=1; shift ;;
         --install-dir) INSTALL_DIR="${2:?--install-dir requires a directory}"; shift 2 ;;
         *) _fail "Unknown option: $1"; exit 2 ;;
     esac
@@ -794,29 +796,55 @@ do_status() {
 }
 
 do_uninstall() {
-    echo ''; echo '=== agent-vault uninstall ==='; echo ''
+    echo ''; echo '=== agent-vault uninstall ==='
+    [[ "$DRY_RUN" -eq 1 ]] && echo '(dry run -- nothing will be changed)'
+    echo ''
     if command -v systemctl >/dev/null 2>&1; then
-        systemctl --user stop "$SYSTEMD_UNIT" 2>/dev/null || true
-        systemctl --user disable "$SYSTEMD_UNIT" 2>/dev/null || true
-        rm -f "$UNIT_DIR/$SYSTEMD_UNIT"
-        systemctl --user daemon-reload 2>/dev/null || true
-        _ok "Service removed"
+        if [[ "$DRY_RUN" -eq 1 ]]; then
+            [[ -f "$UNIT_DIR/$SYSTEMD_UNIT" ]] && echo "[dry-run] would stop + disable + remove: $SYSTEMD_UNIT"
+        else
+            systemctl --user stop "$SYSTEMD_UNIT" 2>/dev/null || true
+            systemctl --user disable "$SYSTEMD_UNIT" 2>/dev/null || true
+            rm -f "$UNIT_DIR/$SYSTEMD_UNIT"
+            systemctl --user daemon-reload 2>/dev/null || true
+            _ok "Service removed"
+        fi
     fi
-    rm -f "$STUB"; _ok "Binstub removed"
-    rm -f "$ASKPASS"; _ok "SUDO_ASKPASS helper removed"
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        [[ -e "$STUB" ]] && echo "[dry-run] would remove binstub: $STUB"
+        [[ -e "$ASKPASS" ]] && echo "[dry-run] would remove SUDO_ASKPASS helper: $ASKPASS"
+    else
+        rm -f "$STUB"; _ok "Binstub removed"
+        rm -f "$ASKPASS"; _ok "SUDO_ASKPASS helper removed"
+    fi
     if [[ "$PURGE" -eq 1 ]]; then
-        rm -rf "$INSTALL_DIR"; _ok "Runtime purged: $INSTALL_DIR"
+        if [[ "$DRY_RUN" -eq 1 ]]; then
+            echo "[dry-run] would PURGE: $INSTALL_DIR"
+        else
+            rm -rf "$INSTALL_DIR"; _ok "Runtime purged: $INSTALL_DIR"
+        fi
     else
         # Remove the runtime venv. Versioned: the `.venv` link + the versions/
         # tree; otherwise the single real venv dir.
-        if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
-            [[ -L "$LINK_DIR" ]] && rm -f "$LINK_DIR"
-            [[ -d "$LINK_DIR" && ! -L "$LINK_DIR" ]] && rm -rf "$LINK_DIR"
-            [[ -d "$INSTALL_DIR/versions" ]] && rm -rf "$INSTALL_DIR/versions"
+        if [[ "$DRY_RUN" -eq 1 ]]; then
+            if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
+                [[ -e "$LINK_DIR" ]] && echo "[dry-run] would remove: $LINK_DIR"
+                [[ -d "$INSTALL_DIR/versions" ]] && echo "[dry-run] would remove: $INSTALL_DIR/versions"
+            else
+                [[ -d "$VENV_DIR" ]] && echo "[dry-run] would remove venv: $VENV_DIR"
+            fi
+            echo "[dry-run] state at $INSTALL_DIR would be kept (--purge to delete)"
+            echo "agent-vault uninstall dry run complete -- nothing was changed"
         else
-            rm -rf "$VENV_DIR"
+            if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
+                [[ -L "$LINK_DIR" ]] && rm -f "$LINK_DIR"
+                [[ -d "$LINK_DIR" && ! -L "$LINK_DIR" ]] && rm -rf "$LINK_DIR"
+                [[ -d "$INSTALL_DIR/versions" ]] && rm -rf "$INSTALL_DIR/versions"
+            else
+                rm -rf "$VENV_DIR"
+            fi
+            _ok "Venv removed (state kept; --purge to delete)"
         fi
-        _ok "Venv removed (state kept; --purge to delete)"
     fi
 }
 
