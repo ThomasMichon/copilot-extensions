@@ -89,6 +89,12 @@ the other mode, including same-owner fallback. The remote authority catalog is
 also checked and admission/publication serialized before a child starts.
 Uncertain or corrupt authority fails closed.
 
+An ACP create or resume targeting a native-owned CodeSpace returns HTTP **409**
+with `detail.code: native_incumbent`. The refusal occurs before ACP session
+allocation or spawning. Session/worktree resume and handoff adapters preserve
+that classification instead of reporting an internal error or trying a fresh
+ACP session.
+
 The current serving bridge generation owns provider transports. A superseded
 controller detaches its infrastructure without terminating the remote native
 execution; its successor reconnects from durable identity. The native registry
@@ -125,6 +131,17 @@ The provider invokes its existing agent-logger-backed transcript recovery and
 preserves the CodeSpace. A recovery failure is reported explicitly and leaves
 venue files intact; terminal exit is not permission to delete the venue.
 Unconfirmed retirement retains ownership and remains a blocker.
+
+Transcript recovery is a separate, optional capability: the controlling
+provider needs an installed and enabled **agent-logger from the same
+marketplace**, its working `session-sync push` runtime, and configured storage.
+Native startup/registration and verified retirement do not require enabling
+logger. Without that prerequisite, a stop can correctly return `state: stopped`
+and `recovery.ok: false`, with an explicit unavailable reason. This means the
+process was retired, **not** that its transcript was rescued; even a nonzero
+`session_count` does not prove successful storage. Preserve the venue and its
+session files. Do not silently enable logger or treat that result as permission
+to delete the CodeSpace.
 
 Admission failures before infrastructure acquisition retain proof that no
 resources were started. Generation-bound stop can retire that unlaunched

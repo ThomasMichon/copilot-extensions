@@ -37,6 +37,7 @@ from ..models import (
     SubmitPromptRequest,
     SubmitPromptResponse,
 )
+from ..native_store import NativeError
 from ..result_snapshot import (
     DEFAULT_MAX_ITEMS,
     DEFAULT_MAX_TEXT_CHARS,
@@ -730,6 +731,8 @@ async def start_session(req: StartSessionRequest, request: Request):
             model=req.model, effort=req.effort,
             parity_fault=req.parity_fault,
         )
+    except NativeError as exc:
+        raise HTTPException(exc.status, detail={"code": exc.code, "detail": exc.detail}) from exc
     except DaemonDrainingError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except SessionConflictError as exc:
@@ -1051,6 +1054,8 @@ async def submit_prompt(
         else:
             turn_index = await mgr.submit_prompt(session_id, req.prompt)
             result = {"queued": False, "turn_index": turn_index}
+    except NativeError as exc:
+        raise HTTPException(exc.status, detail={"code": exc.code, "detail": exc.detail}) from exc
     except DaemonDrainingError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except KeyError:
@@ -1566,6 +1571,8 @@ async def resume_session(session_id: str, request: Request):
     mgr: SessionManager = request.app.state.session_manager
     try:
         session = await mgr.resume_session(session_id)
+    except NativeError as exc:
+        raise HTTPException(exc.status, detail={"code": exc.code, "detail": exc.detail}) from exc
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
     except ValueError as exc:
@@ -1607,6 +1614,8 @@ async def handoff_session(
     mgr: SessionManager = request.app.state.session_manager
     try:
         successor = await mgr.handoff_session(session_id, reason=reason, seed=seed)
+    except NativeError as exc:
+        raise HTTPException(exc.status, detail={"code": exc.code, "detail": exc.detail}) from exc
     except DaemonDrainingError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except KeyError:
