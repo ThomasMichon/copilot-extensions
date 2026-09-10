@@ -434,6 +434,34 @@ scenarios.
 
 ## Journal
 
+### 2026-09-10 - Phase 9: fold in a corrected bridge-machine liveness model
+
+- A downstream deployment's operator design conversation (2026-09-10) found
+  a load-bearing bug class in exactly the bridge/session machine Phase 9
+  already scopes: a resume path 404'd whenever a target-liveness cache
+  (a discovery index) had no entry for the target, even though a live,
+  authoritative existence/liveness check further down the same code path
+  would have classified it correctly. The cache was accidentally load-
+  bearing as the *authority* on target existence, rather than the
+  performance shortcut it was meant to be.
+- Folded the corrected model into Phase 9's bridge/session machine
+  section: liveness is always a **live, three-tier read** (hot / warm /
+  cold), never gated by cache membership; a cache miss or stale entry
+  falls through to a live check instead of failing. Re-seated the
+  resulting verb shape into the machine spec: one universal "resume"
+  keyed by worktree or repo/agent identity, returning hot/warm/cold as an
+  *observed result* rather than a caller precondition; a narrower
+  exact-session-id resume; a declared error for "create fresh" against a
+  single-head target instead of a separate reclaim escape hatch; and a
+  distinct "discard and roll forward" handoff gesture.
+- Added two simulation-track fixtures (stale/empty liveness cache;
+  already-hot target refusing silent double-attach) and a self-repair
+  taxonomy example for the cache-vs-live-check gap.
+- This is design-only, same as the rest of Phase 9; it also matches the
+  companion agent-bridge vision's own concurrent revision on this point,
+  so this effort's bridge-machine section and that vision stay in sync
+  rather than diverging.
+
 ### 2026-09-10 - Phase 9: architecture-first redirect before acting on Phase 8's candidates
 
 - Operator direction, following Phase 8's landing: do not start implementing
