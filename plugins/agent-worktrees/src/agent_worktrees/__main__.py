@@ -22067,6 +22067,20 @@ def build_parser() -> argparse.ArgumentParser:
         "Picker/operator update flow opts in (#1393).",
     )
 
+    # uninstall-plugins (sweep every deployed core plugin runtime -- teardown)
+    sp = sub.add_parser(
+        "uninstall-plugins",
+        help="Sweep every deployed core copilot-extensions plugin runtime "
+        "via each plugin's own uninstall action (JSON; dry-run by default)",
+    )
+    sp.add_argument(
+        "--apply",
+        action="store_true",
+        help="Actually invoke each plugin's uninstall action. Default is "
+        "dry-run: print the plan (and any diagnostics naming what this "
+        "sweep cannot remove) without touching anything.",
+    )
+
     # reconcile-binstubs (project launchers in ~/.local/bin vs projects.yaml)
     reconcile_binstubs_parser = sub.add_parser(
         "reconcile-binstubs",
@@ -24868,6 +24882,30 @@ def cmd_reconcile_plugins(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_uninstall_plugins(args: argparse.Namespace) -> int:
+    """Sweep every deployed core plugin runtime via its own uninstall action.
+
+    Dry-run by default (``build_uninstall_plan`` -- prints the JSON plan plus
+    any diagnostics naming what the sweep found it cannot remove, without
+    touching anything). ``--apply`` executes it in-process
+    (``apply_uninstall_plan``) and exits non-zero if any step failed.
+    """
+    from . import reconcile
+
+    if getattr(args, "apply", False):
+        def _log(msg: str) -> None:
+            print(msg, file=sys.stderr, flush=True)
+
+        summary = reconcile.apply_uninstall_plan(log=_log)
+        failed = [item for item in summary.get("executed", []) if not item.get("ok", False)]
+        print(json.dumps(summary))
+        return 1 if failed else 0
+
+    plan = reconcile.build_uninstall_plan()
+    print(json.dumps(plan, indent=2))
+    return 0
+
+
 def cmd_reconcile_binstubs(args: argparse.Namespace) -> int:
     """Reconcile ~/.local/bin project binstubs against the projects registry."""
     try:
@@ -25122,6 +25160,7 @@ COMMAND_MAP = {
     "reconcile-marketplaces": cmd_reconcile_marketplaces,
     "stage-update": cmd_stage_update,
     "reconcile-plugins": cmd_reconcile_plugins,
+    "uninstall-plugins": cmd_uninstall_plugins,
     "reconcile-binstubs": cmd_reconcile_binstubs,
     "register-project-entry": cmd_register_project_entry,
     "dev": cmd_dev,

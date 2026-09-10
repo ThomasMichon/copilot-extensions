@@ -473,6 +473,7 @@ to the effort after release.
 | `validate` | Validate core infrastructure files |
 | `pre-launch` | Check bootstrap staleness (JSON output, for launch wrappers) |
 | `reconcile-plugins` | Reconcile repo-adopted plugin payloads + gated runtimes (JSON output, for launch wrappers) |
+| `uninstall-plugins` | Sweep every deployed core plugin runtime via each plugin's own uninstall action (JSON; dry-run by default) |
 
 ### Repo-adopted plugin reconciliation (`reconcile-plugins`)
 
@@ -496,6 +497,34 @@ legacy root without an `install.json` receipt. Namespaced active or
 deactivation-required state reconciles only after the helper validates the exact
 plugin receipt and root; activation-required, maintenance, invalid, foreign,
 orphaned, revalidation, and provenance-uncertain states remain read-only.
+
+### Teardown sweep (`uninstall-plugins`)
+
+The symmetric counterpart to `reconcile-plugins`, but for removal rather than
+install/update: it discovers every core-marketplace plugin payload actually
+installed on this machine (independent of any repo's current
+`enabledPlugins` -- disabling a plugin does not by itself remove its
+already-deployed runtime/autorun state) and, for each with evidence of a
+deployed runtime (`~/.<name>/deploy-manifest.json`), invokes that plugin's own
+`install.{sh,ps1} uninstall` action. No purge/remove-config flag is ever
+appended, so each plugin's own keep-list (durable state/history/DB files)
+stays intact -- only executables, autorun registrations, and recomputable
+runtime state are removed. Default is a **dry-run**: `uninstall-plugins`
+prints the JSON plan (and any `diagnostics` naming what it found it cannot
+remove) without touching anything; pass `--apply` to execute it in-process.
+
+Known gaps this sweep surfaces as `diagnostics` rather than silently missing:
+a plugin deployed only via an idempotent `init.*` bootstrap script (no
+`install.{sh,ps1}`, e.g. `agent-containers`, `agent-mcp`, `agent-machines`)
+has no supported uninstall action (`uninstall-unsupported`); `wsl-setup`'s
+`WSL-Keepalive-Ubuntu` scheduled task is installed via
+`skills/setting-up-wsl/references/wsl-keepalive.ps1`, outside this
+convention (`manual-cleanup-required`). `agent-ssh` gets one cascaded step:
+its own uninstall does not remove the separate dtssh transport's
+Startup-folder host listener, so
+`transports/dtssh/scripts/install-host.{ps1,sh} uninstall` is appended
+automatically (or reported as `dtssh-host-script-missing`). `agent-worktrees`
+itself is excluded -- use its own top-level `uninstall` verb.
 
 ### Deployment ownership (`extensions.agent-worktrees.auto_update`)
 
