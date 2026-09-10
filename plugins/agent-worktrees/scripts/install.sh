@@ -440,21 +440,29 @@ PROJECT_NAME=""
 if [[ -n "$PROJECT_NAME_ARG" ]]; then
     PROJECT_NAME="$PROJECT_NAME_ARG"
 else
-    # Try to infer from CWD basename matching an existing config dir
+    # Try to infer from CWD basename matching an existing config dir. Never
+    # infer the reserved runtime name itself: ~/.agent-worktrees/config.yaml is
+    # the TOOL's OWN runtime config (always present once installed), not a
+    # user-created project -- inferring it whenever the CWD happens to be a
+    # directory literally named `agent-worktrees` (e.g. this plugin's own
+    # checkout/payload dir) is a guaranteed false positive, not something to
+    # warn about on every routine invocation. Skip inference for it entirely
+    # so the noisy message below is reserved for a genuine explicit
+    # --project-name mistake.
     _cwd_name="$(basename "$PWD")"
-    if [[ -f "$HOME/.$_cwd_name/config.yaml" ]]; then
+    if [[ "$_cwd_name" != "agent-worktrees" && -f "$HOME/.$_cwd_name/config.yaml" ]]; then
         PROJECT_NAME="$_cwd_name"
     fi
 fi
 # Reserved-name guard: `agent-worktrees` is the runtime's own global command
 # (the project-agnostic shim from bin/agent-worktrees, deployed by
-# deploy_tool_binstub), never a per-project launcher. If inference or an
-# explicit flag resolves the name to it (e.g. the installer run from a dir
-# literally named `agent-worktrees`, whose ~/.agent-worktrees/config.yaml always
-# exists), a project deploy would overwrite the global shim with a
-# self-`--project` binstub -- historically the seed of a fork-storm. Never treat
-# the reserved runtime name as a project. (echo, not warn(): the output helpers
-# are not defined until later in the script.)
+# deploy_tool_binstub), never a per-project launcher. Auto-inference above
+# already never resolves to it, so reaching here means an EXPLICIT
+# --project-name agent-worktrees was passed -- a genuine mistake worth
+# flagging, since a project deploy would overwrite the global shim with a
+# self-`--project` binstub -- historically the seed of a fork-storm. Never
+# treat the reserved runtime name as a project. (echo, not warn(): the output
+# helpers are not defined until later in the script.)
 if [[ "$PROJECT_NAME" == "agent-worktrees" ]]; then
     echo "  ! Ignoring reserved runtime name 'agent-worktrees' as a project (global command is owned by the tool binstub)" >&2
     PROJECT_NAME=""
