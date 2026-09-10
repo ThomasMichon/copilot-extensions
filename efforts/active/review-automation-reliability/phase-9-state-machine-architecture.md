@@ -234,16 +234,17 @@ Each scenario below is a deterministic, unit-testable fixture exercising
 one or more of the three machines' coupling, not a live integration test.
 The driver
 (`../../../plugins/agent-dispatch/src/agent_dispatch/simulation.py`) is a
-generic `World` (a task `VersionedRecord` paired with a bridge one) plus
-`step_task`/`step_bridge` helpers that resolve a named transition from the
+generic `World` (a task `VersionedRecord`, a bridge one, and an optional
+provider-approval one) plus `step_task`/`step_bridge`/
+`step_provider_approval` helpers that resolve a named transition from the
 owning declared table and apply it through `machine_coupling.apply_transition`
 -- it declares no new machine behavior, it only drives the already-declared
-tables. The five scenarios below are expressible against the machines'
-current vocabulary and are covered by
-`../../../plugins/agent-dispatch/tests/test_simulation.py`; the remaining
-five need a vocabulary extension (revision/head tracking on the provider
-machine, version/EOL on the bridge machine, a steer transition on the task
-machine) and are deferred to a follow-up slice, tracked as open items below:
+tables. Seven of the ten scenarios below are now covered
+(`../../../plugins/agent-dispatch/tests/test_simulation.py` and
+`../../../plugins/agent-dispatch/tests/test_simulation_revision.py`); the
+remaining three need a vocabulary extension (version/EOL on the bridge
+machine, a steer transition on the task machine) and are deferred to a
+follow-up slice, tracked as open items below:
 
 - [ ] Bridge caught mid-version-update while a task holds an active
   session against it. *(deferred -- needs a version/EOL concept on the
@@ -255,15 +256,20 @@ machine) and are deferred to a follow-up slice, tracked as open items below:
 - [ ] The dispatch supervisor is about to end-of-life a bridge/runtime
   version while tasks are still attached to it. *(deferred -- same
   version/EOL gap as above.)*
-- [ ] The provider's base revision moves (unrelated commits land) while a
+- [x] The provider's base revision moves (unrelated commits land) while a
   task's analysis is in flight, with and without the submitter's actual
   diff changing (base-only vs. substantive -- Phase 8's base-only
-  detection candidate). *(deferred -- needs a revision/head-token concept
-  on the provider machine, not yet declared.)*
-- [ ] A verdict/response from a reviewer arrives after a newer PR update
+  detection candidate). Declared as
+  `provider_state_machine.Revision`/`RevisionChangeKind`/
+  `classify_revision_change`, folding Phase 8's base-only detection
+  candidate directly into the provider machine rather than a standalone
+  feature.
+- [x] A verdict/response from a reviewer arrives after a newer PR update
   has already superseded the revision it was computed against (out-of-order
-  delivery relative to a provider update). *(deferred -- same
-  revision/head-token gap as above.)*
+  delivery relative to a provider update). Guarded by
+  `provider_state_machine.verdict_applies_to_current_revision`, which the
+  evaluator consults before applying any verdict-driven approval
+  transition.
 - [x] Two provider events for the same task arrive out of order or
   duplicated (idempotent-replay proof for Phase 2's dedup requirement).
 - [ ] A steering input arrives while the evaluator is mid-transition on the
