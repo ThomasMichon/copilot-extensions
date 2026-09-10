@@ -26,7 +26,7 @@ async def test_stop_reconnects_only_retirement_control_when_application_ports_fa
     activated = False
 
     class Transport:
-        def __init__(self, prefix, row, on_reserved):
+        def __init__(self, prefix, row, on_reserved, on_progress=None):
             self.on_reserved = on_reserved
 
         async def start(self, *, resume, retirement_only=False):
@@ -82,7 +82,7 @@ async def test_unconfirmed_retirement_stays_stopping_and_never_activates(tmp_pat
     calls = []
 
     class Transport:
-        def __init__(self, prefix, row, on_reserved):
+        def __init__(self, prefix, row, on_reserved, on_progress=None):
             pass
 
         async def start(self, *, resume, retirement_only=False):

@@ -27,7 +27,7 @@ class Backend:
     represented = True
     stopped = False
 
-    def __init__(self, prefix, row, on_reserved):
+    def __init__(self, prefix, row, on_reserved, on_progress=None):
         self.row, self.on_reserved = row, on_reserved
         self.closed = False
 

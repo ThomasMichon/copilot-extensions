@@ -47,6 +47,25 @@ process. Transport loss retries the same execution/generation; uncertain input
 is not replayed. The terminal has a bounded replay tail and supports resize.
 The native CLI retains its own permissions and interactive prompts.
 
+Before the first successful terminal attachment, the presentation allows a fixed
+**1800-second preparation window**, matching the provider's readiness budget.
+After an attachment has succeeded, transport loss gets **120 seconds from the
+last disconnect** to reconnect. A recovery status never resets that window back
+to preparation. Healthy attached terminals are not limited by either deadline;
+TCP/WebSocket handshakes and status waits remain bounded. Expiry only ends the
+presentation with an explicit error: it does not restart the owner, relaunch
+Copilot, clear ownership, or change execution/generation. `Ctrl+]` and caller
+cancellation remain available while waiting. Stopped/rejected or mismatched
+identities are handled explicitly rather than retried as preparation.
+
+During preparation, `phase` can report
+`preparing/<substage>/<started|reached|failed>`. Substages are a fixed allowlist:
+local configuration, owner admission, SSH, target authentication, target setup,
+worktree, and native-host readiness. These identity-bound checkpoints reuse the
+provider's tracker and carry no raw stderr, commands, paths, credentials, or
+arbitrary detail. Older providers remain compatible with generic preparation
+status. Late progress cannot overwrite launch, ready, stopping, or stopped state.
+
 ## Ownership and restart
 
 The native host reuses Session Host framing, connect nonces, process survival,

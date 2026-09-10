@@ -18,6 +18,11 @@ from .session_host.launcher import host_spawn_kwargs
 
 CAPABILITY = "codespace-native-control-v1"
 _LIVE = ("starting", "ready", "unrepresented", "unreachable")
+_PROGRESS_PHASES = frozenset({
+    "local-config", "owner-admission", "ssh-to-target", "target-auth-env",
+    "target-binstub", "worktree", "native-host",
+})
+_PROGRESS_STATUSES = frozenset({"started", "reached", "failed"})
 
 
 def validate_request(request: dict) -> dict:
@@ -57,8 +62,9 @@ def validate_request(request: dict) -> dict:
 
 
 class ProviderTransport:
-    def __init__(self, prefix: list[str], row: dict, on_reserved) -> None:
+    def __init__(self, prefix: list[str], row: dict, on_reserved, on_progress=None) -> None:
         self.prefix, self.row, self.on_reserved = prefix, row, on_reserved
+        self.on_progress = on_progress
         self.process = None
         self.pending: dict[str, asyncio.Future] = {}
         self.reader_task = self.stderr_task = None
@@ -105,6 +111,17 @@ class ProviderTransport:
                 value = json.loads(raw)
                 if value.get("event") == "reserved":
                     self.on_reserved()
+                elif value.get("event") == "progress":
+                    if (
+                        self.on_progress is not None
+                        and value.get("executionId") == self.row["id"]
+                        and value.get("generation") == self.row["generation"]
+                        and isinstance(value.get("phase"), str)
+                        and value["phase"] in _PROGRESS_PHASES
+                        and isinstance(value.get("status"), str)
+                        and value["status"] in _PROGRESS_STATUSES
+                    ):
+                        self.on_progress(value["phase"], value["status"])
                 elif value.get("event") == "rejected":
                     if not self.ready.done():
                         self.ready.set_exception(NativeError("venue_busy", "Another execution owns the CodeSpace"))
@@ -210,6 +227,25 @@ class NativeManager:
         self.tasks[row["id"]] = task
         task.add_done_callback(lambda _: self.tasks.pop(row["id"], None))
 
+    @staticmethod
+    def _save_progress(store, execution_id, generation, phase, status):
+        if (
+            not isinstance(phase, str) or phase not in _PROGRESS_PHASES
+            or not isinstance(status, str) or status not in _PROGRESS_STATUSES
+        ):
+            return
+        row = store.get(execution_id, generation)
+        if row["state"] not in {"starting", "unreachable"} or row["data"].get("launchRequested"):
+            return
+        try:
+            store.update(
+                execution_id, generation, phase=f"preparing/{phase}/{status}",
+                allowed_states=("starting", "unreachable"),
+            )
+        except NativeError as exc:
+            if exc.code != "state_changed":
+                raise
+
     async def _prepare(
         self, execution_id: str, generation: str, *, launch: bool = False,
         retirement_only: bool = False,
@@ -230,6 +266,9 @@ class NativeManager:
                         lambda: store.update(
                             execution_id, generation, infrastructureOwned=True,
                             allowed_states=(*_LIVE, "stopping"),
+                        ),
+                        on_progress=lambda phase, status: self._save_progress(
+                            store, execution_id, generation, phase, status,
                         ),
                     )
                     self.transports[execution_id] = transport

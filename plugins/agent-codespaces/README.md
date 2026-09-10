@@ -185,6 +185,12 @@ shortcut is introduced.
 
 ### Native retirement control
 
+The native transport emits allowlisted preparation checkpoints for local
+configuration, owner admission, SSH, target auth/setup, worktree, and native-host
+readiness. The bridge can expose these through the existing native receipt's
+`phase`; no raw stderr, command payload, credential, or arbitrary detail is
+forwarded. Progress does not establish native readiness or alter ownership.
+
 Native retirement uses an identity-bound control-only reconnection when normal
 infrastructure is unavailable. It does not rebind application forwards or
 activate a paused native child. Shared required-relay/auth and ownership checks

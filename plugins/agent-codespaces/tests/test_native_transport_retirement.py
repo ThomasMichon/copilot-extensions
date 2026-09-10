@@ -101,6 +101,33 @@ def test_retirement_mode_rejects_application_forward_options(monkeypatch):
     assert exc.value.code == 2
 
 
+def test_progress_contains_only_fixed_phase_status_and_identity(capsys):
+    args = SimpleNamespace(execution_id="execution", generation="generation", secret="never-publish")
+    native_transport.emit_progress(args, "local-config")
+    assert json.loads(capsys.readouterr().out) == {
+        "event": "progress", "executionId": "execution", "generation": "generation",
+        "phase": "local-config", "status": "started",
+    }
+    with pytest.raises(ValueError):
+        native_transport.emit_progress(args, "never-publish")
+    assert capsys.readouterr().out == ""
+
+
+def test_native_preparation_reuses_sanitized_connect_checkpoints(state, ssh_runtime, monkeypatch, capsys):
+    monkeypatch.setattr(relay_readiness, "relay_ping", lambda _: True)
+    monkeypatch.setattr(relay_readiness, "remote_relay_ready", AsyncMock(return_value=True))
+    monkeypatch.setattr(cli, "_provision_relay_helpers", AsyncMock(return_value=True))
+    monkeypatch.setattr(native_transport, "serve", AsyncMock(return_value=0))
+    assert cli.main(argv()) == 0
+    progress = [json.loads(line) for line in capsys.readouterr().out.splitlines()
+                if json.loads(line).get("event") == "progress"]
+    phases = {(row["phase"], row["status"]) for row in progress}
+    for phase in ("local-config", "owner-admission", "ssh-to-target", "target-auth-env", "target-binstub"):
+        assert (phase, "started") in phases
+        assert (phase, "reached") in phases
+    assert all(set(row) == {"event", "executionId", "generation", "phase", "status"} for row in progress)
+
+
 @pytest.mark.asyncio
 async def test_retirement_control_skips_all_forwarding_and_rejects_activation(state, monkeypatch):
     import ssh_manager

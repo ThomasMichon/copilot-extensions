@@ -16,6 +16,20 @@ from . import execution_claims
 
 log = logging.getLogger("agent-codespaces")
 CAPABILITY = "codespace-native-transport-v1"
+_PROGRESS_PHASES = frozenset({
+    "local-config", "owner-admission", "ssh-to-target", "target-auth-env",
+    "target-binstub", "worktree", "native-host",
+})
+_PROGRESS_STATUSES = frozenset({"started", "reached", "failed"})
+
+
+def emit_progress(args, phase: str, status: str = "started") -> None:
+    if phase not in _PROGRESS_PHASES or status not in _PROGRESS_STATUSES:
+        raise ValueError("Unsupported native preparation progress")
+    print(json.dumps({
+        "event": "progress", "executionId": args.execution_id,
+        "generation": args.generation, "phase": phase, "status": status,
+    }), flush=True)
 
 
 class InputPump:
@@ -185,6 +199,9 @@ async def serve(args, manager, ssh_config, relay_env: str) -> int:
 
     monitor_task = None
     try:
+        progress = getattr(args, "native_progress", None)
+        if progress:
+            progress("native-host", "started")
         capability = await remote("capabilities")
         if capability.get("capability") != "codespace-native-host-v1" or capability.get("supported") is not True:
             raise RuntimeError("remote native execution hosting capability is unavailable")
@@ -199,6 +216,8 @@ async def serve(args, manager, ssh_config, relay_env: str) -> int:
         state = json.loads(ready.stdout)
         if ready.exit_code != 0 or state.get("module") != "agent-bridge/runtime" or state.get("state") != "ready":
             raise RuntimeError("remote shared agent-bridge service is not ready")
+        if progress:
+            progress("native-host", "reached")
         await emit({"event": "ready", "capability": CAPABILITY, "version": 1})
         if not retirement_only:
             monitor_task = asyncio.create_task(monitor())
@@ -247,6 +266,8 @@ def command(args) -> int:
         return 75
     args.native_input = InputPump()
     print(json.dumps({"event": "reserved", "executionId": args.execution_id, "generation": args.generation}), flush=True)
+    args.native_progress = lambda phase, status="started": emit_progress(args, phase, status)
+    args.native_progress("local-config")
     account = lifecycle.account_for_codespace(args.name)
     if account:
         os.environ.update(gh_account.env_for_account(account))

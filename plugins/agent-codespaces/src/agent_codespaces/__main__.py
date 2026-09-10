@@ -1179,8 +1179,17 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     from .lifecycle import account_for_codespace
     from .worktrees import ContextRefused
 
-    source = CodespaceSource(args.name, account=account_for_codespace(args.name))
-    config = load_merged_config()
+    progress = getattr(args, "native_progress", None)
+    try:
+        source = CodespaceSource(args.name, account=account_for_codespace(args.name))
+        config = load_merged_config()
+    except Exception:
+        if progress:
+            progress("local-config", "failed")
+        raise
+    if progress:
+        progress("local-config", "reached")
+        progress("owner-admission", "started")
     from .relay_launch import effective_relay_port
     relay_port = effective_relay_port(config)
     require_relay = bool(getattr(args, "require_relay", False))
@@ -1392,7 +1401,15 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     if overall_timeout is None and diagnostic_remote_cmd:
         overall_timeout = args.timeout
 
+    def checkpoint(_event, data):
+        phase = {
+            3: "ssh-to-target", 4: "target-auth-env", 5: "target-binstub", 6: "worktree",
+        }.get(data.get("stage"))
+        if progress and phase:
+            progress(phase, data["status"])
+
     tracker = ConnectTracker(
+        emit=checkpoint if progress else None,
         session_id=args.name,
         emit_stderr=diagnostic_remote_cmd,
     )
@@ -1711,6 +1728,8 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     except BaseException:
         target_lock.release()
         raise
+    if progress:
+        progress("owner-admission", "reached")
 
     # Place the Owner hold only AFTER the target lock is held, so a busy-target
     # rejection above can't leak a hold that would linger until its TTL. The
