@@ -1534,6 +1534,15 @@ _start() {
 _stop() {
     if [[ -x "$LINK_PYTHON" ]]; then
         "$LINK_PYTHON" -I -X utf8 -m agent_index stop || true
+        # The durable engine daemon is a SEPARATE detached process from the
+        # light service stopped above (daemon.py, launched by 'engine start' /
+        # Ensure-Running, outliving any systemd unit that happens to exist for
+        # it). Stopping only the service leaves it running indefinitely --
+        # this is the "kill the detached child, not just the task" gotcha
+        # (service-lifecycle-supervision.md) applied to a plain process
+        # rather than a scheduled task/unit. `engine stop` is idempotent and a
+        # no-op when the engine was never started.
+        "$LINK_PYTHON" -I -X utf8 -m agent_index engine stop || true
     fi
     if command -v systemctl >/dev/null 2>&1 && [[ -f "$UNIT_DIR/$SYSTEMD_UNIT" ]]; then
         systemctl --user stop "$SYSTEMD_UNIT" 2>/dev/null || true
