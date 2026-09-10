@@ -3435,49 +3435,6 @@ class SessionManager:
         )
         return client, acp_sid
 
-    async def _codespace_host_available(
-        self,
-        rec: Any,
-        session: Session,
-        availability: dict[str, bool],
-    ) -> bool:
-        """Check venue availability without SSH, once per CodeSpace per pass."""
-        from .session_host.codespace_transport import (
-            CodeSpaceTransport,
-            parse_codespace_target,
-        )
-
-        name = (getattr(rec, "endpoint", None) or {}).get("codespace")
-        if not name:
-            target = session.target
-            cs_target = target.codespace
-            if not isinstance(cs_target, dict) or not cs_target.get("name"):
-                cs_target = parse_codespace_target(target.spawn_command or [])
-            name = (cs_target or {}).get("name")
-        if not isinstance(name, str) or not name:
-            self._remote_recovery_skipped.add(rec.session_id)
-            log.warning(
-                "Skipping background reattach for %s: CodeSpace identity "
-                "is unavailable for a no-wake availability check",
-                rec.session_id,
-            )
-            return False
-        if name not in availability:
-            try:
-                availability[name] = await CodeSpaceTransport(name).is_running()
-            except Exception:
-                availability[name] = False
-                log.warning(
-                    "Could not check CodeSpace %s without waking; "
-                    "skipping background reattach",
-                    name, exc_info=True,
-                )
-        if not availability[name]:
-            self._remote_recovery_skipped.add(rec.session_id)
-            return False
-        self._remote_recovery_skipped.discard(rec.session_id)
-        return True
-
     async def recover_disconnected_hosts(self) -> int:
         """In-session liveness-driven reattach for host-backed sessions (P1).
 
@@ -3488,16 +3445,13 @@ class SessionManager:
         the host + child processes survive, redial the host and resume by cursor
         (no restart, no lost turn). A merely ``stalled`` session (channel up,
         agent silent) is surfaced but not reattached -- reconnecting cannot
-        un-wedge a silent agent. Disconnected CodeSpaces require a fresh no-wake
-        availability check on each pass, including venues skipped at startup.
-        Returns the count reattached.
+        un-wedge a silent agent. Returns the count reattached.
         """
         if self._host_index is None:
             return 0
         from .session_host.version_mux import HostDisposition, plan_host
 
         recovered = 0
-        codespace_availability: dict[str, bool] = {}
         now = time.time()
         for rec in list(self._live_host_records()):
             session = self._sessions.get(rec.session_id)
@@ -3559,19 +3513,10 @@ class SessionManager:
             if session._lifecycle_lock.locked():
                 continue
             async with session._lifecycle_lock:
-                if (
-                    getattr(rec, "boundary", "local") == "codespace"
-                    and not await self._codespace_host_available(
-                        rec, session, codespace_availability,
-                    )
-                ):
-                    continue
                 if await self._reattach_one(
                     rec, session, new_status=keep,
                     send_resume=getattr(rec, "resume_on_reattach", False),
                 ):
-                    self._remote_recovery_inconclusive.discard(rec.session_id)
-                    self._remote_recovery_skipped.discard(rec.session_id)
                     recovered += 1
         if recovered:
             log.info("Recovered %d disconnected host-backed session(s)", recovered)

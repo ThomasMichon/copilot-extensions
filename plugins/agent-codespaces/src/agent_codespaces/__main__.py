@@ -2513,8 +2513,6 @@ def _discover_workspace_folder(codespaces: list[dict], repository: str) -> str |
     """
     import subprocess as sp
 
-    from agent_procutil import no_window_kwargs
-
     from . import gh_account
 
     available = [
@@ -2534,7 +2532,6 @@ def _discover_workspace_folder(codespaces: list[dict], repository: str) -> str |
                 text=True,
                 timeout=45,
                 env=env,
-                **no_window_kwargs(),
             )
         except (FileNotFoundError, sp.TimeoutExpired):
             return None
