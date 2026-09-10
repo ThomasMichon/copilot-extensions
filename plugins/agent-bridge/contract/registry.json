@@ -31,7 +31,8 @@
           "0.4.0-dev432",
           "0.4.0-dev435",
           "0.4.0-dev447",
-          "0.4.0-dev461"
+          "0.4.0-dev461",
+          "0.4.0-dev468"
         ]
       },
       "capability_versions": {
@@ -102,7 +103,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/native_manager.py",
-          "sha256": "03847e71f7c3d77eab4f274165a3ae7cea45e23eee27e1e2c31e45aad2516fe0",
+          "sha256": "6600012100d58ad690451fb3a04bd588338e5dac4369b602d6949dc2fbde41fc",
           "semantic": true,
           "non_semantic_reason": null
         }
@@ -200,8 +201,14 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-launch.json",
-          "sha256": "3cdeda92736cece271b097836d381300d8577cffbb49646bcc0d3ca7454198a1",
+          "sha256": "293d381a6f96f0b013224903fb1b89af7845ebc6d5e12ecc46aee2d4d062cffb",
           "role": "current native execution contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev461/native-launch.json",
+          "sha256": "3cdeda92736cece271b097836d381300d8577cffbb49646bcc0d3ca7454198a1",
+          "role": "prior native launch contract before retirement corrections",
           "generation": 15
         },
         {
@@ -212,6 +219,14 @@
         }
       ],
       "provenance": [
+        {
+          "commit": "0996f2a84a1dd1ba3c349b51bbbb0046038307f6",
+          "plugin_version": "0.4.0-dev468",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_manager.py",
+          "source_git_blob": "c188c379a03df2863e2075c5a2bce8b8c8fbc8f4",
+          "capture_method": "Invoke validate_request from the exact published corrected source, verify the unchanged launch wire shape, and normalize the valid controller owner path to a neutral public path. Preserve prior runtime evidence separately; retirement behavior is exercised by native retirement regression tests."
+        },
         {
           "commit": "e746dc19ca456e7e9e7f52107dd26a1348294df5",
           "plugin_version": "0.4.0-dev461",
