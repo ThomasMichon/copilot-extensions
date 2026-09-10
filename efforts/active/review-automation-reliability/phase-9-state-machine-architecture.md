@@ -54,6 +54,42 @@ of these three, not a bug in any single machine.
    clarifying; treat that vision as the source of truth for bridge verbs and
    reference it rather than re-defining bridge states here once it lands.
 
+   **Liveness is a live, three-tier read -- never gated by a cache.** A
+   downstream deployment's operator design conversation (2026-09-10) found
+   the load-bearing bug class here: a target-existence or liveness cache
+   (a discovery index, a session-record table) is a **performance
+   shortcut only** -- it must never be the *authority* on whether a target
+   exists or what state it's in. A cache miss, a stale entry, or an
+   unpopulated crawl must fall through to a **live, authoritative check**,
+   never a hard failure. The three tiers, each observed live at resume
+   time:
+   - **Hot** -- a live interactive controller is actually attached to the
+     target right now. Resuming refuses unless the caller explicitly
+     force-takes-over (that would spawn a second controller on the same
+     target).
+   - **Warm** -- no live interactive controller, but the backing process is
+     actually alive. Resuming reattaches it; conversation/session history
+     intact.
+   - **Cold** -- neither of the above. Resuming always succeeds here: it
+     spawns a fresh session bound to the *existing* checkout/target (never
+     a new one).
+
+   This reframes the bridge machine's verb surface: **one universal
+   "resume", keyed by either a worktree handle or a repo/agent name**,
+   returns whichever of hot/warm/cold is actually true as an **observed
+   result**, never a precondition the caller must satisfy or guess first.
+   A narrower "resume this exact session id" remains available for
+   targeting one specific, possibly non-head session. A distinct "create
+   fresh" path exists only where a genuinely new, additional checkout is
+   possible; where the target's own registry class has exactly one head
+   (no second checkout to make), "create fresh" is a declared error and
+   "resume" is the only correct verb -- collapsing what would otherwise be
+   a second, competing recovery mechanism (an explicit reclaim escape
+   hatch alongside create) into the one correctly-observed resume path. A
+   separate "discard and roll forward in place" gesture (deliberate
+   handoff under context pressure or a runaway agent) stays distinct from
+   resume's "give me whatever's there, however it stands."
+
 Each machine's states and legal transitions are declared independently.
 **Control flow couples them explicitly**, never implicitly: a task-state
 transition that requires a bridge action (spawn, resume, suspend, end)
@@ -183,7 +219,10 @@ definition itself (not left to be discovered ad hoc when it fails):
 - **Self-repair**: the system detects an inconsistent intermediate state
   and must actively reconcile it before proceeding (e.g., a carried
   session whose bridge status disagrees with the task's assumed bridge
-  state -- Phase 5's `reconcile_reserving` gap, generalized).
+  state -- Phase 5's `reconcile_reserving` gap, generalized; and the
+  cache-vs-live-check gap above -- a stale/missing liveness cache entry is
+  never treated as "target absent," it always falls through to a live
+  hot/warm/cold check before any transition proceeds).
 
 No transition is left unclassified. A transition whose recovery mode is
 "none of the above" is a design defect in this phase, not an acceptable
@@ -213,6 +252,13 @@ one or more of the three machines' coupling, not a live integration test:
   duplicated (idempotent-replay proof for Phase 2's dedup requirement).
 - [ ] A steering input arrives while the evaluator is mid-transition on the
   same task (steer-vs-transition race).
+- [ ] A resume is requested against a target whose liveness cache is
+  empty, stale, or missing the entry entirely; the live hot/warm/cold
+  check must still classify it correctly rather than the resume failing
+  outright (the corrected bridge-machine model above).
+- [ ] A resume is requested against a target that is genuinely hot (a live
+  interactive controller already attached); the resume must refuse absent
+  an explicit force-takeover, never silently spawn a second controller.
 
 Each fixture asserts: the correct terminal/next state is reached regardless
 of interleaving order, the transition is idempotent under replay, and the
