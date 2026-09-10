@@ -42,6 +42,34 @@ def _install_fake(monkeypatch, handler):
                         lambda cmd, **kw: handler(cmd, kw))
 
 
+def test_engine_environment_removes_parent_python_runtime(monkeypatch):
+    inherited = {
+        "PYTHONHOME": "/parent/python",
+        "PYTHONPATH": "/parent/modules",
+        "PYTHONEXECUTABLE": "/parent/python/bin/python",
+        "VIRTUAL_ENV": "/parent/venv",
+        "UV_INTERNAL__PYTHONHOME": "/uv/python",
+        "__PYVENV_LAUNCHER__": "/parent/python",
+    }
+    for key, value in inherited.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("UV_DEFAULT_INDEX", "https://example.invalid/simple")
+
+    env = ec._engine_environment()
+
+    assert not inherited.keys() & env.keys()
+    assert env["PYTHONUTF8"] == "1"
+    assert env["PYTHONSAFEPATH"] == "1"
+    assert env["UV_DEFAULT_INDEX"] == "https://example.invalid/simple"
+
+
+def test_engine_environment_preserves_differently_cased_posix_names(monkeypatch):
+    assert not ec._is_parent_python_variable("virtual_env", windows=False)
+    assert not ec._is_parent_python_variable("PythonPath", windows=False)
+    assert ec._is_parent_python_variable("VIRTUAL_ENV", windows=False)
+    assert ec._is_parent_python_variable("virtual_env", windows=True)
+
+
 _ONE_WT = {
     "version": 1,
     "worktrees": [

@@ -1536,6 +1536,8 @@ class LiveLoader:
         """
         if self._cancelled.is_set():
             raise RuntimeError("cancelled")
+        from ...engine_client import _engine_environment
+
         kwargs = dict(
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             # Never inherit the console stdin: an ``ssh`` child would otherwise
@@ -1543,11 +1545,7 @@ class LiveLoader:
             # reader, freezing the picker's keys until the load fan-out exits.
             stdin=subprocess.DEVNULL,
             text=True, encoding="utf-8", errors="replace",
-            env={
-                **os.environ,
-                "PYTHONUTF8": "1",
-                "PYTHONSAFEPATH": "1",
-            },
+            env=_engine_environment(),
         )
         if os.name == "posix":
             kwargs["start_new_session"] = True   # own group -> killpg on cancel
@@ -1586,11 +1584,14 @@ class LiveLoader:
         teardown) tears it down and no ``ssh ... list --stream`` is orphaned."""
         if self._cancelled.is_set():
             raise RuntimeError("cancelled")
+        from ...engine_client import _engine_environment
+
         kwargs = dict(
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             stdin=subprocess.DEVNULL,
             text=True, encoding="utf-8", errors="replace",
             bufsize=1,   # line-buffered: surface rows as they arrive
+            env=_engine_environment(),
         )
         if os.name == "posix":
             kwargs["start_new_session"] = True
