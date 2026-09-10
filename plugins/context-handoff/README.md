@@ -63,6 +63,14 @@ Ordinary non-native handoff behavior is unchanged.
 First use in an empty profile can require native extension
 trust confirmation for the plugin's existing capabilities.
 
+For a custom-agent launch, receiver bootstrap subscribes to native
+`subagent.selected` / `subagent.deselected` events before checking the current
+agent. A transient default agent during cold resume is not a settled profile:
+bootstrap waits for selection without blocking extension initialization.
+Default-agent launches do not wait for a custom-selection event. Admission
+still compares every profile field exactly; a genuine mismatch reports the
+field's expected and observed values and preserves the source.
+
 Install context-handoff, agent-worktrees, and agent-dispatch as sibling plugin
 payloads in the same installation root. The shared core resolves its runtime
 peers relative to that root; installing only context-handoff in a different
@@ -81,6 +89,13 @@ real Windows acceptance.
   baton while an existing launch is unresolved.
 - Interrupted first trust resumes the already-created empty receiver UUID.
   A prepared receiver resumes instead of provisioning a second session.
+- For a profile rejection before consumption, first verify the source's
+  frozen profile and receiver identity. After installing the corrected plugin,
+  exit only the failed receiver and run `native-launch.mjs --checkpoint PATH
+  --cli COPILOT -- [original host options]` in that same pane and working
+  directory. A `prepared` checkpoint selects cold resume of the same UUID and
+  token; do not create a new pane, resave the baton, change its goal, or widen
+  permissions. A genuine mismatch must be resolved, not bypassed.
 - Receiver preparation waits for the source's host-launch receipt before
   writing its own checkpoint. Startup/trust can finish while this event-driven
   wait is pending. An unknown host launch requires inspection of that receiver,

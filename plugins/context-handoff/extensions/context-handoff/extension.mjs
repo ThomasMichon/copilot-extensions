@@ -857,6 +857,9 @@ const session = await joinSession({
 state.sessionId = session.sessionId ?? state.sessionId ?? null;
 state.cwd = state.cwd || process.cwd();
 state.turnCount = 0;
+// Keep startup non-blocking: the native UI selects --agent only after the
+// extension initialization returns. Bootstrap subscribes before checking the
+// current agent and waits for selection without holding initialization open.
 nativeStartup = bootstrapNativeHandoff(session).then(result => {
   nativeReceiptPath = result?.preparing ? null : result?.path || null;
   const pending = recoverPendingHandoff(session.sessionId);

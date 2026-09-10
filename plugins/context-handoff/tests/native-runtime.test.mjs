@@ -35,7 +35,114 @@ test("profile assertion checks model, agent and permissions without changing the
   } };
   await assertNativeProfile(session, goal);
   permissionMode = "allow-all";
-  await assert.rejects(assertNativeProfile(session, goal), /permissions differ/);
+  await assert.rejects(assertNativeProfile(session, goal),
+    /permissionMode: expected "manual", observed "allow-all"/);
+});
+
+for (const order of ["after-startup", "during-getter", "already-selected", "default-agent",
+  "different-agentId", "deselected-agentId", "different-modelId", "different-reasoningEffort",
+  "different-contextTier", "different-permissionMode"]) {
+  test(`native startup waits for actual agent selection without blocking the host: ${order}`, async () => {
+    const model = { modelId: "gpt-6-astra", reasoningEffort: "xhigh", contextTier: "long_context" };
+    let agentId = order === "already-selected" ? "coordinator" : null;
+    const record = {
+      kind: "context-handoff-session-request",
+      nativeGoal: {
+        successorSessionId: "target", phase: "frozen",
+        profile: { model, agentId: order === "default-agent" ? null : "coordinator" },
+        permissionMode: "allow-all",
+      },
+    };
+    const listeners = new Set();
+    const observedModel = { ...model };
+    let permissionMode = "allow-all";
+    let prepared = 0;
+    let startup;
+    const selected = () => {
+      agentId = "coordinator";
+      const key = order.split("-")[1];
+      if (order.startsWith("different-")) {
+        if (key === "agentId") agentId = "other-agent";
+        else if (key === "permissionMode") permissionMode = "manual";
+        else observedModel[key] = "different";
+      }
+      if (order === "deselected-agentId") agentId = null;
+      for (const listener of listeners) listener({
+        type: agentId ? "subagent.selected" : "subagent.deselected", data: { agentName: agentId },
+      });
+    };
+    const session = {
+      sessionId: "target",
+      on: listener => { listeners.add(listener); return () => listeners.delete(listener); },
+      rpc: {
+        model: { getCurrent: async () => observedModel },
+        agent: { getCurrent: async () => {
+          const agent = agentId ? { id: agentId } : null;
+          if (order === "during-getter" && !agent) selected();
+          return { agent };
+        } },
+        permissions: { getMode: async () => ({ mode: permissionMode }) },
+      },
+    };
+    const source = readFileSync(new URL(
+      "../extensions/context-handoff/native-runtime.mjs", import.meta.url,
+    ), "utf8").replace(/^import[\s\S]*?from "[^"]+";\n/gm, "").replaceAll("export ", "");
+    const context = vm.createContext({
+      process: { env: {} },
+      readFileSync: () => JSON.stringify(record),
+      prepareNativeGoal: async () => { prepared++; },
+    });
+    vm.runInContext(`${source}\nglobalThis.bootstrap = bootstrapNativeHandoff;`, context);
+    // The host awaits extension startup before its UI can select the agent.
+    // Match extension.mjs: retain the promise, never await it in this hook.
+    await (async function hostStartup() {
+      startup = context.bootstrap(session, {
+        CONTEXT_HANDOFF_NATIVE_CHECKPOINT: "owned-checkpoint",
+        CONTEXT_HANDOFF_NATIVE_PHASE: "prepare",
+      });
+    })();
+    if (order === "after-startup" || order.includes("-agentId") || order.startsWith("different-")) {
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(prepared, 0, "a transient default agent must not reject or prepare");
+      selected();
+      selected(); // duplicate notifications must not bootstrap twice
+    }
+    if (order.startsWith("different-") || order === "deselected-agentId") {
+      await assert.rejects(startup, new RegExp(`${order.split("-")[1]}: expected .* observed`));
+      assert.equal(prepared, 0, "genuine differences must not write, consume, or retire");
+    } else {
+      await startup;
+      assert.equal(prepared, 1);
+    }
+    assert.equal(listeners.size, 0);
+  });
+}
+
+test("the actual extension initializer returns before native UI selection", { timeout: 1000 }, async () => {
+  const source = readFileSync(new URL(
+    "../extensions/context-handoff/extension.mjs", import.meta.url,
+  ), "utf8");
+  const start = source.indexOf("nativeStartup = bootstrapNativeHandoff(session)");
+  const end = source.indexOf("if (handoffConfig.warning)", start);
+  assert.ok(start >= 0 && end > start);
+  let select;
+  const selection = new Promise(resolve => { select = resolve; });
+  const context = vm.createContext({
+    session: { sessionId: "target" }, state: {},
+    bootstrapNativeHandoff: () => selection,
+    recoverPendingHandoff: () => null,
+  });
+  vm.runInContext(`globalThis.initialize = async () => {
+    let nativeStartup, nativeReceiptPath, nativeStartupError;
+    ${source.slice(start, end)}
+    return { completion: nativeStartup, receipt: () => nativeReceiptPath };
+  };`, context);
+  // Selection is performed by the host only after it awaits initialization.
+  const initialized = await context.initialize();
+  assert.equal(initialized.receipt(), undefined);
+  select({ preparing: false, path: "owned-checkpoint" });
+  await initialized.completion;
+  assert.equal(initialized.receipt(), "owned-checkpoint");
 });
 
 test("queued send waits for its native user event before admission and never resends", async () => {

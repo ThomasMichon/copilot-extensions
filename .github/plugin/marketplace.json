@@ -18,7 +18,7 @@
     {
       "name": "agent-bridge",
       "description": "Live cross-boundary inter-agent communication service - conversation transport, session management, SSE event streaming, agent subprocess spawning, and ACP-over-WebSocket support for external clients",
-      "version": "0.4.0-dev457",
+      "version": "0.4.0-dev458",
       "source": "plugins/agent-bridge"
     },
     {
@@ -54,7 +54,7 @@
     {
       "name": "context-handoff",
       "description": "Context window monitoring and native goal continuity - durable task/file handoffs, exact remaining soft caps, profile-preserving admission, and identity-checked live cutover through Herdr or agent-worktrees",
-      "version": "0.1.1-dev12",
+      "version": "0.1.1-dev13",
       "source": "plugins/context-handoff"
     },
     {
@@ -78,7 +78,7 @@
     {
       "name": "agent-dispatch",
       "description": "Portable durable agent task-loop + per-host coordinator: a single-writer SQLite work queue (eight-state model with owner-preserving suspension, capability-gated atomic claim, affinity routing, liveness-reconciled recovery) so agents coordinate without push latency or an account per agent.",
-      "version": "0.1.2-dev53",
+      "version": "0.1.2-dev54",
       "source": "plugins/agent-dispatch"
     },
     {

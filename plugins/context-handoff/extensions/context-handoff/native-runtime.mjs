@@ -26,11 +26,41 @@ export async function assertNativeProfile(session, goal) {
   const model = await session.rpc.model.getCurrent();
   const agentId = (await session.rpc.agent.getCurrent()).agent?.id || null;
   const permissionMode = (await session.rpc.permissions.getMode()).mode;
-  if (["modelId", "reasoningEffort", "contextTier"].some(
+  const differences = ["modelId", "reasoningEffort", "contextTier"].filter(
     key => model[key] !== goal.profile.model[key],
-  ) || agentId !== goal.profile.agentId || permissionMode !== goal.permissionMode) {
-    throw new Error("Successor model, agent, or permissions differ from the source; admission stopped.");
+  ).map(key => `${key}: expected ${JSON.stringify(goal.profile.model[key])}, observed ${JSON.stringify(model[key])}`);
+  for (const [key, expected, observed] of [
+    ["agentId", goal.profile.agentId, agentId],
+    ["permissionMode", goal.permissionMode, permissionMode],
+  ]) {
+    if (expected !== observed) differences.push(
+      `${key}: expected ${JSON.stringify(expected)}, observed ${JSON.stringify(observed)}`,
+    );
   }
+  if (differences.length) {
+    throw new Error(`Successor profile differs (${differences.join("; ")}); admission stopped.`);
+  }
+}
+
+async function waitForNativeAgentSelection(session, goal) {
+  // --agent is applied by the native UI after extension startup/resume.
+  // A default-agent launch has no selection event to wait for.
+  if (!goal.profile?.agentId) return;
+  let selected;
+  const selection = new Promise(resolve => { selected = resolve; });
+  const unsubscribe = session.on(event => {
+    if (event.type === "subagent.selected" || event.type === "subagent.deselected") selected();
+  });
+  try {
+    // Subscribe first: selection may finish while this getter is in flight.
+    // Do not consult persisted events from the earlier preparation process.
+    const { agent } = await session.rpc.agent.getCurrent();
+    if (!agent) await selection;
+  } finally {
+    unsubscribe();
+  }
+  // This is readiness only, not an assertion or a profile override. The
+  // following assertion still rejects any genuine model/agent/mode mismatch.
 }
 
 export function bindNativeSuccessor(record, sessionId, execute = runCli) {
@@ -87,6 +117,7 @@ export async function bootstrapNativeHandoff(session, env = process.env) {
     retireNativePredecessor(path, session.sessionId);
     return { preparing: false, path };
   }
+  await waitForNativeAgentSelection(session, goal);
   await assertNativeProfile(session, goal);
   const adapter = {
     goal, session,
