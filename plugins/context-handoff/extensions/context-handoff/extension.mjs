@@ -494,11 +494,15 @@ const session = await joinSession({
         "in this session's session-state folder; (2) refreshes worktree-visible " +
         "pending-handoff state when agent-worktrees is available; (3) reuses the " +
         "existing agent-dispatch task path when available; (4) best-effort pings " +
-        "agent-bridge if present; (5) waits up to 30 seconds for any pickup " +
-        "signal; (6) reports whether anything acknowledged the request; (7) " +
-        "prints manual fallback guidance if nothing did; and (8) ALWAYS ends with " +
-        "the final short handoff prompt/seed. It NEVER checks panes or PIDs, " +
-        "spawns or retires sessions, or performs any cutover itself.",
+        "agent-bridge if present; (5) waits (up to 2 minutes) for either full " +
+        "pickup or, sooner, an acknowledgement that an automatic cutover has " +
+        "already started (a real successor's Copilot cold-start routinely takes " +
+        "40-90+ seconds, well past a naive short wait); (6) reports whether " +
+        "anything acknowledged the request, or is already under way; (7) " +
+        "prints manual fallback guidance only when truly nothing happened; and " +
+        "(8) ALWAYS ends with the final short handoff prompt/seed. " +
+        "It NEVER checks panes or PIDs, spawns or retires sessions, or " +
+        "performs any cutover itself.",
       skipPermission: true,
       parameters: {
         type: "object",
@@ -568,7 +572,9 @@ const session = await joinSession({
         const pickedUp = pickup.pickedUp;
         const pickupLine = pickedUp
           ? `Pickup acknowledged within ${(pickup.waitedMs / 1000).toFixed(1)}s via ${pickup.via.join(", ")}.`
-          : `No pickup signal arrived within ${(pickup.waitedMs / 1000).toFixed(1)}s.`;
+          : pickup.spawnInFlight
+            ? `No full pickup yet, but a successor spawn was acknowledged within ${(pickup.waitedMs / 1000).toFixed(1)}s -- an automatic cutover is already under way (real Copilot cold-start just takes longer than that).`
+            : `No pickup signal arrived within ${(pickup.waitedMs / 1000).toFixed(1)}s.`;
         const bridgeLine = result.bridge?.attempted
           ? (
               result.bridge.accepted
