@@ -60,10 +60,12 @@ from .managed_runtime import (
     MaterializedRuntime,
     RuntimeMaterializer,
 )
+from .loop_governance import LoopGovernance
 from .procutil import no_window_kwargs
 from .registrations import RegistrationKind
 
 log = logging.getLogger("agent-dispatch.supervisor-daemon")
+_GOVERNANCE_BACKOFF_SECONDS = 10.0
 
 
 class UnsupportedKind(RuntimeError):
@@ -724,6 +726,7 @@ class SupervisorDaemon:
         #: Set by ``_maybe_self_update`` the tick it triggers a handoff; read by
         #: ``serve`` to break its loop and pick the distinct return code.
         self.self_update_triggered = False
+        self._governance = LoopGovernance()
         #: Cached canonical interpreter for spawning registration children --
         #: resolved once (not per-registration/per-tick) since the current-version
         #: slot cannot change without a full daemon cutover/restart anyway. See
@@ -741,6 +744,16 @@ class SupervisorDaemon:
 
             self._own_python_cached = resolve_own_runtime_python()
         return self._own_python_cached
+
+    def set_governance_recheck_fn(
+        self,
+        fn: Callable[[str], dict[str, Any]] | None,
+    ) -> None:
+        """Override the loop-governance recheck callback (tests)."""
+        self._governance.set_recheck_fn(fn)
+
+    def _recheck_governance(self, checkpoint: str) -> dict[str, Any] | None:
+        return self._governance.recheck(checkpoint)
 
     # -- registry view -------------------------------------------------------
 
@@ -1907,6 +1920,15 @@ class SupervisorDaemon:
             return False
         if target is None:
             return False
+        before_spawn = self._recheck_governance("pre-mutation:self-update")
+        if before_spawn is not None and before_spawn.get("status") != "ready":
+            log.warning(
+                "supervisor self-update skipped at %s: %s (%s)",
+                before_spawn.get("checkpoint"),
+                before_spawn.get("reason"),
+                before_spawn.get("status"),
+            )
+            return False
         self._self_update_last_spawn = now
         # Every reconcile tick already runs to completion before the next one
         # starts, so this is always a safe cutover point (unlike the
@@ -1989,7 +2011,34 @@ class SupervisorDaemon:
             return 3
         try:
             while True:
+                boundary = self._recheck_governance("iteration-boundary")
+                if boundary is not None and boundary.get("status") != "ready":
+                    log.warning(
+                        "supervisor daemon backing off at %s: %s (%s)",
+                        boundary.get("checkpoint"),
+                        boundary.get("reason"),
+                        boundary.get("status"),
+                    )
+                    if once:
+                        break
+                    self.sleep(_GOVERNANCE_BACKOFF_SECONDS)
+                    continue
                 try:
+                    before_reconcile = self._recheck_governance("pre-mutation:reconcile")
+                    if (
+                        before_reconcile is not None
+                        and before_reconcile.get("status") != "ready"
+                    ):
+                        log.warning(
+                            "supervisor daemon skipped reconcile at %s: %s (%s)",
+                            before_reconcile.get("checkpoint"),
+                            before_reconcile.get("reason"),
+                            before_reconcile.get("status"),
+                        )
+                        if once:
+                            break
+                        self.sleep(_GOVERNANCE_BACKOFF_SECONDS)
+                        continue
                     summary = self.reconcile_once()
                     if on_cycle is not None:
                         on_cycle(summary)
