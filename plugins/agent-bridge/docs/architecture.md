@@ -281,7 +281,7 @@ downstream agent.
 | `start` | Start the service (`--passive` for a cutover spare -- see below) |
 | `stop` | Stop the service |
 | `status` | Show service status |
-| `uninstall` | Remove service (`--remove-config` for config too) |
+| `uninstall` | Remove service (`--remove-config` for config too; `-DryRun`/`--dry-run` previews without changing anything) |
 
 ### Scheduled task: write-once bootstrap (decoupled from the runtime version)
 
