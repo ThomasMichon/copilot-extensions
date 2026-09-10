@@ -304,7 +304,7 @@ because they provide tools or services.
 - [x] Add user-wide and plugin-scoped parser-free maintenance gates with strict
   ownership sidecars, explicit management-command authorization, draining lease
   behavior, stale-owner diagnostics, and fail-safe remote maintenance probing.
-- [ ] Provide explicit legacy-state attribution/migration under the legacy
+- [x] Provide explicit legacy-state attribution/migration under the legacy
   lock/lease and cell install lock; publish the ownership tombstone and
   generation-pinned activation without an observable mixed-writer interval.
 - [ ] Add explicit rollback/deactivation that publishes a monotonic
@@ -371,6 +371,53 @@ because they provide tools or services.
 See [`design.md`](design.md).
 
 ## Journal
+
+### 2026-09-10 — Phase 6 item 2: explicit legacy attribution / migration
+
+- Merged [#2337](https://github.com/ThomasMichon/copilot-extensions/pull/2337)
+  at `b6a980a61a9816aafbe5fe6e58d60edc3413aeb4`, landing the explicit
+  legacy-state attribution / migration slice for
+  [#1110](https://github.com/ThomasMichon/copilot-extensions/issues/1110).
+- The shared `installation-context` primitive now exposes
+  `attribute_legacy_state(...)`, which attributes only clear legacy filesystem
+  state to an explicitly named destination cell while holding the legacy
+  lock/lease plus the destination cell install lock, writing the ownership
+  tombstone before the generation-pinned namespaced activation, preserving
+  ambiguous or orphaned state unchanged, and treating repeat attribution of the
+  same footprint as an idempotent no-op.
+- `agent-machines` is the command-only exemplar for the slice via the explicit
+  `cell-attribute-legacy` management action. It inventories the declared
+  legacy footprint from `payload-invocation.json`, preserves linked/missing or
+  otherwise unattributable state for deliberate resolution, and records the
+  exact claimed path set in the tombstone. Vendored `installation-context`
+  copies were synchronized across every current adopter.
+- Validation:
+  `python -m pytest -q libs/installation-context/tests/test_installation_mode_governance.py`
+  (`77 passed, 30 skipped`);
+  `python tools/run-plugin-tests.py agent-machines`
+  (`510 passed, 20 skipped`);
+  `python tools/check-install-contract.py`,
+  `python tools/check-version-consistency.py`,
+  `python tools/check-vendored-libs-sync.py`,
+  `python tools/sync-installation-context.py --check`,
+  `python libs/payload-invocation/generate.py --all --check`,
+  `python -m pytest -q libs/installer-readiness/tests`,
+  `python tools/check-marketplace-isolation.py`,
+  `python tools/check-docs-consistency.py`,
+  changed-file `ruff check --select F,E9`, and `git diff --check` all passed;
+  PR #2337 CI also passed its plugin matrix for agent-bridge, agent-codespaces,
+  agent-containers, agent-index, agent-logger, agent-machines, agent-mcp,
+  agent-ssh, agent-vault, and the agent-worktrees collect-only/Windows-launch
+  lanes plus the shared guards/lint jobs. WSL targeted coverage also passed for
+  the attribution paths and the agent-machines exemplar.
+- Native Windows whole-portfolio spot checks still reproduced unchanged
+  unrelated failures from `origin/main` in untouched installation-context and
+  subprocess-heavy test surfaces, so the merge relied on the passing changed
+  governance surface plus the green PR CI matrix rather than the pre-existing
+  full-suite failures.
+- `#1110` remains open. Rollback/deactivation, long-running maintenance
+  rechecks, legacy service and binstub retirement, blocking guard enforcement,
+  and rollback/retention documentation remain separate follow-on Phase 6 items.
 
 ### 2026-09-10 — Phase 6 item 1: maintenance gates and ownership sidecars
 
