@@ -283,6 +283,94 @@ itself, compounded to keep a reviewer from ever rendering a verdict:
   own trusted config/tooling when the reviewer cannot review itself,
   distinct from and narrower than an ordinary human/admin override.
 
+### Phase 8 - Contribution candidates from a mature downstream deployment
+
+A downstream reviewer-loop deployment has run this recipe's shape at
+sustained, high-frequency production volume for several weeks (many
+reviews/day, sustained incident load), and has patched its own local
+lifecycle/scheduler/pool implementation in parallel rather than adopting
+the generic runtime end-to-end. A structured, file-by-file comparison of
+that deployment's patched behavior against this plugin's registrar, recipe
+driver/registry, and worktree/claim substrate found a set of concrete
+behaviors present downstream and absent (or weaker) here. This phase
+records those as candidate contributions -- **evidence and candidates
+only; no implementation is proposed or begun by this phase**, consistent
+with this effort's own coordination gate.
+
+**Candidate contributions (downstream ahead; each is a real, patched
+behavior, not a hypothesis):**
+
+- [ ] A rolling, windowed review-attempt budget reserved through a single
+  choke point that every non-verdict exit path -- including a failure to
+  even start or suspend the reviewer process -- passes through, with an
+  explicit provisional-reserve/commit/cancel lifecycle so a failed launch
+  never silently consumes or bypasses the budget. This is the generalized
+  form of the gap Phase 7's item 4 already names for this effort's own
+  `bounded-verdict-reliability` feature; the downstream implementation is a
+  working reference for the choke-point shape, not a new requirement.
+- [ ] An append-only, per-review-round event ledger (candidate arrival,
+  claim, dispatch, retry/redrive, suspend/resume, recovery, verdict
+  completion, merge, close, cleanup) keyed by a stable round identity, with
+  reason-code classification on cancellation/abandonment outcomes (the
+  downstream deployment found and closed a large unlabeled-cancellation gap
+  in its own reason-code coverage by adding this classification -- worth
+  generalizing rather than re-discovering per consumer).
+- [ ] Base-only/same-head/unchanged-substance change detection: a
+  rebase-stable content fingerprint that lets the scheduler distinguish "the
+  base moved but the submitter's actual diff did not" from a genuine
+  substantive revision, so a base-only refresh does not re-trigger a full
+  review or consume a fresh attempt.
+- [ ] Stale-approval-versus-current-head classification as a first-class
+  scheduling input: an approval recorded against an older head is not
+  merge authority for a newer one, independent of and prior to any provider
+  merge-readiness check.
+- [ ] A separate merge-authority lane for an official/provider-native
+  approval versus a recipe-internal, candidate-fenced approval marker --
+  today's `land=self`/`land=author` split is an ownership mode, not an
+  approval-*source* distinction, and the two are conflated in the generic
+  contract.
+- [ ] WIP/draft/hold and unresolved-blocking-thread gating evaluated before
+  a review or merge action is taken, not left entirely to the consumer.
+- [ ] Worktree-pool reuse: force-clean/reset semantics (verify-and-restore,
+  not merely detect) applied to a candidate worktree before reuse, and
+  explicit tolerance for a dirty-status result that carries zero real
+  content difference (a mode-only permission-bit change with no line
+  changes was recently observed making this pool-reuse tooling refuse a
+  cleanly-mergeable worktree downstream -- worth a normalization rule here
+  rather than per-consumer workarounds).
+- [ ] A long-running relay/host-substrate liveness and health-fencing
+  pattern (bind-address/loopback-scope validation, an explicit health/live
+  endpoint, refuse-unsafe-startup) for any generic runtime component meant
+  to run continuously across restarts -- currently no equivalent exists in
+  this plugin family for a component playing that role.
+
+**Open design question -- not resolved by this phase:**
+
+- [ ] **Conflict handling has two incompatible designs in active production
+  use**, and this phase does not pick a winner. This plugin's existing
+  conflict-resolution recipe rebases and force-pushes the pull request's
+  own branch to resolve a conflict. The downstream deployment's patched
+  scheduler deliberately does the opposite: on a confirmed conflict it
+  creates **no** conflict-resolution worker at all, hands the blocker back
+  to the submitter, and reviews only the submitter's own corrected head.
+  Both are real, intentional, currently-deployed safety postures (the
+  downstream rationale: never mutate a contributor's branch on their
+  behalf, even to fix it) rather than one being an unfinished version of
+  the other. Reconciling this is a maintainer decision, not a
+  comparison-agent one -- surfaced here so it isn't silently decided by
+  whichever side happens to land a PR first.
+
+**Explicitly out of scope for this phase (found during the comparison,
+not actionable as a port):**
+
+- Composite-cursor pagination over the review-round ledger and durable
+  protection against one contributor's pull request being closed/replaced
+  by a different, competing pull request targeting the same lineage were
+  both found **absent on both sides** of the comparison (the latter is
+  Phase 6's own still-open structural-guard question above). Neither is a
+  "downstream is ahead" contribution candidate; both are genuine shared
+  gaps worth their own future phase or issue, not folded into this one.
+
 ## Validation Plan
 
 - [ ] Concurrent claim attempts yield exactly one review owner.
@@ -308,7 +396,36 @@ scenarios.
 
 ## Journal
 
-### 2026-09-05 - Phase 7: six live environment-drift failures from a downstream reviewer deployment
+### 2026-09-10 - Phase 8: contribution-candidate comparison against a mature downstream deployment
+
+- Added Phase 8 after a structured, file-by-file comparison between a
+  downstream reviewer-loop deployment's patched lifecycle/scheduler/pool
+  implementation and this plugin's registrar, recipe driver/registry, and
+  worktree/claim substrate. The downstream deployment has run this recipe's
+  shape at sustained high volume for several weeks and independently
+  hardened several behaviors this plugin does not yet generalize:
+  choke-point attempt-budget accounting, a per-round event ledger with
+  reason-code classification, base-only/unchanged-substance detection,
+  stale-approval-vs-current-head classification, an official-vs-candidate
+  approval-authority split, WIP/hold gating, worktree-pool force-clean with
+  content-aware dirty tolerance, and a relay/health-fencing pattern for a
+  long-running component.
+- Recorded, and deliberately did **not** resolve, a genuine two-sided design
+  conflict found during the comparison: this plugin's conflict-resolution
+  recipe rebases and force-pushes the pull request's own branch, while the
+  downstream deployment's hardened scheduler refuses to ever do that,
+  handing a conflict back to the submitter instead. Both are intentional,
+  currently-deployed postures; picking one is a maintainer call, flagged as
+  an open question rather than silently decided by this phase.
+- Explicitly excluded two comparison findings that were absent on *both*
+  sides (composite-cursor ledger pagination; durable protection against one
+  contributor's pull request being closed/replaced by a competing one) --
+  those are shared gaps, not downstream-ahead contribution candidates, and
+  the latter duplicates Phase 6's still-open question.
+- This phase is evidence and candidates only, per this effort's own
+  coordination gate (no implementation begins under the current token).
+
+
 
 - Added Phase 7 after a multi-hour production incident
   (a downstream reviewer deployment, its production instance) surfaced six
