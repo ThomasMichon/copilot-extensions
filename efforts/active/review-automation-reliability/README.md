@@ -436,6 +436,38 @@ scenarios.
 
 ## Journal
 
+### 2026-09-10 - Phase 9: fourth slice (control-flow coupling rules)
+
+- Declared the explicit coupling between all three machines
+  (`plugins/agent-dispatch/src/agent_dispatch/machine_coupling.py`):
+  `TASK_TRANSITION_BRIDGE_CONFIRMATION` names, per task transition needing
+  a bridge action, which bridge transition(s) confirm it actually
+  happened (a task transition never assumes the bridge effect occurred
+  just because it was requested); `BRIDGE_EVENT_EVIDENCE` names, per
+  bridge-side event, only the task transitions it is evidence *for* --
+  the accessor `consider_task_transitions` is never given a task record,
+  so it structurally cannot mutate one. Also declares the generic
+  CAS/generation primitive (`VersionedRecord` + `apply_transition`) the
+  sub-doc's "Mechanism, concretely" section describes, shared by all
+  three machines rather than three separately hand-rolled CAS loops --
+  its three outcomes (applied / lost-CAS-so-re-read / already-advanced-
+  so-no-op) are exactly Phase 9's idempotent-replay requirement.
+- Added structural tests
+  (`plugins/agent-dispatch/tests/test_machine_coupling.py`, 18 passing):
+  every bridge event names only real task transitions and never a direct
+  application, every task transition's bridge confirmation names a real
+  bridge transition (including `resume` accepting either resolved
+  liveness outcome), and the CAS primitive's three outcomes plus
+  non-mutation of its input record.
+- This closes the phase-9 sub-doc's recovery-taxonomy checkbox too: every
+  transition across all three machines already carried exactly one
+  `RecoveryMode` tag as each was declared, proven incrementally by each
+  module's own structural test.
+- Remaining Plan items: the ten-scenario simulation/test track and the
+  Phase 8 candidate re-validation pass -- both explicitly deferred past
+  this slice per prior advisor guidance (the simulation fixtures drive
+  against these coupling rules, so they come after, not before).
+
 ### 2026-09-10 - Phase 9: third slice (bridge/session machine)
 
 - Declared the bridge/session state machine

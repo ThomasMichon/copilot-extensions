@@ -319,10 +319,26 @@ above, not an independent feature:
   prove reachability/exit-checking, that the live probe is always called
   regardless of a cache hint, and that every non-refusing resume outcome
   maps to a real declared transition.
-- [ ] Define the explicit control-flow coupling rules between the three
+- [x] Define the explicit control-flow coupling rules between the three
   machines (task-requests-bridge-action / bridge-event-as-evidence, as
-  described above).
-- [ ] Classify every declared transition into the recovery taxonomy.
+  described above)
+  (`../../../plugins/agent-dispatch/src/agent_dispatch/machine_coupling.py`),
+  plus the generic CAS/generation primitive (`VersionedRecord` +
+  `apply_transition`) all three machines' transitions share. Structural
+  tests
+  (`../../../plugins/agent-dispatch/tests/test_machine_coupling.py`)
+  prove every bridge event names only real task transitions as evidence
+  (never applies one), every task transition requiring bridge
+  confirmation names a real bridge transition, and the CAS primitive's
+  three outcomes (applied / lost-CAS / already-advanced-no-op).
+- [x] Classify every declared transition into the recovery taxonomy.
+  Already satisfied incrementally as each machine was declared: every
+  transition in `task_state_machine.py`, `provider_state_machine.py`
+  (both dimensions), and `bridge_state_machine.py` carries exactly one
+  `RecoveryMode` tag, each proven by that module's own
+  `test_every_transition_has_exactly_one_recovery_mode` (or dimension
+  equivalent) structural test -- no transition was left unclassified to
+  be discovered ad hoc.
 - [ ] Build the simulation/test track as deterministic fixtures, one per
   scenario above.
 - [ ] Re-validate each Phase 8 candidate against the declared machines;
