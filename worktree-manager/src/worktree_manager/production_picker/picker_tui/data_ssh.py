@@ -1876,7 +1876,12 @@ class LiveLoader:
         on git classification of every worktree, which can take seconds or stall.
         Phase 2 (``classify=True``) runs the full git classification and swaps
         the authoritative ``state`` in. A generation guard keeps a concurrent
-        :meth:`reload` from being clobbered by this pass's phase 2 (#1421)."""
+        :meth:`reload` from being clobbered by this pass's phase 2 (#1421), and
+        -- mirroring the sibling ``_load_remote_stream`` fix (#2347) -- Phase 1's
+        own failure write too: a superseded Phase 1 attempt (a newer
+        ``reload()``/``reload_source()`` already bumped the generation and
+        committed a fresher, genuinely successful ready state) must never
+        clobber that with a stale failure marker."""
         gen = self._gen.get(source.cache_key, 0)
         t0 = _dt.datetime.now()
         try:
@@ -1884,11 +1889,14 @@ class LiveLoader:
         except Exception as exc:
             self._log_fetch_failure(source, exc, t0, phase="local")
             with self._lock:
-                self._state[source.cache_key] = "failed"
-                self._error[source.cache_key] = str(exc).strip() or type(exc).__name__
+                if self._gen.get(source.cache_key, 0) == gen:
+                    self._state[source.cache_key] = "failed"
+                    self._error[source.cache_key] = (
+                        str(exc).strip() or type(exc).__name__
+                    )
             return
         with self._lock:
-            if self._cancelled.is_set():
+            if self._cancelled.is_set() or self._gen.get(source.cache_key, 0) != gen:
                 return
             self._records[source.cache_key] = fast
             self._state[source.cache_key] = "ready"
