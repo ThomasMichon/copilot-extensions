@@ -139,6 +139,42 @@ def test_ambient_context_cannot_authorize_lifecycle(tmp_path, monkeypatch, style
     assert not (root / "deploy-manifest.json").exists()
 
 
+@pytest.mark.parametrize("style", STYLES)
+def test_lifecycle_requires_matching_plugin_maintenance_token(tmp_path, style):
+    root, args = fixture(tmp_path)
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    entered = engine.ic.enter_maintenance(
+        scope="plugin",
+        owner="test-owner",
+        reason="upgrade",
+        expected_duration_seconds=300,
+        durable_home=args.durable_home,
+        context=args.context,
+        expected_marketplace_id=args.expected_marketplace_id,
+        expected_plugin_id="agent-machines",
+        environment={},
+        os_profile=profile,
+        platform="windows" if os.name == "nt" else "posix",
+        wsl_distro=None,
+    )
+
+    result = adapter(style, args)
+    assert result.returncode != 0
+    assert "--maintenance-token" in result.stderr
+
+    args.maintenance_token = "wrong-token"
+    wrong = adapter(style, args)
+    assert wrong.returncode != 0
+    assert "does not match" in wrong.stderr
+
+    args.maintenance_token = entered["token"]
+    allowed = adapter(style, args)
+    assert allowed.returncode == 0, allowed.stderr
+    assert json.loads(allowed.stdout)["reason"] == "cell-repaired"
+    assert root.joinpath("maintenance").exists()
+
+
 @pytest.mark.parametrize("case", ["missing-completion", "bad-completion", "missing-snapshot", "changed-payload", "foreign-marketplace", "linked-manifest"])
 def test_repair_refuses_missing_or_foreign_immutable_evidence(tmp_path, case):
     root, args = fixture(tmp_path)
