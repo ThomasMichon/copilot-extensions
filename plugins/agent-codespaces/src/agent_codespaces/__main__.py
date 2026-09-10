@@ -232,6 +232,25 @@ def main(argv: list[str] | None = None) -> int:
              "Mutually exclusive with --remote-cmd.",
     )
     ssh_parser.add_argument(
+        "--interactive-command-file", metavar="PATH",
+        help="Read a UTF-8 shell command from PATH and run it with a forced TTY. "
+             "Preserves payload whitespace; cannot combine with diagnostic/stdio mode.",
+    )
+    ssh_parser.add_argument(
+        "--interactive-command", metavar="COMMAND",
+        help="Run a shell command with a forced TTY; prefer the file form for shell quoting.",
+    )
+    ssh_parser.add_argument(
+        "--local-forward", action="append", default=[], metavar="LOCAL:REMOTE",
+        help="Forward a host loopback listener to CodeSpace loopback (ports 1..65535). "
+             "Repeatable; interactive sessions only.",
+    )
+    ssh_parser.add_argument(
+        "--reverse-forward", action="append", default=[], metavar="REMOTE:LOCAL",
+        help="Forward a CodeSpace loopback listener to host loopback (ports 1..65535). "
+             "Repeatable; interactive sessions only.",
+    )
+    ssh_parser.add_argument(
         "--timeout", dest="timeout", type=float, default=60.0, metavar="SECS",
         help="Timeout in seconds for --remote-cmd execution (default: 60). On "
              "expiry the command is terminated and the CLI exits 124. For a "
@@ -783,6 +802,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[BLOCKED] CodeSpace installation context refused: {error}", file=sys.stderr)
         return _COORDINATION_EXIT
 
+    from .interactive import normalize_options
+
+    normalize_options(parser, args)
+
     # --remote-cmd-file: the internal bridge-dispatch path passes the ACP launch
     # payload as a file PATH (a clean argv token) rather than a --remote-cmd
     # string, so no shell (cmd.exe %VAR% expansion in particular) can mangle it.
@@ -1033,6 +1056,14 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     config = load_merged_config()
     from .relay_launch import effective_relay_port
     relay_port = effective_relay_port(config)
+
+    # The supervised relay owns this remote listener even when a connection
+    # owner provides it. Refuse caller collisions before taking any claims.
+    if not args.no_relay and any(
+        listen == relay_port for listen, _ in getattr(args, "reverse_forward", [])
+    ):
+        print("[ERROR] reverse-forward listener conflicts with the credential relay", file=sys.stderr)
+        return 2
 
     # Reusing a box (an explicit ssh connect) clears any prune-lifecycle marker
     # -- it is active work again, not a recovered/prunable reclaim candidate.
@@ -1419,11 +1450,24 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
 
         # Interactive SSH -- fall through to gh codespace ssh
         await manager.disconnect(args.name)
-        return _interactive_ssh(
+        interactive_command = _build_launch_command(
+            getattr(args, "interactive_command", None),
+            [],
+            is_stdio=False,
+            relay_env=relay_env,
+            breadcrumb=breadcrumb_prelude(args.name),
+        )
+        from .interactive import ssh_options
+
+        return await _interactive_ssh(
             args.name,
-            port_forwards,
+            ssh_options(
+                getattr(args, "local_forward", []),
+                getattr(args, "reverse_forward", []),
+            ),
             relay_port=relay_port if not args.no_relay else None,
             relay_token=relay_token,
+            command=interactive_command,
         )
 
     # Serialize SSH access to this CodeSpace across processes. All access funnels
@@ -2293,16 +2337,19 @@ async def _pipe_stdio(proc) -> None:
     out_thread.join(timeout=2)
 
 
-def _interactive_ssh(
+async def _interactive_ssh(
     codespace_name: str,
     port_forwards: list[str],
     relay_port: int | None = None,
     relay_token: str | None = None,
+    *,
+    command: str | None = None,
 ) -> int:
     """Fall back to ``gh codespace ssh`` for interactive sessions."""
-    import subprocess as sp
+    from ssh_manager.process import terminate_ssh_process_tree
 
     from . import gh_account, lifecycle
+    from .interactive import foreground_group, process_group_options, restore_foreground
 
     # Pin gh to the account that owns this CodeSpace (multi-account #195/#190),
     # then overlay the relay vars. Start from the account env so GH_TOKEN is set
@@ -2319,11 +2366,28 @@ def _interactive_ssh(
             env["LC_GIT_CREDENTIAL_RELAY_TOKEN"] = relay_token
 
     args = ["gh", "codespace", "ssh", "-c", codespace_name]
-    for fwd in port_forwards:
-        # Split "-R port:host:port" into SSH option
-        args.extend(["--", fwd])
+    if command is not None or port_forwards:
+        args.append("--")
+        if command is not None:
+            args.append("-tt")
+        args.extend(port_forwards)
+        if command is not None:
+            args.append(command)
 
-    return sp.call(args, env=env)
+    # Inherit terminal handles, not pipes or detached/windowless flags. Awaiting
+    # the child keeps the supervised credential relay's event loop responsive.
+    proc = await asyncio.create_subprocess_exec(
+        *args, env=env, **process_group_options(),
+    )
+    previous = foreground_group(proc.pid)
+    try:
+        return await proc.wait()
+    finally:
+        try:
+            if proc.returncode is None:
+                await terminate_ssh_process_tree(proc)
+        finally:
+            restore_foreground(previous)
 
 
 def _cmd_list(args: argparse.Namespace) -> int:

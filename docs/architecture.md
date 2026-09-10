@@ -398,6 +398,19 @@ sequenceDiagram
 
 ## Communication paths
 
+The CodeSpace provider's caller-owned terminal path uses the same claims,
+target-lock, fence, and account-resolution gates as its diagnostic/ACP paths.
+`ssh --interactive-command-file` adds a forced-PTY shell payload, with optional
+strictly loopback `--local-forward` / `--reverse-forward` listeners carried by
+the interactive `gh codespace ssh` child rather than the provisioning connection.
+The child is awaited asynchronously so the independent credential relay remains
+supervised until the terminal exits. Local console handles are inherited;
+on POSIX the child owns a process group that borrows and restores the foreground
+terminal, and on Windows it inherits the existing console. Cancellation tears
+down only that owned tree. This does not add a session host, installer, or
+general SSH-options interface. See the
+[interactive SSH contract](../plugins/agent-codespaces/README.md#caller-owned-interactive-ssh).
+
 ```mermaid
 flowchart TB
     A["Copilot CLI session<br/>(host machine)"]

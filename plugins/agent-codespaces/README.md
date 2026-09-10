@@ -168,6 +168,66 @@ There are also bridge-facing seams (`namespace-list`, `namespace-resolve`,
 `relay-launch-env`, `provision-command`, `acp-model-flags`). They are invoked by
 agent-bridge and are not the normal human/operator surface.
 
+### Caller-owned interactive SSH
+
+Use a local UTF-8 command file when a terminal owner needs a startup command,
+especially across Windows shell quoting boundaries:
+
+```bash
+agent-codespaces ssh example-space \
+  --interactive-command-file terminal-command.txt \
+  --local-forward 8080:3000 \
+  --reverse-forward 9000:9001 \
+  --no-provision --no-relay
+```
+
+For example, `terminal-command.txt` can contain:
+
+```bash
+cd /workspaces/example-web &&
+exec bash -il
+```
+
+- `--interactive-command-file PATH` reads UTF-8 (an optional UTF-8 BOM is
+  accepted), without trimming whitespace or rewriting the file. Use LF line
+  endings for remote Bash scripts. Missing, unreadable, invalid-UTF-8, blank, or
+  NUL-containing payloads fail before claims or connections. The optional
+  `--interactive-command COMMAND` string form is mutually exclusive with the
+  file form.
+- The command is a **trusted caller-owned shell program**, not an argument list.
+  It travels as one SSH command argument through the existing `bash -l -c`
+  wrapper, after the normal relay environment and arrival prelude. No ACP model
+  or plugin flags are appended. SSH receives `-tt` to force a remote PTY, while
+  local stdin/stdout/stderr remain attached to the caller's terminal. A command
+  that should leave a shell open must explicitly launch one.
+- Repeat `--local-forward LOCAL:REMOTE` to listen on host
+  `127.0.0.1:LOCAL` and connect to CodeSpace `127.0.0.1:REMOTE`. Repeat
+  `--reverse-forward REMOTE:LOCAL` for the opposite direction. Both fields must
+  be decimal ports in `1..65535`; addresses, wildcards, sockets, and arbitrary
+  SSH options are not accepted. Duplicate listeners within a direction are
+  rejected, including differently formatted spellings of the same port.
+  The same number in opposite directions is valid. A reverse listener cannot
+  claim the credential relay's remote port while relay use is enabled.
+- Forwarded sessions use `ExitOnForwardFailure=yes`,
+  `ServerAliveInterval=30`, and `ServerAliveCountMax=3`. Failure to bind an SSH
+  listener aborts the session; this does not promise that a destination service
+  is listening. The remote SSH server must honor loopback binds (do not configure
+  `GatewayPorts yes` to widen remote listeners).
+- The new command and forward flags cannot combine with `--remote-cmd`,
+  `--remote-cmd-file`, or `--stdio`. Forward flags can also accompany a plain
+  interactive shell without a startup command. Existing diagnostic/ACP and
+  unadorned interactive behavior remain unchanged.
+- `--no-provision` and `--no-relay` retain their existing independent meanings.
+  Neither disables claims, target locks, fences, or account pinning.
+  `--no-provision` skips heavyweight provisioning **and plugin staging**; callers
+  own any required remote tools and official plugin installation. No installer
+  or copying behavior is added by this interface.
+- Relay supervision and any connection-owner hold remain active throughout the
+  interactive child. The child's exit status is returned unchanged. Cancellation
+  and an explicit `--connect-timeout` stop only the owned process tree and release
+  owned relay/lock resources. There is no implicit interactive timeout;
+  `--timeout` remains the diagnostic-command deadline.
+
 ### `create` options
 
 ```bash
