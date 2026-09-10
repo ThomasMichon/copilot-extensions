@@ -569,8 +569,16 @@ fi
 JSON=$(printf '%s' "$JSON" | "$PYTHON" -c "import sys, json
 d = json.load(sys.stdin)
 print(json.dumps(d['launch'] if isinstance(d, dict) and 'launch' in d else d))")
-if [[ -z "$LAUNCH_PROJECT" ]]; then
-    LAUNCH_PROJECT=$(printf '%s' "$JSON" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('project',''))")
+# The resolved plan's `project` is authoritative for the worktree this launch
+# actually targets -- it can legitimately differ from this script's own
+# ambient/starting project (e.g. an initial --project inherited from how this
+# launcher was invoked). Always prefer it over a stale ambient value so every
+# downstream direct call (session-backend status, etc.) is scoped to the
+# project that really owns the resolved worktree, not wherever this script
+# happened to start (#2338).
+_PLAN_PROJECT=$(printf '%s' "$JSON" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('project',''))")
+if [[ -n "$_PLAN_PROJECT" ]]; then
+    LAUNCH_PROJECT="$_PLAN_PROJECT"
 fi
 
 ACTION=$(echo "$JSON" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('action','none'))")

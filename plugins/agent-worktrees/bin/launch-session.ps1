@@ -687,7 +687,15 @@ $plan = ($jsonOutput -join "`n") | ConvertFrom-Json -ErrorAction Stop
 if ($plan.PSObject.Properties.Name -contains 'launch') {
     $plan = $plan.launch
 }
-if (-not $script:LaunchProject -and $plan.PSObject.Properties.Name -contains 'project') {
+
+# The resolved plan's `project` is authoritative for the worktree this launch
+# actually targets -- it can legitimately differ from this script's own
+# ambient/starting project (e.g. an initial `--project` inherited from how
+# this launcher was invoked). Always prefer it over a stale ambient value so
+# every downstream direct call (session-backend status, etc.) is scoped to
+# the project that really owns the resolved worktree, not wherever this
+# script happened to start (#2338).
+if ($plan.PSObject.Properties.Name -contains 'project' -and $plan.project) {
     $script:LaunchProject = [string]$plan.project
 }
 
