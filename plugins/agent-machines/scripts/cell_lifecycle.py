@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Explicit, receipt-authorized Agent Machines attribution, deactivation, repair, and uninstall."""
+"""Explicit, receipt-authorized Agent Machines attribution, retirement, deactivation, repair, and uninstall."""
 from __future__ import annotations
 
 import argparse
@@ -288,6 +288,260 @@ def _deactivate(arguments: argparse.Namespace) -> dict[str, Any]:
     )
 
 
+def _legacy_binstub_items(profile: Path) -> tuple[Path, list[dict[str, str]]]:
+    legacy_root, items = _legacy_path_items(profile)
+    binstubs = [
+        item for item in items if item["identity"].startswith(".local/bin/agent-machines")
+    ]
+    if not binstubs:
+        ic._fail("payload-invocation.json must declare agent-machines global binstubs.")
+    return legacy_root, binstubs
+
+
+def _retirement_health_report(arguments: argparse.Namespace) -> tuple[dict[str, Any], Path]:
+    durable = ic.canonical_path(arguments.durable_home)
+    current_environment, profile = ic._current_environment(
+        environment=os.environ,
+        os_profile=None,
+        platform=None,
+        wsl_distro=None,
+    )
+    legacy_root, _binstubs = _legacy_binstub_items(profile)
+    validated = ic.validate_context_receipt(
+        arguments.context,
+        durable,
+        expected_marketplace_id=arguments.expected_marketplace_id,
+        expected_plugin_id="agent-machines",
+        environment={},
+    )
+    plugin_root = Path(validated["pluginRoot"])
+    activation = ic._activation_result(
+        plugin_root=plugin_root,
+        durable_home=durable,
+        marketplace_id=arguments.expected_marketplace_id,
+        plugin_id="agent-machines",
+        current_environment=current_environment,
+        legacy_root=legacy_root,
+    )
+    checked_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace(
+        "+00:00", "Z"
+    )
+    if (
+        activation["state"] != "valid"
+        or activation["actualMode"] != "namespaced"
+        or activation["activationGeneration"] != arguments.expected_activation_generation
+    ):
+        return (
+            {
+                "kind": "agent-machines-runtime",
+                "status": "blocked",
+                "reason": "activation-not-ready",
+                "checkedAt": checked_at,
+                "evidence": {
+                    "activation": activation,
+                },
+            },
+            legacy_root,
+        )
+    try:
+        current_version = ic._read_runtime_marker(
+            plugin_root / ic.CURRENT_VERSION_FILE,
+            "Current version marker",
+        )
+        last_known_good = ic._read_runtime_marker(
+            plugin_root / ic.LAST_KNOWN_GOOD_FILE,
+            "Last-known-good marker",
+        )
+    except ic.InstallationContextError as error:
+        return (
+            {
+                "kind": "agent-machines-runtime",
+                "status": "blocked",
+                "reason": "runtime-selection-invalid",
+                "checkedAt": checked_at,
+                "evidence": {
+                    "activation": activation,
+                    "error": str(error),
+                },
+            },
+            legacy_root,
+        )
+    if (
+        current_version != arguments.runtime_version
+        or last_known_good != arguments.runtime_version
+    ):
+        return (
+            {
+                "kind": "agent-machines-runtime",
+                "status": "blocked",
+                "reason": "runtime-selection-mismatch",
+                "checkedAt": checked_at,
+                "evidence": {
+                    "activation": activation,
+                    "currentVersion": current_version,
+                    "lastKnownGoodVersion": last_known_good,
+                    "expectedRuntimeVersion": arguments.runtime_version,
+                },
+            },
+            legacy_root,
+        )
+    manifest_path = plugin_root / "deploy-manifest.json"
+    try:
+        manifest = ic.read_json(manifest_path)
+    except (ic.InstallationContextError, OSError, json.JSONDecodeError) as error:
+        return (
+            {
+                "kind": "agent-machines-runtime",
+                "status": "blocked",
+                "reason": "deploy-manifest-invalid",
+                "checkedAt": checked_at,
+                "evidence": {
+                    "activation": activation,
+                    "error": str(error),
+                },
+            },
+            legacy_root,
+        )
+    if not isinstance(manifest, dict):
+        return (
+            {
+                "kind": "agent-machines-runtime",
+                "status": "blocked",
+                "reason": "deploy-manifest-invalid",
+                "checkedAt": checked_at,
+                "evidence": {
+                    "activation": activation,
+                    "error": "deploy manifest must be a JSON object",
+                },
+            },
+            legacy_root,
+        )
+    installation = manifest.get("installation")
+    runtime = manifest.get("runtime")
+    selected_by = runtime.get("selectedBy") if isinstance(runtime, dict) else None
+    expected_interpreter = _interpreter(plugin_root / "versions" / arguments.runtime_version)
+    valid_manifest = (
+        manifest.get("schema_version") == 4
+        and manifest.get("service") == "agent-machines"
+        and isinstance(installation, dict)
+        and installation.get("marketplaceId") == arguments.expected_marketplace_id
+        and installation.get("pluginId") == "agent-machines"
+        and _manifest_path_matches(installation.get("context"), plugin_root / "install.json")
+        and isinstance(runtime, dict)
+        and runtime.get("kind") == "python"
+        and runtime.get("version") == arguments.runtime_version
+        and _manifest_path_matches(
+            runtime.get("path"),
+            plugin_root / "versions" / arguments.runtime_version,
+        )
+        and _manifest_path_matches(runtime.get("interpreter"), expected_interpreter)
+        and isinstance(selected_by, dict)
+        and selected_by.get("kind") in {"local", "marketplace"}
+        and selected_by.get("version") == arguments.runtime_version
+        and _manifest_path_matches(selected_by.get("path"), arguments.expected_payload_root)
+    )
+    if not valid_manifest:
+        return (
+            {
+                "kind": "agent-machines-runtime",
+                "status": "blocked",
+                "reason": "deploy-manifest-mismatch",
+                "checkedAt": checked_at,
+                "evidence": {
+                    "activation": activation,
+                    "currentVersion": current_version,
+                    "lastKnownGoodVersion": last_known_good,
+                    "manifestPath": str(manifest_path),
+                },
+            },
+            legacy_root,
+        )
+    try:
+        completion = ic.validate_runtime_slot_completion(
+            context=arguments.context,
+            expected_marketplace_id=arguments.expected_marketplace_id,
+            expected_plugin_id="agent-machines",
+            expected_payload_root=arguments.expected_payload_root,
+            expected_payload_version=arguments.expected_payload_version,
+            snapshot_id=arguments.snapshot_id,
+            runtime_version=arguments.runtime_version,
+            durable_home=durable,
+            environment={},
+        )
+    except ic.InstallationContextError as error:
+        return (
+            {
+                "kind": "agent-machines-runtime",
+                "status": "blocked",
+                "reason": "runtime-completion-invalid",
+                "checkedAt": checked_at,
+                "evidence": {
+                    "activation": activation,
+                    "error": str(error),
+                },
+            },
+            legacy_root,
+        )
+    return (
+        {
+            "kind": "agent-machines-runtime",
+            "status": "ready",
+            "reason": "cell-runtime-healthy",
+            "checkedAt": checked_at,
+            "evidence": {
+                "activationGeneration": activation["activationGeneration"],
+                "namespaceGeneration": validated["namespaceGeneration"],
+                "installGeneration": validated["generation"],
+                "currentVersion": current_version,
+                "lastKnownGoodVersion": last_known_good,
+                "deployManifest": str(manifest_path),
+                "completion": completion["completion"],
+            },
+        },
+        legacy_root,
+    )
+
+
+def _retire_legacy(arguments: argparse.Namespace) -> dict[str, Any]:
+    if (
+        not ic._path_is_fully_qualified(arguments.context)
+        or not ic._path_is_fully_qualified(arguments.durable_home)
+    ):
+        ic._fail("Legacy retirement requires explicit absolute context and durable home.")
+    current_environment, profile = ic._current_environment(
+        environment=os.environ,
+        os_profile=None,
+        platform=None,
+        wsl_distro=None,
+    )
+    health_report, legacy_root = _retirement_health_report(arguments)
+    _legacy_root, binstubs = _legacy_binstub_items(profile)
+    legacy_lock = (
+        provisioning_lock(legacy_root)
+        if legacy_root.is_dir() and not ic._is_link_or_junction(legacy_root)
+        else nullcontext()
+    )
+    return ic.retire_legacy_compatibility(
+        context=arguments.context,
+        expected_marketplace_id=arguments.expected_marketplace_id,
+        expected_plugin_id="agent-machines",
+        expected_namespace_generation=arguments.expected_namespace_generation,
+        expected_install_generation=arguments.expected_install_generation,
+        expected_activation_generation=arguments.expected_activation_generation,
+        legacy_root=legacy_root,
+        retirement_id="global-binstubs",
+        legacy_items=binstubs,
+        health_report=health_report,
+        legacy_lock=legacy_lock,
+        durable_home=arguments.durable_home,
+        maintenance_token=getattr(arguments, "maintenance_token", None),
+        environment=os.environ,
+        os_profile=profile,
+        platform=current_environment["platform"],
+        wsl_distro=current_environment["wslDistro"],
+    )
+
+
 def lifecycle(arguments: argparse.Namespace) -> dict[str, Any]:
     """Execute a derived-only repair or a state-preserving owned uninstall."""
     a = arguments
@@ -295,6 +549,8 @@ def lifecycle(arguments: argparse.Namespace) -> dict[str, Any]:
         return _attribute_legacy(a)
     if a.action == "cell-deactivate":
         return _deactivate(a)
+    if a.action == "cell-retire-legacy":
+        return _retire_legacy(a)
     if not ic._path_is_fully_qualified(a.context) or not ic._path_is_fully_qualified(a.durable_home):
         ic._fail("Lifecycle management requires explicit absolute context and durable home.")
     durable = ic.canonical_path(a.durable_home)
@@ -668,7 +924,16 @@ def lifecycle(arguments: argparse.Namespace) -> dict[str, Any]:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("cell-repair", "cell-uninstall", "cell-attribute-legacy", "cell-deactivate"))
+    parser.add_argument(
+        "action",
+        choices=(
+            "cell-repair",
+            "cell-uninstall",
+            "cell-attribute-legacy",
+            "cell-deactivate",
+            "cell-retire-legacy",
+        ),
+    )
     parser.add_argument("--maintenance-token")
     for name in ("context", "durable-home", "expected-marketplace-id", "expected-payload-root",
                  "expected-payload-version", "snapshot-id", "runtime-version"):
@@ -682,7 +947,7 @@ def main(argv=None) -> int:
         group.add_argument(f"--expected-{marker}-version")
         group.add_argument(f"--expect-{marker}-absent", action="store_true")
     args = parser.parse_args(argv)
-    if args.action in {"cell-repair", "cell-uninstall"}:
+    if args.action in {"cell-repair", "cell-uninstall", "cell-retire-legacy"}:
         required = (
             "context",
             "durable_home",
@@ -694,20 +959,23 @@ def main(argv=None) -> int:
             "expected_namespace_generation",
             "expected_install_generation",
         )
+        if args.action == "cell-retire-legacy":
+            required += ("expected_activation_generation",)
         missing = [name for name in required if getattr(args, name) in (None, "")]
         if missing:
             parser.error(
                 "the following arguments are required for "
                 f"{args.action}: " + ", ".join(f"--{name.replace('_', '-')}" for name in missing)
             )
-        for marker in ("current", "last_known_good"):
-            if not (
-                getattr(args, f"expected_{marker}_version") or getattr(args, f"expect_{marker}_absent")
-            ):
-                parser.error(
-                    f"{args.action} requires either --expected-{marker.replace('_', '-')}-version "
-                    f"or --expect-{marker.replace('_', '-')}-absent"
-                )
+        if args.action != "cell-retire-legacy":
+            for marker in ("current", "last_known_good"):
+                if not (
+                    getattr(args, f"expected_{marker}_version") or getattr(args, f"expect_{marker}_absent")
+                ):
+                    parser.error(
+                        f"{args.action} requires either --expected-{marker.replace('_', '-')}-version "
+                        f"or --expect-{marker.replace('_', '-')}-absent"
+                    )
     elif args.action == "cell-deactivate":
         required = (
             "context",

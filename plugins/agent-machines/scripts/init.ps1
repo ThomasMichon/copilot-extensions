@@ -17,7 +17,7 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('install', 'init', 'stamp', 'provision', 'cell-provision', 'cell-repair', 'cell-uninstall', 'cell-attribute-legacy', 'cell-deactivate', 'slot-provision', 'slot-validate', 'slot-complete', 'slot-completion-validate', 'slot-cutover')]
+    [ValidateSet('install', 'init', 'stamp', 'provision', 'cell-provision', 'cell-repair', 'cell-uninstall', 'cell-attribute-legacy', 'cell-deactivate', 'cell-retire-legacy', 'slot-provision', 'slot-validate', 'slot-complete', 'slot-completion-validate', 'slot-cutover')]
     [string]$Action = 'install',
     [string]$InstallDir,
     [string]$Context,
@@ -44,7 +44,7 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
-if ($Action -in @('cell-repair', 'cell-uninstall', 'cell-attribute-legacy', 'cell-deactivate')) {
+if ($Action -in @('cell-repair', 'cell-uninstall', 'cell-attribute-legacy', 'cell-deactivate', 'cell-retire-legacy')) {
     $lifecycleArgs = @($Action)
     $names = @{
         Context = 'context'; DurableHome = 'durable-home'; ExpectedMarketplaceId = 'expected-marketplace-id'

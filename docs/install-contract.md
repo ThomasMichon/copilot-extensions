@@ -621,6 +621,76 @@ Explicit rollback or deactivation writes
 }
 ```
 
+#### Legacy retirement record schema
+
+Explicit compatibility retirement writes
+`<plugin-root>/retirements/activation-<target-generation>--<retirement-id>.json`:
+
+```json
+{
+  "schema": "copilot-extensions.legacy-retirement",
+  "version": 1,
+  "marketplaceId": "example--0123456789abcdef",
+  "pluginId": "agent-example",
+  "context": "C:\\Users\\example\\.copilot-extensions\\marketplaces\\example--0123456789abcdef\\plugins\\agent-example\\install.json",
+  "environment": {
+    "platform": "windows",
+    "homeRealPath": "C:\\Users\\example",
+    "wslDistro": null
+  },
+  "target": {
+    "id": "global-binstubs",
+    "activation": {
+      "path": "C:\\Users\\example\\.copilot-extensions\\marketplaces\\example--0123456789abcdef\\plugins\\agent-example\\installation-activation.json",
+      "generation": 1,
+      "mode": "namespaced",
+      "state": "active",
+      "namespaceGeneration": 1,
+      "installGeneration": 1,
+      "legacyDisposition": "retained-inert"
+    },
+    "tombstone": {
+      "path": "C:\\Users\\example\\.agent-example\\.installation-ownership.json",
+      "activationGeneration": 1,
+      "transferredAt": "2026-01-01T00:00:00Z",
+      "attribution": {"kind": "explicit-legacy-attribution"}
+    },
+    "health": {
+      "kind": "example-runtime",
+      "status": "ready",
+      "reason": "cell-runtime-healthy",
+      "checkedAt": "2026-01-01T00:15:00Z",
+      "evidence": {"source": "test"}
+    },
+    "items": [
+      {
+        "kind": "path",
+        "identity": ".local/bin/agent-example",
+        "path": "C:\\Users\\example\\.local\\bin\\agent-example"
+      }
+    ]
+  },
+  "result": {
+    "items": [
+      {
+        "kind": "path",
+        "identity": ".local/bin/agent-example",
+        "path": "C:\\Users\\example\\.local\\bin\\agent-example",
+        "disposition": "removed"
+      }
+    ]
+  },
+  "createdAt": "2026-01-01T00:15:00Z"
+}
+```
+
+Retirement is fail-closed and auditable. A wrapper or service artifact is
+retireable only when the claimed tombstone still binds that artifact to the
+current active namespaced activation and the destination cell contributes an
+explicit `health.status: "ready"` report from its own validated runtime or
+service health path. Missing or ambiguous ownership, unhealthy replacements,
+and reappeared artifacts preserve the legacy surface unchanged.
+
 `target.kind` is `legacy-attribution-rollback` when the caller explicitly
 clears a matching tombstone under the legacy lock and `cell-deactivation` when
 the caller explicitly proves no tombstone exists. The record is keyed by the
