@@ -3284,7 +3284,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             }
             if selection.assignment is not None:
                 launch["profile_assignment"] = profile_assignment.metadata(selection.assignment)
-            project = cfg.active_project()
+            project = config.repo_name
             if project:
                 launch["project"] = project
             _json_output(
