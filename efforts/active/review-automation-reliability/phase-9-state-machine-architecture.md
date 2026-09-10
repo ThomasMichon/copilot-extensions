@@ -285,11 +285,17 @@ above, not an independent feature:
 
 ## Plan (this phase)
 
+- [x] Declare the dispatch task state machine as a checkable data table
+  (`../../../plugins/agent-dispatch/src/agent_dispatch/task_state_machine.py`),
+  reconciling Phase 1's original reviewer-flavored state list against the
+  real `agent_dispatch.queue.Status` states and the board-game ownership
+  split above, with structural tests
+  (`../../../plugins/agent-dispatch/tests/test_task_state_machine.py`)
+  proving every state reachable, no non-terminal state without an exit,
+  and every transition classified under exactly one recovery mode.
 - [ ] Declare the provider/PR-target state machine and its per-provider
   capability table (approval authority, notification fidelity, conflict
   policy).
-- [ ] Declare the dispatch task state machine, reconciling Phase 1's
-  original state list against the board-game ownership split above.
 - [ ] Declare the bridge/session state machine, deferring to the
   agent-bridge vision's verb work for the authoritative verb vocabulary
   once it lands; coordinate rather than duplicate in the interim.
@@ -302,5 +308,5 @@ above, not an independent feature:
 - [ ] Re-validate each Phase 8 candidate against the declared machines;
   fold each into the relevant machine's spec rather than implementing it
   standalone.
-- [ ] Submit this phase's design as its own reviewed slice before any
+- [x] Submit this phase's design as its own reviewed slice before any
   implementation begins, per this effort's coordination gate.
