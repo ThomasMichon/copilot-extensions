@@ -301,7 +301,7 @@ because they provide tools or services.
 
 ### Phase 6 — Migration, enforcement, and cleanup ([#1110](https://github.com/ThomasMichon/copilot-extensions/issues/1110))
 
-- [ ] Add user-wide and plugin-scoped parser-free maintenance gates with strict
+- [x] Add user-wide and plugin-scoped parser-free maintenance gates with strict
   ownership sidecars, explicit management-command authorization, draining lease
   behavior, stale-owner diagnostics, and fail-safe remote maintenance probing.
 - [ ] Provide explicit legacy-state attribution/migration under the legacy
@@ -371,6 +371,54 @@ because they provide tools or services.
 See [`design.md`](design.md).
 
 ## Journal
+
+### 2026-09-09 — Phase 6 item 1: maintenance gates and ownership sidecars
+
+- Merged [#2329](https://github.com/ThomasMichon/copilot-extensions/pull/2329)
+  at `f1087819216159ee241b875147a92d24198ea715`, landing the first operative
+  Phase 6 slice for [#1110](https://github.com/ThomasMichon/copilot-extensions/issues/1110).
+- The shared `installation-context` primitive now exposes explicit
+  `maintenance-enter`, `maintenance-status`, and `maintenance-release`
+  actions; writes strict user-wide or plugin-scoped ownership sidecars with a
+  random token; refuses management mutation unless the caller presents the
+  matching token; reports stale sidecars without clearing them; and treats
+  ambiguous or unreachable remote maintenance probes as quiesced/fail-closed.
+- `activation-cas` now honors applicable maintenance before publishing a new
+  activation receipt, and the first concrete consumer (`agent-machines`
+  `cell-repair` / `cell-uninstall`) now requires the exact maintenance token
+  when scoped maintenance is active. Vendored copies were synchronized across
+  every current adopter, including the newly checked `agent-vault` copy.
+- Validation:
+  `python -m pytest -q libs/installation-context/tests/test_installation_mode_governance.py libs/installation-context/tests/test_vendoring.py`
+  (`75 passed, 30 skipped`);
+  `python tools/run-plugin-tests.py agent-machines`
+  (`508 passed, 20 skipped`);
+  `python tools/check-install-contract.py`,
+  `python tools/check-version-consistency.py`,
+  `python tools/check-vendored-libs-sync.py`,
+  `python tools/sync-installation-context.py --check`,
+  `python libs/payload-invocation/generate.py --all --check`,
+  `python -m pytest -q libs/installer-readiness/tests`,
+  `python tools/check-marketplace-isolation.py`,
+  `python tools/check-docs-consistency.py`,
+  `git diff --check`, and changed-file `ruff check --select F,E9` all passed;
+  PR #2329 CI also passed its plugin matrix for agent-bridge, agent-codespaces,
+  agent-containers, agent-index, agent-logger, agent-machines, agent-mcp,
+  agent-ssh, agent-vault, and the agent-worktrees collect-only/Windows-launch
+  lanes plus the shared guards/lint jobs.
+- Native Windows full-suite spot checks still reproduced unchanged unrelated
+  failures from `origin/main`: the previously tracked
+  [#2159](https://github.com/ThomasMichon/copilot-extensions/issues/2159),
+  [#2160](https://github.com/ThomasMichon/copilot-extensions/issues/2160),
+  [#2214](https://github.com/ThomasMichon/copilot-extensions/issues/2214), and
+  [#2240](https://github.com/ThomasMichon/copilot-extensions/issues/2240), plus
+  the newly filed [#2327](https://github.com/ThomasMichon/copilot-extensions/issues/2327)
+  and [#2328](https://github.com/ThomasMichon/copilot-extensions/issues/2328).
+- `#1110` remains open. The remaining Phase 6 scope is unchanged: explicit
+  legacy attribution/migration, rollback/deactivation, long-running maintenance
+  rechecks, legacy service and binstub retirement, report-only guard
+  enforcement, and rollback/retention documentation still need their own
+  follow-on increments.
 
 ### 2026-08-25 — Kickoff
 
