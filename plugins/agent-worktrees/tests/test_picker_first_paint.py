@@ -454,6 +454,108 @@ def test_stream_source_is_not_authoritative_until_done(monkeypatch):
     assert loader.authoritative_source_ids() == {source.source_id}
 
 
+def test_stale_generation_spawn_failure_does_not_clobber_fresher_ready_state(
+    monkeypatch,
+):
+    """Same guard for the other failure branch: a stale-generation call whose
+    subprocess spawn itself raises must not clobber a newer, real success."""
+    from agent_worktrees.picker_tui import data_ssh
+
+    def boom(_argv):
+        raise OSError("could not spawn")
+
+    source = data_ssh.Source(
+        "host", "Win", ["agent-worktrees", "list"], local=True
+    )
+    loader = data_ssh.LiveLoader([source])
+    monkeypatch.setattr(loader, "_spawn_stream", boom)
+
+    loader._gen[source.cache_key] = 1
+    loader._state[source.cache_key] = "ready"
+    loader._records[source.cache_key] = [{"id4": "real-content"}]
+
+    result = loader._load_remote_stream(source, 0)
+
+    assert result is True
+    assert loader.state_for_source(source.cache_key) == "ready"
+    assert loader._records[source.cache_key] == [{"id4": "real-content"}]
+
+
+def test_stale_generation_stream_failure_does_not_clobber_fresher_ready_state(
+    monkeypatch,
+):
+    """Regression: a superseded (stale-generation) `_load_remote_stream` call
+    that ultimately fails must never overwrite a NEWER generation's already-
+    committed ``ready`` state/records -- else the tab shows a red X (failed)
+    even though its content genuinely loaded (from the newer, real load), a
+    race most visible on the current/local machine (the source most likely to
+    have an early reload racing its initial load)."""
+    from agent_worktrees.picker_tui import data_ssh
+
+    class FailingStdout:
+        def __iter__(self):
+            return iter(())  # no rows, no "done" -- a real failure
+
+    class FailingProc:
+        stdout = FailingStdout()
+        returncode = 1
+
+        @staticmethod
+        def communicate(timeout=None):
+            return "", "boom: something went wrong"
+
+    source = data_ssh.Source(
+        "host", "Win", ["agent-worktrees", "list"], local=True
+    )
+    loader = data_ssh.LiveLoader([source])
+    monkeypatch.setattr(loader, "_spawn_stream", lambda _argv: FailingProc())
+
+    # Simulate a newer reload() having already superseded generation 0 and
+    # committed a genuinely successful, ready state with real records --
+    # exactly what a fresher, concurrent load would have done.
+    loader._gen[source.cache_key] = 1
+    loader._state[source.cache_key] = "ready"
+    loader._records[source.cache_key] = [{"id4": "real-content"}]
+
+    # The STALE gen-0 attempt (e.g. the picker's very first load, whose
+    # subprocess was slow) now finishes -- with a failure.
+    result = loader._load_remote_stream(source, 0)
+
+    assert result is True
+    # The stale failure must not have clobbered the newer, real success.
+    assert loader.state_for_source(source.cache_key) == "ready"
+    assert loader._records[source.cache_key] == [{"id4": "real-content"}]
+
+
+def test_current_generation_stream_failure_is_recorded(monkeypatch):
+    """Sanity counterpart: a genuine (non-superseded) failure still sets the
+    failed state -- the generation guard must not swallow real failures."""
+    from agent_worktrees.picker_tui import data_ssh
+
+    class FailingStdout:
+        def __iter__(self):
+            return iter(())
+
+    class FailingProc:
+        stdout = FailingStdout()
+        returncode = 1
+
+        @staticmethod
+        def communicate(timeout=None):
+            return "", "boom: something went wrong"
+
+    source = data_ssh.Source(
+        "host", "Win", ["agent-worktrees", "list"], local=True
+    )
+    loader = data_ssh.LiveLoader([source])
+    monkeypatch.setattr(loader, "_spawn_stream", lambda _argv: FailingProc())
+
+    result = loader._load_remote_stream(source, 0)
+
+    assert result is True
+    assert loader.state_for_source(source.cache_key) == "failed"
+
+
 def test_local_live_source_uses_streaming_subprocess(monkeypatch):
     from agent_worktrees.picker_tui import data_ssh
 
