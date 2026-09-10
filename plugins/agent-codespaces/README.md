@@ -191,6 +191,13 @@ activate a paused native child. Shared required-relay/auth and ownership checks
 still apply. A reservation that failed admission before infrastructure started
 can be retired with its generation; uncertain prior cleanup still requires proof.
 
+Local Git root/origin discovery does not inherit the native JSON control stdin.
+Those noninteractive probes use null stdin and a 10-second timeout; an elapsed
+probe fails explicitly rather than treating repository configuration as absent.
+This preserves configuration discovery and leaves the control pipe owned by the
+native transport. It does not change generation-bound cancellation or authorize
+resetting an existing execution.
+
 ### Diagnostic command input
 
 For a diagnostic command whose input exceeds local shell command-line limits,

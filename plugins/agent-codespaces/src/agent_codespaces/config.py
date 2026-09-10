@@ -27,6 +27,7 @@ from typing import Any, cast
 from urllib.parse import urlsplit, urlunsplit
 
 import yaml
+from agent_procutil import no_window_kwargs
 from dropin_registry import (
     EntryDecision,
     EntryStatus,
@@ -44,6 +45,7 @@ from plugin_activation import (
 )
 
 log = logging.getLogger("agent-codespaces")
+_GIT_PROBE_TIMEOUT = 10.0
 
 
 def _home() -> Path:
@@ -1391,13 +1393,15 @@ def cwd_repo_root() -> Path | None:
     adopt`` (the adoption manifest remains for extra/multi repos and for the
     detached daemon paths, which pass ``include_cwd=False``).
     """
-    import subprocess
-
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
             cwd=Path.cwd(), capture_output=True, text=True,
+            stdin=subprocess.DEVNULL, timeout=_GIT_PROBE_TIMEOUT,
+            **no_window_kwargs(),
         )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("Local Git root discovery timed out; repository configuration is unverified") from exc
     except (OSError, subprocess.SubprocessError):
         return None
     if result.returncode != 0 or not (result.stdout or "").strip():
@@ -1950,7 +1954,12 @@ def _git_origin_remote(repo_path: Path) -> str | None:
             capture_output=True,
             text=True,
             check=False,
+            stdin=subprocess.DEVNULL,
+            timeout=_GIT_PROBE_TIMEOUT,
+            **no_window_kwargs(),
         )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("Local Git origin discovery timed out; repository identity is unverified") from exc
     except (OSError, subprocess.SubprocessError):
         return None
     remote = (result.stdout or "").strip()
