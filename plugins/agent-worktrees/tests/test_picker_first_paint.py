@@ -580,3 +580,65 @@ def test_local_live_source_uses_streaming_subprocess(monkeypatch):
 
     assert calls == [(source, 0)]
     assert data_ssh._stream_argv(source) == [*argv, "--stream"]
+
+
+def test_default_run_removes_parent_python_runtime(monkeypatch):
+    """The local source's argv (``_local_argv``) re-invokes ``sys.executable
+    -m agent_worktrees`` as a real subprocess, and both the module-level
+    ``_run`` and ``LiveLoader._spawn``/``_spawn_stream`` must sanitize the
+    child environment -- otherwise a leaked ``PYTHONHOME`` (e.g. from an outer
+    ``uv run`` pointing at a foreign-architecture shared CPython) forces that
+    child to load a mismatched stdlib and crash on `import socket`. Mirrors
+    ``worktree_manager``'s ``test_default_run_removes_parent_python_runtime``
+    / ``test_tracked_runners_remove_parent_python_runtime`` (#2359, #2384)."""
+    from agent_worktrees.picker_tui import data_ssh
+
+    seen = []
+
+    class FakeCompleted:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(argv, **kwargs):
+        seen.append(kwargs["env"])
+        return FakeCompleted()
+
+    monkeypatch.setenv("PYTHONHOME", "/parent/python")
+    monkeypatch.setenv("UV_INTERNAL__PYTHONHOME", "/uv/python")
+    monkeypatch.setattr(data_ssh.subprocess, "run", fake_run)
+
+    data_ssh._run(["engine"], 1)
+
+    assert len(seen) == 1
+    assert "PYTHONHOME" not in seen[0]
+    assert "UV_INTERNAL__PYTHONHOME" not in seen[0]
+
+
+def test_tracked_runners_remove_parent_python_runtime(monkeypatch):
+    from agent_worktrees.picker_tui import data_ssh
+
+    seen = []
+
+    class FakeProc:
+        returncode = 0
+
+        def communicate(self, timeout=None):
+            return "", ""
+
+    def fake_popen(argv, **kwargs):
+        seen.append(kwargs["env"])
+        return FakeProc()
+
+    monkeypatch.setenv("PYTHONHOME", "/parent/python")
+    monkeypatch.setenv("UV_INTERNAL__PYTHONHOME", "/uv/python")
+    monkeypatch.setattr(data_ssh.subprocess, "Popen", fake_popen)
+    loader = data_ssh.LiveLoader([])
+
+    loader._spawn(["engine"], 1)
+    stream = loader._spawn_stream(["engine", "--stream"])
+    loader._procs.remove(stream)
+
+    assert len(seen) == 2
+    assert all("PYTHONHOME" not in env for env in seen)
+    assert all("UV_INTERNAL__PYTHONHOME" not in env for env in seen)

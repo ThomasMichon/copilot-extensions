@@ -9,10 +9,12 @@ mode. The roster comes from the canonical ``machines.yaml`` registry (via
 shells never drift from config.
 
 A :class:`LiveLoader` runs ``<project> list --json --classify --mux-details``
-on a background daemon thread per machine: the local machine in-process (reusing
-``data_local.load``, no subprocess), every reachable remote over its multi-machine system
-SSH alias. The picker shows the connect spinner while a machine loads and
-resolves it to ``ready`` (data) or ``failed`` (unreachable / errored).
+on a background daemon thread per machine: the local machine as a tracked
+subprocess (``sys.executable -m agent_worktrees ...``, via :func:`_local_argv`,
+so a stalled Python/git classification pass can never stall Textual's own
+loop), every reachable remote over its multi-machine system SSH alias. The
+picker shows the connect spinner while a machine loads and resolves it to
+``ready`` (data) or ``failed`` (unreachable / errored).
 
 This module only *reads* worktree listings -- it never creates, opens, cleans,
 or syncs anything.
@@ -1058,6 +1060,35 @@ def _is_classify_unsupported(stderr: str) -> bool:
 # operator's keystrokes.
 _CREATE_NO_WINDOW = no_window_flags()
 
+# Variables that describe *this* interpreter's own launch environment -- never
+# something a spawned child should inherit. The local source's argv
+# (``_local_argv``) re-invokes ``sys.executable -m agent_worktrees`` as a real
+# subprocess (it is not run in-process), so a leaked ``PYTHONHOME`` (e.g. from
+# an outer ``uv run`` pointing at a foreign-architecture shared CPython) would
+# force that child to load a mismatched stdlib and crash on `import socket`
+# ("DLL load failed... not a valid Win32 application") instead of resolving its
+# own venv. Remote (SSH) invocations need the same treatment: a remote alias
+# can legitimately share a Python-tooling PATH/profile with the picker host.
+# Mirrors ``worktree_manager.engine_client._engine_environment`` (#2359, #2384).
+_PARENT_PYTHON_ENV = {
+    "PYTHONHOME",
+    "PYTHONPATH",
+    "PYTHONEXECUTABLE",
+    "VIRTUAL_ENV",
+    "UV_INTERNAL__PYTHONHOME",
+    "__PYVENV_LAUNCHER__",
+}
+
+
+def _sanitized_subprocess_env() -> dict[str, str]:
+    """A clean environment for a spawned ``agent-worktrees``/``ssh`` child."""
+    windows = os.name == "nt"
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if (key.upper() if windows else key) not in _PARENT_PYTHON_ENV
+    }
+
 
 def _run(argv, timeout):
     kwargs = dict(
@@ -1066,6 +1097,7 @@ def _run(argv, timeout):
         # DEVNULL gives ssh an empty stdin (instant EOF) so a background ssh
         # child can't read the operator's keystrokes out from under the TUI.
         stdin=subprocess.DEVNULL,
+        env=_sanitized_subprocess_env(),
     )
     if os.name == "nt" and _CREATE_NO_WINDOW:
         kwargs["creationflags"] = _CREATE_NO_WINDOW
@@ -1624,6 +1656,7 @@ class LiveLoader:
             # reader, freezing the picker's keys until the load fan-out exits.
             stdin=subprocess.DEVNULL,
             text=True, encoding="utf-8", errors="replace",
+            env=_sanitized_subprocess_env(),
         )
         if os.name == "posix":
             kwargs["start_new_session"] = True   # own group -> killpg on cancel
@@ -1667,6 +1700,7 @@ class LiveLoader:
             stdin=subprocess.DEVNULL,
             text=True, encoding="utf-8", errors="replace",
             bufsize=1,   # line-buffered: surface rows as they arrive
+            env=_sanitized_subprocess_env(),
         )
         if os.name == "posix":
             kwargs["start_new_session"] = True
