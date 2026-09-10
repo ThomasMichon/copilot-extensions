@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Explicit, receipt-authorized Agent Machines repair and uninstall."""
+"""Explicit, receipt-authorized Agent Machines attribution, repair, and uninstall."""
 from __future__ import annotations
 
 import argparse
@@ -17,6 +17,7 @@ from typing import Any
 
 sys.dont_write_bytecode = True
 SCRIPT_ROOT = Path(__file__).resolve().parent
+PAYLOAD_MANIFEST = SCRIPT_ROOT.parent / "payload-invocation.json"
 
 
 def _load(name: str, path: Path) -> Any:
@@ -132,9 +133,108 @@ def _manifest_path_matches(value: Any, expected: Path | str) -> bool:
     )
 
 
+def _legacy_path_items(profile: Path) -> tuple[Path, list[dict[str, str]]]:
+    manifest = ic.read_json(PAYLOAD_MANIFEST)
+    if not isinstance(manifest, dict):
+        ic._fail("payload-invocation.json must be a JSON object.")
+    installation = ic._property(manifest, "installation")
+    if not isinstance(installation, dict):
+        ic._fail("payload-invocation.json installation must be a JSON object.")
+    footprint = ic._property(installation, "legacyFootprint")
+    if not isinstance(footprint, dict):
+        ic._fail("payload-invocation.json legacyFootprint must be a JSON object.")
+    paths = ic._property(footprint, "paths")
+    if not isinstance(paths, list):
+        ic._fail("payload-invocation.json legacyFootprint.paths must be an array.")
+    items: list[dict[str, str]] = []
+    legacy_root: Path | None = None
+    for entry in paths:
+        if not isinstance(entry, str) or not entry:
+            ic._fail("legacyFootprint.paths entries must be non-empty strings.")
+        raw = Path(entry)
+        absolute = raw if ic._path_is_fully_qualified(raw) else profile / raw
+        record = {
+            "kind": "path",
+            "identity": entry,
+            "path": str(Path(os.path.abspath(os.fspath(absolute)))),
+        }
+        items.append(record)
+        if entry == ".agent-machines":
+            legacy_root = Path(record["path"])
+    if legacy_root is None:
+        ic._fail("payload-invocation.json must declare .agent-machines in legacyFootprint.paths.")
+    return legacy_root, items
+
+
+def _attribute_legacy(arguments: argparse.Namespace) -> dict[str, Any]:
+    if not ic._path_is_fully_qualified(arguments.context) or not ic._path_is_fully_qualified(arguments.durable_home):
+        ic._fail("Legacy attribution requires explicit absolute context and durable home.")
+    durable = ic.canonical_path(arguments.durable_home)
+    current_environment, profile = ic._current_environment(
+        environment=os.environ,
+        os_profile=None,
+        platform=None,
+        wsl_distro=None,
+    )
+    legacy_root, items = _legacy_path_items(profile)
+    present = [
+        {
+            **item,
+            "classification": "orphaned",
+            "reason": "legacy-root-unavailable",
+        }
+        for item in items
+        if os.path.lexists(Path(item["path"]))
+    ]
+    absent = [
+        {
+            **item,
+            "classification": "absent",
+            "reason": "legacy-absent",
+        }
+        for item in items
+        if not os.path.lexists(Path(item["path"]))
+    ]
+    if not legacy_root.is_dir() or ic._is_link_or_junction(legacy_root):
+        return {
+            "action": "attribute-legacy",
+            "status": "preserved" if present else "ready",
+            "reason": "legacy-root-unavailable" if present else "no-legacy-state",
+            "legacyRoot": str(legacy_root),
+            "context": str(ic.canonical_path(arguments.context)),
+            "tombstone": None,
+            "tombstoneChanged": False,
+            "activation": None,
+            "activationChanged": False,
+            "activationGeneration": 0,
+            "namespaceGeneration": None,
+            "installGeneration": None,
+            "attributedItems": [],
+            "preservedItems": present,
+            "absentItems": absent,
+            "operative": False,
+        }
+    return ic.attribute_legacy_state(
+        context=arguments.context,
+        expected_marketplace_id=arguments.expected_marketplace_id,
+        expected_plugin_id="agent-machines",
+        legacy_root=legacy_root,
+        legacy_items=items,
+        legacy_lock=provisioning_lock(legacy_root),
+        durable_home=durable,
+        maintenance_token=getattr(arguments, "maintenance_token", None),
+        environment=os.environ,
+        os_profile=profile,
+        platform=current_environment["platform"],
+        wsl_distro=current_environment["wslDistro"],
+    )
+
+
 def lifecycle(arguments: argparse.Namespace) -> dict[str, Any]:
     """Execute a derived-only repair or a state-preserving owned uninstall."""
     a = arguments
+    if a.action == "cell-attribute-legacy":
+        return _attribute_legacy(a)
     if not ic._path_is_fully_qualified(a.context) or not ic._path_is_fully_qualified(a.durable_home):
         ic._fail("Lifecycle management requires explicit absolute context and durable home.")
     durable = ic.canonical_path(a.durable_home)
@@ -507,18 +607,51 @@ def lifecycle(arguments: argparse.Namespace) -> dict[str, Any]:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("cell-repair", "cell-uninstall"))
+    parser.add_argument("action", choices=("cell-repair", "cell-uninstall", "cell-attribute-legacy"))
     parser.add_argument("--maintenance-token")
     for name in ("context", "durable-home", "expected-marketplace-id", "expected-payload-root",
                  "expected-payload-version", "snapshot-id", "runtime-version"):
-        parser.add_argument(f"--{name}", required=True)
+        parser.add_argument(f"--{name}")
     for name in ("expected-namespace-generation", "expected-install-generation"):
-        parser.add_argument(f"--{name}", required=True, type=ic._parse_cli_generation)
+        parser.add_argument(f"--{name}", type=ic._parse_cli_generation)
     for marker in ("current", "last-known-good"):
-        group = parser.add_mutually_exclusive_group(required=True)
+        group = parser.add_mutually_exclusive_group(required=False)
         group.add_argument(f"--expected-{marker}-version")
         group.add_argument(f"--expect-{marker}-absent", action="store_true")
     args = parser.parse_args(argv)
+    if args.action in {"cell-repair", "cell-uninstall"}:
+        required = (
+            "context",
+            "durable_home",
+            "expected_marketplace_id",
+            "expected_payload_root",
+            "expected_payload_version",
+            "snapshot_id",
+            "runtime_version",
+            "expected_namespace_generation",
+            "expected_install_generation",
+        )
+        missing = [name for name in required if getattr(args, name) in (None, "")]
+        if missing:
+            parser.error(
+                "the following arguments are required for "
+                f"{args.action}: " + ", ".join(f"--{name.replace('_', '-')}" for name in missing)
+            )
+        for marker in ("current", "last_known_good"):
+            if not (
+                getattr(args, f"expected_{marker}_version") or getattr(args, f"expect_{marker}_absent")
+            ):
+                parser.error(
+                    f"{args.action} requires either --expected-{marker.replace('_', '-')}-version "
+                    f"or --expect-{marker.replace('_', '-')}-absent"
+                )
+    else:
+        for name in ("context", "durable_home", "expected_marketplace_id"):
+            if getattr(args, name) in (None, ""):
+                parser.error(
+                    "the following arguments are required for "
+                    f"{args.action}: --{name.replace('_', '-')}"
+                )
     try:
         print(json.dumps(lifecycle(args), separators=(",", ":")))
         return 0

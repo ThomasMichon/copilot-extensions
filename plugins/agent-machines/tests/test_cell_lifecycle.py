@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import subprocess
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -73,7 +74,17 @@ def select(args, version="1.0.0"):
     args.expect_current_absent = args.expect_last_known_good_absent = version is None
 
 
-def adapter(style, args, *, omit=()):
+def legacy_state(profile: Path) -> tuple[Path, Path]:
+    root = profile / ".agent-machines"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "legacy.txt").write_text("legacy state\n", encoding="utf-8")
+    command = profile / ".local" / "bin" / "agent-machines"
+    command.parent.mkdir(parents=True, exist_ok=True)
+    command.write_text("legacy wrapper\n", encoding="utf-8")
+    return root, command
+
+
+def adapter(style, args, *, omit=(), env=None):
     command = (
         [shutil.which("pwsh") or shutil.which("powershell"), "-NoProfile", "-File", str(SCRIPT.with_name("init.ps1")), "-Action", args.action]
         if style == "powershell" else ["bash", str(SCRIPT.with_name("init.sh")), args.action]
@@ -85,7 +96,7 @@ def adapter(style, args, *, omit=()):
         command.append(name)
         if value is not True:
             command.append(str(value))
-    return subprocess.run(command, text=True, encoding="utf-8", capture_output=True, timeout=30)
+    return subprocess.run(command, text=True, encoding="utf-8", capture_output=True, timeout=30, env=env)
 
 
 STYLES = (["bash"] if os.name != "nt" and shutil.which("bash") else []) + (
@@ -173,6 +184,106 @@ def test_lifecycle_requires_matching_plugin_maintenance_token(tmp_path, style):
     assert allowed.returncode == 0, allowed.stderr
     assert json.loads(allowed.stdout)["reason"] == "cell-repaired"
     assert root.joinpath("maintenance").exists()
+
+
+@pytest.mark.parametrize("style", STYLES)
+def test_legacy_attribution_adapters_publish_tombstone_once(tmp_path, monkeypatch, style):
+    if os.name != "nt":
+        pytest.skip("subprocess adapter attribution uses the real POSIX profile; direct governance tests cover POSIX")
+    root, args = fixture(tmp_path)
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    legacy, command = legacy_state(profile)
+    env = os.environ.copy()
+    env.update({"HOME": str(profile), "USERPROFILE": str(profile)})
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    args.action = "cell-attribute-legacy"
+    args.maintenance_token = None
+
+    first = adapter(style, args, env=env)
+    assert first.returncode == 0, first.stderr
+    first_payload = json.loads(first.stdout)
+    assert first_payload["reason"] == "legacy-attributed"
+    assert first_payload["tombstoneChanged"] is True
+    assert first_payload["activationChanged"] is True
+    assert {item["identity"] for item in first_payload["attributedItems"]} == {
+        ".agent-machines",
+        ".local/bin/agent-machines",
+    }
+    tombstone = legacy / ".installation-ownership.json"
+    activation = root / "installation-activation.json"
+    assert tombstone.exists()
+    assert activation.exists()
+    preserved_tombstone = tombstone.read_bytes()
+    preserved_activation = activation.read_bytes()
+
+    second = adapter(style, args, env=env)
+    assert second.returncode == 0, second.stderr
+    second_payload = json.loads(second.stdout)
+    assert second_payload["reason"] == "already-attributed"
+    assert second_payload["tombstoneChanged"] is False
+    assert second_payload["activationChanged"] is False
+    assert tombstone.read_bytes() == preserved_tombstone
+    assert activation.read_bytes() == preserved_activation
+    assert command.read_text(encoding="utf-8") == "legacy wrapper\n"
+
+
+def test_legacy_attribution_refuses_without_legacy_lock_or_install_lock(tmp_path, monkeypatch):
+    _root, args = fixture(tmp_path)
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    legacy_state(profile)
+    monkeypatch.setattr(
+        engine.ic,
+        "_current_environment",
+        lambda **_kwargs: (
+            {
+                "platform": "windows" if os.name == "nt" else "posix",
+                "homeRealPath": str(profile.resolve()),
+                "wslDistro": None,
+            },
+            profile.resolve(),
+        ),
+    )
+    monkeypatch.setenv("HOME", str(profile))
+    monkeypatch.setenv("USERPROFILE", str(profile))
+    args.action = "cell-attribute-legacy"
+
+    @contextmanager
+    def failing_lock(_path: Path):
+        raise ic.InstallationContextError("legacy lock remained busy")
+        yield
+
+    monkeypatch.setattr(engine, "provisioning_lock", failing_lock)
+    with pytest.raises(ic.InstallationContextError, match="legacy lock remained busy"):
+        engine.lifecycle(args)
+
+    monkeypatch.undo()
+    monkeypatch.setattr(
+        engine.ic,
+        "_current_environment",
+        lambda **_kwargs: (
+            {
+                "platform": "windows" if os.name == "nt" else "posix",
+                "homeRealPath": str(profile.resolve()),
+                "wslDistro": None,
+            },
+            profile.resolve(),
+        ),
+    )
+    monkeypatch.setenv("HOME", str(profile))
+    monkeypatch.setenv("USERPROFILE", str(profile))
+    legacy_state(profile)
+    original_acquire = ic._DirectoryLock.acquire
+
+    def fail_install(self):
+        if self.kind == "install":
+            raise ic.InstallationContextError("Installation lock remained busy.")
+        return original_acquire(self)
+
+    monkeypatch.setattr(ic._DirectoryLock, "acquire", fail_install)
+    with pytest.raises(ic.InstallationContextError, match="remained busy"):
+        engine.lifecycle(args)
 
 
 @pytest.mark.parametrize("case", ["missing-completion", "bad-completion", "missing-snapshot", "changed-payload", "foreign-marketplace", "linked-manifest"])

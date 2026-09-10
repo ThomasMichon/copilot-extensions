@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 
 import pytest
@@ -110,6 +111,14 @@ def _api_environment(profile: Path) -> dict[str, object]:
         "platform": "posix",
         "homeRealPath": str(profile.resolve()),
         "wslDistro": None,
+    }
+
+
+def _profile_environment(profile: Path) -> dict[str, object]:
+    return {
+        "platform": "windows" if os.name == "nt" else "posix",
+        "homeRealPath": str(profile.resolve()),
+        "wslDistro": None if os.name == "nt" else os.environ.get("WSL_DISTRO_NAME") or None,
     }
 
 
@@ -240,6 +249,21 @@ def _activation(
         },
     )
     return activation
+
+
+def _legacy_items(profile: Path) -> list[dict[str, str]]:
+    return [
+        {
+            "kind": "path",
+            "identity": f".{PLUGIN_ID}",
+            "path": str((profile / f".{PLUGIN_ID}").resolve()),
+        },
+        {
+            "kind": "path",
+            "identity": f".local/bin/{PLUGIN_ID}",
+            "path": str((profile / ".local" / "bin" / PLUGIN_ID).resolve()),
+        },
+    ]
 
 
 def _policy(enabled: bool, marketplace_id: str, *, plugin_enabled=None) -> dict:
@@ -1211,8 +1235,6 @@ def test_activation_cas_requires_matching_maintenance_token(tmp_path: Path) -> N
             platform="windows" if os.name == "nt" else "posix",
             wsl_distro=None,
         )
-    assert not (Path(layout["plugin_root"]) / "installation-activation.json").exists()
-
     allowed = module.compare_and_swap_activation(
         context=layout["install"],
         expected_marketplace_id=layout["marketplace_id"],
@@ -1238,6 +1260,245 @@ def test_activation_cas_requires_matching_maintenance_token(tmp_path: Path) -> N
     )
     assert allowed["status"] == "ready"
     assert allowed["activationChanged"] is True
+
+
+def test_attribute_legacy_state_publishes_tombstone_and_activation(tmp_path: Path) -> None:
+    module = _load_module()
+    layout = _cell_layout(tmp_path)
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    environment = _profile_environment(profile)
+    legacy = profile / f".{PLUGIN_ID}"
+    legacy.mkdir()
+    command = profile / ".local" / "bin" / PLUGIN_ID
+    command.parent.mkdir(parents=True)
+    command.write_text("legacy wrapper\n", encoding="utf-8")
+
+    result = module.attribute_legacy_state(
+        context=layout["install"],
+        expected_marketplace_id=layout["marketplace_id"],
+        expected_plugin_id=PLUGIN_ID,
+        legacy_root=legacy,
+        legacy_items=_legacy_items(profile),
+        legacy_lock=nullcontext(),
+        durable_home=layout["durable"],
+        maintenance_token=None,
+        environment={},
+        os_profile=profile,
+        platform=str(environment["platform"]),
+        wsl_distro=environment["wslDistro"],
+    )
+
+    assert result["status"] == "ready"
+    assert result["reason"] == "legacy-attributed"
+    assert result["tombstoneChanged"] is True
+    assert result["activationChanged"] is True
+    assert {item["identity"] for item in result["attributedItems"]} == {
+        f".{PLUGIN_ID}",
+        f".local/bin/{PLUGIN_ID}",
+    }
+    tombstone = json.loads((legacy / ".installation-ownership.json").read_text(encoding="utf-8"))
+    assert tombstone["marketplaceId"] == layout["marketplace_id"]
+    assert tombstone["activation"]["generation"] == 1
+    assert tombstone["attribution"]["kind"] == "explicit-legacy-attribution"
+    assert {item["identity"] for item in tombstone["attribution"]["items"]} == {
+        f".{PLUGIN_ID}",
+        f".local/bin/{PLUGIN_ID}",
+    }
+    activation = json.loads((Path(layout["plugin_root"]) / "installation-activation.json").read_text(encoding="utf-8"))
+    assert activation["mode"] == "namespaced"
+    assert activation["legacy"]["disposition"] == "retained-inert"
+    assert activation["legacy"]["probe"]["result"] == "present"
+
+
+def test_attribute_legacy_state_preserves_ambiguous_existing_owner(tmp_path: Path) -> None:
+    module = _load_module()
+    current = _cell_layout(tmp_path, vector_index=0)
+    destination = _cell_layout(tmp_path, vector_index=1)
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    environment = _profile_environment(profile)
+    legacy = profile / f".{PLUGIN_ID}"
+    legacy.mkdir()
+    command = profile / ".local" / "bin" / PLUGIN_ID
+    command.parent.mkdir(parents=True)
+    command.write_text("legacy wrapper\n", encoding="utf-8")
+    activation = _activation(
+        destination,
+        generation=7,
+        environment=environment,
+    )
+    _write_json(
+        legacy / ".installation-ownership.json",
+        {
+            "schema": "copilot-extensions.legacy-installation-ownership",
+            "version": 1,
+            "marketplaceId": destination["marketplace_id"],
+            "pluginId": PLUGIN_ID,
+            "activation": {"path": str(activation.resolve()), "generation": 7},
+            "environment": environment,
+            "transferredAt": "2026-01-01T00:00:00Z",
+        },
+    )
+    original = (legacy / ".installation-ownership.json").read_bytes()
+
+    result = module.attribute_legacy_state(
+        context=current["install"],
+        expected_marketplace_id=current["marketplace_id"],
+        expected_plugin_id=PLUGIN_ID,
+        legacy_root=legacy,
+        legacy_items=_legacy_items(profile),
+        legacy_lock=nullcontext(),
+        durable_home=current["durable"],
+        environment={},
+        os_profile=profile,
+        platform=str(environment["platform"]),
+        wsl_distro=environment["wslDistro"],
+    )
+
+    assert result["status"] == "preserved"
+    assert result["reason"] == "owned-by-other-cell"
+    assert all(item["classification"] == "ambiguous" for item in result["preservedItems"])
+    assert (legacy / ".installation-ownership.json").read_bytes() == original
+    assert not (Path(current["plugin_root"]) / "installation-activation.json").exists()
+
+
+def test_attribute_legacy_state_preserves_orphaned_transfer(tmp_path: Path) -> None:
+    module = _load_module()
+    layout = _cell_layout(tmp_path)
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    environment = _profile_environment(profile)
+    legacy = profile / f".{PLUGIN_ID}"
+    legacy.mkdir()
+    command = profile / ".local" / "bin" / PLUGIN_ID
+    command.parent.mkdir(parents=True)
+    command.write_text("legacy wrapper\n", encoding="utf-8")
+    _write_json(
+        legacy / ".installation-ownership.json",
+        {
+            "schema": "copilot-extensions.legacy-installation-ownership",
+            "version": 1,
+            "marketplaceId": layout["marketplace_id"],
+            "pluginId": PLUGIN_ID,
+            "activation": {
+                "path": str((Path(layout["plugin_root"]) / "installation-activation.json").resolve()),
+                "generation": 4,
+            },
+            "environment": environment,
+            "transferredAt": "2026-01-01T00:00:00Z",
+        },
+    )
+    original = (legacy / ".installation-ownership.json").read_bytes()
+
+    result = module.attribute_legacy_state(
+        context=layout["install"],
+        expected_marketplace_id=layout["marketplace_id"],
+        expected_plugin_id=PLUGIN_ID,
+        legacy_root=legacy,
+        legacy_items=_legacy_items(profile),
+        legacy_lock=nullcontext(),
+        durable_home=layout["durable"],
+        environment={},
+        os_profile=profile,
+        platform=str(environment["platform"]),
+        wsl_distro=environment["wslDistro"],
+    )
+
+    assert result["status"] == "preserved"
+    assert result["reason"] == "orphaned-transfer"
+    assert all(item["classification"] == "orphaned" for item in result["preservedItems"])
+    assert (legacy / ".installation-ownership.json").read_bytes() == original
+    assert not (Path(layout["plugin_root"]) / "installation-activation.json").exists()
+
+
+def test_attribute_legacy_state_is_idempotent(tmp_path: Path) -> None:
+    module = _load_module()
+    layout = _cell_layout(tmp_path)
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    environment = _profile_environment(profile)
+    legacy = profile / f".{PLUGIN_ID}"
+    legacy.mkdir()
+    command = profile / ".local" / "bin" / PLUGIN_ID
+    command.parent.mkdir(parents=True)
+    command.write_text("legacy wrapper\n", encoding="utf-8")
+    arguments = dict(
+        context=layout["install"],
+        expected_marketplace_id=layout["marketplace_id"],
+        expected_plugin_id=PLUGIN_ID,
+        legacy_root=legacy,
+        legacy_items=_legacy_items(profile),
+        legacy_lock=nullcontext(),
+        durable_home=layout["durable"],
+        environment={},
+        os_profile=profile,
+        platform=str(environment["platform"]),
+        wsl_distro=environment["wslDistro"],
+    )
+
+    first = module.attribute_legacy_state(**arguments)
+    tombstone = (legacy / ".installation-ownership.json").read_bytes()
+    activation = (Path(layout["plugin_root"]) / "installation-activation.json").read_bytes()
+    second = module.attribute_legacy_state(**arguments)
+
+    assert first["reason"] == "legacy-attributed"
+    assert second["reason"] == "already-attributed"
+    assert second["activationChanged"] is False
+    assert second["tombstoneChanged"] is False
+    assert (legacy / ".installation-ownership.json").read_bytes() == tombstone
+    assert (Path(layout["plugin_root"]) / "installation-activation.json").read_bytes() == activation
+
+
+def test_attribute_legacy_state_requires_legacy_lock_and_install_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_module()
+    layout = _cell_layout(tmp_path)
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    environment = _profile_environment(profile)
+    legacy = profile / f".{PLUGIN_ID}"
+    legacy.mkdir()
+    arguments = dict(
+        context=layout["install"],
+        expected_marketplace_id=layout["marketplace_id"],
+        expected_plugin_id=PLUGIN_ID,
+        legacy_root=legacy,
+        legacy_items=_legacy_items(profile),
+        durable_home=layout["durable"],
+        environment={},
+        os_profile=profile,
+        platform=str(environment["platform"]),
+        wsl_distro=environment["wslDistro"],
+    )
+
+    class FailingLock:
+        def __enter__(self):
+            raise module.InstallationContextError("legacy lock remained busy")
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    with pytest.raises(module.InstallationContextError, match="legacy lock remained busy"):
+        module.attribute_legacy_state(
+            **arguments,
+            legacy_lock=FailingLock(),
+        )
+
+    original_acquire = module._DirectoryLock.acquire
+
+    def fail_install(self):
+        if self.kind == "install":
+            raise module.InstallationContextError("Installation lock 'install' remained busy.")
+        return original_acquire(self)
+
+    monkeypatch.setattr(module._DirectoryLock, "acquire", fail_install)
+    with pytest.raises(module.InstallationContextError, match="remained busy"):
+        module.attribute_legacy_state(
+            **arguments,
+            legacy_lock=nullcontext(),
+        )
+    assert not (legacy / ".installation-ownership.json").exists()
+    assert not (Path(layout["plugin_root"]) / "installation-activation.json").exists()
 
 
 def test_stale_maintenance_status_reports_dead_owner_without_clearing_marker(
