@@ -289,8 +289,16 @@ recovery mode taken matches the taxonomy above.
 
 ## Phase 8 candidates, re-seated as required behaviors (not a parallel checklist)
 
-Every Phase 8 candidate is an expression of one of the three machines
-above, not an independent feature:
+Every Phase 8 candidate is *conceptually* an expression of one of the three
+machines above, not an independent feature. The original mapping below
+(kept for its rationale) was written before this phase's declared tables
+existed; the **re-validation pass** (roster item 2, below) checked each
+candidate against what the four modules actually declare today, not just
+which machine it conceptually belongs to. Three of the eight are now
+genuinely declared behaviors; five are still only a conceptual home
+assignment, with no declared table or function backing them yet -- that
+gap is real and is called out per candidate rather than left implied by
+the original prose.
 
 - Attempt-budget choke point, event ledger with reason-code
   classification, stale-approval classification, official-vs-candidate
@@ -305,6 +313,30 @@ above, not an independent feature:
 - Relay/host liveness and health-fencing -> a **bridge/session** machine
   property (the host substrate's own state must be observable and
   fenced independently of any single task).
+
+### Re-validation pass: declared today vs. still only assigned a home
+
+| Phase 8 candidate | Assigned machine (above) | Actually declared? |
+|---|---|---|
+| Base-only/unchanged-substance detection | provider | **Yes** -- `provider_state_machine.Revision`, `RevisionChangeKind`, `classify_revision_change`. |
+| Stale-approval-vs-current-head classification | provider | **Yes** -- `ApprovalStatus.STALE` + `revision_invalidates_approval` (already declared before this pass) is now concretely groundable in a real `Revision`, and `verdict_applies_to_current_revision` is the first-class scheduling guard the candidate asked for. |
+| WIP/draft/hold and blocking-thread gating | provider | **Yes** -- `HoldReason` flag set + `merge_blocked_by_hold`. |
+| Attempt-budget choke point (reserve/commit/cancel) | provider + task | **No.** Neither machine declares a budget counter, a reservation lifecycle, or a choke point any transition passes through. The task machine's `RecoveryMode`/CAS mechanism could carry a budget field on `VersionedRecord`, but nothing today declares one. |
+| Event ledger with reason-code classification | provider + task | **No.** The `RecoveryMode` taxonomy classifies *transitions*, not *outcomes on an append-only per-round ledger* -- there is no ledger data structure or reason-code vocabulary declared anywhere in the four modules. |
+| Official-vs-candidate approval-authority split | provider + task | **No.** `ProviderCapability.automated_identity_eligible_approver` is a per-provider default, not a per-approval-record distinction between an official/provider-native approval and a recipe-internal candidate-fenced one. |
+| Worktree-pool force-clean/dirty-tolerance | bridge | **No.** `bridge_state_machine.py` has no notion of a worktree's clean/dirty status or a normalization rule (e.g. mode-only diffs) -- `BridgeState`/`Liveness` model process liveness, not checkout content state. |
+| Relay/host liveness and health-fencing | bridge | **Partially.** `Liveness` (hot/warm/cold, always live-probed) covers *whether a controller is attached*, which is adjacent but not the same as bind-address/loopback-scope validation, an explicit health/live endpoint, or refuse-unsafe-startup -- those remain undeclared. |
+
+Three candidates (base-only detection, stale-approval classification,
+WIP/hold gating) needed no further work this pass -- they are real,
+checkable behaviors today. The other five are unchanged from Phase 8:
+real, evidenced, patched-downstream behaviors that still have no declared
+expression in this repository, only a conceptual assignment to a machine.
+Folding them in is design work (new dimensions/tables on the provider and
+bridge machines, plus a genuinely new ledger concept), not a
+re-validation-pass fix -- consistent with this effort's own coordination
+gate, they are left as open follow-up work rather than authored ad hoc
+inside this checklist item.
 
 ## Plan (this phase)
 
@@ -364,8 +396,15 @@ above, not an independent feature:
   be discovered ad hoc.
 - [ ] Build the simulation/test track as deterministic fixtures, one per
   scenario above.
-- [ ] Re-validate each Phase 8 candidate against the declared machines;
+- [x] Re-validate each Phase 8 candidate against the declared machines;
   fold each into the relevant machine's spec rather than implementing it
-  standalone.
+  standalone. Done as the "Re-validation pass" table above: three
+  candidates are genuinely declared today (base-only detection,
+  stale-approval classification, WIP/hold gating); five remain only a
+  conceptual home assignment with no declared table backing them
+  (attempt-budget, event ledger, approval-authority split, worktree-pool
+  dirty-tolerance, relay health-fencing) -- left as open follow-up design
+  work rather than folded in ad hoc, since declaring them is new design
+  subject to this phase's own coordination gate, not a re-validation fix.
 - [x] Submit this phase's design as its own reviewed slice before any
   implementation begins, per this effort's coordination gate.

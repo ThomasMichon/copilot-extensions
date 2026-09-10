@@ -436,6 +436,33 @@ scenarios.
 
 ## Journal
 
+### 2026-09-10 - Phase 9: seventh slice (Phase 8 candidate re-validation, docs-only)
+
+- Re-validated all eight Phase 8 candidates against what the four Phase 9
+  modules (`task_state_machine.py`, `provider_state_machine.py`,
+  `bridge_state_machine.py`, `machine_coupling.py`) actually declare today,
+  not just which machine each was conceptually assigned to. Added a
+  per-candidate table to the sub-doc's "Phase 8 candidates, re-seated"
+  section: three candidates (base-only detection, stale-approval
+  classification, WIP/hold gating) are genuinely declared behaviors as of
+  the prior two slices; five (attempt-budget choke point, event ledger,
+  official-vs-candidate approval-authority split, worktree-pool
+  dirty-tolerance, relay/host health-fencing) are still only a conceptual
+  home assignment with no declared table or function backing them.
+- Deliberately did not author new design to close that gap in this slice
+  -- an advisor review flagged that a bridge version/EOL dimension and a
+  task steer transition (needed for the three still-deferred simulation
+  scenarios) would be new design authored inside a "build the test track"
+  checklist item, contradicting this phase's own already-ticked
+  coordination gate ("submit this phase's design as its own reviewed
+  slice before any implementation begins"). Both gaps -- the five
+  under-declared Phase 8 candidates and the three deferred simulation
+  scenarios -- are left as open follow-up design work (a Phase 9
+  sub-doc amendment or a new phase), not folded in ad hoc.
+- Ticked the Plan's "re-validate each Phase 8 candidate" checkbox; the
+  "build the simulation/test track" checkbox remains open (seven of ten
+  scenarios covered, three deferred pending the design decision above).
+
 ### 2026-09-10 - Phase 9: sixth slice (simulation/test track, provider revision scenarios)
 
 - Extended `provider_state_machine.py` with the revision/head-tracking
