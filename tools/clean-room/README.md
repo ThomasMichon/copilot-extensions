@@ -79,6 +79,23 @@ uninstall in addition to install, explicit update, rollback, and isolation.
 > build-time convenience to install a *given* prereq, not part of what's tested,
 > and is not inherited into the operator's runtime environment.
 
+> **Reproducing a network-blocked machine from an unrestricted dev box.**
+> `-BlockPublicFeeds` (`--block-public-feeds` on `run.sh`, or
+> `$env:CR_BLOCK_PUBLIC_FEEDS=1`) null-routes `pypi.org`,
+> `files.pythonhosted.org`, `registry.npmjs.org`, and `download.pytorch.org` at
+> the container network layer (Docker `--add-host`), regardless of what the
+> HOST machine can actually reach. This lets a fully-connected dev box exercise
+> the same "public feed genuinely unreachable" condition a governed machine
+> (e.g. aperture-labs' `tmichon-book2`) already produces naturally, catching a
+> hardcoded public-feed straggler before it ever reaches that machine. Combine
+> with `-UvIndex`/`--uv-index` (a real substitute feed) to prove installs still
+> succeed under the block; omit it to confirm the existing `toolchain-uv` jam
+> detection (present in most scenarios) fires on the resulting failure. Linux
+> arm only (`-Os linux`, the default) -- `run.ps1` errors if combined with
+> `-Os windows`, which uses a different container networking model and does
+> not consume this flag.
+> (aperture-labs `feed-neutral-build-config` effort, #6755 Phase 3.)
+
 ## Usage
 
 ```powershell
@@ -90,6 +107,7 @@ uninstall in addition to install, explicit update, rollback, and isolation.
 ./run.ps1 -Image base -NameSuffix agc    # a SECOND concurrent base clean-room (container cr-base-agc) -- won't clobber another agent's cr-base
 ./run.ps1 -Until 1 -Then shell           # prepare up to stage 1, then hand off to a shell
 ./run.ps1 -UvIndex https://…/pypi/simple/  # opt-in uv-index fixture (governed box)
+./run.ps1 -BlockPublicFeeds -UvIndex https://…  # reproduce a network-blocked machine from an unrestricted dev box
 ./run.ps1 -Mode bridge-register          # expose the box as an agent-bridge agent
 ./run.ps1 -Scenario context-handoff-eval -Mode eval  # handoff speed/fidelity/lifecycle witness
 ./run.ps1 -Image pristine -Mode down     # remove the container
@@ -103,6 +121,7 @@ uninstall in addition to install, explicit update, rollback, and isolation.
 ./run.sh --image base --name-suffix agc   # a SECOND concurrent base clean-room (container cr-base-agc)
 ./run.sh --until 1 --then shell run
 ./run.sh --uv-index https://…/pypi/simple/ run
+./run.sh --block-public-feeds --uv-index https://… run   # reproduce a network-blocked machine from an unrestricted dev box
 ./run.sh --scenario agent-vault-eval eval        # Tier-E agent-driven eval (mirrors run.ps1 -Mode eval)
 ./run.sh --scenario context-handoff-eval eval    # handoff speed/fidelity/lifecycle witness
 ./run.sh bridge-register
@@ -356,7 +375,9 @@ Override via `run.ps1` params or `CR_*` env (see the `scenarios/generic-single-p
 header): `CR_MARKETPLACE_REPO` (a GitHub `owner/repo`, or a container-local
 marketplace directory mounted with `-HarnessMount` for uncommitted-worktree
 validation), `CR_MARKETPLACE_NAME`, `CR_PRIMARY_PLUGIN`,
-`CR_EXPECT_DEPS`, `CR_UV_INDEX` (opt-in uv-index fixture), `CR_UNTIL` (stop after
+`CR_EXPECT_DEPS`, `CR_UV_INDEX` (opt-in uv-index fixture),
+`CR_BLOCK_PUBLIC_FEEDS` (null-route public feeds at the container network
+layer), `CR_UNTIL` (stop after
 stage N). The scenario name + stage list live in `manifest.json`.
 
 ## Files
@@ -371,7 +392,7 @@ stage N). The scenario name + stage list live in `manifest.json`.
 | `scenarios/<name>/manifest.json` | Scenario descriptor: image variant, prereqs, auth, expected artifacts, ordered stages. |
 | `scenarios/<name>/scenario.sh` | In-container driver + assertions for one scenario (bind-mounted at run, so edits need no rebuild). Sources the lib; honors `CR_UNTIL`. |
 | `scenarios/generic-single-plugin/` | The reference scenario (today's Layer-0 install check). |
-| `run.ps1` / `run.sh` | Host wrappers: build · one-time auth+commit · run (`-Scenario`) · **eval** (Tier-E agent-driven; `-Mode eval` / `eval`) · **shell** (interactive handoff) · **bridge-register/unregister** (drive over agent-bridge) · down; `-Image base\|pristine`, `-UvIndex`. |
+| `run.ps1` / `run.sh` | Host wrappers: build · one-time auth+commit · run (`-Scenario`) · **eval** (Tier-E agent-driven; `-Mode eval` / `eval`) · **shell** (interactive handoff) · **bridge-register/unregister** (drive over agent-bridge) · down; `-Image base\|pristine`, `-UvIndex`, `-BlockPublicFeeds`. |
 | `bridge_register.py` | Stdlib-only helper: register/unregister the container as an agent-bridge `command` agent via the provider API (no copilot-extensions imports). |
 
 ## Scope / non-goals
