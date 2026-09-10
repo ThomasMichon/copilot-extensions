@@ -245,3 +245,18 @@ against real behavior.
   to read `pyvenv.cfg` and prefer the base install's own `pythonw.exe` when it
   exists, then re-vendors the byte-identical helper across every consuming
   plugin.
+
+### 2026-09-09 - audit hardening + live agent-mcp confirmation
+- A repo-wide Windows Python-launch audit against the launch-kind matrix found
+  two additional short-lived captured interpreter launches in `agent-index`
+  that still used bare `subprocess.run(sys.executable, ...)`: the management
+  governance checker and the LanceDB FTS rebuild worker. Both now route through
+  `agent_procutil.no_window_kwargs()`; the other Python-launch hits were either
+  foreground/non-background probes or already used the approved shared
+  primitives.
+- Live validation on this Windows host reinstalled the local `agent-mcp`
+  checkout, warmed a uv-managed bridge runtime, killed the first spawned
+  `agent_mcp serve` host, and forced a lazy respawn. In both the initial spawn
+  and the respawn, the live serve process was the uv base install's real
+  `pythonw.exe` with no console `python.exe` child beneath it, confirming the
+  trampoline layer is now skipped instead of delegated to Default Terminal.

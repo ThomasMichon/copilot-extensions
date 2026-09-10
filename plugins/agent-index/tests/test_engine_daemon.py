@@ -146,7 +146,7 @@ def test_start_spawns_and_waits_for_health(monkeypatch, tmp_path):
         return calls["n"] >= 2  # unhealthy at the guard, healthy while waiting
 
     monkeypatch.setattr(daemon, "is_healthy", health)
-    monkeypatch.setattr(daemon, "_spawn", lambda cmd: FakeProc())
+    monkeypatch.setattr(daemon, "_spawn", lambda cmd, *, python: FakeProc())
     monkeypatch.setattr(daemon.time, "sleep", lambda _s: None)
 
     out = daemon.start(tmp_path)
@@ -167,7 +167,7 @@ def test_spawn_uses_windowless_daemon_contract(monkeypatch):
         lambda cmd, **kwargs: captured.update(cmd=cmd, kwargs=kwargs) or FakeProc(),
     )
 
-    daemon._spawn(["pythonw.exe", "-m", "agent_index.engine.app"])
+    daemon._spawn(["pythonw.exe", "-m", "agent_index.engine.app"], python="python.exe")
 
     assert captured["kwargs"]["creationflags"] == 0x08000000
     assert captured["kwargs"]["stdin"] is daemon.subprocess.DEVNULL
@@ -180,7 +180,9 @@ def test_start_raises_on_early_exit(monkeypatch, tmp_path):
     py.parent.mkdir(parents=True, exist_ok=True)
     py.write_text("", encoding="ascii")
     monkeypatch.setattr(daemon, "is_healthy", lambda *a, **k: False)
-    monkeypatch.setattr(daemon, "_spawn", lambda cmd: FakeProc(alive=False, returncode=1))
+    monkeypatch.setattr(
+        daemon, "_spawn", lambda cmd, *, python: FakeProc(alive=False, returncode=1)
+    )
     monkeypatch.setattr(daemon.time, "sleep", lambda _s: None)
     with pytest.raises(RuntimeError, match="exited early"):
         daemon.start(tmp_path)

@@ -14,7 +14,12 @@ import time
 from pathlib import Path
 from typing import Any
 
-from agent_procutil import detached_kwargs, windowless_python, windowless_python_env
+from agent_procutil import (
+    detached_kwargs,
+    no_window_kwargs,
+    windowless_python,
+    windowless_python_env,
+)
 import httpx
 
 from . import __version__
@@ -210,6 +215,7 @@ def _validate_cutover_governance(transaction: dict[str, Any] | None) -> None:
             errors="replace",
             check=False,
             timeout=30,
+            **no_window_kwargs(),
         )
         if result.returncode != 0:
             raise OSError(
