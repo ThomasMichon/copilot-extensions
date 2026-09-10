@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 import sys
+import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -28,21 +29,29 @@ def _context_receipt_path(context: dict[str, object]) -> str | None:
     return None
 
 
-def _load_governance_module() -> dict[str, Any] | None:
-    context = _load_installation_context()
-    if context is None:
-        return None
-    context_path = _context_receipt_path(context)
-    marketplace_id = context.get("marketplaceId")
-    if not isinstance(marketplace_id, str) or not marketplace_id.strip() or not context_path:
-        return {
-            "error": {
-                "status": "backoff",
-                "reason": "governance-unavailable",
-                "detail": "installation context omitted marketplace or receipt identity",
-            }
-        }
+def _durable_home_from_context(context_path: str) -> Path:
     try:
+        return Path(context_path).expanduser().resolve(strict=False).parents[4]
+    except IndexError as exc:
+        raise ValueError("installation context receipt layout is invalid") from exc
+
+
+def _load_governance_module() -> dict[str, Any] | None:
+    try:
+        raw_context = os.environ.get(_CONTEXT_ENV, "").strip()
+        if not raw_context:
+            return None
+        context = _load_installation_context()
+        if context is None:
+            raise ValueError("installation context could not be resolved")
+        context_path = _context_receipt_path(context)
+        marketplace_id = context.get("marketplaceId")
+        if (
+            not isinstance(marketplace_id, str)
+            or not marketplace_id.strip()
+            or not context_path
+        ):
+            raise ValueError("installation context omitted marketplace or receipt identity")
         root = install_dir().expanduser()
         manifest_path = root / "deploy-manifest.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -78,6 +87,7 @@ def _load_governance_module() -> dict[str, Any] | None:
             "marketplace_id": marketplace_id.strip(),
             "plugin_id": PLUGIN_ID,
             "legacy_root": str(legacy_install_dir()),
+            "durable_home": str(_durable_home_from_context(context_path)),
         }
     except Exception as exc:
         return {
@@ -96,40 +106,44 @@ class LoopGovernance:
         self._helper = _load_governance_module() if helper is None else helper
         self._baseline: dict[str, Any] | None = None
         self.state: dict[str, Any] | None = None
+        self._lock = threading.Lock()
 
     def set_recheck_fn(self, fn: Callable[[str], dict[str, Any]] | None) -> None:
         """Override the installed helper (tests)."""
-        self._helper = fn
-        self._baseline = None
-        self.state = None
+        with self._lock:
+            self._helper = fn
+            self._baseline = None
+            self.state = None
 
     def recheck(self, checkpoint: str) -> dict[str, Any] | None:
         """Return the current governance verdict for ``checkpoint``."""
-        helper = self._helper
-        if helper is None:
-            self.state = None
-            return None
-        if callable(helper):
-            result = helper(checkpoint)
-            if "checkpoint" not in result:
-                result = dict(result)
+        with self._lock:
+            helper = self._helper
+            if helper is None:
+                self.state = None
+                return None
+            if callable(helper):
+                result = helper(checkpoint)
+                if "checkpoint" not in result:
+                    result = dict(result)
+                    result["checkpoint"] = checkpoint
+            elif "error" in helper:
+                result = {"checkpoint": checkpoint, **helper["error"]}
+            else:
+                module = helper["module"]
+                result = module.recheck_loop_governance(
+                    context=helper["context"],
+                    expected_marketplace_id=helper["marketplace_id"],
+                    expected_plugin_id=helper["plugin_id"],
+                    legacy_root=helper["legacy_root"],
+                    durable_home=helper["durable_home"],
+                    baseline=self._baseline,
+                    environment=os.environ,
+                )
                 result["checkpoint"] = checkpoint
-        elif "error" in helper:
-            result = {"checkpoint": checkpoint, **helper["error"]}
-        else:
-            module = helper["module"]
-            result = module.recheck_loop_governance(
-                context=helper["context"],
-                expected_marketplace_id=helper["marketplace_id"],
-                expected_plugin_id=helper["plugin_id"],
-                legacy_root=helper["legacy_root"],
-                baseline=self._baseline,
-                environment=os.environ,
-            )
-            result["checkpoint"] = checkpoint
-        self.state = result
-        if result.get("status") == "ready":
-            baseline = result.get("baseline")
-            self._baseline = baseline if isinstance(baseline, dict) else None
-            self.state = None
-        return result
+            self.state = result
+            if result.get("status") == "ready":
+                baseline = result.get("baseline")
+                self._baseline = baseline if isinstance(baseline, dict) else None
+                self.state = None
+            return result

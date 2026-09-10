@@ -1437,13 +1437,50 @@ def test_sweep_rechecks_before_publish_and_retains_registered_session_on_generat
     monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
     monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
     monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
-    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
     monkeypatch.setattr(m, "_monitor_maybe_trigger_handoff_cutover", lambda *_a: None)
     mux_calls: list[tuple[str, str, str]] = []
     monkeypatch.setattr(
         m,
         "_monitor_mux_set",
         lambda mux_bin, sess, opt, val: mux_calls.append((sess, opt, val)) or True,
+    )
+    segment_cache = type("Cache", (), {"get": staticmethod(lambda _path: "SEG")})()
+    governance_calls: list[str] = []
+
+    class _Governance:
+        def recheck(self, checkpoint):
+            governance_calls.append(checkpoint)
+            return {"status": "revalidation-required", "reason": "generation-changed"}
+
+    with pytest.raises(m._StatusMonitorGovernanceDeferred):
+        m._monitor_sweep(
+            "tmux",
+            "T",
+            "P",
+            set(),
+            segment_cache=segment_cache,
+            governance=_Governance(),
+        )
+
+    assert governance_calls == ["pre-mutation:publish-status"]
+    assert (reg / "wt-a").exists()
+    assert mux_calls == []
+
+
+def test_sweep_rechecks_before_render_status_and_retains_registered_session(
+    tmp_path, monkeypatch
+):
+    reg = tmp_path / "reg"
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
+    m._register_session_for_monitor("wt-a", "/w/a")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_monitor_maybe_trigger_handoff_cutover", lambda *_a: None)
+    monkeypatch.setattr(
+        m,
+        "_monitor_mux_set",
+        lambda *args, **kwargs: pytest.fail("mux publish must not run after render guard"),
     )
     governance_calls: list[str] = []
 
@@ -1461,9 +1498,8 @@ def test_sweep_rechecks_before_publish_and_retains_registered_session_on_generat
             governance=_Governance(),
         )
 
-    assert governance_calls == ["pre-mutation:publish-status"]
+    assert governance_calls == ["pre-mutation:render-status"]
     assert (reg / "wt-a").exists()
-    assert mux_calls == []
 
 
 def test_sweep_proceeds_when_iteration_and_pre_mutation_checks_stay_current(

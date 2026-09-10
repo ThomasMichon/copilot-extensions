@@ -9418,9 +9418,12 @@ def _monitor_sweep(
                 if segment_cache is not None:
                     segment_value = segment_cache.get(path)
                 else:
+                    _status_monitor_recheck(governance, "pre-mutation:render-status")
                     segment_value = _render_status_segment(
                         path, fetch=False, plain=False, no_title=False, persist_title=True
                     )
+            except _StatusMonitorGovernanceDeferred:
+                raise
             except Exception:
                 pass
             if mux_bin:

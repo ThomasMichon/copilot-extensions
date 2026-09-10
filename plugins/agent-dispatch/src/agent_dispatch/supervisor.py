@@ -4065,7 +4065,10 @@ class Supervisor:
                         boundary.get("reason"),
                         boundary.get("status"),
                     )
-                    self.wait_for_turn_end(_GOVERNANCE_BACKOFF_SECONDS)
+                    try:
+                        self.wait_for_turn_end(_GOVERNANCE_BACKOFF_SECONDS)
+                    except KeyboardInterrupt:
+                        return
                     continue
                 try:
                     spawned = self.poll_once()
