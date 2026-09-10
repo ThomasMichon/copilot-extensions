@@ -1,0 +1,19 @@
+{
+  "captured_from": {
+    "commit": "5f9557edbc40b0d7c65d825608cc89df8607bd28",
+    "plugin_version": "0.4.0-dev474",
+    "protocol_generation": 15,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+    "source_git_blob": "31006d0701310979c379d552d2863111853501c1",
+    "source_sha256": "8624e9c9577a277ba1e66157a2d755c28fd2abf1d6f8178e28f2cf63aef33b1c"
+  },
+  "response": {
+    "status_code": 409,
+    "json": {
+      "detail": {
+        "code": "native_incumbent",
+        "detail": "Native execution ownership blocks ACP fallback"
+      }
+    }
+  }
+}

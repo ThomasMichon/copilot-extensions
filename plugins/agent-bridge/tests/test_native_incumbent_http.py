@@ -1,5 +1,7 @@
 """Native ownership is an explicit HTTP refusal, never a fallback ACP launch."""
 
+import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -52,6 +54,9 @@ async def test_real_native_guard_returns_409_before_acp_allocation(tmp_path, act
         response = await client.post(url, json=body)
     assert response.status_code == 409
     assert response.json() == expected_refusal()
+    fixture = Path(__file__).parents[1] / "contract" / "fixtures" / "http" / "current" / "native-incumbent-error.json"
+    captured = json.loads(fixture.read_text())["response"]
+    assert captured == {"status_code": response.status_code, "json": response.json()}
     assert manager._sessions == previous_sessions
     assert store.get("native", "generation") == before
 

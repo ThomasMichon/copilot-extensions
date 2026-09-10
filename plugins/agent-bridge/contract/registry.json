@@ -33,7 +33,8 @@
           "0.4.0-dev447",
           "0.4.0-dev461",
           "0.4.0-dev468",
-          "0.4.0-dev470"
+          "0.4.0-dev470",
+          "0.4.0-dev474"
         ]
       },
       "capability_versions": {
@@ -74,7 +75,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
-          "sha256": "49d51795792a12b55ed8cd93893abd26f24e1a5a84dde049f97e24525153f583",
+          "sha256": "8624e9c9577a277ba1e66157a2d755c28fd2abf1d6f8178e28f2cf63aef33b1c",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -110,6 +111,12 @@
         }
       ],
       "fixtures": [
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-incumbent-error.json",
+          "sha256": "97b7131bc1b991f0ec2797972caf45f5573aa7d3453ac18afacfa5d332b72a8d",
+          "role": "current native-owned venue refusal before ACP allocation",
+          "generation": 15
+        },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/health.json",
           "sha256": "00a8f05e86943ebb907dc7ca3f04a9c84e7f7aa8725669947f26a546457c5a81",
@@ -226,6 +233,14 @@
         }
       ],
       "provenance": [
+        {
+          "commit": "5f9557edbc40b0d7c65d825608cc89df8607bd28",
+          "plugin_version": "0.4.0-dev474",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "31006d0701310979c379d552d2863111853501c1",
+          "capture_method": "POST through the real ASGI session-create route with a real native ownership guard and synthetic incumbent. Verify HTTP 409 and no ACP session allocation. Capture the exact committed source; retain earlier error fixtures as historical evidence."
+        },
         {
           "commit": "d06c85b681a0344aeb26e24b1402c5e2f9f32ff5",
           "plugin_version": "0.4.0-dev470",
