@@ -63,6 +63,8 @@ def fixture(tmp_path, *, name="alpha", versions=("1.0.0",)):
         expected_marketplace_id=stamped["marketplaceId"], expected_payload_root=str(payload),
         expected_payload_version=versions[0], snapshot_id=versions[0], runtime_version=versions[0],
         expected_namespace_generation=stamped["namespaceGeneration"], expected_install_generation=stamped["generation"],
+        expected_activation_generation=None, expected_tombstone_activation_generation=None,
+        expect_tombstone_absent=False,
         expected_current_version=None, expect_current_absent=True,
         expected_last_known_good_version=None, expect_last_known_good_absent=True,
     )
@@ -228,6 +230,42 @@ def test_legacy_attribution_adapters_publish_tombstone_once(tmp_path, monkeypatc
     assert command.read_text(encoding="utf-8") == "legacy wrapper\n"
 
 
+@pytest.mark.parametrize("style", STYLES)
+def test_deactivate_adapters_roll_back_attribution_and_replay(tmp_path, monkeypatch, style):
+    if os.name != "nt":
+        pytest.skip("subprocess adapter deactivation uses the real POSIX profile; direct governance tests cover POSIX")
+    root, args = fixture(tmp_path)
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    legacy, _command = legacy_state(profile)
+    env = os.environ.copy()
+    env.update({"HOME": str(profile), "USERPROFILE": str(profile)})
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    args.action = "cell-attribute-legacy"
+
+    attributed = adapter(style, args, env=env)
+    assert attributed.returncode == 0, attributed.stderr
+    activation_generation = json.loads(attributed.stdout)["activationGeneration"]
+
+    args.action = "cell-deactivate"
+    args.expected_activation_generation = activation_generation
+    args.expected_tombstone_activation_generation = activation_generation
+    args.expect_tombstone_absent = False
+    first = adapter(style, args, env=env)
+    assert first.returncode == 0, first.stderr
+    first_payload = json.loads(first.stdout)
+    assert first_payload["reason"] == "legacy-attribution-rolled-back"
+    assert first_payload["recordChanged"] is True
+    assert not (legacy / ".installation-ownership.json").exists()
+    activation = json.loads((root / "installation-activation.json").read_text(encoding="utf-8"))
+    assert activation["mode"] == "legacy"
+    assert activation["state"] == "deactivated"
+
+    second = adapter(style, args, env=env)
+    assert second.returncode == 0, second.stderr
+    assert json.loads(second.stdout)["reason"] == "already-rolled-back"
+
+
 def test_legacy_attribution_refuses_without_legacy_lock_or_install_lock(tmp_path, monkeypatch):
     _root, args = fixture(tmp_path)
     profile = tmp_path / "profile"
@@ -274,6 +312,123 @@ def test_legacy_attribution_refuses_without_legacy_lock_or_install_lock(tmp_path
     monkeypatch.setenv("HOME", str(profile))
     monkeypatch.setenv("USERPROFILE", str(profile))
     legacy_state(profile)
+    original_acquire = ic._DirectoryLock.acquire
+
+    def fail_install(self):
+        if self.kind == "install":
+            raise ic.InstallationContextError("Installation lock remained busy.")
+        return original_acquire(self)
+
+    monkeypatch.setattr(ic._DirectoryLock, "acquire", fail_install)
+    with pytest.raises(ic.InstallationContextError, match="remained busy"):
+        engine.lifecycle(args)
+
+
+def test_deactivate_requires_matching_plugin_maintenance_token(tmp_path, monkeypatch):
+    root, args = fixture(tmp_path)
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    legacy_state(profile)
+    monkeypatch.setattr(
+        engine.ic,
+        "_current_environment",
+        lambda **_kwargs: (
+            {
+                "platform": "windows" if os.name == "nt" else "posix",
+                "homeRealPath": str(profile.resolve()),
+                "wslDistro": None,
+            },
+            profile.resolve(),
+        ),
+    )
+    monkeypatch.setenv("HOME", str(profile))
+    monkeypatch.setenv("USERPROFILE", str(profile))
+    args.action = "cell-attribute-legacy"
+    attributed = engine.lifecycle(args)
+
+    token = engine.ic.enter_maintenance(
+        scope="plugin",
+        owner="test-owner",
+        reason="rollback",
+        expected_duration_seconds=300,
+        durable_home=args.durable_home,
+        context=args.context,
+        expected_marketplace_id=args.expected_marketplace_id,
+        expected_plugin_id="agent-machines",
+        environment={},
+        os_profile=profile,
+        platform="windows" if os.name == "nt" else "posix",
+        wsl_distro=None,
+    )["token"]
+
+    args.action = "cell-deactivate"
+    args.expected_activation_generation = attributed["activationGeneration"]
+    args.expected_tombstone_activation_generation = attributed["activationGeneration"]
+    args.expect_tombstone_absent = False
+    args.maintenance_token = None
+    with pytest.raises(ic.InstallationContextError, match="--maintenance-token"):
+        engine.lifecycle(args)
+
+    args.maintenance_token = "wrong-token"
+    with pytest.raises(ic.InstallationContextError, match="does not match"):
+        engine.lifecycle(args)
+
+    args.maintenance_token = token
+    result = engine.lifecycle(args)
+    assert result["reason"] == "legacy-attribution-rolled-back"
+    assert root.joinpath("maintenance").exists()
+
+
+def test_deactivate_refuses_without_legacy_lock_or_install_lock(tmp_path, monkeypatch):
+    _root, args = fixture(tmp_path)
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    legacy_state(profile)
+    monkeypatch.setattr(
+        engine.ic,
+        "_current_environment",
+        lambda **_kwargs: (
+            {
+                "platform": "windows" if os.name == "nt" else "posix",
+                "homeRealPath": str(profile.resolve()),
+                "wslDistro": None,
+            },
+            profile.resolve(),
+        ),
+    )
+    monkeypatch.setenv("HOME", str(profile))
+    monkeypatch.setenv("USERPROFILE", str(profile))
+    args.action = "cell-attribute-legacy"
+    attributed = engine.lifecycle(args)
+    args.action = "cell-deactivate"
+    args.expected_activation_generation = attributed["activationGeneration"]
+    args.expected_tombstone_activation_generation = attributed["activationGeneration"]
+    args.expect_tombstone_absent = False
+
+    @contextmanager
+    def failing_lock(_path: Path):
+        raise ic.InstallationContextError("legacy lock remained busy")
+        yield
+
+    monkeypatch.setattr(engine, "provisioning_lock", failing_lock)
+    with pytest.raises(ic.InstallationContextError, match="legacy lock remained busy"):
+        engine.lifecycle(args)
+
+    monkeypatch.undo()
+    monkeypatch.setattr(
+        engine.ic,
+        "_current_environment",
+        lambda **_kwargs: (
+            {
+                "platform": "windows" if os.name == "nt" else "posix",
+                "homeRealPath": str(profile.resolve()),
+                "wslDistro": None,
+            },
+            profile.resolve(),
+        ),
+    )
+    monkeypatch.setenv("HOME", str(profile))
+    monkeypatch.setenv("USERPROFILE", str(profile))
     original_acquire = ic._DirectoryLock.acquire
 
     def fail_install(self):
