@@ -436,6 +436,33 @@ scenarios.
 
 ## Journal
 
+### 2026-09-10 - Phase 9: fifth slice (simulation/test track, first five scenarios)
+
+- Added the simulation driver
+  (`plugins/agent-dispatch/src/agent_dispatch/simulation.py`): a generic
+  `World` pairing a task `VersionedRecord` with a bridge one, plus
+  `step_task`/`step_bridge` helpers that resolve a named transition from
+  the owning declared table and apply it through
+  `machine_coupling.apply_transition`. The driver declares no new machine
+  behavior -- it only drives the already-declared tables.
+- Built five of the sub-doc's ten "Simulation and test track" scenarios as
+  deterministic fixtures
+  (`plugins/agent-dispatch/tests/test_simulation.py`): session host
+  detached, port changed underneath an attached task, duplicate/
+  out-of-order provider-driven task events, resume against a stale/empty/
+  missing liveness cache, and resume against a genuinely hot target
+  (including the force-takeover composite). Each asserts convergence
+  regardless of event order, idempotent replay, and that the recorded
+  recovery mode matches the declared taxonomy.
+- The remaining five scenarios (bridge mid-version-update, supervisor
+  EOL, base-only vs. substantive provider revision, out-of-order verdict
+  vs. superseding revision, steer-vs-transition race) need a vocabulary
+  extension the machines don't yet declare (revision/head tracking on the
+  provider machine, version/EOL on the bridge machine, a steer transition
+  on the task machine) -- deferred to a follow-up slice rather than forcing
+  a fixture that doesn't actually exercise a real declared invariant.
+  Marked as deferred, with the reason, directly in the sub-doc's checklist.
+
 ### 2026-09-10 - Phase 9: fourth slice (control-flow coupling rules)
 
 - Declared the explicit coupling between all three machines
