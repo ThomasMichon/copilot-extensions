@@ -311,7 +311,7 @@ because they provide tools or services.
   legacy/deactivated activation before clearing the tombstone under both locks.
   Reserve activation deletion for locked cleanup after companion evidence is
   gone.
-- [ ] Make every long-running legacy and namespaced loop recheck maintenance,
+- [x] Make every long-running legacy and namespaced loop recheck maintenance,
   tombstone ownership, and activation/install generations at iteration
   boundaries and before mutation.
 - [ ] Migrate or retire legacy services and global generic binstubs only after
@@ -371,6 +371,91 @@ because they provide tools or services.
 See [`design.md`](design.md).
 
 ## Journal
+
+### 2026-09-10 — Phase 6 item 4 completion: remaining loop adopters
+
+- Merged [#2365](https://github.com/ThomasMichon/copilot-extensions/pull/2365)
+  at `47a85d07d04438e10d5b6e40dc496ad40967b9cb`, completing the remaining
+  long-running loop governance recheck scope for
+  [#1110](https://github.com/ThomasMichon/copilot-extensions/issues/1110).
+- `agent-worktrees` now applies the shared
+  `recheck_loop_governance(...)` contract throughout the resident
+  `status-monitor`: at the iteration boundary, immediately before lock renewal,
+  before any durable render/publish/cache mutation, and before resident hook-IPC
+  responses and handoff-cutover actions that would mutate session/worktree
+  state. A generation or ownership flip now leaves the registered session
+  queued for the next sweep instead of publishing stale state.
+- `agent-dispatch` now applies the same contract across every remaining
+  long-running loop in the plugin: coordinator liveness GC and orphan reaping,
+  coordinator self-retire and self-update polling, `Supervisor.serve()`, and
+  `SupervisorDaemon.serve()`. The spawn supervisor now rechecks both before
+  reserving and before launching, releasing a reserved attempt back to the queue
+  when governance changes before spawn. While landing the slice, the PR also
+  fixed an unrelated required-CI blocker by synchronizing the shipped
+  `agent-index` managed-runtime declaration with the current `agent-index`
+  version surfaces.
+- `agent-bridge` now rechecks governance across its periodic daemon loops:
+  periodic GC, heartbeat/liveness note + disconnected-host recovery +
+  host-reapable refresh + wedged-session reconciliation, idle shutdown, stranded
+  host sweep, idle-session reaping, live-session lease reaping, self-retire
+  polling, and periodic worktree discovery. Discovery now revalidates again
+  before publishing fresh cache entries, discarding in-flight crawl results when
+  ownership or generations change mid-pass.
+- Validation:
+  `python tools/run-plugin-tests.py agent-worktrees`
+  (`1 failed, 578 passed, 2 skipped` on native Windows, with the unchanged
+  `tests/test_config.py::TestControlPlaneRelatedPRTier::test_cp_related_pr_map_includes_knowledge_overlay`
+  failure reproduced on detached `origin/main` and tracked in
+  [#2364](https://github.com/ThomasMichon/copilot-extensions/issues/2364));
+  `python tools/run-plugin-tests.py agent-dispatch`
+  (`3 failed, 681 passed, 5 skipped`, with the unchanged Windows
+  `test_bootstrap_check_reconcile_opt_in.py::{test_sh_skips_spawn_without_opt_in,test_sh_proceeds_with_opt_in}`
+  failures reproduced on detached `origin/main` and already tracked in
+  [#2327](https://github.com/ThomasMichon/copilot-extensions/issues/2327), and
+  the previously unrelated `test_shipped_index_declaration_preserves_version_and_source_authority`
+  blocker fixed before merge);
+  `python tools/run-plugin-tests.py agent-bridge`
+  (`2 failed, 558 passed, 2 skipped`, with the unchanged Windows
+  `test_bootstrap_check_reconcile_opt_in.py::{test_sh_skips_spawn_without_opt_in,test_sh_attempts_spawn_with_opt_in}`
+  failures reproduced on detached `origin/main` and already tracked in
+  [#2327](https://github.com/ThomasMichon/copilot-extensions/issues/2327));
+  `python -m pytest -q libs/installation-context/tests`
+  (`18 failed, 506 passed, 130 skipped`, where the baseline
+  `17 failed, 507 passed, 130 skipped` set reproduced unchanged on detached
+  `origin/main` and remains the already-tracked
+  [#2352](https://github.com/ThomasMichon/copilot-extensions/issues/2352)
+  bucket, while the extra current-branch
+  `test_installation_context_posix.py::test_concurrent_first_stamp_leaves_one_untorn_receipt[python-runner_command0]`
+  failure did not reproduce when rerun on either this branch or detached
+  `origin/main`);
+  `python tools/check-install-contract.py`,
+  `python tools/check-version-consistency.py`,
+  `python tools/check-vendored-libs-sync.py`,
+  `python tools/sync-installation-context.py --check`,
+  `python libs/payload-invocation/generate.py --all --check`,
+  `python -m pytest -q libs/installer-readiness/tests`
+  (`46 passed, 1 skipped`),
+  `python tools/check-marketplace-isolation.py` (report-only; 709 findings),
+  `python tools/check-docs-consistency.py`,
+  `git diff --check`,
+  `python tools/check-agent-bridge-contracts.py --base origin/main`,
+  `python -m pytest -q tools/test_check_agent_bridge_contracts.py`
+  (`16 passed`), and
+  `ruff check --select F,E9` on the changed Python files all passed. WSL/POSIX
+  changed-surface coverage also passed via
+  `python3 tools/run-plugin-tests.py agent-worktrees -k status_monitor`
+  (`80 passed, 1 skipped, 4043 deselected`),
+  `python3 tools/run-plugin-tests.py agent-dispatch -k "loop_governance or test_shipped_index_declaration_preserves_version_and_source_authority"`
+  (`7 passed, 2266 deselected`),
+  `python3 tools/run-plugin-tests.py agent-bridge -k loop_governance`
+  (`3 passed, 1 skipped, 2248 deselected`), and
+  `./.test-venvs/linux/agent-worktrees/bin/python -m pytest -q libs/installation-context/tests/test_installation_mode_governance.py -k loop_recheck`
+  (`4 passed, 113 deselected`).
+- With `agent-index` already landed in [#2361](https://github.com/ThomasMichon/copilot-extensions/pull/2361),
+  every applicable long-running loop across the current runtime plugin suite now
+  rechecks maintenance, tombstone ownership, and activation/install generations
+  at the iteration boundary and before mutation, so the Phase 6 plan item is now
+  complete.
 
 ### 2026-09-10 — Phase 6 item 4: long-running loop governance rechecks
 
