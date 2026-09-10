@@ -150,6 +150,7 @@ def _state(w):
     if (w.get("mux_session") or w.get("mux_attached")
             or w.get("session_lock_live") or w.get("session_bound_live")
             or w.get("session_bridge_live") or w.get("session_ahp_live")
+            or w.get("execution_leg_live")
             or w.get("session_bare_orphan")):
         return "ACTIVE"
     st = (w.get("state") or "").lower()
@@ -177,6 +178,7 @@ def _sess(w):
         return "○"
     if (w.get("session_lock_live") or w.get("session_bound_live")
             or w.get("session_bridge_live") or w.get("session_ahp_live")
+            or w.get("execution_leg_live")
             or w.get("session_bare_orphan")):
         return "PROC"
     if w.get("session_lock_stale"):
@@ -318,7 +320,8 @@ def _sessionless(w):
     if (w.get("kind") or "session") in ("system", "bridge"):
         return False
     if (w.get("turn_count", 0) > 0 or w.get("mux_session")
-            or w.get("mux_attached") or w.get("session_ahp_live")):
+            or w.get("mux_attached") or w.get("session_ahp_live")
+            or w.get("execution_leg_live")):
         return False
     return True
 
@@ -470,6 +473,7 @@ def norm(
         # mux_live; drives the classification-absent fast-pass ACTIVE.
         "session_bound_live": bool(w.get("session_bound_live")),
         "session_ahp_live": bool(w.get("session_ahp_live")),
+        "execution_leg_live": bool(w.get("execution_leg_live")),
         # Controller metadata is passed through for future presentation and
         # recovery actions. It is deliberately absent from state/active/resume
         # derivation: control is not binding.

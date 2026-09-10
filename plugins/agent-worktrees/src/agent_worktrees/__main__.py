@@ -66,7 +66,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 
 import yaml
@@ -304,10 +304,13 @@ def _normalize_path(p: str) -> str:
 
 def _hosted_session_blocks_cleanup(record) -> bool:
     """Whether an external session may still depend on this checkout."""
-    if getattr(record, "session_backend_opaque", False):
+    if (
+        getattr(record, "session_backend_opaque", False)
+        or getattr(record, "execution_leg_opaque", False)
+    ):
         return True
-    backend = getattr(record, "session_backend", None)
-    return backend is not None and backend.state in {"active", "unknown"}
+    leg = tracking.derive_execution_leg(record)
+    return leg is not None and leg.state in {"active", "unknown"}
 
 
 def _build_active_paths(
@@ -832,6 +835,17 @@ def _worktree_to_dict(
     elif rec.session_backend_opaque:
         d["session_backend"] = {"opaque": True, "state": "unknown"}
         d["session_ahp_live"] = True
+    if rec.execution_leg_opaque:
+        d["execution_leg"] = {"opaque": True, "state": "unknown"}
+        d["execution_leg_live"] = True
+    else:
+        execution_leg = tracking.derive_execution_leg(rec)
+        if execution_leg is not None:
+            d["execution_leg"] = execution_leg.to_dict()
+            d["execution_leg_live"] = execution_leg.state in {
+            "active",
+            "unknown",
+            }
     if rec.completed_at:
         d["completed_at"] = rec.completed_at
     if rec.kind in tracking.MANAGED_KINDS:
@@ -1172,6 +1186,580 @@ def cmd_session_backend(args) -> int:
             "binding_revision": binding.binding_revision,
         }
     )
+    return 0
+
+
+def _execution_leg_payload(
+    worktree_id: str,
+    binding: tracking.ExecutionLegBinding | None,
+    *,
+    legacy: bool = False,
+) -> dict[str, object]:
+    return {
+        "worktree_id": worktree_id,
+        "execution_leg": binding.to_dict() if binding is not None else None,
+        "legacy": legacy,
+    }
+
+
+def _read_execution_leg_blob(blob_file: str) -> dict[str, object]:
+    if blob_file == "-":
+        raw = sys.stdin.read()
+    else:
+        raw = Path(blob_file).read_text(encoding="utf-8")
+    value = json.loads(raw)
+    if not isinstance(value, dict):
+        raise ValueError("execution-leg blob must be a JSON object")
+    return value
+
+
+def _execution_leg_reservation_path(yaml_path: Path) -> Path:
+    return yaml_path.with_suffix(".execution-leg-reservation.json")
+
+
+def _read_execution_leg_reservation(path: Path) -> dict[str, object]:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError("execution-leg reservation is invalid")
+    return value
+
+
+_EXECUTION_LEG_RESERVATION_DEFAULT_SECONDS = 300
+_EXECUTION_LEG_RESERVATION_MAX_SECONDS = 900
+
+
+def _reservation_timestamp(value: object, *, field: str) -> datetime:
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"execution-leg reservation {field} is invalid")
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError(f"execution-leg reservation {field} is invalid")
+    return parsed.astimezone(timezone.utc)
+
+
+def _reservation_expired(
+    reservation: dict[str, object],
+    *,
+    now: datetime,
+) -> bool:
+    return _reservation_timestamp(
+        reservation.get("expires_at"),
+        field="expires_at",
+    ) <= now
+
+
+def _reservation_owner_liveness(
+    reservation: dict[str, object],
+) -> bool | None:
+    pid = reservation.get("owner_pid")
+    if not isinstance(pid, int) or pid <= 0:
+        return None
+    if not locks.pid_alive(pid):
+        return False
+    recorded = reservation.get("owner_start_time")
+    if not recorded:
+        return True
+    current = locks.process_start_time(pid)
+    if current is None:
+        return True
+    return str(current) == str(recorded)
+
+
+def _write_execution_leg_reservation(
+    path: Path,
+    value: dict[str, object],
+) -> None:
+    temp_path = path.with_name(f"{path.name}.{secrets.token_hex(8)}.tmp")
+    try:
+        temp_path.write_text(
+            json.dumps(value, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        os.replace(temp_path, path)
+    finally:
+        try:
+            temp_path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _binding_from_payload(value: object) -> tracking.ExecutionLegBinding | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("execution-leg reservation contains an invalid binding")
+    provider = value.get("provider")
+    blob = value.get("blob", {})
+    if not isinstance(provider, str) or not provider or not isinstance(blob, dict):
+        raise ValueError("execution-leg reservation contains an invalid binding")
+    state = str(value.get("state") or "unknown")
+    if state not in {"active", "disposed", "unknown"}:
+        state = "unknown"
+    return tracking.ExecutionLegBinding(
+        provider=provider,
+        state=state,
+        binding_revision=int(value.get("binding_revision") or 0),
+        blob=dict(blob),
+    )
+
+
+def cmd_execution_leg(args) -> int:
+    """Inspect or mutate a provider-neutral execution-leg binding."""
+    config = cfg.load_config()
+    worktree_id = _resolve_worktree_id(args.worktree_id)
+    yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+    if not yaml_path.exists():
+        return _json_error(f"Worktree not found: {worktree_id}")
+
+    try:
+        if args.action == "get":
+            with tracking._RecordLock(yaml_path):
+                record = tracking.load_record(yaml_path)
+            if record.execution_leg_opaque or record.session_backend_opaque:
+                raise ValueError(
+                    "worktree uses an unsupported hosted-session schema"
+                )
+            binding = tracking.derive_execution_leg(record)
+            _json_output(
+                _execution_leg_payload(
+                    worktree_id,
+                    binding,
+                    legacy=record.execution_leg is None and binding is not None,
+                )
+            )
+            return 0
+
+        if args.action == "clear" and args.if_match_revision is None:
+            raise ValueError("execution-leg clear requires --if-match-revision")
+        if args.action == "set":
+            if not args.provider:
+                raise ValueError("execution-leg set requires --provider")
+            if args.binding_revision is None or args.binding_revision <= 0:
+                raise ValueError(
+                    "execution-leg set requires a positive --binding-revision"
+                )
+            if not args.blob_file:
+                raise ValueError("execution-leg set requires --blob-file")
+        if args.action in {"reserve", "renew"}:
+            lease_seconds = getattr(
+                args,
+                "lease_seconds",
+                _EXECUTION_LEG_RESERVATION_DEFAULT_SECONDS,
+            )
+            if not 1 <= lease_seconds <= _EXECUTION_LEG_RESERVATION_MAX_SECONDS:
+                raise ValueError(
+                    f"execution-leg {args.action} --lease-seconds must be between "
+                    f"1 and {_EXECUTION_LEG_RESERVATION_MAX_SECONDS}"
+                )
+        if args.action == "reserve":
+            if not args.provider:
+                raise ValueError("execution-leg reserve requires --provider")
+            if getattr(args, "operation", None) not in {"ensure", "dispose"}:
+                raise ValueError(
+                    "execution-leg reserve requires --operation ensure|dispose"
+                )
+            if not getattr(args, "reservation_owner", None):
+                raise ValueError(
+                    "execution-leg reserve requires --reservation-owner"
+                )
+        if args.action in {"renew", "release"} and not getattr(
+            args, "reservation_token", None
+        ):
+            raise ValueError(
+                f"execution-leg {args.action} requires --reservation-token"
+            )
+
+        mutation_lock = yaml_path.with_suffix(".execution-leg.yaml")
+        reservation_path = _execution_leg_reservation_path(yaml_path)
+        with tracking._RecordLock(
+            mutation_lock,
+            timeout=120,
+            require_sidecar=True,
+        ):
+            record = tracking.load_record(yaml_path)
+            repo = _repo_for_record(config, record) or config.default_repo
+            lifecycle_lock = fin.FinalizeLock(
+                Path(repo.worktree_root) / ".finalize.lock"
+            )
+            lifecycle_lock.acquire()
+            try:
+                if not yaml_path.exists():
+                    raise ValueError(f"worktree record disappeared: {worktree_id}")
+                with tracking._RecordLock(yaml_path):
+                    latest = tracking.load_record(yaml_path)
+                    if latest.execution_leg_opaque:
+                        raise ValueError(
+                            "worktree uses a newer unsupported execution_leg schema"
+                        )
+                    if latest.session_backend_opaque:
+                        raise ValueError(
+                            "worktree uses a newer unsupported session_backend schema"
+                        )
+                    current = tracking.derive_execution_leg(latest)
+                    current_revision = (
+                        current.binding_revision if current is not None else 0
+                    )
+                    reservation = (
+                        _read_execution_leg_reservation(reservation_path)
+                        if reservation_path.exists()
+                        else None
+                    )
+                    if reservation is not None and reservation.get("phase") in {
+                        "committing",
+                        "releasing",
+                    }:
+                        result = _binding_from_payload(
+                            reservation.get("result_execution_leg")
+                        )
+                        current_payload = (
+                            current.to_dict() if current is not None else None
+                        )
+                        result_payload = (
+                            result.to_dict() if result is not None else None
+                        )
+                        if current_payload == result_payload:
+                            supplied_token = getattr(
+                                args, "reservation_token", None
+                            )
+                            if (
+                                args.action in {"set", "clear", "release"}
+                                and reservation.get("token") != supplied_token
+                            ):
+                                raise ValueError(
+                                    "execution-leg reservation token mismatch"
+                                )
+                            reservation_path.unlink()
+                            reservation = None
+                            if args.action in {"set", "clear", "release"}:
+                                _json_output(
+                                    _execution_leg_payload(worktree_id, current)
+                                )
+                                return 0
+                        elif (
+                            int(reservation.get("reserved_revision") or -1)
+                            != current_revision
+                        ):
+                            raise ValueError(
+                                "execution-leg reservation transition cannot be "
+                                "reconciled"
+                            )
+
+                    if args.action == "reserve":
+                        if reservation is not None:
+                            now = datetime.now(timezone.utc)
+                            owner_live = _reservation_owner_liveness(reservation)
+                            if owner_live is True or (
+                                owner_live is None
+                                and not _reservation_expired(reservation, now=now)
+                            ):
+                                owner = str(
+                                    reservation.get("owner") or "<unknown>"
+                                )
+                                expires_at = str(
+                                    reservation.get("expires_at") or "<unknown>"
+                                )
+                                raise ValueError(
+                                    "execution-leg lifecycle operation is already "
+                                    f"reserved by {owner} until {expires_at}"
+                                )
+                            previous = _binding_from_payload(
+                                reservation.get("previous_execution_leg")
+                            )
+                            current_payload = (
+                                current.to_dict() if current is not None else None
+                            )
+                            previous_payload = (
+                                previous.to_dict() if previous is not None else None
+                            )
+                            if (
+                                reservation.get("phase") == "prepared"
+                                and current_payload == previous_payload
+                            ):
+                                reservation_path.unlink()
+                                reservation = None
+                            elif (
+                                int(reservation.get("reserved_revision") or -1)
+                                != current_revision
+                            ):
+                                raise ValueError(
+                                    "expired execution-leg reservation cannot be "
+                                    "reconciled because its revision changed"
+                                )
+                            else:
+                                current = previous
+                                current_revision = (
+                                    current.binding_revision
+                                    if current is not None
+                                    else max(
+                                        0,
+                                        int(
+                                            reservation.get(
+                                                "reserved_revision"
+                                            ) or 0
+                                        ) - 1,
+                                    )
+                                )
+                        if reservation is not None and (
+                            int(reservation.get("reserved_revision") or -1)
+                            != current_revision + 1
+                        ):
+                            raise ValueError(
+                                "expired execution-leg reservation cannot be "
+                                "reconciled because its revision changed"
+                            )
+                        if (
+                            current is not None
+                            and current.state in {"active", "unknown"}
+                            and current.provider != args.provider
+                        ):
+                            raise ValueError(
+                                "worktree is already owned by execution-leg "
+                                f"provider {current.provider}"
+                            )
+                        now = datetime.now(timezone.utc)
+                        expires_at = now + timedelta(seconds=args.lease_seconds)
+                        token = secrets.token_hex(24)
+                        previous = current.to_dict() if current is not None else None
+                        binding = tracking.ExecutionLegBinding(
+                            provider=args.provider,
+                            state="unknown",
+                            binding_revision=(
+                                int(reservation.get("reserved_revision") or 0) + 1
+                                if reservation is not None
+                                else current_revision + 1
+                            ),
+                            blob=dict(current.blob) if current is not None else {},
+                        )
+                        reservation_value = {
+                            "version": 1,
+                            "phase": "prepared",
+                            "owner": args.reservation_owner,
+                            "owner_pid": getattr(
+                                args, "reservation_owner_pid", None
+                            ),
+                            "owner_start_time": getattr(
+                                args, "reservation_owner_start_time", None
+                            ),
+                            "token": token,
+                            "operation": args.operation,
+                            "provider": args.provider,
+                            "created_at": now.isoformat(timespec="seconds"),
+                            "expires_at": expires_at.isoformat(timespec="seconds"),
+                            "reserved_revision": binding.binding_revision,
+                            "previous_execution_leg": previous,
+                        }
+                        _write_execution_leg_reservation(
+                            reservation_path,
+                            reservation_value,
+                        )
+                        latest.execution_leg = binding
+                        latest.execution_leg_opaque = False
+                        latest.execution_leg_raw = None
+                        latest.session_backend = None
+                        latest.session_backend_opaque = False
+                        latest.session_backend_raw = None
+                        tracking._save_record_unlocked(
+                            latest,
+                            yaml_path,
+                            preserve_handoff_reservations=False,
+                        )
+                        reservation_value["phase"] = "reserved"
+                        _write_execution_leg_reservation(
+                            reservation_path,
+                            reservation_value,
+                        )
+                        _json_output({
+                            **_execution_leg_payload(worktree_id, binding),
+                            "reservation_token": token,
+                            "reservation_owner": args.reservation_owner,
+                            "created_at": now.isoformat(timespec="seconds"),
+                            "expires_at": expires_at.isoformat(timespec="seconds"),
+                            "operation": args.operation,
+                            "previous_execution_leg": previous,
+                        })
+                        return 0
+
+                    if args.action == "renew":
+                        if reservation is None:
+                            raise ValueError(
+                                "execution-leg lifecycle operation is not reserved"
+                            )
+                        if reservation.get("token") != args.reservation_token:
+                            raise ValueError("execution-leg reservation token mismatch")
+                        if (
+                            int(reservation.get("reserved_revision") or -1)
+                            != current_revision
+                        ):
+                            raise ValueError(
+                                "execution-leg reservation revision changed"
+                            )
+                        now = datetime.now(timezone.utc)
+                        reservation["expires_at"] = (
+                            now + timedelta(seconds=args.lease_seconds)
+                        ).isoformat(timespec="seconds")
+                        _write_execution_leg_reservation(
+                            reservation_path,
+                            reservation,
+                        )
+                        _json_output({
+                            **_execution_leg_payload(worktree_id, current),
+                            "reservation_token": args.reservation_token,
+                            "expires_at": reservation["expires_at"],
+                        })
+                        return 0
+
+                    if args.action == "release":
+                        if reservation is None:
+                            raise ValueError(
+                                "execution-leg lifecycle operation is not reserved"
+                            )
+                        if reservation.get("token") != getattr(
+                            args, "reservation_token", None
+                        ):
+                            raise ValueError("execution-leg reservation token mismatch")
+                        if (
+                            int(reservation.get("reserved_revision") or -1)
+                            != current_revision
+                        ):
+                            raise ValueError(
+                                "execution-leg reservation revision changed"
+                            )
+                        binding = _binding_from_payload(
+                            reservation.get("previous_execution_leg")
+                        )
+                        if binding is not None:
+                            binding.binding_revision = current_revision + 1
+                        latest.execution_leg = binding
+                        latest.execution_leg_opaque = False
+                        latest.execution_leg_raw = None
+                        latest.session_backend = None
+                        latest.session_backend_opaque = False
+                        latest.session_backend_raw = None
+                        reservation["phase"] = "releasing"
+                        reservation["result_execution_leg"] = (
+                            binding.to_dict() if binding is not None else None
+                        )
+                        _write_execution_leg_reservation(
+                            reservation_path,
+                            reservation,
+                        )
+                        tracking._save_record_unlocked(
+                            latest,
+                            yaml_path,
+                            preserve_handoff_reservations=False,
+                        )
+                        reservation_path.unlink()
+                        _json_output(_execution_leg_payload(worktree_id, binding))
+                        return 0
+
+                    if reservation is not None:
+                        supplied_token = getattr(
+                            args, "reservation_token", None
+                        )
+                        if reservation.get("token") != supplied_token:
+                            if supplied_token:
+                                raise ValueError(
+                                    "execution-leg reservation token mismatch"
+                                )
+                            raise ValueError(
+                                "execution-leg lifecycle operation is reserved"
+                            )
+                        if (
+                            int(reservation.get("reserved_revision") or -1)
+                            != current_revision
+                        ):
+                            raise ValueError(
+                                "execution-leg reservation revision changed"
+                            )
+                    elif getattr(args, "reservation_token", None):
+                        raise ValueError(
+                            "execution-leg lifecycle operation is not reserved"
+                        )
+                    expected = args.if_match_revision
+                    if expected is not None and expected != current_revision:
+                        raise ValueError(
+                            "execution-leg revision mismatch: "
+                            f"expected {expected}, found {current_revision}"
+                        )
+                    if (
+                        args.action in {"set", "clear"}
+                        and current is not None
+                        and current.state in {"active", "unknown"}
+                    ):
+                        if reservation is None:
+                            raise ValueError(
+                                "destructive mutation of an active execution leg "
+                                "requires its provider-owning reservation"
+                            )
+                        reservation_provider = reservation.get("provider")
+                        if reservation_provider != current.provider:
+                            raise ValueError(
+                                "execution-leg reservation does not own the "
+                                f"current provider {current.provider}"
+                            )
+                        if args.provider != reservation_provider:
+                            raise ValueError(
+                                "execution-leg mutation provider must match the "
+                                f"owning reservation provider {reservation_provider}"
+                            )
+
+                    if args.action == "clear":
+                        latest.execution_leg = None
+                        latest.execution_leg_opaque = False
+                        latest.execution_leg_raw = None
+                        latest.session_backend = None
+                        latest.session_backend_opaque = False
+                        latest.session_backend_raw = None
+                        binding = None
+                    else:
+                        if (
+                            latest.status in {"finalizing", "finalized"}
+                            and args.state in {"active", "unknown"}
+                        ):
+                            raise ValueError(
+                                "cannot activate an execution leg for a finalizing "
+                                "or finalized worktree"
+                            )
+                        if args.binding_revision <= current_revision:
+                            raise ValueError(
+                                "execution-leg binding revision must increase: "
+                                f"current {current_revision}, requested "
+                                f"{args.binding_revision}"
+                            )
+                        binding = tracking.ExecutionLegBinding(
+                            provider=args.provider,
+                            state=args.state,
+                            binding_revision=args.binding_revision,
+                            blob=_read_execution_leg_blob(args.blob_file),
+                        )
+                        latest.execution_leg = binding
+                        latest.execution_leg_opaque = False
+                        latest.execution_leg_raw = None
+                        latest.session_backend = None
+                        latest.session_backend_opaque = False
+                        latest.session_backend_raw = None
+                    if reservation is not None:
+                        reservation["phase"] = "committing"
+                        reservation["result_execution_leg"] = (
+                            binding.to_dict() if binding is not None else None
+                        )
+                        _write_execution_leg_reservation(
+                            reservation_path,
+                            reservation,
+                        )
+                    tracking._save_record_unlocked(
+                        latest,
+                        yaml_path,
+                        preserve_handoff_reservations=False,
+                    )
+                    if reservation is not None:
+                        reservation_path.unlink()
+            finally:
+                lifecycle_lock.release()
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return _json_error(str(exc), exit_code=3)
+
+    _json_output(_execution_leg_payload(worktree_id, binding))
     return 0
 
 
@@ -20560,6 +21148,36 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--worktree-id", required=True)
     p.add_argument("--json", action="store_true")
 
+    p = sub.add_parser(
+        "execution-leg",
+        help="Inspect or mutate the provider-neutral execution leg for a worktree",
+    )
+    p.add_argument(
+        "action",
+        choices=["get", "set", "clear", "reserve", "renew", "release"],
+    )
+    p.add_argument("--worktree-id", required=True)
+    p.add_argument("--provider")
+    p.add_argument(
+        "--state",
+        choices=["active", "disposed", "unknown"],
+        default="active",
+    )
+    p.add_argument("--binding-revision", type=int)
+    p.add_argument("--blob-file")
+    p.add_argument("--if-match-revision", type=int)
+    p.add_argument("--operation", choices=["ensure", "dispose"])
+    p.add_argument("--reservation-token")
+    p.add_argument("--reservation-owner")
+    p.add_argument("--reservation-owner-pid", type=int)
+    p.add_argument("--reservation-owner-start-time")
+    p.add_argument(
+        "--lease-seconds",
+        type=int,
+        default=_EXECUTION_LEG_RESERVATION_DEFAULT_SECONDS,
+    )
+    p.add_argument("--json", action="store_true")
+
     # post-exit (run post-exit checks after Copilot exits)
     p = sub.add_parser("post-exit", help="Post-exit worktree checks (idempotent)")
     p.add_argument("worktree_id", nargs="?", default=None)
@@ -25136,6 +25754,7 @@ def cmd_session_lock(args: argparse.Namespace) -> int:
 COMMAND_MAP = {
     "resolve": cmd_resolve,
     "session-backend": cmd_session_backend,
+    "execution-leg": cmd_execution_leg,
     "post-exit": cmd_post_exit,
     "session-lock": cmd_session_lock,
     "finalize": cmd_finalize,

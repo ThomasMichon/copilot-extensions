@@ -20,7 +20,16 @@ def test_active_ahp_binding_blocks_finalize(monkeypatch):
     )
     record = SimpleNamespace(
         worktree_id="host-win-20260903-abcd",
-        session_backend=SimpleNamespace(state="active"),
+        session_backend=tracking.SessionBackendBinding(
+            kind="ahp",
+            endpoint_url="ws://127.0.0.1:8765",
+            session_id="11111111-1111-1111-1111-111111111111",
+            protocol_version="0.7.0",
+            auth_account="example-user",
+            created_at="2026-09-03T00:00:00+00:00",
+            last_seen_at="2026-09-03T00:00:00+00:00",
+            state="active",
+        ),
     )
     assert finalize._has_live_session(record) is True
 
@@ -38,7 +47,16 @@ def test_disposed_ahp_binding_does_not_block_finalize(monkeypatch):
     )
     record = SimpleNamespace(
         worktree_id="host-win-20260903-abcd",
-        session_backend=SimpleNamespace(state="disposed"),
+        session_backend=tracking.SessionBackendBinding(
+            kind="ahp",
+            endpoint_url="ws://127.0.0.1:8765",
+            session_id="11111111-1111-1111-1111-111111111111",
+            protocol_version="0.7.0",
+            auth_account="example-user",
+            created_at="2026-09-03T00:00:00+00:00",
+            last_seen_at="2026-09-03T00:00:00+00:00",
+            state="disposed",
+        ),
     )
     assert finalize._has_live_session(record) is False
 
@@ -55,6 +73,33 @@ def test_opaque_future_backend_blocks_finalize(monkeypatch):
         session_backend_opaque=True,
     )
     assert finalize._has_live_session(record) is True
+
+
+def test_opaque_future_execution_leg_blocks_finalize(monkeypatch):
+    monkeypatch.setattr(
+        finalize.sessions,
+        "worktree_has_live_session",
+        lambda _record: False,
+    )
+    record = SimpleNamespace(
+        worktree_id="host-win-20260903-abcd",
+        execution_leg=None,
+        execution_leg_opaque=True,
+        session_backend=None,
+        session_backend_opaque=False,
+    )
+    assert finalize._has_live_session(record) is True
+
+
+def test_cleanup_fail_closed_for_both_opaque_hosting_schemas():
+    assert cli._hosted_session_blocks_cleanup(SimpleNamespace(
+        session_backend_opaque=True,
+        execution_leg_opaque=False,
+    ))
+    assert cli._hosted_session_blocks_cleanup(SimpleNamespace(
+        session_backend_opaque=False,
+        execution_leg_opaque=True,
+    ))
 
 
 def _record(tmp_path, *, state: str) -> tracking.WorktreeRecord:

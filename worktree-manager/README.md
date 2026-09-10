@@ -160,6 +160,21 @@ cd scripts/picker-snapshot && npm install
 uv run python render.py picker.png
 ```
 
+New Worktree options and the Open/Resume action menu expose independent,
+default-off `AHP` and `No Mux` checkmarks. `AHP` asks the Manager to create or
+verify a same-machine hosted session for the exact engine-resolved worktree;
+`No Mux` controls only terminal presentation. Configuration is user-owned in
+`~/.worktree-manager/config.toml`; see
+[`docs/configuration.md`](docs/configuration.md). Missing or mismatched AHP
+configuration, account, host, session, or working directory fails closed and
+never falls back to a direct Copilot process.
+
+On resume, an `active` or `unknown` persisted execution leg forces its provider
+even when the AHP checkmark is off; only a disposed or absent binding may return
+to direct launch. An AHP-owned row exposes **Dispose hosted session** as an
+explicit action. It disposes and terminally marks the hosted binding so a later
+normal Finalize can proceed; terminal exit never performs that destruction.
+
 `picker mock` renders real-shaped state but simulates mutations. The screenshot
 command exports the production character grid, ANSI grid, or SVG through the
 same compositor used by the live app. `scripts/picker-shot.py` adds
