@@ -691,6 +691,44 @@ explicit `health.status: "ready"` report from its own validated runtime or
 service health path. Missing or ambiguous ownership, unhealthy replacements,
 and reappeared artifacts preserve the legacy surface unchanged.
 
+#### Retention and deactivated cells
+
+Phase 6's audit evidence is intentionally asymmetric:
+
+- The legacy ownership tombstone is **temporary ownership evidence**. Explicit
+  rollback clears the matching tombstone under the legacy lock and the cell
+  install lock after publishing the next `legacy`/`deactivated` activation
+  generation and its paired deactivation record. If the tombstone remains but no
+  current namespaced activation can validate it, the result is
+  `orphaned-transfer` and all writers fail closed.
+- `deactivations/activation-<target-generation>.json` and
+  `retirements/activation-<target-generation>--<retirement-id>.json` are
+  **durable audit records**. The shared installation-context library has no
+  age-based expiry, background cleanup, or rotation for either directory.
+  Repeating the same explicit target reuses the existing record for idempotency;
+  it does not rewrite or delete it.
+- `installation-activation.json` is also retained across deactivation.
+  Deactivation advances it to `mode: legacy`, `state: deactivated`; it does not
+  delete the record or remove the cell's runtime artifacts. Cleanup is the only
+  operation permitted to delete the activation record, and only after companion
+  ownership and rollback evidence has been cleared under the required locks.
+
+Operator shorthand may call this an "inactive cell", but the authoritative
+evidence is the deactivated activation record. Diagnose it by reading
+`installation-activation.json` first:
+
+- `mode: legacy`, `state: deactivated` means the cell is no longer
+  authoritative.
+- `legacy.disposition: restored` means rollback restored the legacy footprint
+  and cleared the matching tombstone.
+- `legacy.disposition: absent` means the cell was deactivated only after the
+  caller proved no tombstone remained and the declared legacy probe was absent.
+
+The plugin root may still retain runtime slots, snapshots, logs, cache, and any
+deactivation or retirement records until an explicit cleanup or uninstall path
+removes the artifacts it owns. Deactivation alone is evidence publication and
+authority transfer, not removal.
+
 `target.kind` is `legacy-attribution-rollback` when the caller explicitly
 clears a matching tombstone under the legacy lock and `cell-deactivation` when
 the caller explicitly proves no tombstone exists. The record is keyed by the

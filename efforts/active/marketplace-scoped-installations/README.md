@@ -317,7 +317,7 @@ because they provide tools or services.
 - [x] Migrate or retire legacy services and global generic binstubs only after
   ownership is proven and the new cell passes health checks.
 - [ ] Turn the report-only guards blocking after all runtime plugins conform.
-- [ ] Document rollback and retention of legacy state and inactive cells.
+- [x] Document rollback and retention of legacy state and inactive cells.
 
 ### Phase 7 — Reconcile deferred backlog
 
@@ -368,9 +368,48 @@ because they provide tools or services.
 
 ## Proposal
 
-See [`design.md`](design.md).
+See [`design.md`](design.md), [`installation-mode-governance.md`](installation-mode-governance.md),
+[`phase-2-launcher-contracts.md`](phase-2-launcher-contracts.md),
+[`phase-3-installation-context.md`](phase-3-installation-context.md), and
+[`phase-6-lifecycle.md`](phase-6-lifecycle.md).
 
 ## Journal
+
+### 2026-09-10 — Phase 6 item 7: rollback and retained-evidence documentation
+
+- Added [`phase-6-lifecycle.md`](phase-6-lifecycle.md) as the focused Phase 6
+  companion covering how explicit legacy attribution, rollback/deactivation,
+  and legacy-compatibility retirement interact; which records are temporary
+  versus durable; and how to diagnose a deactivated-but-not-cleaned cell
+  without re-reading the full install contract. The note links the exact JSON
+  schemas back to [`docs/install-contract.md`](../../../docs/install-contract.md)
+  rather than duplicating them.
+- Updated the normative
+  [`docs/install-contract.md`](../../../docs/install-contract.md) record section
+  with the current retention and deactivated-cell behavior: tombstones clear
+  only on explicit rollback, deactivation and retirement records have no
+  age-based expiry or scavenger in the shared implementation, and
+  `installation-activation.json` remains as a monotonic `legacy`/`deactivated`
+  record until a later cleanup path removes it under the required locks.
+- Updated [`installation-mode-governance.md`](installation-mode-governance.md)
+  to point at the new lifecycle note and removed the stale "retention duration"
+  open choice now that the current implementation behavior is documented.
+- Validation: `python tools/check-docs-consistency.py` and `git diff --check`
+  passed.
+- The guard-enforcement item remains open. I re-read
+  `tools/check-marketplace-isolation.py` and the surrounding `tools/` guards:
+  for this effort, the Phase 6 blocking gate still refers to the
+  marketplace-isolation inventory; the other report-only guard in `tools/`
+  (`check-runtime-resolution.py`) belongs to the separate
+  `uniform-runtime-resolution` effort. The current marketplace-isolation run
+  still reported **681** findings across 1344 operative plugin files
+  (`unqualified-runtime-root`: 416, `fixed-service-identity`: 133,
+  `global-plugin-binstub`: 80, `path-sibling-launch`: 52), so the "all runtime
+  plugins conform" precondition for `--strict` does not hold and the guard stays
+  report-only.
+- This checks off only the Phase 6 documentation item. It deliberately does
+  **not** close [#1110](https://github.com/ThomasMichon/copilot-extensions/issues/1110),
+  because the guard-enforcement item is still unfinished.
 
 ### 2026-09-10 — Phase 6 item 5: ownership- and health-gated legacy wrapper retirement
 
