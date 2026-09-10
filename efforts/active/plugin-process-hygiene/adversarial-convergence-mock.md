@@ -138,8 +138,8 @@ note in the effort Journal for what's already covered by #737/#738/#739/#918).
 
 ## Plan for this sub-phase
 
-- [ ] Land this design doc + effort/README updates as the reviewed plan (this
-      PR) before any code.
+- [x] Land this design doc + effort/README updates as the reviewed plan
+      (PR #2303) before any code.
 - [x] Build the mock daemon + mock transient client + adversary driver as a
       new clean-room scenario
       (`tools/clean-room/scenarios/plugin-process-hygiene-convergence/`).
@@ -148,7 +148,7 @@ note in the effort Journal for what's already covered by #737/#738/#739/#918).
       found and fixed in the *harness itself*, not the contract: a
       self-matching process-count query, and PowerShell's single-result
       array-unwrapping silently dropping `.Count`. The contract held.)
-- [ ] Land the mock harness as its own PR, referencing this doc.
+- [x] Land the mock harness as its own PR (PR #2305), referencing this doc.
 - [ ] Use the harness's PASS/FAIL evidence, plus #2301's per-plugin citations,
       to decide which (if any) plugin needs an actual code change versus
       already conforming.

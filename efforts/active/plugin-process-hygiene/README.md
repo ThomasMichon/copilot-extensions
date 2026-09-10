@@ -518,6 +518,17 @@ Landed independently of this effort's own PR sequence, then reconciled into it:
   already-conforming evidence, and scoping what's genuinely still open) is
   the remaining work this effort's Phase 4b(ii) hands off to.
 
+### 2026-09-09 (later) — Checklist reconciliation
+
+Found the Phase 4b(ii) sub-doc's own checklist a step behind reality while
+resuming this effort: PR #2303 (design doc) and PR #2305 (mock harness) were
+both already merged, but their own checklist items ("land this design doc",
+"land the mock harness as its own PR") were still unticked. Ticked both,
+citing the now-merged PR numbers (never the in-flight/self-referential form).
+No code or design changes -- purely a bookkeeping catch-up so the next
+resumer reads an accurate Plan. The one remaining Phase 4b(ii) checklist item
+is unchanged: the per-plugin #2301 audit against the now-validated contract.
+
 ### 2026-09-09 (later still) — Phase 4c: classify-pass race found and designed
 
 - **Grounded in a live reproduction**, not a hypothetical: opening a harness
