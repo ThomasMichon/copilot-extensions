@@ -663,3 +663,33 @@ is unchanged: the per-plugin #2301 audit against the now-validated contract.
   Phase 4c's lease (not superseded) when no daemon is reachable in time.
   Design-only; a reviewed design PR precedes any plugin code, per this
   effort's standing convention.
+
+### 2026-09-09 (later still) — Phase 4b(ii)'s per-plugin audit landed on #2301
+
+Closed Phase 4b(ii)'s last open checklist item: a direct-read audit of
+agent-worktrees, agent-bridge, agent-dispatch, and agent-ssh against the
+mock-validated transient-hook-client contract, posted as a
+[#2301 comment](https://github.com/ThomasMichon/copilot-extensions/issues/2301#issuecomment-5613535208)
+rather than re-litigated here. Verdicts: **agent-worktrees CONFORMS**
+(`hook_client.py` never spawns; `_ensure_status_monitor` is off the hook path
+entirely, confirmed by grep); **agent-bridge PARTIAL** (its
+`bootstrap-check.ps1` background-spawn was fixed same-day by #2317,
+`write-session-guidance.ps1` left unverified); **agent-dispatch DEVIATES**
+(confirmed, unfixed — same ungated `Start-Process -FilePath 'conhost.exe'`
+shape #2317 fixed elsewhere); **agent-ssh SPLIT** (same hook deviation, but
+its actual persistent daemon, `dtssh-host-launcher.ps1`, conforms via a named
+Mutex). The 8 further sibling plugins #2317 named are explicitly flagged as
+*that PR's* claim, not independently re-verified by this audit — the comment
+is deliberately careful not to let an unverified list masquerade as a
+finding.
+
+Resolution recorded there and here: the confirmed deviations are **not**
+fixed by fanning out #2317's opt-in-gate pattern to each sibling. A new
+effort, [`tiered-payload-provisioning`](../tiered-payload-provisioning/README.md)
+(created earlier the same day from an operator critique that gating "only
+changes who pays the cost, not whether it's expensive"), removes the
+expensive hook-triggered path entirely via a unified, serialized/debounced
+stamp-now/provision-on-first-use model applying to every version update. Its
+Phase 3 is where agent-dispatch's and agent-ssh's confirmed deviations
+actually get fixed — this effort's Phase 4b(ii) is now fully closed, with
+implementation handed off rather than duplicated into a new phase here.
