@@ -273,7 +273,9 @@ async def attach(
                 if status["state"] == "rejected":
                     raise NativeError("venue_busy", "Native execution was rejected; no replacement will be launched")
                 budget = remaining()
-                if status["state"] in {"ready", "unrepresented"}:
+                if status["state"] in {"ready", "unrepresented"} or (
+                    status["state"] == "starting" and status.get("phase") == "registration"
+                ):
                     result = await connection(
                         client, execution_id, generation, input_source, handshake_timeout=budget,
                     )

@@ -270,7 +270,13 @@ def command(args) -> int:
     args.native_progress("local-config")
     account = lifecycle.account_for_codespace(args.name)
     if account:
-        os.environ.update(gh_account.env_for_account(account))
+        token = gh_account.token_for_account(account)
+        if not token:
+            raise RuntimeError("Native CodeSpace account token is unavailable; refusing ambient authentication")
+        # Reassigning unrelated empty variables deletes them from the Windows
+        # environment, corrupting counted Git config entries such as fsmonitor.
+        os.environ["GH_TOKEN"] = token
+        os.environ.pop("GITHUB_TOKEN", None)
     if sys.platform != "win32":
         def interrupted(*_):
             raise KeyboardInterrupt

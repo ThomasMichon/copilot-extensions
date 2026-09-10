@@ -47,6 +47,12 @@ process. Transport loss retries the same execution/generation; uncertain input
 is not replayed. The terminal has a bounded replay tail and supports resize.
 The native CLI retains its own permissions and interactive prompts.
 
+The activated terminal is attachable during `starting` / `registration`, before
+a live session is represented. This lets the operator answer folder-trust and
+extension-consent prompts that may otherwise block registration. The terminal
+still verifies the authenticated host identity; answering a prompt or attaching
+does not itself establish readiness. No blanket permission approval is applied.
+
 Before the first successful terminal attachment, the presentation allows a fixed
 **1800-second preparation window**, matching the provider's readiness budget.
 After an attachment has succeeded, transport loss gets **120 seconds from the
@@ -65,6 +71,10 @@ worktree, and native-host readiness. These identity-bound checkpoints reuse the
 provider's tracker and carry no raw stderr, commands, paths, credentials, or
 arbitrary detail. Older providers remain compatible with generic preparation
 status. Late progress cannot overwrite launch, ready, stopping, or stopped state.
+
+Account pinning changes only GitHub credential variables. Unrelated inherited
+environment entries, including empty counted Git configuration values on
+Windows, remain intact for owner-origin resolution and the shared fence.
 
 ## Ownership and restart
 

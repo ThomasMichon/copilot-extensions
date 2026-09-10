@@ -88,6 +88,36 @@ async def test_initial_preparation_can_exceed_120_seconds_without_replacement(ri
 
 
 @pytest.mark.asyncio
+async def test_registration_terminal_is_available_before_session_is_represented(rig):
+    receipt = {
+        "state": "starting", "phase": "registration",
+        "sessionId": None, "represented": False, "ready": False,
+    }
+    rig.status = lambda: receipt
+    assert await terminal.attach("execution", "generation") == 7
+    assert rig.connections == [("execution", "generation", 1800)]
+    assert receipt == {
+        "state": "starting", "phase": "registration",
+        "sessionId": None, "represented": False, "ready": False,
+    }
+    assert rig.restored
+
+
+@pytest.mark.asyncio
+async def test_registration_still_requires_authenticated_host_handshake(rig, monkeypatch):
+    rig.status = lambda: {"state": "starting", "phase": "registration"}
+    rig.step = 600
+
+    async def connect(*args, **kwargs):
+        raise NativeError("not_ready", "native activation is not verified", 503)
+
+    monkeypatch.setattr(terminal, "connection", connect)
+    with pytest.raises(NativeError, match="preparation budget exhausted"):
+        await terminal.attach("execution", "generation")
+    assert not rig.source.has_attached and rig.restored
+
+
+@pytest.mark.asyncio
 async def test_initial_preparation_has_a_fixed_1800_second_window(rig):
     rig.step = 600
     with pytest.raises(NativeError, match="preparation budget exhausted") as exc:
