@@ -646,12 +646,16 @@ def _run_production_picker(project: str) -> int:
         if not worktree_id:
             print("error: Picker returned a resume decision with no worktree id.")
             return 1
+        if not decision.get("is_local", True) and opts.get("ahp"):
+            print("error: AHP is supported only for same-machine launches.")
+            return 1
         return _run_launch(picker_app.LaunchRequest(
             project=project,
             worktree_id=str(worktree_id),
             mode="bare-resume" if opts.get("bare_resume") else "resume",
             title=str(decision.get("title") or "") or None,
             no_mux=bool(opts.get("no_mux")),
+            ahp=bool(opts.get("ahp")),
             machine=(
                 None if decision.get("is_local", True)
                 else str(decision.get("machine") or "") or None
@@ -674,12 +678,53 @@ def _run_production_picker(project: str) -> int:
             machine=str(decision.get("machine") or "") or None,
             environment=str(decision.get("env") or "") or None,
         )
+    if action == "dispose-hosted-session":
+        worktree_id = decision.get("worktree_id")
+        if not worktree_id:
+            print("error: Picker returned a disposal decision with no worktree id.")
+            return 1
+        if not decision.get("is_local", True):
+            print("error: AHP session disposal is supported only on this machine.")
+            return 1
+        request = picker_app.LaunchRequest(
+            project=project,
+            worktree_id=str(worktree_id),
+            mode="resume",
+        )
+        plan, code = _resolve_for(request)
+        if plan is None:
+            return code
+        from . import ahp_provider, engine_client, manager_config
+
+        try:
+            disposed = ahp_provider.dispose_worktree_session(
+                project,
+                str(worktree_id),
+                str(plan.work_dir or ""),
+            )
+        except (
+            ahp_provider.AhpProviderError,
+            engine_client.EngineError,
+            manager_config.ManagerConfigError,
+        ) as error:
+            print(f"error: could not dispose AHP session: {error}")
+            return 1
+        print(
+            "Disposed the AHP-hosted session."
+            if disposed
+            else "No active AHP-hosted session was present."
+        )
+        return 0
     if action == "new":
+        if not decision.get("is_local", True) and opts.get("ahp"):
+            print("error: AHP is supported only for same-machine launches.")
+            return 1
         return _run_launch(picker_app.LaunchRequest(
             project=project,
             worktree_id=None,
             mode="base" if opts.get("anchor") else "new",
             no_mux=bool(opts.get("no_mux")),
+            ahp=bool(opts.get("ahp")),
             machine=(
                 None if decision.get("is_local", True)
                 else str(decision.get("machine") or "") or None
@@ -768,16 +813,7 @@ def _restore_production_picker_session(
         machine=None if is_local else machine,
         environment=None if is_local else environment,
     )
-    if not is_local:
-        return _run_launch(request)
-
-    try:
-        return engine_client.run_project_passthrough(
-            project, ["--worktree-id", worktree_id]
-        )
-    except engine_client.EngineError as error:
-        print(f"error: could not launch restored session: {error}")
-        return 1
+    return _run_launch(request)
 
 
 def _resolve_for(req) -> "tuple[object | None, int]":
@@ -832,6 +868,73 @@ def _run_launch(req) -> int:
         return code
     if plan.action == "none":
         return plan.exit_code
+    if plan.action == "remote":
+        if getattr(req, "ahp", False):
+            print("error: AHP is supported only for same-machine launches")
+            return 1
+        return launcher.launch(plan, want_mux=not getattr(req, "no_mux", False))
+    use_ahp = bool(getattr(req, "ahp", False))
+    worktree_id = str(getattr(plan, "worktree_id", None) or "")
+    if (
+        getattr(req, "machine", None) is None
+        and worktree_id
+        and getattr(req, "mode", "") in {"resume", "bare-resume"}
+    ):
+        from . import engine_client
+
+        try:
+            persisted = engine_client.execution_leg_get(
+                req.project,
+                worktree_id,
+            ).get("execution_leg")
+        except engine_client.EngineFeatureUnavailable:
+            persisted = None
+        except engine_client.EngineError as error:
+            print(f"error: could not inspect the persisted execution leg: {error}")
+            return 1
+        if persisted is not None:
+            if not isinstance(persisted, dict):
+                print("error: agent-worktrees returned an invalid execution leg")
+                return 1
+            state = str(persisted.get("state") or "unknown")
+            if state in {"active", "unknown"}:
+                provider = str(persisted.get("provider") or "")
+                if provider != "ahp":
+                    print(
+                        "error: worktree requires unsupported execution-leg "
+                        f"provider {provider or '<unknown>'}"
+                    )
+                    return 1
+                if req.mode == "bare-resume":
+                    print(
+                        "error: bare resume is incompatible with the worktree's "
+                        "active AHP execution leg"
+                    )
+                    return 1
+                use_ahp = True
+    if use_ahp:
+        from . import ahp_provider, engine_client, manager_config
+
+        if getattr(req, "machine", None):
+            print("error: AHP is supported only for same-machine launches")
+            return 1
+        if req.mode in {"base", "bare-resume"}:
+            print("error: AHP requires an agent-worktrees-managed worktree")
+            return 1
+        try:
+            attachment = ahp_provider.ensure_session(
+                req.project,
+                str(plan.worktree_id or ""),
+                str(plan.work_dir or ""),
+            )
+            plan = ahp_provider.attach_plan(plan, attachment)
+        except (
+            ahp_provider.AhpProviderError,
+            engine_client.EngineError,
+            manager_config.ManagerConfigError,
+        ) as error:
+            print(f"error: could not prepare AHP launch: {error}")
+            return 1
     return launcher.launch(plan, want_mux=not getattr(req, "no_mux", False))
 
 

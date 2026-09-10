@@ -218,6 +218,132 @@ def test_list_worktree_rows_uses_supplied_cancellable_runner(monkeypatch):
     assert seen["timeout"] == ec._DEFAULT_TIMEOUT
 
 
+def test_repository_identity_uses_scoped_engine_commands(monkeypatch):
+    calls = []
+
+    def handler(cmd, kw):
+        calls.append(cmd)
+        if "account-for" in cmd:
+            return _fake_completed(
+                cmd,
+                stdout=json.dumps({
+                    "target": "example/example",
+                    "account": "example-user",
+                }),
+            )
+        return _fake_completed(cmd, stdout="secret-token\n")
+
+    _install_fake(monkeypatch, handler)
+
+    assert ec.repository_account("example") == "example-user"
+    assert ec.repository_token("example", "example-user") == "secret-token"
+    assert calls[1][-7:] == [
+        "repos",
+        "gh",
+        "--",
+        "auth",
+        "token",
+        "--user",
+        "example-user",
+    ]
+
+
+def test_execution_leg_set_uses_json_blob_file_and_fencing(monkeypatch):
+    seen = {}
+
+    def handler(cmd, kw):
+        blob_path = ec.Path(cmd[cmd.index("--blob-file") + 1])
+        seen["blob_path"] = blob_path
+        seen["blob"] = json.loads(blob_path.read_text(encoding="utf-8"))
+        seen["cmd"] = cmd
+        return _fake_completed(
+            cmd,
+            stdout=json.dumps({
+                "worktree_id": "wt-1",
+                "execution_leg": {"binding_revision": 2},
+            }),
+        )
+
+    _install_fake(monkeypatch, handler)
+
+    result = ec.execution_leg_set(
+        "example",
+        "wt-1",
+        provider="ahp",
+        state="active",
+        binding_revision=2,
+        blob={"session_id": "session-1"},
+        if_match_revision=1,
+    )
+
+    assert result["execution_leg"]["binding_revision"] == 2
+    assert seen["blob"] == {"session_id": "session-1"}
+    assert "--if-match-revision" in seen["cmd"]
+    assert not seen["blob_path"].exists()
+
+
+def test_execution_leg_lifecycle_reservation_uses_engine_owned_tokens(monkeypatch):
+    calls = []
+
+    def handler(cmd, kw):
+        calls.append(cmd)
+        return _fake_completed(
+            cmd,
+            stdout=json.dumps({"reservation_token": "token-1"}),
+        )
+
+    _install_fake(monkeypatch, handler)
+
+    assert ec.execution_leg_reserve(
+        "example",
+        "wt-1",
+        provider="ahp",
+        operation="ensure",
+        owner="manager:test",
+        owner_pid=123,
+        owner_start_time="456",
+        lease_seconds=45,
+    )["reservation_token"] == "token-1"
+    ec.execution_leg_release(
+        "example",
+        "wt-1",
+        reservation_token="token-1",
+    )
+
+    assert "--operation" in calls[0]
+    assert calls[0][calls[0].index("--operation") + 1] == "ensure"
+    assert calls[0][calls[0].index("--reservation-owner") + 1] == "manager:test"
+    assert calls[0][calls[0].index("--reservation-owner-pid") + 1] == "123"
+    assert calls[0][calls[0].index("--reservation-owner-start-time") + 1] == "456"
+    assert calls[0][calls[0].index("--lease-seconds") + 1] == "45"
+    assert calls[1][calls[1].index("--reservation-token") + 1] == "token-1"
+
+
+def test_execution_leg_get_classifies_only_conclusive_unsupported_engine(
+    monkeypatch,
+):
+    _install_fake(
+        monkeypatch,
+        lambda cmd, kw: _fake_completed(
+            cmd,
+            returncode=2,
+            stderr="invalid choice: 'execution-leg' (choose from 'list', 'resolve')",
+        ),
+    )
+    with pytest.raises(ec.EngineFeatureUnavailable):
+        ec.execution_leg_get("example", "wt-1")
+
+
+def test_execution_leg_get_parse_failure_remains_fail_closed(monkeypatch):
+    _install_fake(
+        monkeypatch,
+        lambda cmd, kw: _fake_completed(cmd, stdout="not json"),
+    )
+    with pytest.raises(ec.EngineError) as error:
+        ec.execution_leg_get("example", "wt-1")
+    assert not isinstance(error.value, ec.EngineFeatureUnavailable)
+
+
 def test_refresh_worktree_uses_exact_provider_contract(monkeypatch):
     seen = {}
 

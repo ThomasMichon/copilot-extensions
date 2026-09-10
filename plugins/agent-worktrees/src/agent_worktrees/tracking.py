@@ -1867,12 +1867,13 @@ def derive_execution_leg(record: WorktreeRecord) -> ExecutionLegBinding | None:
     ``efforts/active/worktree-manager-control-plane/phase-3b-ahp-relocation.md``
     (Phase 3b Slice 1) for the migration this groundwork serves.
     """
-    if record.execution_leg is not None:
-        return record.execution_leg
-    if record.execution_leg_opaque:
+    execution_leg = getattr(record, "execution_leg", None)
+    if execution_leg is not None:
+        return execution_leg
+    if getattr(record, "execution_leg_opaque", False):
         return None
-    backend = record.session_backend
-    if backend is None or record.session_backend_opaque:
+    backend = getattr(record, "session_backend", None)
+    if backend is None or getattr(record, "session_backend_opaque", False):
         return None
     return ExecutionLegBinding(
         provider=backend.kind,

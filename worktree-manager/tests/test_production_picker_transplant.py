@@ -269,7 +269,7 @@ def test_manager_acts_on_production_picker_resume_decision(monkeypatch):
             "worktree_id": "demo-1234",
             "title": "Resume me",
             "is_local": True,
-            "options": {"bare_resume": True, "no_mux": True},
+            "options": {"bare_resume": True, "no_mux": True, "ahp": True},
         },
     )
     requests = []
@@ -285,7 +285,7 @@ def test_manager_acts_on_production_picker_resume_decision(monkeypatch):
     assert requests[0].no_mux is True
 
 
-def test_manager_restores_local_session_then_launches_project_binstub(monkeypatch):
+def test_manager_restores_local_session_then_uses_common_launch_gate(monkeypatch):
     monkeypatch.setattr(
         runner,
         "run",
@@ -310,10 +310,11 @@ def test_manager_restores_local_session_then_launches_project_binstub(monkeypatc
             or {"ok": True, "action": "reclaimed", "requires_resume": True}
         ),
     )
+    requests = []
     monkeypatch.setattr(
-        engine_client,
-        "run_project_passthrough",
-        lambda project, args: calls.append(("launch", project, args)) or 0,
+        entrypoint,
+        "_run_launch",
+        lambda request: requests.append(request) or 0,
     )
 
     assert entrypoint._run_production_picker("demo") == 0
@@ -322,7 +323,9 @@ def test_manager_restores_local_session_then_launches_project_binstub(monkeypatc
         "demo",
         ["remux", "--worktree-id", "demo-1234", "--yes", "--json"],
     )
-    assert calls[1] == ("launch", "demo", ["--worktree-id", "demo-1234"])
+    assert requests[0].project == "demo"
+    assert requests[0].worktree_id == "demo-1234"
+    assert requests[0].mode == "resume"
 
 
 def test_manager_does_not_launch_when_restore_prep_fails(monkeypatch):
@@ -457,7 +460,7 @@ def test_manager_reports_remote_restore_transport_failure(monkeypatch):
     assert entrypoint._run_production_picker("demo") == 1
 
 
-def test_manager_acts_on_remote_production_picker_decision(monkeypatch):
+def test_manager_rejects_crafted_remote_ahp_picker_decision(monkeypatch, capsys):
     monkeypatch.setattr(
         runner,
         "run",
@@ -468,7 +471,7 @@ def test_manager_acts_on_remote_production_picker_decision(monkeypatch):
             "is_local": False,
             "machine": "Example",
             "env": "WSL",
-            "options": {"bare_resume": True, "no_mux": True},
+            "options": {"bare_resume": True, "no_mux": True, "ahp": True},
         },
     )
     requests = []
@@ -478,12 +481,9 @@ def test_manager_acts_on_remote_production_picker_decision(monkeypatch):
         lambda request: requests.append(request) or 0,
     )
 
-    assert entrypoint._run_production_picker("demo") == 0
-    assert requests[0].worktree_id == "demo-1234"
-    assert requests[0].mode == "bare-resume"
-    assert requests[0].machine == "Example"
-    assert requests[0].environment == "WSL"
-    assert requests[0].no_mux is True
+    assert entrypoint._run_production_picker("demo") == 1
+    assert requests == []
+    assert "same-machine" in capsys.readouterr().out
 
 
 def test_manager_acts_on_base_repo_production_picker_decision(monkeypatch):
@@ -523,6 +523,424 @@ def test_run_launch_executes_remote_plan(monkeypatch):
 
     assert entrypoint._run_launch(request) == 17
     assert calls == [(plan, False)]
+
+
+def test_run_launch_rejects_crafted_remote_ahp_before_launch(
+    monkeypatch,
+):
+    from worktree_manager import engine_client, launcher
+
+    plan = type("Plan", (), {"action": "remote", "exit_code": 0})()
+    monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (plan, 0))
+    monkeypatch.setattr(
+        engine_client,
+        "execution_leg_get",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("remote launch must not inspect local execution-leg state")
+        ),
+    )
+    calls = []
+    monkeypatch.setattr(
+        launcher,
+        "launch",
+        lambda resolved, *, want_mux: calls.append((resolved, want_mux)) or 0,
+    )
+    request = type(
+        "Request",
+        (),
+        {
+            "project": "demo",
+            "worktree_id": "demo-1234",
+            "mode": "resume",
+            "machine": "Example",
+            "environment": "WSL",
+            "no_mux": False,
+            "ahp": True,
+        },
+    )()
+
+    assert entrypoint._run_launch(request) == 1
+    assert calls == []
+
+
+def test_run_launch_selects_ahp_after_plan_resolution(monkeypatch, tmp_path):
+    from worktree_manager import ahp_provider, engine_client, launcher
+
+    plan = type(
+        "Plan",
+        (),
+        {
+            "action": "exec",
+            "exit_code": 0,
+            "worktree_id": "demo-1234",
+            "work_dir": str(tmp_path),
+        },
+    )()
+    hosted = object()
+    attachment = object()
+    monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (plan, 0))
+    monkeypatch.setattr(
+        engine_client,
+        "execution_leg_get",
+        lambda *_args, **_kwargs: {"execution_leg": None},
+    )
+    monkeypatch.setattr(
+        ahp_provider,
+        "ensure_session",
+        lambda project, worktree_id, work_dir: (
+            attachment
+            if (project, worktree_id, work_dir)
+            == ("demo", "demo-1234", str(tmp_path))
+            else None
+        ),
+    )
+    monkeypatch.setattr(ahp_provider, "attach_plan", lambda value, found: hosted)
+    calls = []
+    monkeypatch.setattr(
+        launcher,
+        "launch",
+        lambda resolved, *, want_mux: calls.append((resolved, want_mux)) or 0,
+    )
+    request = type(
+        "Request",
+        (),
+        {
+            "project": "demo",
+            "mode": "resume",
+            "machine": None,
+            "no_mux": False,
+            "ahp": True,
+        },
+    )()
+
+    assert entrypoint._run_launch(request) == 0
+    assert calls == [(hosted, True)]
+
+
+def test_run_launch_default_never_calls_ahp(monkeypatch):
+    from worktree_manager import ahp_provider, launcher
+
+    plan = type(
+        "Plan",
+        (),
+        {
+            "action": "exec",
+            "exit_code": 0,
+            "worktree_id": "demo-1234",
+        },
+    )()
+    monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (plan, 0))
+    monkeypatch.setattr(
+        ahp_provider,
+        "ensure_session",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("AHP is opt-in")),
+    )
+    monkeypatch.setattr(launcher, "launch", lambda *_args, **_kwargs: 0)
+    request = type("Request", (), {"no_mux": False, "ahp": False})()
+
+    assert entrypoint._run_launch(request) == 0
+
+
+@pytest.mark.parametrize("state", ["active", "unknown"])
+def test_run_launch_forces_persisted_active_or_unknown_ahp_binding(
+    monkeypatch,
+    tmp_path,
+    state,
+):
+    from worktree_manager import ahp_provider, engine_client, launcher
+
+    plan = type(
+        "Plan",
+        (),
+        {
+            "action": "exec",
+            "exit_code": 0,
+            "worktree_id": "demo-1234",
+            "work_dir": str(tmp_path),
+        },
+    )()
+    attachment = object()
+    hosted = object()
+    monkeypatch.setattr(entrypoint, "_resolve_for", lambda _request: (plan, 0))
+    monkeypatch.setattr(
+        engine_client,
+        "execution_leg_get",
+        lambda *_args, **_kwargs: {
+            "execution_leg": {
+                "provider": "ahp",
+                "state": state,
+                "binding_revision": 3,
+                "blob": {},
+            }
+        },
+    )
+    monkeypatch.setattr(
+        ahp_provider,
+        "ensure_session",
+        lambda *_args, **_kwargs: attachment,
+    )
+    monkeypatch.setattr(
+        ahp_provider,
+        "attach_plan",
+        lambda value, found: hosted
+        if (value, found) == (plan, attachment)
+        else None,
+    )
+    calls = []
+    monkeypatch.setattr(
+        launcher,
+        "launch",
+        lambda resolved, *, want_mux: calls.append((resolved, want_mux)) or 0,
+    )
+    request = type(
+        "Request",
+        (),
+        {
+            "project": "demo",
+            "worktree_id": "demo-1234",
+            "mode": "resume",
+            "machine": None,
+            "no_mux": False,
+            "ahp": False,
+        },
+    )()
+
+    assert entrypoint._run_launch(request) == 0
+    assert calls == [(hosted, True)]
+
+
+def test_run_launch_allows_direct_after_disposed_binding(monkeypatch):
+    from worktree_manager import ahp_provider, engine_client, launcher
+
+    plan = type(
+        "Plan",
+        (),
+        {
+            "action": "exec",
+            "exit_code": 0,
+            "worktree_id": "demo-1234",
+        },
+    )()
+    monkeypatch.setattr(entrypoint, "_resolve_for", lambda _request: (plan, 0))
+    monkeypatch.setattr(
+        engine_client,
+        "execution_leg_get",
+        lambda *_args, **_kwargs: {
+            "execution_leg": {
+                "provider": "ahp",
+                "state": "disposed",
+                "binding_revision": 4,
+                "blob": {},
+            }
+        },
+    )
+    monkeypatch.setattr(
+        ahp_provider,
+        "ensure_session",
+        lambda *_args: (_ for _ in ()).throw(
+            AssertionError("disposed binding does not force AHP")
+        ),
+    )
+    calls = []
+    monkeypatch.setattr(
+        launcher,
+        "launch",
+        lambda resolved, *, want_mux: calls.append((resolved, want_mux)) or 0,
+    )
+    request = type(
+        "Request",
+        (),
+        {
+            "project": "demo",
+            "worktree_id": "demo-1234",
+            "mode": "resume",
+            "machine": None,
+            "no_mux": False,
+            "ahp": False,
+        },
+    )()
+
+    assert entrypoint._run_launch(request) == 0
+    assert calls == [(plan, True)]
+
+
+@pytest.mark.parametrize("mode", ["resume", "bare-resume"])
+def test_run_launch_preserves_direct_resume_when_execution_leg_is_unsupported(
+    monkeypatch,
+    mode,
+):
+    from worktree_manager import engine_client, launcher
+
+    plan = type(
+        "Plan",
+        (),
+        {
+            "action": "exec",
+            "exit_code": 0,
+            "worktree_id": "demo-1234",
+        },
+    )()
+    monkeypatch.setattr(entrypoint, "_resolve_for", lambda _request: (plan, 0))
+    monkeypatch.setattr(
+        engine_client,
+        "execution_leg_get",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            engine_client.EngineFeatureUnavailable("older engine")
+        ),
+    )
+    calls = []
+    monkeypatch.setattr(
+        launcher,
+        "launch",
+        lambda resolved, *, want_mux: calls.append((resolved, want_mux)) or 0,
+    )
+    request = type(
+        "Request",
+        (),
+        {
+            "project": "demo",
+            "worktree_id": "demo-1234",
+            "mode": mode,
+            "machine": None,
+            "no_mux": False,
+            "ahp": False,
+        },
+    )()
+
+    assert entrypoint._run_launch(request) == 0
+    assert calls == [(plan, True)]
+
+
+def test_run_launch_fails_closed_for_unknown_unavailable_provider(
+    monkeypatch,
+    capsys,
+):
+    from worktree_manager import engine_client, launcher
+
+    plan = type(
+        "Plan",
+        (),
+        {
+            "action": "exec",
+            "exit_code": 0,
+            "worktree_id": "demo-1234",
+        },
+    )()
+    monkeypatch.setattr(entrypoint, "_resolve_for", lambda _request: (plan, 0))
+    monkeypatch.setattr(
+        engine_client,
+        "execution_leg_get",
+        lambda *_args, **_kwargs: {
+            "execution_leg": {
+                "provider": "future-host",
+                "state": "unknown",
+                "binding_revision": 9,
+                "blob": {},
+            }
+        },
+    )
+    monkeypatch.setattr(
+        launcher,
+        "launch",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("must not launch direct")
+        ),
+    )
+    request = type(
+        "Request",
+        (),
+        {
+            "project": "demo",
+            "worktree_id": "demo-1234",
+            "mode": "resume",
+            "machine": None,
+            "no_mux": False,
+            "ahp": False,
+        },
+    )()
+
+    assert entrypoint._run_launch(request) == 1
+    assert "requires unsupported execution-leg provider future-host" in capsys.readouterr().out
+
+
+def test_run_launch_rejects_bare_resume_for_active_ahp_binding(
+    monkeypatch,
+    capsys,
+):
+    from worktree_manager import engine_client, launcher
+
+    plan = type(
+        "Plan",
+        (),
+        {
+            "action": "exec",
+            "exit_code": 0,
+            "worktree_id": "demo-1234",
+        },
+    )()
+    monkeypatch.setattr(entrypoint, "_resolve_for", lambda _request: (plan, 0))
+    monkeypatch.setattr(
+        engine_client,
+        "execution_leg_get",
+        lambda *_args, **_kwargs: {
+            "execution_leg": {
+                "provider": "ahp",
+                "state": "active",
+                "binding_revision": 3,
+                "blob": {},
+            }
+        },
+    )
+    monkeypatch.setattr(
+        launcher,
+        "launch",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("bare resume must fail closed")
+        ),
+    )
+    request = type(
+        "Request",
+        (),
+        {
+            "project": "demo",
+            "worktree_id": "demo-1234",
+            "mode": "bare-resume",
+            "machine": None,
+            "no_mux": False,
+            "ahp": False,
+        },
+    )()
+
+    assert entrypoint._run_launch(request) == 1
+    assert "bare resume is incompatible" in capsys.readouterr().out
+
+
+def test_production_picker_disposal_decision_calls_manager_owned_provider(
+    monkeypatch,
+    tmp_path,
+):
+    from worktree_manager import ahp_provider
+
+    monkeypatch.setattr(
+        runner,
+        "run",
+        lambda _project: {
+            "action": "dispose-hosted-session",
+            "worktree_id": "demo-1234",
+            "is_local": True,
+        },
+    )
+    plan = type("Plan", (), {"work_dir": str(tmp_path)})()
+    monkeypatch.setattr(entrypoint, "_resolve_for", lambda _request: (plan, 0))
+    calls = []
+    monkeypatch.setattr(
+        ahp_provider,
+        "dispose_worktree_session",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or True,
+    )
+
+    assert entrypoint._run_production_picker("demo") == 0
+    assert calls[0][0] == ("demo", "demo-1234", str(tmp_path))
 
 
 def test_resolve_for_uses_remote_compatibility_on_older_engine(monkeypatch):

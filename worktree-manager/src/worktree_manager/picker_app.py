@@ -142,6 +142,7 @@ class LaunchRequest:
     mode: str
     title: str | None = None
     no_mux: bool = False
+    ahp: bool = False
     machine: str | None = None
     environment: str | None = None
 

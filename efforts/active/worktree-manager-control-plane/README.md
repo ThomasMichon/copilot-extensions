@@ -186,11 +186,12 @@ realized in `main`; unchecked items are the remaining delta.
             read path + `derive_execution_leg()` compatibility view in
             `tracking.py`. No behavior change: nothing writes `execution_leg:`
             yet, existing `session_backend:` output stays byte-identical.
-      - [ ] Steps 2-6 (generic `execution-leg` CLI verbs; relocate
-            `ahp_backend.py` + config + `websocket-client` dependency to
-            Worktree Manager; cut launch/resume/create over; delete
-            `cmd_session_backend`/`ahp_backend.py` from agent-worktrees;
-            update tests) per the linked plan.
+      - [x] Steps 2-4: generic fenced `execution-leg get/set/clear` CLI;
+            Manager-owned AHP provider/config/dependency over the public engine
+            subprocess boundary; production Picker default-off AHP controls and
+            launch/resume/create cutover for exact engine-created worktrees.
+      - [ ] Steps 5-6: delete the legacy agent-worktrees AHP backend/config path
+            and complete the remaining launcher-contract test migration.
 - [ ] **Slice 2 (Mux):** relocate Mux launch/reattach/remux mechanics
       (`launch-session.{sh,ps1,cmd}`, `pane-wrapper.{sh,ps1}`, `cmd_remux`)
       from `agent-worktrees` to the Worktree Manager, consistent with the same
@@ -425,3 +426,17 @@ its issues; the public artifacts stay self-contained and general-purpose.
   full suite hangs partway through `test_data_ssh_sources.py`/
   `test_launch_trace.py`, likely a real-SSH-subprocess test with no mock/
   timeout in this environment — a separate, pre-existing issue to file.
+- **2026-09-09** — Implemented the reviewed Phase 3b AHP relocation Steps 2-4
+  without deleting the legacy path. agent-worktrees now exposes fenced,
+  provider-neutral `execution-leg get/set/clear` JSON verbs, preserves legacy
+  `session_backend` reads, and treats active/unknown generic legs as cleanup
+  blockers. Worktree Manager now owns loopback AHP configuration and protocol
+  behavior, resolves account/token through pinned engine subprocess commands,
+  creates or verifies the exact resolved worktree session, persists the opaque
+  AHP leg, and composes the authenticated client attachment. The production
+  Picker adds independent default-off `AHP` controls to New Worktree and
+  Open/Resume. Validated 17 focused agent-worktrees tests, 296 Worktree Manager
+  engine/config/provider/launch/Picker tests, touched-Python Ruff `F,E9`,
+  version consistency, install contract, docs consistency, and `git diff
+  --check`; all passed. Bumped agent-worktrees to `1.5.5-dev49`, marketplace
+  metadata to `1.7.7-dev45`, and Worktree Manager to `0.1.0-dev34`.
