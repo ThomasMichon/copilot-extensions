@@ -987,12 +987,25 @@ _CREATE_NO_WINDOW = no_window_flags()
 
 
 def _run(argv, timeout):
+    # Sanitize the child's environment the same way LiveLoader._spawn /
+    # _spawn_stream do (#2359): the *local* source's fast/classify passes fall
+    # back to this module-level runner (see ``_fetch``'s ``runner = runner or
+    # _run``, taken before the ``source.local`` branch), so without this it
+    # inherits the Picker process's own PYTHONHOME/PYTHONPATH/VIRTUAL_ENV --
+    # e.g. a foreign-architecture PYTHONHOME from an outer ``uv run`` -- which
+    # crashes the local agent-worktrees venv's own interpreter on `import
+    # socket` (DLL load failed: arch mismatch) instead of resolving its own
+    # pyvenv.cfg. Remote (SSH) invocations need this too: a remote alias can
+    # legitimately share a Python-tooling PATH/profile with the picker host.
+    from ...engine_client import _engine_environment
+
     kwargs = dict(
         capture_output=True, text=True,
         encoding="utf-8", errors="replace", timeout=timeout,
         # DEVNULL gives ssh an empty stdin (instant EOF) so a background ssh
         # child can't read the operator's keystrokes out from under the TUI.
         stdin=subprocess.DEVNULL,
+        env=_engine_environment(),
     )
     if os.name == "nt" and _CREATE_NO_WINDOW:
         kwargs["creationflags"] = _CREATE_NO_WINDOW
