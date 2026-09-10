@@ -38,8 +38,10 @@ cannot be mistaken for successful publication.
 - **Delegates:** adapters implement provider seams without owning orchestration.
 - **Handoff:** every slice reports durable state transitions and evidence to the
   host contract.
-- **Public coordination token:** the reviewed plan PR until a dedicated issue
-  is authorized; implementation does not begin under the temporary token.
+- **Public coordination token:**
+  [ThomasMichon/copilot-extensions#2357](https://github.com/ThomasMichon/copilot-extensions/issues/2357)
+  (Phase 9 implementation). Slices land as separate PRs referencing this
+  issue.
 
 ## Context
 
@@ -433,6 +435,33 @@ drivers and prove reliability with deterministic interruption and duplication
 scenarios.
 
 ## Journal
+
+### 2026-09-10 - Phase 9: opened the implementation coordination issue; first slice landed
+
+- Opened
+  [ThomasMichon/copilot-extensions#2357](https://github.com/ThomasMichon/copilot-extensions/issues/2357)
+  as the effort's coordination-gate "dedicated issue," replacing the
+  temporary reviewed-plan-PR token now that Phase 9's design has merged.
+  Implementation slices reference this issue instead of proceeding under
+  the temporary token.
+- Landed the first implementation slice: the dispatch task state machine
+  declared as a checkable data table
+  (`plugins/agent-dispatch/src/agent_dispatch/task_state_machine.py`),
+  reconciled against the real, already-implemented
+  `agent_dispatch.queue.Status` states (not a fresh prototype) -- Phase
+  1's reviewer-flavored state list turns out to be a specific consumer's
+  projection of this same eight-state machine, not a separate design.
+  Added structural tests
+  (`plugins/agent-dispatch/tests/test_task_state_machine.py`) proving the
+  table itself is sound: every state reachable from `proposed`, no
+  non-terminal state lacks a declared exit, no terminal state has one, and
+  every transition carries exactly one recovery-taxonomy tag. These are
+  deterministic, in-process fixtures with no live provider or
+  infrastructure dependency -- the intentional first slice, ahead of any
+  scenario/interleaving fixture or live-provider validation.
+- Next slices: the provider/PR-target and bridge/session machines, the
+  control-flow coupling rules, then the scenario-level simulation track
+  from the sub-doc, each as its own reviewed PR against #2357.
 
 ### 2026-09-10 - Phase 9: fold in a corrected bridge-machine liveness model
 
