@@ -168,6 +168,21 @@ There are also bridge-facing seams (`namespace-list`, `namespace-resolve`,
 `relay-launch-env`, `provision-command`, `acp-model-flags`). They are invoked by
 agent-bridge and are not the normal human/operator surface.
 
+### Owner-derived fence provenance
+
+When a qualified holder is supplied, the remote fence's harness identity comes
+from that holder's declared project and owner-scoped lease origin, never the
+diagnostic process's working directory. This applies to shared native transport
+as well as ordinary SSH. Invalid or unresolved explicit ownership blocks the
+connection without an ambient fallback. Calls with no holder retain
+legacy best-effort discovery.
+
+A fresh foreign-harness marker still refuses entry; it is not rewritten merely
+because a holder string matches. Refusals report the marker's expiry timestamp
+and remaining seconds, including the existing clock-skew allowance. Natural
+expiry and same-harness admission are unchanged. No marker-release or takeover
+shortcut is introduced.
+
 ### Native retirement control
 
 Native retirement uses an identity-bound control-only reconnection when normal

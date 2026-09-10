@@ -24,6 +24,7 @@ import asyncio
 import functools
 import json
 import logging
+import math
 import os
 import shlex
 import shutil
@@ -1931,10 +1932,10 @@ async def _check_cross_harness_fence(
     (pure) + ``coordination.harness_identity`` (the identity shell-out); this is
     the thin SSH-executing wrapper.
 
-    Returns ``True`` to **proceed**, ``False`` to **refuse**. Degrade-safe: no
-    resolvable harness identity, an unreadable marker, or any exec failure all
-    **proceed** -- the fence only *adds* a cross-harness signal, it never becomes
-    a new hard dependency. Disable entirely with
+    Returns ``True`` to **proceed**, ``False`` to **refuse**. An explicit holder
+    must resolve its own harness identity; another cwd is never a fallback.
+    With no holder, preserve legacy best-effort identity discovery. Unreadable
+    markers and remote exec failures retain existing behavior. Disable with
     ``AGENT_CODESPACES_DISABLE_FENCE``.
     """
     if os.environ.get("AGENT_CODESPACES_DISABLE_FENCE"):
@@ -1943,11 +1944,17 @@ async def _check_cross_harness_fence(
     from . import coordination, fence
 
     try:
-        local_harness = coordination.harness_identity()
+        local_harness = coordination.harness_identity(holder_ref)
     except Exception as exc:
         log.debug("Cross-harness fence identity on %s unresolved: %s", name, exc)
+        if holder_ref is not None:
+            print("[BLOCKED] Could not resolve the explicit fence owner's declared lease origin.", file=sys.stderr)
+            return False
         local_harness = None
     if not local_harness:
+        if holder_ref is not None:
+            print("[BLOCKED] The explicit fence owner's declared lease origin is unavailable.", file=sys.stderr)
+            return False
         # No identity -> we cannot tell foreign from own; fence off (proceed).
         return True
 
@@ -1962,13 +1969,28 @@ async def _check_cross_harness_fence(
         )
         return True
 
-    decision = fence.evaluate(local_harness, fence.FenceMarker.parse(text))
+    marker = fence.FenceMarker.parse(text)
+    now = time.time()
+    decision = fence.evaluate(local_harness, marker, now=now)
     if decision.refuse:
         if not force:
+            expiry = ""
+            if marker is not None:
+                try:
+                    deadline = marker.written_at + marker.ttl + fence.FENCE_SKEW
+                    timestamp = datetime.fromtimestamp(deadline, timezone.utc).isoformat()
+                    remaining = max(0, math.ceil(deadline - now))
+                    expiry = (
+                        f"       Marker expires after {timestamp}; {remaining}s remaining "
+                        f"(includes {fence.FENCE_SKEW}s clock-skew allowance).\n"
+                    )
+                except (ValueError, OverflowError, OSError):
+                    expiry = "       Marker expiry cannot be represented; ownership is still retained.\n"
             print(
                 f"[BUSY] CodeSpace '{name}' is held by a DIFFERENT harness "
                 f"(fence marker holder '{decision.foreign_holder or '?'}', "
                 f"harness '{decision.foreign_harness}').\n"
+                f"{expiry}"
                 f"       Our repo-ref lease store cannot arbitrate across "
                 f"harnesses, so the in-CodeSpace lockfile fences it. Options:\n"
                 f"       - let the other harness finish, or use a different "
