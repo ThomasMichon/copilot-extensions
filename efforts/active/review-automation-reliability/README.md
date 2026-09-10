@@ -64,6 +64,13 @@ failure, and explicit human steering.
 
 ## Plan
 
+**Note (2026-09-10):** Phases 1-3's state list, idempotency, and steering
+items are superseded in scope by
+[Phase 9](phase-9-state-machine-architecture.md)'s formal three-machine
+model -- their unchecked items are re-validated and folded into Phase 9's
+declarations rather than implemented standalone. Left in place as the
+original record.
+
 ### Phase 1 - Define the durable review lifecycle
 
 - [ ] Specify requested, claimed, analyzing, awaiting-steer, ready, submitted,
@@ -371,6 +378,32 @@ not actionable as a port):**
   "downstream is ahead" contribution candidate; both are genuine shared
   gaps worth their own future phase or issue, not folded into this one.
 
+### Phase 9 - Foundational state-machine architecture
+
+Full design in
+[`phase-9-state-machine-architecture.md`](phase-9-state-machine-architecture.md).
+Phases 1-8 accumulated real hardening by patching each incident as it was
+found (Phases 5-7) and by comparing against a mature downstream
+deployment's own independent patches (Phase 8). That comparison confirms a
+pattern: the recurring failure classes share one root cause -- no single,
+explicit model of what state a review/task/session is in and what the
+valid next move is. This phase defines three coupled state machines
+(provider/PR-target, dispatch task, bridge/session), a declarative
+per-provider capability model (approval authority, notification fidelity,
+conflict policy), the board-game ownership contract (supervisor
+creates/resumes/suspends/ends; the agent plays its task's current state
+and requests the next; evaluators/emitters actually move it), a
+recovery-mode taxonomy per transition (self-recovering / safe-retry /
+self-repair), and a deterministic simulation/test track for the gnarliest
+interleavings. It re-seats every Phase 8 candidate as a behavior of one of
+the three machines rather than an independent patch, and resolves Phase
+8's open conflict-handling question as a policy-gated default
+(hand-back unless a provider/repository's declared policy explicitly
+permits branch mutation).
+
+- [ ] See the sub-doc's own Plan checklist; this phase's design must clear
+  its own review gate before any implementation begins.
+
 ## Validation Plan
 
 - [ ] Concurrent claim attempts yield exactly one review owner.
@@ -387,6 +420,11 @@ not actionable as a port):**
   review rubric, merge policy, scheduling policy, or organizational telemetry.
 - [ ] Reviewer declarations use the existing registrar schema and discovery
   convention without a competing reviewer-specific format.
+- [ ] Phase 9's full simulation/test track
+  ([`phase-9-state-machine-architecture.md`](phase-9-state-machine-architecture.md)
+  § Simulation and test track) passes: every listed interleaving reaches
+  the correct next state regardless of ordering, replays idempotently, and
+  takes the recovery mode its transition is classified under.
 
 ## Proposal
 
@@ -395,6 +433,48 @@ drivers and prove reliability with deterministic interruption and duplication
 scenarios.
 
 ## Journal
+
+### 2026-09-10 - Phase 9: architecture-first redirect before acting on Phase 8's candidates
+
+- Operator direction, following Phase 8's landing: do not start implementing
+  Phase 8's candidates piecemeal. Do the state-machine design work first --
+  agent-dispatch and its consumers (a downstream reviewer deployment among
+  them) keep hitting weird, un-resumable states because there is no
+  enforced model of what state a review/task/session is in and what the
+  expected next move is, across a distributed system with no built-in
+  transaction (PR updates and verdicts arrive separately, the base moves
+  constantly, providers offer inconsistent notification fidelity, and
+  different providers grant different actors different rights).
+- Captured as Phase 9 (own sub-doc, linked above): three coupled state
+  machines (provider/PR-target, dispatch task, bridge/session) with
+  explicit control-flow coupling between them; a declarative
+  per-provider/per-repository capability model (approval authority,
+  notification fidelity, conflict-handling policy); the board-game
+  contract (an agent asks "where am I" / "what are my valid next moves";
+  the dispatch supervisor owns spawn/resume/suspend/end via the bridge; the
+  agent plays its task's current state and requests transitions;
+  evaluators/emitters actually move the task, including mid-flight
+  steering); a recovery-mode taxonomy (self-recovering / safe-retry /
+  self-repair) applied to every declared transition; and a deterministic
+  simulation/unit-test track covering the gnarliest interleavings (bridge
+  mid-version-update, a detached session host, a changed discovered port, a
+  supervisor end-of-lifing a runtime version, base-only vs. substantive PR
+  movement, out-of-order verdict/update delivery, steer-vs-transition
+  races).
+- Re-seated every Phase 8 candidate as a behavior one of the three machines
+  must express, rather than a parallel patch list.
+- Resolved Phase 8's open conflict-handling question as a **policy-gated
+  default**: hand-back (never mutate a contributor's branch) unless a
+  provider/repository's declared policy explicitly permits automated
+  branch mutation, in which case the existing rebase/force-push recipe
+  remains available as that opted-in mode.
+- This effort's bridge/session state-machine work explicitly depends on,
+  and must not duplicate, the concurrent agent-bridge vision work
+  clarifying that plugin's verb vocabulary; Phase 9 defers to it as the
+  authoritative source once it lands.
+- Phase 9 is design only; no implementation begins here, consistent with
+  this effort's coordination gate. It must clear its own review before any
+  Phase 1-8 item resumes under its model.
 
 ### 2026-09-10 - Phase 8: contribution-candidate comparison against a mature downstream deployment
 
