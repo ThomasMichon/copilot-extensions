@@ -441,6 +441,98 @@ def test_deactivate_refuses_without_legacy_lock_or_install_lock(tmp_path, monkey
         engine.lifecycle(args)
 
 
+def test_retire_legacy_global_binstub_requires_health_then_replays(tmp_path, monkeypatch):
+    root, args = fixture(tmp_path)
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    legacy, command = legacy_state(profile)
+    monkeypatch.setattr(
+        engine.ic,
+        "_current_environment",
+        lambda **_kwargs: (
+            {
+                "platform": "windows" if os.name == "nt" else "posix",
+                "homeRealPath": str(profile.resolve()),
+                "wslDistro": None,
+            },
+            profile.resolve(),
+        ),
+    )
+    monkeypatch.setenv("HOME", str(profile))
+    monkeypatch.setenv("USERPROFILE", str(profile))
+
+    args.action = "cell-attribute-legacy"
+    attributed = engine.lifecycle(args)
+
+    args.action = "cell-retire-legacy"
+    args.expected_activation_generation = attributed["activationGeneration"]
+    blocked = engine.lifecycle(args)
+    assert blocked["status"] == "preserved"
+    assert blocked["reason"] == "runtime-selection-mismatch"
+    assert command.exists()
+
+    args.action = "cell-repair"
+    repaired = engine.lifecycle(args)
+    assert repaired["reason"] == "cell-repaired"
+
+    args.action = "cell-retire-legacy"
+    retired = engine.lifecycle(args)
+    assert retired["status"] == "ready"
+    assert retired["reason"] == "legacy-compatibility-retired"
+    assert retired["health"]["status"] == "ready"
+    assert not command.exists()
+    assert legacy.exists()
+    record = Path(retired["record"])
+    payload = json.loads(record.read_text(encoding="utf-8"))
+    assert payload["target"]["id"] == "global-binstubs"
+    assert any(item["disposition"] == "removed" for item in payload["result"]["items"])
+
+    replay = engine.lifecycle(args)
+    assert replay["status"] == "ready"
+    assert replay["reason"] == "already-retired"
+    assert record.exists()
+
+
+@pytest.mark.parametrize("style", STYLES)
+def test_retire_legacy_binstub_adapters_publish_record_and_replay(tmp_path, monkeypatch, style):
+    if os.name != "nt":
+        pytest.skip("subprocess adapter retirement uses the real POSIX profile; direct governance tests cover POSIX")
+    _root, args = fixture(tmp_path)
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    legacy, command = legacy_state(profile)
+    env = os.environ.copy()
+    env.update({"HOME": str(profile), "USERPROFILE": str(profile)})
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+
+    args.action = "cell-attribute-legacy"
+    attributed = adapter(style, args, env=env)
+    assert attributed.returncode == 0, attributed.stderr
+    args.expected_activation_generation = json.loads(attributed.stdout)["activationGeneration"]
+
+    args.action = "cell-repair"
+    repaired = adapter(style, args, env=env)
+    assert repaired.returncode == 0, repaired.stderr
+    assert json.loads(repaired.stdout)["reason"] == "cell-repaired"
+
+    args.action = "cell-retire-legacy"
+    first = adapter(style, args, env=env)
+    assert first.returncode == 0, first.stderr
+    first_payload = json.loads(first.stdout)
+    assert first_payload["reason"] == "legacy-compatibility-retired"
+    assert first_payload["recordChanged"] is True
+    assert first_payload["health"]["status"] == "ready"
+    assert not command.exists()
+    assert legacy.exists()
+
+    second = adapter(style, args, env=env)
+    assert second.returncode == 0, second.stderr
+    second_payload = json.loads(second.stdout)
+    assert second_payload["reason"] == "already-retired"
+    assert second_payload["recordChanged"] is False
+    assert Path(second_payload["record"]).exists()
+
+
 @pytest.mark.parametrize("case", ["missing-completion", "bad-completion", "missing-snapshot", "changed-payload", "foreign-marketplace", "linked-manifest"])
 def test_repair_refuses_missing_or_foreign_immutable_evidence(tmp_path, case):
     root, args = fixture(tmp_path)

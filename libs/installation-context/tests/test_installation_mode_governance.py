@@ -266,6 +266,16 @@ def _legacy_items(profile: Path) -> list[dict[str, str]]:
     ]
 
 
+def _retirement_health(*, status: str = "ready", reason: str = "cell-runtime-healthy") -> dict[str, object]:
+    return {
+        "kind": "example-runtime",
+        "status": status,
+        "reason": reason,
+        "checkedAt": "2026-01-01T00:15:00Z",
+        "evidence": {"source": "test"},
+    }
+
+
 def _policy(enabled: bool, marketplace_id: str, *, plugin_enabled=None) -> dict:
     marketplace: dict[str, object] = {"enabled": enabled}
     if plugin_enabled is not None:
@@ -1947,6 +1957,164 @@ def test_deactivate_installation_allows_successor_cell_after_rollback(
         (legacy / ".installation-ownership.json").read_text(encoding="utf-8")
     )
     assert tombstone["marketplaceId"] == successor["marketplace_id"]
+
+
+def test_retire_legacy_compatibility_requires_proven_ownership(tmp_path: Path) -> None:
+    module = _load_module()
+    layout = _cell_layout(tmp_path)
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    environment = _profile_environment(profile)
+    legacy = profile / f".{PLUGIN_ID}"
+    legacy.mkdir()
+    command = profile / ".local" / "bin" / PLUGIN_ID
+    command.parent.mkdir(parents=True)
+    command.write_text("legacy wrapper\n", encoding="utf-8")
+    activation = _activation(layout, generation=1, environment=environment)
+
+    result = module.retire_legacy_compatibility(
+        context=layout["install"],
+        expected_marketplace_id=layout["marketplace_id"],
+        expected_plugin_id=PLUGIN_ID,
+        expected_namespace_generation=layout["namespace_generation"],
+        expected_install_generation=layout["install_generation"],
+        expected_activation_generation=1,
+        legacy_root=legacy,
+        retirement_id="global-binstubs",
+        legacy_items=[_legacy_items(profile)[1]],
+        health_report=_retirement_health(),
+        legacy_lock=nullcontext(),
+        durable_home=layout["durable"],
+        environment={},
+        os_profile=profile,
+        platform=str(environment["platform"]),
+        wsl_distro=environment["wslDistro"],
+    )
+
+    assert activation.exists()
+    assert result["status"] == "preserved"
+    assert result["reason"] == "ownership-unproven"
+    assert command.exists()
+    assert result["record"] is None
+
+
+def test_retire_legacy_compatibility_requires_healthy_destination(tmp_path: Path) -> None:
+    module = _load_module()
+    layout = _cell_layout(tmp_path)
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    environment = _profile_environment(profile)
+    legacy = profile / f".{PLUGIN_ID}"
+    legacy.mkdir()
+    command = profile / ".local" / "bin" / PLUGIN_ID
+    command.parent.mkdir(parents=True)
+    command.write_text("legacy wrapper\n", encoding="utf-8")
+    attributed = module.attribute_legacy_state(
+        context=layout["install"],
+        expected_marketplace_id=layout["marketplace_id"],
+        expected_plugin_id=PLUGIN_ID,
+        legacy_root=legacy,
+        legacy_items=_legacy_items(profile),
+        legacy_lock=nullcontext(),
+        durable_home=layout["durable"],
+        environment={},
+        os_profile=profile,
+        platform=str(environment["platform"]),
+        wsl_distro=environment["wslDistro"],
+    )
+
+    result = module.retire_legacy_compatibility(
+        context=layout["install"],
+        expected_marketplace_id=layout["marketplace_id"],
+        expected_plugin_id=PLUGIN_ID,
+        expected_namespace_generation=layout["namespace_generation"],
+        expected_install_generation=layout["install_generation"],
+        expected_activation_generation=attributed["activationGeneration"],
+        legacy_root=legacy,
+        retirement_id="global-binstubs",
+        legacy_items=[_legacy_items(profile)[1]],
+        health_report=_retirement_health(
+            status="blocked",
+            reason="cell-runtime-unhealthy",
+        ),
+        legacy_lock=nullcontext(),
+        durable_home=layout["durable"],
+        environment={},
+        os_profile=profile,
+        platform=str(environment["platform"]),
+        wsl_distro=environment["wslDistro"],
+    )
+
+    assert result["status"] == "preserved"
+    assert result["reason"] == "cell-runtime-unhealthy"
+    assert command.exists()
+    assert result["record"] is None
+
+
+def test_retire_legacy_compatibility_publishes_auditable_record(tmp_path: Path) -> None:
+    module = _load_module()
+    layout = _cell_layout(tmp_path)
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    environment = _profile_environment(profile)
+    legacy = profile / f".{PLUGIN_ID}"
+    legacy.mkdir()
+    command = profile / ".local" / "bin" / PLUGIN_ID
+    command.parent.mkdir(parents=True)
+    command.write_text("legacy wrapper\n", encoding="utf-8")
+    attributed = module.attribute_legacy_state(
+        context=layout["install"],
+        expected_marketplace_id=layout["marketplace_id"],
+        expected_plugin_id=PLUGIN_ID,
+        legacy_root=legacy,
+        legacy_items=_legacy_items(profile),
+        legacy_lock=nullcontext(),
+        durable_home=layout["durable"],
+        environment={},
+        os_profile=profile,
+        platform=str(environment["platform"]),
+        wsl_distro=environment["wslDistro"],
+    )
+    arguments = dict(
+        context=layout["install"],
+        expected_marketplace_id=layout["marketplace_id"],
+        expected_plugin_id=PLUGIN_ID,
+        expected_namespace_generation=layout["namespace_generation"],
+        expected_install_generation=layout["install_generation"],
+        expected_activation_generation=attributed["activationGeneration"],
+        legacy_root=legacy,
+        retirement_id="global-binstubs",
+        legacy_items=[_legacy_items(profile)[1]],
+        health_report=_retirement_health(),
+        legacy_lock=nullcontext(),
+        durable_home=layout["durable"],
+        environment={},
+        os_profile=profile,
+        platform=str(environment["platform"]),
+        wsl_distro=environment["wslDistro"],
+    )
+
+    first = module.retire_legacy_compatibility(**arguments)
+
+    assert first["status"] == "ready"
+    assert first["reason"] == "legacy-compatibility-retired"
+    assert first["recordChanged"] is True
+    assert not command.exists()
+    record = Path(first["record"])
+    assert record.exists()
+    payload = json.loads(record.read_text(encoding="utf-8"))
+    assert payload["schema"] == "copilot-extensions.legacy-retirement"
+    assert payload["target"]["id"] == "global-binstubs"
+    assert payload["target"]["health"]["status"] == "ready"
+    assert payload["result"]["items"][0]["disposition"] == "removed"
+
+    second = module.retire_legacy_compatibility(**arguments)
+
+    assert second["status"] == "ready"
+    assert second["reason"] == "already-retired"
+    assert second["recordChanged"] is False
+    assert Path(second["record"]).read_bytes() == record.read_bytes()
+    assert payload["target"]["tombstone"]["path"].endswith(".installation-ownership.json")
 
 
 def test_loop_recheck_establishes_baseline_and_proceeds_when_unchanged(

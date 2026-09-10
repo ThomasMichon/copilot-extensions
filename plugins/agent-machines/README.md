@@ -100,10 +100,11 @@ reconcile. Cell snapshot copy is staged in an owned sibling and atomically
 published before provenance stamping. Retry cleans only a marker-proven
 unfinished publication and never removes a pre-existing snapshot.
 
-### Explicit legacy attribution, deactivation, cell repair, and uninstall
+### Explicit legacy attribution, legacy-wrapper retirement, deactivation, cell repair, and uninstall
 
-`scripts/init.sh cell-attribute-legacy`, `cell-deactivate`, `cell-repair`, and
-`cell-uninstall` (PowerShell: `scripts\init.ps1 -Action cell-attribute-legacy`,
+`scripts/init.sh cell-attribute-legacy`, `cell-retire-legacy`,
+`cell-deactivate`, `cell-repair`, and `cell-uninstall` (PowerShell:
+`scripts\init.ps1 -Action cell-attribute-legacy`, `cell-retire-legacy`,
 `cell-deactivate`, `cell-repair`, or `cell-uninstall`) use the same
 stdlib-only management engine and an existing Python 3.10+ interpreter. They
 never self-provision a toolchain or trust an inherited context/action.
@@ -144,6 +145,19 @@ rollback selector:
 | `--expected-tombstone-activation-generation` or `--expect-tombstone-absent` | `-ExpectedTombstoneActivationGeneration` or `-ExpectTombstoneAbsent` |
 | `--maintenance-token` | `-MaintenanceToken` |
 
+Legacy-wrapper retirement requires these explicit inputs:
+
+| Bash argument | PowerShell parameter |
+|---|---|
+| `--context` | `-Context` |
+| `--durable-home` | `-DurableHome` |
+| `--expected-marketplace-id` | `-ExpectedMarketplaceId` |
+| `--expected-payload-root`, `--expected-payload-version` | `-ExpectedPayloadRoot`, `-ExpectedPayloadVersion` |
+| `--snapshot-id`, `--runtime-version` | `-SnapshotId`, `-RuntimeVersion` |
+| `--expected-namespace-generation`, `--expected-install-generation` | `-ExpectedNamespaceGeneration`, `-ExpectedInstallGeneration` |
+| `--expected-activation-generation` | `-ExpectedActivationGeneration` |
+| `--maintenance-token` | `-MaintenanceToken` |
+
 Repair recreates only the derived schema-4 deploy manifest and exact intended
 current/LKG selection, from validated immutable completion and snapshot evidence.
 It preserves current receipt payload provenance separately from the selected
@@ -161,6 +175,17 @@ generation-pinned namespaced activation with `legacy.disposition:
 retained-inert`. If the legacy root is missing, linked/reparsed, already owned
 by another cell, or otherwise ambiguous/orphaned, the command preserves that
 state unchanged and reports it for deliberate resolution.
+
+Legacy-wrapper retirement is equally explicit and idempotent. `cell-retire-legacy`
+targets only the declared global `agent-machines` compatibility binstubs under
+`~/.local/bin/`, and only after the current cell can prove both ownership and
+health: the tombstone must still belong to the current activation generation,
+and the active runtime must still validate from immutable slot-completion,
+current/LKG marker, and schema-4 deploy-manifest evidence. On success it
+removes only the ownership-matched wrapper files, leaves legacy durable state
+and rollback evidence intact, and writes an auditable record under
+`retirements/`. Replaying the same target reports `already-retired`; missing
+attribution or unhealthy runtime preserves the wrapper unchanged.
 
 Deactivation is equally explicit and idempotent. `cell-deactivate` always
 targets one exact activation generation and either an exact tombstone activation
