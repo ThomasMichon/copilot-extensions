@@ -9,6 +9,9 @@ writes but streamed immediately via the EventBus.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import importlib.util
+import json
 import logging
 import os
 import signal
@@ -18,6 +21,7 @@ import threading
 import time
 from collections.abc import Callable
 from contextlib import suppress
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from agent_procutil import (
@@ -40,6 +44,7 @@ log = logging.getLogger(__name__)
 _PROGRESS_PERSIST_INTERVAL = 5.0
 
 _TERMINAL_VALUES = {s.value for s in TERMINAL}
+_GOVERNANCE_BACKOFF_SECONDS = 10.0
 
 
 def _machine_id() -> str:
@@ -106,6 +111,62 @@ def _terminate_pid(pid: int) -> None:
             os.kill(int(pid), signal.SIGTERM)
     except Exception:  # best effort
         log.debug("terminate pid %s failed", pid, exc_info=True)
+
+
+def _load_governance_module():
+    context_path = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip()
+    installation_id = os.environ.get("AGENT_INDEX_INSTALLATION_ID", "").strip()
+    plugin_root_value = os.environ.get("AGENT_INDEX_HOME", "").strip()
+    if not context_path or not installation_id or not plugin_root_value:
+        return None
+    plugin_root = Path(plugin_root_value).expanduser()
+    manifest_path = plugin_root / "deploy-manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        source = manifest.get("source")
+        payload_root_value = source.get("path") if isinstance(source, dict) else None
+        if not isinstance(payload_root_value, str) or not payload_root_value.strip():
+            raise ValueError("deploy manifest source.path is missing")
+        payload_root = Path(payload_root_value).expanduser().resolve(strict=True)
+        script = payload_root / "scripts" / "installation-context" / "installation_context.py"
+        if not script.is_file():
+            raise FileNotFoundError(script)
+        module_name = (
+            "agent_index_installation_context_"
+            + hashlib.sha256(os.fsencode(script)).hexdigest()[:16]
+        )
+        spec = importlib.util.spec_from_file_location(module_name, script)
+        if spec is None or spec.loader is None:
+            raise ImportError("installation-context module cannot be loaded")
+        module = importlib.util.module_from_spec(spec)
+        prior = sys.modules.get(module_name)
+        sys.modules[module_name] = module
+        try:
+            spec.loader.exec_module(module)
+        except Exception:
+            if prior is None:
+                sys.modules.pop(module_name, None)
+            else:
+                sys.modules[module_name] = prior
+            raise
+        marketplace_id, separator, plugin_id = installation_id.partition("/")
+        if not separator or plugin_id != "agent-index":
+            raise ValueError("installation id is invalid")
+        return {
+            "module": module,
+            "context": context_path,
+            "marketplace_id": marketplace_id,
+            "plugin_id": plugin_id,
+            "legacy_root": str(Path.home() / ".agent-index"),
+        }
+    except Exception as exc:
+        return {
+            "error": {
+                "status": "backoff",
+                "reason": "governance-unavailable",
+                "detail": str(exc),
+            }
+        }
 
 
 class IndexingCancelled(Exception):
@@ -246,6 +307,9 @@ class TaskRunner:
         self._monitors: dict[str, asyncio.Task[None]] = {}
         self._worker_locks: dict[str, Any] = {}
         self._cancel_requested: set[str] = set()
+        self._governance_helper = _load_governance_module()
+        self._governance_baseline: dict[str, Any] | None = None
+        self._governance_state: dict[str, Any] | None = None
         # Observable state
         self.running = False
         self.active_task_id: str | None = None
@@ -267,6 +331,15 @@ class TaskRunner:
         executor so the lock is held in the async context.
         """
         self._source_lock_acquire = fn
+
+    def set_governance_recheck_fn(
+        self,
+        fn: Callable[[str], dict[str, Any]] | None,
+    ) -> None:
+        """Override the loop-governance recheck callback (tests)."""
+        self._governance_helper = fn
+        self._governance_baseline = None
+        self._governance_state = None
 
     # ── Lifecycle ────────────────────────────────────────────
 
@@ -366,11 +439,52 @@ class TaskRunner:
             "running": self.running,
             "paused": self._paused,
             "active_task_id": self.active_task_id,
+            "governance": self._governance_state,
             "stats": {
                 "completed": self.tasks_completed,
                 "failed": self.tasks_failed,
             },
         }
+
+    async def _wait_for_wake(self, timeout: float) -> None:
+        self._wake.clear()
+        try:
+            await asyncio.wait_for(self._wake.wait(), timeout=timeout)
+        except (TimeoutError, asyncio.TimeoutError):
+            pass
+
+    def _recheck_governance(self, checkpoint: str) -> dict[str, Any] | None:
+        helper = self._governance_helper
+        if helper is None:
+            self._governance_state = None
+            return None
+        if callable(helper):
+            result = helper(checkpoint)
+            if "checkpoint" not in result:
+                result = dict(result)
+                result["checkpoint"] = checkpoint
+        elif "error" in helper:
+            result = {
+                "checkpoint": checkpoint,
+                **helper["error"],
+            }
+        else:
+            module = helper["module"]
+            result = module.recheck_loop_governance(
+                context=helper["context"],
+                expected_marketplace_id=helper["marketplace_id"],
+                expected_plugin_id=helper["plugin_id"],
+                legacy_root=helper["legacy_root"],
+                baseline=self._governance_baseline,
+                environment=os.environ,
+            )
+            result["checkpoint"] = checkpoint
+        self._governance_state = result
+        if result.get("status") == "ready":
+            baseline = result.get("baseline")
+            self._governance_baseline = baseline if isinstance(baseline, dict) else None
+            self._governance_state = None
+        return result
 
     # ── Worker loop ──────────────────────────────────────────
 
@@ -380,23 +494,52 @@ class TaskRunner:
         await asyncio.sleep(2)
 
         while not self._shutdown:
+            boundary = self._recheck_governance("iteration-boundary")
+            if boundary is not None and boundary.get("status") != "ready":
+                log.warning(
+                    "Worker loop backing off at %s: %s (%s)",
+                    boundary.get("checkpoint"),
+                    boundary.get("reason"),
+                    boundary.get("status"),
+                )
+                await self._wait_for_wake(_GOVERNANCE_BACKOFF_SECONDS)
+                continue
             # Pause (drain) or a worker already running => wait. At most one
             # indexing worker runs at a time (serialized via _active_workers).
             if self._paused or self._active_workers:
-                self._wake.clear()
-                try:
-                    await asyncio.wait_for(self._wake.wait(), timeout=5.0)
-                except (TimeoutError, asyncio.TimeoutError):
-                    pass
+                await self._wait_for_wake(5.0)
+                continue
+
+            pending = await asyncio.to_thread(self.store.get_pending_count)
+            if pending <= 0:
+                await self._wait_for_wake(10.0)
+                continue
+            before_dequeue = self._recheck_governance("pre-mutation:dequeue")
+            if before_dequeue is not None and before_dequeue.get("status") != "ready":
+                log.warning(
+                    "Worker loop refused dequeue at %s: %s (%s)",
+                    before_dequeue.get("checkpoint"),
+                    before_dequeue.get("reason"),
+                    before_dequeue.get("status"),
+                )
+                await self._wait_for_wake(_GOVERNANCE_BACKOFF_SECONDS)
                 continue
 
             task = await asyncio.to_thread(self.store.dequeue_next)
             if task is None:
-                self._wake.clear()
-                try:
-                    await asyncio.wait_for(self._wake.wait(), timeout=10.0)
-                except (TimeoutError, asyncio.TimeoutError):
-                    pass
+                await self._wait_for_wake(10.0)
+                continue
+            before_launch = self._recheck_governance("pre-mutation:launch")
+            if before_launch is not None and before_launch.get("status") != "ready":
+                await asyncio.to_thread(self.store.release_processing, task.id)
+                log.warning(
+                    "Worker loop released task %s after %s: %s (%s)",
+                    task.id,
+                    before_launch.get("checkpoint"),
+                    before_launch.get("reason"),
+                    before_launch.get("status"),
+                )
+                await self._wait_for_wake(_GOVERNANCE_BACKOFF_SECONDS)
                 continue
 
             await self._launch_worker(task)

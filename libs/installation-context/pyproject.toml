@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-installation-context"
-version = "0.1.0-dev1"
+version = "0.1.0-dev2"
 description = "Marketplace-qualified installation identity and receipt validation"
 readme = "README.md"
 license = "MIT"
