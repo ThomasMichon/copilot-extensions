@@ -255,19 +255,21 @@ def release(target: str, ttl: float = DEFAULT_TTL) -> bool:
         return True
 
 
-def heartbeat(codespace: str, ttl: float = DEFAULT_TTL) -> bool:
+def heartbeat(codespace: str, ttl: float = DEFAULT_TTL, *, owner: str | None = None) -> bool:
     """Refresh the heartbeat on a held lease. Returns True if updated.
 
     Also renews the cross-machine L2 lease (best-effort) and rotates the stored
     fencing token when one is held -- so a live holder keeps its distributed grip
-    and a crashed holder's L2 lease expires on the store's timer.
+    and a crashed holder's L2 lease expires on the store's timer. An optional
+    owner assertion prevents a prior operation from renewing a replacement.
     """
     with _lease_lock():
         leases = _prune(_read_leases(), ttl)
         lease = leases.get(codespace)
-        if not lease:
+        if not lease or (owner is not None and _claim_owner(lease) != owner):
             return False
         token = lease.lease_token
+        identity = (lease.worktree, lease.effort, lease.acquired_at, token)
     new_token = ""
     if token:
         res = coordination.renew(codespace, token)
@@ -276,7 +278,9 @@ def heartbeat(codespace: str, ttl: float = DEFAULT_TTL) -> bool:
     with _lease_lock():
         leases = _prune(_read_leases(), ttl)
         lease = leases.get(codespace)
-        if not lease:
+        if not lease or (
+            lease.worktree, lease.effort, lease.acquired_at, lease.lease_token
+        ) != identity:
             return False
         lease.heartbeat_at = time.time()
         if new_token:

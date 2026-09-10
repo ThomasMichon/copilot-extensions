@@ -249,7 +249,15 @@ exec bash -il
   apply. A later outage retains existing relay supervision/reconnection; this
   flag does not kill a terminal for a transient post-launch loss.
 - Relay supervision and any connection-owner hold remain active throughout the
-  interactive child. The child's exit status is returned unchanged. Cancellation
+  interactive child. Owned claims and relay tenants are heartbeated every 30
+  seconds; a claim heartbeat asserts its owner and rejects a replacement that
+  appeared during distributed renewal. Refresh work is joined before cleanup.
+  Direct and Connection Owner relay supervisors perform periodic remote
+  protocol probes, in addition to process-death and host-port-rebinding checks.
+  An uncertain probe transport does not tear down a potentially healthy relay;
+  a definite bad protocol response triggers the shared supervisor's recovery.
+  The managed command channel remains available through final cleanliness and
+  obligation settlement, then disconnects. The child's exit status is returned unchanged. Cancellation
   and an explicit `--connect-timeout` stop only the owned process tree and release
   owned relay/lock resources. There is no implicit interactive timeout;
   `--timeout` remains the diagnostic-command deadline.
@@ -274,6 +282,16 @@ the daemon. The optional `agent-codespaces owner --status` reports configuration
 only, **not** live relay readiness; when a live enabled Owner is used, the SSH
 operation places its hold, waits up to 30 seconds for readiness, and verifies the
 remote protocol before proceeding.
+
+This command is a transport/preparation primitive, not yet a complete native
+Copilot execution-host integration. The shared bridge/provider infrastructure
+remains part of the end-to-end contract. The official bridge extension already
+supports native live-session representation and messaging, but this command does
+not itself prove a CodeSpace's registration/routing to the controlling bridge.
+Transport-surviving native execution identity, reattachment/retirement, and
+cross-mode exclusion require the hosting boundary rather than a standalone
+terminal-only substitute. These remaining parity requirements are tracked in
+[#2316](https://github.com/ThomasMichon/copilot-extensions/issues/2316).
 
 ### `create` options
 

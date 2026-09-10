@@ -29,7 +29,7 @@ import shlex
 import shutil
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -962,6 +962,7 @@ async def _start_supervised_relay(
     *,
     context: str,
     host_port_resolver: Callable[[], int] | None = None,
+    serving_probe: Callable[[], Awaitable[bool]] | None = None,
 ) -> SupervisedRelayForward | None:
     """Start the best-effort supervised credential-relay reverse-forward."""
     relay = None
@@ -969,7 +970,8 @@ async def _start_supervised_relay(
         from ssh_manager import SupervisedRelayForward
 
         relay = SupervisedRelayForward(
-            ssh_config, relay_port, host_port_resolver=host_port_resolver
+            ssh_config, relay_port, host_port_resolver=host_port_resolver,
+            serving_probe=serving_probe,
         )
         await relay.start()
         return relay
@@ -1296,6 +1298,11 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
             return False
         return True
 
+    async def _relay_serving_probe() -> bool:
+        from .relay_readiness import remote_relay_ready
+
+        return await remote_relay_ready(manager, args.name, relay_port, fail_open=True)
+
     async def _run() -> int:
         nonlocal relay_forward
 
@@ -1319,6 +1326,7 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
                         host_port_resolver=lambda: relay_launch.effective_relay_port(
                             config
                         ),
+                        serving_probe=_relay_serving_probe,
                     )
                 tracker.reached(ConnectStage.SSH_TO_TARGET, f"codespace={args.name}")
                 break
@@ -1514,8 +1522,8 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
             tracker.reached(ConnectStage.LAUNCH_ACP)
             return _emit_remote_cmd_result(result, args.timeout)
 
-        # Interactive SSH -- fall through to gh codespace ssh
-        await manager.disconnect(args.name)
+        # Keep the managed channel for relay probes and final settlement while
+        # the foreground terminal uses its own PTY-bearing SSH child.
         interactive_command = _build_launch_command(
             getattr(args, "interactive_command", None),
             [],
@@ -1568,6 +1576,13 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
             defer_to_owner = False
 
     async def _run_with_cleanup() -> int:
+        heartbeat = None
+        if claim_owner or defer_to_owner:
+            from .ssh_lifetime import maintain_ownership
+
+            heartbeat = asyncio.create_task(maintain_ownership(
+                args.name, claim_owner, owner_tenant if defer_to_owner else None,
+            ))
         try:
             if overall_timeout is not None and overall_timeout > 0:
                 return await asyncio.wait_for(_run(), timeout=overall_timeout)
@@ -1587,6 +1602,9 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
             )
             raise
         finally:
+            if heartbeat is not None:
+                heartbeat.cancel()
+                await asyncio.gather(heartbeat, return_exceptions=True)
             # Settle the CodeSpace obligation on the borrowing worktree if its
             # work is at-rest (resource-obligation-settlement Ph3b-wiring/2).
             # Runs while the SSH channel is still up (before disconnect), so the

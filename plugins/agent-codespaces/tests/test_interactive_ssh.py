@@ -222,7 +222,7 @@ def test_interactive_process_preserves_relay_and_claim_lifetime(monkeypatch, ssh
         assert "relay-start" not in events
     manager.ensure_connected.assert_awaited_once()
     assert manager.ensure_connected.call_args.args[2] == []
-    assert manager.disconnect.await_count == 2
+    assert manager.disconnect.await_count == 1
     assert argv[:7] == ["gh", "codespace", "ssh", "-c", "example-space", "--", "-tt"]
     assert shlex.split(argv[-1])[3].endswith("; exec bash -il")
 
@@ -244,7 +244,7 @@ def test_interactive_launch_failure_releases_relay_and_lock(monkeypatch, ssh_run
             "ssh", "example-space", "--interactive-command", "true", "--no-provision",
         ])
     assert events[-2:] == ["relay-stop", "unlock"]
-    assert manager.disconnect.await_count == 2
+    assert manager.disconnect.await_count == 1
 
 
 def test_interactive_timeout_reaps_child_before_resources(monkeypatch, ssh_runtime):
@@ -266,7 +266,7 @@ def test_interactive_timeout_reaps_child_before_resources(monkeypatch, ssh_runti
     ]) == 124
     assert children and children[0].returncode is not None
     assert events[-2:] == ["relay-stop", "unlock"]
-    assert manager.disconnect.await_count == 2
+    assert manager.disconnect.await_count == 1
 
 
 def test_new_options_do_not_bypass_busy_target(monkeypatch, ssh_runtime):

@@ -105,6 +105,35 @@ def test_heartbeat_refreshes(leases):
     assert lease_mod.heartbeat("cs-absent") is False
 
 
+def test_owner_checked_heartbeat_does_not_renew_another_claim(leases, monkeypatch):
+    current = lease_mod.claim("example-space", "example-owner")
+    monkeypatch.setattr(
+        lease_mod.coordination, "renew",
+        lambda *a: pytest.fail("must not renew another owner's distributed lease"),
+    )
+    assert lease_mod.heartbeat("example-space", owner="different-owner") is False
+    assert lease_mod.get_lease("example-space").heartbeat_at == current.heartbeat_at
+
+
+@pytest.mark.parametrize("change_owner", [False, True])
+def test_heartbeat_does_not_overwrite_a_replacement_during_renewal(leases, monkeypatch, change_owner):
+    current = lease_mod.claim("example-space", "example-owner")
+    current.lease_token = "original-token"
+    lease_mod._write_leases({"example-space": current})
+
+    def replace(*a):
+        changed = lease_mod.get_lease("example-space")
+        if change_owner:
+            changed.worktree = "replacement-owner"
+        changed.lease_token = "replacement-token"
+        lease_mod._write_leases({"example-space": changed})
+        return type("Renewal", (), {"ok": True, "token": "stale-renewal-token"})()
+
+    monkeypatch.setattr(lease_mod.coordination, "renew", replace)
+    assert lease_mod.heartbeat("example-space", owner="example-owner") is False
+    assert lease_mod.get_lease("example-space").lease_token == "replacement-token"
+
+
 def test_multiple_codespaces_independent(leases):
     lease_mod.borrow("effort-a", "cs-one")
     lease_mod.borrow("effort-b", "cs-two")

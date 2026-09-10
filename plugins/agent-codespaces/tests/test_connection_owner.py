@@ -292,9 +292,10 @@ def test_make_supervised_relay_factory_wires_config_and_port():
     built = {}
 
     class FakeRelay:
-        def __init__(self, ssh_config, relay_port, *, host_port_resolver=None):
+        def __init__(self, ssh_config, relay_port, *, host_port_resolver=None, serving_probe=None):
             built.update(
-                ssh_config=ssh_config, relay_port=relay_port, resolver=host_port_resolver
+                ssh_config=ssh_config, relay_port=relay_port, resolver=host_port_resolver,
+                probe=serving_probe,
             )
 
         @property
@@ -323,7 +324,9 @@ def test_make_supervised_relay_factory_wires_config_and_port():
         port_resolver=lambda cfg: 4321 if cfg == "CFG" else 0,
     )
     channel = factory("cs-x")
-    assert isinstance(channel, FakeRelay)
+    assert isinstance(channel, owner._ProbedRelayChannel)
+    assert not channel.is_alive
+    assert callable(built["probe"])
     assert built["ssh_config"] == "sshcfg:cs-x"
     assert built["relay_port"] == 4321
     assert built["gh_env"] == {"GH_TOKEN": "x"}

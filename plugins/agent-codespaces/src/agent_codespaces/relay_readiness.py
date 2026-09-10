@@ -48,10 +48,16 @@ def remote_ping_command(port: int) -> str:
     return f"python3 -c {shlex.quote(program)} {int(port)}"
 
 
-async def remote_relay_ready(manager, name: str, port: int) -> bool:
+async def remote_relay_ready(
+    manager, name: str, port: int, *, fail_open: bool = False,
+) -> bool:
     """Require a bounded round trip through the CodeSpace's reverse forward."""
     try:
         result = await manager.exec_command(name, remote_ping_command(port), timeout=5.0)
-        return result.exit_code == 0 and not getattr(result, "timed_out", False)
+        if getattr(result, "timed_out", False) or result.exit_code == 255:
+            return fail_open
+        return result.exit_code == 0
     except Exception:
-        return False
+        # A monitor must not churn a healthy relay merely because its command
+        # channel is temporarily unavailable. Admission remains fail-closed.
+        return fail_open

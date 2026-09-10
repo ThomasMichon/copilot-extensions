@@ -404,7 +404,12 @@ target-lock, fence, and account-resolution gates as its diagnostic/ACP paths.
 strictly loopback `--local-forward` / `--reverse-forward` listeners carried by
 the interactive `gh codespace ssh` child rather than the provisioning connection.
 The child is awaited asynchronously so the independent credential relay remains
-supervised until the terminal exits. Local console handles are inherited;
+supervised until the terminal exits. The managed command channel stays connected
+for periodic relay-serving probes and final cleanliness/obligation settlement;
+lease and deferred-owner tenant heartbeats run without blocking relay supervision
+and are joined before cleanup. The Connection Owner owns an isolated probe
+channel per relay, so its cleanup does not disconnect a terminal's channel.
+Local console handles are inherited;
 on POSIX the child owns a process group that borrows and restores the foreground
 terminal, and on Windows it inherits the existing console. Cancellation tears
 down only that owned tree. This does not add a session host, installer, or

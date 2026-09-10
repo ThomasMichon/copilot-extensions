@@ -678,6 +678,28 @@ class ConnectionOwner:
 # increment that follows (dotfiles#1345).
 
 
+class _ProbedRelayChannel:
+    """Keep a relay supervisor's probe transport under the same ownership."""
+
+    def __init__(self, relay: RelayChannel, manager: Any, name: str) -> None:
+        self._relay = relay
+        self._manager = manager
+        self._name = name
+
+    @property
+    def is_alive(self) -> bool:
+        return self._relay.is_alive
+
+    async def start(self) -> None:
+        await self._relay.start()
+
+    async def stop(self) -> None:
+        try:
+            await self._relay.stop()
+        finally:
+            await self._manager.disconnect(self._name)
+
+
 def make_supervised_relay_factory(
     config: Any,
     *,
@@ -685,6 +707,7 @@ def make_supervised_relay_factory(
     relay_cls: type | None = None,
     config_source_cls: type | None = None,
     port_resolver: Callable[[Any], int] | None = None,
+    manager_factory: Callable[[], Any] | None = None,
 ) -> RelayFactory:
     """Build a :data:`RelayFactory` backed by ``ssh_manager.SupervisedRelayForward``.
 
@@ -711,15 +734,34 @@ def make_supervised_relay_factory(
         from .relay_launch import effective_relay_port
 
         port_resolver = effective_relay_port
+    if manager_factory is None:
+        from ssh_manager import ConnectionManager
+
+        manager_factory = ConnectionManager
 
     def factory(codespace: str) -> RelayChannel:
-        ssh_config = config_source_cls(codespace, gh_env=gh_env).get_ssh_config()
+        source = config_source_cls(codespace, gh_env=gh_env)
+        ssh_config = source.get_ssh_config()
         relay_port = port_resolver(config)
-        return relay_cls(
+        manager = manager_factory()
+        probe_key = f"relay-owner-{codespace}"
+
+        async def probe() -> bool:
+            from .relay_readiness import remote_relay_ready
+
+            try:
+                await manager.ensure_connected(probe_key, source, [])
+            except Exception:
+                return True
+            return await remote_relay_ready(manager, probe_key, relay_port, fail_open=True)
+
+        relay = relay_cls(
             ssh_config,
             relay_port,
             host_port_resolver=lambda: port_resolver(config),
+            serving_probe=probe,
         )
+        return _ProbedRelayChannel(relay, manager, probe_key)
 
     return factory
 
