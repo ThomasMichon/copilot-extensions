@@ -436,6 +436,34 @@ scenarios.
 
 ## Journal
 
+### 2026-09-10 - Phase 9: third slice (bridge/session machine)
+
+- Declared the bridge/session state machine
+  (`plugins/agent-dispatch/src/agent_dispatch/bridge_state_machine.py`):
+  lifecycle states absent/hydrating/running/suspended/ended, plus the
+  corrected three-tier liveness model (hot/warm/cold) folded in from the
+  #6744 liveness fix -- liveness is always a live observation, never
+  gated by a cache. The resume outcome (refuse/force-takeover/reattach/
+  spawn-fresh-bound) is explicitly coupled to the lifecycle table rather
+  than declared as an independent set: REATTACH and SPAWN_FRESH_BOUND
+  each name a real transition in the lifecycle table, checked by test.
+- The companion agent-bridge vision (`visions/plugins/agent-bridge/README.md`)
+  does not yet declare the hot/warm/cold tiers or the cache-is-never-
+  authority rule as of this slice -- it has a task-shaped verb set
+  (create/identify/read/steer/wait/interrupt/stop/resume/end) and a
+  "takeover" pattern, but nothing more specific. This module does not
+  duplicate or compete with those verbs; it declares only what this
+  effort's Phase 9 needs and should be reconciled with the vision once it
+  declares its own liveness model.
+- Added structural tests
+  (`plugins/agent-dispatch/tests/test_bridge_state_machine.py`, 24
+  passing): reachability/exit-checking of the lifecycle table, the live
+  probe is always invoked regardless of a cache hint (including a
+  deliberately-stale hint that disagrees with the live result), and every
+  non-refusing resume outcome maps to a declared transition.
+- Next slice: the explicit control-flow coupling rules between all three
+  machines (task-requests-bridge-action / bridge-event-as-evidence).
+
 ### 2026-09-10 - Phase 9: second slice landed (provider/PR-target machine)
 
 - Landed the second implementation slice: the provider/PR-target state

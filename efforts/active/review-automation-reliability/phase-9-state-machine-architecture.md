@@ -303,9 +303,22 @@ above, not an independent feature:
   and exit-checked, every provider's capability declaring fidelity for
   every event type, and every provider defaulting to the hand-back
   conflict policy unless a repository explicitly overrides it.
-- [ ] Declare the bridge/session state machine, deferring to the
-  agent-bridge vision's verb work for the authoritative verb vocabulary
-  once it lands; coordinate rather than duplicate in the interim.
+- [x] Declare the bridge/session state machine
+  (`../../../plugins/agent-dispatch/src/agent_dispatch/bridge_state_machine.py`),
+  deferring to the agent-bridge vision's verb work for the authoritative
+  verb vocabulary once it lands (as of this slice
+  `visions/plugins/agent-bridge/README.md` declares a task-shaped verb set
+  but not yet the hot/warm/cold liveness tiers or the cache-is-never-
+  authority rule, so this module does not duplicate or compete with it).
+  Declares the lifecycle (absent/hydrating/running/suspended/ended), the
+  corrected three-tier liveness model (hot/warm/cold, always a live
+  observation, never cache-gated), and couples the one-universal-resume
+  outcome to the lifecycle table so the two are checked together rather
+  than as two independent tables. Structural tests
+  (`../../../plugins/agent-dispatch/tests/test_bridge_state_machine.py`)
+  prove reachability/exit-checking, that the live probe is always called
+  regardless of a cache hint, and that every non-refusing resume outcome
+  maps to a real declared transition.
 - [ ] Define the explicit control-flow coupling rules between the three
   machines (task-requests-bridge-action / bridge-event-as-evidence, as
   described above).
