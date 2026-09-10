@@ -239,6 +239,7 @@ shift || true
 
 NO_SERVICE=0
 PURGE=0
+DRY_RUN=0
 INSTALL_DIR=""
 CONTEXT=""
 EXPECTED_MARKETPLACE_ID=""
@@ -259,6 +260,7 @@ while [[ $# -gt 0 ]]; do
         --no-service) NO_SERVICE=1; shift ;;
         --purge) PURGE=1; shift ;;
         --force) FORCE=1; shift ;;
+        --dry-run) DRY_RUN=1; shift ;;
         --install-dir) INSTALL_DIR="$2"; shift 2 ;;
         --context) CONTEXT="${2:-}"; shift 2 ;;
         --expected-marketplace-id) EXPECTED_MARKETPLACE_ID="${2:-}"; shift 2 ;;
@@ -1551,6 +1553,21 @@ _stop() {
 }
 
 _uninstall() {
+    [[ "$DRY_RUN" -eq 1 ]] && echo '(dry run -- nothing will be changed)'
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        echo "[dry-run] would stop agent-index"
+        [[ -f "$UNIT_DIR/$SYSTEMD_UNIT" ]] && echo "[dry-run] would disable + remove: $SYSTEMD_UNIT"
+        [[ -f "$UNIT_DIR/$ENGINE_SYSTEMD_UNIT" ]] && echo "[dry-run] would stop + disable + remove: $ENGINE_SYSTEMD_UNIT"
+        [[ -e "$STUB" ]] && echo "[dry-run] would remove binstub: $STUB"
+        if [[ "$PURGE" -eq 1 ]]; then
+            [[ -d "$ENGINE_HOME" ]] && echo "[dry-run] would PURGE engine home: $ENGINE_HOME"
+            [[ -d "$INSTALL_DIR" ]] && echo "[dry-run] would PURGE: $INSTALL_DIR"
+        else
+            echo "[dry-run] engine home + install dir would be kept (--purge to delete)"
+        fi
+        echo "agent-index uninstall dry run complete -- nothing was changed"
+        return 0
+    fi
     _stop
     if command -v systemctl >/dev/null 2>&1 && [[ -f "$UNIT_DIR/$SYSTEMD_UNIT" ]]; then
         systemctl --user disable "$SYSTEMD_UNIT" 2>/dev/null || true

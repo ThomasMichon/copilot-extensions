@@ -39,7 +39,11 @@ param(
     [switch]$NoService,
 
     [switch]$Purge,
-    [switch]$Force
+    [switch]$Force,
+
+    # Preview mode for the 'uninstall' action: print what WOULD be removed
+    # without touching the filesystem or scheduled task.
+    [switch]$DryRun
 )
 
 Set-StrictMode -Version 2.0
@@ -1081,34 +1085,59 @@ function Invoke-Status {
 }
 
 function Invoke-Uninstall {
-    Write-Host ''; Write-Host '=== agent-vault uninstall ===' -ForegroundColor Cyan; Write-Host ''
-    Invoke-Stop
+    Write-Host ''; Write-Host '=== agent-vault uninstall ===' -ForegroundColor Cyan
+    if ($DryRun) { Write-Host '(dry run -- nothing will be changed)' -ForegroundColor Yellow }
+    Write-Host ''
+    if ($DryRun) {
+        Write-Host '[dry-run] would stop agent-vault'
+    } else {
+        Invoke-Stop
+    }
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
-        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
-        Write-Ok 'Scheduled task removed'
+        if ($DryRun) {
+            Write-Host "[dry-run] would remove scheduled task: $TaskName"
+        } else {
+            Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+            Write-Ok 'Scheduled task removed'
+        }
     }
     foreach ($stub in @($BinstubPs1, $BinstubCmd)) {
         if (Test-Path $stub) {
-            Remove-Item $stub -Force -ErrorAction SilentlyContinue
-            Write-Ok "Binstub removed: $stub"
+            if ($DryRun) {
+                Write-Host "[dry-run] would remove binstub: $stub"
+            } else {
+                Remove-Item $stub -Force -ErrorAction SilentlyContinue
+                Write-Ok "Binstub removed: $stub"
+            }
         }
     }
     if ($Purge) {
-        if (Test-Path $InstallDir) { Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue }
-        Write-Ok "Runtime purged: $InstallDir"
+        if (Test-Path $InstallDir) {
+            if ($DryRun) { Write-Host "[dry-run] would PURGE: $InstallDir" }
+            else { Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue; Write-Ok "Runtime purged: $InstallDir" }
+        }
     } else {
         # Remove the runtime venv. In the versioned layout this is the `.venv`
         # link AND the whole versions/ tree; otherwise the single real venv dir.
         if ($VersionedRuntime) {
-            if (Test-VenvIsLink $LinkDir) { & cmd /c rmdir "$LinkDir" 2>$null }
-            elseif (Test-Path $LinkDir) { Remove-Item -Recurse -Force $LinkDir -ErrorAction SilentlyContinue }
-            $verRoot = Join-Path $InstallDir 'versions'
-            if (Test-Path $verRoot) { Remove-Item -Recurse -Force $verRoot -ErrorAction SilentlyContinue }
+            if ($DryRun) {
+                if ((Test-VenvIsLink $LinkDir) -or (Test-Path $LinkDir)) { Write-Host "[dry-run] would remove: $LinkDir" }
+                $verRoot = Join-Path $InstallDir 'versions'
+                if (Test-Path $verRoot) { Write-Host "[dry-run] would remove: $verRoot" }
+            } else {
+                if (Test-VenvIsLink $LinkDir) { & cmd /c rmdir "$LinkDir" 2>$null }
+                elseif (Test-Path $LinkDir) { Remove-Item -Recurse -Force $LinkDir -ErrorAction SilentlyContinue }
+                $verRoot = Join-Path $InstallDir 'versions'
+                if (Test-Path $verRoot) { Remove-Item -Recurse -Force $verRoot -ErrorAction SilentlyContinue }
+            }
         } elseif (Test-Path $VenvDir) {
-            Remove-Item -Recurse -Force $VenvDir -ErrorAction SilentlyContinue
+            if ($DryRun) { Write-Host "[dry-run] would remove venv: $VenvDir" }
+            else { Remove-Item -Recurse -Force $VenvDir -ErrorAction SilentlyContinue }
         }
-        Write-Ok 'Venv removed (state kept; -Purge to delete)'
+        if ($DryRun) { Write-Host "[dry-run] state at $InstallDir would be kept (-Purge to delete)" }
+        else { Write-Ok 'Venv removed (state kept; -Purge to delete)' }
     }
+    if ($DryRun) { Write-Host 'agent-vault uninstall dry run complete -- nothing was changed' -ForegroundColor Yellow }
 }
 
 switch ($Action) {

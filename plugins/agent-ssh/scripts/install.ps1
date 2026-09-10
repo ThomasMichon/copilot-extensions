@@ -7,7 +7,11 @@ param(
     [ValidateSet('install', 'update', 'status', 'uninstall', 'stamp', 'provision')]
     [string]$Action = 'install',
     [string]$InstallDir,
-    [switch]$Force
+    [switch]$Force,
+
+    # Preview mode for the 'uninstall' action: print what WOULD be removed
+    # without touching the filesystem.
+    [switch]$DryRun
 )
 
 Set-StrictMode -Version 2.0
@@ -567,6 +571,16 @@ if ($Action -eq 'status') {
 }
 
 if ($Action -eq 'uninstall') {
+    if ($DryRun) {
+        Write-Host '(dry run -- nothing will be changed)' -ForegroundColor Yellow
+        $ps1 = Join-Path $LocalBin 'agent-ssh.ps1'
+        $cmd = Join-Path $LocalBin 'agent-ssh.cmd'
+        if (Test-Path $ps1) { Write-Host "[dry-run] would remove binstub: $ps1" }
+        if (Test-Path $cmd) { Write-Host "[dry-run] would remove binstub: $cmd" }
+        if (Test-Path $InstallDir) { Write-Host "[dry-run] would remove (config + DB + venv): $InstallDir" }
+        Write-Host 'agent-ssh uninstall dry run complete -- nothing was changed' -ForegroundColor Yellow
+        exit 0
+    }
     Remove-Item (Join-Path $LocalBin 'agent-ssh.ps1') -Force -ErrorAction SilentlyContinue
     Remove-Item (Join-Path $LocalBin 'agent-ssh.cmd') -Force -ErrorAction SilentlyContinue
     Remove-Item $InstallDir -Recurse -Force -ErrorAction SilentlyContinue
