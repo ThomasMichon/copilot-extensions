@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
+from agent_procutil import no_window_kwargs
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -618,6 +619,7 @@ class ContentStore:
             capture_output=True,
             text=True,
             timeout=timeout,
+            **no_window_kwargs(),
         )
         if proc.returncode != 0:
             # Surface the child's stderr so the caller's retry loop can still

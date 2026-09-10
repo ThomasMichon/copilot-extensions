@@ -10,7 +10,7 @@ import sys
 import time
 from pathlib import Path
 
-from agent_procutil import detached_kwargs, windowless_python
+from agent_procutil import detached_kwargs, windowless_python, windowless_python_env
 
 from . import config, rendezvous
 from .config import IS_WINDOWS, SOCKET_PATH, ResolvedVault
@@ -357,14 +357,18 @@ def start_service(tcp_port: int | None = None) -> bool:
             return True
         tcp_port = context.port
 
-    cmd = [windowless_python(sys.executable), "-m", "agent_vault.service"]
+    python = sys.executable
+    cmd = [windowless_python(python), "-m", "agent_vault.service"]
     if tcp_port:
         cmd.extend(["--tcp-port", str(tcp_port)])
 
     if IS_WINDOWS:
         cmd.append("--foreground")
+        env = os.environ.copy()
+        env.update(windowless_python_env(python))
         subprocess.Popen(
             cmd,
+            env=env,
             **detached_kwargs(),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,

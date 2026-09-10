@@ -37,7 +37,7 @@ import sys
 import time
 from typing import TYPE_CHECKING
 
-from agent_procutil import detached_kwargs, windowless_python
+from agent_procutil import detached_kwargs, windowless_python, windowless_python_env
 
 from agent_index.engine.client import EngineUnavailableError
 
@@ -135,8 +135,9 @@ def _spawn_engine(profile: ModelProfile) -> subprocess.Popen:
     whole reindex; it self-terminates on its idle timeout, and ``stop_engine``
     ends it explicitly when the indexer is done.
     """
+    python = sys.executable
     cmd = [
-        windowless_python(sys.executable),
+        windowless_python(python),
         "-m",
         "agent_index.engine.app",
         "--host",
@@ -150,6 +151,7 @@ def _spawn_engine(profile: ModelProfile) -> subprocess.Popen:
         "stderr": subprocess.DEVNULL,
         "env": os.environ.copy(),
     }
+    kwargs["env"].update(windowless_python_env(python))
     # Detach from the parent console so the engine is independent.
     kwargs.update(detached_kwargs())
     return subprocess.Popen(cmd, **kwargs)  # type: ignore[arg-type]  # noqa: S603

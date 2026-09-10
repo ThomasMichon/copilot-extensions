@@ -124,7 +124,8 @@ def test_remote_machine_falls_back_to_full_cli(monkeypatch):
     def run(command, check, **kwargs):
         captured["command"] = command
         assert check is False
-        assert kwargs == {"creationflags": 123}
+        assert kwargs["creationflags"] == 123
+        assert isinstance(kwargs.get("env"), dict)
         return types.SimpleNamespace(returncode=7)
 
     monkeypatch.setattr(board_cli.subprocess, "run", run)

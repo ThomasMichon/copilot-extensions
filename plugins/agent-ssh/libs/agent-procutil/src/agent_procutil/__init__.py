@@ -19,8 +19,11 @@ exact creation flags) can't drift between copies:
 * :func:`windowless_daemon_kwargs` -- keep a Windows daemon in a
   ``CREATE_NO_WINDOW`` host while optionally breaking away from an inherited
   Job object; use this when its own children must inherit the windowless host.
-* :func:`windowless_python` -- select ``pythonw.exe`` for a detached Python
-  daemon on Windows so the venv launcher cannot allocate a second console.
+* :func:`windowless_python` -- select the safest available ``pythonw.exe`` for a
+  detached Python daemon on Windows so neither a venv launcher nor its base
+  interpreter can allocate a second console.
+* :func:`windowless_python_env` -- preserve the original venv context when
+  ``windowless_python`` targets a base install's ``pythonw.exe``.
 
 Both are no-ops off Windows (``no_window_kwargs`` -> ``{}``; ``detached_kwargs``
 -> ``start_new_session=True``), so call sites stay platform-agnostic::
@@ -58,6 +61,7 @@ __all__ = [
     "detached_kwargs",
     "windowless_daemon_kwargs",
     "windowless_python",
+    "windowless_python_env",
 ]
 
 
@@ -68,6 +72,33 @@ def contained_test_mode() -> bool:
 
 def _is_windows() -> bool:
     return os.name == "nt"
+
+
+def _venv_home_pythonw(python: str) -> str | None:
+    """Return the base ``pythonw.exe`` recorded by a venv's ``pyvenv.cfg``.
+
+    Relocatable Windows venv launchers (for example from ``uv venv``) can ship a
+    tiny local ``pythonw.exe`` trampoline that re-execs the base interpreter
+    named by ``pyvenv.cfg``'s ``home = ...`` entry. When that base install also
+    ships a genuine GUI-subsystem ``pythonw.exe``, prefer it over the local
+    trampoline so the detached daemon never re-enters a console interpreter.
+    """
+    venv_root = os.path.dirname(os.path.dirname(python))
+    cfg_path = os.path.join(venv_root, "pyvenv.cfg")
+    try:
+        with open(cfg_path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                key, _, value = line.partition("=")
+                if key.strip() != "home":
+                    continue
+                home = value.strip()
+                if not home:
+                    return None
+                base_pythonw = os.path.join(home, "pythonw.exe")
+                return base_pythonw if os.path.isfile(base_pythonw) else None
+    except OSError:
+        return None
+    return None
 
 
 def no_window_flags() -> int:
@@ -99,17 +130,40 @@ def windowless_python(executable: str | os.PathLike[str] | None = None) -> str:
     """Return the interpreter for a fully detached Python daemon.
 
     A Windows venv ``python.exe`` is a console-subsystem launcher. Even when it
-    starts under ``DETACHED_PROCESS``, it re-execs the base ``python.exe`` as a
+    starts under ``DETACHED_PROCESS``, it can re-exec a base ``python.exe`` as a
     child, which allocates a fresh console that Windows Terminal may capture.
-    Its ``pythonw.exe`` sibling is a GUI-subsystem launcher and never allocates
-    that console. Off Windows, or when no sibling exists, return the requested
+    Prefer the base install's own ``pythonw.exe`` recorded in ``pyvenv.cfg``
+    when available; otherwise fall back to the local ``pythonw.exe`` sibling.
+    Off Windows, or when no windowless interpreter exists, return the requested
     interpreter unchanged.
     """
     python = os.fspath(executable) if executable is not None else sys.executable
     if not _is_windows():
         return python
+    base_pythonw = _venv_home_pythonw(python)
+    if base_pythonw:
+        return base_pythonw
     candidate = os.path.join(os.path.dirname(python), "pythonw.exe")
     return candidate if os.path.isfile(candidate) else python
+
+
+def windowless_python_env(
+    executable: str | os.PathLike[str] | None = None,
+) -> dict[str, str]:
+    """Extra child environment needed by :func:`windowless_python`.
+
+    When ``windowless_python()`` skips a relocatable venv's local trampoline and
+    targets the base install's real ``pythonw.exe``, CPython still needs the
+    original venv launcher path in ``__PYVENV_LAUNCHER__`` so it keeps the venv
+    ``sys.prefix`` / ``site-packages`` instead of falling back to the base
+    install. Other cases need no environment changes.
+    """
+    python = os.fspath(executable) if executable is not None else sys.executable
+    if not _is_windows():
+        return {}
+    if _venv_home_pythonw(python):
+        return {"__PYVENV_LAUNCHER__": python}
+    return {}
 
 
 def detached_kwargs(*, breakaway: bool = False) -> dict:

@@ -14,7 +14,12 @@ import time
 from pathlib import Path
 from typing import Any
 
-from agent_procutil import detached_kwargs, windowless_python
+from agent_procutil import (
+    detached_kwargs,
+    no_window_kwargs,
+    windowless_python,
+    windowless_python_env,
+)
 import httpx
 
 from . import __version__
@@ -210,6 +215,7 @@ def _validate_cutover_governance(transaction: dict[str, Any] | None) -> None:
             errors="replace",
             check=False,
             timeout=30,
+            **no_window_kwargs(),
         )
         if result.returncode != 0:
             raise OSError(
@@ -1435,8 +1441,9 @@ def cmd_deploy(args: argparse.Namespace) -> int:
 
     def spawn_passive(port: int):
         start_command = "__cell-start" if expected_installation else "start"
+        python = sys.executable
         cmd = [
-            windowless_python(sys.executable),
+            windowless_python(python),
             "-I",
             "-X",
             "utf8",
@@ -1460,6 +1467,7 @@ def cmd_deploy(args: argparse.Namespace) -> int:
             "stdout": subprocess.DEVNULL,
             "stderr": subprocess.DEVNULL,
         }
+        kwargs["env"].update(windowless_python_env(python))
         kwargs.update(detached_kwargs())
         handle = subprocess.Popen(cmd, **kwargs)  # noqa: S603
         passive_instance.update({"port": port, "pid": handle.pid})

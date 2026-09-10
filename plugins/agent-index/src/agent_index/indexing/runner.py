@@ -20,7 +20,12 @@ from collections.abc import Callable
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any
 
-from agent_procutil import detached_kwargs, no_window_kwargs, windowless_python
+from agent_procutil import (
+    detached_kwargs,
+    no_window_kwargs,
+    windowless_python,
+    windowless_python_env,
+)
 
 from agent_index.indexing.task_store import TERMINAL, TaskStatus
 
@@ -418,8 +423,9 @@ class TaskRunner:
             pass
         logf = open(log_path, "ab", buffering=0)  # child inherits this handle
         try:
+            python = sys.executable
             cmd = [
-                windowless_python(sys.executable),
+                windowless_python(python),
                 "-I",
                 "-B",
                 "-X",
@@ -441,6 +447,7 @@ class TaskRunner:
                 "stderr": logf,
                 "stdin": subprocess.DEVNULL,
             }
+            kwargs["env"].update(windowless_python_env(python))
             kwargs.update(
                 no_window_kwargs()
                 if os.environ.get("AGENT_INDEX_MANAGED_PYTHON")

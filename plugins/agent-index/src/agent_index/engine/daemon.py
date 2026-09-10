@@ -23,7 +23,11 @@ import subprocess
 import time
 from pathlib import Path
 
-from agent_procutil import windowless_daemon_kwargs, windowless_python
+from agent_procutil import (
+    windowless_daemon_kwargs,
+    windowless_python,
+    windowless_python_env,
+)
 
 from .generation import current_engine_generation
 
@@ -121,13 +125,14 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
-def _spawn(cmd: list[str]) -> subprocess.Popen:
+def _spawn(cmd: list[str], *, python: str) -> subprocess.Popen:
     kwargs: dict[str, object] = {
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.DEVNULL,
         "stderr": subprocess.DEVNULL,
         "env": os.environ.copy(),
     }
+    kwargs["env"].update(windowless_python_env(python))
     kwargs.update(windowless_daemon_kwargs())
     return subprocess.Popen(cmd, **kwargs)  # type: ignore[arg-type]  # noqa: S603
 
@@ -174,7 +179,7 @@ def start(home: Path | None = None, *, wait_timeout: float = 90.0) -> str:
             f"first (installer, or 'agent-index engine install')"
         )
 
-    proc = _spawn(engine_command(home))
+    proc = _spawn(engine_command(home), python=str(py))
     _write_pid(proc.pid, home)
 
     deadline = time.monotonic() + wait_timeout

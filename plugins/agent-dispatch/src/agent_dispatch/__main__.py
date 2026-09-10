@@ -257,19 +257,26 @@ def _spawn_coordinator_process() -> None:
     from .install_paths import install_dir as runtime_install_dir
 
     install_dir = runtime_install_dir()
-    from .procutil import detached_kwargs, resolve_own_runtime_python, windowless_python
+    from .procutil import (
+        detached_kwargs,
+        resolve_own_runtime_python,
+        windowless_python,
+        windowless_python_env,
+    )
 
     # Always the canonically-resolved current-version slot (never sys.executable
     # directly, and never a legacy `.venv` path -- see resolve_own_runtime_python's
     # docstring for the production incident this class of bug caused: a stale
     # fallback here silently spawned an entire duplicate coordinator+supervisor
     # tree under the system Python instead of the installed slot).
-    python = windowless_python(resolve_own_runtime_python())
+    resolved_python = resolve_own_runtime_python()
+    python = windowless_python(resolved_python)
 
     # Honor service.env (token, host/port pins) if present -- parity with the
     # installed launcher, which loads it before running `serve`.
     env = dict(os.environ)
     env.setdefault("PYTHONUTF8", "1")
+    env.update(windowless_python_env(resolved_python))
     env_file = install_dir / "service.env"
     if env_file.is_file():
         try:
@@ -555,10 +562,11 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
             return int(sock.getsockname()[1])
 
     def spawn_passive(port: int):
-        from agent_procutil import detached_kwargs, windowless_python
+        from agent_procutil import detached_kwargs, windowless_python, windowless_python_env
 
+        python = _sys.executable
         cmd = [
-            windowless_python(_sys.executable), "-m", "agent_dispatch", "serve",
+            windowless_python(python), "-m", "agent_dispatch", "serve",
             "--host", cfg.host, "--port", str(port), "--passive",
         ]
         # The coordinator binds AGENT_DISPATCH_PORT (Stage C: else an ephemeral
@@ -567,6 +575,7 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
         # binds EXACTLY that port and the health-gate/flip target the right one.
         child_env = dict(os.environ)
         child_env["AGENT_DISPATCH_PORT"] = str(port)
+        child_env.update(windowless_python_env(python))
         kwargs: dict[str, Any] = {
             "env": child_env,
             "stdin": _subprocess.DEVNULL,
@@ -4329,11 +4338,15 @@ def _spawn_detached_waiter(spec: Any) -> dict:
     waiter that outlives this process, so the kicking worker can be torn down
     while a cheap OS-level process owns the wait and fires the resume."""
     from . import hibernation
-    from .procutil import detached_kwargs, windowless_python
+    from .procutil import detached_kwargs, windowless_python, windowless_python_env
 
-    argv = hibernation.detached_run_argv(spec, python=windowless_python(sys.executable))
+    python = sys.executable
+    argv = hibernation.detached_run_argv(spec, python=windowless_python(python))
+    env = dict(os.environ)
+    env.update(windowless_python_env(python))
     proc = subprocess.Popen(  # noqa: S603 -- fixed argv (interpreter + our own module)
         argv,
+        env=env,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,

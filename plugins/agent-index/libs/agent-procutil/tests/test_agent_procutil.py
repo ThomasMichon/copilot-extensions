@@ -40,6 +40,41 @@ def test_windowless_python_prefers_pythonw_on_windows(monkeypatch, tmp_path):
     assert pu.windowless_python(python) == str(pythonw)
 
 
+def test_windowless_python_prefers_base_home_pythonw_from_pyvenv_cfg(monkeypatch, tmp_path):
+    venv_root = tmp_path / "venv"
+    scripts = venv_root / "Scripts"
+    scripts.mkdir(parents=True)
+    python = scripts / "python.exe"
+    python.write_text("")
+    (scripts / "pythonw.exe").write_text("")
+    base = tmp_path / "base-python"
+    base.mkdir()
+    base_pythonw = base / "pythonw.exe"
+    base_pythonw.write_text("")
+    (venv_root / "pyvenv.cfg").write_text(f"home = {base}\n", encoding="utf-8")
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    assert pu.windowless_python(python) == str(base_pythonw)
+    assert pu.windowless_python_env(python) == {"__PYVENV_LAUNCHER__": str(python)}
+
+
+def test_windowless_python_falls_back_to_local_pythonw_when_base_home_lacks_it(
+    monkeypatch, tmp_path
+):
+    venv_root = tmp_path / "venv"
+    scripts = venv_root / "Scripts"
+    scripts.mkdir(parents=True)
+    python = scripts / "python.exe"
+    python.write_text("")
+    local_pythonw = scripts / "pythonw.exe"
+    local_pythonw.write_text("")
+    base = tmp_path / "base-python"
+    base.mkdir()
+    (venv_root / "pyvenv.cfg").write_text(f"home = {base}\n", encoding="utf-8")
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    assert pu.windowless_python(python) == str(local_pythonw)
+    assert pu.windowless_python_env(python) == {}
+
+
 def test_windowless_python_falls_back_without_pythonw(monkeypatch, tmp_path):
     python = tmp_path / "python.exe"
     python.write_text("")
@@ -50,6 +85,7 @@ def test_windowless_python_falls_back_without_pythonw(monkeypatch, tmp_path):
 def test_windowless_python_noop_off_windows(monkeypatch):
     monkeypatch.setattr(pu, "_is_windows", lambda: False)
     assert pu.windowless_python("/usr/bin/python3") == "/usr/bin/python3"
+    assert pu.windowless_python_env("/usr/bin/python3") == {}
 
 
 def test_detached_kwargs_windows_plain(monkeypatch):

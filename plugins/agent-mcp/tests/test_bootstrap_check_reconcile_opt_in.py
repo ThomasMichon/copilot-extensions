@@ -41,12 +41,23 @@ _SH = _PLUGIN_ROOT / "scripts" / "bootstrap-check.sh"
 # so the static file-shape check looks for the variable form, while the
 # runtime behavior tests below use the resolved literal key.
 _OPT_IN_KEY = f"background_reconcile_{_PLUGIN_NAME}"
-# Resolve bash to its FULL path rather than invoking the bare command name: on
-# Windows, a Windows App Execution Alias can intercept a bare "bash.exe"
-# process-creation call (routing it to WSL) even when shutil.which() finds
-# Git Bash first on PATH -- the alias interception happens below PATH search,
-# at CreateProcess time, unless the explicit resolved path is used.
-_BASH = shutil.which("bash")
+
+
+def _resolve_bash() -> str | None:
+    """Return a usable Bash path, excluding the WindowsApps WSL alias stub."""
+    path = os.environ.get("PATH")
+    if path:
+        filtered = os.pathsep.join(part for part in path.split(os.pathsep) if "WindowsApps" not in part)
+        bash = shutil.which("bash", path=filtered)
+        if bash:
+            return bash
+    bash = shutil.which("bash")
+    if bash and "WindowsApps" not in bash:
+        return bash
+    return None
+
+
+_BASH = _resolve_bash()
 
 
 def test_hook_scripts_exist():

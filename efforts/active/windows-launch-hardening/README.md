@@ -10,7 +10,7 @@
   surfaced real console windows (`python.exe`/`pwsh.exe`/`cmd.exe` with `.agent-`
   paths) because they relied on `-WindowStyle Hidden` alone or spawned without
   window-suppression flags.
-- **Umbrella issue:** #786 (supersedes #775, the headless sub-thread — Phases 1-2 landed); current regression: #2037.
+- **Umbrella issue:** #786 (supersedes #775, the headless sub-thread — Phases 1-2 landed); current regression: #2334.
 
 ## Guiding Intent
 
@@ -230,3 +230,33 @@ against real behavior.
 - #2037 carries the coordinated correction: hidden-console daemon roots,
   explicit no-window flags on captured children, and a headless Docker installer
   probe, followed by multi-cycle Windows validation.
+
+### 2026-09-09 - relocatable venv trampoline residual
+- Live Windows process-tree capture on a detached `agent-dispatch` coordinator
+  and `agent-mcp` serve host showed the shared `windowless_python()` fix from
+  #973 still leaving a console-subsystem child in the tree under `uv`-managed
+  runtimes: the venv-local `Scripts\pythonw.exe` was a relocatable trampoline,
+  not the final interpreter.
+- `pyvenv.cfg` on those runtimes recorded a base install whose real
+  `pythonw.exe` sat alongside the console `python.exe`; the trampoline re-execed
+  the base interpreter without our detached/windowless flags, so Default
+  Terminal surfaced a fresh visible terminal window for the child.
+- #2334 tracks the residual publicly. The fix extends shared `agent-procutil`
+  to read `pyvenv.cfg` and prefer the base install's own `pythonw.exe` when it
+  exists, then re-vendors the byte-identical helper across every consuming
+  plugin.
+
+### 2026-09-09 - audit hardening + live agent-mcp confirmation
+- A repo-wide Windows Python-launch audit against the launch-kind matrix found
+  two additional short-lived captured interpreter launches in `agent-index`
+  that still used bare `subprocess.run(sys.executable, ...)`: the management
+  governance checker and the LanceDB FTS rebuild worker. Both now route through
+  `agent_procutil.no_window_kwargs()`; the other Python-launch hits were either
+  foreground/non-background probes or already used the approved shared
+  primitives.
+- Live validation on this Windows host reinstalled the local `agent-mcp`
+  checkout, warmed a uv-managed bridge runtime, killed the first spawned
+  `agent_mcp serve` host, and forced a lazy respawn. In both the initial spawn
+  and the respawn, the live serve process was the uv base install's real
+  `pythonw.exe` with no console `python.exe` child beneath it, confirming the
+  trampoline layer is now skipped instead of delegated to Default Terminal.

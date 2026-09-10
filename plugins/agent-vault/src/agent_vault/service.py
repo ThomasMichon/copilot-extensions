@@ -14,7 +14,7 @@ import threading
 import time
 from pathlib import Path
 
-from agent_procutil import detached_kwargs, windowless_python
+from agent_procutil import detached_kwargs, windowless_python, windowless_python_env
 
 from .cache import get_cache
 from .config import (
@@ -1222,12 +1222,16 @@ def daemonize_unix() -> bool:
 
 def daemonize_windows(argv: list[str]) -> None:
     """Start a detached background process (Windows)."""
-    cmd = [windowless_python(sys.executable), *argv, "--foreground"]
+    python = sys.executable
+    cmd = [windowless_python(python), *argv, "--foreground"]
+    env = os.environ.copy()
+    env.update(windowless_python_env(python))
     subprocess.Popen(
         cmd,
         # Neutral cwd: the detached daemon must not inherit (and pin) the
         # caller's directory, which may be a worktree or the plugin payload.
         cwd=str(Path.home()),
+        env=env,
         **detached_kwargs(),
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
