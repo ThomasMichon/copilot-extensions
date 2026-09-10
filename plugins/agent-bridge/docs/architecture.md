@@ -345,6 +345,11 @@ restart does not inherently close the child's pipes.
   events, and host connection data are persisted to SQLite/host state. On startup
   the daemon reattaches to compatible surviving Session Hosts; otherwise it can
   lazily resume from persisted Copilot state.
+- **Background CodeSpace recovery does not wake unavailable venues.** Before
+  reattaching a disconnected CodeSpace session, the heartbeat checks current
+  availability without SSH, once per CodeSpace per pass. Unavailable or
+  indeterminate venues remain untouched; a later Available result permits
+  recovery. Healthy attached sessions need no availability check.
 - **Active turns are preserved across frontend restarts when the Session Host
   survives.** A streaming `send`/`read`/`wait` reconnects through the routing
   table and resumes from the caller's acked delivery cursor. If a host is

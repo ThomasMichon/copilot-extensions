@@ -58,6 +58,9 @@ Scaffold and adopt it in one step from inside the repo:
 agent-codespaces config init      # writes .copilot-extensions/agent-codespaces/config.yaml (+ auto-adopts)
 ```
 
+On Windows, the noninteractive workspace-discovery command used by `config init`
+runs with console-window suppression.
+
 Running a command inside a repo that carries the file **auto-discovers** it (no
 manual `config adopt`); adoption persists it for the detached daemon and for
 extra/multi-repo setups. Legacy `.agent-codespaces/config.yaml` and repo-root
