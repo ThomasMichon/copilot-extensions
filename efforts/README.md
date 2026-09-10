@@ -30,6 +30,7 @@ that pattern to this repository.
 | [Marketplace-Scoped Installations](active/marketplace-scoped-installations/README.md) | Active | #1096 |
 | [Native-Construct Convergence](active/native-construct-convergence/README.md) | Active | #985 |
 | [Plugin Process Hygiene](active/plugin-process-hygiene/README.md) | Active | #736 |
+| [Tiered Payload Provisioning](active/tiered-payload-provisioning/README.md) | Draft | See effort |
 | [Progressive Context Disclosure](active/progressive-context-disclosure/README.md) | Active | #1612 |
 | [Restricted Venue Targets](active/restricted-venue-targets/README.md) | Draft | #1188 |
 | [Test Portfolio Rationalization](active/test-portfolio-rationalization/README.md) | Active | #1303 |
