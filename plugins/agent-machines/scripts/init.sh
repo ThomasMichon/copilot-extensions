@@ -344,6 +344,9 @@ DURABLE_HOME=""
 ORIGIN_PAYLOAD_ROOT=""
 EXPECTED_NAMESPACE_GENERATION=""
 EXPECTED_INSTALL_GENERATION=""
+EXPECTED_ACTIVATION_GENERATION=""
+EXPECTED_TOMBSTONE_ACTIVATION_GENERATION=""
+EXPECT_TOMBSTONE_ABSENT=0
 EXPECTED_CURRENT_VERSION=""
 EXPECT_CURRENT_ABSENT=0
 ORIGINAL_ARGS=("$@")
@@ -361,10 +364,13 @@ while [[ $# -gt 0 ]]; do
         --origin-payload-root) ORIGIN_PAYLOAD_ROOT="${2:-}"; shift 2 ;;
         --expected-namespace-generation) EXPECTED_NAMESPACE_GENERATION="${2:-}"; shift 2 ;;
         --expected-install-generation) EXPECTED_INSTALL_GENERATION="${2:-}"; shift 2 ;;
+        --expected-activation-generation) EXPECTED_ACTIVATION_GENERATION="${2:-}"; shift 2 ;;
+        --expected-tombstone-activation-generation) EXPECTED_TOMBSTONE_ACTIVATION_GENERATION="${2:-}"; shift 2 ;;
+        --expect-tombstone-absent) EXPECT_TOMBSTONE_ABSENT=1; shift ;;
         --expected-current-version) EXPECTED_CURRENT_VERSION="${2:-}"; shift 2 ;;
         --expect-current-absent) EXPECT_CURRENT_ABSENT=1; shift ;;
         --maintenance-token) MAINTENANCE_TOKEN="${2:-}"; shift 2 ;;
-        stamp|provision|init|cell-provision|cell-repair|cell-uninstall|cell-attribute-legacy|slot-provision|slot-validate|slot-complete|slot-completion-validate|slot-cutover) ACTION="$1"; shift ;;
+        stamp|provision|init|cell-provision|cell-repair|cell-uninstall|cell-attribute-legacy|cell-deactivate|slot-provision|slot-validate|slot-complete|slot-completion-validate|slot-cutover) ACTION="$1"; shift ;;
         *) shift ;;
     esac
 done
@@ -373,7 +379,7 @@ export AGENT_MACHINES_ACTION="$ACTION"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-if [[ "$ACTION" == cell-repair || "$ACTION" == cell-uninstall || "$ACTION" == cell-attribute-legacy ]]; then
+if [[ "$ACTION" == cell-repair || "$ACTION" == cell-uninstall || "$ACTION" == cell-attribute-legacy || "$ACTION" == cell-deactivate ]]; then
     [[ "${ORIGINAL_ARGS[0]:-}" == "$ACTION" ]] || {
         _fail 'Cell lifecycle actions must be explicit, not inherited'
         exit 2

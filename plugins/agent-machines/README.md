@@ -100,13 +100,13 @@ reconcile. Cell snapshot copy is staged in an owned sibling and atomically
 published before provenance stamping. Retry cleans only a marker-proven
 unfinished publication and never removes a pre-existing snapshot.
 
-### Explicit legacy attribution, cell repair, and uninstall
+### Explicit legacy attribution, deactivation, cell repair, and uninstall
 
-`scripts/init.sh cell-attribute-legacy`, `cell-repair`, and `cell-uninstall`
-(PowerShell: `scripts\init.ps1 -Action cell-attribute-legacy`,
-`cell-repair`, or `cell-uninstall`) use the same stdlib-only management engine
-and an existing Python 3.10+ interpreter. They never self-provision a
-toolchain or trust an inherited context/action.
+`scripts/init.sh cell-attribute-legacy`, `cell-deactivate`, `cell-repair`, and
+`cell-uninstall` (PowerShell: `scripts\init.ps1 -Action cell-attribute-legacy`,
+`cell-deactivate`, `cell-repair`, or `cell-uninstall`) use the same
+stdlib-only management engine and an existing Python 3.10+ interpreter. They
+never self-provision a toolchain or trust an inherited context/action.
 
 Legacy attribution requires these explicit inputs:
 
@@ -131,6 +131,19 @@ Repair and uninstall require every value below explicitly:
 | `--expected-last-known-good-version` or `--expect-last-known-good-absent` | `-ExpectedLastKnownGoodVersion` or `-ExpectLastKnownGoodAbsent` |
 | `--maintenance-token` | `-MaintenanceToken` |
 
+Deactivation requires the explicit activation target below and exactly one
+rollback selector:
+
+| Bash argument | PowerShell parameter |
+|---|---|
+| `--context` | `-Context` |
+| `--durable-home` | `-DurableHome` |
+| `--expected-marketplace-id` | `-ExpectedMarketplaceId` |
+| `--expected-namespace-generation`, `--expected-install-generation` | `-ExpectedNamespaceGeneration`, `-ExpectedInstallGeneration` |
+| `--expected-activation-generation` | `-ExpectedActivationGeneration` |
+| `--expected-tombstone-activation-generation` or `--expect-tombstone-absent` | `-ExpectedTombstoneActivationGeneration` or `-ExpectTombstoneAbsent` |
+| `--maintenance-token` | `-MaintenanceToken` |
+
 Repair recreates only the derived schema-4 deploy manifest and exact intended
 current/LKG selection, from validated immutable completion and snapshot evidence.
 It preserves current receipt payload provenance separately from the selected
@@ -149,6 +162,15 @@ retained-inert`. If the legacy root is missing, linked/reparsed, already owned
 by another cell, or otherwise ambiguous/orphaned, the command preserves that
 state unchanged and reports it for deliberate resolution.
 
+Deactivation is equally explicit and idempotent. `cell-deactivate` always
+targets one exact activation generation and either an exact tombstone activation
+generation to roll back or an explicit proof that no tombstone exists. Under
+maintenance admission and the same ownership locks, it publishes the next
+`legacy`/`deactivated` activation generation, writes an auditable deactivation
+record under `deactivations/`, and only then clears the matched tombstone. A
+replay of the same target reports `already-rolled-back` or
+`already-deactivated`; an ambiguous tombstone state is preserved unchanged.
+
 Uninstall requires an absent or explicitly deactivated activation and no live
 owned runtime processes. It preflights the entire owned inventory, CAS-clears
 both selection markers, removes all owned historical slots and snapshots, then
@@ -158,15 +180,15 @@ identity. Unknown, foreign, malformed, linked, or otherwise ambiguous artifacts
 refuse removal. Ordinary POSIX venv interpreter links and the exact `lib64 -> lib`
 scaffolding may be unlinked without following them; all other links are refused.
 
-`state/`, namespace/install/activation receipts, lock infrastructure, and empty
-attributable plugin directories remain. Namespace garbage collection and legacy
-migration are separate operations. Repeated repair reports
+`state/`, namespace/install/activation receipts, `deactivations/`, lock
+infrastructure, and empty attributable plugin directories remain. Namespace
+garbage collection and legacy migration are separate operations. Repeated repair reports
 `reason: cell-repair-healthy`; repeated uninstall reports `status: preserved`.
 Generation or selection drift reports `status: revalidation-required`; callers
 must inspect JSON status, not merely exit 0. Interrupted reservation release is
 the shared library's explicit `slot-release`, never automatic cleanup.
-When applicable user-wide or plugin-scoped maintenance is active, repair and
-uninstall also require the exact token returned by the shared
+When applicable user-wide or plugin-scoped maintenance is active, deactivation,
+repair, and uninstall also require the exact token returned by the shared
 `maintenance-enter` action; a missing or mismatched token is refused without
 mutating the cell.
 

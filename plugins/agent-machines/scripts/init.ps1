@@ -17,7 +17,7 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('install', 'init', 'stamp', 'provision', 'cell-provision', 'cell-repair', 'cell-uninstall', 'cell-attribute-legacy', 'slot-provision', 'slot-validate', 'slot-complete', 'slot-completion-validate', 'slot-cutover')]
+    [ValidateSet('install', 'init', 'stamp', 'provision', 'cell-provision', 'cell-repair', 'cell-uninstall', 'cell-attribute-legacy', 'cell-deactivate', 'slot-provision', 'slot-validate', 'slot-complete', 'slot-completion-validate', 'slot-cutover')]
     [string]$Action = 'install',
     [string]$InstallDir,
     [string]$Context,
@@ -26,6 +26,9 @@ param(
     [string]$OriginPayloadRoot,
     [string]$ExpectedNamespaceGeneration,
     [string]$ExpectedInstallGeneration,
+    [string]$ExpectedActivationGeneration,
+    [string]$ExpectedTombstoneActivationGeneration,
+    [switch]$ExpectTombstoneAbsent,
     [string]$ExpectedCurrentVersion,
     [switch]$ExpectCurrentAbsent,
     [string]$ExpectedLastKnownGoodVersion,
@@ -41,11 +44,13 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
-if ($Action -in @('cell-repair', 'cell-uninstall', 'cell-attribute-legacy')) {
+if ($Action -in @('cell-repair', 'cell-uninstall', 'cell-attribute-legacy', 'cell-deactivate')) {
     $lifecycleArgs = @($Action)
     $names = @{
         Context = 'context'; DurableHome = 'durable-home'; ExpectedMarketplaceId = 'expected-marketplace-id'
         ExpectedNamespaceGeneration = 'expected-namespace-generation'; ExpectedInstallGeneration = 'expected-install-generation'
+        ExpectedActivationGeneration = 'expected-activation-generation'; ExpectedTombstoneActivationGeneration = 'expected-tombstone-activation-generation'
+        ExpectTombstoneAbsent = 'expect-tombstone-absent'
         ExpectedCurrentVersion = 'expected-current-version'; ExpectCurrentAbsent = 'expect-current-absent'
         ExpectedLastKnownGoodVersion = 'expected-last-known-good-version'; ExpectLastKnownGoodAbsent = 'expect-last-known-good-absent'
         ExpectedPayloadRoot = 'expected-payload-root'; ExpectedPayloadVersion = 'expected-payload-version'

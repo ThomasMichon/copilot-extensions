@@ -568,6 +568,68 @@ enumerates exactly which legacy artifacts were claimed from which paths; absent,
 ambiguous, linked/reparsed, or orphaned artifacts are preserved unchanged and
 remain outside that list.
 
+#### Deactivation record schema
+
+Explicit rollback or deactivation writes
+`<plugin-root>/deactivations/activation-<target-generation>.json`:
+
+```json
+{
+  "schema": "copilot-extensions.installation-deactivation",
+  "version": 1,
+  "marketplaceId": "example--0123456789abcdef",
+  "pluginId": "agent-example",
+  "context": "C:\\Users\\example\\.copilot-extensions\\marketplaces\\example--0123456789abcdef\\plugins\\agent-example\\install.json",
+  "environment": {
+    "platform": "windows",
+    "homeRealPath": "C:\\Users\\example",
+    "wslDistro": null
+  },
+  "target": {
+    "kind": "legacy-attribution-rollback",
+    "activation": {
+      "path": "C:\\Users\\example\\.copilot-extensions\\marketplaces\\example--0123456789abcdef\\plugins\\agent-example\\installation-activation.json",
+      "generation": 1,
+      "mode": "namespaced",
+      "state": "active",
+      "namespaceGeneration": 1,
+      "installGeneration": 1,
+      "legacyDisposition": "retained-inert"
+    },
+    "tombstone": {
+      "path": "C:\\Users\\example\\.agent-example\\.installation-ownership.json",
+      "activationGeneration": 1,
+      "transferredAt": "2026-01-01T00:00:00Z",
+      "attribution": {"kind": "explicit-legacy-attribution"}
+    }
+  },
+  "result": {
+    "activation": {
+      "path": "C:\\Users\\example\\.copilot-extensions\\marketplaces\\example--0123456789abcdef\\plugins\\agent-example\\installation-activation.json",
+      "generation": 2,
+      "mode": "legacy",
+      "state": "deactivated",
+      "legacyDisposition": "restored"
+    },
+    "tombstone": {
+      "path": "C:\\Users\\example\\.agent-example\\.installation-ownership.json",
+      "cleared": true,
+      "clearedAt": "2026-01-01T00:10:00Z"
+    }
+  },
+  "createdAt": "2026-01-01T00:10:00Z"
+}
+```
+
+`target.kind` is `legacy-attribution-rollback` when the caller explicitly
+clears a matching tombstone under the legacy lock and `cell-deactivation` when
+the caller explicitly proves no tombstone exists. The record is keyed by the
+rolled-back activation generation, so repeating the same explicit target is an
+idempotent no-op rather than a second destructive mutation. The active
+`installation-activation.json` still advances to `generation + 1`; the
+deactivation record is the auditable companion that preserves the rolled-back
+target, its prior mode/state, and whether a tombstone was cleared.
+
 Legacy footprint is qualified by ownership. Present but unattributed state
 blocks automatic activation for every cell. A valid tombstone attributing an
 inert legacy footprint to another marketplace cell does not block a new,
