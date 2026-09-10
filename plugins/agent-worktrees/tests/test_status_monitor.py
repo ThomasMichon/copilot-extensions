@@ -1388,6 +1388,120 @@ def test_installers_invoke_monitor_restart_at_cutover():
         )
 
 
+def test_status_monitor_backs_off_at_iteration_boundary_without_mutating(
+    tmp_path, monkeypatch
+):
+    lock = tmp_path / "status-monitor.lock"
+    monkeypatch.setattr(m, "_monitor_lock_path", lambda: lock)
+    monkeypatch.setattr(m, "_load_hook_client_module", lambda: None)
+    writes: list[dict | None] = []
+    monkeypatch.setattr(
+        m.locks,
+        "write_lock",
+        lambda _path, extra=None: writes.append(extra),
+    )
+    runtime_states = iter([False, True])
+    monkeypatch.setattr(m, "_runtime_superseded", lambda **_kw: next(runtime_states))
+    monkeypatch.setattr(
+        m,
+        "_monitor_sweep",
+        lambda *args, **kwargs: pytest.fail("sweep must not run while backing off"),
+    )
+    sleeps: list[float] = []
+    monkeypatch.setattr(m.time, "sleep", sleeps.append)
+    governance_calls: list[str] = []
+
+    class _Governance:
+        def recheck(self, checkpoint):
+            governance_calls.append(checkpoint)
+            return {"status": "backoff", "reason": "maintenance-active"}
+
+    monkeypatch.setattr(
+        m.loop_governance_mod,
+        "LoopGovernance",
+        lambda: _Governance(),
+    )
+
+    assert m.cmd_status_monitor(argparse.Namespace(interval=5)) == 0
+    assert governance_calls == ["iteration-boundary"]
+    assert sleeps == [m._GOVERNANCE_BACKOFF_SECONDS]
+    assert len(writes) == 2  # startup ownership stamp only; no loop renewal
+
+
+def test_sweep_rechecks_before_publish_and_retains_registered_session_on_generation_change(
+    tmp_path, monkeypatch
+):
+    reg = tmp_path / "reg"
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
+    m._register_session_for_monitor("wt-a", "/w/a")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    monkeypatch.setattr(m, "_monitor_maybe_trigger_handoff_cutover", lambda *_a: None)
+    mux_calls: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(
+        m,
+        "_monitor_mux_set",
+        lambda mux_bin, sess, opt, val: mux_calls.append((sess, opt, val)) or True,
+    )
+    governance_calls: list[str] = []
+
+    class _Governance:
+        def recheck(self, checkpoint):
+            governance_calls.append(checkpoint)
+            return {"status": "revalidation-required", "reason": "generation-changed"}
+
+    with pytest.raises(m._StatusMonitorGovernanceDeferred):
+        m._monitor_sweep(
+            "tmux",
+            "T",
+            "P",
+            set(),
+            governance=_Governance(),
+        )
+
+    assert governance_calls == ["pre-mutation:publish-status"]
+    assert (reg / "wt-a").exists()
+    assert mux_calls == []
+
+
+def test_sweep_proceeds_when_iteration_and_pre_mutation_checks_stay_current(
+    tmp_path, monkeypatch
+):
+    reg = tmp_path / "reg"
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
+    m._register_session_for_monitor("wt-a", "/w/a")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    monkeypatch.setattr(m, "_monitor_maybe_trigger_handoff_cutover", lambda *_a: None)
+    monkeypatch.setattr(m, "_warm_list_cache_for_active_project", lambda **kw: 0)
+    mux_calls = _capture_set(monkeypatch)
+    governance_calls: list[str] = []
+
+    class _Governance:
+        def recheck(self, checkpoint):
+            governance_calls.append(checkpoint)
+            return {"status": "ready", "reason": "current", "baseline": {}}
+
+    ctx_done: set[str] = set()
+    assert (
+        m._monitor_sweep(
+            "tmux",
+            "T",
+            "P",
+            ctx_done,
+            governance=_Governance(),
+        )
+        == 1
+    )
+    assert "wt-a" in ctx_done
+    assert ("wt-a", "@aw_seg", "SEG") in mux_calls
+    assert "pre-mutation:publish-status" in governance_calls
+
+
 # --- windowless daemon spawn (the "headed status-monitor" DefTerm bug) --------
 
 
