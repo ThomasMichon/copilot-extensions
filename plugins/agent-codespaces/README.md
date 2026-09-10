@@ -283,15 +283,14 @@ only, **not** live relay readiness; when a live enabled Owner is used, the SSH
 operation places its hold, waits up to 30 seconds for readiness, and verifies the
 remote protocol before proceeding.
 
-This command is a transport/preparation primitive, not yet a complete native
-Copilot execution-host integration. The shared bridge/provider infrastructure
-remains part of the end-to-end contract. The official bridge extension already
-supports native live-session representation and messaging, but this command does
-not itself prove a CodeSpace's registration/routing to the controlling bridge.
-Transport-surviving native execution identity, reattachment/retirement, and
-cross-mode exclusion require the hosting boundary rather than a standalone
-terminal-only substitute. These remaining parity requirements are tracked in
-[#2316](https://github.com/ThomasMichon/copilot-extensions/issues/2316).
+This command is the transport/preparation primitive. For managed native Copilot,
+use agent-bridge's `native start/attach/resume/status/stop` hosting surface, which
+composes this provider's infrastructure with a survivable native execution host,
+real native registration, and identity-bound retirement. Do not substitute a
+foreground SSH process for that hosting contract. The provider's internal
+`native-transport` channel owns preparation, relay, and forwarding—not the
+remote Copilot process's lifetime. Interaction reservations prevent ACP/SSH
+fallback from taking a native-owned venue, even when its registration is lost.
 
 ### `create` options
 

@@ -74,6 +74,7 @@ _HTTP_CAPABILITY_CONSTANTS = {
     "attention_wait": "ATTENTION_WAIT_PROTOCOL_VERSION",
     "remote_operations": "REMOTE_OPERATIONS_PROTOCOL_VERSION",
     "conditional_idle_end": "CONDITIONAL_IDLE_END_PROTOCOL_VERSION",
+    "native_executions": "NATIVE_EXECUTION_PROTOCOL_VERSION",
 }
 _FETCH_RECOVERY_ATTEMPTED = False
 _MAIN_REFSPEC = "+refs/heads/main:refs/remotes/origin/main"

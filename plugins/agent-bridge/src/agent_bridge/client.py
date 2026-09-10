@@ -639,6 +639,39 @@ class BridgeClient:
         """GET /api/v1/sessions/{id}"""
         return self._request("GET", f"/api/v1/sessions/{session_id}") or {}
 
+    def native_capabilities(self) -> dict[str, Any]:
+        return self._request("GET", "/api/v1/native-executions/capabilities") or {}
+
+    def native_start(self, request: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/api/v1/native-executions", request) or {}
+
+    def native_status(self, execution_id: str, *, generation: str | None = None) -> dict[str, Any]:
+        path = "/api/v1/native-executions/" + urllib.parse.quote(execution_id, safe="")
+        if generation:
+            path += "?" + urllib.parse.urlencode({"generation": generation})
+        return self._request("GET", path) or {}
+
+    def native_stop(self, execution_id: str, generation: str) -> dict[str, Any]:
+        return self._request(
+            "POST", "/api/v1/native-executions/" + urllib.parse.quote(execution_id, safe="") + "/stop",
+            {"generation": generation}, request_timeout=210,
+        ) or {}
+
+    def native_resolve(self, target: str) -> dict[str, Any] | None:
+        value = self._request(
+            "GET", "/api/v1/native-executions/resolve?" + urllib.parse.urlencode({"target": target}),
+        ) or {}
+        return value.get("execution")
+
+    def native_list(self) -> dict[str, Any]:
+        return self._request("GET", "/api/v1/native-executions") or {}
+
+    def native_message(self, execution_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request(
+            "POST", "/api/v1/native-executions/" + urllib.parse.quote(execution_id, safe="") + "/messages",
+            payload, request_timeout=330,
+        ) or {}
+
     def get_live_session(self, session_id: str) -> dict[str, Any]:
         """GET /api/v1/live-sessions/{id}; {} if not a registered live session.
 

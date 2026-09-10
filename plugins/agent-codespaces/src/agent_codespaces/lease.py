@@ -248,6 +248,10 @@ def release(target: str, ttl: float = DEFAULT_TTL) -> bool:
         ]
         if not to_remove:
             return False
+        from .execution_claims import assert_access
+
+        for c in to_remove:
+            assert_access(c)
         for c in to_remove:
             del leases[c]
             log.info("Released lease on '%s'", c)
@@ -508,6 +512,7 @@ def claim(
     holder_ref: str | None = None,
     coordinate: bool = True,
     preflight_result: coordination.PreflightResult | None = None,
+    execution_identity: tuple[str, str] | None = None,
 ) -> Lease:
     """Acquire an **exclusive** claim on ``codespace`` for worktree ``owner``.
 
@@ -536,6 +541,10 @@ def claim(
         raise RuntimeError("claim requires a CodeSpace name")
     if not owner:
         raise RuntimeError("claim requires an owner worktree")
+    from .execution_claims import assert_access
+
+    with _lease_lock():
+        assert_access(codespace, execution_identity, owner)
 
     # L2 (cross-machine) acquire/renew, network, *outside* the local lock. Peek
     # the local store lock-free only to choose renew (we already hold it) vs
@@ -599,6 +608,7 @@ def claim(
         # unavailable -> keep prior_token (renew) or "" (acquire): L1-only.
 
     with _lease_lock():
+        assert_access(codespace, execution_identity, owner)
         leases = _prune(_read_leases(), ttl)
         held = leases.get(codespace)
         if held and _claim_owner(held) != owner:
@@ -651,12 +661,18 @@ def lease_token_for(codespace: str, ttl: float = DEFAULT_TTL) -> str | None:
         return None
 
 
-def release_claim(codespace: str, owner: str, ttl: float = DEFAULT_TTL) -> bool:
+def release_claim(
+    codespace: str, owner: str, ttl: float = DEFAULT_TTL, *,
+    execution_identity: tuple[str, str] | None = None,
+) -> bool:
     """Release ``codespace``'s claim iff it is owned by ``owner``. Idempotent.
 
     Also tombstones the cross-machine L2 lease (best-effort) when one was held.
     """
     with _lease_lock():
+        from .execution_claims import assert_access
+
+        assert_access(codespace, execution_identity, owner)
         leases = _prune(_read_leases(), ttl)
         held = leases.get(codespace)
         if not held or _claim_owner(held) != owner:

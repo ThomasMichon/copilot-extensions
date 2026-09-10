@@ -695,7 +695,7 @@ async def test_codespace_handshake_failure_releases_claim(
     )
     monkeypatch.setattr(
         "agent_bridge.session_manager._release_codespace_claim",
-        lambda *args: released.append(args) or True,
+        lambda *args, **kwargs: released.append(args) or True,
     )
     monkeypatch.setattr(
         "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
@@ -1095,7 +1095,7 @@ async def test_failed_handshake_claim_release_failure_retains_session(
 ) -> None:
     monkeypatch.setattr(
         "agent_bridge.session_manager._release_codespace_claim",
-        lambda *_args: False,
+        lambda *_args, **_kwargs: False,
     )
     manager = SessionManager(tmp_db)
     target = SpawnTarget(
@@ -4027,7 +4027,8 @@ class TestCodespaceExclusiveClaim:
         )
         claim_calls: list[tuple[str, str, str | None]] = []
 
-        def fake_claim(name, owner, *, holder_ref=None):
+        def fake_claim(name, owner, *, holder_ref=None, execution_id=""):
+            assert execution_id
             claim_calls.append((name, owner, holder_ref))
             return claim_result
 
@@ -4147,7 +4148,7 @@ class TestCodespaceExclusiveClaim:
         released: list[tuple[str, str]] = []
         monkeypatch.setattr(
             "agent_bridge.session_manager._release_codespace_claim",
-            lambda name, owner: released.append((name, owner)),
+            lambda name, owner, **kwargs: released.append((name, owner)),
         )
         manager, session, _calls = await self._start(
             tmp_db, monkeypatch,

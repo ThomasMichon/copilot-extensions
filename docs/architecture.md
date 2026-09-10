@@ -423,6 +423,16 @@ availability, and does not start the shared credential-service daemon or an ACP
 session. Defaults remain best-effort. See the
 [interactive SSH contract](../plugins/agent-codespaces/README.md#caller-owned-interactive-ssh).
 
+Managed native Copilot uses agent-bridge's
+[`native` execution hosting](../plugins/agent-bridge/docs/native-executions.md)
+rather than making the foreground SSH process its owner. Native records remain
+separate from ACP SessionManager rows. The existing Session Host provides a
+nonce-authenticated PTY execution backend, the CodeSpace provider retains
+preparation/relay/forwarding/claims, and the official remote bridge extension
+proves the real native session registration. Durable mode reservations and the
+shared remote authority catalog exclude ACP fallback until verified retirement.
+Controller or registration loss recovers the same execution identity.
+
 ```mermaid
 flowchart TB
     A["Copilot CLI session<br/>(host machine)"]

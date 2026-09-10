@@ -116,7 +116,7 @@ _ADO_AUTH_EXIT = 77
 # deliberately excluded -- they must keep working without gh. `doctor` in
 # particular self-reports a missing/mis-authed gh, so it never balks.
 _GH_REQUIRED_COMMANDS = frozenset({
-    "ssh", "list", "delete", "finalize", "stop", "verify",
+    "ssh", "native-transport", "list", "delete", "finalize", "stop", "verify",
     "create", "prune", "wait", "pool", "allocate",
 })
 
@@ -338,6 +338,35 @@ def main(argv: list[str] | None = None) -> int:
              "another worktree's control.",
     )
 
+    # --- native execution infrastructure (bridge-owned process boundary) ---
+    native_p = sub.add_parser("native-transport", help="Serve shared infrastructure for a native execution")
+    native_p.add_argument("name")
+    native_p.add_argument("--owner", dest="effort", required=True)
+    native_p.add_argument("--execution-id", required=True)
+    native_p.add_argument("--generation", required=True)
+    native_p.add_argument("--repo")
+    native_p.add_argument("--no-plugin-staging", action="store_true", default=True)
+    native_p.add_argument("--require-relay", action="store_true", default=True)
+    native_p.add_argument("--local-forward", action="append", default=[])
+    native_p.add_argument("--reverse-forward", action="append", default=[])
+    native_p.add_argument("--resume-infrastructure", dest="no_provision", action="store_true")
+    native_p.set_defaults(
+        native_transport=True, native_retired=False, remote_cmd=None, remote_cmd_file=None,
+        interactive_command=None, interactive_command_file=None, no_relay=False,
+        stdio=False, force=False, force_claim=False, stage_plugins=[], timeout=60.0,
+        connect_timeout=None, auth_cache_warmup=None, session_id=None,
+    )
+    abort_p = sub.add_parser("native-abort", help="Release a proven unlaunched native reservation")
+    abort_p.add_argument("name")
+    abort_p.add_argument("--owner", required=True)
+    abort_p.add_argument("--execution-id", required=True)
+    abort_p.add_argument("--generation", required=True)
+    retirement_p = sub.add_parser("native-retirement", help="Read an identity-bound native retirement receipt")
+    retirement_p.add_argument("name")
+    retirement_p.add_argument("--owner", required=True)
+    retirement_p.add_argument("--execution-id", required=True)
+    retirement_p.add_argument("--generation", required=True)
+
     # --- list ---
     list_parser = sub.add_parser("list", help="List active CodeSpaces")
     list_parser.add_argument(
@@ -553,6 +582,9 @@ def main(argv: list[str] | None = None) -> int:
         help="Acquire an EXCLUSIVE, worktree-keyed claim on a CodeSpace (#897)",
     )
     claim_p.add_argument("codespace", help="CodeSpace name to claim")
+    claim_p.add_argument("--interaction-mode", choices=["acp"])
+    claim_p.add_argument("--execution-id")
+    claim_p.add_argument("--generation")
     claim_p.add_argument(
         "--owner", dest="owner", default=None,
         help="Owning worktree (its worktree-dir). Defaults to the calling "
@@ -576,6 +608,8 @@ def main(argv: list[str] | None = None) -> int:
         help="Release this worktree's exclusive claim on a CodeSpace (#897)",
     )
     release_claim_p.add_argument("codespace", help="CodeSpace name")
+    release_claim_p.add_argument("--execution-id")
+    release_claim_p.add_argument("--generation")
     release_claim_p.add_argument(
         "--owner", dest="owner", default=None,
         help="Owning worktree (defaults to the calling worktree). Only releases "
@@ -805,6 +839,18 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     args = parser.parse_args(argv)
+    if getattr(args, "interaction_mode", None) and not (
+        getattr(args, "execution_id", None) and getattr(args, "generation", None)
+    ):
+        parser.error("interaction-mode claims require --execution-id and --generation")
+    if getattr(args, "execution_id", None) or getattr(args, "generation", None):
+        from .execution_claims import identifier
+
+        try:
+            identifier(args.execution_id)
+            identifier(args.generation)
+        except (ValueError, AttributeError):
+            parser.error("--execution-id and --generation must both be valid portable identities")
 
     try:
         if args.command and args.command not in {"doctor", "status", "version", "installer-readiness"}:
@@ -856,6 +902,21 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
+        if args.command == "native-transport":
+            from .native_transport import command as native_transport_command
+
+            return native_transport_command(args)
+        if args.command == "native-abort":
+            from .execution_claims import abort_unlaunched
+
+            released = abort_unlaunched(args.name, args.owner, (args.execution_id, args.generation))
+            print(json.dumps({"released": released}))
+            return 0
+        if args.command == "native-retirement":
+            from .execution_claims import retirement
+
+            print(json.dumps({"receipt": retirement(args.name, args.owner, (args.execution_id, args.generation))}))
+            return 0
         if args.command == "ssh":
             return _cmd_ssh(args)
         if args.command == "list":
@@ -1119,6 +1180,22 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
             explicit=getattr(args, "effort", None),
             session_id=getattr(args, "session_id", None),
         )
+    from . import execution_claims
+    from .lease import _lease_lock
+
+    execution_identity = (
+        (args.execution_id, args.generation)
+        if getattr(args, "native_transport", False) else None
+    )
+    try:
+        with _lease_lock():
+            execution_claims.assert_access(args.name, execution_identity, claim_owner)
+    except ClaimConflict as exc:
+        print(f"[BUSY] {exc}", file=sys.stderr)
+        return _BUSY_EXIT
+    except CoordinationRejected as exc:
+        print(f"[BLOCKED] {exc}", file=sys.stderr)
+        return _COORDINATION_EXIT
     # Resolve the qualified holder ClaimRef once, for BOTH the cross-machine L2
     # claim (below) and the cross-harness in-CodeSpace fence (in _run). It is the
     # marker's holder identity even when L1/L2 claiming is disabled, so hoist it
@@ -1144,6 +1221,7 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
                 force=getattr(args, "force_claim", False),
                 active=active_worktree_ids(),
                 holder_ref=holder_ref,
+                **({"execution_identity": execution_identity} if execution_identity else {}),
             )
         except ClaimConflict as exc:
             print(
@@ -1504,6 +1582,11 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
         if not await _required_relay_ready():
             return _RELAY_REQUIRED_EXIT
 
+        if getattr(args, "native_transport", False):
+            from .native_transport import serve
+
+            return await serve(args, manager, connection.config, relay_env)
+
         if args.stdio and remote_cmd:
             # Structured stdio mode for agent-bridge
             tracker.started(ConnectStage.LAUNCH_ACP, "stdio channel")
@@ -1556,6 +1639,13 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     except TargetBusyError as busy:
         print(busy.user_message(), file=sys.stderr)
         return _BUSY_EXIT
+    try:
+        with _lease_lock():
+            execution_claims.assert_access(args.name, execution_identity, claim_owner)
+    except (ClaimConflict, CoordinationRejected) as exc:
+        target_lock.release()
+        print(f"[BLOCKED] {exc}", file=sys.stderr)
+        return _BUSY_EXIT if isinstance(exc, ClaimConflict) else _COORDINATION_EXIT
 
     # Place the Owner hold only AFTER the target lock is held, so a busy-target
     # rejection above can't leak a hold that would linger until its TTL. The
@@ -1577,6 +1667,16 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
 
     async def _run_with_cleanup() -> int:
         heartbeat = None
+        input_watch = None
+        if getattr(args, "native_transport", False):
+            main_task = asyncio.current_task()
+
+            async def watch_input():
+                while not args.native_input.closed.is_set():
+                    await asyncio.sleep(.1)
+                main_task.cancel()
+
+            input_watch = asyncio.create_task(watch_input())
         if claim_owner or defer_to_owner:
             from .ssh_lifetime import maintain_ownership
 
@@ -1602,6 +1702,9 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
             )
             raise
         finally:
+            if input_watch is not None:
+                input_watch.cancel()
+                await asyncio.gather(input_watch, return_exceptions=True)
             if heartbeat is not None:
                 heartbeat.cancel()
                 await asyncio.gather(heartbeat, return_exceptions=True)
@@ -1611,7 +1714,9 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
             # read-only cleanliness probe can execute. Best-effort + degrade-safe:
             # un-probeable / dirty / no holder-ref -> the obligation stays active
             # (never settled blind).
-            if fence_holder_ref:
+            if fence_holder_ref and (
+                not getattr(args, "native_transport", False) or getattr(args, "native_retired", False)
+            ):
                 await _settle_codespace_on_disconnect(
                     manager, args.name, fence_holder_ref,
                 )
@@ -1625,6 +1730,8 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
                 except Exception as exc:
                     log.debug("Owner release for %s failed: %s", args.name, exc)
             await manager.disconnect(args.name)
+            if getattr(args, "native_transport", False):
+                args.native_cleanup_complete = True
 
     try:
         return asyncio.run(_run_with_cleanup())
@@ -4067,6 +4174,32 @@ def _cmd_leases() -> int:
     return 0
 
 
+async def _check_remote_execution_mode(name: str) -> tuple[int, str]:
+    """Inspect native authority through an isolated control-plane channel."""
+    from ssh_manager import ConnectionManager
+    from .lifecycle import account_for_codespace
+
+    key = f"execution-guard-{os.getpid()}-{name}"
+    manager = ConnectionManager()
+    source = CodespaceSource(name, account=account_for_codespace(name))
+    command = (
+        "if command -v agent-bridge >/dev/null 2>&1; then "
+        "agent-bridge native-host guard --requested-mode acp; rc=$?; "
+        "if [ \"$rc\" = 0 ] || [ \"$rc\" = 75 ] || [ \"$rc\" = 78 ]; then exit \"$rc\"; fi; fi; "
+        "for p in \"$HOME\"/.agent-bridge/session-hosts/host-native-*.json; do "
+        "if [ -e \"$p\" ]; then echo 'Native authority requires a compatible hosting runtime'; exit 78; fi; done; "
+        "echo EXECUTION_MODE_CLEAR"
+    )
+    try:
+        await manager.ensure_connected(key, source, [])
+        result = await manager.exec_command(key, "bash -lc " + shlex.quote(command), timeout=30)
+        return result.exit_code, result.stdout
+    except Exception:
+        return 78, "Native mode authority could not be inspected"
+    finally:
+        await manager.disconnect(key)
+
+
 @_context_admitted
 def _cmd_claim(args: argparse.Namespace) -> int:
     """Acquire an exclusive worktree-keyed claim on a CodeSpace (#897).
@@ -4092,6 +4225,23 @@ def _cmd_claim(args: argparse.Namespace) -> int:
         session_id=getattr(args, "session_id", None),
     )
     readiness = coordination.preflight(holder_ref) if holder_ref else None
+    from . import execution_claims
+    from .lease import _lease_lock
+
+    owner = resolve_owner_worktree(explicit=getattr(args, "owner", None))
+    identity = (
+        (args.execution_id, args.generation)
+        if getattr(args, "execution_id", None) else None
+    )
+    try:
+        with _lease_lock():
+            execution_claims.assert_access(args.codespace, identity, owner)
+    except ClaimConflict as exc:
+        print(f"[BUSY] {exc}", file=sys.stderr)
+        return _BUSY_EXIT
+    except CoordinationRejected as exc:
+        print(f"[BLOCKED] {exc}", file=sys.stderr)
+        return _COORDINATION_EXIT
 
     # This escape hatch disables the local exclusive claim, not authorization
     # for an owner-associated operation. The preflight above still applies.
@@ -4106,7 +4256,6 @@ def _cmd_claim(args: argparse.Namespace) -> int:
         print("[OK] Claim disabled (AGENT_CODESPACES_DISABLE_CLAIM); skipped.")
         return 0
 
-    owner = resolve_owner_worktree(explicit=getattr(args, "owner", None))
     if not owner:
         if readiness and readiness.rejected:
             print(
@@ -4122,17 +4271,29 @@ def _cmd_claim(args: argparse.Namespace) -> int:
         )
         return 0
     try:
+        created_reservation = False
+        if getattr(args, "interaction_mode", None):
+            mode_code, mode_detail = asyncio.run(_check_remote_execution_mode(args.codespace))
+            if mode_code != 0 or "EXECUTION_MODE_CLEAR" not in mode_detail.splitlines():
+                print(f"[BLOCKED] {mode_detail}", file=sys.stderr)
+                return _BUSY_EXIT if mode_code == 75 else _COORDINATION_EXIT
+            created_reservation = execution_claims.reserve(
+                args.codespace, owner, args.execution_id, args.generation, args.interaction_mode,
+            )
         lease = claim(
             args.codespace, owner,
             force=getattr(args, "force_claim", False),
             active=active_worktree_ids(),
             holder_ref=holder_ref,
             preflight_result=readiness,
+            **({"execution_identity": identity} if identity else {}),
         )
     except ClaimConflict as exc:
-        print(f"[BUSY] {exc} Use --force-claim to take over.", file=sys.stderr)
+        print(f"[BUSY] {exc} End the owning execution before changing modes.", file=sys.stderr)
         return _BUSY_EXIT
     except CoordinationRejected as exc:
+        if created_reservation:
+            execution_claims.release(args.codespace, owner, identity)
         print(
             f"[BLOCKED] CodeSpace claim requires durable coordination: {exc}",
             file=sys.stderr,
@@ -4155,7 +4316,16 @@ def _cmd_release_claim(args: argparse.Namespace) -> int:
         print("[WARN] No owning worktree resolved; nothing to release.",
               file=sys.stderr)
         return 0
-    if release_claim(args.codespace, owner):
+    from . import execution_claims
+
+    identity = (args.execution_id, args.generation) if getattr(args, "execution_id", None) else None
+    mode = execution_claims.get(args.codespace)
+    if mode and mode["mode"] == "native":
+        print("[BLOCKED] Native execution retirement must be verified by agent-bridge native stop.", file=sys.stderr)
+        return _COORDINATION_EXIT
+    if release_claim(args.codespace, owner, **({"execution_identity": identity} if identity else {})):
+        if identity:
+            execution_claims.release(args.codespace, owner, identity)
         print(f"[OK] Released claim on {args.codespace} (owner {owner})")
     else:
         print(f"No claim on {args.codespace} owned by {owner}.")

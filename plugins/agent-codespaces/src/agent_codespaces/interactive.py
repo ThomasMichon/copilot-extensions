@@ -12,7 +12,7 @@ from pathlib import Path
 
 def normalize_options(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     """Validate before command-file normalization, claims, or connections."""
-    if args.command != "ssh":
+    if args.command not in {"ssh", "native-transport"}:
         return
     if args.require_relay and args.no_relay:
         parser.error("--require-relay cannot be combined with --no-relay")

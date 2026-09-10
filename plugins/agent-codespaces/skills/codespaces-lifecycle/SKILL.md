@@ -42,6 +42,9 @@ self-provision on first use. Full detail:
 Choose the requested interaction surface:
 
 - **ACP dispatch:** use agent-bridge's `send`/session controls.
+- **Native Copilot:** use agent-bridge's `native start/attach/resume/status/stop`
+  hosting surface, retaining the execution ID and generation. Do not substitute
+  a foreground SSH process for managed native lifetime or representation.
 - **Explicit caller-owned interactive terminal:** use the provider's
   `ssh --interactive-command-file` flow below. Do not redirect an explicitly
   selected interactive terminal to ACP dispatch.
@@ -169,6 +172,14 @@ model and its explicit degraded-state boundaries.
 
 ### Explicit caller-owned interactive terminal
 
+For **native Copilot**, the shared hosting entry is
+`<agent-bridge catalog argv[0]> native start --codespace NAME --owner OWNER
+--cwd /workspaces/example-web --request-id REQUEST --command-file PATH
+--no-plugin-staging --require-relay --json`. Attach/resume the returned execution
+with its generation; require its real native registration before readiness.
+The lower-level SSH primitive below remains for other caller-owned terminals,
+not a substitute for native hosting. Neither selection redirects to ACP.
+
 For an explicitly requested terminal/startup command, check the resolved
 provider's `ssh --help` for `--interactive-command-file`, `--local-forward`,
 `--reverse-forward`, `--no-plugin-staging`, and `--require-relay`. Missing support
@@ -191,7 +202,7 @@ the Owner's configuration-only `owner --status` is not service readiness.
 ```
 
 Use a trusted UTF-8 command file with LF endings, for example
-`cd /workspaces/example-web && exec copilot`. Forward flags are repeatable;
+`cd /workspaces/example-web && exec bash -il`. Forward flags are repeatable;
 select the caller's actual loopback listener ports. Keep credential/repo
 preparation enabled: `--no-plugin-staging` suppresses provider-controlled plugin
 registration/install and host payload copying without blanket `--no-provision`

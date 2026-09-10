@@ -6,6 +6,15 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _neutralize_remote_mode_inspection(monkeypatch):
+    from unittest.mock import AsyncMock
+    from agent_codespaces import __main__ as cli
+
+    monkeypatch.setattr(cli, "_check_remote_execution_mode",
+                        AsyncMock(return_value=(0, "EXECUTION_MODE_CLEAR")))
+
+
+@pytest.fixture(autouse=True)
 def _disable_codespace_claim(monkeypatch):
     """Disable the #897 exclusive-claim enforcement by default in unit tests.
 

@@ -382,6 +382,11 @@ class CliNamespaceResolver(NamespaceResolver):
         return self._prefix
 
     @property
+    def management_command(self) -> list[str] | None:
+        """The attributable provider invocation, without ambient-name substitution."""
+        return list(self._command) if self._command else None
+
+    @property
     def bare_addressable(self) -> bool:
         if self._fallback is not None:
             return self._fallback.bare_addressable

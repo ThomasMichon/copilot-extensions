@@ -36,6 +36,9 @@ class ProtocolError(Exception):
 class MsgType(bytes, enum.Enum):
     # Frontend -> Host
     ATTACH = b"A"      # payload: u64 last_acked_seq (0 == fresh attach)
+    PROBE = b"P"       # authenticated liveness query; never displaces a frontend
+    RESIZE = b"R"      # native terminal only: u16 rows + u16 columns
+    START = b"B"       # native host admission gate: expected child pid + nonce
     ACK = b"K"         # payload: u64 seq
     WRITE = b"W"       # payload: raw ACP bytes to relay into child stdin
     TERMINATE = b"T"   # payload: empty -- explicit, sanctioned reap
@@ -96,6 +99,20 @@ def pack_liveness(alive: bool, exit_code: int = 0) -> bytes:
 def pack_flag(value: bool) -> bytes:
     """Encode a single boolean (STATUS/DETACH ``reapable``) as one byte."""
     return b"\x01" if value else b"\x00"
+
+
+def pack_resize(rows: int, columns: int) -> bytes:
+    if not 1 <= rows <= 65535 or not 1 <= columns <= 65535:
+        raise ProtocolError("terminal dimensions must be in 1..65535")
+    return struct.pack(">HH", rows, columns)
+
+
+def unpack_resize(payload: bytes) -> tuple[int, int]:
+    if len(payload) != 4:
+        raise ProtocolError("invalid terminal resize payload")
+    rows, columns = struct.unpack(">HH", payload)
+    pack_resize(rows, columns)
+    return rows, columns
 
 
 def unpack_flag(payload: bytes) -> bool:

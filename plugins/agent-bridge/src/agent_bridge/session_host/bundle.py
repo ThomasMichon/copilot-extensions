@@ -41,6 +41,8 @@ _AGENT_BRIDGE_MODULES = (
     "session_host/host.py",
     "session_host/osutil.py",
     "session_host/launcher.py",
+    "session_host/terminal.py",
+    "session_host/execution_guard.py",
 )
 _MAIN = "agent_bridge.session_host.launcher:main"
 

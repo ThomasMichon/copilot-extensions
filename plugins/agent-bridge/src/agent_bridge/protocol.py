@@ -28,7 +28,8 @@ The daemon advertises both on ``/health``; ``BridgeClient`` reads them (see
 from __future__ import annotations
 
 # Current HTTP wire-contract version this build speaks.
-HTTP_PROTOCOL_VERSION = 14
+HTTP_PROTOCOL_VERSION = 15
+NATIVE_EXECUTION_PROTOCOL_VERSION = 15
 
 # First version that exposes the harness-owned relay interruption capability.
 RELAY_INTERRUPT_PROTOCOL_VERSION = 2

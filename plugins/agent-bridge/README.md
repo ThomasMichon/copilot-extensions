@@ -1,5 +1,9 @@
 # Agent Bridge
 
+Explicitly selected native CodeSpace Copilot uses the shared
+[`native start/attach/resume/status/stop` hosting contract](docs/native-executions.md).
+It retains bridge/provider infrastructure without an ACP surrogate session.
+
 Persistent inter-agent communication service for Copilot CLI. One instance per
 machine, providing session management, SSE event streaming, live-session
 messaging, and agent subprocess spawning across local, SSH, CodeSpace, and
