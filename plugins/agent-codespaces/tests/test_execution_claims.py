@@ -104,6 +104,8 @@ def test_mode_race_has_exactly_one_winner(state):
 def test_only_clean_unlaunched_infrastructure_can_abort(state):
     native()
     identity = ("native-one", "generation-one")
+    assert modes.get("example-space")["infrastructureStopped"] is True
+    modes.mark("example-space", "owner", identity, infrastructureStopped=False)
     with pytest.raises(lease.CoordinationRejected):
         modes.abort_unlaunched("example-space", "owner", identity)
     modes.mark("example-space", "owner", identity, infrastructureStopped=True)

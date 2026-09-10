@@ -54,6 +54,7 @@ async def serve(args, manager, ssh_config, relay_env: str) -> int:
     jobs: set[asyncio.Task] = set()
     identity = (args.execution_id, args.generation)
     retired_result = None
+    retirement_only = bool(getattr(args, "retirement_only", False))
 
     async def emit(value: dict) -> None:
         def write():
@@ -145,6 +146,8 @@ async def serve(args, manager, ssh_config, relay_env: str) -> int:
                 await emit({"id": request_id, "ok": True, "result": retired_result})
                 return
             require_owner()
+            if retirement_only and action not in {"stop", "status"}:
+                raise ValueError("retirement-only transport cannot launch, activate, or deliver input")
             mapping = {"launch": "start", "activate": "activate", "status": "status",
                        "stop": "stop", "message": "message", "result": "result"}
             if action not in mapping:
@@ -169,7 +172,7 @@ async def serve(args, manager, ssh_config, relay_env: str) -> int:
                 except Exception:
                     result["recovery"] = {"ok": False, "detail": "session recovery remains pending; venue preserved"}
                 execution_claims.update_recovery(args.name, args.effort, identity, result["recovery"])
-            elif result.get("host") and not result.get("retired"):
+            elif action != "stop" and not retirement_only and result.get("host") and not result.get("retired"):
                 result["localPort"] = await ensure_forwards(int(result["host"]["port"]))
             result["ports"] = [
                 {"direction": direction, "listen": listen, "connect": connect, "host": "127.0.0.1"}
@@ -197,7 +200,8 @@ async def serve(args, manager, ssh_config, relay_env: str) -> int:
         if ready.exit_code != 0 or state.get("module") != "agent-bridge/runtime" or state.get("state") != "ready":
             raise RuntimeError("remote shared agent-bridge service is not ready")
         await emit({"event": "ready", "capability": CAPABILITY, "version": 1})
-        monitor_task = asyncio.create_task(monitor())
+        if not retirement_only:
+            monitor_task = asyncio.create_task(monitor())
         while True:
             raw = await args.native_input.next()
             if not raw:
@@ -241,9 +245,6 @@ def command(args) -> int:
     except (ClaimConflict, TargetBusyError):
         print(json.dumps({"event": "rejected", "code": "venue_busy"}), flush=True)
         return 75
-    execution_claims.mark(
-        args.name, args.effort, (args.execution_id, args.generation), infrastructureStopped=False,
-    )
     args.native_input = InputPump()
     print(json.dumps({"event": "reserved", "executionId": args.execution_id, "generation": args.generation}), flush=True)
     account = lifecycle.account_for_codespace(args.name)

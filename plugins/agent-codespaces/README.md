@@ -168,6 +168,14 @@ There are also bridge-facing seams (`namespace-list`, `namespace-resolve`,
 `relay-launch-env`, `provision-command`, `acp-model-flags`). They are invoked by
 agent-bridge and are not the normal human/operator surface.
 
+### Native retirement control
+
+Native retirement uses an identity-bound control-only reconnection when normal
+infrastructure is unavailable. It does not rebind application forwards or
+activate a paused native child. Shared required-relay/auth and ownership checks
+still apply. A reservation that failed admission before infrastructure started
+can be retired with its generation; uncertain prior cleanup still requires proof.
+
 ### Diagnostic command input
 
 For a diagnostic command whose input exceeds local shell command-line limits,

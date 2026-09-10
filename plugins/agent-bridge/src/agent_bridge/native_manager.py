@@ -65,7 +65,7 @@ class ProviderTransport:
         self.ready = None
         self.write_lock = asyncio.Lock()
 
-    async def start(self, *, resume: bool) -> None:
+    async def start(self, *, resume: bool, retirement_only: bool = False) -> None:
         spec = self.row["data"]["spec"]
         argv = [
             *self.prefix, "native-transport", self.row["codespace"],
@@ -74,9 +74,12 @@ class ProviderTransport:
         ]
         if resume:
             argv.append("--resume-infrastructure")
-        for key, flag in (("localForward", "--local-forward"), ("reverseForward", "--reverse-forward")):
-            for value in spec[key]:
-                argv += [flag, value]
+        if retirement_only:
+            argv.append("--retirement-only")
+        else:
+            for key, flag in (("localForward", "--local-forward"), ("reverseForward", "--reverse-forward")):
+                for value in spec[key]:
+                    argv += [flag, value]
         env = dict(os.environ)
         for key in ("COPILOT_AGENT_SESSION_ID", "COPILOT_SESSION_ID", "SESSION_ID", "COPILOT_PLUGIN_ROOT"):
             env.pop(key, None)
@@ -207,12 +210,17 @@ class NativeManager:
         self.tasks[row["id"]] = task
         task.add_done_callback(lambda _: self.tasks.pop(row["id"], None))
 
-    async def _prepare(self, execution_id: str, generation: str, *, launch: bool = False) -> None:
+    async def _prepare(
+        self, execution_id: str, generation: str, *, launch: bool = False,
+        retirement_only: bool = False,
+    ) -> None:
         lock = self.locks.setdefault(execution_id, asyncio.Lock())
         async with lock:
             store = self.store()
             row = store.get(execution_id, generation)
             if row["state"] in {"stopped", "rejected"}:
+                return
+            if row["state"] == "stopping" and not retirement_only:
                 return
             transport = self.transports.get(execution_id)
             try:
@@ -225,7 +233,12 @@ class NativeManager:
                         ),
                     )
                     self.transports[execution_id] = transport
-                    await transport.start(resume=not launch)
+                    if retirement_only:
+                        await transport.start(resume=True, retirement_only=True)
+                    else:
+                        await transport.start(resume=not launch)
+                if retirement_only:
+                    return
                 if launch:
                     store.update(
                         execution_id, generation, launchRequested=True, phase="launching", allowed_states=_LIVE,
@@ -249,7 +262,10 @@ class NativeManager:
                 if current["state"] not in {"stopped", "rejected"}:
                     rejected = getattr(exc, "code", "") == "venue_busy" and not current["data"].get("infrastructureOwned")
                     store.update(
-                        execution_id, generation, state="rejected" if rejected else "unreachable",
+                        execution_id, generation,
+                        state="stopping" if current["state"] == "stopping" else (
+                            "rejected" if rejected else "unreachable"
+                        ),
                         represented=False, error=getattr(exc, "code", "infrastructure_unavailable"),
                         allowed_states=(*_LIVE, "stopping"),
                     )
@@ -272,11 +288,12 @@ class NativeManager:
 
     @staticmethod
     def _save_result(store, execution_id, generation, result):
+        stopping = store.get(execution_id, generation)["state"] == "stopping"
         return store.update(
-            execution_id, generation, state="stopping" if result.get("retired") or result["state"] == "stopped" else result["state"],
-            represented=bool(result.get("represented")), sessionId=result.get("sessionId"),
+            execution_id, generation, state="stopping" if stopping or result.get("retired") or result["state"] == "stopped" else result["state"],
+            represented=not stopping and bool(result.get("represented")), sessionId=result.get("sessionId"),
             endpoint=result, ports=result.get("ports", []), exitCode=result.get("exitCode"),
-            phase="ready" if result.get("represented") else "registration",
+            phase="stopping" if stopping else ("ready" if result.get("represented") else "registration"),
             error=result.get("error"), retired=bool(result.get("retired")),
             allowed_states=(*_LIVE, "stopping"),
         )
@@ -286,7 +303,7 @@ class NativeManager:
         if store is None:
             raise NativeError("not_found", "Native execution is not recorded", 404)
         row = store.get(execution_id, generation)
-        if row["state"] in {"stopped", "rejected"}:
+        if row["state"] in {"stopped", "rejected", "stopping"}:
             return receipt(row)
         if not self.serving():
             value = receipt(row)
@@ -361,7 +378,7 @@ class NativeManager:
         row = store.get(execution_id, generation)
         if row["state"] == "stopped" and row["data"].get("retired"):
             return receipt(row)
-        store.update(execution_id, generation, state="stopping")
+        store.update(execution_id, generation, state="stopping", represented=False, phase="stopping")
         pending = self.tasks.get(execution_id)
         if pending is not None:
             if not store.get(execution_id, generation)["data"].get("launchRequested"):
@@ -384,6 +401,9 @@ class NativeManager:
             await asyncio.wait_for(proc.communicate(), 30)
             if proc.returncode:
                 raise NativeError("retirement_unconfirmed", "Unlaunched native ownership could not be released")
+            proof = await self._retirement_receipt(row)
+            if not proof or proof.get("noLaunch") is not True:
+                raise NativeError("retirement_unconfirmed", "Unlaunched native retirement receipt is unavailable")
             return receipt(store.update(execution_id, generation, state="stopped", retired=True, phase="stopped"))
         if execution_id not in self.transports:
             cached = await self._retirement_receipt(row)
@@ -392,7 +412,7 @@ class NativeManager:
                     execution_id, generation, state="stopped", retired=True, represented=False,
                     recovery=cached.get("recovery"), exitCode=cached.get("exitCode"), phase="stopped",
                 ))
-            await self._prepare(execution_id, generation)
+            await self._prepare(execution_id, generation, retirement_only=True)
         transport = self.transports.get(execution_id)
         if transport is None:
             raise NativeError("retirement_unconfirmed", "Native infrastructure is unavailable; ownership retained", 503)

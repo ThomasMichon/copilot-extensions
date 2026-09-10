@@ -393,6 +393,10 @@ def main(argv: list[str] | None = None) -> int:
     native_p.add_argument("--local-forward", action="append", default=[])
     native_p.add_argument("--reverse-forward", action="append", default=[])
     native_p.add_argument("--resume-infrastructure", dest="no_provision", action="store_true")
+    native_p.add_argument(
+        "--retirement-only", action="store_true",
+        help="Reconnect owned retirement control without application forwards or activation.",
+    )
     native_p.set_defaults(
         native_transport=True, native_retired=False, remote_cmd=None, remote_cmd_file=None,
         interactive_command=None, interactive_command_file=None, no_relay=False,
@@ -905,6 +909,10 @@ def main(argv: list[str] | None = None) -> int:
     from .interactive import normalize_options
 
     normalize_options(parser, args)
+    if getattr(args, "retirement_only", False) and (
+        args.local_forward or args.reverse_forward
+    ):
+        parser.error("--retirement-only cannot establish application forwards")
 
     # --remote-cmd-file: the internal bridge-dispatch path passes the ACP launch
     # payload as a file PATH (a clean argv token) rather than a --remote-cmd
@@ -1689,10 +1697,19 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     try:
         with _lease_lock():
             execution_claims.assert_access(args.name, execution_identity, claim_owner)
+        if execution_identity is not None:
+            # Only this target-lock owner may begin infrastructure work. Pure
+            # admission failures must not erase an existing cleanup verdict.
+            execution_claims.mark(
+                args.name, claim_owner, execution_identity, infrastructureStopped=False,
+            )
     except (ClaimConflict, CoordinationRejected) as exc:
         target_lock.release()
         print(f"[BLOCKED] {exc}", file=sys.stderr)
         return _BUSY_EXIT if isinstance(exc, ClaimConflict) else _COORDINATION_EXIT
+    except BaseException:
+        target_lock.release()
+        raise
 
     # Place the Owner hold only AFTER the target lock is held, so a busy-target
     # rejection above can't leak a hold that would linger until its TTL. The

@@ -153,6 +153,8 @@ def reserve(name: str, owner: str, execution_id: str, generation: str, mode: str
                 "mode": mode, "owner": owner, "executionId": execution_id,
                 "generation": generation, "createdAt": time.time(),
             }
+            if mode == "native":
+                rows[name]["infrastructureStopped"] = True
             _write(rows)
             return True
     finally:

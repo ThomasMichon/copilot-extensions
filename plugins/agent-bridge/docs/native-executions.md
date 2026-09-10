@@ -97,6 +97,20 @@ preserves the CodeSpace. A recovery failure is reported explicitly and leaves
 venue files intact; terminal exit is not permission to delete the venue.
 Unconfirmed retirement retains ownership and remains a blocker.
 
+Admission failures before infrastructure acquisition retain proof that no
+resources were started. Generation-bound stop can retire that unlaunched
+reservation; an interrupted or unconfirmed cleanup cannot overwrite uncertainty
+with this proof. A launch specification remains immutable: changing rejected
+forwarding requires retiring its generation before using a new request.
+
+Retirement reconnects an authenticated, identity-bound control transport without
+recreating application listeners or activating the native child. An occupied
+development/CDP listener therefore cannot strand a paused or disconnected native
+execution. Status reads preserve retirement intent rather than resuming or
+activating it. Retirement still requires the remote host's verified proof; a
+successful transport connection or empty reservation is not a retirement receipt.
+These are internal bridge/provider changes; the public native verbs are unchanged.
+
 The host backend currently requires Linux process identity. Frontend commands
 support Windows and POSIX terminals. No WSL, private helper runtime, ACP
 surrogate session, or copied host plugin/profile is introduced.
