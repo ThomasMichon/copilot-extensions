@@ -542,7 +542,19 @@ Migration writes `<legacy-root>/.installation-ownership.json`:
     "homeRealPath": "C:\\Users\\example",
     "wslDistro": null
   },
-  "transferredAt": "2026-01-01T00:00:00Z"
+  "transferredAt": "2026-01-01T00:00:00Z",
+  "attribution": {
+    "kind": "explicit-legacy-attribution",
+    "legacyRoot": "C:\\Users\\example\\.agent-example",
+    "context": "C:\\Users\\example\\.copilot-extensions\\marketplaces\\example--0123456789abcdef\\plugins\\agent-example\\install.json",
+    "items": [
+      {
+        "kind": "path",
+        "identity": ".agent-example",
+        "path": "C:\\Users\\example\\.agent-example"
+      }
+    ]
+  }
 }
 ```
 
@@ -551,6 +563,10 @@ generation. A tombstone whose activation is missing, unreadable, mismatched, or
 foreign is `orphaned-transfer`: all writers fail closed and legacy operation
 must never resume. Explicit rollback first publishes the next legacy activation
 generation and only then clears the tombstone while holding both locks.
+When a caller records explicit attribution details, `attribution.items`
+enumerates exactly which legacy artifacts were claimed from which paths; absent,
+ambiguous, linked/reparsed, or orphaned artifacts are preserved unchanged and
+remain outside that list.
 
 Legacy footprint is qualified by ownership. Present but unattributed state
 blocks automatic activation for every cell. A valid tombstone attributing an
@@ -745,6 +761,9 @@ verification. Failure to acquire either lock fails closed. Publication order
 for a transferred legacy footprint must never expose namespaced activation
 without its matching tombstone, nor clear the tombstone before a rollback
 activation is durable.
+An explicit attribution command may no-op when the same destination already owns
+the tombstoned footprint, but it must never silently claim ambiguous or
+orphaned legacy state.
 
 At every iteration boundary and immediately before mutation, legacy and
 namespaced long-running loops recheck maintenance, the tombstone, activation
