@@ -109,10 +109,14 @@ def _spawn_serve_host(handle: str) -> None:
     """
     import subprocess
 
-    from agent_procutil import detached_kwargs, windowless_python
+    from agent_procutil import detached_kwargs, windowless_python, windowless_python_env
 
-    cmd = [windowless_python(sys.executable), "-m", "agent_mcp", "serve", "--socket", handle]
+    python = sys.executable
+    cmd = [windowless_python(python), "-m", "agent_mcp", "serve", "--socket", handle]
+    env = dict(os.environ)
+    env.update(windowless_python_env(python))
     kwargs: dict = {
+        "env": env,
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.DEVNULL,
         "stderr": subprocess.DEVNULL,

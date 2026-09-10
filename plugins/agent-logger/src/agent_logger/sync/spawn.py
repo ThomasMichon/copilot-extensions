@@ -41,7 +41,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from agent_procutil import detached_kwargs, windowless_python
+from agent_procutil import detached_kwargs, windowless_python, windowless_python_env
 
 from agent_logger.sync.lock import sync_lock
 
@@ -128,9 +128,11 @@ def spawn_detached_sync(cfg, *, prune: bool = False) -> int:
     else:
         env.pop(STAGED_ENV, None)
 
-    cmd = [windowless_python(sys.executable), "-m", "agent_logger.sync.engine", "run"]
+    python = sys.executable
+    cmd = [windowless_python(python), "-m", "agent_logger.sync.engine", "run"]
     if prune:
         cmd.append("--prune")
+    env.update(windowless_python_env(python))
 
     try:
         subprocess.Popen(  # noqa: S603 - fixed argv, detached background sync

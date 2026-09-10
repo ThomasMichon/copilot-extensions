@@ -74,6 +74,7 @@ from agent_procutil import (
     detached_kwargs,
     windowless_daemon_kwargs,
     windowless_python,
+    windowless_python_env,
 )
 
 from . import (
@@ -9299,7 +9300,10 @@ def _start_provisioning_if_needed(
         "--apply",
     ]
     argv[0] = _windowless_python()
+    env = dict(os.environ)
+    env.update(windowless_python_env(sys.executable))
     kwargs: dict = {
+        "env": env,
         "stdin": subprocess.DEVNULL,
         "cwd": os.path.expanduser("~"),
     }

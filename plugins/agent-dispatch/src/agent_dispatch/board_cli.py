@@ -15,7 +15,7 @@ from pathlib import Path
 
 from .install_paths import install_dir
 from .procutil import no_window_kwargs as _no_window_kwargs
-from .procutil import windowless_python
+from .procutil import windowless_python, windowless_python_env
 
 GROUPS = (
     "Blocked",
@@ -173,8 +173,9 @@ def main(argv: list[str] | None = None) -> int:
 
     local = _local_machine()
     if local and local != args.machine.casefold():
+        python = sys.executable
         command = [
-            windowless_python(sys.executable),
+            windowless_python(python),
             "-m",
             "agent_dispatch",
             "inbox",
@@ -188,8 +189,10 @@ def main(argv: list[str] | None = None) -> int:
         ]
         if args.label:
             command.extend(["--label", args.label])
+        env = dict(os.environ)
+        env.update(windowless_python_env(python))
         return subprocess.run(
-            command, check=False, **_no_window_kwargs()
+            command, check=False, env=env, **_no_window_kwargs()
         ).returncode
 
     query = {

@@ -140,13 +140,15 @@ def spawn_passive_daemon(ctx: _CutoverContext, control_port: int) -> subprocess.
     cutover process and its lifetime never drifts from the existing
     detach pattern used elsewhere in this plugin.
     """
-    from agent_procutil import detached_kwargs, windowless_python
+    from agent_procutil import detached_kwargs, windowless_python, windowless_python_env
 
-    cmd = [windowless_python(sys.executable), "-m", "agent_mcp", "serve",
+    python = sys.executable
+    cmd = [windowless_python(python), "-m", "agent_mcp", "serve",
           "--socket", str(ctx.new_socket_path),
           "--passive", "--control-port", str(control_port)]
     env = dict(os.environ)
     env["AGENT_MCP_CONTROL_TOKEN"] = ctx.new_control_token
+    env.update(windowless_python_env(python))
     kwargs, opened = _passive_stdio_kwargs(ctx.new_log_path)
     kwargs["env"] = env
     kwargs.update(detached_kwargs())

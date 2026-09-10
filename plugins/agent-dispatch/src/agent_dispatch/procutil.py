@@ -38,6 +38,7 @@ from agent_procutil import (
     no_window_kwargs,
     windowless_daemon_kwargs,
     windowless_python,
+    windowless_python_env,
 )
 
 __all__ = [
@@ -59,6 +60,7 @@ __all__ = [
     "runtime_root",
     "windowless_daemon_kwargs",
     "windowless_python",
+    "windowless_python_env",
 ]
 
 #: Slot-interpreter subpaths, POSIX then Windows (matches

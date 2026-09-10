@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 import secrets
 import time
 from collections.abc import Callable
@@ -207,10 +208,11 @@ def _spawn_self_deploy(python_path: Any) -> None:
     """
     import subprocess
 
-    from agent_procutil import detached_kwargs, windowless_python
+    from agent_procutil import detached_kwargs, windowless_python, windowless_python_env
 
     cmd = [windowless_python(python_path), "-m", "agent_dispatch", "deploy", "--json"]
     kwargs: dict[str, Any] = {
+        "env": {**os.environ, **windowless_python_env(python_path)},
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.DEVNULL,
         "stderr": subprocess.DEVNULL,
