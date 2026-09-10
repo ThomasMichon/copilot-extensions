@@ -372,6 +372,61 @@ See [`design.md`](design.md).
 
 ## Journal
 
+### 2026-09-10 — Phase 6 item 4: long-running loop governance rechecks
+
+- Merged [#2361](https://github.com/ThomasMichon/copilot-extensions/pull/2361)
+  at `64cc326d14db1fe574e70164b98612b30d6f1f32`, landing the next
+  long-running loop governance increment for
+  [#1110](https://github.com/ThomasMichon/copilot-extensions/issues/1110).
+- The shared `installation-context` primitive now exposes
+  `recheck_loop_governance(...)`, which snapshots the active maintenance state,
+  tombstone ownership, and activation / namespace / install generations for one
+  installation context; returns `ready`, `backoff`, or
+  `revalidation-required`; and fails closed when the loop can no longer prove it
+  is still operating on the same ownership and generation it started with.
+- `agent-index` is now the service-bearing exemplar for the slice. Its
+  long-running task-runner loop rechecks governance at the iteration boundary,
+  immediately before dequeueing queued work, and immediately before recording a
+  launched worker. If governance flips after dequeue but before launch, the
+  claimed task is re-queued instead of being left processing under stale
+  authority. Vendored `installation-context` copies were synchronized across
+  every current adopter.
+- Validation:
+  `python -m pytest -q libs/installation-context/tests`
+  (`17 failed, 507 passed, 130 skipped` on native Windows, with the same
+  17 pre-existing failures reproduced unchanged in a detached `origin/main`
+  worktree and already tracked under
+  [#2352](https://github.com/ThomasMichon/copilot-extensions/issues/2352));
+  `python tools/run-plugin-tests.py agent-index`
+  (`1 failed, 335 passed, 60 skipped`, with the unchanged Windows
+  `test_managed_adapter_runs_real_service_without_plugin_or_engine_provisioning`
+  failure reproduced on both this branch and detached `origin/main`, now
+  tracked in [#2360](https://github.com/ThomasMichon/copilot-extensions/issues/2360));
+  `ruff check --select F,E9` on the changed Python files,
+  `python tools/check-install-contract.py`,
+  `python tools/check-version-consistency.py`,
+  `python tools/check-vendored-libs-sync.py`,
+  `python tools/sync-installation-context.py --check`,
+  `python libs/payload-invocation/generate.py --all --check`,
+  `python -m pytest -q libs/installer-readiness/tests`,
+  `python tools/check-marketplace-isolation.py`,
+  `python tools/check-docs-consistency.py`, and `git diff --check` all passed.
+  WSL / POSIX changed-surface coverage also passed via
+  `python -m pytest -q libs/installation-context/tests/test_installation_mode_governance.py -k "loop_recheck or maintenance_status_reports_authorization_metadata or attribute_legacy_state or deactivate_installation"`
+  (`16 passed, 101 deselected`),
+  `python -m pytest -q libs/installation-context/tests/test_vendoring.py`
+  (`3 passed`), and
+  `python3 tools/run-plugin-tests.py agent-index -k task_runner_governance`
+  (`6 passed, 602 deselected`). The full WSL `agent-index` suite hit an
+  unrelated pre-existing `WindowsPath` internal-error path outside the new loop
+  governance surface, so the POSIX proof here stayed on the changed surfaces.
+- This does **not** check off the Phase 6 plan item yet. Additional applicable
+  long-running loops still need the same recheck contract, including the
+  `agent-worktrees` resident `status-monitor`, the `agent-dispatch`
+  coordinator / supervisor / supervisor-daemon loops, and the `agent-bridge`
+  periodic daemon loops (GC, heartbeat / reattach, idle and live-session
+  reapers, and periodic worktree discovery).
+
 ### 2026-09-10 — Phase 6 item 3: explicit rollback / deactivation
 
 - Merged [#2353](https://github.com/ThomasMichon/copilot-extensions/pull/2353)
