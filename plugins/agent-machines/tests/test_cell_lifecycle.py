@@ -233,6 +233,18 @@ def test_legacy_attribution_refuses_without_legacy_lock_or_install_lock(tmp_path
     profile = tmp_path / "profile"
     profile.mkdir()
     legacy_state(profile)
+    monkeypatch.setattr(
+        engine.ic,
+        "_current_environment",
+        lambda **_kwargs: (
+            {
+                "platform": "windows" if os.name == "nt" else "posix",
+                "homeRealPath": str(profile.resolve()),
+                "wslDistro": None,
+            },
+            profile.resolve(),
+        ),
+    )
     monkeypatch.setenv("HOME", str(profile))
     monkeypatch.setenv("USERPROFILE", str(profile))
     args.action = "cell-attribute-legacy"
@@ -247,6 +259,18 @@ def test_legacy_attribution_refuses_without_legacy_lock_or_install_lock(tmp_path
         engine.lifecycle(args)
 
     monkeypatch.undo()
+    monkeypatch.setattr(
+        engine.ic,
+        "_current_environment",
+        lambda **_kwargs: (
+            {
+                "platform": "windows" if os.name == "nt" else "posix",
+                "homeRealPath": str(profile.resolve()),
+                "wslDistro": None,
+            },
+            profile.resolve(),
+        ),
+    )
     monkeypatch.setenv("HOME", str(profile))
     monkeypatch.setenv("USERPROFILE", str(profile))
     legacy_state(profile)
