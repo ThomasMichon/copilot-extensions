@@ -1,6 +1,7 @@
 # Installation-Mode Governance
 
 [Effort](README.md) · [Architecture](design.md) ·
+[Phase 6 lifecycle note](phase-6-lifecycle.md) ·
 [Normative install contract](../../../docs/install-contract.md#installation-mode-governance) ·
 [Migration issue #1110](https://github.com/ThomasMichon/copilot-extensions/issues/1110)
 
@@ -206,7 +207,6 @@ No rollout step changes the absent-file default.
   deactivation, cleanup, and maintenance.
 - Platform-specific owner-liveness checks used to classify a maintenance
   sidecar as stale.
-- Retention duration for inert rollback material after deactivation.
 
 These choices do not alter binary desired policy, sticky actual mode, ownership
 tombstones, two-lock migration, or fail-closed status precedence.
