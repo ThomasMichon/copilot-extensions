@@ -32,14 +32,19 @@
   (dispatch register-once under elevated update), #1841
   (declare service lifecycle tiers and reconcile user-mode ensure), #2301
   (audit + close reality gaps against the process-count-scales-with-services-not-sessions
-  invariant — Phase 4b(ii)'s per-plugin audit target).
+  invariant — Phase 4b(ii)'s per-plugin audit target), #2323
+  (resident accelerator daemon for classify/list, thin-client protocol — Phase 4d).
 - **Lifecycle-policy slice:** #625 (lifecycle pecking order and conformance
   audit).
 - **Related:** #438 (bridge cutover-on-update),
   #396 (dispatch hot-reconciled supervision), #229 (worktree state store),
   #918 (resident status monitor), #1788 (session lifecycle hook coalescing),
   #2259 (agent-dispatch supervisor self-update, landed default-on via #2266/#2280),
-  #2300 (the vision extension this sub-phase's design realizes).
+  #2300 (the vision extension this sub-phase's design realizes),
+  #2315 (Phase 4c design), #2322 (Phase 4c implementation — the classify-pass
+  lease Phase 4d's daemon narrows to a fallback path, not supersedes),
+  #2319 (vision revision naming the thin-client/ref-counted-subscriber
+  expectation Phase 4d realizes).
 
 ## Guiding Intent
 
@@ -214,9 +219,60 @@ cross-checked against a live host running ~7 concurrent sessions) found:
   Phase 2 primitive to a real, evidence-grounded race in agent-worktrees's own
   classify path — not a new cross-cutting cache layer, and not the same
   problem Phase 4b(ii) governs (that phase is about hook/callback transience;
-  this is about two independent *batch classification* callers). No plugin
-  code change lands in this design entry; the design clears review first, per
-  this effort's standing convention.
+  this is about two independent *batch classification* callers).
+- **Landed:** design (#2315) then implementation (#2322) — both merged.
+  ``_classify_records`` acquires the per-project lease; a losing caller waits
+  (bounded, default 15s) then answers from `_classify_from_cache` (a fresh
+  disk re-read, never a guessed state); the lease is advisory-only (any
+  lease-layer failure degrades to classifying live, unchanged from before this
+  phase). See Phase 4d below for the larger direction this narrow fix is a
+  down payment on.
+
+### Phase 4d — agent-worktrees: resident accelerator daemon for classify/list (#2323)
+
+- **Relationship to Phase 4c.** Phase 4c's lease serializes two racing
+  classify callers but does not eliminate the second caller's cost — the
+  winner still pays the full live classification, and every caller still
+  boots its own process, resolves its own config, and reasons about its own
+  cache. This phase builds the steady-state target PR #2319's vision revision
+  now states explicitly: a reachable resident accelerator that **owns** the
+  computation, with ordinary readers (not only session-lifecycle hooks)
+  reaching it as thin, ref-counted subscribers. Phase 4c's lease is **not
+  superseded** — it remains the correct fallback/degraded path for exactly
+  the case this phase's daemon is unreachable or absent.
+- **Placement.** Extend `hook_ipc.py`'s existing token-authed TCP surface
+  (currently scoped to `session-lifecycle-v1` hook decisions only) with a new
+  request kind for list/classify data. The resident status-monitor
+  (`cmd_status_monitor` — already single-active via a liveness lock, already
+  idle-exits on no demand, already self-retires on supersession) becomes the
+  daemon that answers it, rather than a second, purpose-built process.
+- **Client shape.** An ordinary caller (CLI `list`/`get`, the Picker) becomes
+  a thin client: resolve identity, boot the monitor on demand if none is
+  reachable (waiting for it to publish its address), request, read, exit. The
+  daemon's own lifetime is governed by **explicit subscriber ref-counting**
+  plus a bounded linger — not the TTL/demand-registration heuristic
+  `list_cache.py` uses today, which infers demand rather than counting live
+  subscribers.
+- **The cold-start budget constraint (flagged during design, must not be
+  dropped in implementation).** `hook_ipc`'s existing request read timeout is
+  1 second — correct for a hook decision, far too short for a cold
+  classification pass (which can take seconds for a worktree-heavy project).
+  The client's boot-wait-request sequence needs its own, much larger timeout
+  budget, with an explicit fallback to today's direct path (Phase 4c's lease,
+  or plain live classification when the lease is also unavailable) when no
+  daemon becomes reachable in time. A first caller after an idle-exit must
+  never be worse off than before this phase existed.
+- **Validation.** Extend the adversarial mock harness (Phase 4b(ii),
+  `tools/clean-room/scenarios/plugin-process-hygiene-convergence/`) with new
+  scenarios: cold-boot-and-wait-for-port, concurrent-callers-during-cold-boot
+  (exactly one boots, the rest wait, all receive the correct answer),
+  ref-counted-exit (the daemon lingers until the last subscriber's grace
+  period elapses, then exits), and the fallback-to-direct-computation path
+  firing correctly when the boot-wait times out.
+- **Sequencing.** Design-first per this effort's standing convention: a
+  reviewed design PR (naming the exact request/response wire shape, the
+  ref-count/linger algorithm, and the timeout budgets) lands before any
+  plugin code change.
 
 ### Phase 5 — agent-mcp: version GC + optional multiplexer (#741, #744)
 
@@ -290,6 +346,14 @@ cross-checked against a live host running ~7 concurrent sessions) found:
   own answer, and (c) neither corrupts the tracking YAML (existing
   `_RecordLock` coverage extended, not replaced). Live reproduction case:
   Picker populate racing an independently-launched `list --json --classify`.
+  **Landed** (#2322): 11 new tests plus the existing `TestClassifyRecordsConvo`
+  suite unchanged.
+- **Resident accelerator daemon (Phase 4d, #2323):** four adversarial mock
+  scenarios extending Phase 4b(ii)'s harness — cold-boot-and-wait-for-port,
+  concurrent-callers-during-cold-boot, ref-counted-exit-after-linger, and
+  fallback-to-direct-computation-on-boot-timeout — each a PASS/FAIL check with
+  zero leftover processes, matching this effort's existing validation
+  discipline.
 
 ## Journal
 
@@ -565,3 +629,37 @@ is unchanged: the per-plugin #2301 audit against the now-validated contract.
   computing its own), and updates the Picker/`cmd_list` call sites only if
   either needs the wait-vs-immediate-return choice made explicit at its layer.
 
+### 2026-09-09 (later still) — Phase 4c implementation landed; vision strengthened; Phase 4d scoped
+
+- **Phase 4c implementation landed** (#2322): `_classify_records` now
+  acquires the per-project lease before `_classify_records_live` (the
+  original body, factored out unchanged); a losing caller waits (bounded,
+  default 15s) then answers via the new `_classify_from_cache` (re-reads each
+  record fresh off disk so the winner's stamp is visible, never guesses a
+  state); the lease is advisory-only, degrading to live classification on any
+  non-contention failure. 11 new tests
+  (`tests/test_classify_lease.py`); the existing `TestClassifyRecordsConvo`
+  suite required no changes.
+- **Vision strengthened in the same sitting** (#2319): the operator's own
+  framing of the target end-state — a debounced, globally-reused daemon that
+  ref-counts subscribing callers and exits after both its work and its
+  subscriber count go to zero — was checked against the visions first, per
+  the operator's explicit instruction ("there should be a vision pushing for
+  this already"). It mostly wasn't: `visions/plugin-services`'s
+  `hooks-and-callbacks-are-transient` was scoped to Copilot-invoked hooks
+  only, and `visions/plugins/agent-worktrees`'s "Derived status" section
+  described the resident monitor as merely optional. Both were strengthened:
+  the hook behavior generalizes to any repeated caller of a
+  work-coalescing-singleton, and agent-worktrees now states the thin-client/
+  ref-counted-subscriber/bounded-linger expectation explicitly, naming direct
+  computation as the correct degrade path rather than the steady-state
+  target.
+- **Phase 4d added** (#2323): the daemon architecture itself — a new request
+  kind on `hook_ipc.py`'s existing TCP surface, the resident status-monitor
+  as the daemon, explicit subscriber ref-counting replacing today's TTL/
+  demand-inference, and (flagged during design, load-bearing for
+  implementation) a client-side cold-start timeout budget separate from
+  `hook_ipc`'s existing 1s hook-decision timeout, with an explicit fallback to
+  Phase 4c's lease (not superseded) when no daemon is reachable in time.
+  Design-only; a reviewed design PR precedes any plugin code, per this
+  effort's standing convention.
