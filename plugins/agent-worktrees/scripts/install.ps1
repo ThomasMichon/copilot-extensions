@@ -564,21 +564,32 @@ $RepoDir = $null
 
 # Infer project name: explicit parameter > existing config matching CWD
 if (-not $ProjectName) {
-    # Try to infer from existing config directories (find any .{name}/config.yaml)
+    # Try to infer from existing config directories (find any .{name}/config.yaml).
+    # Never infer the reserved runtime name itself: ~/.agent-worktrees/config.yaml
+    # is the TOOL's OWN runtime config (always present once installed), not a
+    # user-created project -- inferring it whenever the CWD happens to be a
+    # directory literally named `agent-worktrees` (e.g. this plugin's own
+    # checkout/payload dir) is a guaranteed false positive, not something to
+    # warn about on every routine invocation. Skip inference for it entirely so
+    # the noisy warning below is reserved for a genuine explicit -ProjectName
+    # mistake.
     if ((Get-Location).Path -match '[\\/]([^\\/]+)$') {
         $cwdName = $Matches[1]
-        $candidateConf = Join-Path $env:USERPROFILE ".$cwdName\config.yaml"
-        if (Test-Path $candidateConf) { $ProjectName = $cwdName }
+        if ($cwdName -ne 'agent-worktrees') {
+            $candidateConf = Join-Path $env:USERPROFILE ".$cwdName\config.yaml"
+            if (Test-Path $candidateConf) { $ProjectName = $cwdName }
+        }
     }
 }
 # Don't auto-adopt the CWD repo -- project association is explicit.
 # Runtime installs fine without a project name.
 # Reserved-name guard: `agent-worktrees` is the runtime's own global command
 # (the project-agnostic shim from bin/agent-worktrees.{ps1,cmd}, deployed by
-# Deploy-GlobalBinstub), never a per-project launcher. If inference or an
-# explicit -ProjectName resolves to it (e.g. the installer run from a dir
-# literally named `agent-worktrees`), a project deploy would overwrite the
-# global shims with self-`--project` binstubs. Never treat it as a project.
+# Deploy-GlobalBinstub), never a per-project launcher. Auto-inference above
+# already never resolves to it, so reaching here means an EXPLICIT
+# -ProjectName agent-worktrees was passed -- a genuine mistake worth warning
+# about, since a project deploy would overwrite the global shims with
+# self-`--project` binstubs. Never treat it as a project.
 if ($ProjectName -eq 'agent-worktrees') {
     Write-ServiceWarn "Ignoring reserved runtime name 'agent-worktrees' as a project (global command is owned by the tool binstub)"
     $ProjectName = $null
