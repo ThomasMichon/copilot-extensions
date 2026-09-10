@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Explicit, receipt-authorized Agent Machines attribution, repair, and uninstall."""
+"""Explicit, receipt-authorized Agent Machines attribution, deactivation, repair, and uninstall."""
 from __future__ import annotations
 
 import argparse
@@ -10,7 +10,7 @@ import socket
 import stat
 import sys
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -230,11 +230,71 @@ def _attribute_legacy(arguments: argparse.Namespace) -> dict[str, Any]:
     )
 
 
+def _deactivate(arguments: argparse.Namespace) -> dict[str, Any]:
+    if (
+        not ic._path_is_fully_qualified(arguments.context)
+        or not ic._path_is_fully_qualified(arguments.durable_home)
+    ):
+        ic._fail("Cell deactivation requires explicit absolute context and durable home.")
+    durable = ic.canonical_path(arguments.durable_home)
+    current_environment, profile = ic._current_environment(
+        environment=os.environ,
+        os_profile=None,
+        platform=None,
+        wsl_distro=None,
+    )
+    legacy_root, items = _legacy_path_items(profile)
+    present = [item for item in items if os.path.lexists(Path(item["path"]))]
+    legacy_probe = {
+        "declared": True,
+        "result": "present" if present else "absent",
+        "checkedAt": datetime.now(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z"),
+    }
+    if arguments.expected_tombstone_activation_generation is not None:
+        if not legacy_root.is_dir() or ic._is_link_or_junction(legacy_root):
+            ic._fail(
+                "Legacy attribution rollback requires an existing unlinked legacy root."
+            )
+        legacy_lock = provisioning_lock(legacy_root)
+    elif legacy_root.is_dir() and not ic._is_link_or_junction(legacy_root):
+        legacy_lock = provisioning_lock(legacy_root)
+    else:
+        legacy_lock = nullcontext()
+    return ic.deactivate_installation(
+        context=arguments.context,
+        expected_marketplace_id=arguments.expected_marketplace_id,
+        expected_plugin_id="agent-machines",
+        expected_namespace_generation=arguments.expected_namespace_generation,
+        expected_install_generation=arguments.expected_install_generation,
+        expected_activation_generation=arguments.expected_activation_generation,
+        legacy_root=legacy_root,
+        legacy_probe=legacy_probe,
+        expected_tombstone_activation_generation=getattr(
+            arguments,
+            "expected_tombstone_activation_generation",
+            None,
+        ),
+        expect_tombstone_absent=getattr(arguments, "expect_tombstone_absent", False),
+        legacy_lock=legacy_lock,
+        durable_home=durable,
+        maintenance_token=getattr(arguments, "maintenance_token", None),
+        environment=os.environ,
+        os_profile=profile,
+        platform=current_environment["platform"],
+        wsl_distro=current_environment["wslDistro"],
+    )
+
+
 def lifecycle(arguments: argparse.Namespace) -> dict[str, Any]:
     """Execute a derived-only repair or a state-preserving owned uninstall."""
     a = arguments
     if a.action == "cell-attribute-legacy":
         return _attribute_legacy(a)
+    if a.action == "cell-deactivate":
+        return _deactivate(a)
     if not ic._path_is_fully_qualified(a.context) or not ic._path_is_fully_qualified(a.durable_home):
         ic._fail("Lifecycle management requires explicit absolute context and durable home.")
     durable = ic.canonical_path(a.durable_home)
@@ -405,6 +465,7 @@ def lifecycle(arguments: argparse.Namespace) -> dict[str, Any]:
                     return result
 
                 allowed = {"install.json", "installation-activation.json", ".payload-provision.lock",
+                           ic.DEACTIVATION_RECORDS_DIR,
                            "current-version", "last-known-good", "deploy-manifest.json", *ic.ROOT_NAMES}
                 if any(path.name not in allowed for path in root.iterdir()):
                     ic._fail("Uninstall refuses unrecognized plugin-root artifacts.")
@@ -607,13 +668,15 @@ def lifecycle(arguments: argparse.Namespace) -> dict[str, Any]:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("cell-repair", "cell-uninstall", "cell-attribute-legacy"))
+    parser.add_argument("action", choices=("cell-repair", "cell-uninstall", "cell-attribute-legacy", "cell-deactivate"))
     parser.add_argument("--maintenance-token")
     for name in ("context", "durable-home", "expected-marketplace-id", "expected-payload-root",
                  "expected-payload-version", "snapshot-id", "runtime-version"):
         parser.add_argument(f"--{name}")
-    for name in ("expected-namespace-generation", "expected-install-generation"):
+    for name in ("expected-namespace-generation", "expected-install-generation", "expected-activation-generation",
+                 "expected-tombstone-activation-generation"):
         parser.add_argument(f"--{name}", type=ic._parse_cli_generation)
+    parser.add_argument("--expect-tombstone-absent", action="store_true")
     for marker in ("current", "last-known-good"):
         group = parser.add_mutually_exclusive_group(required=False)
         group.add_argument(f"--expected-{marker}-version")
@@ -645,6 +708,29 @@ def main(argv=None) -> int:
                     f"{args.action} requires either --expected-{marker.replace('_', '-')}-version "
                     f"or --expect-{marker.replace('_', '-')}-absent"
                 )
+    elif args.action == "cell-deactivate":
+        required = (
+            "context",
+            "durable_home",
+            "expected_marketplace_id",
+            "expected_namespace_generation",
+            "expected_install_generation",
+            "expected_activation_generation",
+        )
+        missing = [name for name in required if getattr(args, name) in (None, "")]
+        if missing:
+            parser.error(
+                "the following arguments are required for "
+                f"{args.action}: " + ", ".join(f"--{name.replace('_', '-')}" for name in missing)
+            )
+        if (
+            (args.expected_tombstone_activation_generation is None)
+            == (not args.expect_tombstone_absent)
+        ):
+            parser.error(
+                f"{args.action} requires exactly one of "
+                "--expected-tombstone-activation-generation or --expect-tombstone-absent"
+            )
     else:
         for name in ("context", "durable_home", "expected_marketplace_id"):
             if getattr(args, name) in (None, ""):

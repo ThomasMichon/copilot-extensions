@@ -34,6 +34,9 @@ uses explicit receipt-generation and current-marker compare-and-swap
 expectations to publish only cell-local runtime markers. Agent Machines and
 Agent Index expose explicit installer adapter actions for the first four
 transactions;
+the Python API additionally exposes explicit `attribute_legacy_state(...)` and
+`deactivate_installation(...)` helpers for the two-lock migration and rollback
+paths, including monotonic deactivation records under `<plugin-root>/deactivations/`.
 their normal install/bootstrap paths do not call them. The adapters bind the
 selected snapshot to their exact payload root and version. Every mutation
 requires an explicit `--context` / `-Context`; it never adopts an ambient
