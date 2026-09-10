@@ -375,6 +375,49 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-10 — Item 6 precondition: what "all runtime plugins conform" means
+
+- Read `tools/check-marketplace-isolation.py` directly rather than treating its
+  finding count as a literal backlog size. It is a plain regex/heuristic
+  scanner over source files (Python/PS1/sh/JS/JSON/YAML), not a
+  behavior-aware check: it flags any literal `.agent-<name>` path token,
+  `.local/bin` reference, fixed service/task/mutex/pipe/socket/lease/endpoint
+  string assignment, or unqualified sibling-command launch, with a single
+  escape hatch — an inline `marketplace-isolation: allow <reason>` marker. The
+  guard's own docstring already says findings are "the migration baseline" and
+  `--strict` should be used "only after the producing phases have landed," not
+  once every matching string is gone.
+- Sampled the current 681-finding set (`--json`, ~6 findings per category).
+  Every sampled hit across `unqualified-runtime-root`, `global-plugin-binstub`,
+  `fixed-service-identity`, and `path-sibling-launch` was in a plugin this
+  effort has **already converted** (`agent-bridge`, `agent-codespaces`), inside
+  intentional, already-cell-aware legacy-fallback code: `LEGACY_INSTALL_DIR`
+  constants, `payload-invocation.json`'s declared `legacyRuntimeRoot`,
+  `_scoped_identity_suffix`-qualified systemd unit names, and the deliberate
+  default-legacy PATH/binstub path this effort's own design requires to keep
+  working when no installation context is active. None of the sampled findings
+  represented genuinely unconverted plugin surfaces.
+- Conclusion: the guard's non-zero count is not evidence of unfinished plugin
+  conversion by itself. The real path to satisfying item 6 is **convert
+  genuine backlog, then annotate every remaining intentional legacy-fallback
+  occurrence with `marketplace-isolation: allow <reason>`** so the count
+  becomes zero for the right reason, not by deleting legacy fallback paths the
+  effort's own design requires to keep. A future increment must still: (a)
+  triage the full 681-finding set (or whatever it is by then) file-by-file,
+  since this sample was not exhaustive; (b) confirm each finding is either
+  genuine backlog (convert it) or intentional (annotate it); (c) only then
+  re-run with `--strict` and flip the guard in CI. This item stays open and
+  unchecked; do not flip `--strict` on the strength of this note alone.
+- Also confirmed and corrected an unrelated process defect while investigating
+  this: issue [#1110](https://github.com/ThomasMichon/copilot-extensions/issues/1110)
+  had been closed directly (not via a merge "Closes #" keyword) around the
+  time [#2353](https://github.com/ThomasMichon/copilot-extensions/pull/2353)
+  merged, while only 3 of 7 Phase 6 plan items were done and despite that PR's
+  own body stating it did not close the issue. Reopened #1110 with an
+  explanatory comment. Every future Phase 6 (and later-phase) delegate must be
+  told explicitly: never run `gh issue close`; only the effort owner closes an
+  issue, and only once every plan item it tracks is concretely verified done.
+
 ### 2026-09-10 — Phase 6 item 7: rollback and retained-evidence documentation
 
 - Added [`phase-6-lifecycle.md`](phase-6-lifecycle.md) as the focused Phase 6
