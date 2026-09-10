@@ -240,6 +240,29 @@ def test_installers_preserve_two_step_cuda_engine_swap():
     assert 'engine-update)                                                  # rebuild durable engine venv + restart daemon (decoupled from service update)' in sh
 
 
+def test_stop_and_uninstall_also_stop_the_durable_engine_daemon():
+    """The durable engine daemon (daemon.py) is a separate detached process
+    from the light service -- stopping only the service, or only the engine's
+    scheduled task, can leave it running indefinitely (the "kill the detached
+    child, not just the task" gotcha in service-lifecycle-supervision.md,
+    since the daemon can be started directly via `engine start` /
+    Ensure-Running, outside any task-tracked process tree). `Invoke-Stop` /
+    `_stop` -- which `Invoke-Uninstall` / `_uninstall` both call first -- must
+    explicitly stop it via the CLI's own `engine stop` (pid-file-based),
+    not just tear down a scheduled task/systemd unit that may not even own it.
+    """
+    ps = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
+    sh = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
+
+    ps_stop = ps.split("function Invoke-Stop {", 1)[1].split(
+        "\n}\n", 1
+    )[0]
+    assert "-m agent_index engine stop" in ps_stop
+
+    sh_stop = sh.split("_stop() {", 1)[1].split("\n}\n", 1)[0]
+    assert "-m agent_index engine stop" in sh_stop
+
+
 def test_cell_host_build_refuses_before_creating_any_environment(monkeypatch, tmp_path):
     spec = importlib.util.spec_from_file_location(
         "index_boundary_cell", PLUGIN / "scripts" / "cell-runtime.py"

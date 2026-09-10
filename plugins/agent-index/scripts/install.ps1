@@ -2127,7 +2127,20 @@ function Invoke-Start {
 }
 
 function Invoke-Stop {
-    if (Test-Path $LinkPython) { & $LinkPython -I -X utf8 -m agent_index stop | Out-Host }
+    if (Test-Path $LinkPython) {
+        & $LinkPython -I -X utf8 -m agent_index stop | Out-Host
+        # The durable engine daemon is a SEPARATE detached process from the
+        # light service stopped above (daemon.py, launched by 'engine start' /
+        # Ensure-Running via a plain detached Popen, not necessarily under
+        # $EngineTaskName). Stop-ScheduledTask below only tears down a task-
+        # tracked process tree -- it does not touch this one if it was ever
+        # started directly, so a bare Stop-ScheduledTask leaves it running
+        # indefinitely (the "kill the detached child, not just the task"
+        # gotcha in service-lifecycle-supervision.md). `engine stop` uses the
+        # daemon's own pid file and is idempotent -- a no-op when the engine
+        # was never started.
+        & $LinkPython -I -X utf8 -m agent_index engine stop | Out-Host
+    }
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
         Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
         Write-Ok "Service task stopped: $TaskName"
