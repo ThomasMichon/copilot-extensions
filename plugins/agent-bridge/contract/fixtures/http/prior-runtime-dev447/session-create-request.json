@@ -1,17 +1,17 @@
 {
   "captured_from": {
-    "commit": "35fd824bcd8ab0d92b1b9b9b02d56b360885c4a3",
-    "plugin_version": "0.4.0-dev461",
-    "protocol_generation": 15,
+    "commit": "52ad065519d1f0a213ba5e3a472d7851bff643d9",
+    "plugin_version": "0.4.0-dev447",
+    "protocol_generation": 14,
     "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
-    "source_git_blob": "39c37dfbf4376294afb3d5670433b5a840f32077",
-    "source_sha256": "5d6b0eae5980a136b65ce4355a7e7ec42ce38a06e0c75c01d47bb0c8400ea8d6"
+    "source_git_blob": "7a62f57cee4614489fbdf01dd6f3dc6ed070b90a",
+    "source_sha256": "ae71af0b435421a655709f10c9256510d69a5864d3d4f5c47e362d8a5a3b348b"
   },
   "request": {
     "agent": "example-agent",
     "caller_id": "example-caller",
     "force_new": false,
-    "protocol_version": 15,
+    "protocol_version": 14,
     "future_option": {
       "enabled": true
     }
@@ -32,6 +32,6 @@
     "mcp_servers": null,
     "copilot_args": null,
     "env": null,
-    "protocol_version": 15
+    "protocol_version": 14
   }
 }

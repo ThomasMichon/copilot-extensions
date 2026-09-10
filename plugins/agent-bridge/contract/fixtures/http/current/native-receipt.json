@@ -1,0 +1,28 @@
+{
+  "captured_from": {
+    "commit": "35fd824bcd8ab0d92b1b9b9b02d56b360885c4a3",
+    "plugin_version": "0.4.0-dev461",
+    "protocol_generation": 15,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/native_store.py",
+    "source_git_blob": "57f78af37313613f0e8b01f98bf4713f179218fe",
+    "source_sha256": "7b0432b7150ba18d15534e7081b36fbf2be5c329d1ec4581f31e56af4c955aba"
+  },
+  "response": {
+    "schema": "copilot-extensions.native-execution",
+    "version": 1,
+    "executionId": "execution-example",
+    "generation": "generation-example",
+    "mode": "native",
+    "codespace": "example-space",
+    "owner": "/workspaces/example-web",
+    "state": "ready",
+    "sessionId": "session-example",
+    "represented": true,
+    "ready": true,
+    "exitCode": null,
+    "phase": null,
+    "error": null,
+    "ports": [],
+    "recovery": null
+  }
+}

@@ -1,15 +1,15 @@
 {
   "captured_from": {
-    "commit": "783117b627819b728f9d0b26fd65c1edd321190a",
-    "plugin_version": "0.4.0-dev435",
-    "protocol_generation": 14,
+    "commit": "35fd824bcd8ab0d92b1b9b9b02d56b360885c4a3",
+    "plugin_version": "0.4.0-dev461",
+    "protocol_generation": 15,
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
-    "source_git_blob": "64a1a80dee8e0568a57f4d7eea528fcdca3eb17f",
-    "source_sha256": "3c2a43766ce10d69b42aaf9a9f8ce5331faff9cb7d9af8b87c36ab397e2c2cd5"
+    "source_git_blob": "9d2fe10336225462929963237dd33acc8a4e3dfa",
+    "source_sha256": "8e01593aaa622a33166fa1f95ce3863e11377e298d239b1becb12e9a3249249c"
   },
   "declared_range": {
     "minimum": 1,
-    "current": 14
+    "current": 15
   },
   "capability_versions": {
     "relay_interrupt": 2,
@@ -24,6 +24,7 @@
     "remote_operations": 11,
     "conditional_idle_end": 12,
     "remote_event_multiplex": 13,
-    "remote_commands": 14
+    "remote_commands": 14,
+    "native_executions": 15
   }
 }

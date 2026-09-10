@@ -1,0 +1,64 @@
+{
+  "captured_from": {
+    "commit": "35fd824bcd8ab0d92b1b9b9b02d56b360885c4a3",
+    "plugin_version": "0.4.0-dev461",
+    "protocol_generation": 15,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/routes/native.py",
+    "source_git_blob": "a0310ead2712e3af52ba1436d058d053b7686538",
+    "source_sha256": "8b9737185028594db2b7ff564d8a2bf19cad921ac9fb0fdc477b39de32d8fb39"
+  },
+  "routes": [
+    {
+      "path": "/api/v1/native-executions/capabilities",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/v1/native-executions/resolve",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/v1/native-executions",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/v1/native-executions",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/v1/native-executions/{execution_id}",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/v1/native-executions/{execution_id}/stop",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/v1/native-executions/{execution_id}/messages",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/v1/native-executions/{execution_id}/result",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/api/v1/native-executions/{execution_id}/terminal",
+      "methods": []
+    }
+  ]
+}

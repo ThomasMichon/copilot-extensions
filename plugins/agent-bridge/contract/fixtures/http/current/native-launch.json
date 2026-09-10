@@ -1,0 +1,26 @@
+{
+  "captured_from": {
+    "commit": "35fd824bcd8ab0d92b1b9b9b02d56b360885c4a3",
+    "plugin_version": "0.4.0-dev461",
+    "protocol_generation": 15,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/native_manager.py",
+    "source_git_blob": "062a053904b1bc4b32f1db869b661866ec739d99",
+    "source_sha256": "03847e71f7c3d77eab4f274165a3ae7cea45e23eee27e1e2c31e45aad2516fe0"
+  },
+  "validated_request": {
+    "requestId": "request-example",
+    "codespace": "example-space",
+    "owner": "/workspaces/example-web",
+    "cwd": "/workspaces/example-web",
+    "command": "exec copilot",
+    "noPluginStaging": true,
+    "requireRelay": true,
+    "localForward": [
+      "4321:4321"
+    ],
+    "reverseForward": [
+      "9000:9001"
+    ]
+  },
+  "normalization": "Replace the valid temporary controller owner path with a neutral public path."
+}
