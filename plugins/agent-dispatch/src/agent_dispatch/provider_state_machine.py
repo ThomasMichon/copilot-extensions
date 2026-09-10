@@ -220,6 +220,68 @@ def merge_blocked_by_hold(holds: frozenset[HoldReason]) -> bool:
     return bool(holds)
 
 
+@dataclass(frozen=True)
+class Revision:
+    """A PR-target's current revision identity, tracked as two independent
+    fingerprints rather than one opaque token: the submitter's own diff
+    (``diff_hash``) and the base branch tip it targets (``base_sha``).
+    Splitting these is what makes base-only movement distinguishable from a
+    real change to the submitted diff -- Phase 8's base-only detection
+    candidate, re-seated here as a provider-machine observation rather than
+    an independent feature."""
+
+    diff_hash: str
+    base_sha: str
+
+
+class RevisionChangeKind(Enum):
+    """How a PR-target's revision moved between two observations."""
+
+    #: Neither fingerprint changed -- not actually a new revision.
+    NONE = "none"
+    #: Only the base tip moved (unrelated commits landed); the submitter's
+    #: own diff is unchanged. An existing approval still covers this diff.
+    BASE_ONLY = "base_only"
+    #: The submitter's diff itself changed, with or without the base also
+    #: moving. Any existing approval no longer covers the current head.
+    SUBSTANTIVE = "substantive"
+
+
+def classify_revision_change(previous: Revision, current: Revision) -> RevisionChangeKind:
+    """Classify a revision move as none / base-only / substantive, purely
+    from the two fingerprints -- no adapter, no network."""
+    if previous == current:
+        return RevisionChangeKind.NONE
+    if previous.diff_hash == current.diff_hash:
+        return RevisionChangeKind.BASE_ONLY
+    return RevisionChangeKind.SUBSTANTIVE
+
+
+#: Which declared ``APPROVAL_TRANSITIONS`` name (if any) a given revision
+#: change kind implies for the approval dimension. ``BASE_ONLY`` implies no
+#: transition at all: the existing approval still covers the current diff,
+#: so nothing moves. ``NONE`` likewise implies nothing. Only ``SUBSTANTIVE``
+#: implies the declared ``revision_invalidates_approval`` transition -- the
+#: same transition the approval dimension already declares, not a new one.
+REVISION_CHANGE_APPROVAL_TRANSITION: dict[RevisionChangeKind, str | None] = {
+    RevisionChangeKind.NONE: None,
+    RevisionChangeKind.BASE_ONLY: None,
+    RevisionChangeKind.SUBSTANTIVE: "revision_invalidates_approval",
+}
+
+
+def verdict_applies_to_current_revision(
+    verdict_revision: Revision, current_revision: Revision
+) -> bool:
+    """Whether a verdict computed against ``verdict_revision`` still applies
+    to ``current_revision``. A verdict/approval event that arrives after a
+    substantive revision change has already superseded the revision it was
+    computed against must not be treated as covering the current head --
+    the evaluator consults this guard before applying any verdict-driven
+    approval transition."""
+    return verdict_revision == current_revision
+
+
 class NotificationFidelity(Enum):
     """How reliably a provider signals a given event type."""
 
