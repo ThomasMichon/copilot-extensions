@@ -607,6 +607,16 @@ declares death. This is the graduated complement of *liveness-not-lease*: a
 slow-but-working worker is left alone, a quiet-but-live worker is prodded, and only
 a truly absent worker is replaced.
 
+**This entire ladder is scoped to bodies agent-dispatch itself spawned** (a
+spawn reservation exists) — never to an operator's own interactively-driven
+CLI session that happens to claim a task. A human driving their own session
+has no reservation behind that claim, so there is nothing for the recovery
+apparatus to nudge, monitor, or terminate; agent-dispatch only ever updates
+its own bookkeeping (the assignment mapping) to reflect that the task is now
+owned by that session. The distinction is structural, not a policy check to
+remember: recovery acts on a *reservation*, and a human's own claim never
+creates one.
+
 ### react-to-turn-end
 Supervision advances on the **worker's turn boundary, not only on a timer**. When
 the coordination layer exposes a worker's turn signal, the layer reacts to an
@@ -1004,3 +1014,13 @@ does **not** quietly undo it.
   overlapping work, and that concurrency is **capped** while charters stay wide.
   Mirrors the intent captured in the downstream fabric vision from the operator's
   loop-recipe design conversation; the implementing work then closes this delta.
+- **2026-09-10** — Clarified the scope of *nudge-before-recover*: the graduated
+  recovery ladder (nudge alive-but-quiet, re-embody confirmed-gone) is scoped to
+  bodies agent-dispatch itself spawned (a spawn reservation exists) and never
+  applies to an operator's own interactively-driven CLI session. The distinction
+  is structural (recovery acts on a reservation; a human's own claim never
+  creates one), not a policy check a future implementation could forget. Mined
+  from an operator design-review conversation on this effort's Phase 9
+  (`review-automation-reliability`, `phase-9-state-machine-architecture.md`),
+  which also produced the reservation/allocation-fencing coupling now declared
+  in that phase's sub-doc.
