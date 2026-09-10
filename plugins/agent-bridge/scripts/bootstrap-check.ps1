@@ -19,18 +19,21 @@
     ~/.<name>/reconcile.log (stdout) / reconcile.err.log (stderr). Check those to
     see whether the last auto-reconcile succeeded.
 
-    OPT-IN GATE (reference implementation -- fan out to sibling plugins as a
-    follow-up, see tools/check-bootstrap-sync.py FAMILIES): a version-drift
-    reconcile spawns a whole background process tree (conhost + pwsh + the
-    installer's own python/pip work) on EVERY session start, in EVERY checked-out
-    project, on this machine. On a shared/active-dev machine that adds up fast
-    (observed flooding the process table). So the background spawn now requires
-    an explicit, checked-in opt-in: a
+    OPT-IN GATE (reference implementation -- fanned out to sibling plugins,
+    see tools/check-bootstrap-sync.py FAMILIES): a version-drift reconcile
+    spawns a whole background process tree (conhost + pwsh + the installer's
+    own python/pip work) on EVERY session start, in EVERY checked-out project,
+    on this machine. On a shared/active-dev machine that adds up fast (observed
+    flooding the process table). So the background spawn now requires an
+    explicit, checked-in, PER-PLUGIN opt-in: a
     ``<project>/.copilot-extensions/config.yaml`` carrying a top-level
-    ``background_reconcile: true`` line. This is deliberately NOT a YAML parse
-    (bootstrap-check has no python/venv yet -- that is the whole point of it
-    being pure PowerShell) -- just a line-oriented regex match, so it works
-    before any runtime exists. No opt-in -> no background spawn; the plugin
+    ``background_reconcile_<plugin-name>: true`` line (e.g.
+    ``background_reconcile_agent-bridge: true``) -- per-plugin, not a single
+    blanket flag, so a consuming repo can want one plugin's daemon without
+    every other plugin's. This is deliberately NOT a YAML parse (bootstrap-check
+    has no python/venv yet -- that is the whole point of it being pure
+    PowerShell) -- just a line-oriented regex match, so it works before any
+    runtime exists. No opt-in -> no background spawn; the plugin
     keeps running at whatever version is already deployed until the operator
     runs an explicit `update`/`install`. This is a deliberate behavior change:
     previously every session silently self-healed a stale runtime.
@@ -117,19 +120,23 @@ try {
     # OPT-IN GATE: drift exists, so we'd normally reconcile -- but only do so
     # when the current project (or its knowledge-repo overlay, once a pure-PS
     # resolver exists for that -- tracked as a follow-up) has explicitly opted
-    # in. $env:COPILOT_PROJECT_DIR is the session's project checkout, injected
-    # by the CLI at session start (same variable agent-worktrees' own hooks.json
+    # THIS plugin in. Per-plugin (not a single blanket flag): a consuming repo
+    # may want agent-bridge's daemon but not agent-dispatch's, for example.
+    # $env:COPILOT_PROJECT_DIR is the session's project checkout, injected by
+    # the CLI at session start (same variable agent-worktrees' own hooks.json
     # already relies on); fall back to cwd if unset, matching the hooks.json
     # convention elsewhere in this repo.
     $ProjectDir = $env:COPILOT_PROJECT_DIR
     if (-not $ProjectDir) { $ProjectDir = (Get-Location).Path }
     $optInFile = Join-Path $ProjectDir '.copilot-extensions\config.yaml'
+    $optInKey = "background_reconcile_$name"
     $optedIn = $false
     if (Test-Path -LiteralPath $optInFile -PathType Leaf) {
-        $optedIn = [bool](Select-String -LiteralPath $optInFile -Pattern '^\s*background_reconcile:\s*true\s*$' -Quiet -ErrorAction SilentlyContinue)
+        $optInPattern = '^\s*' + [regex]::Escape($optInKey) + ':\s*true\s*$'
+        $optedIn = [bool](Select-String -LiteralPath $optInFile -Pattern $optInPattern -Quiet -ErrorAction SilentlyContinue)
     }
     if (-not $optedIn) {
-        [Console]::Error.WriteLine("[$name] runtime $deployed -> $current; background reconcile SKIPPED (no opt-in -- add 'background_reconcile: true' to $optInFile to enable)")
+        [Console]::Error.WriteLine("[$name] runtime $deployed -> $current; background reconcile SKIPPED (no opt-in -- add '$optInKey`: true' to $optInFile to enable)")
         Exit-SessionStart
     }
 

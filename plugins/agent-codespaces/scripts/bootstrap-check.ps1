@@ -6,6 +6,14 @@
     installer in the BACKGROUND only when the deployed runtime version drifts
     from the payload -- so a `copilot plugin update` is picked up automatically.
     Reconciles the TOOL, never machine state/config. PS5.1+.
+
+    OPT-IN GATE (fanned out from the agent-bridge reference implementation,
+    see tools/check-bootstrap-sync.py FAMILIES): the background reconcile
+    spawn below requires an explicit, checked-in, PER-PLUGIN opt-in --
+    ``<project>/.copilot-extensions/config.yaml`` carrying a top-level
+    ``background_reconcile_<plugin-name>: true`` line (plain regex match, no
+    yaml parser -- this hook has no python/venv yet). No opt-in -> no
+    background spawn; deliberate behavior change from silent auto-heal.
 #>
 $ErrorActionPreference = 'SilentlyContinue'
 $script:SessionStartJsonEmitted = $false
@@ -65,6 +73,25 @@ try {
         }
     }
     if ($provisioned -and $deployed -eq $current) { Exit-SessionStart }
+
+    # OPT-IN GATE: drift exists, so we'd normally reconcile -- but only when
+    # this project has explicitly opted THIS plugin in (per-plugin, not a
+    # blanket flag). COPILOT_PROJECT_DIR is the session's project checkout,
+    # injected by the CLI at session start; fall back to cwd if unset.
+    $ProjectDir = $env:COPILOT_PROJECT_DIR
+    if (-not $ProjectDir) { $ProjectDir = (Get-Location).Path }
+    $optInFile = Join-Path $ProjectDir '.copilot-extensions\config.yaml'
+    $optInKey = "background_reconcile_$name"
+    $optedIn = $false
+    if (Test-Path -LiteralPath $optInFile -PathType Leaf) {
+        $optInPattern = '^\s*' + [regex]::Escape($optInKey) + ':\s*true\s*$'
+        $optedIn = [bool](Select-String -LiteralPath $optInFile -Pattern $optInPattern -Quiet -ErrorAction SilentlyContinue)
+    }
+    if (-not $optedIn) {
+        [Console]::Error.WriteLine("[$name] runtime $deployed -> $current; background reconcile SKIPPED (no opt-in -- add '$optInKey`: true' to $optInFile to enable)")
+        Exit-SessionStart
+    }
+
     $init = Join-Path $PluginDir 'scripts\init.ps1'
     if (Test-Path $init) {
         $reCmd = "& `"$init`""

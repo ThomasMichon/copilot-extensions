@@ -45,12 +45,19 @@ def _python_disabled_environment(tmp_path: Path) -> dict[str, str]:
         command.chmod(0o755)
     home = tmp_path / "home"
     home.mkdir()
+    # A project dir for COPILOT_PROJECT_DIR: the reconcile opt-in gate (added
+    # alongside the copilot-extensions-wide hardening pass) resolves the
+    # opt-in file relative to this, not to pytest's own (unpredictable, maybe
+    # shared) cwd.
+    project = tmp_path / "project"
+    project.mkdir(exist_ok=True)
     return {
         **os.environ,
         "HOME": str(home),
         "USERPROFILE": str(home),
         "PATH": str(fake_bin) + os.pathsep + os.environ.get("PATH", ""),
         "COPILOT_PLUGIN_ROOT": str(PLUGIN),
+        "COPILOT_PROJECT_DIR": str(project),
         "COPILOT_EXTENSIONS_TEST_CONTAINED": "1",
         "COMPUTERNAME": "TEST-HOST",
     }
@@ -119,6 +126,14 @@ def test_powershell_catalog_remains_available_without_python(tmp_path: Path):
 @pytest.mark.skipif(BASH is None or os.name == "nt", reason="POSIX hook coverage")
 def test_posix_update_reconciles_old_runtime_without_python(tmp_path: Path):
     env = _python_disabled_environment(tmp_path)
+    # This test proves the reconcile itself works without python (the whole
+    # point of the 'pythonless' family) -- it must still explicitly opt in to
+    # the background-reconcile gate to actually reach that code path.
+    project = Path(env["COPILOT_PROJECT_DIR"])
+    (project / ".copilot-extensions").mkdir(parents=True, exist_ok=True)
+    (project / ".copilot-extensions" / "config.yaml").write_text(
+        "background_reconcile_budget-guidance: true\n", encoding="utf-8"
+    )
     payload = tmp_path / "payload"
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
