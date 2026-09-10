@@ -307,7 +307,7 @@ because they provide tools or services.
 - [x] Provide explicit legacy-state attribution/migration under the legacy
   lock/lease and cell install lock; publish the ownership tombstone and
   generation-pinned activation without an observable mixed-writer interval.
-- [ ] Add explicit rollback/deactivation that publishes a monotonic
+- [x] Add explicit rollback/deactivation that publishes a monotonic
   legacy/deactivated activation before clearing the tombstone under both locks.
   Reserve activation deletion for locked cleanup after companion evidence is
   gone.
@@ -371,6 +371,58 @@ because they provide tools or services.
 See [`design.md`](design.md).
 
 ## Journal
+
+### 2026-09-10 — Phase 6 item 3: explicit rollback / deactivation
+
+- Merged [#2353](https://github.com/ThomasMichon/copilot-extensions/pull/2353)
+  at `aa3280056fda5d7db82e8599d0652b2430531524`, landing the explicit
+  rollback / deactivation slice for
+  [#1110](https://github.com/ThomasMichon/copilot-extensions/issues/1110).
+- The shared `installation-context` primitive now exposes
+  `deactivate_installation(...)`, which requires an explicit activation target
+  plus either an explicit tombstone generation to roll back or an explicit
+  proof that no tombstone exists; reuses maintenance admission plus the
+  marketplace genesis / cell install lock discipline; publishes the next
+  `legacy`/`deactivated` activation generation; writes an auditable
+  per-target record under `deactivations/`; and only then clears the matched
+  tombstone. Repeating the same explicit target is an idempotent no-op.
+- `agent-machines` is the command-only exemplar for the slice via the explicit
+  `cell-deactivate` management action. It derives the declared legacy footprint
+  from `payload-invocation.json`, rolls back attributed legacy state only when
+  the tombstone target matches exactly, refuses ambiguous untombstoned legacy
+  state without mutation, and preserves `deactivations/` during uninstall.
+  Vendored `installation-context` copies were synchronized across every current
+  adopter.
+- Validation:
+  changed-surface Windows coverage passed via
+  `python -m pytest -q libs/installation-context/tests/test_installation_mode_governance.py -k "deactivate_installation or activation_cas_requires_matching_maintenance_token or attribute_legacy_state"`
+  (`12 passed, 101 deselected`) and
+  `python tools/run-plugin-tests.py agent-machines`
+  (`513 passed, 20 skipped`);
+  `python tools/check-install-contract.py`,
+  `python tools/check-version-consistency.py`,
+  `python tools/check-vendored-libs-sync.py`,
+  `python tools/sync-installation-context.py --check`,
+  `python libs/payload-invocation/generate.py --all --check`,
+  `python -m pytest -q libs/installer-readiness/tests`,
+  `python tools/check-marketplace-isolation.py`,
+  `python tools/check-docs-consistency.py`,
+  changed-file `ruff check --select F,E9`, and `git diff --check` all passed;
+  WSL targeted rollback/deactivation coverage also passed for the same
+  governance and `agent-machines` lifecycle surfaces.
+- Native Windows `python -m pytest -q libs/installation-context/tests` still
+  reproduces unchanged failures outside the rollback/deactivation surface
+  (bootstrap no-op, legacy-entrypoint, and snapshot/concurrency cases). The
+  current branch reproduced `17 failed, 503 passed, 130 skipped`; the same
+  failing subset was re-run in a detached `origin/main` worktree, including
+  `test_runtime_slot_completion_captures_one_concurrently_replaced_build_receipt[python]`.
+  The unchanged native-Windows baseline is now tracked in
+  [#2352](https://github.com/ThomasMichon/copilot-extensions/issues/2352), so
+  this slice relied on the passing changed governance surface plus the green
+  PR CI matrix rather than the pre-existing full-suite failures.
+- `#1110` remains open. Long-running maintenance rechecks, legacy service and
+  binstub retirement, blocking guard enforcement, and rollback/retention
+  documentation remain separate follow-on Phase 6 items.
 
 ### 2026-09-10 — Phase 6 item 2: explicit legacy attribution / migration
 
