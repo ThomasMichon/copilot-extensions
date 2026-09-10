@@ -293,9 +293,16 @@ above, not an independent feature:
   (`../../../plugins/agent-dispatch/tests/test_task_state_machine.py`)
   proving every state reachable, no non-terminal state without an exit,
   and every transition classified under exactly one recovery mode.
-- [ ] Declare the provider/PR-target state machine and its per-provider
+- [x] Declare the provider/PR-target state machine and its per-provider
   capability table (approval authority, notification fidelity, conflict
-  policy).
+  policy)
+  (`../../../plugins/agent-dispatch/src/agent_dispatch/provider_state_machine.py`),
+  with structural tests
+  (`../../../plugins/agent-dispatch/tests/test_provider_state_machine.py`)
+  proving both dimensions (approval status, mergeability) fully reachable
+  and exit-checked, every provider's capability declaring fidelity for
+  every event type, and every provider defaulting to the hand-back
+  conflict policy unless a repository explicitly overrides it.
 - [ ] Declare the bridge/session state machine, deferring to the
   agent-bridge vision's verb work for the authoritative verb vocabulary
   once it lands; coordinate rather than duplicate in the interim.
