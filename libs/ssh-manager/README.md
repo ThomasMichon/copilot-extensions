@@ -16,6 +16,8 @@ agent-codespaces) import this library instead of spawning SSH directly.
 - **Platform-aware** -- Unix sockets on Linux/macOS/WSL, direct-SSH fallback
   on native Windows
 - **Async-first** -- built on asyncio, matches agent-bridge patterns
+- **Owned Windows proxies** -- native proxy children run behind a per-SSH
+  loopback broker with explicit no-window flags and byte-transparent pipes
 
 ## Usage
 
@@ -32,6 +34,23 @@ print(result.stdout)
 await manager.disconnect("my-server")
 ```
 
+## Windows proxy lifecycle
+
+Managed commands, forwards, and probes use
+`ssh_manager.proxy.create_ssh_subprocess`. On Windows, a configured
+`ProxyCommand` runs in an owned loopback broker. OpenSSH launches a windowless
+binary stdio client, which authenticates to that broker using a per-launch
+capability. HostName, Port, credential-path expansion, and host-key checks stay
+unchanged. The client and broker forward opaque bytes without a terminal or
+text decoder.
+Native Windows OpenSSH and Git for Windows retain their respective proxy-command
+quoting and shell semantics.
+
+The broker lives in the calling process and closes with its SSH root.
+`terminate_ssh_process_tree` also awaits broker cleanup on timeout or
+cancellation. No persistent broker service or cached loopback port is created.
+POSIX transports retain native ProxyCommand execution.
+
 ## As a Dependency
 
 In your plugin's `pyproject.toml`:
@@ -42,8 +61,8 @@ dependencies = [
 ]
 ```
 
-Or install editable for development:
+Or install both libraries into a development virtual environment:
 
 ```bash
-pip install -e libs/ssh-manager
+uv pip install -e libs/agent-procutil -e libs/ssh-manager
 ```

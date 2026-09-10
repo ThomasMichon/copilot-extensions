@@ -287,6 +287,14 @@ jobs:
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Test ${{ matrix.plugin }}
         run: python tools/run-plugin-tests.py ${{ matrix.plugin }}
+      - name: Test shared SSH proxy contracts
+        if: matrix.plugin == 'agent-bridge'
+        env:
+          PYTHONPATH: plugins/agent-bridge/libs/ssh-manager/src
+        run: >-
+          .test-venvs/linux/agent-bridge/bin/python -m pytest -q
+          libs/ssh-manager/tests/test_process.py
+          libs/ssh-manager/tests/test_proxy.py
 
   worktrees-smoke:
     name: agent-worktrees (collect-only)

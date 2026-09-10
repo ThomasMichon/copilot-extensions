@@ -26,7 +26,8 @@ from .platform import (
     ensure_socket_dir,
     socket_path_for_host,
 )
-from .process import ssh_subprocess_kwargs, terminate_ssh_process_tree
+from .process import terminate_ssh_process_tree
+from .proxy import create_ssh_subprocess
 
 log = logging.getLogger("ssh-manager")
 
@@ -324,12 +325,12 @@ class ConnectionManager:
 
         log.debug("Starting ControlMaster: %s", " ".join(args))
 
-        proc = await asyncio.create_subprocess_exec(
+        proc = await create_ssh_subprocess(
             *args,
+            config=config,
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            **ssh_subprocess_kwargs(),
         )
 
         # Wait briefly for connection to establish or fail
@@ -434,8 +435,9 @@ class ConnectionManager:
 
         log.debug("exec_command on %s: %s", host, command)
 
-        proc = await asyncio.create_subprocess_exec(
+        proc = await create_ssh_subprocess(
             *args,
+            config=info.config,
             stdin=(
                 asyncio.subprocess.PIPE
                 if input_bytes is not None
@@ -443,7 +445,6 @@ class ConnectionManager:
             ),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            **ssh_subprocess_kwargs(),
         )
 
         timed_out = False
@@ -500,8 +501,9 @@ class ConnectionManager:
 
         log.debug("open_stdio_channel on %s: %s", host, remote_cmd)
 
-        proc = await asyncio.create_subprocess_exec(
+        proc = await create_ssh_subprocess(
             *args,
+            config=info.config,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=(
@@ -512,7 +514,7 @@ class ConnectionManager:
             # POSIX: give the ssh child its own session/process group so
             # teardown signals only the ssh process tree -- never the parent's
             # group. Windows uses taskkill /T against the root pid.
-            **ssh_subprocess_kwargs(limit=_STDIO_CHANNEL_LIMIT_BYTES),
+            limit=_STDIO_CHANNEL_LIMIT_BYTES,
         )
 
         info.child_processes.append(proc)
@@ -710,12 +712,12 @@ class ConnectionManager:
                 info.config.ssh_target,
             ])
             try:
-                proc = await asyncio.create_subprocess_exec(
+                proc = await create_ssh_subprocess(
                     *args,
+                    config=info.config,
                     stdin=asyncio.subprocess.DEVNULL,
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.PIPE,
-                    **ssh_subprocess_kwargs(),
                 )
                 await asyncio.wait_for(proc.wait(), timeout=5.0)
             except (TimeoutError, asyncio.TimeoutError) as e:

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-ssh-manager"
-version = "0.1.0-dev16"
+version = "0.1.0-dev17"
 description = "Shared SSH ControlMaster connection multiplexer for Copilot CLI plugins"
 readme = "README.md"
 license = "MIT"
@@ -12,8 +12,7 @@ requires-python = ">=3.10"
 authors = [
     { name = "Thomas Michon" }
 ]
-# No runtime dependencies beyond stdlib -- pure library
-dependencies = []
+dependencies = ["agent-procutil"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
