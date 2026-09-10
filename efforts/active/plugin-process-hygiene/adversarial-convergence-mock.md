@@ -149,6 +149,19 @@ note in the effort Journal for what's already covered by #737/#738/#739/#918).
       self-matching process-count query, and PowerShell's single-result
       array-unwrapping silently dropping `.Count`. The contract held.)
 - [x] Land the mock harness as its own PR (PR #2305), referencing this doc.
-- [ ] Use the harness's PASS/FAIL evidence, plus #2301's per-plugin citations,
+- [x] Use the harness's PASS/FAIL evidence, plus #2301's per-plugin citations,
       to decide which (if any) plugin needs an actual code change versus
-      already conforming.
+      already conforming. Done via a direct-read audit posted as
+      [#2301 comment](https://github.com/ThomasMichon/copilot-extensions/issues/2301#issuecomment-5613535208):
+      agent-worktrees CONFORMS; agent-bridge PARTIAL (its one violation fixed
+      same-day by #2317, `write-session-guidance.ps1` unverified);
+      agent-dispatch DEVIATES (confirmed, unfixed); agent-ssh SPLIT (same
+      hook deviation, but its actual persistent daemon
+      `dtssh-host-launcher.ps1` conforms via a Mutex guard). The remaining 8
+      plugins #2317 named are explicitly flagged unverified, not re-confirmed.
+      Resolution: no per-plugin `background_reconcile` gate fan-out — the
+      confirmed deviations are fixed by
+      [`tiered-payload-provisioning`](../tiered-payload-provisioning/README.md)'s
+      Phase 3 instead, which removes the expensive hook-triggered path
+      entirely rather than gating it per plugin.
+
