@@ -91,6 +91,7 @@ class SessionHost:
         self._terminal_bytes = 0
         self._on_child_start = on_child_start
         self._exit_task: asyncio.Task | None = None
+        self._connections: set[asyncio.StreamWriter] = set()
         self._child_done = asyncio.Event()
         self._server: asyncio.base_events.Server | None = None
         self._reader_task: asyncio.Task | None = None
@@ -598,8 +599,16 @@ class SessionHost:
                 self._child_done.set()
 
             self._exit_task = asyncio.create_task(observe_exit())
+        async def accept(reader, writer):
+            self._connections.add(writer)
+            try:
+                await self._handle_front(reader, writer)
+            finally:
+                self._connections.discard(writer)
+                writer.close()
+
         self._server = await asyncio.start_server(
-            self._handle_front, host, port, limit=proto.MAX_MESSAGE_BYTES)
+            accept, host, port, limit=proto.MAX_MESSAGE_BYTES)
         sock = self._server.sockets[0]
         return sock.getsockname()[1]
 
@@ -619,6 +628,8 @@ class SessionHost:
                 pass
         if self._server is not None:
             self._server.close()
+        for writer in list(self._connections):
+            writer.close()
         if self._reader_task is not None:
             self._reader_task.cancel()
             try:

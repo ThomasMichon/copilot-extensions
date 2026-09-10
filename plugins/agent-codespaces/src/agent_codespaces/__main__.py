@@ -4228,7 +4228,11 @@ def _cmd_claim(args: argparse.Namespace) -> int:
     from . import execution_claims
     from .lease import _lease_lock
 
-    owner = resolve_owner_worktree(explicit=getattr(args, "owner", None))
+    owner = (
+        None if os.environ.get("AGENT_CODESPACES_DISABLE_CLAIM")
+        and execution_claims.get(args.codespace) is None
+        else resolve_owner_worktree(explicit=getattr(args, "owner", None))
+    )
     identity = (
         (args.execution_id, args.generation)
         if getattr(args, "execution_id", None) else None

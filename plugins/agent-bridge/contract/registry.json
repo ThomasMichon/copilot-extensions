@@ -110,7 +110,7 @@
       "fixtures": [
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/health.json",
-          "sha256": "724146d0087c0e3646e628feca5d4f48b8bf356fa46dbfcac27c8e5d10c76c9d",
+          "sha256": "00a8f05e86943ebb907dc7ca3f04a9c84e7f7aa8725669947f26a546457c5a81",
           "role": "current health response",
           "generation": 15
         },
@@ -128,19 +128,19 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/session-create-request.json",
-          "sha256": "324049fe72932d6d4f45e0ed1487fe23f547caf58c14e39b4bfa7acf0315a29e",
+          "sha256": "e13287c3a2e124d9fbd066515053f9c39e97efe70aae40a36dbfe93a96ff273a",
           "role": "current session-create request with unknown-field tolerance",
           "generation": 15
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/session-create-response.json",
-          "sha256": "dfa4a19c11d29faa7fde21d10bf275339ed37fdc53a0f8d8e35b6423eb13b4a9",
+          "sha256": "54595295adb1da2a1cd86d2302a2f48072a65191708be9077a92286502f579bb",
           "role": "current session-create response",
           "generation": 15
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/representative-error.json",
-          "sha256": "4d062b7bcec42c3a76e578d591e56257ca39918e20e407a44f2d61c974af7306",
+          "sha256": "44cb199bf6ca53897dc00ba2bd4f9dd26c7326e6ab6d006e3e48b7b96fba8656",
           "role": "current representative FastAPI error",
           "generation": 15
         },
@@ -164,13 +164,13 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/protocol-constants.json",
-          "sha256": "4b95b4e74b35cdcaf559a4a916c40deb067f198e342fd52dcf390b7ea7958f44",
+          "sha256": "c98dddf53ab9247ba56746a4321bfc48ad5d916372e667d7f605aa685385f294",
           "role": "current HTTP range and capability constants",
           "generation": 15
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-command.json",
-          "sha256": "b173fbe35a239c220e82a41073def08040fc51ad69b6dd2fab01ac2b481c4c7a",
+          "sha256": "5fd3993bb5ae1d62135793a22b801e8061d17f3cb23fd8ecbae9e67d49ecc4af",
           "role": "current carrier-backed remote command request and response",
           "generation": 15
         },
@@ -182,25 +182,25 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-receipt.json",
-          "sha256": "c6db8e5a49d55f7cde910349f232b34f54dc4ef0ca989ab099a562f0406a6596",
+          "sha256": "a66c3273799090a24711a370a52d865ad568ab6141680d2f96b14128ab6438ff",
           "role": "current native execution contract",
           "generation": 15
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-routes.json",
-          "sha256": "6c0923b34e2a1a4608f8f88509f0d996a977b4cbc5955932f122e1c252b37cd1",
+          "sha256": "1f0ce21588553aff08ce6a9a1a530d5a6076e0aa71bd8886f361d93c5eead87d",
           "role": "current native execution contract",
           "generation": 15
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-registration.json",
-          "sha256": "bb5656bc6847245d034a9a9a75c2f1db8c3dc20c10d51f7aa74b48b842f48021",
+          "sha256": "ff7437b51a6ff7ca8107c5a616d82924a0ac64ce7e5e03fe86983c966f221c0d",
           "role": "current native execution contract",
           "generation": 15
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-launch.json",
-          "sha256": "bae33569c8122d95531afa90b1de1e7e02732d2dd22f610410639abbc46adfef",
+          "sha256": "3cdeda92736cece271b097836d381300d8577cffbb49646bcc0d3ca7454198a1",
           "role": "current native execution contract",
           "generation": 15
         },
@@ -213,68 +213,68 @@
       ],
       "provenance": [
         {
-          "commit": "35fd824bcd8ab0d92b1b9b9b02d56b360885c4a3",
+          "commit": "e746dc19ca456e7e9e7f52107dd26a1348294df5",
           "plugin_version": "0.4.0-dev461",
           "generation": 15,
           "source_path": "plugins/agent-bridge/src/agent_bridge/native_manager.py",
           "source_git_blob": "062a053904b1bc4b32f1db869b661866ec739d99",
-          "capture_method": "Serialize committed production constants, models, routes and native receipts using neutral synthetic inputs."
+          "capture_method": "Serialize committed production constants, models, routes and native receipts using neutral synthetic inputs. Exact captured blobs verified against the published equivalent after rebase."
         },
         {
-          "commit": "35fd824bcd8ab0d92b1b9b9b02d56b360885c4a3",
+          "commit": "e746dc19ca456e7e9e7f52107dd26a1348294df5",
           "plugin_version": "0.4.0-dev461",
           "generation": 15,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/native.py",
           "source_git_blob": "a0310ead2712e3af52ba1436d058d053b7686538",
-          "capture_method": "Serialize committed production constants, models, routes and native receipts using neutral synthetic inputs."
+          "capture_method": "Serialize committed production constants, models, routes and native receipts using neutral synthetic inputs. Exact captured blobs verified against the published equivalent after rebase."
         },
         {
-          "commit": "35fd824bcd8ab0d92b1b9b9b02d56b360885c4a3",
+          "commit": "e746dc19ca456e7e9e7f52107dd26a1348294df5",
           "plugin_version": "0.4.0-dev461",
           "generation": 15,
           "source_path": "plugins/agent-bridge/src/agent_bridge/native_store.py",
           "source_git_blob": "57f78af37313613f0e8b01f98bf4713f179218fe",
-          "capture_method": "Serialize committed production constants, models, routes and native receipts using neutral synthetic inputs."
+          "capture_method": "Serialize committed production constants, models, routes and native receipts using neutral synthetic inputs. Exact captured blobs verified against the published equivalent after rebase."
         },
         {
-          "commit": "35fd824bcd8ab0d92b1b9b9b02d56b360885c4a3",
+          "commit": "e746dc19ca456e7e9e7f52107dd26a1348294df5",
           "plugin_version": "0.4.0-dev461",
           "generation": 15,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
           "source_git_blob": "8d3442fb7c93d5de0a8234ac2d6c66fef53174d8",
-          "capture_method": "Serialize committed production constants, models, routes and native receipts using neutral synthetic inputs."
+          "capture_method": "Serialize committed production constants, models, routes and native receipts using neutral synthetic inputs. Exact captured blobs verified against the published equivalent after rebase."
         },
         {
-          "commit": "35fd824bcd8ab0d92b1b9b9b02d56b360885c4a3",
+          "commit": "e746dc19ca456e7e9e7f52107dd26a1348294df5",
           "plugin_version": "0.4.0-dev461",
           "generation": 15,
           "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
           "source_git_blob": "9d2fe10336225462929963237dd33acc8a4e3dfa",
-          "capture_method": "Serialize committed production constants, models, routes and native receipts using neutral synthetic inputs."
+          "capture_method": "Serialize committed production constants, models, routes and native receipts using neutral synthetic inputs. Exact captured blobs verified against the published equivalent after rebase."
         },
         {
-          "commit": "35fd824bcd8ab0d92b1b9b9b02d56b360885c4a3",
+          "commit": "e746dc19ca456e7e9e7f52107dd26a1348294df5",
           "plugin_version": "0.4.0-dev461",
           "generation": 15,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
           "source_git_blob": "8f0a0f10ce17e7bdd5e4a567cd856ed3f2891278",
-          "capture_method": "Serialize committed production constants, models, routes and native receipts using neutral synthetic inputs."
+          "capture_method": "Serialize committed production constants, models, routes and native receipts using neutral synthetic inputs. Exact captured blobs verified against the published equivalent after rebase."
         },
         {
-          "commit": "35fd824bcd8ab0d92b1b9b9b02d56b360885c4a3",
+          "commit": "e746dc19ca456e7e9e7f52107dd26a1348294df5",
           "plugin_version": "0.4.0-dev461",
           "generation": 15,
           "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
           "source_git_blob": "39c37dfbf4376294afb3d5670433b5a840f32077",
-          "capture_method": "Serialize committed production constants, models, routes and native receipts using neutral synthetic inputs."
+          "capture_method": "Serialize committed production constants, models, routes and native receipts using neutral synthetic inputs. Exact captured blobs verified against the published equivalent after rebase."
         },
         {
-          "commit": "35fd824bcd8ab0d92b1b9b9b02d56b360885c4a3",
+          "commit": "e746dc19ca456e7e9e7f52107dd26a1348294df5",
           "plugin_version": "0.4.0-dev461",
           "generation": 15,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
           "source_git_blob": "3db42b622f914802f529fc1df83358020d382969",
-          "capture_method": "Serialize committed production constants, models, routes and native receipts using neutral synthetic inputs."
+          "capture_method": "Serialize committed production constants, models, routes and native receipts using neutral synthetic inputs. Exact captured blobs verified against the published equivalent after rebase."
         },
         {
           "commit": "783117b627819b728f9d0b26fd65c1edd321190a",
@@ -473,7 +473,7 @@
       "fixtures": [
         {
           "path": "plugins/agent-bridge/contract/fixtures/session-host/current/messages.json",
-          "sha256": "4037cae49e721f337442b26da6dd162de012cdfde775320241d2f478777b2f1d",
+          "sha256": "e378a0f5c1a94116c65f31b4c95f22294ffd4f413a776fa91630841d729b954b",
           "role": "current framing and every control/data message shape",
           "generation": 1
         },
@@ -492,12 +492,12 @@
       ],
       "provenance": [
         {
-          "commit": "35fd824bcd8ab0d92b1b9b9b02d56b360885c4a3",
+          "commit": "e746dc19ca456e7e9e7f52107dd26a1348294df5",
           "plugin_version": "0.4.0-dev461",
           "generation": 1,
           "source_path": "plugins/agent-bridge/src/agent_bridge/session_host/protocol.py",
           "source_git_blob": "a7efa469939cb6a7d52e9a67292443f0def706d6",
-          "capture_method": "Serialize committed production constants, models, routes and native receipts using neutral synthetic inputs."
+          "capture_method": "Serialize committed production constants, models, routes and native receipts using neutral synthetic inputs. Exact captured blobs verified against the published equivalent after rebase."
         },
         {
           "commit": "340288212311ad6ce21e2539b9a5b67656bf8c7e",

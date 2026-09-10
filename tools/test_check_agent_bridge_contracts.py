@@ -333,6 +333,27 @@ def test_missing_provenance_commit_recovers_history_once(
     ) == 1
 
 
+def test_published_pr_provenance_can_be_fetched_by_exact_object(monkeypatch):
+    checker = _load_checker()
+    commit = "b" * 40
+    calls = []
+    available = [False]
+
+    def git(*args):
+        calls.append(args)
+        if args == ("fetch", "--quiet", "origin", commit):
+            available[0] = True
+        if args[:2] == ("cat-file", "-e"):
+            return subprocess.CompletedProcess(args, 0 if available[0] else 1, "", "")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(checker, "_git", git)
+    assert checker._ensure_commit_available(commit)
+    assert checker._ensure_commit_available(commit)
+    assert calls.count(("fetch", "--quiet", "origin", commit)) == 1
+    assert not checker._ensure_commit_available("not-an-object-id")
+
+
 @pytest.mark.parametrize(
     ("mutation", "expected"),
     [
