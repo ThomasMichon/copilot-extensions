@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from agent_procutil import detached_kwargs, windowless_python
+from agent_procutil import detached_kwargs, windowless_python, windowless_python_env
 import httpx
 
 from . import __version__
@@ -1435,8 +1435,9 @@ def cmd_deploy(args: argparse.Namespace) -> int:
 
     def spawn_passive(port: int):
         start_command = "__cell-start" if expected_installation else "start"
+        python = sys.executable
         cmd = [
-            windowless_python(sys.executable),
+            windowless_python(python),
             "-I",
             "-X",
             "utf8",
@@ -1460,6 +1461,7 @@ def cmd_deploy(args: argparse.Namespace) -> int:
             "stdout": subprocess.DEVNULL,
             "stderr": subprocess.DEVNULL,
         }
+        kwargs["env"].update(windowless_python_env(python))
         kwargs.update(detached_kwargs())
         handle = subprocess.Popen(cmd, **kwargs)  # noqa: S603
         passive_instance.update({"port": port, "pid": handle.pid})

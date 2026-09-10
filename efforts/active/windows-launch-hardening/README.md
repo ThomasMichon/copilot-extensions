@@ -10,7 +10,7 @@
   surfaced real console windows (`python.exe`/`pwsh.exe`/`cmd.exe` with `.agent-`
   paths) because they relied on `-WindowStyle Hidden` alone or spawned without
   window-suppression flags.
-- **Umbrella issue:** #786 (supersedes #775, the headless sub-thread — Phases 1-2 landed); current regression: #2037.
+- **Umbrella issue:** #786 (supersedes #775, the headless sub-thread — Phases 1-2 landed); current regression: #2334.
 
 ## Guiding Intent
 
@@ -230,3 +230,18 @@ against real behavior.
 - #2037 carries the coordinated correction: hidden-console daemon roots,
   explicit no-window flags on captured children, and a headless Docker installer
   probe, followed by multi-cycle Windows validation.
+
+### 2026-09-09 - relocatable venv trampoline residual
+- Live Windows process-tree capture on a detached `agent-dispatch` coordinator
+  and `agent-mcp` serve host showed the shared `windowless_python()` fix from
+  #973 still leaving a console-subsystem child in the tree under `uv`-managed
+  runtimes: the venv-local `Scripts\pythonw.exe` was a relocatable trampoline,
+  not the final interpreter.
+- `pyvenv.cfg` on those runtimes recorded a base install whose real
+  `pythonw.exe` sat alongside the console `python.exe`; the trampoline re-execed
+  the base interpreter without our detached/windowless flags, so Default
+  Terminal surfaced a fresh visible terminal window for the child.
+- #2334 tracks the residual publicly. The fix extends shared `agent-procutil`
+  to read `pyvenv.cfg` and prefer the base install's own `pythonw.exe` when it
+  exists, then re-vendors the byte-identical helper across every consuming
+  plugin.

@@ -203,12 +203,13 @@ def _spawn_self_update_successor(python_path: Any, respawn_argv: list[str]) -> N
     """
     import os
 
-    from agent_procutil import detached_kwargs, windowless_python
+    from agent_procutil import detached_kwargs, windowless_python, windowless_python_env
 
     cmd = [windowless_python(python_path), "-m", "agent_dispatch", *respawn_argv]
     env = {
         k: v for k, v in os.environ.items() if k not in ("PYTHONPATH", "PYTHONHOME")
     }
+    env.update(windowless_python_env(python_path))
     kwargs: dict[str, Any] = {
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.DEVNULL,

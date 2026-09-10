@@ -837,6 +837,10 @@ async def test_shutdown_raises_on_rejected_reply(tmp_path, monkeypatch):
             new_log_path=tmp_path / "x.log", new_control_token="wrong-token",
             old_control_token=None, token_by_port={port: "wrong-token"},
         )
+        (tmp_path / "x.sock.endpoint").write_text(
+            json.dumps({"port": port, "token": "wrong-token"}),
+            encoding="utf-8",
+        )
         client = _cutover.CutoverClient(f"http://127.0.0.1:{port}", ctx)
         with pytest.raises(_cutover.ControlError):
             await asyncio.to_thread(client.shutdown)
