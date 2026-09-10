@@ -12,6 +12,7 @@ import re
 import secrets
 import socket
 import stat
+import subprocess
 import sys
 import time
 import warnings
@@ -37,6 +38,7 @@ ROOT_NAMES = ("versions", "snapshots", "state", "run", "logs", "cache", "launche
 POLICY_SCHEMA = "copilot-extensions.installation-mode"
 ACTIVATION_SCHEMA = "copilot-extensions.installation-activation"
 TOMBSTONE_SCHEMA = "copilot-extensions.legacy-installation-ownership"
+MAINTENANCE_SCHEMA = "copilot-extensions.installation-maintenance"
 RESOLUTION_SCHEMA = "copilot-extensions.installation-resolution"
 SNAPSHOT_PROVENANCE_SCHEMA = "copilot-extensions.snapshot-provenance"
 SNAPSHOT_PROVENANCE_FILE = "snapshot-provenance.json"
@@ -4641,6 +4643,40 @@ def _coerce_current_time(value: datetime | str | None) -> datetime:
     return value.astimezone(timezone.utc)
 
 
+def _maintenance_candidates(
+    profile: Path,
+    plugin_root: Path | None,
+) -> list[tuple[str, Path]]:
+    candidates: list[tuple[str, Path]] = [
+        ("user", profile / ".copilot-extensions" / "maintenance"),
+    ]
+    if plugin_root is not None:
+        candidates.append(("plugin", plugin_root / "maintenance"))
+    return candidates
+
+
+def _optional_integer(value: Mapping[str, Any], name: str, label: str) -> int | None:
+    result = _exact_property(value, name)
+    if result is _MISSING:
+        return None
+    if isinstance(result, bool) or not isinstance(result, int):
+        _fail(f"{label}.{name} must be an integer.")
+    return result
+
+
+def _optional_text(
+    value: Mapping[str, Any],
+    name: str,
+    label: str,
+) -> str | None:
+    result = _exact_property(value, name)
+    if result is _MISSING:
+        return None
+    if not isinstance(result, str) or not result:
+        _fail(f"{label}.{name} must be a non-empty string.")
+    return result
+
+
 def _normalize_short_host(value: str) -> str:
     return value.split(".", 1)[0].casefold()
 
@@ -5070,6 +5106,7 @@ def compare_and_swap_activation(
     legacy_probe: Mapping[str, Any],
     durable_home: str | os.PathLike[str] | None = None,
     legacy_root: str | os.PathLike[str] | None = None,
+    maintenance_token: str | None = None,
     environment: Mapping[str, str] | None = None,
     os_profile: str | os.PathLike[str] | None = None,
     platform: str | None = None,
@@ -5105,7 +5142,7 @@ def compare_and_swap_activation(
             _fail(f"Expected {name} generation must be a non-negative integer.")
 
     caller_environment = environment if environment is not None else os.environ
-    current_environment, _ = _current_environment(
+    current_environment, profile = _current_environment(
         environment=caller_environment,
         os_profile=os_profile,
         platform=platform,
@@ -5151,6 +5188,14 @@ def compare_and_swap_activation(
         plugin_id=plugin_id,
     )
     with genesis_lock, install_lock:
+        _require_management_authorization(
+            profile=profile,
+            plugin_root=plugin_root,
+            maintenance_token=maintenance_token,
+            current_time=datetime.now(timezone.utc),
+            host=socket.gethostname(),
+            pid_is_live=_pid_is_live,
+        )
         validated = validate_context_receipt(
             install_path,
             durable,
@@ -5403,6 +5448,130 @@ def _tombstone_result(
         return result
 
 
+def _maintenance_inspection(
+    *,
+    profile: Path,
+    plugin_root: Path | None,
+    current_time: datetime,
+    host: str,
+    pid_is_live: Callable[[int], bool],
+) -> dict[str, Any]:
+    inactive = {
+        "state": "inactive",
+        "scope": "none",
+        "marker": None,
+        "sidecar": None,
+        "reason": None,
+        "owner": None,
+        "host": None,
+        "pid": None,
+        "enteredAt": None,
+        "expectedUntil": None,
+        "authorization": {
+            "state": "unneeded",
+            "marketplaceId": None,
+            "pluginId": None,
+            "context": None,
+            "namespaceGeneration": None,
+            "installGeneration": None,
+            "activationGeneration": None,
+            "tokenPresent": False,
+        },
+    }
+    for scope, marker_entry in _maintenance_candidates(profile, plugin_root):
+        if not os.path.lexists(marker_entry):
+            continue
+        marker = canonical_path(marker_entry)
+        sidecar_entry = marker_entry.with_name(f"{marker_entry.name}.json")
+        result: dict[str, Any] = {
+            "state": "stale",
+            "scope": scope,
+            "marker": str(marker),
+            "sidecar": str(canonical_path(sidecar_entry)),
+            "reason": "sidecar-missing",
+            "owner": None,
+            "host": None,
+            "pid": None,
+            "enteredAt": None,
+            "expectedUntil": None,
+            "authorization": {
+                "state": "unavailable",
+                "marketplaceId": None,
+                "pluginId": None,
+                "context": None,
+                "namespaceGeneration": None,
+                "installGeneration": None,
+                "activationGeneration": None,
+                "tokenPresent": False,
+            },
+        }
+        if marker_entry.is_symlink():
+            result["reason"] = "marker-linked"
+            return result
+        if sidecar_entry.is_symlink() or not sidecar_entry.is_file():
+            return result
+        try:
+            value = read_json(sidecar_entry)
+            if not isinstance(value, Mapping):
+                _fail("Maintenance sidecar must be a JSON object.")
+            owner = _required_string(value, "owner", "maintenance")
+            sidecar_host = _required_string(value, "host", "maintenance")
+            pid = _required_integer(value, "pid", "maintenance")
+            _required_string(value, "reason", "maintenance")
+            entered_at = _parse_rfc3339_utc(
+                _exact_property(value, "enteredAt"), "maintenance.enteredAt"
+            )
+            expected_until = _parse_rfc3339_utc(
+                _exact_property(value, "expectedUntil"),
+                "maintenance.expectedUntil",
+            )
+            schema = _optional_text(value, "schema", "maintenance")
+            if schema is not None and schema != MAINTENANCE_SCHEMA:
+                _fail("Maintenance sidecar schema is invalid.")
+            version = _optional_integer(value, "version", "maintenance")
+            if version is not None and version != 1:
+                _fail("Maintenance sidecar version is invalid.")
+            token = _optional_text(value, "token", "maintenance")
+            authorization = {
+                "state": (
+                    "ready"
+                    if token is not None and len(token) >= 32
+                    else "unavailable"
+                ),
+                "marketplaceId": _optional_text(value, "marketplaceId", "maintenance"),
+                "pluginId": _optional_text(value, "pluginId", "maintenance"),
+                "context": _optional_text(value, "context", "maintenance"),
+                "namespaceGeneration": _optional_integer(value, "namespaceGeneration", "maintenance"),
+                "installGeneration": _optional_integer(value, "installGeneration", "maintenance"),
+                "activationGeneration": _optional_integer(value, "activationGeneration", "maintenance"),
+                "tokenPresent": token is not None,
+            }
+            result.update(
+                owner=owner,
+                host=sidecar_host,
+                pid=pid,
+                enteredAt=entered_at.isoformat().replace("+00:00", "Z"),
+                expectedUntil=expected_until.isoformat().replace("+00:00", "Z"),
+                authorization=authorization,
+            )
+            if _normalize_short_host(sidecar_host) != _normalize_short_host(host):
+                result["reason"] = "foreign-host"
+            elif entered_at > current_time:
+                result["reason"] = "not-yet-active"
+            elif current_time > expected_until:
+                result["reason"] = "expired"
+            elif not pid_is_live(pid):
+                result["reason"] = "owner-dead"
+            else:
+                result["state"] = "active"
+                result["reason"] = "maintenance-active"
+            return result
+        except (InstallationContextError, OSError):
+            result["reason"] = "sidecar-invalid"
+            return result
+    return inactive
+
+
 def _maintenance_result(
     *,
     profile: Path,
@@ -5411,59 +5580,336 @@ def _maintenance_result(
     host: str,
     pid_is_live: Callable[[int], bool],
 ) -> dict[str, Any]:
-    candidates = [
-        ("user", profile / ".copilot-extensions" / "maintenance")
-    ]
-    if plugin_root is not None:
-        candidates.append(("plugin", plugin_root / "maintenance"))
-    for scope, marker_entry in candidates:
-        if not os.path.lexists(marker_entry):
-            continue
-        marker = marker_entry.absolute()
-        sidecar_entry = marker_entry.with_name(f"{marker_entry.name}.json")
-        sidecar = sidecar_entry.absolute()
-        state = "stale"
-        if (
-            not marker_entry.is_symlink()
-            and sidecar_entry.is_file()
-            and not sidecar_entry.is_symlink()
-        ):
-            try:
-                value = read_json(sidecar_entry)
-                if not isinstance(value, Mapping):
-                    _fail("Maintenance sidecar must be a JSON object.")
-                owner = _required_string(value, "owner", "maintenance")
-                sidecar_host = _required_string(value, "host", "maintenance")
-                pid = _required_integer(value, "pid", "maintenance")
-                reason = _required_string(value, "reason", "maintenance")
-                entered_at = _parse_rfc3339_utc(
-                    _exact_property(value, "enteredAt"), "maintenance.enteredAt"
-                )
-                expected_until = _parse_rfc3339_utc(
-                    _exact_property(value, "expectedUntil"),
-                    "maintenance.expectedUntil",
-                )
-                if (
-                    owner
-                    and reason
-                    and _normalize_short_host(sidecar_host) == _normalize_short_host(host)
-                    and entered_at <= current_time <= expected_until
-                    and pid_is_live(pid)
-                ):
-                    state = "active"
-            except (InstallationContextError, OSError):
-                state = "stale"
-        return {
-            "state": state,
-            "scope": scope,
-            "marker": str(marker),
-            "sidecar": str(sidecar),
-        }
+    maintenance = _maintenance_inspection(
+        profile=profile,
+        plugin_root=plugin_root,
+        current_time=current_time,
+        host=host,
+        pid_is_live=pid_is_live,
+    )
     return {
-        "state": "inactive",
-        "scope": "none",
+        "state": maintenance["state"],
+        "scope": maintenance["scope"],
+        "marker": maintenance["marker"],
+        "sidecar": maintenance["sidecar"],
+    }
+
+
+def _require_management_authorization(
+    *,
+    profile: Path,
+    plugin_root: Path | None,
+    maintenance_token: str | None,
+    current_time: datetime,
+    host: str,
+    pid_is_live: Callable[[int], bool],
+) -> dict[str, Any]:
+    maintenance = _maintenance_inspection(
+        profile=profile,
+        plugin_root=plugin_root,
+        current_time=current_time,
+        host=host,
+        pid_is_live=pid_is_live,
+    )
+    if maintenance["state"] == "inactive":
+        return maintenance
+    if maintenance["state"] != "active":
+        _fail(
+            "Applicable maintenance is stale or invalid "
+            f"(scope={maintenance['scope']} reason={maintenance['reason']})."
+        )
+    if not maintenance_token:
+        _fail(
+            "Applicable maintenance requires an explicit matching "
+            "--maintenance-token."
+        )
+    if maintenance["authorization"]["state"] != "ready":
+        _fail(
+            "Applicable maintenance sidecar cannot authorize management commands; "
+            "explicit repair is required."
+        )
+    sidecar_value = read_json(Path(maintenance["sidecar"]))
+    if not isinstance(sidecar_value, Mapping):
+        _fail("Maintenance sidecar must be a JSON object.")
+    if _required_string(sidecar_value, "token", "maintenance") != maintenance_token:
+        _fail("Maintenance token does not match the applicable maintenance owner.")
+    return maintenance
+
+
+@_validation_scope
+def enter_maintenance(
+    *,
+    scope: str,
+    owner: str,
+    reason: str,
+    expected_duration_seconds: int,
+    durable_home: str | os.PathLike[str] | None = None,
+    context: str | os.PathLike[str] | None = None,
+    expected_marketplace_id: str | None = None,
+    expected_plugin_id: str | None = None,
+    environment: Mapping[str, str] | None = None,
+    os_profile: str | os.PathLike[str] | None = None,
+    platform: str | None = None,
+    wsl_distro: str | None = None,
+) -> dict[str, Any]:
+    if scope not in {"user", "plugin"}:
+        _fail("Maintenance scope must be 'user' or 'plugin'.")
+    if not owner.strip():
+        _fail("Maintenance owner must be a non-empty string.")
+    if not reason.strip():
+        _fail("Maintenance reason must be a non-empty string.")
+    if expected_duration_seconds < 1:
+        _fail("Maintenance duration must be at least one second.")
+    environment = environment if environment is not None else os.environ
+    current_environment, profile = _current_environment(
+        environment=environment,
+        os_profile=os_profile,
+        platform=platform,
+        wsl_distro=wsl_distro,
+    )
+    plugin_root: Path | None = None
+    metadata: dict[str, Any] = {}
+    resolved_durable_home = canonical_path(durable_home or profile / ".copilot-extensions")
+    if scope == "plugin":
+        if context is None or expected_marketplace_id is None or expected_plugin_id is None:
+            _fail(
+                "Plugin-scoped maintenance requires --context, "
+                "--expected-marketplace-id, and --expected-plugin-id."
+            )
+        validated = validate_context_receipt(
+            context,
+            resolved_durable_home,
+            expected_marketplace_id=expected_marketplace_id,
+            expected_plugin_id=expected_plugin_id,
+            environment={},
+        )
+        plugin_root = canonical_path(validated["pluginRoot"])
+        metadata.update(
+            marketplaceId=_string_property(validated, "marketplaceId"),
+            pluginId=_string_property(validated, "pluginId"),
+            context=str(canonical_path(validated["installReceipt"])),
+            namespaceGeneration=int(validated["namespaceGeneration"]),
+            installGeneration=int(validated["generation"]),
+        )
+        activation = _activation_result(
+            plugin_root=plugin_root,
+            durable_home=resolved_durable_home,
+            marketplace_id=metadata["marketplaceId"],
+            plugin_id=metadata["pluginId"],
+            current_environment=current_environment,
+            legacy_root=canonical_path(
+                Path(current_environment["homeRealPath"]) / f".{metadata['pluginId']}"
+            ),
+        )
+        if activation["state"] in {"valid", "revalidation"}:
+            metadata["activationGeneration"] = int(activation["activationGeneration"])
+    marker_entry = (
+        profile / ".copilot-extensions" / "maintenance"
+        if scope == "user"
+        else plugin_root / "maintenance"
+    )
+    marker_entry.parent.mkdir(parents=True, exist_ok=True)
+    if os.path.lexists(marker_entry):
+        existing = _maintenance_inspection(
+            profile=profile,
+            plugin_root=plugin_root if scope == "plugin" else None,
+            current_time=datetime.now(timezone.utc),
+            host=socket.gethostname(),
+            pid_is_live=_pid_is_live,
+        )
+        _fail(
+            "Applicable maintenance already exists "
+            f"(scope={existing['scope']} reason={existing['reason']})."
+        )
+    descriptor = os.open(
+        marker_entry,
+        os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+    )
+    os.close(descriptor)
+    token = secrets.token_hex(24)
+    entered_at = datetime.now(timezone.utc).replace(microsecond=0)
+    sidecar = {
+        "schema": MAINTENANCE_SCHEMA,
+        "version": 1,
+        "owner": owner,
+        "host": socket.gethostname(),
+        "pid": os.getpid(),
+        "reason": reason,
+        "enteredAt": entered_at.isoformat().replace("+00:00", "Z"),
+        "expectedUntil": datetime.fromtimestamp(
+            entered_at.timestamp() + expected_duration_seconds,
+            timezone.utc,
+        ).isoformat().replace("+00:00", "Z"),
+        "token": token,
+        **metadata,
+    }
+    sidecar_entry = marker_entry.with_name(f"{marker_entry.name}.json")
+    try:
+        _atomic_write_json(sidecar_entry, sidecar)
+    except BaseException:
+        marker_entry.unlink(missing_ok=True)
+        raise
+    return {
+        "action": "maintenance-enter",
+        "status": "ready",
+        "scope": scope,
+        "marker": str(canonical_path(marker_entry)),
+        "sidecar": str(canonical_path(sidecar_entry)),
+        "token": token,
+    }
+
+
+@_validation_scope
+def release_maintenance(
+    *,
+    scope: str,
+    maintenance_token: str,
+    durable_home: str | os.PathLike[str] | None = None,
+    context: str | os.PathLike[str] | None = None,
+    expected_marketplace_id: str | None = None,
+    expected_plugin_id: str | None = None,
+    environment: Mapping[str, str] | None = None,
+    os_profile: str | os.PathLike[str] | None = None,
+    platform: str | None = None,
+    wsl_distro: str | None = None,
+) -> dict[str, Any]:
+    if scope not in {"user", "plugin"}:
+        _fail("Maintenance scope must be 'user' or 'plugin'.")
+    if not maintenance_token:
+        _fail("Maintenance release requires --maintenance-token.")
+    environment = environment if environment is not None else os.environ
+    _current, profile = _current_environment(
+        environment=environment,
+        os_profile=os_profile,
+        platform=platform,
+        wsl_distro=wsl_distro,
+    )
+    plugin_root: Path | None = None
+    resolved_durable_home = canonical_path(durable_home or profile / ".copilot-extensions")
+    if scope == "plugin":
+        if context is None or expected_marketplace_id is None or expected_plugin_id is None:
+            _fail(
+                "Plugin-scoped maintenance release requires --context, "
+                "--expected-marketplace-id, and --expected-plugin-id."
+            )
+        validated = validate_context_receipt(
+            context,
+            resolved_durable_home,
+            expected_marketplace_id=expected_marketplace_id,
+            expected_plugin_id=expected_plugin_id,
+            environment={},
+        )
+        plugin_root = canonical_path(validated["pluginRoot"])
+    marker_entry = (
+        profile / ".copilot-extensions" / "maintenance"
+        if scope == "user"
+        else plugin_root / "maintenance"
+    )
+    if not os.path.lexists(marker_entry):
+        return {
+            "action": "maintenance-release",
+            "status": "ready",
+            "scope": scope,
+            "released": False,
+            "reason": "maintenance-absent",
+        }
+    maintenance = _require_management_authorization(
+        profile=profile,
+        plugin_root=plugin_root if scope == "plugin" else None,
+        maintenance_token=maintenance_token,
+        current_time=datetime.now(timezone.utc),
+        host=socket.gethostname(),
+        pid_is_live=_pid_is_live,
+    )
+    sidecar_entry = marker_entry.with_name(f"{marker_entry.name}.json")
+    sidecar_entry.unlink()
+    marker_entry.unlink()
+    return {
+        "action": "maintenance-release",
+        "status": "ready",
+        "scope": scope,
+        "released": True,
+        "reason": "maintenance-released",
+        "marker": maintenance["marker"],
+    }
+
+
+def require_management_authorization(
+    *,
+    profile: Path,
+    plugin_root: Path | None,
+    maintenance_token: str | None,
+    current_time: datetime,
+    host: str,
+    pid_is_live: Callable[[int], bool],
+) -> dict[str, Any]:
+    return _require_management_authorization(
+        profile=profile,
+        plugin_root=plugin_root,
+        maintenance_token=maintenance_token,
+        current_time=current_time,
+        host=host,
+        pid_is_live=pid_is_live,
+    )
+
+
+def probe_remote_maintenance(
+    command: Sequence[str],
+    *,
+    cwd: str | os.PathLike[str] | None = None,
+    environment: Mapping[str, str] | None = None,
+    timeout_seconds: float = 30.0,
+) -> dict[str, Any]:
+    unknown = {
+        "state": "unknown",
+        "scope": "remote",
         "marker": None,
         "sidecar": None,
+        "reason": "maintenance-unknown",
+    }
+    try:
+        result = subprocess.run(
+            list(command),
+            cwd=None if cwd is None else os.fspath(cwd),
+            env=None if environment is None else dict(environment),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=timeout_seconds,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return unknown
+    if result.returncode != 0:
+        return unknown
+    try:
+        payload = json.loads(result.stdout, object_pairs_hook=_reject_duplicate_keys)
+    except (UnicodeError, json.JSONDecodeError):
+        return unknown
+    if not isinstance(payload, Mapping):
+        return unknown
+    state = _exact_property(payload, "state")
+    scope = _exact_property(payload, "scope")
+    marker = _exact_property(payload, "marker")
+    sidecar = _exact_property(payload, "sidecar")
+    if state not in {"inactive", "active", "stale"}:
+        return unknown
+    if scope not in {"none", "user", "plugin"}:
+        return unknown
+    if marker is not None and not isinstance(marker, str):
+        return unknown
+    if sidecar is not None and not isinstance(sidecar, str):
+        return unknown
+    return {
+        "state": state,
+        "scope": scope,
+        "marker": marker,
+        "sidecar": sidecar,
+        "reason": _exact_property(payload, "reason")
+        if "reason" in payload
+        else None,
     }
 
 
@@ -5957,6 +6403,7 @@ def _build_parser() -> argparse.ArgumentParser:
     activation_parser.add_argument("--legacy-probe-file")
     activation_parser.add_argument("--legacy-root")
     activation_parser.add_argument("--durable-home")
+    activation_parser.add_argument("--maintenance-token")
 
     snapshot_stamp_parser = subparsers.add_parser("snapshot-stamp")
     snapshot_stamp_parser.add_argument("--context", required=True)
@@ -6076,6 +6523,47 @@ def _build_parser() -> argparse.ArgumentParser:
 
     probe_parser = subparsers.add_parser("probe-legacy")
     _add_mode_arguments(probe_parser)
+
+    maintenance_status_parser = subparsers.add_parser("maintenance-status")
+    maintenance_status_parser.add_argument(
+        "--scope",
+        choices=("user", "plugin"),
+        default="user",
+    )
+    maintenance_status_parser.add_argument("--context")
+    maintenance_status_parser.add_argument("--expected-marketplace-id")
+    maintenance_status_parser.add_argument("--expected-plugin-id")
+    maintenance_status_parser.add_argument("--durable-home")
+
+    maintenance_enter_parser = subparsers.add_parser("maintenance-enter")
+    maintenance_enter_parser.add_argument(
+        "--scope",
+        required=True,
+        choices=("user", "plugin"),
+    )
+    maintenance_enter_parser.add_argument("--owner", required=True)
+    maintenance_enter_parser.add_argument("--reason", required=True)
+    maintenance_enter_parser.add_argument(
+        "--expected-duration-seconds",
+        required=True,
+        type=_parse_cli_generation,
+    )
+    maintenance_enter_parser.add_argument("--context")
+    maintenance_enter_parser.add_argument("--expected-marketplace-id")
+    maintenance_enter_parser.add_argument("--expected-plugin-id")
+    maintenance_enter_parser.add_argument("--durable-home")
+
+    maintenance_release_parser = subparsers.add_parser("maintenance-release")
+    maintenance_release_parser.add_argument(
+        "--scope",
+        required=True,
+        choices=("user", "plugin"),
+    )
+    maintenance_release_parser.add_argument("--maintenance-token", required=True)
+    maintenance_release_parser.add_argument("--context")
+    maintenance_release_parser.add_argument("--expected-marketplace-id")
+    maintenance_release_parser.add_argument("--expected-plugin-id")
+    maintenance_release_parser.add_argument("--durable-home")
     return parser
 
 
@@ -6161,6 +6649,56 @@ def main(argv: Sequence[str] | None = None) -> int:
                 legacy_probe=legacy_probe,
                 durable_home=arguments.durable_home,
                 legacy_root=arguments.legacy_root,
+                maintenance_token=arguments.maintenance_token,
+            )
+        elif arguments.action == "maintenance-status":
+            plugin_root = None
+            profile = _current_environment(
+                environment=os.environ,
+                os_profile=None,
+                platform=None,
+                wsl_distro=None,
+            )[1]
+            if arguments.scope == "plugin":
+                if not (arguments.context and arguments.expected_marketplace_id and arguments.expected_plugin_id):
+                    _fail(
+                        "maintenance-status --scope plugin requires --context, "
+                        "--expected-marketplace-id, and --expected-plugin-id."
+                    )
+                validated = validate_context_receipt(
+                    arguments.context,
+                    arguments.durable_home or profile / ".copilot-extensions",
+                    expected_marketplace_id=arguments.expected_marketplace_id,
+                    expected_plugin_id=arguments.expected_plugin_id,
+                    environment={},
+                )
+                plugin_root = canonical_path(validated["pluginRoot"])
+            result = _maintenance_inspection(
+                profile=profile,
+                plugin_root=plugin_root,
+                current_time=datetime.now(timezone.utc),
+                host=socket.gethostname(),
+                pid_is_live=_pid_is_live,
+            )
+        elif arguments.action == "maintenance-enter":
+            result = enter_maintenance(
+                scope=arguments.scope,
+                owner=arguments.owner,
+                reason=arguments.reason,
+                expected_duration_seconds=arguments.expected_duration_seconds,
+                durable_home=arguments.durable_home,
+                context=arguments.context,
+                expected_marketplace_id=arguments.expected_marketplace_id,
+                expected_plugin_id=arguments.expected_plugin_id,
+            )
+        elif arguments.action == "maintenance-release":
+            result = release_maintenance(
+                scope=arguments.scope,
+                maintenance_token=arguments.maintenance_token,
+                durable_home=arguments.durable_home,
+                context=arguments.context,
+                expected_marketplace_id=arguments.expected_marketplace_id,
+                expected_plugin_id=arguments.expected_plugin_id,
             )
         elif arguments.action == "snapshot-stamp":
             result = stamp_snapshot_provenance(

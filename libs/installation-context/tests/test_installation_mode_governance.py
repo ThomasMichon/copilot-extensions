@@ -793,7 +793,10 @@ def test_dangling_plugin_maintenance_marker_fails_closed(
     legacy = tmp_path / "legacy"
     legacy.mkdir()
     marker = Path(layout["plugin_root"]) / "maintenance"
-    marker.symlink_to(marker.with_name("missing-maintenance-target"))
+    try:
+        marker.symlink_to(marker.with_name("missing-maintenance-target"))
+    except OSError:
+        pytest.skip("symlink creation unavailable")
 
     result = _run(
         runner,
@@ -1034,6 +1037,264 @@ def test_maintenance_precedence_and_stale_sidecar(tmp_path: Path) -> None:
     )
     assert stale["status"] == "maintenance-blocked"
     assert stale["reason"] == "maintenance-stale"
+
+
+def test_maintenance_status_reports_authorization_metadata(tmp_path: Path) -> None:
+    module = _load_module()
+    layout = _cell_layout(tmp_path)
+    profile = tmp_path / "profile"
+    legacy = tmp_path / "legacy"
+    profile.mkdir()
+    legacy.mkdir()
+    entered = module.enter_maintenance(
+        scope="plugin",
+        owner="test-owner",
+        reason="upgrade",
+        expected_duration_seconds=300,
+        durable_home=layout["durable"],
+        context=layout["install"],
+        expected_marketplace_id=layout["marketplace_id"],
+        expected_plugin_id=PLUGIN_ID,
+        environment={},
+        os_profile=profile,
+        platform="windows" if os.name == "nt" else "posix",
+        wsl_distro=None,
+    )
+
+    result = _run(
+        "python",
+        [
+            "maintenance-status",
+            "--scope",
+            "plugin",
+            "--context",
+            str(layout["install"]),
+            "--expected-marketplace-id",
+            str(layout["marketplace_id"]),
+            "--expected-plugin-id",
+            PLUGIN_ID,
+            "--durable-home",
+            str(layout["durable"]),
+        ],
+    )
+
+    assert result.returncode == 0, result.stderr
+    value = json.loads(result.stdout)
+    assert value["state"] == "active"
+    assert value["scope"] == "plugin"
+    assert value["reason"] == "maintenance-active"
+    assert value["owner"] == "test-owner"
+    assert value["authorization"]["state"] == "ready"
+    assert value["authorization"]["tokenPresent"] is True
+    assert value["authorization"]["marketplaceId"] == layout["marketplace_id"]
+    assert value["authorization"]["pluginId"] == PLUGIN_ID
+    assert value["authorization"]["context"] == str(Path(layout["install"]).resolve())
+    assert Path(entered["marker"]).exists()
+
+
+def test_maintenance_release_requires_matching_token(tmp_path: Path) -> None:
+    module = _load_module()
+    layout = _cell_layout(tmp_path)
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    token = module.enter_maintenance(
+        scope="plugin",
+        owner="test-owner",
+        reason="upgrade",
+        expected_duration_seconds=300,
+        durable_home=layout["durable"],
+        context=layout["install"],
+        expected_marketplace_id=layout["marketplace_id"],
+        expected_plugin_id=PLUGIN_ID,
+        environment={},
+        os_profile=profile,
+        platform="windows" if os.name == "nt" else "posix",
+        wsl_distro=None,
+    )["token"]
+    args = [
+        "maintenance-release",
+        "--scope",
+        "plugin",
+        "--context",
+        str(layout["install"]),
+        "--expected-marketplace-id",
+        str(layout["marketplace_id"]),
+        "--expected-plugin-id",
+        PLUGIN_ID,
+        "--durable-home",
+        str(layout["durable"]),
+        "--maintenance-token",
+    ]
+
+    wrong = _run("python", [*args, "wrong-token"])
+    assert wrong.returncode == 1
+    assert "does not match" in wrong.stderr
+
+    released = _run("python", [*args, token])
+    assert released.returncode == 0, released.stderr
+    assert json.loads(released.stdout)["released"] is True
+
+    replay = _run("python", [*args, token])
+    assert replay.returncode == 0, replay.stderr
+    assert json.loads(replay.stdout)["reason"] == "maintenance-absent"
+
+
+def test_activation_cas_requires_matching_maintenance_token(tmp_path: Path) -> None:
+    module = _load_module()
+    layout = _cell_layout(tmp_path)
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    token = module.enter_maintenance(
+        scope="plugin",
+        owner="test-owner",
+        reason="upgrade",
+        expected_duration_seconds=300,
+        durable_home=layout["durable"],
+        context=layout["install"],
+        expected_marketplace_id=layout["marketplace_id"],
+        expected_plugin_id=PLUGIN_ID,
+        environment={},
+        os_profile=profile,
+        platform="windows" if os.name == "nt" else "posix",
+        wsl_distro=None,
+    )["token"]
+
+    with pytest.raises(module.InstallationContextError, match="--maintenance-token"):
+        module.compare_and_swap_activation(
+            context=layout["install"],
+            expected_marketplace_id=layout["marketplace_id"],
+            expected_plugin_id=PLUGIN_ID,
+            expected_namespace_generation=layout["namespace_generation"],
+            expected_install_generation=layout["install_generation"],
+            expected_activation_generation=0,
+            activation_mode="namespaced",
+            activation_state="active",
+            legacy_disposition="absent",
+            legacy_probe={
+                "declared": True,
+                "result": "absent",
+                "checkedAt": "2026-01-01T00:00:00Z",
+            },
+            durable_home=layout["durable"],
+            legacy_root=legacy,
+            maintenance_token=None,
+            environment={},
+            os_profile=profile,
+            platform="windows" if os.name == "nt" else "posix",
+            wsl_distro=None,
+        )
+    assert not (Path(layout["plugin_root"]) / "installation-activation.json").exists()
+
+    with pytest.raises(module.InstallationContextError, match="does not match"):
+        module.compare_and_swap_activation(
+            context=layout["install"],
+            expected_marketplace_id=layout["marketplace_id"],
+            expected_plugin_id=PLUGIN_ID,
+            expected_namespace_generation=layout["namespace_generation"],
+            expected_install_generation=layout["install_generation"],
+            expected_activation_generation=0,
+            activation_mode="namespaced",
+            activation_state="active",
+            legacy_disposition="absent",
+            legacy_probe={
+                "declared": True,
+                "result": "absent",
+                "checkedAt": "2026-01-01T00:00:00Z",
+            },
+            durable_home=layout["durable"],
+            legacy_root=legacy,
+            maintenance_token="wrong-token",
+            environment={},
+            os_profile=profile,
+            platform="windows" if os.name == "nt" else "posix",
+            wsl_distro=None,
+        )
+    assert not (Path(layout["plugin_root"]) / "installation-activation.json").exists()
+
+    allowed = module.compare_and_swap_activation(
+        context=layout["install"],
+        expected_marketplace_id=layout["marketplace_id"],
+        expected_plugin_id=PLUGIN_ID,
+        expected_namespace_generation=layout["namespace_generation"],
+        expected_install_generation=layout["install_generation"],
+        expected_activation_generation=0,
+        activation_mode="namespaced",
+        activation_state="active",
+        legacy_disposition="absent",
+        legacy_probe={
+            "declared": True,
+            "result": "absent",
+            "checkedAt": "2026-01-01T00:00:00Z",
+        },
+        durable_home=layout["durable"],
+        legacy_root=legacy,
+        maintenance_token=token,
+        environment={},
+        os_profile=profile,
+        platform="windows" if os.name == "nt" else "posix",
+        wsl_distro=None,
+    )
+    assert allowed["status"] == "ready"
+    assert allowed["activationChanged"] is True
+
+
+def test_stale_maintenance_status_reports_dead_owner_without_clearing_marker(
+    tmp_path: Path,
+) -> None:
+    layout = _cell_layout(tmp_path)
+    marker = Path(layout["plugin_root"]) / "maintenance"
+    marker.touch()
+    _write_json(
+        marker.with_name("maintenance.json"),
+        {
+            "schema": "copilot-extensions.installation-maintenance",
+            "version": 1,
+            "owner": "test-owner",
+            "host": "test-host.example",
+            "pid": 999999,
+            "reason": "upgrade",
+            "enteredAt": "2026-01-01T00:00:00Z",
+            "expectedUntil": "2099-01-01T00:00:00Z",
+            "token": "a" * 48,
+            "marketplaceId": layout["marketplace_id"],
+            "pluginId": PLUGIN_ID,
+            "context": str(Path(layout["install"]).resolve()),
+            "namespaceGeneration": layout["namespace_generation"],
+            "installGeneration": layout["install_generation"],
+        },
+    )
+
+    module = _load_module()
+    maintenance = module._maintenance_inspection(
+        profile=tmp_path / "profile",
+        plugin_root=Path(layout["plugin_root"]),
+        current_time=module._parse_rfc3339_utc("2026-01-01T00:30:00Z", "current"),
+        host="test-host.example",
+        pid_is_live=lambda _pid: False,
+    )
+
+    assert maintenance["state"] == "stale"
+    assert maintenance["reason"] == "owner-dead"
+    assert marker.exists()
+    assert marker.with_name("maintenance.json").exists()
+
+
+def test_remote_maintenance_probe_fails_closed_on_unreachable_or_ambiguous_output() -> None:
+    module = _load_module()
+
+    unreachable = module.probe_remote_maintenance(
+        [sys.executable, "-c", "raise SystemExit(23)"]
+    )
+    assert unreachable["state"] == "unknown"
+    assert unreachable["reason"] == "maintenance-unknown"
+
+    ambiguous = module.probe_remote_maintenance(
+        [sys.executable, "-c", "print('{\"state\":\"active\"}')"]
+    )
+    assert ambiguous["state"] == "unknown"
+    assert ambiguous["reason"] == "maintenance-unknown"
 
 
 @pytest.mark.parametrize(

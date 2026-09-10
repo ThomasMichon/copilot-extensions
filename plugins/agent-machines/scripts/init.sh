@@ -363,6 +363,7 @@ while [[ $# -gt 0 ]]; do
         --expected-install-generation) EXPECTED_INSTALL_GENERATION="${2:-}"; shift 2 ;;
         --expected-current-version) EXPECTED_CURRENT_VERSION="${2:-}"; shift 2 ;;
         --expect-current-absent) EXPECT_CURRENT_ABSENT=1; shift ;;
+        --maintenance-token) MAINTENANCE_TOKEN="${2:-}"; shift 2 ;;
         stamp|provision|init|cell-provision|cell-repair|cell-uninstall|slot-provision|slot-validate|slot-complete|slot-completion-validate|slot-cutover) ACTION="$1"; shift ;;
         *) shift ;;
     esac
