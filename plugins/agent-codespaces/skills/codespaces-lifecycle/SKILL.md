@@ -2,13 +2,16 @@
 name: codespaces-lifecycle
 description: >
   GitHub Codespaces operations -- bridge dispatch to codespace agents,
-  diagnostic SSH, list/pool/wait/stop/finalize/delete/status, and credential
+  explicitly selected caller-owned interactive terminals, diagnostic SSH,
+  list/pool/wait/stop/finalize/delete/status, and credential
   relay troubleshooting. Use this skill
   for day-to-day codespace management.
   Trigger phrases include:
   - 'codespace'
   - 'codespace ssh'
   - 'ssh into codespace'
+  - 'interactive codespace terminal'
+  - 'codespace startup command'
   - 'list codespaces'
   - 'stop codespace'
   - 'delete codespace'
@@ -36,10 +39,25 @@ self-provision on first use. Full detail:
 
 ## Connecting to CodeSpaces
 
-Routine **dispatch** should go through **agent-bridge**, not raw SSH.
+Choose the requested interaction surface:
+
+- **ACP dispatch:** use agent-bridge's `send`/session controls.
+- **Explicit caller-owned interactive terminal:** use the provider's
+  `ssh --interactive-command-file` flow below. Do not redirect an explicitly
+  selected interactive terminal to ACP dispatch.
+- **Diagnostic command:** use provider `ssh --remote-cmd` only after verifying
+  that no live incumbent owns the target.
+
+Both agent interaction modes retain shared bridge/provider infrastructure;
+choosing a terminal does not authorize disabling credentials, preparation,
+claims, fencing, recovery, or applicable live-session integration.
+
+### ACP dispatch
+
+Routine **ACP dispatch** goes through **agent-bridge**, not a hand-built SSH launch.
 CodeSpace agents are discovered **automatically** via the agent-codespaces
 namespace resolver — **no manual registration is needed past installation**
-(see *Agent-Bridge Integration* below). Any CodeSpace (running or stopped) is
+(see *ACP venue namespace integration* below). Any CodeSpace (running or stopped) is
 addressable as `codespace:<name>`, by either its **raw** name or its **friendly**
 (display) name. The `codespace:` prefix is optional — a bare name resolves too,
 and constrains nothing; use the prefix to force CodeSpace-only resolution. A
@@ -67,7 +85,7 @@ the candidates.
 | `<agent-bridge catalog argv[0]> resume <session-id>` | Resume a stopped session |
 | `<agent-bridge catalog argv[0]> end <session-id>` | End and clean up session |
 
-### Sync pattern (default — recommended for interactive use)
+### Attached stream (default for ACP dispatch)
 
 The payload-local `send` operation blocks until the turn completes.
 Use when you need the result before continuing.
@@ -76,7 +94,7 @@ Use when you need the result before continuing.
 powershell(command: '& "<agent-bridge catalog argv[0]>" send "codespace:<name>" "<prompt>"', initial_wait: 120)
 ```
 
-### Long-running interactive work
+### Long-running ACP work
 
 Keep the default attached stream when the operator expects to see progress.
 Long runtime alone is **not** a reason to add `--no-wait`: the bridge collapses
@@ -110,7 +128,7 @@ is part of the current request. Either keep the original `send` attached, or
 immediately follow with `read`/`wait`. A genuinely detached dispatch needs an
 explicit later monitoring plan.
 
-### Multi-turn sessions
+### Multi-turn ACP sessions
 
 Sessions are persistent. After the first `send` creates a session, send
 follow-ups using the session ID:
@@ -139,29 +157,69 @@ follow-ups using the session ID:
 
 ### Exclusive control: claim + cross-harness fence
 
-A CodeSpace is fronted by a single bridge, so `agent-codespaces` takes an
-**exclusive, worktree-keyed claim** on connect (`ssh --effort` / `claim`): a
-host-local **L1** lock plus an atomic cross-machine **L2** Git-ref lease
-(`<agent-worktrees catalog argv[0]> lease`, the same-harness authority) — a live claim on another
-machine raises `[BUSY]`/`ClaimConflict` (take over with `--force-claim`). On top,
-a **cross-harness fence** reads a lockfile inside the CodeSpace (`~/.agent-lease`)
-and **refuses** the connect if a *foreign harness* holds it (the seam the
-same-harness ref store cannot see). All degrade-safe — a missing store / identity
-never blocks. See `borrowing-codespaces` for the full lease + fence model.
+Respect the target's incumbent owner. The provider's `ssh --effort` / `claim`
+seams take an **exclusive, worktree-keyed claim** using host-local **L1** state
+and the configured cross-machine **L2** Git-ref lease authority. The provider
+SSH path also checks the remote **cross-harness fence** (`~/.agent-lease`).
+Honor `[BUSY]` and durable-coordination rejections; selecting a mode does not
+authorize takeover or bypass. See `borrowing-codespaces` for the lease/fence
+model and its explicit degraded-state boundaries.
 
-## SSH (Diagnostic Only)
+## SSH: caller-owned terminals and diagnostics
 
-SSH is for diagnostics and one-off commands, **not routine dispatch**.
-If you find yourself using SSH for dispatch or status checks, diagnose
-the bridge connection instead.
+### Explicit caller-owned interactive terminal
 
-> **Never SSH a CodeSpace that has an active dispatch.** The catalog command's `ssh` action
-> shares the same ssh-manager ControlMaster socket as the dispatch's connection;
-> a concurrent diagnostic SSH can tear that down and **collapse the running
-> session**. To answer "is it making progress?", read the bridge feed and get
-> durable state (branch HEAD / pushed / PR) from the **source of truth** (the git
-> remote / PR API) — not by shelling into the CodeSpace. Reserve host SSH for a
-> CodeSpace whose dispatch is **stopped/idle**.
+For an explicitly requested terminal/startup command, check the resolved
+provider's `ssh --help` for `--interactive-command-file`, `--local-forward`,
+`--reverse-forward`, `--no-plugin-staging`, and `--require-relay`. Missing support
+is a blocker; do not guess a version floor or substitute ACP.
+
+Retain the shared credential service using the resolved bridge command:
+
+```text
+<agent-bridge catalog argv[0]> service start
+<agent-bridge catalog argv[0]> installer-readiness
+```
+
+Require readiness exit 0 and JSON schema `copilot-extensions.module-readiness`,
+version `1`, module `agent-bridge/runtime`, state `ready`. The provider's
+`--require-relay` separately checks the credential protocol through the tunnel;
+the Owner's configuration-only `owner --status` is not service readiness.
+
+```text
+<agent-codespaces catalog argv[0]> ssh <codespace-name> --interactive-command-file <local-utf8-file> --effort <owner-worktree-dir> --no-plugin-staging --require-relay --local-forward 4321:4321 --reverse-forward 9000:9001
+```
+
+Use a trusted UTF-8 command file with LF endings, for example
+`cd /workspaces/example-web && exec copilot`. Forward flags are repeatable;
+select the caller's actual loopback listener ports. Keep credential/repo
+preparation enabled: `--no-plugin-staging` suppresses provider-controlled plugin
+registration/install and host payload copying without blanket `--no-provision`
+or `--no-relay`. Install applicable remote plugins through their official
+installation flow, not by copying host payloads, settings, or profiles.
+
+For native Copilot, verify actual bridge live-session registration/routing and
+the owning provider's recovery/lifecycle capabilities before reporting the
+integrated workflow ready. A CodeSpace namespace listing or a working terminal
+does not prove those capabilities. Keep missing parity visible as a blocker;
+do not invent a live-session record or redirect control to ACP. Address bridge
+`send` to a verified native session identity with the supported freshness assertion
+(`--expected-session-id`), so missing representation cannot fall through to ACP.
+See the plugin README's **Caller-owned interactive SSH** contract for limits.
+
+### Incumbent safety and diagnostic SSH
+
+Before a new interactive launch or diagnostic command, verify that no live
+incumbent owns the target, including an idle ACP or native session. Do not open
+diagnostic SSH against an active incumbent: shared transport cleanup can disrupt
+its session. Inspect progress through the incumbent's bridge/control surface
+and source-control evidence instead. Require the incumbent's owned lifecycle
+to end/release it before starting another interaction surface; a mode choice
+does not authorize implicit `--force`, `--force-claim`, or disabled claims.
+
+Use non-PTY `--remote-cmd` for diagnostics on a verified unoccupied target.
+Keep routine ACP delegation on agent-bridge; the explicit terminal flow above
+is a distinct caller-selected mode, not a diagnostic workaround.
 
 > **CodeSpace dispatch sessions are now resilient to the failures that used to
 > collapse them ~every 10–15 min.** The main culprit — the ACP stdio relay
@@ -189,11 +247,11 @@ the bridge connection instead.
 # Run a command and return output
 <agent-codespaces catalog argv[0]> ssh <codespace-name> --remote-cmd "ls -la"
 
-# Structured stdio for agent-bridge transport
+# Structured stdio for bridge transport adapters, not caller-owned terminals
 <agent-codespaces catalog argv[0]> ssh <codespace-name> --stdio --remote-cmd "copilot --acp --stdio"
 
-# Skip credential relay tunnel setup
-<agent-codespaces catalog argv[0]> ssh <codespace-name> --no-relay
+# Explicitly requested relay-free diagnostic on an unoccupied target
+<agent-codespaces catalog argv[0]> ssh <codespace-name> --remote-cmd "true" --no-relay
 ```
 
 ## Listing and Status
@@ -377,10 +435,10 @@ All requests pass through a policy gate before reaching any source:
 - **Host allowlist** -- fnmatch-style patterns per source
 - **Resource allowlist** -- exact-match for Azure resources (az-login)
 
-## Agent-Bridge Integration
+## ACP venue namespace integration
 
-**No manual registration is required.** When agent-codespaces is installed, its
-sessionStart hook drops a small **namespace-provider manifest** into
+**ACP venue discovery is automatic.** The agent-codespaces sessionStart hook
+drops a small **namespace-provider manifest** into
 `~/.agent-bridge/providers.d/` (declaring the `codespace:` namespace and the
 absolute path to the agent-codespaces binstub). agent-bridge discovers that
 manifest there and registers the `codespace:` **namespace resolver**, driving
@@ -388,7 +446,7 @@ the provider over a process boundary. That resolver lists and resolves your
 CodeSpaces **live** (via `gh codespace list`) on demand — so
 the payload-local `agents` output shows them and
 `<agent-bridge catalog argv[0]> send codespace:<name>` works immediately,
-with no expiry, including newly-created CodeSpaces.
+for ACP dispatch. Native live-session registration must be verified separately.
 
 Because discovery is declarative (a dropped manifest carrying an absolute
 command), it works even though the agent-bridge daemon runs from its own
