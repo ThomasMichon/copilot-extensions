@@ -436,6 +436,26 @@ scenarios.
 
 ## Journal
 
+### 2026-09-10 - Phase 9: sixth slice (simulation/test track, provider revision scenarios)
+
+- Extended `provider_state_machine.py` with the revision/head-tracking
+  vocabulary the remaining two simulation scenarios needed: `Revision`
+  (a diff-hash + base-sha pair, tracked as two independent fingerprints),
+  `RevisionChangeKind` (none/base-only/substantive), and
+  `classify_revision_change` -- folding Phase 8's base-only detection
+  candidate directly into the provider machine rather than a standalone
+  feature, per the sub-doc's "Phase 8 candidates, re-seated" section.
+  Also added `verdict_applies_to_current_revision`, the guard an evaluator
+  consults before applying any verdict-driven approval transition.
+- Extended the simulation driver (`simulation.py`) with an optional
+  `provider` record on `World` and a `step_provider_approval` helper.
+- Covered two more of the sub-doc's ten scenarios
+  (`test_simulation_revision.py`): base-only vs. substantive provider
+  revision movement, and an out-of-order verdict arriving after a
+  substantive revision has already superseded it -- seven of ten
+  scenarios now covered; three remain deferred (bridge version/EOL,
+  task steer transition).
+
 ### 2026-09-10 - Phase 9: fifth slice (simulation/test track, first five scenarios)
 
 - Added the simulation driver
