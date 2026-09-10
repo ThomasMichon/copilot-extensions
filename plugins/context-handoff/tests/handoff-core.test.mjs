@@ -129,6 +129,21 @@ test("manual fallback instructions stay manual and seed-focused", () => {
   assert.match(text, new RegExp(seed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
 
+test("manual fallback instructions distinguish an in-flight spawn from silence", () => {
+  const seed =
+    "Task: Continue | Resume: /consume-handoff to take over | " +
+    "Recovery: context-handoff file:handoff-1";
+  const text = manualFallbackInstructions(
+    { storage: "file", id: "handoff-1" },
+    seed,
+    { spawnInFlight: true },
+  );
+  assert.match(text, /already been.*spawned and is starting up/s);
+  assert.match(text, /expected in-progress state, not a failure/);
+  assert.doesNotMatch(text, /No control system acknowledged the request/);
+  assert.match(text, new RegExp(seed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
 test("runtime invocation isolates imports and forces UTF-8", () => {
   assert.deepEqual(
     isolatedPythonArgs("agent_worktrees", ["get", "worktree-dir"]),
@@ -714,16 +729,66 @@ test("triggerHandoff always returns the final seed and manual fallback when noth
     requestBridge: () => ({ attempted: true, accepted: false, error: "unsupported" }),
     readPickupSignals: () => ({
       pickedUp: false,
+      spawnInFlight: false,
       via: [],
       sessionState: { path: "C:\\state\\handoff-request.json", consumed: false },
       worktree: { pickedUp: false },
       dispatch: { consumed: false },
     }),
     sleepFn: async () => {},
+    waitMs: 0,
   });
   assert.equal(result.ok, true);
   assert.match(result.manualInstructions, /No control system acknowledged the request/);
   assert.match(result.manualInstructions, new RegExp(result.seed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("triggerHandoff exits early and reports progress once a spawn is merely in flight", async () => {
+  const calls = [];
+  const result = await triggerHandoff({
+    promptText: "stored markdown",
+    sid: "predecessor-1",
+    cwd: "C:\\repo",
+    title: "Parser follow-up",
+    store: () => ({
+      storage: "file",
+      id: "handoff-predecessor-1",
+      path: "C:\\state\\handoff-predecessor-1.json",
+      metadata: { worktree: "wt-example", title: "Parser follow-up" },
+    }),
+    writeSessionState: ({ seed }) => ({ ok: true, path: "C:\\state\\handoff-request.json", seed }),
+    noteHandoff: () => {},
+    logActivity: () => ({ logged: true }),
+    requestBridge: () => ({ attempted: false, accepted: false }),
+    readPickupSignals: (() => {
+      let count = 0;
+      return () => {
+        count++;
+        calls.push(count);
+        return {
+          pickedUp: false,
+          spawnInFlight: count >= 2,
+          via: [],
+          sessionState: { path: "C:\\state\\handoff-request.json", consumed: false },
+          worktree: { pickedUp: false },
+          dispatch: { consumed: false },
+        };
+      };
+    })(),
+    sleepFn: async () => {},
+    // A ceiling far longer than this test should ever actually wait -- it
+    // must exit as soon as spawnInFlight flips true, not run out the clock.
+    waitMs: 120000,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.pickup.pickedUp, false);
+  assert.equal(result.pickup.spawnInFlight, true);
+  // Exactly two reads: the first (not yet in flight) then the one that
+  // flipped spawnInFlight true -- proves the loop didn't keep polling.
+  assert.equal(calls.length, 2);
+  assert.match(result.manualInstructions, /already been.*spawned and is starting up/s);
+  assert.match(result.manualInstructions, /expected in-progress state, not a failure/);
+  assert.doesNotMatch(result.manualInstructions, /No control system acknowledged the request/);
 });
 
 test("triggerHandoff reports when an explicit stored baton cannot be recovered", async () => {

@@ -1363,6 +1363,42 @@ function worktreeSuccessorRecorded(cwd, stored, predecessorSessionId, execute = 
   };
 }
 
+// A weaker, earlier signal than `worktreeSuccessorRecorded`: the resident
+// status-monitor logs `handoff_cutover_spawn` as soon as it claims the token
+// and opens the successor pane -- well before that successor's own Copilot
+// process has cold-started far enough to run its `sessionStart` hook and
+// flip the worktree's head session (which is what `worktreeSuccessorRecorded`
+// actually waits for). Real cold-starts routinely take 40-90+ seconds, so
+// surfacing this earlier "spawn acknowledged" state lets the predecessor stop
+// waiting/report progress sooner instead of looking like nothing happened.
+function worktreeSpawnInFlight(cwd, stored, execute = runCli) {
+  const worktreeId = stored.metadata?.worktree || null;
+  if (!worktreeId) return { inFlight: false, worktreeId };
+  let raw;
+  try {
+    raw = execute(
+      "agent-worktrees",
+      ["activity", "--worktree-id", worktreeId, "--event", "handoff_cutover_spawn", "--json"],
+      { cwd, timeout: 10000 },
+    );
+  } catch (error) {
+    return { inFlight: false, worktreeId, error: describeCliError(error) };
+  }
+  const lines = String(raw || "").split("\n").map((line) => line.trim()).filter(Boolean);
+  for (const line of lines) {
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (String(event?.handoff_token || "") === stored.id) {
+      return { inFlight: true, worktreeId, event };
+    }
+  }
+  return { inFlight: false, worktreeId };
+}
+
 function dispatchTaskConsumed(cwd, taskId) {
   if (!taskId) return { consumed: false, task: null };
   const task = agentDispatchJson(["show", taskId], cwd);
@@ -1424,8 +1460,15 @@ function pickupSignals(cwd, sid, stored, sessionStatePath, execute = runCli) {
   if (sessionConsumed) via.push("session-state-consumed");
   if (worktree.pickedUp) via.push("worktree-successor");
   if (dispatch.consumed) via.push("dispatch-consumed");
+  const pickedUp = via.length > 0;
+  // Only worth a separate CLI round-trip when full pickup hasn't already
+  // been confirmed -- the spawn marker is strictly implied by pickedUp.
+  const spawn = pickedUp
+    ? { inFlight: true, worktreeId: worktree.worktreeId }
+    : worktreeSpawnInFlight(cwd, stored, execute);
   return {
-    pickedUp: via.length > 0,
+    pickedUp,
+    spawnInFlight: spawn.inFlight,
     via,
     sessionState: {
       path: sessionStatePath,
@@ -1433,6 +1476,7 @@ function pickupSignals(cwd, sid, stored, sessionStatePath, execute = runCli) {
     },
     worktree,
     dispatch,
+    spawn,
   };
 }
 
@@ -1475,10 +1519,28 @@ export function buildSeedForStored(stored) {
   return buildCutoverSeed(kind, stored.id, lead);
 }
 
-export function manualFallbackInstructions(stored, seed) {
+export function manualFallbackInstructions(stored, seed, { spawnInFlight = false } = {}) {
   const location = stored.storage === "agent-dispatch"
     ? `agent-dispatch task ${stored.id}`
     : `file handoff ${stored.id}`;
+  if (spawnInFlight) {
+    return (
+      `Handoff stored as ${location}. A successor session has already been ` +
+      "spawned and is starting up -- real Copilot cold-start (loading MCP " +
+      "servers/skills before it can run its own sessionStart hook) routinely " +
+      "takes longer than this tool's short wait, so this is the expected " +
+      "in-progress state, not a failure. No action is usually needed; the " +
+      "automatic cutover should complete once the successor finishes " +
+      "starting. If you'd rather not wait, or want a backup, run " +
+      "`/consume-handoff` in the successor session yourself, or use the " +
+      "context-handoff payload-local CLI and pass only the trailing " +
+      "`task:<id>` or `file:<id>` token to `consume --locator`.\n\n" +
+      "Copy only the following short handoff prompt/seed:\n\n" +
+      "```text\n" +
+      `${seed}\n` +
+      "```"
+    );
+  }
   return (
     `Handoff stored as ${location}. No control system acknowledged the request ` +
     "during the grace window, so continue manually: open the successor session " +
@@ -1501,7 +1563,13 @@ export async function triggerHandoff(
     title = "",
     preferTask = true,
     handoffToken = null,
-    waitMs = 30000,
+    // Ceiling only -- in practice the loop below exits far sooner, as soon as
+    // `handoff_cutover_spawn` marks a spawn in flight (typically 10-25s).
+    // 30s used to be BOTH the ceiling and the only signal checked, so a real
+    // Copilot cold-start (40-90s+ before the successor's sessionStart hook
+    // flips the head session) meant this almost always timed out reporting
+    // "no pickup" even though an automatic cutover was already under way.
+    waitMs = 120000,
     execute = runCli,
     store = storeHandoff,
     writeSessionState = writeSessionStateHandoff,
@@ -1587,7 +1655,15 @@ export async function triggerHandoff(
 
   const start = Date.now();
   let status = readPickupSignals(cwd, sid, stored, sessionState.path, execute);
-  while (!status.pickedUp && (Date.now() - start) < waitMs) {
+  // Exit as soon as EITHER full pickup is confirmed OR a spawn is merely in
+  // flight -- the latter means the automatic cutover is already under way,
+  // so there is nothing more useful to learn by continuing to block; report
+  // that progress instead of waiting out the full ceiling.
+  while (
+    !status.pickedUp
+    && !status.spawnInFlight
+    && (Date.now() - start) < waitMs
+  ) {
     await sleepFn(1000);
     status = readPickupSignals(cwd, sid, stored, sessionState.path, execute);
   }
@@ -1608,6 +1684,6 @@ export async function triggerHandoff(
     },
     manualInstructions: status.pickedUp
       ? null
-      : manualFallbackInstructions(stored, seed),
+      : manualFallbackInstructions(stored, seed, { spawnInFlight: status.spawnInFlight }),
   };
 }
