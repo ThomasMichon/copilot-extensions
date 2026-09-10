@@ -394,6 +394,7 @@ def resolve_owner_worktree(
     try:
         r = subprocess.run(
             args, capture_output=True, text=True, timeout=10,
+            stdin=subprocess.DEVNULL,
             creationflags=_creation_flags(),
         )
     except Exception:
@@ -424,6 +425,7 @@ def active_worktree_ids() -> set[str] | None:
         try:
             r = subprocess.run(
                 [aw, "list", "--json"], capture_output=True, text=True,
+                stdin=subprocess.DEVNULL,
                 timeout=15, creationflags=_creation_flags(),
             )
         except Exception:

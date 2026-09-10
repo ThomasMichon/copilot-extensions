@@ -2265,6 +2265,7 @@ def _state_root_config_dir(repo_path: Path) -> Path | None:
             proc = subprocess.run(
                 [exe, "state-root", "--json"], cwd=str(repo_path),
                 capture_output=True, text=True, timeout=20,
+                stdin=subprocess.DEVNULL,
             )
         except (OSError, subprocess.SubprocessError):
             return None

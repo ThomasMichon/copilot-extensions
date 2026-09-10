@@ -204,6 +204,14 @@ This preserves configuration discovery and leaves the control pipe owned by the
 native transport. It does not change generation-bound cancellation or authorize
 resetting an existing execution.
 
+The same stdin boundary applies to local worktree inventory, owner/L2
+coordination, account/token discovery, state-root lookup, SSH configuration
+fetching, and the browser-based host sign-in launcher. These local commands use
+null stdin with their existing timeouts; they cannot wait on the native control
+pipe. Explicit SSH/credential payload pipes and interactive terminal input are
+unchanged. A warm local admission stall is not a reason to extend the cold
+CodeSpace preparation window.
+
 ### Diagnostic command input
 
 For a diagnostic command whose input exceeds local shell command-line limits,

@@ -135,6 +135,7 @@ def _list_codespaces_under(login: str | None) -> list[CodespaceInfo]:
     try:
         result = subprocess.run(
             args, capture_output=True, text=True, timeout=30,
+            stdin=subprocess.DEVNULL,
             creationflags=_creation_flags(), env=env,
         )
     except FileNotFoundError:

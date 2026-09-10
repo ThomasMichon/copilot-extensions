@@ -165,6 +165,7 @@ def _run(args: list[str], *, timeout: float = 45.0) -> subprocess.CompletedProce
         return subprocess.run(
             [aw, *args],
             capture_output=True, text=True, timeout=timeout,
+            stdin=subprocess.DEVNULL,
             creationflags=_creationflags(),
         )
     except Exception as exc:  # binstub vanished / exec error -> unavailable
