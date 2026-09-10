@@ -14,6 +14,8 @@ def normalize_options(parser: argparse.ArgumentParser, args: argparse.Namespace)
     """Validate before command-file normalization, claims, or connections."""
     if args.command != "ssh":
         return
+    if args.require_relay and args.no_relay:
+        parser.error("--require-relay cannot be combined with --no-relay")
     command = args.interactive_command
     path = args.interactive_command_file
     interactive = command is not None or path is not None

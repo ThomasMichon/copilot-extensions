@@ -178,7 +178,7 @@ agent-codespaces ssh example-space \
   --interactive-command-file terminal-command.txt \
   --local-forward 8080:3000 \
   --reverse-forward 9000:9001 \
-  --no-provision --no-relay
+  --no-plugin-staging --require-relay
 ```
 
 For example, `terminal-command.txt` can contain:
@@ -222,11 +222,58 @@ exec bash -il
   `--no-provision` skips heavyweight provisioning **and plugin staging**; callers
   own any required remote tools and official plugin installation. No installer
   or copying behavior is added by this interface.
+- `--no-plugin-staging` independently skips **all provider-controlled Copilot
+  plugin delivery**: automatic CodeSpace-scoped registration/settings updates
+  and remote-marketplace pre-installation, local-marketplace `codespacePlugins`
+  host copying, and related-repo / explicit `--stage-plugin` payload copying.
+  It does **not** skip relay/auth helpers, configured dotfiles or harness repo
+  preparation, repo provision hooks, auth verification, or auth-cache warming.
+  These helper scripts are provider-owned auth plumbing, not host plugin
+  payloads. Caller-owned remote plugin installation remains explicit.
+  User-configured repo hooks or dotfiles installers are still arbitrary programs;
+  this flag does not rewrite or sandbox their behavior, nor remove existing
+  remote plugin settings or payloads.
+- `--require-relay` is an opt-in **launch admission** gate. It requires the host
+  credential service to answer the relay protocol before claims; requires an
+  owned live reverse-forward or a ready Connection Owner; requires a real
+  protocol round trip through the exact remote loopback listener; and requires
+  successful remote auth-helper setup. It repeats the remote probe after repo
+  preparation, immediately before launching the interactive/diagnostic/ACP
+  operation. Missing service, failed forwarding, owner readiness timeout,
+  protocol-probe failure, or failed helper setup exits **69**, with normal
+  owned-resource cleanup. Combining it with `--no-relay` is a usage error
+  (exit **2**). With no opt-in, existing best-effort behavior is unchanged.
+  Protocol probes request no credentials and use no auth-cache fallback: they
+  establish service/tunnel readiness, not authorization for every remote host
+  or resource. Existing auth verification and configured credential policy still
+  apply. A later outage retains existing relay supervision/reconnection; this
+  flag does not kill a terminal for a transient post-launch loss.
 - Relay supervision and any connection-owner hold remain active throughout the
   interactive child. The child's exit status is returned unchanged. Cancellation
   and an explicit `--connect-timeout` stop only the owned process tree and release
   owned relay/lock resources. There is no implicit interactive timeout;
   `--timeout` remains the diagnostic-command deadline.
+
+For a caller that wants host-backed credentials without plugin copying or ACP,
+keep relay/repo preparation enabled and use the example above. Do not substitute
+`--no-relay` or blanket `--no-provision` for plugin-delivery suppression.
+The shared credential service must already be available. Using the resolved
+agent-bridge command (not an unrelated same-named executable):
+
+```text
+agent-bridge service start
+agent-bridge installer-readiness
+```
+
+The second command is read-only JSON; require exit 0 and
+`{"schema":"copilot-extensions.module-readiness","version":1,
+"module":"agent-bridge/runtime","state":"ready",...}`. This checks daemon
+readiness and creates no ACP session; `--require-relay` separately verifies the
+credential service through the CodeSpace tunnel. SSH does not implicitly start
+the daemon. The optional `agent-codespaces owner --status` reports configuration
+only, **not** live relay readiness; when a live enabled Owner is used, the SSH
+operation places its hold, waits up to 30 seconds for readiness, and verifies the
+remote protocol before proceeding.
 
 ### `create` options
 

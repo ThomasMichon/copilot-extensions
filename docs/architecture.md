@@ -408,7 +408,14 @@ supervised until the terminal exits. Local console handles are inherited;
 on POSIX the child owns a process group that borrows and restores the foreground
 terminal, and on Windows it inherits the existing console. Cancellation tears
 down only that owned tree. This does not add a session host, installer, or
-general SSH-options interface. See the
+general SSH-options interface. `--no-plugin-staging` suppresses both automatic
+CodeSpace plugin delivery (registration/pre-install and local payload copying)
+and explicit related-plugin staging independently of credential/repo preparation.
+`--require-relay` adds fail-closed host protocol, owned/deferred forward,
+remote protocol, and auth-helper readiness gates, with a second remote probe
+after preparation. It checks launch admission, not perpetual credential
+availability, and does not start the shared credential-service daemon or an ACP
+session. Defaults remain best-effort. See the
 [interactive SSH contract](../plugins/agent-codespaces/README.md#caller-owned-interactive-ssh).
 
 ```mermaid

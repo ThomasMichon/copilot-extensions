@@ -30,6 +30,7 @@ from agent_codespaces import interactive
     ["--interactive-command", "true", "--remote-cmd", ""],
     ["--interactive-command-file", "missing.txt", "--remote-cmd-file", "missing.txt"],
     ["--interactive-command", "true", "--stdio"],
+    ["--require-relay", "--no-relay"],
     ["--local-forward", "1:2", "--remote-cmd", "true"],
     ["--reverse-forward", "1:2", "--remote-cmd-file", "missing.txt"],
     ["--local-forward", "1:2", "--stdio"],
@@ -184,74 +185,6 @@ async def test_shell_payload_survives_real_process_argv(tmp_path, monkeypatch):
     assert json.loads(output.read_text()) == [
         "gh", "codespace", "ssh", "-c", "example-space", "--", "-tt", command,
     ]
-
-
-@pytest.fixture
-def ssh_runtime(monkeypatch):
-    from agent_codespaces import connection_owner, coordination, lease
-    import ssh_manager
-
-    events = []
-    config = SimpleNamespace(
-        credentials=SimpleNamespace(relay_port=9857, ado_host=None, feed_token_env=None),
-    )
-    monkeypatch.setattr(cli, "_gh_binary_available", lambda: True)
-    monkeypatch.setattr(cli, "load_merged_config", lambda: config)
-    monkeypatch.setattr(cli, "CodespaceSource", lambda *a, **k: object())
-    monkeypatch.setattr("agent_codespaces.lifecycle.account_for_codespace", lambda _: None)
-    monkeypatch.setattr(cli, "_clear_status_quietly", lambda _: events.append("clear-status"))
-    monkeypatch.setattr(cli, "_relay_listening", lambda _: True)
-    monkeypatch.setattr("agent_codespaces.relay_token.token_for", lambda _: "synthetic-relay")
-    monkeypatch.setattr(connection_owner, "should_defer_to_owner", lambda *a, **k: False)
-    monkeypatch.delenv("AGENT_CODESPACES_DISABLE_CLAIM", raising=False)
-    monkeypatch.setattr(lease, "resolve_owner_worktree", lambda **k: "example-worktree")
-    monkeypatch.setattr(lease, "active_worktree_ids", lambda: {"example-worktree"})
-    monkeypatch.setattr(lease, "claim", lambda *a, **k: events.append("claim"))
-    monkeypatch.setattr(coordination, "owner_ref", lambda **k: None)
-    monkeypatch.setattr(cli, "_check_cross_harness_fence", AsyncMock(return_value=True))
-    manager = SimpleNamespace(
-        ensure_connected=AsyncMock(return_value=SimpleNamespace(config=SimpleNamespace())),
-        disconnect=AsyncMock(),
-    )
-    monkeypatch.setattr(ssh_manager, "ConnectionManager", lambda: manager)
-
-    class Lock:
-        def __init__(self, *a, **k):
-            pass
-
-        def acquire(self, force=False):
-            assert not force
-            events.append("lock")
-
-        def release(self):
-            events.append("unlock")
-
-    monkeypatch.setattr(ssh_manager, "TargetLock", Lock)
-    for name in ("_provision_relay_helpers", "_verify_remote_auth", "_warm_remote_auth_cache"):
-        monkeypatch.setattr(cli, name, AsyncMock())
-    for name in ("_provision_dotfiles", "_provision_harness", "_register_codespace_plugins",
-                 "_provision_repo_hooks", "_stage_plugins"):
-        monkeypatch.setattr(cli, name, lambda *a, **k: pytest.fail("unexpected heavy provisioning"))
-
-    async def start_relay(*a, **k):
-        events.append("relay-start")
-
-        async def heartbeat():
-            while True:
-                events.append("heartbeat")
-                await asyncio.sleep(0.01)
-
-        task = asyncio.create_task(heartbeat())
-
-        async def stop():
-            events.append("relay-stop")
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
-
-        return SimpleNamespace(stop=stop)
-
-    monkeypatch.setattr(cli, "_start_supervised_relay", start_relay)
-    return events, manager
 
 
 @pytest.mark.parametrize("no_relay", [False, True])

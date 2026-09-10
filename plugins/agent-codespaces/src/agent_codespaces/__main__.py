@@ -85,6 +85,7 @@ _SSH_BOOT_TIMEOUT = float(os.environ.get("AGENT_CODESPACES_BOOT_TIMEOUT", "180")
 # generic failures (1) and the --remote-cmd timeout (124) so callers can react.
 _BUSY_EXIT = 75
 _COORDINATION_EXIT = 78
+_RELAY_REQUIRED_EXIT = 69
 
 
 def _context_admitted(
@@ -270,6 +271,16 @@ def main(argv: list[str] | None = None) -> int:
              "Non-stdio --remote-cmd uses this minimal diagnostic path by "
              "default; --stdio and interactive keep full provisioning unless "
              "this flag is supplied.",
+    )
+    ssh_parser.add_argument(
+        "--no-plugin-staging", action="store_true",
+        help="Skip CodeSpace plugin registration/install and all host plugin payload "
+             "staging, while retaining credential and repository preparation.",
+    )
+    ssh_parser.add_argument(
+        "--require-relay", action="store_true",
+        help="Fail closed (exit 69) unless the host credential relay, reverse forward, "
+             "and remote auth-helper setup are ready before launch. Cannot use with --no-relay.",
     )
     ssh_parser.add_argument(
         "--no-relay", action="store_true",
@@ -1056,6 +1067,8 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     config = load_merged_config()
     from .relay_launch import effective_relay_port
     relay_port = effective_relay_port(config)
+    require_relay = bool(getattr(args, "require_relay", False))
+    no_plugin_staging = bool(getattr(args, "no_plugin_staging", False))
 
     # The supervised relay owns this remote listener even when a connection
     # owner provides it. Refuse caller collisions before taking any claims.
@@ -1064,6 +1077,17 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     ):
         print("[ERROR] reverse-forward listener conflicts with the credential relay", file=sys.stderr)
         return 2
+    if require_relay:
+        from .relay_readiness import relay_ping
+
+        if not relay_ping(relay_port):
+            print(
+                "[FAIL] Required host credential relay is unavailable. Start/check "
+                "the credential service (agent-bridge service start; "
+                "agent-bridge installer-readiness), then retry.",
+                file=sys.stderr,
+            )
+            return _RELAY_REQUIRED_EXIT
 
     # Reusing a box (an explicit ssh connect) clears any prune-lifecycle marker
     # -- it is active work again, not a recovered/prunable reclaim candidate.
@@ -1254,6 +1278,24 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
             breadcrumb=breadcrumb_prelude(args.name),
         )
 
+    async def _required_relay_ready() -> bool:
+        if not require_relay:
+            return True
+        from .relay_readiness import remote_relay_ready
+
+        serving = (
+            _owner.owner_serves_relay(args.name) if defer_to_owner
+            else relay_forward is not None and relay_forward.is_alive
+        )
+        if not serving or not await remote_relay_ready(manager, args.name, relay_port):
+            print(
+                "[FAIL] Required credential relay is not serving through the "
+                "CodeSpace reverse forward; refusing to launch.",
+                file=sys.stderr,
+            )
+            return False
+        return True
+
     async def _run() -> int:
         nonlocal relay_forward
 
@@ -1312,6 +1354,13 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
                     args.name,
                 )
             else:
+                if require_relay:
+                    print(
+                        "[FAIL] Required credential relay Connection Owner did not "
+                        "become ready; refusing to launch.",
+                        file=sys.stderr,
+                    )
+                    return _RELAY_REQUIRED_EXIT
                 log.warning(
                     "Connection Owner did not report a live relay for %s within the "
                     "wait window -- git auth may lag until it reconciles.", args.name,
@@ -1333,12 +1382,22 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
             await manager.disconnect(args.name)
             return _BUSY_EXIT
 
+        if not await _required_relay_ready():
+            return _RELAY_REQUIRED_EXIT
+
         if not args.no_relay:
             # Stage 4 (target-auth-env): deploy the CodeSpace-side relay helpers
             # so remote auth resolves over the tunnel. Auth verification later
             # in this same stage catches missing local credentials up front.
             tracker.started(ConnectStage.TARGET_AUTH_ENV, "credential relay")
-            await _provision_relay_helpers(manager, args.name)
+            helpers_ready = await _provision_relay_helpers(manager, args.name)
+            if require_relay and not helpers_ready:
+                print(
+                    "[FAIL] Required credential relay auth-helper setup failed; "
+                    "refusing to launch.",
+                    file=sys.stderr,
+                )
+                return _RELAY_REQUIRED_EXIT
 
         cs_plugin_dirs: list[str] = []
         if minimal_provision:
@@ -1370,7 +1429,7 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
             # (the dispatch) ignores enabledPlugins and only surfaces plugin
             # skills via --plugin-dir. Best-effort; needs the relay up for the
             # payload pre-install.
-            if not args.no_relay:
+            if not args.no_relay and not no_plugin_staging:
                 cs_plugin_dirs = await _register_codespace_plugins(
                     manager, args.name, getattr(args, "repo", None), config,
                 )
@@ -1407,7 +1466,7 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
         # fold their --plugin-dir paths into the launch. Best-effort: a staging
         # failure drops that plugin but never blocks the dispatch.
         plugin_dirs: list[str] = list(cs_plugin_dirs)
-        if not args.no_relay and not minimal_provision:
+        if not args.no_relay and not minimal_provision and not no_plugin_staging:
             plugin_dirs += await _stage_plugins(
                 manager,
                 args.name,
@@ -1431,6 +1490,13 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
             # platform binary, so `copilot --acp` dies at LAUNCH_ACP ("Connection
             # closed"). Verify + self-repair (public-npm reinstall) up front.
             await _preflight_copilot_platform(manager, args.name)
+
+        # Repository/platform preparation can be lengthy. Recheck admission
+        # before launch rather than treating an earlier pong as lasting health.
+        if not await _required_relay_ready():
+            return _RELAY_REQUIRED_EXIT
+
+        if args.stdio and remote_cmd:
             # Structured stdio mode for agent-bridge
             tracker.started(ConnectStage.LAUNCH_ACP, "stdio channel")
             proc = await manager.open_stdio_channel(args.name, remote_cmd)
@@ -1741,21 +1807,22 @@ async def _check_cross_harness_fence(
     return True
 
 
-async def _provision_relay_helpers(manager, name: str) -> None:
+async def _provision_relay_helpers(manager, name: str) -> bool:
     """Deploy the CodeSpace-side relay helper scripts over SSH.
 
     Installs ``ado-auth-helper-relay`` and the smart ``ado-auth-helper``
     wrapper into the CodeSpace so ADO auth resolves over the credential
     relay tunnel. Idempotent and best-effort: logs a warning on failure
-    but never raises, since the SSH command itself should still proceed.
+    but never raises. Required-relay callers use the result to gate launch.
     """
     from .codespace_assets import build_provision_command
 
     try:
         command = build_provision_command()
         result = await manager.exec_command(name, command, timeout=30.0)
-        if result.exit_code == 0:
+        if result.exit_code == 0 and not getattr(result, "timed_out", False):
             log.debug("Relay helpers provisioned on %s", name)
+            return True
         else:
             log.warning(
                 "Relay helper provisioning on %s exited %s: %s",
@@ -1763,6 +1830,7 @@ async def _provision_relay_helpers(manager, name: str) -> None:
             )
     except Exception as exc:
         log.warning("Relay helper provisioning on %s failed: %s", name, exc)
+    return False
 
 
 async def _provision_dotfiles(manager, name: str, config) -> None:
