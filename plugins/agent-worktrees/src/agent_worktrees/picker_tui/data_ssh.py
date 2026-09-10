@@ -1782,8 +1782,15 @@ class LiveLoader:
         except Exception as exc:
             self._log_fetch_failure(source, exc, t0, phase="stream")
             with self._lock:
-                self._state[source.cache_key] = "failed"
-                self._error[source.cache_key] = str(exc).strip() or type(exc).__name__
+                # A superseded load (a newer reload()/reload_source() already
+                # bumped the generation) must never clobber state a fresher
+                # attempt already committed -- mirrors the success branch's
+                # generation guard below (#nit: stale-failure red-X).
+                if self._gen.get(source.cache_key, 0) == gen:
+                    self._state[source.cache_key] = "failed"
+                    self._error[source.cache_key] = (
+                        str(exc).strip() or type(exc).__name__
+                    )
             return True
         timer = threading.Timer(deadline, lambda: _kill_proc_tree(proc))
         timer.daemon = True
@@ -1869,8 +1876,11 @@ class LiveLoader:
             returncode=rc, stderr=err, argv=argv)
         self._log_fetch_failure(source, exc, t0, phase="stream", timeout=deadline)
         with self._lock:
-            self._state[source.cache_key] = "failed"
-            self._error[source.cache_key] = str(exc).strip() or type(exc).__name__
+            # Same generation guard as above: a stale attempt's failure must
+            # not overwrite a newer reload's already-committed ready state/rows.
+            if self._gen.get(source.cache_key, 0) == gen:
+                self._state[source.cache_key] = "failed"
+                self._error[source.cache_key] = str(exc).strip() or type(exc).__name__
         return True
 
     def _load_remote_two_phase(self, source: Source):
