@@ -1729,10 +1729,13 @@ def _create_worktree_core(
         "worktree_id": worktree_id,
         "post_exit": True,
         "no_mux": no_mux,
+        # Authoritative for downstream out-of-process calls (e.g. the
+        # launcher's `session-backend status`), which must scope to the
+        # project that actually owns this worktree -- not whatever ambient
+        # project the launcher itself started with, nor the mutable
+        # process-global `cfg.active_project()` (#2338).
+        "project": config.repo_name,
     }
-    project = cfg.active_project()
-    if project:
-        result["launch"]["project"] = project
     if selection.assignment is not None:
         result["launch"]["profile_assignment"] = profile_assignment.metadata(selection.assignment)
     return result
@@ -3281,7 +3284,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             }
             if selection.assignment is not None:
                 launch["profile_assignment"] = profile_assignment.metadata(selection.assignment)
-            project = cfg.active_project()
+            project = config.repo_name
             if project:
                 launch["project"] = project
             _json_output(
@@ -5220,6 +5223,11 @@ def _resolve_resume(
         "worktree_id": record.worktree_id,
         "post_exit": True,
         "no_mux": getattr(args, "no_mux", False),
+        # Authoritative for downstream out-of-process calls (e.g. the
+        # launcher's `session-backend status`), which must scope to the
+        # project that actually owns this worktree -- not whatever ambient
+        # project the launcher itself started with (#2338).
+        "project": config.repo_name,
     }
     if selection.assignment is not None:
         plan["profile_assignment"] = profile_assignment.metadata(selection.assignment)
