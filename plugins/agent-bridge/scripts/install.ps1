@@ -405,8 +405,8 @@ function Invoke-UvPipInstallResilient {
        all retries, is returned as-is for the caller to handle/fail on as
        before. A single 3s retry proved insufficient when many plugins hammer
        the shared interpreter at once during a full `agent-worktrees update
-       --force` sweep (observed live on lambda-core after the first fix
-       landed) -- the backoff schedule gives the race more room to clear. #>
+       --force` sweep (observed in deployment after the first fix landed) --
+       the backoff schedule gives the race more room to clear. #>
     param([Parameter(Mandatory)][string[]]$Arguments)
     $delays = @(3, 6, 10)
     $out = & uv pip install @Arguments 2>&1
