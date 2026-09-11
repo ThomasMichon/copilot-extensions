@@ -467,6 +467,43 @@ scenarios.
 
 ## Journal
 
+### 2026-09-11 - Phase 10 item 3: second slice, polling-fallback cadence policy
+
+- Added `plugins/agent-dispatch/src/agent_dispatch/pr_polling_policy.py`,
+  resolving the trigger-mechanism design fork the first slice left open.
+  Operator direction: webhooks are the primary, low-latency trigger for
+  new PR observations; polling only fires as a fallback once a PR's last
+  observed state (from any source) is older than a declared interval.
+  That interval is scoped by a declared `RepoTier` (not one global
+  number), matching the operator's own risk framing: `OWNED_PRIVATE` (5
+  min -- a private, single-tenant repo with no shared rate-limit risk),
+  `QUICK_COLLAB` (30 min), `PUBLIC_UNOWNED` (60 min, and the default for
+  any repository with no explicit tier -- the conservative assumption for
+  a repo this identity does not control).
+- The repository -> tier mapping is intentionally **not** committed to
+  this module: `copilot-extensions` is a public, organization-neutral
+  repo, so no specific repository name belongs in its source. The
+  mapping is caller-supplied config instead, the same shape
+  `provider_state_machine.REPOSITORY_OVERRIDES` already uses (declared
+  empty here, populated by whoever deploys it).
+- `poll_due(repo, last_observed_at, now, repository_tiers)` is the pure
+  decision function: a fresh observation from *any* source (webhook or
+  poll) pushes the next poll out, so the fallback timer never fires while
+  webhooks keep the state fresh.
+- Added `plugins/agent-dispatch/tests/test_pr_polling_policy.py` (16
+  tests): tier resolution (declared mapping, undeclared-repo fallback,
+  explicit default override), the declared per-tier intervals, interval
+  overrides, and `poll_due`'s not-yet-due / due / reset-by-fresh-
+  observation / undeclared-repo / invalid-clock-order behavior.
+- Full `agent-dispatch` suite (690 tests) passes via
+  `tools/run-plugin-tests.py agent-dispatch`. Bumped agent-dispatch's
+  version to 0.1.2-dev77.
+- Item 3 remains open: still needed are the `Revision`-history evaluator
+  (incl. `STALE`), a real webhook receiver for review/check-status events
+  (today's `producers/webhook.py` only handles PR-merge), and the
+  persistent per-(repo, PR) state store both the evaluator and this
+  policy's poll-fallback timer depend on.
+
 ### 2026-09-11 - Phase 10 item 3: first slice of the GitHub provider adapter (read-only observer)
 
 - Added `plugins/agent-dispatch/src/agent_dispatch/github_provider_adapter.py`:
