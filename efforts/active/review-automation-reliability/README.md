@@ -40,8 +40,10 @@ cannot be mistaken for successful publication.
   host contract.
 - **Public coordination token:**
   [ThomasMichon/copilot-extensions#2357](https://github.com/ThomasMichon/copilot-extensions/issues/2357)
-  (Phase 9 implementation). Slices land as separate PRs referencing this
-  issue.
+  (Phase 9 implementation, now complete) and
+  [ThomasMichon/copilot-extensions#2423](https://github.com/ThomasMichon/copilot-extensions/issues/2423)
+  (Phase 10 implementation). Slices land as separate PRs referencing the
+  issue for their phase.
 
 ## Context
 
@@ -412,6 +414,26 @@ permits branch mutation).
   this phase's own scope boundary ("designs the model... does not
   implement it end to end") is otherwise satisfied.
 
+### Phase 10 - Wire the declared state machines into the live runtime
+
+Full design in
+[`phase-10-live-wiring.md`](phase-10-live-wiring.md).
+Phase 9 deliberately declared four machines (task, provider, bridge,
+spawn-reservation) as pure data plus deterministic, in-process
+structural/simulation tests -- it never touched `queue.py`'s actual
+runtime behavior. This phase closes that gap: it makes the declared
+tables the **single source of truth** the live code executes against,
+rather than a parallel model that tests merely assert still matches.
+Doing this is what makes this effort's remaining Validation Plan items
+(concurrent claim ownership, duplicate/reordered delivery, restart-at-
+any-boundary resumption, stale-revision blocking, etc.) checkable against
+*actual* running behavior instead of only the declared model.
+
+- [ ] See the sub-doc's own Plan checklist; each wiring slice lands only
+  once its structural tests (already-declared, from Phase 9) plus new
+  live-behavior tests both pass, so no wiring slice can silently diverge
+  from the machine it claims to implement.
+
 ## Validation Plan
 
 - [ ] Concurrent claim attempts yield exactly one review owner.
@@ -444,6 +466,36 @@ drivers and prove reliability with deterministic interruption and duplication
 scenarios.
 
 ## Journal
+
+### 2026-09-11 - Phase 10 opened: wire the declared state machines into the live runtime
+
+Per operator direction: continue driving this effort by wiring Phase 9's
+four declared state machines (task, provider, bridge, spawn-reservation)
+into the live `agent-dispatch` runtime, so the effort's remaining
+Validation Plan items become checkable against actual running behavior
+rather than only the declared model. This is genuinely new scope beyond
+Phase 9's design-only boundary, not a continuation of it.
+
+- Added a Phase 10 section to this README and the full design in
+  [`phase-10-live-wiring.md`](phase-10-live-wiring.md): a five-item wiring
+  order (task machine into `queue.py`'s transition call sites, the CAS
+  primitive into `queue.py`'s generation fencing, a new GitHub provider
+  adapter, the bridge machine into a live agent-bridge liveness read, and
+  the spawn-reservation consistency checks into the supervisor's real
+  reconciliation loop), ordered by risk: items 1/2/5 are refactors/
+  additions against existing, already-working code (low risk, since the
+  declared tables were directly confirmed to already match today's real
+  transitions); items 3/4 require genuinely new adapter code or depend on
+  agent-bridge's own convergence (larger, later slices).
+- Opened
+  [ThomasMichon/copilot-extensions#2423](https://github.com/ThomasMichon/copilot-extensions/issues/2423)
+  as Phase 10's coordination token, alongside #2357 (Phase 9, now
+  complete) rather than reusing it -- each phase gets its own tracking
+  issue per this effort's established coordination pattern.
+- Next: submit this phase's design as its own reviewed slice (matching
+  Phase 9's own coordination-gate convention), then start with wiring
+  item 1 (the task machine into `queue.py`'s transition call sites) as
+  the first, lowest-risk implementation slice.
 
 ### 2026-09-11 - Phase 9: design/declaration work complete
 
