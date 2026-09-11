@@ -916,6 +916,22 @@ _COLUMNS: dict[str, str] = {
 }
 
 
+def _task_transition_spec(name: str) -> tuple[frozenset[str], str]:
+    """Resolve a declared task transition's ``(from_states, to_state)`` from
+    :mod:`agent_dispatch.task_state_machine` -- Phase 10's live-wiring of
+    the task machine (``efforts/active/review-automation-reliability/phase-10-live-wiring.md``).
+
+    A lazy, function-local import: :mod:`agent_dispatch.task_state_machine`
+    imports :class:`Status` from this module, so a module-level import here
+    would be circular. By the time any ``TaskQueue`` method actually calls
+    this, both modules have already finished importing.
+    """
+    from .task_state_machine import TRANSITIONS_BY_NAME
+
+    transition = TRANSITIONS_BY_NAME[name]
+    return transition.from_states, transition.to_state
+
+
 class TaskQueue:
     """A leased, capability-gated task queue over a SQLite database file.
 
@@ -3231,9 +3247,8 @@ class TaskQueue:
 
     def approve(self, task_id: str, *, now: float | None = None) -> Task:
         """Move a ``proposed`` task to ``queued`` (makes it claimable)."""
-        return self._transition(
-            task_id, allowed={Status.PROPOSED}, to=Status.QUEUED, now=now, note="approve"
-        )
+        allowed, to = _task_transition_spec("approve")
+        return self._transition(task_id, allowed=allowed, to=to, now=now, note="approve")
 
     # -- consumer / lease ----------------------------------------------------
 
@@ -3485,10 +3500,11 @@ class TaskQueue:
         extra: dict[str, object] = {"last_seen_at": ts}
         if owner_session_id is not None:
             extra["owner_session_id"] = owner_session_id
+        allowed, to = _task_transition_spec("start")
         return self._transition(
             task_id,
-            allowed={Status.CLAIMED},
-            to=Status.STARTED,
+            allowed=allowed,
+            to=to,
             worker_id=worker_id,
             now=now,
             note="start",
@@ -3542,7 +3558,8 @@ class TaskQueue:
         owner-session identity, and generation as an atomic transition fence.
         """
         encoded_result = self._encode_result(result)
-        allowed = {Status.STARTED, Status.SUSPENDED}
+        allowed, _to = _task_transition_spec("complete")
+        allowed = set(allowed)
         if expected_status is not None:
             if expected_status not in allowed:
                 raise TaskError(
@@ -3717,10 +3734,11 @@ class TaskQueue:
                 conn.execute("COMMIT")
                 return result  # type: ignore[return-value]
             conn.execute("COMMIT")
+        allowed, to = _task_transition_spec("suspend")
         return self._transition(
             task_id,
-            allowed={Status.STARTED},
-            to=Status.SUSPENDED,
+            allowed=allowed,
+            to=to,
             worker_id=worker_id,
             now=now,
             note=f"suspend: {meaningful}",
@@ -3759,10 +3777,11 @@ class TaskQueue:
         }
         if adopt_owner_session_id is not None:
             extra["owner_session_id"] = adopt_owner_session_id
+        allowed, to = _task_transition_spec("resume")
         return self._transition(
             task_id,
-            allowed={Status.SUSPENDED},
-            to=Status.STARTED,
+            allowed=allowed,
+            to=to,
             worker_id=worker_id,
             now=ts,
             note="resume",
@@ -3791,10 +3810,11 @@ class TaskQueue:
         liveness-safe teardown.
         """
         note = _clip(reason, PROGRESS_SUMMARY_MAX) or "release suspended task"
+        allowed, to = _task_transition_spec("release_suspended")
         return self._transition(
             task_id,
-            allowed={Status.SUSPENDED},
-            to=Status.QUEUED,
+            allowed=allowed,
+            to=to,
             worker_id=worker_id,
             now=now,
             note=note,
@@ -3903,10 +3923,11 @@ class TaskQueue:
         """
         if not permitted:
             raise TaskError("abandon requires permission (permitted=True)")
+        allowed, to = _task_transition_spec("abandon")
         return self._transition(
             task_id,
-            allowed=Status.ABANDONABLE,
-            to=Status.ABANDONED,
+            allowed=allowed,
+            to=to,
             worker_id=worker_id,
             require_owner=False,
             now=now,

@@ -467,6 +467,43 @@ scenarios.
 
 ## Journal
 
+### 2026-09-11 - Phase 10 slice 1: wire the task machine into `queue.py`
+
+- Replaced every hardcoded `allowed=`/`to=` pair in `queue.py`'s task-
+  lifecycle methods (`approve`, `start`, `suspend`, `resume`,
+  `release_suspended`, `abandon`, and `complete_with_outcome`'s local
+  `allowed` set) with a lookup against a new
+  `task_state_machine.TRANSITIONS_BY_NAME`, via a lazily-imported
+  `_task_transition_spec()` helper (avoids a circular import, since
+  `task_state_machine` itself imports `Status` from `queue`). The
+  declared table is now the actual data these methods execute against,
+  not a parallel description of it.
+- **Wiring surfaced a real, previously-undetected discrepancy**: the
+  declared `complete` transition only named `started` as a legal source,
+  but `TaskQueue.complete_with_outcome` has always also allowed
+  completing a `suspended` task directly (a suspended task may resolve
+  while no worker process is running -- forcing a fake resume/active turn
+  solely to reach the terminal state would be worse). Corrected the
+  declared table to `frozenset({Status.STARTED, Status.SUSPENDED})` to
+  match the real, already-working behavior, per this phase's own rule:
+  fix the declared table first, never patch around it in `queue.py`.
+- Added
+  `plugins/agent-dispatch/tests/test_task_transition_wiring.py` (9
+  tests): each monkeypatches one declared transition's `from_states`/
+  `to_state` and asserts the corresponding live method's behavior changes
+  to match -- proof of genuine wiring, not coincidental parity that could
+  silently drift. Confirmed all 35 pre-existing `queue.py` ruff findings
+  (unrelated `S101`/`S608`/`RUF100`/`B007`) predate this change via
+  `git stash` isolation; none are new.
+- Full `agent-dispatch` suite (628 tests) passes unchanged in behavior
+  except the now-corrected `complete`-from-`suspended` path, which was
+  already the real behavior all along.
+- Bumped agent-dispatch's version (plugin.json, pyproject.toml,
+  marketplace.json) to 0.1.2-dev68.
+- Ticked wiring item 1's checkbox in `phase-10-live-wiring.md`. Next:
+  item 2 (make `machine_coupling`'s CAS outcome classification explicit
+  in `queue.py`'s own generation/lease fencing).
+
 ### 2026-09-11 - Phase 10 opened: wire the declared state machines into the live runtime
 
 Per operator direction: continue driving this effort by wiring Phase 9's
