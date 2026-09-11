@@ -235,6 +235,31 @@ publishes there.
 - [x] `docs/config-reference.md`: documented `pr.roles` / `pr.fork` + the
       confirmation-gate behavior, alongside the existing PR-flow legibility
       matrix fields.
+- [x] **Live end-to-end validation against a real GitHub repo** (2026-09-11):
+      ran the actual `agent-worktrees create-pr` CLI (updated runtime, not
+      mocks) against `gim-home/odsp-web-harness` with `pr.fork.enabled: true`.
+      First call correctly returned `needs_confirmation: "fork_setup"` and
+      touched nothing (no remote added, no branch pushed); `--confirm-fork`
+      then created/reused a real personal fork
+      (`tmichon_microsoft/odsp-web-harness-role-fork-test`, pre-existing under
+      a non-default name — proved `ensure_fork`'s `POST .../forks` correctly
+      recognizes and reuses an EXISTING fork under a non-default name rather
+      than erroring or creating a colliding duplicate), pushed there, and
+      opened `gim-home/odsp-web-harness#290` with head
+      `tmichon_microsoft:pr/...` — exactly the designed shape. Closed without
+      merging (test-only) and cleaned up all scratch artifacts (branches,
+      local worktrees/registrations; the scratch fork repos themselves need
+      an operator with `delete_repo` token scope to remove — flagged
+      separately, not a code issue).
+  - **Noted edge case (not a bug, just a GitHub API interaction worth
+    documenting):** `ensure_fork` doesn't pass an explicit target name to the
+    fork-create API. If a caller already owns an unrelated repo with the
+    upstream's default name (this session's own `tmichon_microsoft` account
+    had exactly that — a stale, differently-sourced `odsp-web-harness`
+    fork), a *first-ever* fork of that name could hit a naming collision from
+    GitHub's side depending on how it resolves the conflict. Untested because
+    this session worked around it by pre-creating the fork under a custom
+    name first; worth a follow-up if it surfaces in practice.
 - [ ] `gim-home/odsp-web-harness` (separate repo, its own PR): adopt
   `pr.roles`/`pr.fork` in its `.agent-worktrees/config.yaml`, replacing its
   current "Tooling note" plain-`git`/`gh` workaround in `CONTRIBUTING.md` with
@@ -258,18 +283,44 @@ publishes there.
       real GitHub API (fake provider `ensure_fork`).
 - [x] Phase 2b: a repo that never configures `pr.fork`/`pr.roles` is provably
       unaffected (`test_fork_mode_off_by_default`).
-- [ ] Phase 3: `gim-home/odsp-web-harness` successfully drives a real fork-based
-      PR via `agent-worktrees` (not by hand) as its own validation.
+- [x] Phase 3: `gim-home/odsp-web-harness` successfully drove a real
+      fork-based PR via `agent-worktrees` (not by hand) —
+      `gim-home/odsp-web-harness#290`, closed test-only, see Phase 3 above.
 
 ## Proposal
 
-Phase 2a + Phase 2b are implemented and tested this session, submitted
-together as one PR (Phase 2a's own PR #2435 was still open/unmerged when
-Phase 2b work started, so it absorbed both slices rather than stacking a
-second PR on an unmerged one). Phase 3's downstream adoption in
-`gim-home/odsp-web-harness` remains open, blocked on this PR merging.
+Phase 2a + Phase 2b are implemented, tested, and **live-validated end-to-end
+against a real GitHub repo** this session, submitted together as one PR
+(Phase 2a's own PR #2435 was still open/unmerged when Phase 2b work started,
+so it absorbed both slices rather than stacking a second PR on an unmerged
+one). Phase 3's remaining item — downstream adoption in
+`gim-home/odsp-web-harness`'s own config/docs — is unblocked and open.
 
 ## Journal
+
+### 2026-09-11 — Live end-to-end validation
+- Ran the real `agent-worktrees create-pr` CLI (runtime updated post-merge,
+  not mocks) against `gim-home/odsp-web-harness` with `pr.fork.enabled: true`
+  set in a scratch project registration. First call: correctly returned
+  `needs_confirmation: "fork_setup"`, verified no remote/branch mutation.
+  `--confirm-fork`: created/reused a real fork
+  (`tmichon_microsoft/odsp-web-harness-role-fork-test`), pushed there, opened
+  `gim-home/odsp-web-harness#290` with the exact designed head shape
+  (`<owner>:<branch>`). Closed the PR test-only (never merged) and cleaned up
+  local worktrees/registrations and the test branch.
+- Hit real GitHub org-policy friction while hunting for a usable
+  cross-account fork pair before settling on the above (`github` org
+  disallows private-repo forking; `microsoft` org allows repo creation more
+  freely than expected — created and immediately deleted a probe repo there,
+  not an appropriate use of that namespace; EMU accounts (`tmichon_microsoft`)
+  can't cross-collaborate with personal accounts at all). None of this
+  affected the harness or its content — purely account/namespace
+  reconnaissance, fully cleaned up.
+- Noted (not fixed) a GitHub-API edge case: `ensure_fork` doesn't pass an
+  explicit target name, so a caller who already owns an unrelated repo with
+  the upstream's default name could hit a naming wrinkle on a truly *first*
+  fork. Untested here since the fork used already existed under a custom
+  name; flagged as a possible follow-up.
 
 ### 2026-09-11 — Phase 2b: fork publish flow + reconciliation with #2433
 - Resuming to drive the actual fork-remote-and-PR flow, found PR #2435
