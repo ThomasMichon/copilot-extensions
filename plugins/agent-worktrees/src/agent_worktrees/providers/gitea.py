@@ -835,6 +835,13 @@ class GiteaProvider:
             viewer_permission=_gitea_viewer_permission(data.get("permissions")),
         )
 
+    def get_viewer_permission(
+        self, repo: str, *, api_base: str = "", token: str | None = None,
+    ) -> str | None:
+        """Not implemented: role-aware PR flow resolution is GitHub-only today."""
+        _ = (repo, api_base, token)
+        return None
+
     def get_comment_threads(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
     ) -> ThreadsResult:

@@ -662,6 +662,50 @@ class GitHubProvider:
         _ = (repo, base, head_sha, api_base, token)
         return None
 
+    def get_viewer_permission(
+        self, repo: str, *, api_base: str = "", token: str | None = None,
+    ) -> str | None:
+        """Read the authenticated caller's permission on ``repo`` via ``gh api``.
+
+        Prefers the response's ``role_name`` field (GitHub's own name for this,
+        already one of ``read``/``triage``/``write``/``maintain``/``admin``);
+        falls back to the legacy ``permissions`` booleans
+        (``admin``/``maintain``/``push``/``triage``/``pull``, highest-true-wins,
+        mapped ``push -> write`` and ``pull -> read``) when ``role_name`` is
+        absent. Returns ``None`` on any failure -- no ``gh`` auth, API error,
+        non-JSON body, or a response with neither field (the caller has no
+        resolvable permission, e.g. an anonymous/public read of a repo they
+        don't collaborate on).
+        """
+        proc = run_cli(["gh", "api", f"repos/{repo}"], env=self._env(token))
+        if proc.returncode != 0:
+            return None
+        try:
+            data = json.loads(proc.stdout)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(data, dict):
+            return None
+        role_name = data.get("role_name")
+        if isinstance(role_name, str) and role_name.strip():
+            role = role_name.strip().lower()
+            from .. import config as _cfg
+            return role if role in _cfg.GITHUB_ROLE_LEVELS else None
+        perms = data.get("permissions")
+        if not isinstance(perms, dict):
+            return None
+        if perms.get("admin"):
+            return "admin"
+        if perms.get("maintain"):
+            return "maintain"
+        if perms.get("push"):
+            return "write"
+        if perms.get("triage"):
+            return "triage"
+        if perms.get("pull"):
+            return "read"
+        return None
+
     _THREADS_QUERY = (
         "query($owner:String!,$name:String!,$number:Int!){"
         "repository(owner:$owner,name:$name){pullRequest(number:$number){"

@@ -303,6 +303,30 @@ class PRProvider(Protocol):
         """
         ...
 
+    def get_viewer_permission(
+        self, repo: str, *, api_base: str = "", token: str | None = None,
+    ) -> str | None:
+        """What permission level does the authenticated caller hold on ``repo``?
+
+        The role-aware PR flow's resolution primitive (see
+        ``efforts/active/role-aware-fork-pr-flow`` in copilot-extensions):
+        ``create-pr``/``pr-merge`` use this to pick a ``PRRoleOverride`` from
+        the repo's ``pr.roles`` config, so a Contributor and a Maintainer on
+        the same repo config can get different flows automatically.
+
+        - **github** reads ``gh api repos/<repo>`` and returns one of
+          ``config.GITHUB_ROLE_LEVELS`` (``read`` | ``triage`` | ``write`` |
+          ``maintain`` | ``admin``), derived from the response's ``role_name``
+          field (or, if absent, the legacy ``permissions`` booleans).
+        - other providers are unsupported (return ``None``).
+
+        Returns ``None`` on any failure (no token, API error, unsupported
+        provider, or a repo the caller can't see at all) -- callers must treat
+        that as "flow unknown," not as a specific role, and fall back to the
+        repo's base (non-role-scoped) ``PRConfig``.
+        """
+        ...
+
     def get_comment_threads(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
     ) -> ThreadsResult:
