@@ -1,0 +1,17 @@
+{
+  "captured_from": {
+    "commit": "d12bcca4101841f47c3c6a0f5458e85042c1ce10",
+    "plugin_version": "0.4.0-dev475",
+    "protocol_generation": 15,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/routes/native.py",
+    "source_git_blob": "b803e2c7aa4d278fd2135920d8a23ed4f5753727",
+    "source_sha256": "2a6a84a6f55f9dd46036236fe1331f1f6fb6d4c2dbf2eafb57a2b764cdd8bd53"
+  },
+  "response": {
+    "capability": "codespace-native-control-v1",
+    "version": 1,
+    "mode": "native",
+    "hostResources": "native-host-resources-v1",
+    "providerAvailable": true
+  }
+}

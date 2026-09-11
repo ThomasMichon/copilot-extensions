@@ -34,7 +34,8 @@
           "0.4.0-dev461",
           "0.4.0-dev468",
           "0.4.0-dev470",
-          "0.4.0-dev474"
+          "0.4.0-dev474",
+          "0.4.0-dev475"
         ]
       },
       "capability_versions": {
@@ -99,15 +100,27 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/native.py",
-          "sha256": "8b9737185028594db2b7ff564d8a2bf19cad921ac9fb0fdc477b39de32d8fb39",
+          "sha256": "2a6a84a6f55f9dd46036236fe1331f1f6fb6d4c2dbf2eafb57a2b764cdd8bd53",
           "semantic": true,
           "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/native_manager.py",
-          "sha256": "347a7315414625775c6260a991d5ebcca3133fc387fc4e1227dfd7a25916aab0",
+          "sha256": "f64d70816c955549a4472b2315a639d316435685cb6368ae8fdb47f1512ea9c9",
           "semantic": true,
           "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/native_resources.py",
+          "semantic": true,
+          "non_semantic_reason": null,
+          "sha256": "04ca03ac43fa6f956a7a5a1ef3ef70e0c5ba15e15d4aa400fa26ed23fb619d90"
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/native_runtime.py",
+          "semantic": true,
+          "non_semantic_reason": null,
+          "sha256": "cbb10ee26520315d2f53fb175d2f9232812f2652b06a68941f6e2f18e7881e9c"
         }
       ],
       "fixtures": [
@@ -230,6 +243,30 @@
           "sha256": "c12313ad80ddb5cfcc6b8670c9c3a46a4fac60eed473945ce531e59d43a7f0c9",
           "role": "prior runtime session-create request evidence",
           "generation": 14
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-resource-launch.json",
+          "sha256": "830946e38856d142d083dee88296f9cd82ac95a335d926a33fa86449405bbe3d",
+          "role": "current optional native host-resource contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-resource-controller-capabilities.json",
+          "sha256": "5c4a2551dc386ba29c2e500852fad5c595a313215efabe0a97c5da7dbfe1f0a7",
+          "role": "current optional native host-resource contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-resource-protocol.json",
+          "sha256": "f732dd8d0f0cbe608784ce11d11a7e459b1b513156405f02fb115581620f722c",
+          "role": "current optional native host-resource contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-resource-runtime-capabilities.json",
+          "sha256": "da75f5caae3759fbe47d2e974c68506198c8818a63f6d15a08dfaed3f04cde0f",
+          "role": "current optional native host-resource contract",
+          "generation": 15
         }
       ],
       "provenance": [
@@ -456,6 +493,38 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
           "source_git_blob": "3db42b622f914802f529fc1df83358020d382969",
           "capture_method": "Read the immutable health-route blob from the last published HTTP generation before attention waits."
+        },
+        {
+          "commit": "d12bcca4101841f47c3c6a0f5458e85042c1ce10",
+          "plugin_version": "0.4.0-dev475",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_manager.py",
+          "source_git_blob": "8de491e0d8a59718c2bf49d148ee9832ea374da9",
+          "capture_method": "Invoke committed validate_request with and without optional resources; normalize only the existing owner directory and local Python executable to neutral placeholders."
+        },
+        {
+          "commit": "d12bcca4101841f47c3c6a0f5458e85042c1ce10",
+          "plugin_version": "0.4.0-dev475",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/native.py",
+          "source_git_blob": "b803e2c7aa4d278fd2135920d8a23ed4f5753727",
+          "capture_method": "Invoke the committed native capabilities route with an available synthetic provider; preserve the real public capability response."
+        },
+        {
+          "commit": "d12bcca4101841f47c3c6a0f5458e85042c1ce10",
+          "plugin_version": "0.4.0-dev475",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_resources.py",
+          "source_git_blob": "696c301ae5e7be27c519c5e52923398cefc96003",
+          "capture_method": "Invoke committed descriptor, provider request, and result serializers with synthetic identities; normalize only the executable and controller resource directory. No resource provider or external venue is launched."
+        },
+        {
+          "commit": "d12bcca4101841f47c3c6a0f5458e85042c1ce10",
+          "plugin_version": "0.4.0-dev475",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_runtime.py",
+          "source_git_blob": "afd094c66ecba176c660ca771fc99980985b15f9",
+          "capture_method": "Run the committed remote native-host capabilities command and retain platform-independent capability fields; the pre-existing platform support discriminator is not normalized into a support claim."
         }
       ],
       "support_window": "HTTP generations 1 through 15 remain supported; evidence includes generations 9 through 15.",

@@ -1,0 +1,69 @@
+{
+  "captured_from": {
+    "commit": "d12bcca4101841f47c3c6a0f5458e85042c1ce10",
+    "plugin_version": "0.4.0-dev475",
+    "protocol_generation": 15,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/native_resources.py",
+    "source_git_blob": "696c301ae5e7be27c519c5e52923398cefc96003",
+    "source_sha256": "04ca03ac43fa6f956a7a5a1ef3ef70e0c5ba15e15d4aa400fa26ed23fb619d90"
+  },
+  "descriptor": {
+    "schema": "copilot-extensions.native-host-resource-capability",
+    "version": 1,
+    "capability": "native-host-resources-v1",
+    "executionId": "execution-example",
+    "generation": "generation-example",
+    "resources": {
+      "preview": {
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "ensureCommand": [
+          "<official-remote-python>",
+          "-m",
+          "agent_bridge",
+          "native",
+          "resource",
+          "ensure",
+          "preview",
+          "--json"
+        ]
+      }
+    }
+  },
+  "provider_request": {
+    "schema": "copilot-extensions.native-host-resource-provider",
+    "version": 1,
+    "operation": "ensure",
+    "executionId": "execution-example",
+    "generation": "generation-example",
+    "resource": "preview",
+    "operationId": "53d9ee8385e857c45bffd1de54f70949648bc1224eb33e3ab3290f4aeb2a897b",
+    "stateDir": "<controller-owned-resource-directory>",
+    "config": {
+      "listenPort": 45123
+    },
+    "input": {},
+    "previous": null
+  },
+  "result": {
+    "executionId": "execution-example",
+    "generation": "generation-example",
+    "sessionId": "session-example",
+    "requestId": "request-example",
+    "resource": "preview",
+    "schema": "copilot-extensions.native-host-resource-result",
+    "version": 1,
+    "state": "ready",
+    "value": {
+      "endpoint": "http://127.0.0.1:45123"
+    }
+  },
+  "empty_input_schema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  }
+}
