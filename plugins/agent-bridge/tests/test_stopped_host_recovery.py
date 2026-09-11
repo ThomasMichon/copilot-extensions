@@ -509,3 +509,49 @@ async def test_stop_preserves_existing_idle_vs_busy_detach_policy(
     host_client.detach.assert_awaited_once_with(reapable)
     assert ctx.manager._host_index.get(ctx.session.session_id) is not None
     assert ctx.session.acp_session_id == "example-acp"
+
+
+@pytest.mark.parametrize(
+    "failure", ["missing_id", "reattach", "provider", "cleanup", "replay", "recreate"],
+)
+async def test_failed_explicit_resume_clears_restart_provenance(
+    context, monkeypatch, failure,
+):
+    from agent_bridge.session_host.spawner import RemoteSpawnCleanupPendingError
+
+    ctx = context
+    ctx.session.status = SessionStatus.STOPPED
+    ctx.session.restart_status = "running"
+    ctx.db.update_session_status(
+        ctx.session.session_id, "stopped", time.time(), restart_status="running",
+    )
+    attach = AsyncMock(return_value=False)
+    refresh = AsyncMock()
+    replace = AsyncMock(side_effect=RuntimeError("resume failed"))
+    monkeypatch.setattr(ctx.manager, "_try_reattach_live_host", attach)
+    monkeypatch.setattr(ctx.manager, "_refresh_provider_target", refresh)
+    monkeypatch.setattr(ctx.manager, "_resume_via_new_remote_host", replace)
+    monkeypatch.setattr("agent_bridge.session_manager._MAX_RESUME_ROUNDS", 1)
+    if failure == "missing_id":
+        ctx.session.acp_session_id = None
+    elif failure == "reattach":
+        attach.side_effect = RuntimeError("reattach failed")
+    elif failure == "provider":
+        refresh.side_effect = RuntimeError("provider failed")
+    elif failure == "cleanup":
+        replace.side_effect = RemoteSpawnCleanupPendingError("cleanup pending")
+    with pytest.raises(RuntimeError):
+        await ctx.manager.resume_session(
+            ctx.session.session_id, allow_recreate=failure == "recreate",
+        )
+    assert ctx.session.status == SessionStatus.STOPPED
+    assert ctx.session.restart_status is None
+    row = ctx.db.get_session(ctx.session.session_id)
+    assert row["status"] == "stopped"
+    assert row["restart_status"] is None
+    for _ in range(2):
+        assert await ctx.manager.recover_disconnected_hosts() == 0
+        assert await ctx.manager.reattach_session_hosts() == 0
+    ctx.factory.assert_not_called()
+    ctx.available.assert_not_awaited()
+    ctx.attach.assert_not_awaited()
