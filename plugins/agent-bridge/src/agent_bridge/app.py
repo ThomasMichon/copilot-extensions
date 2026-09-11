@@ -1057,6 +1057,12 @@ async def lifespan(app: FastAPI):
                     session.session_id, exc_info=True,
                 )
 
+    # Disconnected sessions may still own relay monitors or detached forwards.
+    try:
+        await mgr.close_frontend_transports()
+    except Exception:
+        log.warning("Failed to close frontend transports on shutdown", exc_info=True)
+
     # Shutdown: disconnect SSH master connections (after sessions are stopped)
     await shutdown_ssh()
 

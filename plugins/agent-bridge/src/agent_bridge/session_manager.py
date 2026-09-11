@@ -3038,6 +3038,29 @@ class SessionManager:
             session.target.cwd,
         )
 
+    async def close_frontend_transports(self) -> None:
+        """Release owned channels on exit, including disconnected sessions."""
+        failed: list[str] = []
+        for session_id in sorted(set(self._forwards) | set(self._relays)):
+            session = self._sessions.get(session_id)
+            try:
+                async with contextlib.AsyncExitStack() as locks:
+                    if session is not None:
+                        await locks.enter_async_context(session._lifecycle_lock)
+                    await self._drop_forward(
+                        session_id, strict=True, preserve_ownership=True,
+                    )
+            except Exception:
+                failed.append(session_id)
+                log.warning(
+                    "Failed to close frontend transports for %s",
+                    session_id, exc_info=True,
+                )
+        if failed:
+            raise RuntimeError(
+                "Frontend transport cleanup failed for: " + ", ".join(failed)
+            )
+
     async def _drop_forward(
         self, session_id: str, *, strict: bool = False,
         preserve_ownership: bool = False,
@@ -4962,6 +4985,8 @@ class SessionManager:
             self._db.update_session_status(
                 session_id, SessionStatus.STOPPED.value, time.time(),
             )
+            if self._host_index is not None:
+                self._host_index.set_resume_flag(session_id, False)
             if not session.acp_session_id and not allow_recreate:
                 raise RuntimeError(
                     f"Session {session_id} has no ACP session ID -- cannot resume"
@@ -6144,12 +6169,12 @@ class SessionManager:
                 )
             await self._quiesce_session(session, cancel_turn=cancel_turn)
 
-            if not for_restart:
-                # Relay monitors reconnect independently of the heartbeat.
-                # Keep host/venue ownership for lazy resume, not live channels.
-                await self._drop_forward(
-                    session_id, strict=True, preserve_ownership=True,
-                )
+            # Relay monitors reconnect independently of the heartbeat. Release
+            # frontend-owned processes even on restart; the successor rebuilds
+            # channels from descriptors, rather than adopting detached processes.
+            await self._drop_forward(
+                session_id, strict=True, preserve_ownership=True,
+            )
             if not for_restart and self._host_index is not None:
                 self._host_index.set_resume_flag(session_id, False)
             # Idle-reaper only: free the child; a plain stop stays resumable.
