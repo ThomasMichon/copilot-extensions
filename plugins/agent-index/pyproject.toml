@@ -85,7 +85,7 @@ engine = [
     # regressed this to >=5.14.1,<6 in #163; the <5 ceiling is enforced in
     # .github/dependabot.yml so it cannot be lifted again while the default model
     # is jina-v2-base-code.)
-    "transformers>=4.40,<5",
+    "transformers>=4.40,<6",
     "sentence-transformers",
 ]
 
