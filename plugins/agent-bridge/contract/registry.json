@@ -36,7 +36,8 @@
           "0.4.0-dev470",
           "0.4.0-dev474",
           "0.4.0-dev475",
-          "0.4.0-dev476"
+          "0.4.0-dev476",
+          "0.4.0-dev477"
         ]
       },
       "capability_versions": {
@@ -107,7 +108,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/native_manager.py",
-          "sha256": "f64d70816c955549a4472b2315a639d316435685cb6368ae8fdb47f1512ea9c9",
+          "sha256": "cd180cb14094046508d795133bf109839d2f805bffefd70c79e03784ac543654",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -115,7 +116,7 @@
           "path": "plugins/agent-bridge/src/agent_bridge/native_resources.py",
           "semantic": true,
           "non_semantic_reason": null,
-          "sha256": "d1024b5e74ae66dc7d7a3b8bfa57773e75fd190969dfccb93e15922f7ff1ea75"
+          "sha256": "605725184fcd9e833b329d350271886022f1243b837a59a54711dbb41f2208a6"
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/native_runtime.py",
@@ -270,26 +271,50 @@
           "generation": 15
         },
         {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-resource-launch.json",
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev476/native-resource-launch.json",
           "sha256": "0bff5a27820cead57999c4307095ebba474e205d2d979c5af88a16dc0322ee61",
+          "role": "prior optional native host-resource contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev476/native-resource-controller-capabilities.json",
+          "sha256": "0c7c6af3c93607d1667a95f7dc2be0e23a0343a083390fd07ec4747c699279b7",
+          "role": "prior optional native host-resource contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev476/native-resource-protocol.json",
+          "sha256": "1ff581db7c3c64a0d594fa1e2f137c6750acd12f7c795045cad33bc882fc7ef0",
+          "role": "prior optional native host-resource contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev476/native-resource-runtime-capabilities.json",
+          "sha256": "9b50464a19ab4beb9f7a5f2e638be8880998f69da289b0b8be053027d82d9d8d",
+          "role": "prior optional native host-resource contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-resource-launch.json",
+          "sha256": "53fd39bacfaa6ec7b1018f7d3ba0aaa94530895c5db7adf313dee22cd6ccf067",
           "role": "current optional native host-resource contract",
           "generation": 15
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-resource-controller-capabilities.json",
-          "sha256": "0c7c6af3c93607d1667a95f7dc2be0e23a0343a083390fd07ec4747c699279b7",
+          "sha256": "5214c849f77a7d9873a0138479a0f731a49f728928ac61aa8706da273ad75b81",
           "role": "current optional native host-resource contract",
           "generation": 15
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-resource-protocol.json",
-          "sha256": "1ff581db7c3c64a0d594fa1e2f137c6750acd12f7c795045cad33bc882fc7ef0",
+          "sha256": "e647d7bdd41bbe6b622c2e928e844dc84ba6039ffa780da34192cd87c96620ee",
           "role": "current optional native host-resource contract",
           "generation": 15
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-resource-runtime-capabilities.json",
-          "sha256": "9b50464a19ab4beb9f7a5f2e638be8880998f69da289b0b8be053027d82d9d8d",
+          "sha256": "f40816f3d04b33a2dcc28c381334da747a2042558370bf64139b01afd778fe2c",
           "role": "current optional native host-resource contract",
           "generation": 15
         }
@@ -578,6 +603,38 @@
         {
           "commit": "97418ab5684410ba73bc167e20101fae17e88d31",
           "plugin_version": "0.4.0-dev476",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_runtime.py",
+          "source_git_blob": "afd094c66ecba176c660ca771fc99980985b15f9",
+          "capture_method": "Run the committed remote native-host capabilities command and retain platform-independent capability fields; the pre-existing platform support discriminator is not normalized into a support claim."
+        },
+        {
+          "commit": "f2da1c6471abae3127a606f4e7078d09f6a9a184",
+          "plugin_version": "0.4.0-dev477",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_manager.py",
+          "source_git_blob": "4ca1f98c260f340204468acccb4f5d9412220b7b",
+          "capture_method": "Invoke committed validate_request with and without optional resources; normalize only the existing owner directory and local Python executable to neutral placeholders."
+        },
+        {
+          "commit": "f2da1c6471abae3127a606f4e7078d09f6a9a184",
+          "plugin_version": "0.4.0-dev477",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/native.py",
+          "source_git_blob": "b803e2c7aa4d278fd2135920d8a23ed4f5753727",
+          "capture_method": "Invoke the committed native capabilities route with an available synthetic provider; preserve the real public capability response."
+        },
+        {
+          "commit": "f2da1c6471abae3127a606f4e7078d09f6a9a184",
+          "plugin_version": "0.4.0-dev477",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_resources.py",
+          "source_git_blob": "a21eac648718b14887ff19a4b14a0912f6669d3c",
+          "capture_method": "Invoke committed descriptor, provider request, and result serializers with synthetic identities; normalize only the executable and controller resource directory. No resource provider or external venue is launched."
+        },
+        {
+          "commit": "f2da1c6471abae3127a606f4e7078d09f6a9a184",
+          "plugin_version": "0.4.0-dev477",
           "generation": 15,
           "source_path": "plugins/agent-bridge/src/agent_bridge/native_runtime.py",
           "source_git_blob": "afd094c66ecba176c660ca771fc99980985b15f9",

@@ -1,7 +1,7 @@
 {
   "captured_from": {
-    "commit": "f2da1c6471abae3127a606f4e7078d09f6a9a184",
-    "plugin_version": "0.4.0-dev477",
+    "commit": "97418ab5684410ba73bc167e20101fae17e88d31",
+    "plugin_version": "0.4.0-dev476",
     "protocol_generation": 15,
     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/native.py",
     "source_git_blob": "b803e2c7aa4d278fd2135920d8a23ed4f5753727",
