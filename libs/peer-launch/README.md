@@ -1,7 +1,7 @@
 # Same-cell peer launcher
 
 `peer_launch.py` is the canonical, dependency-free native process boundary for
-Agent Dispatch and Agent CodeSpaces. `tools/sync-peer-launch.py` packages
+Agent Dispatch, Agent CodeSpaces, and Agent Containers. `tools/sync-peer-launch.py` packages
 byte-identical copies alongside each consumer's `_installation_context.py`;
 `tools/sync-installation-context.py` owns those validator bytes. Neither
 bootstrap imports a validator through an unvalidated payload pointer.
@@ -43,6 +43,15 @@ probe stops the session-guidance writer before other producers or any file
 mutation; existing guidance is preserved rather than replaced with a success-shaped
 empty result.
 Both platform hook wrappers preserve the writer's explicit refusal status.
+
+Containers uses this boundary for the optional knowledge-repository config
+lookup. It validates its owner before selecting any config override, asks only
+the same-cell worktrees installation for `state-root`, and refuses failed,
+malformed, or unbound required-state responses instead of falling back to fleet
+defaults. A missing peer remains optional after owner admission. Legacy config
+precedence and best-effort lookup are unchanged without explicit context.
+The scrubber removes the Containers environment namespace as well as the other
+callers' credentials and routing overrides.
 
 ## Validation
 

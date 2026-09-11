@@ -32,6 +32,15 @@ this plugin and work standalone; without agent-bridge only bridge addressing
 
 ## Concepts
 
+With an explicit installation-cell context, configuration loading validates the
+Containers owner before using config overrides. Its optional knowledge-repo
+fallback invokes only that cell's Agent Worktrees through the packaged native
+peer boundary, never an ambient command. An absent peer is optional only after
+owner validation; invalid receipts, blocked governance, failed probes, and
+unbound required knowledge roots produce an error rather than default fleet
+configuration. Without explicit context, legacy precedence and fallback remain
+unchanged.
+
 - **Fleet** — a named pool of long-lived dev containers built from one
   devcontainer spec. Kept warm (stopped, not destroyed) between uses.
 - **Lease / borrow** — an *effort* (a logical unit of work) borrows a
