@@ -52,12 +52,14 @@ def _gitea_viewer_permission(permissions: object) -> str:
     Returns ``""`` when missing/malformed or every bit is false (an
     authenticated read of a visible repo always has at least ``pull`` true, so
     all-false means the field wasn't populated -- unknown, not a confident
-    "none").
+    "none"). A bit must be the actual boolean ``True`` -- a malformed payload
+    with e.g. ``"push": "false"`` (a truthy string) must never normalize to
+    write access.
     """
     if not isinstance(permissions, dict):
         return ""
     for bit in _GITEA_PERMISSION_PRIORITY:
-        if permissions.get(bit):
+        if permissions.get(bit) is True:
             return _GITEA_PERMISSION_TOKEN[bit]
     return ""
 

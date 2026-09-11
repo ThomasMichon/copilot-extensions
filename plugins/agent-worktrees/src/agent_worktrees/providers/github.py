@@ -62,12 +62,14 @@ def _github_viewer_permission(permissions: object) -> str:
     Returns ``""`` when the payload is missing/malformed or every bit is false
     (an authenticated call always has at least ``pull`` true for a repo it can
     see, so all-false means the field wasn't populated -- report unknown, not a
-    confident "none").
+    confident "none"). A bit must be the actual boolean ``True`` -- a malformed
+    payload with e.g. ``"push": "false"`` (a truthy string) must never
+    normalize to write access.
     """
     if not isinstance(permissions, dict):
         return ""
     for bit in _GH_PERMISSION_PRIORITY:
-        if permissions.get(bit):
+        if permissions.get(bit) is True:
             return _GH_PERMISSION_TOKEN[bit]
     return ""
 

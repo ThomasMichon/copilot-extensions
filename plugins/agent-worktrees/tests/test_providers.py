@@ -1025,6 +1025,22 @@ class TestGitHubProvider:
         pol = github.GitHubProvider().get_repo_policy("o/r")
         assert pol.viewer_permission == ""
 
+    def test_get_repo_policy_viewer_permission_github_rejects_non_bool(
+        self, monkeypatch,
+    ):
+        # A malformed truthy-but-non-bool value (e.g. "false" the string) must
+        # never be read as granted access.
+        from agent_worktrees.providers import github
+
+        def fake(args, **kw):
+            return _proc(stdout=json.dumps({
+                "permissions": {"admin": "false", "push": "false", "pull": 1},
+            }))
+
+        monkeypatch.setattr(github, "run_cli", fake)
+        pol = github.GitHubProvider().get_repo_policy("o/r")
+        assert pol.viewer_permission == ""
+
     def test_get_repo_policy_viewer_permission_gitea(self, monkeypatch):
         from agent_worktrees.providers import gitea
 
@@ -1054,6 +1070,21 @@ class TestGitHubProvider:
             "o/r", api_base="https://gitea.example", token="tok",
         )
         assert pol.allow_rebase is True
+
+    def test_get_repo_policy_viewer_permission_gitea_rejects_non_bool(
+        self, monkeypatch,
+    ):
+        from agent_worktrees.providers import gitea
+
+        def fake(args, **kw):
+            body = json.dumps({"permissions": {"admin": "false", "push": 1}})
+            return _proc(stdout=f"{body}\n200")
+
+        monkeypatch.setattr(gitea, "run_cli", fake)
+        pol = gitea.GiteaProvider().get_repo_policy(
+            "o/r", api_base="https://gitea.example", token="tok",
+        )
+        assert pol.viewer_permission == ""
 
     def test_get_repo_policy_gitea_no_token_unsupported(self):
         from agent_worktrees.providers import gitea
