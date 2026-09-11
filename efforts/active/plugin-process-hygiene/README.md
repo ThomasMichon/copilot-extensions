@@ -871,8 +871,37 @@ focused pass with more test coverage than this session budgeted, rather than
 folding it into the same diff as the launcher-resolution fix. #1836 stays
 open for that remaining piece.
 
+### 2026-09-11 (later still) — Closed the rest of #1836: `start` no longer depends on the Scheduled Task
+
+Operator confirmed agent-vault is lightly used on this machine and cleared it
+for direct experimentation, so picked back up the deferred piece. Discovered
+`agent_vault.cli` **already has** its own idempotent, health-gated user-mode
+ensure path independent of any Scheduled Task -- `cmd_start` ->
+`ensure_service`/`start_service` (pings first, cold-starts via `sys.executable`
+if not running, polls until healthy). `install.ps1`'s `Invoke-Start` just
+never delegated to it: it hard-required a registered task and errored
+otherwise. Fixed by making `Invoke-Start` prefer the Scheduled Task when
+registered (keeps Task Scheduler's own crash-restart policy for the at-logon
+case) and fall back to `& $LinkPython -m agent_vault start` -- the exact same
+path the CLI itself uses -- when no task exists, rather than reimplementing
+process-spawning logic in PowerShell. Added
+`test_start_does_not_require_a_registered_scheduled_task`.
+
+**Live-verified on this machine** (not just unit tests): stopped the running
+daemon, `Unregister-ScheduledTask -TaskName AgentVault`, ran the patched
+`install.ps1 start` -- daemon came up and answered `ping` with no task
+registered. Re-ran `install.ps1 update` twice in a row to confirm both the
+#1836 launcher-resolution fix and the register-once guard: first run built +
+activated `0.1.0-dev102` and registered the task fresh; second run printed
+"Scheduled task already correct ... left registered as-is" (no
+Set-ScheduledTask). Restored the task registration afterward so the machine
+is back to its normal running state. Full suite: 258 passed, same 2
+pre-existing unrelated failures. Bumped to `0.1.0-dev102`.
+
+**#1836 is now fully closed** -- both the launcher-resolution/register-once
+half and the start/session-start convergence half are landed.
+
 Remaining #736-adjacent open work not picked up this session: #742 (atomic
 `current-version` marker), #743 (agent-vault drain-safe cutover), #744
-(work-coalescing singleton tier design), #1836 (start/session-start
-convergence, per above).
+(work-coalescing singleton tier design).
 
