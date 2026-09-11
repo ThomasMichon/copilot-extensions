@@ -3873,12 +3873,13 @@ class SessionManager:
                     proc.kill()
 
     def _schedule_remote_reap(self, rec: Any, reason: str) -> None:
-        """Fire-and-forget a remote ``kill`` of a detached far-side Host.
+        """Schedule a tracked remote ``kill`` of a detached far-side Host.
 
         Uses the durable endpoint's SSH config (no live Spawner needed) to run a
         one-shot ``kill`` over the tunnel. Best-effort: if there is no running
         loop or the exec fails, the detached Host lingers until the CodeSpace
-        stops -- never fatal, and never touches a local process.
+        stops -- never fatal, and never touches a local process. An explicit
+        stop awaits this session's scheduled reaps before acknowledging.
         """
         endpoint = getattr(rec, "endpoint", None) or {}
         if not endpoint:
@@ -4007,7 +4008,17 @@ class SessionManager:
                 )
                 if plan.disposition in (HostDisposition.REAP_STOPPED,
                                         HostDisposition.FORCE_REAP):
-                    self._reap_host_record(rec, plan.reason)
+                    if getattr(rec, "boundary", "local") == "local":
+                        teardown = asyncio.create_task(
+                            asyncio.to_thread(self._reap_host_record, rec, plan.reason)
+                        )
+                        try:
+                            await asyncio.shield(teardown)
+                        except asyncio.CancelledError:
+                            await teardown
+                            raise
+                    else:
+                        self._reap_host_record(rec, plan.reason)
                     reaped += 1
         return reaped
 

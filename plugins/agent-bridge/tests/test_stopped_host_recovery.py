@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -649,7 +650,13 @@ async def test_host_sweeps_preserve_stopped_or_lifecycle_owned_records(
     ))
     monkeypatch.setattr(version_mux, "plan_host", plan)
     monkeypatch.setattr(ctx.manager, "_rec_child_alive", lambda _rec: True)
-    reap = Mock()
+    loop_thread = threading.get_ident()
+
+    def assert_off_loop(*_args):
+        assert threading.get_ident() != loop_thread
+        assert ctx.session._lifecycle_lock.locked()
+
+    reap = Mock(side_effect=assert_off_loop)
     monkeypatch.setattr(ctx.manager, "_reap_host_record", reap)
     entered, release = asyncio.Event(), asyncio.Event()
 
@@ -718,3 +725,41 @@ async def test_stop_waits_for_its_pending_remote_reap_only(context, monkeypatch)
         await asyncio.wait_for(other_task, 1)
     assert ctx.manager._remote_reap_tasks == set()
     assert ctx.manager._remote_reaps_by_session == {}
+
+
+async def test_cancelled_local_sweep_keeps_lock_until_worker_settles(context, monkeypatch):
+    from agent_bridge.session_host import version_mux
+
+    ctx = context
+    ctx.record.boundary = "local"
+    ctx.manager._host_index.register(ctx.record)
+    monkeypatch.setattr(ctx.manager, "_rec_host_alive", lambda _rec: True)
+    monkeypatch.setattr(ctx.manager, "_rec_child_alive", lambda _rec: True)
+    monkeypatch.setattr(version_mux, "plan_host", lambda **_kwargs: SimpleNamespace(
+        disposition=version_mux.HostDisposition.FORCE_REAP, reason="expired",
+    ))
+    loop = asyncio.get_running_loop()
+    entered = asyncio.Event()
+    release = threading.Event()
+
+    def reap(*_args):
+        loop.call_soon_threadsafe(entered.set)
+        assert release.wait(timeout=2)
+        assert ctx.session._lifecycle_lock.locked()
+
+    monkeypatch.setattr(ctx.manager, "_reap_host_record", reap)
+    sweep = asyncio.create_task(ctx.manager.sweep_stranded_hosts())
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        sweep.cancel()
+        await asyncio.sleep(0)
+        stop = asyncio.create_task(ctx.manager.stop_session(ctx.session.session_id))
+        await asyncio.sleep(0)
+        assert not stop.done()
+        assert not sweep.done()
+    finally:
+        release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await sweep
+    await asyncio.wait_for(stop, 1)
+    assert ctx.session.status == SessionStatus.STOPPED
