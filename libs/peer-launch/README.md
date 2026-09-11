@@ -50,6 +50,9 @@ the same-cell worktrees installation for `state-root`, and refuses failed,
 malformed, or unbound required-state responses instead of falling back to fleet
 defaults. A missing peer remains optional after owner admission. Legacy config
 precedence and best-effort lookup are unchanged without explicit context.
+Returned knowledge roots must be existing directories. Relay profile generation
+and in-process relay registration preserve context refusal before publishing
+an allowlist or touching the token store.
 The scrubber removes the Containers environment namespace as well as the other
 callers' credentials and routing overrides.
 

@@ -395,6 +395,11 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   exact argv/environment isolation, and owner/peer refusal.
   Existing CodeSpaces adapter coverage remains green on both platforms.
   No persistent installation was activated or deployed by this slice.
+- Advisory review identified a relay-profile catch that could replace refused
+  configuration with a permissive allowlist. Both CLI and in-process relay
+  registration now preserve refusal before token-store mutation; returned
+  knowledge roots must also be existing directories. The expanded config/relay
+  selection passed 103 tests on both Windows and POSIX.
 - This advances `cell-local-invocation` and `provenance-safe-transition`;
   remaining Phase 2/6 boundaries, lease migration, Phase 7 intake, and final
   validation remain the parent completion gate.

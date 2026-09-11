@@ -107,3 +107,41 @@ def test_cli_stops_before_provider_on_refusal(
     monkeypatch.setattr(lifecycle, "list_containers", lambda *args: pytest.fail("Docker touched"))
     assert cli.main(["fleet"]) == 1
     assert "peer governance refused" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("kind", ["missing", "file"])
+def test_bound_knowledge_root_must_be_a_directory(
+    owner: dict[str, str], tmp_path: Path, kind: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "knowledge"
+    if kind == "file":
+        root.touch()
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: subprocess.CompletedProcess(
+        [], 0, json.dumps({
+            "requires_external": True, "bound": True, "state_root": str(root),
+        }), "",
+    ))
+    with pytest.raises(ContextRefused, match="invalid or unbound"):
+        config.load_config()
+
+
+def test_relay_profile_cannot_replace_refusal_with_default_allowlist(
+    owner: dict[str, str], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from agent_containers import __main__ as cli
+    from agent_containers import relay_provider
+
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: subprocess.CompletedProcess(
+        [], 126, "", "peer governance refused",
+    ))
+    monkeypatch.setattr(
+        relay_provider, "_prepare_token_file", lambda: pytest.fail("token state mutated"),
+    )
+    with pytest.raises(ContextRefused, match="peer governance refused"):
+        relay_provider.relay_profile()
+    with pytest.raises(ContextRefused, match="peer governance refused"):
+        relay_provider.register_relay(None)
+    assert cli.main(["relay-profile"]) == 1
+    captured = capsys.readouterr()
+    assert "peer governance refused" in captured.err
+    assert captured.out == ""

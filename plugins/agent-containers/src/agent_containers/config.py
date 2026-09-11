@@ -530,6 +530,7 @@ def _knowledge_overlay_config() -> Path | None:
         or (data["requires_external"] and not data["bound"])
         or not isinstance(data.get("state_root"), str)
         or not Path(data["state_root"]).is_absolute()
+        or not Path(data["state_root"]).is_dir()
     ):
         raise _peer_launch.ContextRefused("Same-cell worktrees state root is invalid or unbound")
     if not data.get("requires_external") or not data.get("bound"):
