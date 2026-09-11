@@ -950,3 +950,48 @@ async def test_child_exit_settlement_joins_late_prompt_state_writer(
     assert ctx.session._prompt_task.done()
     assert ctx.session.status == SessionStatus.STOPPED
     assert ctx.db.get_session(ctx.session.session_id)["status"] == "stopped"
+
+
+@pytest.mark.parametrize("result", ["live", "missing"])
+@pytest.mark.parametrize("change", ["replace", "remove", "stop_resume"])
+async def test_remote_authority_results_cannot_overwrite_newer_lifecycle(
+    context, monkeypatch, result, change,
+):
+    from dataclasses import replace
+
+    ctx = context
+    replacement = replace(ctx.record, port=52000, nonce="replacement")
+    stale = replace(ctx.record, port=53000, nonce="stale")
+    operations = []
+
+    async def reattach(session):
+        session.status = SessionStatus.IDLE
+        ctx.db.update_session_status(session.session_id, "idle", time.time())
+        return True
+
+    monkeypatch.setattr(ctx.manager, "_try_reattach_live_host", reattach)
+
+    async def stop_resume():
+        await ctx.manager.stop_session(ctx.session.session_id)
+        await ctx.manager.resume_session(ctx.session.session_id)
+
+    async def inspect(_session_id):
+        if change == "replace":
+            ctx.manager._host_index.register(replacement)
+        elif change == "remove":
+            ctx.manager._host_index.remove(ctx.session.session_id)
+        else:
+            operations.append(asyncio.create_task(stop_resume()))
+        return stale if result == "live" else None
+
+    ctx.spawner.recover_record.side_effect = inspect
+    assert await ctx.manager._recover_remote_host_records(background=True) == 0
+    if operations:
+        await asyncio.gather(*operations)
+    expected = None if change == "remove" else (
+        replacement if change == "replace" else ctx.record
+    )
+    assert ctx.manager._host_index.get(ctx.session.session_id) == expected
+    if change == "stop_resume":
+        assert ctx.session.status == SessionStatus.IDLE
+    ctx.spawner.recover_record.assert_awaited_once()
