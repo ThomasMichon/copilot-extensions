@@ -5716,6 +5716,7 @@ def build_parser() -> argparse.ArgumentParser:
     native_start_p.add_argument("--cwd", required=True)
     native_start_p.add_argument("--request-id", required=True)
     native_start_p.add_argument("--command-file", "--interactive-command-file", dest="command_file", required=True)
+    native_start_p.add_argument("--host-resources-file")
     native_start_p.add_argument("--local-forward", action="append", default=[])
     native_start_p.add_argument("--reverse-forward", action="append", default=[])
     native_start_p.add_argument("--no-plugin-staging", action="store_true", default=True)
@@ -5727,6 +5728,16 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--expected-generation", required=action != "status")
         if action in {"status", "stop"}:
             p.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    resource_p = native_sub.add_parser("resource", help="Request an allowlisted local host resource from the native session")
+    resource_sub = resource_p.add_subparsers(dest="resource_action", required=True)
+    resource_descriptor = resource_sub.add_parser("descriptor")
+    resource_descriptor.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    resource_ensure = resource_sub.add_parser("ensure")
+    resource_ensure.add_argument("resource")
+    resource_ensure.add_argument("--request-id")
+    resource_ensure.add_argument("--input-file")
+    resource_ensure.add_argument("--timeout", type=float, default=120)
+    resource_ensure.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     native_p.set_defaults(func=_cmd_native)
 
     native_host_p = sub.add_parser("native-host", help="Official remote native execution-host management")
@@ -5736,11 +5747,11 @@ def build_parser() -> argparse.ArgumentParser:
     native_guard_p.add_argument("--requested-mode", choices=["acp", "native"], required=True)
     native_start = native_host_sub.add_parser("start")
     native_start.add_argument("--request-stdin", action="store_true", required=True)
-    for action in ("activate", "status", "stop", "message", "result"):
+    for action in ("activate", "status", "stop", "message", "result", "resource-complete"):
         action_p = native_host_sub.add_parser(action)
         action_p.add_argument("execution_id")
         action_p.add_argument("--expected-generation", required=True)
-        if action in {"stop", "message", "result"}:
+        if action in {"stop", "message", "result", "resource-complete"}:
             action_p.add_argument("--request-stdin", action="store_true", required=action != "stop")
     native_host_p.set_defaults(func=_cmd_native_host)
 

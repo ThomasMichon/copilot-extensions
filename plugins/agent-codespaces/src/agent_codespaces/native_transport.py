@@ -93,7 +93,7 @@ async def serve(args, manager, ssh_config, relay_env: str) -> int:
                 command += [args.execution_id, "--expected-generation", args.generation]
             else:
                 command.append("--request-stdin")
-            if action in {"stop", "message", "result"}:
+            if action in {"stop", "message", "result", "resource-complete"}:
                 command.append("--request-stdin")
         payload = data or {}
         if action == "start":
@@ -163,7 +163,8 @@ async def serve(args, manager, ssh_config, relay_env: str) -> int:
             if retirement_only and action not in {"stop", "status"}:
                 raise ValueError("retirement-only transport cannot launch, activate, or deliver input")
             mapping = {"launch": "start", "activate": "activate", "status": "status",
-                       "stop": "stop", "message": "message", "result": "result"}
+                       "stop": "stop", "message": "message", "result": "result",
+                       "resource-complete": "resource-complete"}
             if action not in mapping:
                 raise ValueError("unsupported native transport operation")
             if action == "launch":
@@ -205,6 +206,11 @@ async def serve(args, manager, ssh_config, relay_env: str) -> int:
         capability = await remote("capabilities")
         if capability.get("capability") != "codespace-native-host-v1" or capability.get("supported") is not True:
             raise RuntimeError("remote native execution hosting capability is unavailable")
+        resources = capability.get("hostResources") == "native-host-resources-v1"
+        if getattr(args, "require_host_resources", False) and not resources:
+            await emit({"event": "failed", "code": "resource_capability_unavailable",
+                        "executionId": args.execution_id, "generation": args.generation})
+            return 69
         started = await manager.exec_command(
             args.name, "bash -lc 'agent-bridge service start'", timeout=150.0,
         )
@@ -218,7 +224,8 @@ async def serve(args, manager, ssh_config, relay_env: str) -> int:
             raise RuntimeError("remote shared agent-bridge service is not ready")
         if progress:
             progress("native-host", "reached")
-        await emit({"event": "ready", "capability": CAPABILITY, "version": 1})
+        await emit({"event": "ready", "capability": CAPABILITY, "version": 1,
+                    **({"hostResources": "native-host-resources-v1"} if resources else {})})
         if not retirement_only:
             monitor_task = asyncio.create_task(monitor())
         while True:

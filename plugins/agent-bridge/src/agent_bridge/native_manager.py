@@ -27,7 +27,7 @@ _PROGRESS_STATUSES = frozenset({"started", "reached", "failed"})
 
 def validate_request(request: dict) -> dict:
     allowed = {"requestId", "codespace", "owner", "cwd", "command", "noPluginStaging",
-               "requireRelay", "localForward", "reverseForward"}
+               "requireRelay", "localForward", "reverseForward", "hostResources"}
     if set(request) - allowed:
         raise NativeError("invalid_request", "Unknown native launch fields", 400)
     for key in ("requestId", "codespace"):
@@ -43,6 +43,9 @@ def validate_request(request: dict) -> dict:
         raise NativeError("invalid_command", "A bounded nonblank UTF-8 command is required", 400)
     if request.get("noPluginStaging", True) is not True or request.get("requireRelay", True) is not True:
         raise NativeError("invalid_preparation", "Native hosting retains required relay preparation without plugin copying", 400)
+    if "hostResources" in request:
+        from .native_resources import validate_definitions
+        validate_definitions(request["hostResources"])
     for key in ("localForward", "reverseForward"):
         values = request.get(key, [])
         if not isinstance(values, list) or len(values) > 32:
@@ -80,6 +83,8 @@ class ProviderTransport:
         ]
         if resume:
             argv.append("--resume-infrastructure")
+        if "hostResources" in spec:
+            argv.append("--require-host-resources")
         if retirement_only:
             argv.append("--retirement-only")
         else:
@@ -125,9 +130,20 @@ class ProviderTransport:
                 elif value.get("event") == "rejected":
                     if not self.ready.done():
                         self.ready.set_exception(NativeError("venue_busy", "Another execution owns the CodeSpace"))
+                elif (
+                    value.get("event") == "failed" and value.get("code") == "resource_capability_unavailable"
+                    and value.get("executionId") == self.row["id"]
+                    and value.get("generation") == self.row["generation"]
+                ):
+                    if not self.ready.done():
+                        self.ready.set_exception(NativeError(
+                            "resource_capability_unavailable", "Remote native host lacks registered resource support", 503,
+                        ))
                 elif value.get("event") == "ready":
                     if value.get("capability") != "codespace-native-transport-v1":
                         raise NativeError("provider_unavailable", "Native transport capability does not match", 503)
+                    if "hostResources" in self.row["data"]["spec"] and value.get("hostResources") != "native-host-resources-v1":
+                        raise NativeError("resource_capability_unavailable", "Native provider lacks host resources", 503)
                     if not self.ready.done():
                         self.ready.set_result(True)
                 elif value.get("id") in self.pending:
@@ -137,8 +153,12 @@ class ProviderTransport:
                             future.set_result(value["result"])
                         else:
                             future.set_exception(NativeError("provider_operation_failed", str(value.get("error")), 503))
-        except Exception:
-            pass
+        except NativeError as exc:
+            if not self.ready.done():
+                self.ready.set_exception(exc)
+        except (ValueError, OSError):
+            if not self.ready.done():
+                self.ready.set_exception(NativeError("provider_unavailable", "Invalid native transport response", 503))
         finally:
             error = NativeError("provider_unavailable", "Native infrastructure transport disconnected", 503)
             if not self.ready.done():
@@ -186,6 +206,54 @@ class NativeManager:
         self.tasks = {}
         self.locks = {}
         self.monitor_task = None
+        self.resource_tasks = {}
+        self._host_resources = None
+
+    def host_resources(self):
+        if self._host_resources is None:
+            from .native_resources import HostResources
+            self._host_resources = HostResources(self.store(), self.serving)
+        return self._host_resources
+
+    def _schedule_resources(self, row, result):
+        if row["state"] != "ready" or "hostResources" not in row["data"]["spec"]:
+            return
+        requests = result.get("resourceRequests", [])
+        if not isinstance(requests, list) or len(requests) > 16:
+            return
+        for request in requests:
+            if not isinstance(request, dict) or not isinstance(request.get("requestId"), str):
+                continue
+            key = (row["id"], row["generation"], request["requestId"])
+            if key not in self.resource_tasks:
+                task = asyncio.create_task(self._serve_resource(row["id"], row["generation"], request))
+                self.resource_tasks[key] = task
+                task.add_done_callback(lambda _, key=key: self.resource_tasks.pop(key, None))
+
+    async def _serve_resource(self, execution, generation, request):
+        from .native_resources import resource_result
+        import logging
+
+        try:
+            try:
+                result = await self.host_resources().ensure(execution, generation, request)
+            except NativeError as exc:
+                result = resource_result(request, error={"code": exc.code, "detail": exc.detail})
+            transport = self.transports.get(execution)
+            if self.serving() and transport is not None:
+                await transport.request("resource-complete", result)
+        except Exception:
+            logging.getLogger("agent-bridge").warning(
+                "Native resource result remains pending; retrying through the owning transport",
+                exc_info=True,
+            )
+
+    async def _finish_retirement(self, execution, generation, **changes):
+        store = self.store()
+        row = store.update(execution, generation, retired=True, represented=False, **changes)
+        if row["data"].get("spec", {}).get("hostResources"):
+            await self.host_resources().cleanup(execution, generation)
+        return receipt(store.update(execution, generation, state="stopped", phase="stopped"))
 
     def store(self, *, create: bool = False) -> NativeStore | None:
         if not create and not (self.root / "native-controller.sqlite").exists() and not (
@@ -282,9 +350,13 @@ class NativeManager:
                     store.update(
                         execution_id, generation, launchRequested=True, phase="launching", allowed_states=_LIVE,
                     )
-                    result = await transport.request("launch", {
+                    launch_request = {
                         "command": row["data"]["spec"]["command"], "cwd": row["data"]["spec"]["cwd"],
-                    })
+                    }
+                    if "hostResources" in row["data"]["spec"]:
+                        from .native_resources import public_definitions
+                        launch_request["hostResources"] = public_definitions(row["data"]["spec"]["hostResources"])
+                    result = await transport.request("launch", launch_request)
                 else:
                     result = await transport.request("status")
                 if result.get("host") and not result.get("retired"):
@@ -295,7 +367,8 @@ class NativeManager:
                             return
                         result = await transport.request("activate")
                     result = await transport.request("status")
-                self._save_result(store, execution_id, generation, result)
+                current = self._save_result(store, execution_id, generation, result)
+                self._schedule_resources(current, result)
             except Exception as exc:
                 current = store.get(execution_id, generation)
                 if current["state"] not in {"stopped", "rejected"}:
@@ -363,6 +436,7 @@ class NativeManager:
                 try:
                     result = await self.transports[execution_id].request("status")
                     row = self._save_result(store, execution_id, row["generation"], result)
+                    self._schedule_resources(row, result)
                 except Exception:
                     current = store.get(execution_id, row["generation"])
                     if current["state"] not in {"stopped", "rejected"}:
@@ -418,6 +492,11 @@ class NativeManager:
         if row["state"] == "stopped" and row["data"].get("retired"):
             return receipt(row)
         store.update(execution_id, generation, state="stopping", represented=False, phase="stopping")
+        resources = [task for key, task in self.resource_tasks.items() if key[:2] == (execution_id, generation)]
+        if resources:
+            await asyncio.gather(*resources, return_exceptions=True)
+        if row["data"].get("retired"):
+            return await self._finish_retirement(execution_id, generation)
         pending = self.tasks.get(execution_id)
         if pending is not None:
             if not store.get(execution_id, generation)["data"].get("launchRequested"):
@@ -443,14 +522,13 @@ class NativeManager:
             proof = await self._retirement_receipt(row)
             if not proof or proof.get("noLaunch") is not True:
                 raise NativeError("retirement_unconfirmed", "Unlaunched native retirement receipt is unavailable")
-            return receipt(store.update(execution_id, generation, state="stopped", retired=True, phase="stopped"))
+            return await self._finish_retirement(execution_id, generation)
         if execution_id not in self.transports:
             cached = await self._retirement_receipt(row)
             if cached:
-                return receipt(store.update(
-                    execution_id, generation, state="stopped", retired=True, represented=False,
-                    recovery=cached.get("recovery"), exitCode=cached.get("exitCode"), phase="stopped",
-                ))
+                return await self._finish_retirement(
+                    execution_id, generation, recovery=cached.get("recovery"), exitCode=cached.get("exitCode"),
+                )
             await self._prepare(execution_id, generation, retirement_only=True)
         transport = self.transports.get(execution_id)
         if transport is None:
@@ -460,9 +538,9 @@ class NativeManager:
             raise NativeError("retirement_unconfirmed", "Native retirement was not verified")
         await transport.close()
         self.transports.pop(execution_id, None)
-        row = store.update(execution_id, generation, state="stopped", retired=True, represented=False,
-                           recovery=result.get("recovery"), exitCode=result.get("exitCode"), phase="stopped")
-        return receipt(row)
+        return await self._finish_retirement(
+            execution_id, generation, recovery=result.get("recovery"), exitCode=result.get("exitCode"),
+        )
 
     async def _retirement_receipt(self, row: dict) -> dict | None:
         from agent_procutil import no_window_kwargs
@@ -532,6 +610,10 @@ class NativeManager:
         await self.detach_infrastructure()
 
     async def detach_infrastructure(self) -> None:
+        resources = list(self.resource_tasks.values())
+        for task in resources:
+            task.cancel()
+        await asyncio.gather(*resources, return_exceptions=True)
         pending = list(self.tasks.values())
         for task in pending:
             task.cancel()

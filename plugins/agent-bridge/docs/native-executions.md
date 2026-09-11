@@ -7,6 +7,11 @@ provider owns preparation, claims, credential forwarding, and managed ports.
 The officially installed remote bridge owns the native PTY execution host and
 the existing native live-session registry.
 
+Optional [on-demand host resources](native-host-resources.md) let the same
+registered native session request a locally allowlisted resource after startup
+or presentation detach. Launching native mode does not require or start any
+resource. Browser/service policy remains with the locally registered provider.
+
 ## Stable CLI and receipts
 
 Use the resolved agent-bridge command:

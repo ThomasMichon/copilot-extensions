@@ -124,10 +124,16 @@ class NativeRuntime:
         code, detail = check_catalog(self.catalog, "native", execution_id, generation)
         if code:
             raise NativeError("venue_busy" if code == 75 else "identity_mismatch", detail)
-        expected_hash = signature({"command": command, "cwd": cwd})
+        launch_spec = {"command": command, "cwd": cwd}
+        resources = request.get("hostResources")
+        if resources is not None:
+            from .native_resources import validate_public
+            launch_spec["hostResources"] = validate_public(resources)
+        expected_hash = signature(launch_spec)
         row, created = self.store.reserve(
             execution_id, generation, execution_id, request["codespace"], request["owner"],
-            expected_hash, {"sessionId": None, "represented": False, "hostNonce": secrets.token_hex(32)},
+            expected_hash, {"sessionId": None, "represented": False, "hostNonce": secrets.token_hex(32),
+                            **({"resourceDefinitions": resources} if resources is not None else {})},
             strict_identity=True,
         )
         if created:
@@ -153,12 +159,20 @@ class NativeRuntime:
             env = {
                 "AGENT_BRIDGE_NATIVE_EXECUTION_ID": execution_id,
                 "AGENT_BRIDGE_NATIVE_GENERATION": generation,
+                "AGENT_BRIDGE_NATIVE_RESOURCES": "",
                 "TERM": "xterm-256color",
                 "AGENT_BRIDGE_HOST_VENUE": f"codespace:{request['codespace']}",
             }
             from .config import config_dir
 
             env["AGENT_BRIDGE_CONFIG_DIR"] = str(config_dir())
+            if resources is not None:
+                from .native_resources import descriptor, bounded_json
+                descriptor_path = self.store.root / f"resources-{execution_id}-{generation}.json"
+                fd = os.open(descriptor_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(fd, "wb") as stream:
+                    stream.write(bounded_json(descriptor(execution_id, generation, resources)))
+                env["AGENT_BRIDGE_NATIVE_RESOURCES"] = str(descriptor_path)
             try:
                 self.launch(
                     ["bash", "-lc", str(request.get("prelude") or "") + command],
@@ -218,12 +232,16 @@ class NativeRuntime:
             execution_id, generation, state=status, represented=represented,
             exitCode=state.get("child_exit_code"), retired=retired,
         )
-        return {
+        result = {
             "executionId": execution_id, "generation": generation, "state": status,
             "sessionId": session_id, "represented": represented, "host": state,
             "exitCode": row["data"].get("exitCode"),
             "retired": retired, "activated": bool(state.get("native_started")),
         }
+        if row["data"].get("resourceDefinitions") and represented:
+            from .native_resources import ResourceMailbox
+            result["resourceRequests"] = ResourceMailbox(self.store).pending(execution_id, generation)
+        return result
 
     async def activate(self, execution_id: str, generation: str) -> dict:
         row = self.store.get(execution_id, generation)
@@ -328,6 +346,7 @@ def command(args) -> int:
     """Internal remote management boundary, invoked through provider transport."""
     if args.native_host_action == "capabilities":
         print(json.dumps({"capability": CAPABILITY, "version": 1,
+                          "hostResources": "native-host-resources-v1",
                           "supported": sys.platform.startswith("linux") and bool(launcher._boot_id())}))
         return 0
     if args.native_host_action == "guard":
@@ -353,6 +372,11 @@ def command(args) -> int:
                 params = json.loads(sys.stdin.read(524289))
                 result = runtime.represented_operation(
                     args.execution_id, args.expected_generation, args.native_host_action, params,
+                )
+            elif args.native_host_action == "resource-complete":
+                from .native_resources import ResourceMailbox
+                result = ResourceMailbox(runtime.store).complete(
+                    args.execution_id, args.expected_generation, json.loads(sys.stdin.read(65537)),
                 )
             else:
                 result = runtime.status(

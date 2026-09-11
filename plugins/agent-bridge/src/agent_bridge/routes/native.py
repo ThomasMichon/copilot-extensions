@@ -35,6 +35,7 @@ async def invoke(awaitable):
 @router.get("/capabilities")
 async def capabilities(request: Request):
     return {"capability": CAPABILITY, "version": 1, "mode": "native",
+            "hostResources": "native-host-resources-v1",
             "providerAvailable": bool(manager(request).provider_command())}
 
 

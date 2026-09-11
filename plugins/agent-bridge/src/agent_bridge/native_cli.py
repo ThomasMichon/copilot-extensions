@@ -16,20 +16,30 @@ def command(args) -> None:
 
     action = args.native_action
     try:
+        if action == "resource":
+            from .native_resource_cli import command as resource_command
+            value = resource_command(args)
+            print(json.dumps(value, indent=2))
+            return
         if action in {"attach", "resume"}:
             raise SystemExit(asyncio.run(attach(args.execution_id, args.expected_generation)))
-        client = _get_client(ensure=action in {"start", "stop"})
+        if action != "start":
+            client = _get_client(ensure=action == "stop")
         if action == "start":
             try:
                 payload = Path(args.command_file).read_bytes().decode("utf-8-sig")
             except (OSError, UnicodeError) as exc:
                 raise NativeError("invalid_command_file", "Native command file could not be read as UTF-8", 400) from exc
-            value = client.native_start({
+            request = {
                 "requestId": args.request_id, "codespace": args.codespace,
                 "owner": args.owner, "cwd": args.cwd, "command": payload,
                 "noPluginStaging": True, "requireRelay": True,
                 "localForward": args.local_forward, "reverseForward": args.reverse_forward,
-            })
+            }
+            if getattr(args, "host_resources_file", None):
+                from .native_resources import read_json_file, validate_definitions
+                request["hostResources"] = validate_definitions(read_json_file(args.host_resources_file))
+            value = _get_client(ensure=True).native_start(request)
         elif action == "stop":
             value = client.native_stop(args.execution_id, args.expected_generation)
         elif action == "status":
