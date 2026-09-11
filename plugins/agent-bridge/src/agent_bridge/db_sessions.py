@@ -30,18 +30,13 @@ class _SessionsMixin:
         )
 
     def update_session_status(
-        self, session_id: str, status: str, now: float, pid: int | None = None
+        self, session_id: str, status: str, now: float, pid: int | None = None,
+        *, restart_status: str | None = None,
     ) -> None:
-        if pid is not None:
-            self.execute_write(
-                "UPDATE sessions SET status=?, pid=?, updated_at=? WHERE id=?",
-                (status, pid, now, session_id),
-            )
-        else:
-            self.execute_write(
-                "UPDATE sessions SET status=?, pid=NULL, updated_at=? WHERE id=?",
-                (status, now, session_id),
-            )
+        self.execute_write(
+            "UPDATE sessions SET status=?, pid=?, updated_at=?, restart_status=? WHERE id=?",
+            (status, pid, now, restart_status, session_id),
+        )
 
     def update_session_acp_id(self, session_id: str, acp_session_id: str) -> None:
         """Persist the ACP session ID for resume support."""

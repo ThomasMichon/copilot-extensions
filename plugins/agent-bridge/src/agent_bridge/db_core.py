@@ -13,7 +13,7 @@ from typing import Any
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 # Post-base ``sessions`` columns ensured idempotently on every init, independent
 # of ``schema_version``. Version-gated ``ALTER TABLE ... ADD COLUMN`` migrations
@@ -31,6 +31,7 @@ _SESSIONS_ENSURE_COLUMNS: tuple[tuple[str, str], ...] = (
     ("predecessor_id", "TEXT"),
     ("successor_id", "TEXT"),
     ("handoff_at", "REAL"),
+    ("restart_status", "TEXT"),
 )
 
 # A live interactive session is kept alive by the extension's 30s heartbeat
@@ -123,6 +124,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     target_type TEXT NOT NULL DEFAULT 'local',
     target_json TEXT,
     status TEXT NOT NULL DEFAULT 'created',
+    restart_status TEXT,
     pid INTEGER,
     acp_session_id TEXT,
     config_json TEXT,

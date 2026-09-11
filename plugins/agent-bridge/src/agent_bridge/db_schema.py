@@ -404,3 +404,10 @@ class _SchemaMixin:
             log.info(
                 "Schema migrated to version 17: delivery cursor invalidations"
             )
+        if from_version < 18:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(sessions)")}
+            if "restart_status" not in cols:
+                conn.execute("ALTER TABLE sessions ADD COLUMN restart_status TEXT")
+            conn.execute("UPDATE schema_version SET version=?", (18,))
+            conn.commit()
+            log.info("Schema migrated to version 18: restart recovery provenance")
