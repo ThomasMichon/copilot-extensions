@@ -103,6 +103,65 @@ def test_valid_managed_fragment_survives_malformed_peer_and_ignores_unrelated(
     assert unrelated.read_text(encoding="utf-8") == "this is intentionally not parsed\n"
 
 
+def test_find_shadowed_aliases_flags_alias_duplicated_in_root_config(
+    tmp_path: Path,
+) -> None:
+    config_d = tmp_path / "config.d"
+    registry, module_path, registry_data, module_data = _sources(
+        tmp_path, "dtssh", aliases=("tmichon-cloud1",)
+    )
+    fragment = _managed_fragment(
+        config_d,
+        registry,
+        module_path,
+        registry_data,
+        module_data,
+    )
+    ssh_config = tmp_path / "config"
+    ssh_config.write_text(
+        "Include ~/.ssh/config.d/*\n"
+        "Host tmichon-cloud1\n"
+        "    ProxyCommand dtssh.exe proxy fresh-tunnel-id --port 2222\n",
+        encoding="utf-8",
+    )
+
+    report = fragment_registry.scan_fragment_registry(
+        config_d,
+        syntax_check=_no_syntax_error,
+    )
+    shadow_findings = fragment_registry.find_shadowed_aliases(report, ssh_config)
+
+    assert [finding.entry for finding in shadow_findings] == [str(fragment)]
+    finding = shadow_findings[0]
+    assert finding.reason == "shadowed-alias"
+    assert "tmichon-cloud1" in finding.remedy
+    assert str(ssh_config) in finding.remedy
+
+    payload = fragment_registry.doctor_payload(report, config_d, ssh_config=ssh_config)
+    assert any(f["reason"] == "shadowed-alias" for f in payload["findings"])
+    rendered = fragment_registry.format_doctor(report, config_d, ssh_config=ssh_config)
+    assert "[WARN]" in rendered
+
+
+def test_find_shadowed_aliases_is_empty_when_no_collision(tmp_path: Path) -> None:
+    config_d = tmp_path / "config.d"
+    registry, module_path, registry_data, module_data = _sources(
+        tmp_path, "dtssh", aliases=("tmichon-cloud1",)
+    )
+    _managed_fragment(config_d, registry, module_path, registry_data, module_data)
+    ssh_config = tmp_path / "config"
+    ssh_config.write_text(
+        "Include ~/.ssh/config.d/*\nHost some-other-alias\n    User example\n",
+        encoding="utf-8",
+    )
+
+    report = fragment_registry.scan_fragment_registry(
+        config_d,
+        syntax_check=_no_syntax_error,
+    )
+    assert fragment_registry.find_shadowed_aliases(report, ssh_config) == ()
+
+
 def test_missing_source_withdraws_fragment_and_blocks_its_alias(tmp_path: Path) -> None:
     config_d = tmp_path / "config.d"
     registry, module_path, registry_data, module_data = _sources(tmp_path, "direct")

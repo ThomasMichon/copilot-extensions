@@ -1044,11 +1044,85 @@ class FragmentRegistry:
         return report
 
 
+def _iter_root_host_aliases(path: Path) -> tuple[str, ...]:
+    """Return exact single-token ``Host <alias>`` aliases from a root ssh_config.
+
+    Only the same strict grammar managed fragments use (one alias, no
+    wildcards/patterns/multi-alias lines) is considered; anything looser is
+    outside managed-fragment territory and is skipped rather than guessed at.
+    """
+    try:
+        text = _read_text(path)
+    except OSError:
+        return ()
+    aliases: list[str] = []
+    for line in _normalize_text(text).splitlines():
+        if not line.strip() or line.strip().startswith("#") or line[:1].isspace():
+            continue
+        host = _HOST_RE.fullmatch(line)
+        if host is None:
+            continue
+        alias = host.group("alias")
+        if ssh_profile.is_valid_alias(alias):
+            aliases.append(alias)
+    return tuple(aliases)
+
+
+def find_shadowed_aliases(
+    report: FragmentRegistryReport,
+    ssh_config: str | os.PathLike[str] | None = None,
+) -> tuple[Finding, ...]:
+    """Flag a Host alias declared both in a managed fragment and the root config.
+
+    OpenSSH keeps the first value it parses per keyword and silently ignores
+    later duplicates, so a stale managed fragment loaded through the
+    ``config.d`` ``Include`` can shadow a live alias written directly into the
+    root ``~/.ssh/config`` (or vice versa) with no error at connect time --
+    the SSH client just dials whichever endpoint the first block names. This
+    check is report-only: it never guesses which side is stale.
+    """
+    root = Path(ssh_config).expanduser() if ssh_config is not None else (Path.home() / ".ssh" / "config")
+    root_aliases = {alias.casefold(): alias for alias in _iter_root_host_aliases(root)}
+    if not root_aliases:
+        return ()
+    findings: list[Finding] = []
+    for key, fragment in sorted(report.entries.items()):
+        collisions = sorted(
+            {alias for alias in fragment.aliases if alias.casefold() in root_aliases}
+        )
+        if not collisions:
+            continue
+        alias_list = ", ".join(collisions)
+        findings.append(
+            Finding(
+                registry=REGISTRY_NAME,
+                entry=key,
+                status="active-with-advisory",
+                reason="shadowed-alias",
+                target=str(root),
+                owner="agent-ssh",
+                remedy=(
+                    f"Host alias {alias_list} is declared both in this managed "
+                    f"fragment and directly in {root}; OpenSSH silently uses "
+                    "whichever block it parses first and ignores the other. "
+                    "Remove or regenerate the stale definition (re-run the "
+                    "transport's install-client/discover step, or delete the "
+                    f"managed fragment at {key}) so only one definition remains."
+                ),
+                detail=f"root config also declares Host {alias_list}",
+            )
+        )
+    return tuple(findings)
+
+
 def doctor_payload(
     report: FragmentRegistryReport,
     directory: str | os.PathLike[str] | None = None,
+    *,
+    ssh_config: str | os.PathLike[str] | None = None,
 ) -> dict[str, object]:
     root = Path(directory) if directory is not None else managed_config_dir()
+    shadow_findings = find_shadowed_aliases(report, ssh_config)
     return {
         "registry": REGISTRY_NAME,
         "path": str(root),
@@ -1057,7 +1131,9 @@ def doctor_payload(
             fragment.to_dict()
             for _, fragment in sorted(report.entries.items())
         ],
-        "findings": [finding.to_dict() for finding in report.findings],
+        "findings": [
+            finding.to_dict() for finding in (*report.findings, *shadow_findings)
+        ],
         "fix_available": False,
         "active_basis": "current-evidence-only",
         "retention_possible": (
@@ -1071,14 +1147,19 @@ def doctor_payload(
 def format_doctor(
     report: FragmentRegistryReport,
     directory: str | os.PathLike[str] | None = None,
+    *,
+    ssh_config: str | os.PathLike[str] | None = None,
 ) -> str:
     root = Path(directory) if directory is not None else managed_config_dir()
-    label = "[WARN]" if report.findings else "[OK]"
+    shadow_findings = find_shadowed_aliases(report, ssh_config)
+    label = "[WARN]" if (report.findings or shadow_findings) else "[OK]"
     lines = [
         f"{label} {REGISTRY_NAME} is {report.snapshot.authority.value}; "
         f"{len(report.entries)} managed fragment(s) confirmed active by current evidence.",
         f"  path: {root}",
     ]
+    for finding in shadow_findings:
+        lines.append(f"  [WARN] {finding.entry}: {finding.remedy}")
     if (
         report.snapshot.authority is ScanAuthority.INDETERMINATE
         or any(finding.status == "indeterminate" for finding in report.findings)
