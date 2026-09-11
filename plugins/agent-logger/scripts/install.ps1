@@ -1014,15 +1014,43 @@ function Register-SyncTask {
     $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
 
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
-        Set-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
-            -Settings $settings -Principal $principal | Out-Null
-        Write-Changed "scheduled task updated (every 4h)"
+        try {
+            Set-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
+                -Settings $settings -Principal $principal -ErrorAction Stop | Out-Null
+            Write-Changed "scheduled task updated (every 4h)"
+        } catch {
+            Write-StaleTaskAclWarning $_
+        }
     } else {
         Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
             -Settings $settings -Principal $principal `
             -Description 'Agent Logger -- push Copilot session data to the configured target every 4 hours.' | Out-Null
         Write-Changed "scheduled task registered (every 4h)"
     }
+}
+
+function Test-IsAccessDenied {
+    param($ErrorRecord)
+    # Both the .NET UnauthorizedAccessException and the COM HRESULT surfaced by
+    # the Task Scheduler API for E_ACCESSDENIED render as "Access is denied."
+    return $ErrorRecord.Exception.Message -match 'Access is denied'
+}
+
+function Write-StaleTaskAclWarning {
+    param($ErrorRecord)
+    if (-not (Test-IsAccessDenied $ErrorRecord)) {
+        throw $ErrorRecord
+    }
+    # A task whose DACL only grants the current user Read/Synchronize (owner
+    # BUILTIN\Administrators) was registered by a prior run that happened to be
+    # elevated. Task Scheduler enforces that ACL regardless of who the task
+    # *runs as* -- a non-elevated Set-ScheduledTask/Unregister-ScheduledTask on
+    # it fails with "Access is denied" even though the principal is the current
+    # user. Recovering the ACL itself requires one elevated action; don't fail
+    # the whole install over it.
+    Write-Warn2 "scheduled task '$TaskName' has an admin-only ACL from a prior elevated run; left unchanged"
+    Write-Warn2 "one-time fix (run once from an elevated prompt, then re-run this installer):"
+    Write-Warn2 "  schtasks /Delete /TN `"$TaskName`" /F"
 }
 
 function Update-SyncTaskBinding {
@@ -1032,8 +1060,12 @@ function Update-SyncTaskBinding {
             Write-Warn2 "scheduled task left unchanged: no provisioned runtime"
             return
         }
-        Set-ScheduledTask -TaskName $TaskName -Action $action | Out-Null
-        Write-Changed "scheduled task runtime updated"
+        try {
+            Set-ScheduledTask -TaskName $TaskName -Action $action -ErrorAction Stop | Out-Null
+            Write-Changed "scheduled task runtime updated"
+        } catch {
+            Write-StaleTaskAclWarning $_
+        }
     } else {
         Write-Ok "package updated (task not registered)"
     }
