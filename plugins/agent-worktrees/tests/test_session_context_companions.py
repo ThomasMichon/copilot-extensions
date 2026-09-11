@@ -52,6 +52,29 @@ def _powershell() -> str:
     return powershell
 
 
+def _scrubbed_env(home: Path) -> dict[str, str]:
+    """Base subprocess env for a sandboxed session-context script run.
+
+    Starts from the real environment (needed for PATH etc.) but scrubs
+    ambient Copilot/agent-worktrees identity vars this test process may
+    itself be running under (e.g. when pytest is invoked from inside a live
+    Copilot CLI session) -- those must never leak into the sandbox, which
+    fully re-derives its own identity from ``home``/``cwd``.
+    """
+    environment = {**os.environ}
+    for stray in (
+        "COPILOT_PLUGIN_ROOT",
+        "COPILOT_EXTENSIONS_CONTEXT",
+        "AGENT_WORKTREES_PAYLOAD_ROOT",
+        "COPILOT_AGENT_SESSION_ID",
+        "COPILOT_CUSTOM_INSTRUCTIONS_DIRS",
+    ):
+        environment.pop(stray, None)
+    environment["HOME"] = str(home)
+    environment["USERPROFILE"] = str(home)
+    return environment
+
+
 def _run(
     script: str,
     payload: str,
@@ -69,11 +92,7 @@ def _run(
         command.append("--side-effect-only")
     elif await_context:
         command.append("--await-context")
-    environment = {
-        **os.environ,
-        "HOME": str(home),
-        "USERPROFILE": str(home),
-    }
+    environment = _scrubbed_env(home)
     return subprocess.run(
         command,
         input=payload,
@@ -108,11 +127,7 @@ def _run_powershell(
         command.append("--side-effect-only")
     elif await_context:
         command.append("--await-context")
-    environment = {
-        **os.environ,
-        "HOME": str(home),
-        "USERPROFILE": str(home),
-    }
+    environment = _scrubbed_env(home)
     return subprocess.run(
         command,
         input=payload,

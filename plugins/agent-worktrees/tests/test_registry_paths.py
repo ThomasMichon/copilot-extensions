@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -54,6 +55,14 @@ def _stamp(
     repository: str,
     plugin: str = "agent-worktrees",
 ) -> tuple[Path, Path]:
+    # Scrub ambient installation-context env this test process may have
+    # inherited from a live Copilot CLI session it is itself running inside
+    # (COPILOT_PLUGIN_ROOT et al.) -- an explicit --payload-root must win, not
+    # conflict with a stray inherited pointer to the *real* installed plugin.
+    stamp_env = {**os.environ}
+    for stray in ("COPILOT_PLUGIN_ROOT", "COPILOT_EXTENSIONS_CONTEXT",
+                  "AGENT_WORKTREES_PAYLOAD_ROOT"):
+        stamp_env.pop(stray, None)
     completed = subprocess.run(
         [
             sys.executable,
@@ -81,6 +90,7 @@ def _stamp(
         capture_output=True,
         text=True,
         check=False,
+        env=stamp_env,
     )
     assert completed.returncode == 0, completed.stderr or completed.stdout
     result = json.loads(completed.stdout)
