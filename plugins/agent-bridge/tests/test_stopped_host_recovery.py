@@ -130,6 +130,7 @@ async def test_restart_intent_survives_repeated_rehydrate(
 async def test_legacy_stopped_row_and_explicit_lazy_resume(context, monkeypatch):
     ctx = context
     ctx.db.update_session_status(ctx.session.session_id, "stopped", time.time())
+    ctx.manager._host_index.set_resume_flag(ctx.session.session_id, True)
     restarted = SessionManager(ctx.db, session_host_state_dir=ctx.state_dir)
     assert await restarted.reattach_session_hosts() == 0
     ctx.factory.assert_not_called()
@@ -142,6 +143,7 @@ async def test_legacy_stopped_row_and_explicit_lazy_resume(context, monkeypatch)
     monkeypatch.setattr(restarted, "_reattach_one", attach)
     resumed = await restarted.resume_session(ctx.session.session_id)
     assert resumed.status == SessionStatus.IDLE
+    assert restarted._host_index.get(ctx.session.session_id).resume_on_reattach is False
     ctx.spawner.recover_record.assert_awaited_once_with(ctx.session.session_id)
     assert resumed.acp_session_id == "example-acp"
 
@@ -337,16 +339,13 @@ async def test_stop_contains_independent_relay_monitor(
         await asyncio.wait_for(
             ctx.manager.stop_session(ctx.session.session_id, for_restart=for_restart), 1,
         )
-        if for_restart:
-            assert not monitor.done()
-            forward.cancel.assert_not_awaited()
-            assert ctx.manager._relays[ctx.session.session_id] == [relay]
-        else:
-            assert monitor.done()
-            assert relay._monitor_task is None
-            forward.cancel.assert_awaited_once()
-            assert ctx.session.session_id not in ctx.manager._relays
-            assert ctx.session.session_id not in ctx.manager._forwards
+        assert monitor.done()
+        assert relay._monitor_task is None
+        forward.cancel.assert_awaited_once()
+        assert ctx.session.session_id not in ctx.manager._relays
+        assert ctx.session.session_id not in ctx.manager._forwards
+        assert ctx.manager._background_recovery_allowed(ctx.session) is for_restart
+        if not for_restart:
             count = len(calls)
             for _ in range(3):
                 ticks.put_nowait(None)
@@ -525,6 +524,7 @@ async def test_failed_explicit_resume_clears_restart_provenance(
     ctx.db.update_session_status(
         ctx.session.session_id, "stopped", time.time(), restart_status="running",
     )
+    ctx.manager._host_index.set_resume_flag(ctx.session.session_id, True)
     attach = AsyncMock(return_value=False)
     refresh = AsyncMock()
     replace = AsyncMock(side_effect=RuntimeError("resume failed"))
@@ -549,9 +549,84 @@ async def test_failed_explicit_resume_clears_restart_provenance(
     row = ctx.db.get_session(ctx.session.session_id)
     assert row["status"] == "stopped"
     assert row["restart_status"] is None
+    assert ctx.manager._host_index.get(ctx.session.session_id).resume_on_reattach is False
     for _ in range(2):
         assert await ctx.manager.recover_disconnected_hosts() == 0
         assert await ctx.manager.reattach_session_hosts() == 0
     ctx.factory.assert_not_called()
     ctx.available.assert_not_awaited()
     ctx.attach.assert_not_awaited()
+
+
+async def test_restart_releases_forward_before_successor_rebinds_descriptor(
+    context, monkeypatch,
+):
+    ctx = context
+    bound = True
+
+    async def cancel():
+        nonlocal bound
+        bound = False
+
+    old = SimpleNamespace(cancel=AsyncMock(side_effect=cancel))
+    ctx.manager._forwards[ctx.session.session_id] = old
+    await ctx.manager.stop_session(ctx.session.session_id, for_restart=True)
+    old.cancel.assert_awaited_once()
+    assert not bound
+    restarted = SessionManager(ctx.db, session_host_state_dir=ctx.state_dir)
+    record = restarted._host_index.get(ctx.session.session_id)
+    assert record is not None
+
+    async def establish():
+        nonlocal bound
+        assert not bound, "old frontend still owns the persisted local port"
+        bound = True
+        return 51000
+
+    successor = SimpleNamespace(
+        establish=AsyncMock(side_effect=establish), cancel=AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_host.endpoints.forward_from_endpoint",
+        lambda _endpoint: successor,
+    )
+    await restarted._ensure_forward(record)
+    successor.establish.assert_awaited_once()
+    assert restarted._forwards[ctx.session.session_id] is successor
+    assert restarted._background_recovery_allowed(restarted.get_session(ctx.session.session_id))
+
+
+async def test_frontend_exit_closes_disconnected_channels_without_changing_intent(
+    context, monkeypatch,
+):
+    ctx = context
+    assert ctx.session.client is None
+    relay = SimpleNamespace(stop=AsyncMock())
+    forward = SimpleNamespace(cancel=AsyncMock())
+    ctx.manager._relays[ctx.session.session_id] = [relay]
+    ctx.manager._forwards[ctx.session.session_id] = forward
+    release_ownership = Mock()
+    monkeypatch.setattr(ctx.manager, "_release_container_lock", release_ownership)
+    await ctx.manager.close_frontend_transports()
+    relay.stop.assert_awaited_once()
+    forward.cancel.assert_awaited_once()
+    assert ctx.manager._relays == {}
+    assert ctx.manager._forwards == {}
+    assert ctx.session.status == SessionStatus.RUNNING
+    assert ctx.db.get_session(ctx.session.session_id)["status"] == "running"
+    assert ctx.manager._host_index.get(ctx.session.session_id) is not None
+    release_ownership.assert_not_called()
+
+
+async def test_frontend_exit_reports_failure_but_closes_other_channels(context):
+    ctx = context
+    relay = SimpleNamespace(stop=AsyncMock(side_effect=RuntimeError("stop failed")))
+    forward = SimpleNamespace(cancel=AsyncMock())
+    ctx.manager._relays[ctx.session.session_id] = [relay]
+    ctx.manager._forwards["other-session"] = forward
+    with pytest.raises(RuntimeError, match="Frontend transport cleanup failed"):
+        await ctx.manager.close_frontend_transports()
+    forward.cancel.assert_awaited_once()
+    assert ctx.manager._forwards == {}
+    assert ctx.manager._relays[ctx.session.session_id] == [relay]
+    assert not ctx.session._lifecycle_lock.locked()

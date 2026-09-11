@@ -380,8 +380,10 @@ restart does not inherently close the child's pipes.
   Ordinary stop also stops per-session credential-relay supervisors and cancels
   live forwards before acknowledgement; transport teardown failures are surfaced
   rather than reported as containment. Host descriptors and venue ownership are
-  retained so explicit resume can rebuild channels. Frontend restart preserves
-  the relay channels instead of treating a transport detach as an operator stop.
+  retained so explicit resume can rebuild channels. Frontend shutdown releases
+  its owned forward/relay processes too: the successor rebuilds channels from
+  descriptors without colliding with orphaned local-port bindings. Restart
+  intent remains distinct from an operator stop.
   Retaining descriptors and conversation state does not pin idle child processes:
   the existing graceful-detach policy may reap an idle child, while busy children
   survive. Explicit resume adopts a surviving host or loads the persisted
@@ -390,7 +392,8 @@ restart does not inherently close the child's pipes.
   guessing that an operator wanted recovery.
   An explicit resume takes over recovery intent; a failed attempt leaves both
   in-memory and durable restart provenance cleared rather than silently
-  restarting background probes.
+  restarting background probes. It also consumes any pending redeploy nudge so
+  later transport recovery cannot send an unsolicited "Resume".
 - **Background CodeSpace recovery does not wake unavailable venues.** Before
   reattaching a disconnected CodeSpace session, the heartbeat reads the exact
   target's state through the GitHub API, once per CodeSpace per pass. It honors
