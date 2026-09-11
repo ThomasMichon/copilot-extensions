@@ -409,27 +409,9 @@ _bootstrap_python() {
 }
 
 _payload_hash() {
-    # Content fingerprint of the RUNTIME PAYLOAD (#935/#776/ce#811): sha256 over
-    # the sorted "<per-file sha256>  <relpath>" list for pyproject.toml plus every
-    # file under src/ and libs/ (excluding caches/build artifacts). A src/-only
-    # edit without a version bump changes this value, so the completion marker +
-    # content guards detect real content drift, not just a pyproject change.
-    # Re-baselined by the accompanying version bump (self-healing). Empty on error.
     (
-        cd "$PLUGIN_DIR" 2>/dev/null || exit 0
-        {
-            [[ -f pyproject.toml ]] && sha256sum pyproject.toml 2>/dev/null
-            for __sub in src libs; do
-                [[ -d "$__sub" ]] || continue
-                find "$__sub" -type f \
-                    ! -path '*/__pycache__/*' ! -path '*/.venv/*' ! -path '*/venv/*' \
-                    ! -path '*/.pytest_cache/*' ! -path '*/.mypy_cache/*' \
-                    ! -path '*/build/*' ! -path '*/dist/*' ! -path '*.egg-info/*' \
-                    ! -name '*.pyc' -print0 2>/dev/null \
-                  | sort -z \
-                  | xargs -0 -r sha256sum 2>/dev/null
-            done
-        } | sort | sha256sum 2>/dev/null | awk '{print $1}'
+        . "$SCRIPT_DIR/payload-hash.sh"
+        bridge_payload_hash "$PLUGIN_DIR"
     ) || true
 }
 

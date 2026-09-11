@@ -505,39 +505,9 @@ function Ensure-Uv {
 }
 
 function Get-PayloadHash {
-    <# Content fingerprint of the RUNTIME PAYLOAD (#935/#776/ce#811). sha256 over
-       the sorted list of "<relpath>:<per-file sha256>" for pyproject.toml plus
-       every file under src/ and libs/ (excluding caches/build artifacts). Unlike
-       the old pyproject-only fingerprint, a src/-only edit WITHOUT a version bump
-       changes this value, so the completion marker + the live-slot content guards
-       detect real content drift, not just a pyproject/version change. The value
-       is re-baselined by the accompanying version bump (a fresh install records
-       the new-algorithm hash), so the algorithm change is self-healing. Never
-       throws -> '' on error. #>
     try {
-        $sha = [System.Security.Cryptography.SHA256]::Create()
-        $base = (Resolve-Path $PluginDir).Path
-        $files = [System.Collections.Generic.List[System.IO.FileInfo]]::new()
-        $pp = Join-Path $base 'pyproject.toml'
-        if (Test-Path $pp) { $files.Add((Get-Item $pp)) }
-        foreach ($sub in @('src', 'libs')) {
-            $d = Join-Path $base $sub
-            if (Test-Path $d) {
-                Get-ChildItem -Path $d -Recurse -File -Force -ErrorAction SilentlyContinue |
-                    Where-Object {
-                        $_.FullName -notmatch '[\\/](__pycache__|\.venv|venv|\.pytest_cache|\.mypy_cache|build|dist|[^\\/]+\.egg-info)[\\/]' -and
-                        $_.Extension -ne '.pyc'
-                    } | ForEach-Object { $files.Add($_) }
-            }
-        }
-        $entries = foreach ($f in $files) {
-            $rel = ($f.FullName.Substring($base.Length).TrimStart('\', '/')) -replace '\\', '/'
-            $fh = [BitConverter]::ToString($sha.ComputeHash([System.IO.File]::ReadAllBytes($f.FullName))).Replace('-', '').ToLower()
-            "${rel}:${fh}"
-        }
-        $joined = [string]::Join("`n", ($entries | Sort-Object))
-        $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($joined))
-        return (-join ($bytes | ForEach-Object { $_.ToString('x2') }))
+        . (Join-Path $ScriptDir 'payload-hash.ps1')
+        return Get-BridgePayloadHash -Payload $PluginDir
     } catch { return '' }
 }
 

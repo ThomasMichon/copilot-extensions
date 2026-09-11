@@ -35,6 +35,12 @@ the runtime from its own payload without searching `PATH` for another
 marketplace's same-named plugin. On Windows the catalog publishes the native
 `.cmd` entry so prompt bodies sent through stdin remain intact.
 
+After an official payload refresh, an attributable bootstrap caller can run
+`<payload-local agent-bridge> provision --current-payload --json` to explicitly
+[converge the selected runtime](docs/getting-started.md#explicit-current-payload-convergence).
+This owner operation updates authorized legacy installations, verifies current
+complete namespaces read-only, and refuses unsupported namespace updates.
+
 The legacy global wrappers remain explicit compatibility and management
 boundaries for callers that do not inherit session catalogs: daemon and service
 launchers, picker pivots, remote commands, provider manifests and provider

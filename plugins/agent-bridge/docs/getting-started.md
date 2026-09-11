@@ -70,6 +70,83 @@ ab_dir=$(find ~/.copilot/installed-plugins -name plugin.json \
 bash "$ab_dir/scripts/install.sh" install
 ```
 
+### Explicit current-payload convergence
+
+Ordinary payload-local invocation resolves an existing complete runtime; it
+does not synchronously upgrade that runtime after every payload refresh.
+Bootstrap callers that have just refreshed the official marketplace payload
+and require its implementation can explicitly converge it:
+
+```bash
+"$BRIDGE_PAYLOAD/bin/agent-bridge" provision --current-payload --json
+```
+
+```powershell
+& "$BridgePayload\bin\agent-bridge.cmd" provision --current-payload --json
+```
+
+`BRIDGE_PAYLOAD` / `BridgePayload` denotes the exact attributed plugin payload
+already selected by the caller, not a `PATH` search or a wildcard first match.
+The payload gate handles this command **before dispatching to installed
+Python code**, so an older runtime does not need to know this new operation.
+Do not invoke it as `python -m agent_bridge provision`.
+
+The gate reuses its ordinary installation-context resolver and runtime
+selection. Callers must not reproduce that resolver or assume
+`~/.agent-bridge`; an active context remains authoritative.
+
+| Selected installation | Result |
+|---|---|
+| Positively authorized legacy, already current and complete | Read-only `unchanged` receipt; no installer/service call |
+| Positively authorized legacy, stale | Existing owner installer `update --install-dir <resolved-root>` (Windows: `update -InstallDir <resolved-root>`), followed by strict verification |
+| Positively authorized legacy, missing runtime | Existing owner `provision` at the resolved root, followed by strict verification |
+| Active namespaced, already current and complete | Read-only validation of context generation, slot ownership/completion and payload content; `unchanged` receipt |
+| Namespaced stale/incomplete, deactivating, ambiguous, mismatched or otherwise unsupported | Nonzero exit before installer, lock/status creation, marker writes or legacy fallback |
+
+Legacy mutation requires the canonical `probe-legacy` decision to allow
+mutation with `probeReason: legacy-active`, checked again inside the existing
+provisioning lock. A migration-required decision is not authorization for this
+operation. `AGENT_BRIDGE_NO_SELFPROVISION` still forbids provisioning/updating.
+The owner installer's existing downgrade, dependency, locking and service
+cutover policies remain in effect; convergence never forces a downgrade.
+An update may cut over the **selected legacy service**. This is an explicit
+management operation, not a side-effect-free status query.
+
+On exit zero, stdout contains exactly one JSON object:
+
+```json
+{
+  "schema": "copilot-extensions.agent-bridge.runtime-convergence",
+  "version": 1,
+  "pluginId": "agent-bridge",
+  "status": "ready",
+  "mode": "legacy",
+  "action": "updated",
+  "payloadRoot": "/path/to/payload",
+  "payloadVersion": "0.4.0-dev479",
+  "runtimeRoot": "/path/to/selected-runtime",
+  "runtimeVersion": "0.4.0-dev479",
+  "python": "/path/to/selected-runtime/versions/0.4.0-dev479/bin/python",
+  "complete": true,
+  "currentPayload": true,
+  "serviceChecked": false
+}
+```
+
+`action` is `unchanged`, `updated`, or `provisioned`. Readiness requires the
+current marker, complete slot, installed distribution version and package
+origin to agree with the selected payload. Legacy slots must also match the
+owner installer's existing platform-specific content fingerprint. Namespace
+slots require the canonical immutable completion chain and matching snapshot
+content. Installer exit zero without those postconditions is an error, not a
+success-shaped receipt. Diagnostics and installer output go to stderr.
+
+This is **runtime readiness only**, not daemon readiness, native capability,
+provider availability or session representation. After convergence, callers
+still run their normal payload-local `service start`, readiness and capability
+checks. There is no general namespaced bridge service-update transaction in
+this compatibility operation; a stale namespace is deliberately refused.
+
 ### What this creates
 
 ```
