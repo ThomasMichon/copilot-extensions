@@ -271,25 +271,25 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-resource-launch.json",
-          "sha256": "f053803cd84144e89cf2d1502f17f7402e4d46dbb03f320f220f28ab2e08790f",
+          "sha256": "0bff5a27820cead57999c4307095ebba474e205d2d979c5af88a16dc0322ee61",
           "role": "current optional native host-resource contract",
           "generation": 15
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-resource-controller-capabilities.json",
-          "sha256": "ea3235678d2216b8c9082709e796d3f50ba5513932e6b97f892802a2fd9390db",
+          "sha256": "0c7c6af3c93607d1667a95f7dc2be0e23a0343a083390fd07ec4747c699279b7",
           "role": "current optional native host-resource contract",
           "generation": 15
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-resource-protocol.json",
-          "sha256": "194817583af7cd3f457a59c31d0b1aecb983b75ff9f37bc313343928c37f2c46",
+          "sha256": "1ff581db7c3c64a0d594fa1e2f137c6750acd12f7c795045cad33bc882fc7ef0",
           "role": "current optional native host-resource contract",
           "generation": 15
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-resource-runtime-capabilities.json",
-          "sha256": "02bb24aa903e2ef446799166a4c6d91e85266c2e0fa8c23eeaa0c268953cb699",
+          "sha256": "9b50464a19ab4beb9f7a5f2e638be8880998f69da289b0b8be053027d82d9d8d",
           "role": "current optional native host-resource contract",
           "generation": 15
         }
@@ -552,7 +552,7 @@
           "capture_method": "Run the committed remote native-host capabilities command and retain platform-independent capability fields; the pre-existing platform support discriminator is not normalized into a support claim."
         },
         {
-          "commit": "2ea755fe464fcb93b298a191b10f60a489f6d721",
+          "commit": "97418ab5684410ba73bc167e20101fae17e88d31",
           "plugin_version": "0.4.0-dev476",
           "generation": 15,
           "source_path": "plugins/agent-bridge/src/agent_bridge/native_manager.py",
@@ -560,7 +560,7 @@
           "capture_method": "Invoke committed validate_request with and without optional resources; normalize only the existing owner directory and local Python executable to neutral placeholders."
         },
         {
-          "commit": "2ea755fe464fcb93b298a191b10f60a489f6d721",
+          "commit": "97418ab5684410ba73bc167e20101fae17e88d31",
           "plugin_version": "0.4.0-dev476",
           "generation": 15,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/native.py",
@@ -568,7 +568,7 @@
           "capture_method": "Invoke the committed native capabilities route with an available synthetic provider; preserve the real public capability response."
         },
         {
-          "commit": "2ea755fe464fcb93b298a191b10f60a489f6d721",
+          "commit": "97418ab5684410ba73bc167e20101fae17e88d31",
           "plugin_version": "0.4.0-dev476",
           "generation": 15,
           "source_path": "plugins/agent-bridge/src/agent_bridge/native_resources.py",
@@ -576,7 +576,7 @@
           "capture_method": "Invoke committed descriptor, provider request, and result serializers with synthetic identities; normalize only the executable and controller resource directory. No resource provider or external venue is launched."
         },
         {
-          "commit": "2ea755fe464fcb93b298a191b10f60a489f6d721",
+          "commit": "97418ab5684410ba73bc167e20101fae17e88d31",
           "plugin_version": "0.4.0-dev476",
           "generation": 15,
           "source_path": "plugins/agent-bridge/src/agent_bridge/native_runtime.py",
