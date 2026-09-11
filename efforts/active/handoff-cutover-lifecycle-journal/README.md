@@ -23,9 +23,21 @@ taken" with still no replacement pane — with no single place to answer "what
 actually happened, in order, for this worktree?"
 
 This effort makes the full cutover sequence a first-class, always-on journal:
-one event per stage, on both sides of the cutover (predecessor and successor
-sessions), cross-linked by session id like a linked list, replayable at any
-time per worktree.
+one event per stage, emitted durably by whichever component is actually
+responsible for that stage, on both sides of the cutover (predecessor and
+successor sessions), cross-linked by session id like a linked list, readable
+for active diagnosis right now, and persisted durably in session-state so the
+trail survives into the archive for later auditing.
+
+**Explicit scope decision (2026-09-11):** this effort's mandate is the
+**logging/observability infrastructure** — durable per-stage events, an
+accessible diagnosis surface, and durable session-state persistence for
+archive auditing (Phases 1-3, 5). It is **not** a mandate to remediate any
+live worktree found stuck mid-handoff, and Phase 4's *fixes* are follow-on
+work once the trace makes root cause provable rather than inferred — the
+operator explicitly declined remediation of the live case study worktree.
+Phase 4 stays in this doc as the root-cause *evidence* (already gathered) and
+as forward-looking fix items, but execution priority is Phases 1-3 first.
 
 ## Participants
 
@@ -201,7 +213,14 @@ renumbering from the "acknowledges handoff" step onward.)
       renders the ordered 13-stage sequence for a worktree/handoff-token, with
       gaps visibly marked ("stage 8 logged, stage 9 never observed").
 
-### Phase 4 — Fix the reported failure class
+### Phase 4 — Fix the reported failure class (deferred; evidence only for now)
+
+> **Scope note:** the operator explicitly declined remediation of the live
+> case-study worktree and asked this effort to focus on durable logging,
+> active-diagnosis accessibility, and archive-durable session-state
+> persistence first (Phases 1, 2, 3, 5). The items below stay as forward
+> tracking for when fix work is greenlit — do not start them as part of this
+> effort's first execution pass.
 - [x] Reproduce the "ack but no pane, retry says already-claimed" symptom —
       **found live**, not synthetic: `lambda-core-wsl-20260910-012212-9395`
       (see Proposal § Case study). Two distinct bugs identified from real
