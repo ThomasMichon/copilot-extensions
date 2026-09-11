@@ -188,22 +188,35 @@ def agent_worktrees_launch_prefix() -> list[str] | None:
     Windows deliberately has no PATH fallback.
     """
     return _sibling_runtime_launch_prefix(
-        ".agent-worktrees", "agent_worktrees", "agent-worktrees"
+        "agent-worktrees", "agent_worktrees", "agent-worktrees"
     )
 
 
 def agent_bridge_launch_prefix() -> list[str] | None:
     """Resolve ``agent-bridge`` without a Windows shell shim."""
     return _sibling_runtime_launch_prefix(
-        ".agent-bridge", "agent_bridge", "agent-bridge"
+        "agent-bridge", "agent_bridge", "agent-bridge"
     )
 
 
 def _sibling_runtime_launch_prefix(
-    runtime_dir: str, module: str, path_command: str
+    plugin_id: str, module: str, path_command: str
 ) -> list[str] | None:
-    """Resolve a sibling's module launcher, with a POSIX-only PATH fallback."""
-    py = resolve_runtime_python(Path.home() / runtime_dir)
+    """Resolve a sibling module from the active installation mode."""
+    explicit_context = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "")
+    if explicit_context:
+        # Validate again at execution, not when a caller constructs its argv.
+        # Only this native child boundary may rebind context/environment.
+        bootstrap = Path(sys.executable)
+        if bootstrap.name.lower() == "pythonw.exe":
+            bootstrap = bootstrap.with_name("python.exe")
+        return [
+            str(bootstrap), "-I", "-X", "utf8",
+            str(Path(__file__).with_name("peer_launch.py")),
+            str(install_dir()), explicit_context, plugin_id,
+        ]
+    root = Path.home() / f".{plugin_id}"
+    py = resolve_runtime_python(root)
     if py is not None:
         return [str(py), "-m", module]
     if os.name != "nt":

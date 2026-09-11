@@ -375,6 +375,32 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-10 — Dispatch same-cell peer invocation
+
+- Replaced dispatch's explicit-context sibling legacy-root lookup with a
+  packaged native child boundary for `agent-worktrees` and `agent-bridge`.
+  It validates active same-cell receipts with the canonical installation-context
+  primitive, checks the peer's own governance, asks that peer's shipped runtime
+  resolver for its interpreter, and rebinds context and runtime environment
+  before executing isolated Python. Absent context preserves legacy behavior;
+  malformed explicit context never authorizes a legacy fallback.
+- Kept runtime selection with its existing owner instead of duplicating
+  completion-marker or slot-validation algorithms inside dispatch. Arbitrary
+  command arguments never cross the PowerShell/POSIX resolver probe.
+- Real disposable-venv regressions cover independent cells, adversarial argv,
+  context rebinding, inactive/foreign/incomplete receipts, saved-prefix
+  revalidation, completion-marker refusal, LKG fallback, and inherited stdio.
+  Focused native Windows dispatch/caller coverage passed 199 tests; the WSL
+  peer-boundary selection passed 31 tests, including POSIX interpreter symlinks
+  and linked-root refusal. A Windows windowless-parent probe exercised two
+  launch cycles without observed child windows or focus transitions.
+- This is one conversion slice, not Phase 6 completion. The initial full
+  inventory classifications remain provisional: a literal legacy fallback
+  does not prove a defect, but an allowance also requires evidence that active
+  namespaced callers cannot use it. Do not apply bulk suppressions or enable
+  strict CI from the classification totals alone. The Phase 2 retirement item,
+  deferred lease work, Phase 7, and final validation remain open.
+
 ### 2026-09-10 — Item 6 precondition: what "all runtime plugins conform" means
 
 - Read `tools/check-marketplace-isolation.py` directly rather than treating its

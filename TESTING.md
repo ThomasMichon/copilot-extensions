@@ -176,6 +176,13 @@ python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fix
   agent-worktrees status-core gates, strict bounded input, exact config shape,
   symlink/reparse and contaminated-Git-environment rejection, exact output,
   process-cwd isolation, and live platform-aware Bash/PowerShell parity).
+  The targeted `-k procutil` smoke lane also exercises same-cell sibling
+  invocation with disposable real venvs, shipped peer governance/resolvers,
+  native argv/stdio fidelity (including Windows PowerShell 5.1 resolution),
+  execution-time receipt rejection, legacy parity, and a two-cycle windowless
+  Windows parent. POSIX runs additionally require the normal symlinked venv
+  interpreter to remain usable. These are bounded contract samples, not a
+  duplicate of the exhaustive installation-context adapter matrix.
 - **agent-index:** fail-closed effective repository/required-state-root
   activation, gated command/scope contribution, non-mutating CLI admission,
   base-only explicit first-use provisioning, attributed dispatch-managed host
