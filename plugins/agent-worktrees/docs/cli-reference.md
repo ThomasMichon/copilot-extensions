@@ -178,6 +178,14 @@ self-describing: `pr-status` prints the active `flow:` profile, and `pr-merge`
 refuses (naming the reason) on a repo where no consent label is bound. Full
 narrative in [worktree-lifecycle.md § Landing the change](worktree-lifecycle.md).
 
+On a `pr-self-merge` repo, `pr-merge --now` also checks the acting identity's
+own **live** provider permission before merging (general multi-maintainer
+comprehension: the repo's config says the flow is self-merge, but that's a
+maintainer's choice — it never grants every submitter merge rights). A
+confident read-only/no-access read refuses with a reminder pointing at the
+contributor path (open the PR, wait for a maintainer); an unknown/unreadable
+permission fails open, unchanged from before this check existed.
+
 | Subcommand | Description |
 |------------|-------------|
 | `create-pr` (alias `pr-create`) | Squash the worktree's commits, publish the PR head branch, and open the PR. Flags: `--title`, `--body`/`--body-file`, `--draft` (open not-ready-for-review), `--new` (force a fresh head branch for a parallel PR), `--no-open` (push only), `--hold` (deprecated alias for `--draft`) |

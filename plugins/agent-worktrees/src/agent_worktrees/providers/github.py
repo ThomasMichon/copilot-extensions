@@ -44,6 +44,36 @@ def _gh_detail_is_transient(detail: str) -> bool:
     )
 
 
+#: GitHub's ``repos/{owner}/{repo}`` payload carries a ``permissions`` object
+#: of booleans for the *authenticated* identity -- the acting token/CLI-login,
+#: never a config value. Highest-to-lowest so one true bit wins.
+_GH_PERMISSION_PRIORITY = ("admin", "maintain", "push", "triage", "pull")
+#: GitHub's boolean key -> the provider-neutral token ``actor_merge_authority``
+#: understands (``push`` is GitHub's name for write access).
+_GH_PERMISSION_TOKEN = {
+    "admin": "admin", "maintain": "maintain", "push": "write",
+    "triage": "triage", "pull": "read",
+}
+
+
+def _github_viewer_permission(permissions: object) -> str:
+    """Normalize ``repos/{owner}/{repo}.permissions`` to a merge-authority token.
+
+    Returns ``""`` when the payload is missing/malformed or every bit is false
+    (an authenticated call always has at least ``pull`` true for a repo it can
+    see, so all-false means the field wasn't populated -- report unknown, not a
+    confident "none"). A bit must be the actual boolean ``True`` -- a malformed
+    payload with e.g. ``"push": "false"`` (a truthy string) must never
+    normalize to write access.
+    """
+    if not isinstance(permissions, dict):
+        return ""
+    for bit in _GH_PERMISSION_PRIORITY:
+        if permissions.get(bit) is True:
+            return _GH_PERMISSION_TOKEN[bit]
+    return ""
+
+
 class GitHubProvider:
     """Open + query pull requests on GitHub via the ``gh`` CLI."""
 
@@ -62,8 +92,17 @@ class GitHubProvider:
                 return endpoint
         return (os.environ.get("GH_HOST") or "github.com").strip().lower()
 
-    def _env(self, token: str | None) -> dict[str, str]:
-        return {"GH_TOKEN": token} if token else {}
+    def _env(self, token: str | None, *, host: str = "") -> dict[str, str]:
+        env: dict[str, str] = {}
+        if token:
+            env["GH_TOKEN"] = token
+        if host:
+            # `gh pr merge`/`gh pr merge --auto` have no `--hostname` flag (unlike
+            # `gh api`) -- GH_HOST is the only way to pin them to a non-default
+            # host, matching authority_endpoint(api_base) so a merge never runs
+            # against a different host than the one viewer_permission verified.
+            env["GH_HOST"] = host
+        return env
 
     def create_pull(self, scope: PRScope, *, token: str | None = None) -> PullResult:
         args = [
@@ -496,15 +535,18 @@ class GitHubProvider:
         The ``pr-merge <#> --now`` submitter-direct primitive. ``--squash`` keeps
         the non-interactive merge method explicit; ``--admin`` is used only when
         the configured review is non-blocking. The source branch is deliberately
-        **not** deleted, so ``finalize`` can affirm the merge.
+        **not** deleted, so ``finalize`` can affirm the merge. Targets
+        ``authority_endpoint(api_base)`` (via ``GH_HOST``) so the merge always
+        runs against the same host ``pr-merge --now``'s live permission gate
+        just verified -- never a different ambient host.
         """
-        _ = api_base
+        host = self.authority_endpoint(api_base)
         args = ["gh", "pr", "merge", str(number), "--repo", repo]
         if squash:
             args.append("--squash")
         if admin:
             args.append("--admin")
-        proc = run_cli(args, env=self._env(token))
+        proc = run_cli(args, env=self._env(token, host=host))
         if proc.returncode != 0:
             return (
                 f"gh pr merge failed for {repo}#{number}: "
@@ -523,11 +565,11 @@ class GitHubProvider:
         eventual merge. Returns "" once auto-merge is armed (the PR is NOT yet
         merged), or an error string so the caller falls back to a direct merge.
         """
-        _ = api_base
+        host = self.authority_endpoint(api_base)
         args = ["gh", "pr", "merge", str(number), "--repo", repo, "--auto"]
         if squash:
             args.append("--squash")
-        proc = run_cli(args, env=self._env(token))
+        proc = run_cli(args, env=self._env(token, host=host))
         if proc.returncode != 0:
             return (
                 f"gh pr merge --auto failed for {repo}#{number}: "
@@ -543,14 +585,21 @@ class GitHubProvider:
 
         Two reads: ``gh api repos/<repo>`` (merge methods, native auto-merge,
         delete-branch-on-merge) and, best-effort, the default branch's protection
-        (required approving reviews, required status checks). Never raises: a
-        failed settings read yields ``RepoPolicy(supported=False, error=...)``;
-        an unreadable/absent protection leaves those fields ``None``.
+        (required approving reviews, required status checks). Both explicitly
+        target ``authority_endpoint(api_base)`` (GitHub Enterprise host, ambient
+        ``GH_HOST``, or ``github.com``) rather than gh's ambient default host --
+        required for ``viewer_permission`` to actually describe the acting
+        identity's access on *this* repo's real host, not whichever host `gh`
+        would otherwise fall back to. Never raises: a failed settings read
+        yields ``RepoPolicy(supported=False, error=...)``; an unreadable/absent
+        protection leaves those fields ``None``.
         """
         from ..pr_contract import RepoPolicy
 
+        host = self.authority_endpoint(api_base)
         proc = run_cli(
-            ["gh", "api", f"repos/{repo}"], env=self._env(token),
+            ["gh", "api", "--hostname", host, f"repos/{repo}"],
+            env=self._env(token),
         )
         if proc.returncode != 0:
             return RepoPolicy(
@@ -567,11 +616,13 @@ class GitHubProvider:
             v = data.get(key)
             return bool(v) if isinstance(v, bool) else None
 
+        viewer_permission = _github_viewer_permission(data.get("permissions"))
+
         req_reviews: int | None = None
         req_checks: bool | None = None
         if default_branch:
             pproc = run_cli(
-                ["gh", "api",
+                ["gh", "api", "--hostname", host,
                  f"repos/{repo}/branches/{default_branch}/protection"],
                 env=self._env(token),
             )
@@ -600,6 +651,7 @@ class GitHubProvider:
             delete_branch_on_merge=_b("delete_branch_on_merge"),
             required_approving_reviews=req_reviews,
             has_required_status_checks=req_checks,
+            viewer_permission=viewer_permission,
         )
 
     def head_contained_in_base(

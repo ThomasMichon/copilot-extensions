@@ -1285,6 +1285,28 @@ def pr_reminder(
     )
 
 
+def pr_reminder_no_actor_authority(flow: PRFlowProfile, *, reason: str) -> PRReminder:
+    """The refusal reminder for ``pr-merge --now`` on a live-authority denial.
+
+    A distinct shape from :func:`pr_reminder`'s ``ok=False`` "pr-merge" /
+    ``pr-self-merge`` branch, which is written for a caller who forgot ``--now``
+    on an otherwise-authorized submitter -- its ``use_instead`` correctly points
+    back at ``pr-merge --now``. That guidance is wrong here: the caller already
+    used ``--now`` and was refused because a **live permission check** found
+    they lack write access, so retrying the same verb can only fail again. This
+    reminder instead names the contributor path -- wait for a maintainer, the
+    same shape :func:`pr_reminder` gives a genuine ``pr-human-merge`` repo.
+    """
+    return PRReminder(
+        flow.profile, "pr-merge", PR_STATE_UNKNOWN, False,
+        headline=reason,
+        next_step="wait for a maintainer to review and merge this PR",
+        waiting_on=("approved", "merged"),
+        use_instead=("pr-watch", "pr-status"),
+        cautions=(),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Adopt-time research: read a repo's ACTUAL provider settings, then derive the
 # policy matrix to match (#225). The read lives in the provider; the mapping
@@ -1309,6 +1331,15 @@ class RepoPolicy:
     delete_branch_on_merge: bool | None = None
     required_approving_reviews: int | None = None
     has_required_status_checks: bool | None = None
+    viewer_permission: str = ""
+    """The acting identity's own live permission level on the repo, normalized
+    to a lowercase provider-neutral token (``"admin"`` / ``"maintain"`` /
+    ``"write"`` / ``"triage"`` / ``"read"`` / ``"none"``), or ``""`` when the
+    provider read failed or does not expose it. This is a **per-identity**
+    fact (whoever's token/CLI-login was used), distinct from every other field
+    on this class, which describes the repo itself. See
+    :func:`actor_merge_authority` for turning it into a merge-eligibility
+    verdict."""
 
 
 def derive_policy_matrix(policy: RepoPolicy) -> dict:
@@ -1357,4 +1388,45 @@ def derive_policy_matrix(policy: RepoPolicy) -> dict:
     return out
 
 
-__all__ += ["RepoPolicy", "derive_policy_matrix"]
+#: Normalized ``viewer_permission`` tokens that carry write-or-above access
+#: (able to push, and so eligible for a ``pr-self-merge`` repo's
+#: submitter-direct merge). Provider-neutral: github reports
+#: admin/maintain/write/triage/read/none; gitea reports admin/write/read.
+_WRITE_OR_ABOVE = frozenset({"admin", "maintain", "write"})
+#: Confidently read-only or no-access tokens -- the complement of the above,
+#: not merely "not in _WRITE_OR_ABOVE" (an unrecognized/future token must fall
+#: to "unknown", never to a confident denial).
+_READ_OR_NONE = frozenset({"triage", "read", "none"})
+
+
+def actor_merge_authority(viewer_permission: str) -> bool | None:
+    """Classify a live, per-identity ``viewer_permission`` as write-or-above.
+
+    Pure and provider-neutral -- the token itself already normalizes
+    github/gitea/azure-devops permission vocabularies (see each provider's
+    ``get_repo_policy``). Returns:
+
+    - ``True``  -- the acting identity has write/maintain/admin access, so a
+      ``pr-self-merge`` repo's submitter-direct merge is theirs to perform.
+    - ``False`` -- a confident read-only/no-access read; self-merge is NOT
+      authorized for this identity even though the repo's *config* selects the
+      ``pr-self-merge`` profile (a maintainer configured it for themselves; a
+      contributor running the same flow does not inherit it).
+    - ``None``  -- unknown (empty string, unsupported provider, or a failed
+      read). Callers must **fail open** on ``None`` -- treat it exactly like
+      today's behavior before this function existed (config alone decides),
+      never as an implicit denial. A live check that couldn't run must never
+      block a legitimate maintainer merely because the read failed.
+    """
+    level = (viewer_permission or "").strip().lower()
+    if level in _WRITE_OR_ABOVE:
+        return True
+    if level in _READ_OR_NONE:
+        return False
+    return None
+
+
+__all__ += [
+    "RepoPolicy", "derive_policy_matrix", "actor_merge_authority",
+    "pr_reminder_no_actor_authority",
+]

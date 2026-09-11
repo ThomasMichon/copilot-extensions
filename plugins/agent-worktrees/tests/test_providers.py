@@ -869,6 +869,22 @@ class TestGitHubProvider:
         github.GitHubProvider().merge_pull("o/r", 7, squash=True, admin=False)
         assert "--admin" not in captured["args"]
 
+    def test_merge_pull_honors_explicit_host(self, monkeypatch):
+        # gh pr merge has no --hostname flag -- GH_HOST is the only way to pin
+        # it to an explicit api_base, matching get_repo_policy's host so a
+        # merge never targets a different host than the permission check did.
+        from agent_worktrees.providers import github
+        captured = {}
+        monkeypatch.setattr(
+            github, "run_cli",
+            lambda args, **kw: (captured.__setitem__("env", kw.get("env")), _proc())[1],
+        )
+        github.GitHubProvider().merge_pull(
+            "o/r", 7, api_base="https://ghe.example.com/api/v3", token="tok",
+        )
+        assert captured["env"]["GH_HOST"] == "ghe.example.com"
+        assert captured["env"]["GH_TOKEN"] == "tok"
+
     def test_merge_pull_surfaces_error(self, monkeypatch):
         from agent_worktrees.providers import github
         monkeypatch.setattr(
@@ -896,6 +912,18 @@ class TestGitHubProvider:
         assert a[:5] == ["gh", "pr", "merge", "7", "--repo"]
         assert "--auto" in a and "--squash" in a
         assert "--admin" not in a and "--delete-branch" not in a
+
+    def test_enable_auto_merge_honors_explicit_host(self, monkeypatch):
+        from agent_worktrees.providers import github
+        captured = {}
+        monkeypatch.setattr(
+            github, "run_cli",
+            lambda args, **kw: (captured.__setitem__("env", kw.get("env")), _proc())[1],
+        )
+        github.GitHubProvider().enable_auto_merge(
+            "o/r", 7, api_base="https://ghe.example.com/api/v3", token="tok",
+        )
+        assert captured["env"]["GH_HOST"] == "ghe.example.com"
 
     def test_enable_auto_merge_surfaces_error(self, monkeypatch):
         from agent_worktrees.providers import github
@@ -929,7 +957,7 @@ class TestGitHubProvider:
         })
 
         def fake(args, **kw):
-            if args[:2] == ["gh", "api"] and args[2].endswith("/protection"):
+            if args[:2] == ["gh", "api"] and args[-1].endswith("/protection"):
                 return _proc(stdout=prot_json)
             return _proc(stdout=repo_json)
 
@@ -946,7 +974,7 @@ class TestGitHubProvider:
         repo_json = json.dumps({"allow_squash_merge": True})
 
         def fake(args, **kw):
-            if args[2].endswith("/protection"):
+            if args[-1].endswith("/protection"):
                 return _proc(returncode=1, stderr="Not Found")
             return _proc(stdout=repo_json)
 
@@ -964,9 +992,128 @@ class TestGitHubProvider:
         assert pol.supported is False and "gone" in pol.error
 
     def test_get_repo_policy_unsupported_on_gitea_and_azure(self):
+        # Gitea needs a token to read anything (no ambient CLI auth like `gh`);
+        # azure-devops has no settings-read primitive at all today.
         from agent_worktrees.providers import azure_devops, gitea
         assert gitea.GiteaProvider().get_repo_policy("o/r").supported is False
         assert azure_devops.AzureDevOpsProvider().get_repo_policy("o/r").supported is False
+
+    def test_get_repo_policy_viewer_permission_github(self, monkeypatch):
+        # #<role-aware-pr-policy>: the acting identity's own permission level
+        # rides the same repos/<repo> read -- no second call.
+        from agent_worktrees.providers import github
+
+        def fake(args, **kw):
+            return _proc(stdout=json.dumps({
+                "permissions": {
+                    "admin": False, "maintain": False, "push": True,
+                    "triage": True, "pull": True,
+                },
+            }))
+
+        monkeypatch.setattr(github, "run_cli", fake)
+        pol = github.GitHubProvider().get_repo_policy("o/r")
+        assert pol.viewer_permission == "write"
+
+    def test_get_repo_policy_viewer_permission_github_missing_is_unknown(
+        self, monkeypatch,
+    ):
+        from agent_worktrees.providers import github
+        monkeypatch.setattr(
+            github, "run_cli", lambda args, **kw: _proc(stdout=json.dumps({})),
+        )
+        pol = github.GitHubProvider().get_repo_policy("o/r")
+        assert pol.viewer_permission == ""
+
+    def test_get_repo_policy_viewer_permission_github_rejects_non_bool(
+        self, monkeypatch,
+    ):
+        # A malformed truthy-but-non-bool value (e.g. "false" the string) must
+        # never be read as granted access.
+        from agent_worktrees.providers import github
+
+        def fake(args, **kw):
+            return _proc(stdout=json.dumps({
+                "permissions": {"admin": "false", "push": "false", "pull": 1},
+            }))
+
+        monkeypatch.setattr(github, "run_cli", fake)
+        pol = github.GitHubProvider().get_repo_policy("o/r")
+        assert pol.viewer_permission == ""
+
+    def test_get_repo_policy_viewer_permission_gitea(self, monkeypatch):
+        from agent_worktrees.providers import gitea
+
+        def fake(args, **kw):
+            body = json.dumps({
+                "permissions": {"admin": False, "push": True, "pull": True},
+            })
+            return _proc(stdout=f"{body}\n200")
+
+        monkeypatch.setattr(gitea, "run_cli", fake)
+        pol = gitea.GiteaProvider().get_repo_policy(
+            "o/r", api_base="https://gitea.example", token="tok",
+        )
+        assert pol.supported is True
+        assert pol.viewer_permission == "write"
+
+    def test_get_repo_policy_gitea_reads_allow_rebase_field(self, monkeypatch):
+        # Gitea's field is `allow_rebase` (not GitHub's `allow_rebase_merge`).
+        from agent_worktrees.providers import gitea
+
+        def fake(args, **kw):
+            body = json.dumps({"allow_rebase": True})
+            return _proc(stdout=f"{body}\n200")
+
+        monkeypatch.setattr(gitea, "run_cli", fake)
+        pol = gitea.GiteaProvider().get_repo_policy(
+            "o/r", api_base="https://gitea.example", token="tok",
+        )
+        assert pol.allow_rebase is True
+
+    def test_get_repo_policy_viewer_permission_gitea_rejects_non_bool(
+        self, monkeypatch,
+    ):
+        from agent_worktrees.providers import gitea
+
+        def fake(args, **kw):
+            body = json.dumps({"permissions": {"admin": "false", "push": 1}})
+            return _proc(stdout=f"{body}\n200")
+
+        monkeypatch.setattr(gitea, "run_cli", fake)
+        pol = gitea.GiteaProvider().get_repo_policy(
+            "o/r", api_base="https://gitea.example", token="tok",
+        )
+        assert pol.viewer_permission == ""
+
+    def test_get_repo_policy_gitea_no_token_unsupported(self):
+        from agent_worktrees.providers import gitea
+        pol = gitea.GiteaProvider().get_repo_policy(
+            "o/r", api_base="https://gitea.example",
+        )
+        assert pol.supported is False
+
+    def test_get_repo_policy_honors_explicit_host(self, monkeypatch):
+        # An explicit api_base (GHE) must be the host BOTH gh calls target --
+        # otherwise viewer_permission would describe the wrong host's access.
+        from agent_worktrees.providers import github
+
+        seen_hosts = []
+
+        def fake(args, **kw):
+            assert args[:3] == ["gh", "api", "--hostname"]
+            seen_hosts.append(args[3])
+            if args[-1].endswith("/protection"):
+                return _proc(stdout="{}")
+            return _proc(stdout=json.dumps({"permissions": {"push": True}}))
+
+        monkeypatch.setattr(github, "run_cli", fake)
+        pol = github.GitHubProvider().get_repo_policy(
+            "o/r", default_branch="main", api_base="https://ghe.example.com/api/v3",
+        )
+        assert pol.viewer_permission == "write"
+        assert seen_hosts == ["ghe.example.com", "ghe.example.com"]
+
 
 
     def test_merge_pull_unsupported_on_gitea_and_azure(self):
