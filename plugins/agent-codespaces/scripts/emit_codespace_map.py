@@ -18,8 +18,9 @@ glance.
 Output contract (Copilot CLI sessionStart hook): a single JSON object on stdout
 -- ``{"additionalContext": "<markdown>"}`` when there is at least one
 CodeSpace-delegated repo, else ``{}``. cwd-gated to a managed agent-worktrees
-project so nothing leaks into unrelated repos. Never raises: any error degrades
-to ``{}``.
+project so nothing leaks into unrelated repos. Legacy lookup errors degrade to
+``{}``; explicit installation context refusal is a nonzero failure, never an
+ambient worktrees lookup.
 """
 
 from __future__ import annotations
@@ -58,6 +59,15 @@ def _aw_binstub() -> str | None:
 
 def _aw(*args: str, cwd: str | None = None) -> str | None:
     """Run ``agent-worktrees`` via its own binstub and return stdout."""
+    if os.environ.get("COPILOT_EXTENSIONS_CONTEXT", ""):
+        # The hook also runs directly from a deployed payload, outside its venv.
+        payload = Path(__file__).resolve().parent.parent
+        sys.path.insert(0, str(payload / "src"))
+        sys.path.insert(0, str(payload / "libs" / "agent-procutil" / "src"))
+        from agent_codespaces import worktrees
+
+        proc = worktrees.run(*args, cwd=cwd, timeout=20)
+        return proc.stdout if proc is not None and proc.returncode == 0 else None
     exe = _aw_binstub()
     if not exe:
         return None
@@ -199,5 +209,8 @@ if __name__ == "__main__":
         main()
     except SystemExit:
         raise
-    except Exception:
+    except Exception as error:
+        if os.environ.get("COPILOT_EXTENSIONS_CONTEXT", ""):
+            print(f"CodeSpaces guidance refused: {error}", file=sys.stderr)
+            raise SystemExit(126)
         sys.stdout.write("{}")

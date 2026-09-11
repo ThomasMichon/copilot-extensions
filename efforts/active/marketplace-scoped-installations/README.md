@@ -375,6 +375,32 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-10 — Shared peer invocation and CodeSpaces callers
+
+- Extracted dispatch's proven native child boundary into the canonical
+  `libs/peer-launch/` source, with byte-identical packaged consumers in dispatch
+  and CodeSpaces and CI synchronization/version-bump coverage.
+- Converted CodeSpaces worktrees lookups used by project selection, state-root
+  configuration, coordination, account selection, leases, and the source map
+  hook. Explicit-context refusals propagate through authentication, claims,
+  SSH admission, and session-guidance production rather than becoming ambient
+  fallback or successful empty guidance writes. No-context behavior remains
+  legacy-compatible.
+- Both owner and peer must pass active receipt and activation/maintenance
+  governance. Owner admission occurs before optional-peer absence and explicit
+  caller-argument shortcuts, and is rechecked before peer execution. Only a
+  valid owner with a genuinely absent peer may take the optional-peer path.
+- Review found and corrected owner-governance and source-hook refusal gaps.
+  Updated Windows dispatch/governance coverage passed 63 tests (3 skips);
+  POSIX passed 62 (4 skips). Updated CodeSpaces adapter/guidance coverage
+  passed 22 tests on Windows (1 skip) and 23 on POSIX. The preceding broader
+  CodeSpaces caller selection passed 459 tests on each platform (8 skips each).
+  Shared packaging/sync, version, install-contract, payload-generation, and
+  headless-launch checks also passed.
+- This is another bounded conversion slice. The inventory remains report-only;
+  neither the rest of the Phase 2/6 launcher/lease work nor the parent effort's
+  validation is complete.
+
 ### 2026-09-10 — Dispatch slice merged; accidental closing reference corrected
 
 - [PR #2418](https://github.com/ThomasMichon/copilot-extensions/pull/2418)

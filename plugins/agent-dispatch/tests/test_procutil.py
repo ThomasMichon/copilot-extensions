@@ -159,6 +159,22 @@ def _make_namespaced_context(
         ),
         encoding="utf-8",
     )
+    environment, _ = installation_context._current_environment(
+        environment=os.environ, os_profile=None, platform=None, wsl_distro=None,
+    )
+    (root / "installation-activation.json").write_text(json.dumps({
+        "schema": "copilot-extensions.installation-activation", "version": 1,
+        "marketplaceId": cell_root.name, "pluginId": plugin_id,
+        "mode": "namespaced", "state": "active", "environment": environment,
+        "context": str(context), "namespaceGeneration": 1,
+        "installGeneration": 1, "generation": 1,
+        "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+        "legacy": {
+            "disposition": "absent",
+            "probe": {"declared": True, "result": "absent",
+                      "checkedAt": "2026-01-01T00:00:00Z"},
+        },
+    }), encoding="utf-8")
     return context
 
 
@@ -265,14 +281,17 @@ def _make_live_peer(cell: Path, plugin: str, version: str) -> Path:
         (procutil.agent_bridge_launch_prefix, "agent-bridge", "agent_bridge"),
     ],
 )
+@pytest.mark.parametrize("owner", ["agent-dispatch", "agent-codespaces"])
 def test_namespaced_sibling_resolution_stays_in_active_marketplace_cell(
-    tmp_path, monkeypatch, resolver, sibling_id, module
+    tmp_path, monkeypatch, resolver, sibling_id, module, owner
 ):
+    if owner == "agent-codespaces" and sibling_id != "agent-worktrees":
+        pytest.skip("CodeSpaces only composes with worktrees")
     tmp_path = tmp_path / "cells & ' \u96ea"
     first_cell = tmp_path / "marketplaces" / FIRST_MARKETPLACE_ID
     second_cell = tmp_path / "marketplaces" / SECOND_MARKETPLACE_ID
-    first_context = _make_namespaced_context(first_cell)
-    _make_namespaced_context(second_cell)
+    first_context = _make_namespaced_context(first_cell, plugin_id=owner)
+    _make_namespaced_context(second_cell, plugin_id=owner)
     _make_namespaced_context(first_cell, plugin_id=sibling_id)
     _make_namespaced_context(second_cell, plugin_id=sibling_id)
     first_python = _make_live_peer(first_cell, sibling_id, "1.0.0-dev1")
@@ -292,23 +311,29 @@ def test_namespaced_sibling_resolution_stays_in_active_marketplace_cell(
         '{"prompt":"quoted \\"seed\\"","empty":"","path":"C:\\\\a b"}',
     ]
     for cell, expected in ((first_cell, first_python), (second_cell, second_python)):
-        own_root = cell / "plugins" / "agent-dispatch"
+        own_root = cell / "plugins" / owner
         monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(own_root))
+        monkeypatch.setenv("AGENT_CODESPACES_HOME", str(own_root))
         monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own_root / "install.json"))
-        monkeypatch.setenv("COPILOT_PLUGIN_ROOT", str(cell / "payloads" / "agent-dispatch"))
+        monkeypatch.setenv("COPILOT_PLUGIN_ROOT", str(cell / "payloads" / owner))
         for name in (
             "AGENT_RT_ROOT", "AGENT_RT_PY", "AGENT_HOME",
             "AGENT_WORKTREES_PAYLOAD_ROOT", "AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT",
             "AGENT_BRIDGE_INSTALL_DIR", "AGENT_BRIDGE_CONFIG_DIR",
             "AGENT_BRIDGE_PAYLOAD_ROOT", "AGENT_BRIDGE_BASE_URL", "PYTHONPATH", "PYTHONHOME",
             "AGENT_DISPATCH_TOKEN", "AGENT_DISPATCH_CONTROL_TOKEN", "AGENT_DISPATCH_URL",
+            "AGENT_CODESPACES_TOKEN", "GH_TOKEN", "GITHUB_TOKEN",
         ):
             monkeypatch.setenv(name, str(tmp_path / "foreign"))
-        prefix = resolver()
-        result = subprocess.run(
-            [*prefix, *raw_args], capture_output=True, encoding="utf-8",
-            timeout=15, **procutil.no_window_kwargs(),
-        )
+        if owner == "agent-codespaces":
+            adapter = _codespaces_adapter(monkeypatch)
+            result = adapter.run(*raw_args)
+        else:
+            prefix = resolver()
+            result = subprocess.run(
+                [*prefix, *raw_args], capture_output=True, encoding="utf-8",
+                timeout=15, **procutil.no_window_kwargs(),
+            )
         assert result.returncode == 0, result.stderr
         observed = json.loads(result.stdout)
         assert observed["argv"] == raw_args
@@ -328,10 +353,88 @@ def test_namespaced_sibling_resolution_stays_in_active_marketplace_cell(
             "AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT", "AGENT_DISPATCH_INSTALL_DIR",
             "AGENT_BRIDGE_BASE_URL", "AGENT_DISPATCH_TOKEN",
             "AGENT_DISPATCH_CONTROL_TOKEN", "AGENT_DISPATCH_URL",
+            "AGENT_CODESPACES_HOME", "AGENT_CODESPACES_TOKEN", "GH_TOKEN", "GITHUB_TOKEN",
         }
         assert os.environ["COPILOT_EXTENSIONS_CONTEXT"] == str(own_root / "install.json")
         if os.name != "nt":
             assert expected.is_symlink()
+
+
+def _codespaces_adapter(monkeypatch):
+    source = Path(__file__).resolve().parents[2] / "agent-codespaces" / "src"
+    monkeypatch.syspath_prepend(str(source))
+    from agent_codespaces import worktrees
+
+    return worktrees
+
+
+def test_codespaces_peer_refusals_are_not_optional_absence(tmp_path, monkeypatch):
+    adapter = _codespaces_adapter(monkeypatch)
+    cell = tmp_path / "marketplaces" / FIRST_MARKETPLACE_ID
+    own = _make_namespaced_context(cell, plugin_id="agent-codespaces")
+    monkeypatch.setenv("AGENT_CODESPACES_HOME", str(own.parent))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own))
+    # Valid owner with no peer at all is the sole installation absence case.
+    assert adapter.run("get", "owner-ref") is None
+    owner_activation = own.with_name("installation-activation.json")
+    original_activation = owner_activation.read_bytes()
+    try:
+        owner_activation.write_text("{", encoding="utf-8")
+        with pytest.raises(adapter.ContextRefused, match="activation-invalid"):
+            adapter.run("get", "owner-ref")
+    finally:
+        owner_activation.write_bytes(original_activation)
+    maintenance = own.parent / "maintenance"
+    try:
+        maintenance.touch()
+        with pytest.raises(adapter.ContextRefused, match="maintenance"):
+            adapter.validate_context()
+        with pytest.raises(adapter.ContextRefused, match="maintenance"):
+            adapter.run("get", "owner-ref")
+    finally:
+        maintenance.unlink()
+    python = _make_live_peer(cell, "agent-worktrees", "1.0.0-dev1")
+    peer = cell / "plugins" / "agent-worktrees" / "install.json"
+    activation = peer.with_name("installation-activation.json")
+    sentinel = tmp_path / "executed"
+    monkeypatch.setenv("PEER_EXECUTION_SENTINEL", str(sentinel))
+    for receipt in (own, owner_activation, peer, cell / "namespace.json", activation):
+        original = receipt.read_bytes()
+        try:
+            for content in (b"{", original.replace(b'"active"', b'"inactive"')):
+                receipt.write_bytes(content)
+                with pytest.raises(adapter.ContextRefused):
+                    adapter.run("claim", "must-not-execute")
+                assert not sentinel.exists()
+            receipt.unlink()
+            with pytest.raises(adapter.ContextRefused):
+                adapter.run("claim", "must-not-execute")
+            assert not sentinel.exists()
+        finally:
+            receipt.write_bytes(original)
+    foreign = _make_namespaced_context(
+        tmp_path / "marketplaces" / SECOND_MARKETPLACE_ID, plugin_id="agent-codespaces",
+    )
+    for raw in ("{", " ", str(foreign), str(peer)):
+        monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", raw)
+        with pytest.raises(adapter.ContextRefused):
+            adapter.run("claim", "must-not-execute")
+        assert not sentinel.exists()
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own))
+    # The source hook must work outside the repo and without CodeSpaces (or
+    # agent-procutil) installed in the bootstrap interpreter's disposable venv.
+    script = (
+        Path(__file__).resolve().parents[2] / "agent-codespaces"
+        / "scripts" / "emit_codespace_map.py"
+    )
+    result = subprocess.run(
+        [str(python), "-I", str(script), "--cwd", str(tmp_path)],
+        cwd=tmp_path, capture_output=True, encoding="utf-8", timeout=15,
+        **procutil.no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {}
+    assert sentinel.read_text() == "executed"
 
 
 @pytest.mark.parametrize("state", ["inactive", "orphaned", "removing"])

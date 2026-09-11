@@ -995,6 +995,7 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     from ssh_manager import ConnectionManager, TargetBusyError, TargetLock
 
     from .lifecycle import account_for_codespace
+    from .worktrees import ContextRefused
 
     source = CodespaceSource(args.name, account=account_for_codespace(args.name))
     config = load_merged_config()
@@ -1067,7 +1068,7 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return _BUSY_EXIT
-        except CoordinationRejected as exc:
+        except (CoordinationRejected, ContextRefused) as exc:
             print(
                 f"[BLOCKED] CodeSpace claim requires durable coordination: {exc}",
                 file=sys.stderr,
@@ -2400,26 +2401,33 @@ def _chdir_to_project(project: str) -> bool:
     runs. Returns True iff the cwd was changed."""
     import shutil
     import subprocess as sp
+    from . import worktrees
 
+    worktrees.validate_context()
     name = (project or "").strip()
     if not name:
         return False
     # Resolve the binstub via PATHEXT (on Windows it is a .cmd/.ps1, not a bare
     # executable, so a plain ["agent-worktrees", ...] argv fails with WinError 2).
-    exe = shutil.which("agent-worktrees")
-    if not exe:
-        print(f"WARNING: --project {name}: agent-worktrees not found on PATH; "
-              f"using current directory", file=sys.stderr)
-        return False
-    try:
-        result = sp.run(
-            [exe, "repos", "find", name],
-            capture_output=True, text=True, timeout=15,
-        )
-    except Exception as exc:  # pragma: no cover - environment-dependent
-        print(f"WARNING: --project {name}: could not resolve checkout ({exc}); "
-              f"using current directory", file=sys.stderr)
-        return False
+    if worktrees.explicit_context():
+        result = worktrees.run("repos", "find", name, timeout=15)
+        if result is None:
+            return False
+    else:
+        exe = shutil.which("agent-worktrees")
+        if not exe:
+            print(f"WARNING: --project {name}: agent-worktrees not found on PATH; "
+                  f"using current directory", file=sys.stderr)
+            return False
+        try:
+            result = sp.run(
+                [exe, "repos", "find", name],
+                capture_output=True, text=True, timeout=15,
+            )
+        except Exception as exc:  # pragma: no cover - environment-dependent
+            print(f"WARNING: --project {name}: could not resolve checkout ({exc}); "
+                  f"using current directory", file=sys.stderr)
+            return False
     path = (result.stdout or "").strip().splitlines()
     checkout = path[0].strip() if path else ""
     if result.returncode != 0 or not checkout or not Path(checkout).is_dir():
@@ -2893,18 +2901,25 @@ def _cmd_doctor(*, json_output: bool = False) -> int:
 
 def _account_login_remedy(login: str) -> str:
     """Return the recorded login flow for ``login``, or a sane default."""
+    from . import worktrees
+
     try:
-        import shutil
-        aw = shutil.which("agent-worktrees")
-        if aw:
+        if worktrees.explicit_context():
+            r = worktrees.run("accounts", "show", login, "--json", timeout=10)
+        else:
+            import shutil
             import subprocess as sp
+            aw = shutil.which("agent-worktrees")
             r = sp.run([aw, "accounts", "show", login, "--json"],
-                       capture_output=True, text=True, timeout=10)
+                       capture_output=True, text=True, timeout=10) if aw else None
+        if r is not None:
             if r.returncode == 0:
                 data = json.loads(r.stdout or "{}")
                 flow = (data.get("login_flow") or "").strip()
                 if flow:
                     return f"run: {flow}"
+    except worktrees.ContextRefused:
+        raise
     except Exception:
         pass
     return f"run: gh auth login -h github.com (account {login})"

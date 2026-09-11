@@ -364,8 +364,19 @@ def resolve_owner_worktree(
     is why an agent-bridge dispatch, whose ``ssh`` subprocess runs from the
     daemon's cwd, must pass the caller's worktree explicitly (``--effort``).
     """
+    from . import worktrees
+
+    worktrees.validate_context()
     if explicit:
         return explicit.strip() or None
+    if worktrees.explicit_context():
+        args = ["get", "worktree-dir"]
+        if session_id:
+            args += ["--session-id", session_id]
+        r = worktrees.run(*args, timeout=10)
+        if r is None or r.returncode != 0:
+            return None
+        return r.stdout.strip() or None
     aw = _agent_worktrees_bin()
     if not aw:
         return None
@@ -392,16 +403,23 @@ def active_worktree_ids() -> set[str] | None:
     path-existence + the TTL backstop. Terminal-status worktrees are excluded so
     a finalized-but-not-yet-pruned worktree does not keep a claim alive here.
     """
-    aw = _agent_worktrees_bin()
-    if not aw:
-        return None
-    try:
-        r = subprocess.run(
-            [aw, "list", "--json"], capture_output=True, text=True,
-            timeout=15, creationflags=_creation_flags(),
-        )
-    except Exception:
-        return None
+    from . import worktrees
+
+    if worktrees.explicit_context():
+        r = worktrees.run("list", "--json", timeout=15)
+        if r is None:
+            return None
+    else:
+        aw = _agent_worktrees_bin()
+        if not aw:
+            return None
+        try:
+            r = subprocess.run(
+                [aw, "list", "--json"], capture_output=True, text=True,
+                timeout=15, creationflags=_creation_flags(),
+            )
+        except Exception:
+            return None
     if r.returncode != 0:
         return None
     try:
@@ -507,6 +525,9 @@ def claim(
     only guards the fast local file R/W). Degrade-safe: if L2 is not wired /
     reachable, this falls back to L1-only -- identical to today's behavior.
     """
+    from .worktrees import validate_context
+
+    validate_context()
     if not codespace:
         raise RuntimeError("claim requires a CodeSpace name")
     if not owner:

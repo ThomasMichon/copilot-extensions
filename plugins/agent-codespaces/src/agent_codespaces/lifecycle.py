@@ -15,6 +15,7 @@ from enum import Enum
 from agent_procutil import no_window_flags
 
 from .config import RUNTIME_DIR, CodespacesConfig, RepoConfig
+from .worktrees import ContextRefused, validate_context
 
 log = logging.getLogger("agent-codespaces")
 
@@ -87,6 +88,7 @@ def list_codespaces() -> list[CodespaceInfo]:
     """
     from . import gh_account
 
+    validate_context()
     try:
         from . import account_binding
 
@@ -109,6 +111,8 @@ def list_codespaces() -> list[CodespaceInfo]:
         try:
             for cs in _list_codespaces_under(login):
                 merged.setdefault(cs.name, cs)
+        except ContextRefused:
+            raise
         except RuntimeError as exc:
             errors.append(str(exc))
     if not merged and errors:
@@ -172,6 +176,7 @@ def account_for_codespace(name: str) -> str | None:
     owning account. None => use ambient auth. Any failure degrades to ambient
     rather than propagating.
     """
+    validate_context()
     try:
         from . import account_binding
 
@@ -186,6 +191,8 @@ def account_for_codespace(name: str) -> str | None:
                     except Exception:
                         pass
                 return cs.account or None
+    except ContextRefused:
+        raise
     except Exception:
         return None
     return None

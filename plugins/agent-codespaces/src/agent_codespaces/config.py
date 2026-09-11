@@ -2232,7 +2232,8 @@ def _state_root_config_dir(repo_path: Path) -> Path | None:
     fallbacks).
 
     Best-effort + fail-open: a missing ``agent-worktrees`` binstub, a
-    non-stateless / unbound repo, or any error yields ``None``. Never raises.
+    non-stateless / unbound repo, or legacy error yields ``None``. Explicit
+    installation context refusals propagate instead of selecting legacy state.
     Only the config *content* + its ``src``/provision ``repo_dir`` graft here;
     plugin-settings sourcing (``source_paths``) stays the harness's own, so
     generic CodeSpace plugins remain harness-sourced.
@@ -2241,16 +2242,23 @@ def _state_root_config_dir(repo_path: Path) -> Path | None:
     import shutil
     import subprocess
 
-    exe = shutil.which("agent-worktrees")
-    if not exe:
-        return None
-    try:
-        proc = subprocess.run(
-            [exe, "state-root", "--json"], cwd=str(repo_path),
-            capture_output=True, text=True, timeout=20,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
+    from . import worktrees
+
+    if worktrees.explicit_context():
+        proc = worktrees.run("state-root", "--json", cwd=str(repo_path), timeout=20)
+        if proc is None:
+            return None
+    else:
+        exe = shutil.which("agent-worktrees")
+        if not exe:
+            return None
+        try:
+            proc = subprocess.run(
+                [exe, "state-root", "--json"], cwd=str(repo_path),
+                capture_output=True, text=True, timeout=20,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
     if proc.returncode != 0 or not (proc.stdout or "").strip():
         return None
     try:

@@ -167,6 +167,13 @@ Cross-cell composition is a separate opt-in contract and always names the target
 cell. A missing same-cell peer degrades gracefully; a same-named cross-cell peer
 is never a fallback.
 
+Dispatch and CodeSpaces share the vendorable
+[`peer-launch` boundary](../../libs/peer-launch/README.md). Explicit context
+refusals propagate instead of authorizing ambient authentication, legacy state,
+or L1-only claims. Only a validated optional-peer absence or compatible
+unsupported capability can degrade. No-context paths retain their legacy
+selection and error semantics.
+
 Session guidance does not introduce a cross-cell coordinator. Each plugin cell
 owns its checked-in pointer, exact-session writer, and payload-relative
 emitters. A host that natively composes independent `additionalContext` outputs

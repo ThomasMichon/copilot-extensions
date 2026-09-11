@@ -154,6 +154,10 @@ def _creationflags() -> int:
 
 def _run(args: list[str], *, timeout: float = 45.0) -> subprocess.CompletedProcess[str] | None:
     """Run ``agent-worktrees <args>``; return the process, or None if unrunnable."""
+    from . import worktrees
+
+    if worktrees.explicit_context():
+        return worktrees.run(*args, timeout=timeout)
     aw = _aw()
     if not aw:
         return None
@@ -179,6 +183,9 @@ def owner_ref(explicit: str | None = None, session_id: str | None = None) -> str
     Returns None when unresolvable -- the caller then skips L2 (degrade-safe),
     preserving L1-only behavior.
     """
+    from .worktrees import validate_context
+
+    validate_context()
     if explicit and explicit.strip():
         return explicit.strip()
     ambient = os.environ.get("AGENT_WORKTREES_OWNER_REF")
@@ -203,20 +210,46 @@ def _owner_project(holder_ref: str) -> str | None:
 
 def preflight(holder_ref: str) -> PreflightResult:
     """Query optional agent-worktrees readiness for the owning project."""
+    from .worktrees import ContextRefused, explicit_context, validate_context
+
+    try:
+        validate_context()
+    except ContextRefused as error:
+        return PreflightResult("rejected", code="context-refused", detail=str(error))
     project = _owner_project(holder_ref)
     if not project:
         return PreflightResult("absent", detail="owner project is unavailable")
-    proc = _run(
-        ["--project", project, "coordination-readiness"],
-        timeout=10,
-    )
+    try:
+        proc = _run(
+            ["--project", project, "coordination-readiness"],
+            timeout=10,
+        )
+    except ContextRefused as error:
+        return PreflightResult("rejected", code="context-refused", detail=str(error))
     if proc is None:
         return PreflightResult("absent", detail="agent-worktrees is unavailable")
+    if explicit_context() and proc.returncode not in (_EXIT_OK, _EXIT_CONFLICT):
+        # Older peers may lack this optional command. Only its explicit argparse
+        # diagnostic is compatibility evidence, not arbitrary failure output.
+        if proc.returncode == 2 and "invalid choice: 'coordination-readiness'" in (proc.stderr or ""):
+            return PreflightResult("absent", detail="peer has no coordination-readiness command")
+        return PreflightResult(
+            "rejected", code="context-refused",
+            detail=proc.stderr.strip() or "Same-cell readiness probe failed",
+        )
     try:
         payload = json.loads(proc.stdout)
     except (TypeError, ValueError):
+        if explicit_context() and proc.returncode != _EXIT_OK:
+            return PreflightResult(
+                "rejected", code="context-refused", detail="Same-cell readiness probe failed",
+            )
         return PreflightResult("absent", detail="preflight output is not JSON")
     if not isinstance(payload, dict) or payload.get("version") != _PREFLIGHT_VERSION:
+        if explicit_context() and proc.returncode != _EXIT_OK:
+            return PreflightResult(
+                "rejected", code="context-refused", detail="Same-cell readiness probe failed",
+            )
         return PreflightResult(
             "absent", detail="preflight version is absent or incompatible"
         )
@@ -233,6 +266,10 @@ def preflight(holder_ref: str) -> PreflightResult:
         and error
     ):
         return PreflightResult("rejected", code=code, detail=error)
+    if explicit_context() and proc.returncode != _EXIT_OK:
+        return PreflightResult(
+            "rejected", code="context-refused", detail="Same-cell readiness probe failed",
+        )
     return PreflightResult("absent", detail="preflight response is incompatible")
 
 
