@@ -23,7 +23,19 @@ dependencies = [
     "pyyaml>=6",
     # Manager-owned same-machine Agent Host Protocol provider.
     "websocket-client>=1.8.0",
+    # Resolve a repo's own committed Copilot/Claude plugin config so AHP
+    # sessions can replicate it (client-contributed plugins), the same way
+    # agent-bridge stages a repo's plugin stack for a standalone launch.
+    "agent-plugin-resolve",
 ]
+
+[tool.uv.sources]
+# Always resolve the vendored lib from the local path, never an index.
+# Copilot CLI + Claude plugin resolution -- marketplaces, plugins, repo settings
+# (module ``plugin_resolve``). Vendored per the harness's shared-lib convention
+# (dotfiles#929); kept byte-identical to every other copy by
+# tools/check-vendored-libs-sync.py.
+agent-plugin-resolve = { path = "libs/plugin-resolve" }
 
 [project.scripts]
 worktree-manager = "worktree_manager.__main__:main"

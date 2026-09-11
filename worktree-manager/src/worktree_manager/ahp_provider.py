@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import platform
@@ -16,6 +17,7 @@ from urllib.parse import unquote, urlparse
 from . import engine_client
 from .engine_client import LaunchPlan
 from .manager_config import AhpConfig, load_config
+from .repo_own_plugins import resolve_repo_plugin_dirs
 
 ROOT_CHANNEL = "ahp-root://"
 SESSION_OWNER_TIMEOUT_MESSAGE = (
@@ -23,6 +25,12 @@ SESSION_OWNER_TIMEOUT_MESSAGE = (
 )
 MAX_SESSION_CATALOG_PAGES = 10_000
 RESERVATION_LEASE_SECONDS = 300
+# Root URI scheme for a client-contributed plugin container (AHP's
+# client-plugins protocol -- see copilot-host's client_plugins.rs). Each
+# resolved repo plugin gets its own numbered root; child URIs are built by
+# percent-encoding each path segment and joining with "/", exactly mirroring
+# the host's own join_uri().
+CLIENT_PLUGIN_URI_SCHEME = "ahp-client-plugin"
 
 
 class AhpProviderError(RuntimeError):
@@ -88,6 +96,73 @@ def _summary_working_directory(item: dict[str, object]) -> str:
     return ""
 
 
+def _plugin_container_customizations(
+    work_dir: str,
+) -> tuple[list[dict[str, object]], dict[str, Path]]:
+    """Resolve ``work_dir``'s own enabled plugins into AHP client-contribution
+    inputs: ``activeClient.customizations`` entries plus the local root each
+    entry's URI resolves to, for answering the host's reverse
+    ``resourceList``/``resourceRead`` calls.
+
+    Mirrors what ``agent-bridge`` stages via ``--plugin-dir`` for a standalone
+    launch (dotfiles#905) -- but contributed over the wire instead of a
+    command line, since an AHP client never controls the process ``copilotd``
+    spawns. Fail-safe: any resolution problem yields ``([], {})``, never an
+    exception into session creation.
+    """
+    try:
+        pairs = resolve_repo_plugin_dirs(work_dir)
+    except Exception:
+        return [], {}
+    customizations: list[dict[str, object]] = []
+    roots: dict[str, Path] = {}
+    for index, (source, plugin_dir) in enumerate(pairs):
+        root_uri = f"{CLIENT_PLUGIN_URI_SCHEME}:/{index}"
+        roots[root_uri] = plugin_dir
+        customizations.append({
+            "id": source,
+            "uri": root_uri,
+            "name": source,
+            "enabled": True,
+        })
+    return customizations, roots
+
+
+def _resolve_client_plugin_uri(
+    roots: dict[str, Path], uri: str
+) -> Path | None:
+    """Map a host-issued ``resourceList``/``resourceRead`` ``uri`` back to a
+    local filesystem path under one of ``roots``, or ``None`` if it names
+    something outside every registered container.
+
+    Reverses the host's own ``join_uri()`` (percent-encodes each path segment,
+    joins with ``/``): splits the URI's suffix past its root into segments,
+    percent-decodes each, and joins them onto the root's local directory.
+    Refuses a decoded segment that isn't a plain filesystem component (``..``,
+    empty, or embedding a separator), so a maliciously-encoded path segment
+    can never escape the plugin's own root directory.
+    """
+    for root_uri, root_dir in roots.items():
+        if uri == root_uri:
+            return root_dir
+        prefix = root_uri + "/"
+        if not uri.startswith(prefix):
+            continue
+        rel = uri[len(prefix):]
+        parts = [unquote(segment) for segment in rel.split("/") if segment != ""]
+        path = root_dir
+        for part in parts:
+            if part in ("", ".", "..") or "/" in part or "\\" in part:
+                return None
+            path = path / part
+        try:
+            path.resolve().relative_to(root_dir.resolve())
+        except ValueError:
+            return None
+        return path
+    return None
+
+
 class AhpController:
     def __init__(
         self,
@@ -103,6 +178,10 @@ class AhpController:
         self.protocol_version = ""
         self._next_id = 1
         self._socket = None
+        # Populated by create_session() when it contributes this repo's own
+        # enabled plugins; answered inline by _request()'s read loop whenever
+        # the host reverse-calls resourceList/resourceRead against them.
+        self._resource_roots: dict[str, Path] = {}
 
     def __enter__(self):
         try:
@@ -195,6 +274,15 @@ class AhpController:
                 continue
             if not isinstance(message, dict):
                 continue
+            if "method" in message and message.get("id") is not None:
+                # A genuine host->client request (not a reply to anything we
+                # sent) -- e.g. a client-contributed-plugin resourceList/
+                # resourceRead reverse call. Answer it inline and keep
+                # waiting for our own response; never queue it as a
+                # notification, since it demands a reply on this same
+                # connection.
+                self._send_reverse_reply(message)
+                continue
             if message.get("id") != request_id:
                 notifications.append(message)
                 continue
@@ -208,6 +296,75 @@ class AhpController:
             result = message.get("result")
             return result if isinstance(result, dict) else {}, notifications
         raise AhpProviderError(f"AHP {method} timed out")
+
+    def _send_reverse_reply(self, request: dict[str, object]) -> None:
+        """Answer one host->client request (currently only the client-plugins
+        ``resourceList``/``resourceRead`` reverse calls this controller ever
+        registers a root for). Any other reverse method, or a URI outside
+        every registered root, gets a JSON-RPC error reply -- never an
+        exception that would tear down the whole connection over one
+        unanswerable reverse call.
+        """
+        req_id = request.get("id")
+        method = str(request.get("method") or "")
+        params = request.get("params")
+        params = params if isinstance(params, dict) else {}
+        uri = str(params.get("uri") or "")
+        try:
+            if method == "resourceList":
+                path = _resolve_client_plugin_uri(self._resource_roots, uri)
+                if path is None or not path.is_dir():
+                    self._send_reverse_error(req_id, -32008, "not found")
+                    return
+                entries = [
+                    {
+                        "name": child.name,
+                        "type": "directory" if child.is_dir() else "file",
+                    }
+                    for child in sorted(path.iterdir(), key=lambda p: p.name)
+                ]
+                self._send_reverse_result(req_id, {"entries": entries})
+                return
+            if method == "resourceRead":
+                path = _resolve_client_plugin_uri(self._resource_roots, uri)
+                if path is None or not path.is_file():
+                    self._send_reverse_error(req_id, -32008, "not found")
+                    return
+                data = path.read_bytes()
+                try:
+                    text = data.decode("utf-8")
+                except UnicodeDecodeError:
+                    self._send_reverse_result(req_id, {
+                        "data": base64.b64encode(data).decode("ascii"),
+                        "encoding": "base64",
+                    })
+                    return
+                self._send_reverse_result(req_id, {
+                    "data": text,
+                    "encoding": "utf-8",
+                })
+                return
+            self._send_reverse_error(req_id, -32601, f"method not found: {method}")
+        except Exception as exc:  # pragma: no cover - defensive
+            self._send_reverse_error(req_id, -32000, f"reverse call failed: {exc}")
+
+    def _send_reverse_result(self, req_id: object, result: dict[str, object]) -> None:
+        if self._socket is None or req_id is None:
+            return
+        self._socket.send(json.dumps({
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": result,
+        }))
+
+    def _send_reverse_error(self, req_id: object, code: int, message: str) -> None:
+        if self._socket is None or req_id is None:
+            return
+        self._socket.send(json.dumps({
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "error": {"code": code, "message": message},
+        }))
 
     def list_sessions(self) -> list[dict[str, object]]:
         sessions: list[dict[str, object]] = []
@@ -248,6 +405,8 @@ class AhpController:
             self.config.connect_timeout_seconds,
             self.config.lifecycle_timeout_seconds,
         )
+        customizations, roots = _plugin_container_customizations(work_dir)
+        self._resource_roots = roots
         for attempt in range(2):
             session_id = str(uuid.uuid4())
             try:
@@ -257,6 +416,11 @@ class AhpController:
                         "channel": f"ahp-session:/{session_id}",
                         "workingDirectories": [worktree_uri],
                         "config": {"mode": "interactive", "target": "workspace"},
+                        "activeClient": {
+                            "clientId": self.client_id,
+                            "tools": [],
+                            "customizations": customizations,
+                        },
                     },
                     timeout_seconds=timeout,
                 )

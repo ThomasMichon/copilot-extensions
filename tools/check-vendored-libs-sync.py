@@ -53,12 +53,24 @@ _VERSION_RE = re.compile(r'^\s*version\s*=\s*"([^"]+)"', re.MULTILINE)
 
 
 def _lib_copies() -> dict[str, list[Path]]:
-    """Map ``lib name -> [copy paths]`` for every ``plugins/*/libs/*`` dir."""
+    """Map ``lib name -> [copy paths]`` for every vendored-lib copy.
+
+    Scans two shapes: ``plugins/<plugin>/libs/*`` (the common case) and any
+    other top-level package directory that vendors libs directly under its
+    own ``libs/`` (e.g. ``worktree-manager/libs/*``, which isn't a
+    marketplace plugin and isn't nested under ``plugins/``).
+    """
     copies: dict[str, list[Path]] = {}
-    if not PLUGINS_DIR.is_dir():
-        return copies
-    for plugin in sorted(PLUGINS_DIR.iterdir()):
-        libs = plugin / "libs"
+    if PLUGINS_DIR.is_dir():
+        for plugin in sorted(PLUGINS_DIR.iterdir()):
+            libs = plugin / "libs"
+            if not libs.is_dir():
+                continue
+            for lib in sorted(libs.iterdir()):
+                if lib.is_dir():
+                    copies.setdefault(lib.name, []).append(lib)
+    for extra in ("worktree-manager",):
+        libs = REPO / extra / "libs"
         if not libs.is_dir():
             continue
         for lib in sorted(libs.iterdir()):
