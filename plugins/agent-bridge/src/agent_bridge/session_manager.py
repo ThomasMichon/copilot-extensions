@@ -4956,6 +4956,12 @@ class SessionManager:
                 raise ValueError(
                     f"Session {session_id} is {session.status.value}, not stopped"
                 )
+            # The caller now owns recovery; a failed explicit attempt must not
+            # leave stale restart intent rearming background provider probes.
+            session.restart_status = None
+            self._db.update_session_status(
+                session_id, SessionStatus.STOPPED.value, time.time(),
+            )
             if not session.acp_session_id and not allow_recreate:
                 raise RuntimeError(
                     f"Session {session_id} has no ACP session ID -- cannot resume"
