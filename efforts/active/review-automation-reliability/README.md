@@ -467,6 +467,46 @@ scenarios.
 
 ## Journal
 
+### 2026-09-11 - Phase 10 item 5: wire the spawn-reservation consistency sweep into the supervisor
+
+- Added `Supervisor.sweep_spawn_consistency()`
+  (`plugins/agent-dispatch/src/agent_dispatch/supervisor.py`): a
+  read-only, additive method that gathers real `ACTIVE` spawn-reservation
+  rows for the pool, resolves liveness for each carrying a local body
+  handle via the same `local_body_verdict_fn` the rest of this module
+  already uses, and classifies each against
+  `spawn_reservation_machine.classify_consistency` and
+  `violating_assignment_groups`, logging any detected anomaly or
+  single-assignment violation. It never mutates a reservation or task and
+  changes no existing reconciliation method's behavior -- this is
+  genuinely additive wiring, not a refactor of `reconcile_reserving`'s
+  carefully-tuned control flow.
+- Added `spawn_reservation_machine.verdict_to_bridge_state()`: translates
+  this module's coarse `live`/`gone`/`unknown` liveness verdict to a
+  `BridgeState` (`unknown` maps to `None`/not-applicable rather than
+  guessing, per Phase 9's "never assume the safer state without
+  evidence" rule).
+- Added `plugins/agent-dispatch/tests/test_spawn_consistency_sweep.py`
+  (6 tests) and four new tests for `verdict_to_bridge_state` in
+  `test_spawn_reservation_machine.py`: a consistent live reservation
+  reports zero anomalies; a `SPAWNED` reservation whose liveness read is
+  `gone` is detected (the headline `reconcile_reserving`-class anomaly
+  this effort exists to catch); a non-local-body or `unknown`-verdict
+  reservation is skipped rather than misclassified; the sweep never
+  mutates what it classifies; and a simulated single-assignment
+  violation is caught (constructed directly, since `reserve_spawn`'s own
+  atomic guarantee makes a real one unreachable through normal usage --
+  itself a confirmation the invariant holds upstream).
+- Full `agent-dispatch` suite (650 tests) passes. Bumped agent-dispatch's
+  version to 0.1.2-dev72.
+- Ticks item 5's Plan checkbox. Scheduling the sweep on a periodic
+  cadence (vs. calling it ad hoc / from an operator command) is left as
+  a follow-up decision, noted in the sub-doc.
+- **Phase 10 items 1, 2, and 5 are now complete.** Remaining: item 3 (a
+  real GitHub provider adapter -- the largest remaining item, expected to
+  be its own sequence of slices) and item 4 (bridge liveness wiring,
+  which depends on agent-bridge's own verb-vocabulary convergence).
+
 ### 2026-09-11 - Phase 10 item 2: idempotent replay for duplicate task-lifecycle requests
 
 - Resolved the item-2 design question raised in the prior correction:
