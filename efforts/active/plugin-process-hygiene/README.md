@@ -756,3 +756,63 @@ above, which is already closed:
   agent-bridge/agent-dispatch/agent-vault under #625), but that audit
   predates this new, more general invariant and should be re-checked against
   it explicitly as a follow-up.
+
+### 2026-09-11 — Scheduled-task binstub audit re-checked against `identity-resolves-by-name-not-path` (#736 follow-up)
+
+Re-confirmed the #625 scheduled-task audit against the new invariant, by
+citing the concrete `Action` construction for each service exemplar:
+
+- **agent-bridge** (`scripts/install.ps1` `Register-ScheduledTask_`): action
+  is `conhost.exe --headless pwsh -File "$launcherPath"` where `$launcherPath`
+  is the stable `start-agent-bridge.ps1` written into `$InstallDir` (never a
+  versioned slot path). The launcher body itself resolves the active version
+  from the `current-version` marker at **every run** ("SINGLE routing point
+  ... never a pinned path").
+- **agent-dispatch** (coordinator + supervisor + embody-supervisor tasks):
+  all three actions are `conhost.exe --headless powershell.exe -File
+  "$launcher"` with a stable launcher in `$InstallDir`
+  (`serve-service.ps1`/`supervise-service.ps1`); each launcher re-resolves
+  `$_py` from the `current-version` marker via the shared
+  `resolve-runtime.ps1` chain at every run, matching agent-bridge's pattern.
+- **agent-vault** (`Register-AgentVaultTask`): action is `conhost.exe
+  --headless powershell.exe -File "$TaskLauncher"`, `$TaskLauncher` stable in
+  `$InstallDir`. Its slot python IS baked into the launcher body's `& '<path>'`
+  line at registration time rather than re-resolved per run -- a real but
+  **already-tracked** deviation (filed as #1836 during the original #625
+  audit; the task is re-registered on every install/update so it does not go
+  stale between reinstalls, but it is not per-run dynamic like the other two).
+  No new gap beyond #1836.
+- Spot-checked the 3 other plugins that also register Scheduled Tasks
+  (agent-logger, agent-codespaces, agent-index): all follow the identical
+  `conhost.exe --headless ... -File "<stable $InstallDir launcher>"` shape,
+  no raw versioned-slot or worktree path in any `Action`.
+
+**Conclusion: no new conformance gap.** All scheduled-task actions target a
+name-stable, installed launcher, never a worktree-scoped or raw versioned-slot
+path; agent-vault's known per-update (not per-run) slot resolution remains
+tracked separately by #1836.
+
+Also re-verified #2417/#2421 has no coverage gap: traced both
+`_reviewer_loop_setup` and `_repository_issue_loop_setup` -- each calls its
+sibling `_..._declarations()` helper (which invokes
+`_reject_worktree_checkout_as_repo_root`) **before** its own `rd.add_pointer`
+call, so a worktree-checkout path is refused before any pointer is persisted.
+Manually reproduced against a `dotfiles.worktrees\<id>\.agent-dispatch\
+registrar\reviewer.json` declaration: `reviewer-loop setup` returns non-zero
+with the expected refusal message; no pointer written. `repository-issue-loop
+setup`'s existing regression test (`test_setup_refuses_worktree_checkout_path`)
+passes. Grepped the rest of `agent_dispatch` for other
+`repo_root_from_surface_path`/`f"repo:{...root.name}"` call sites: none found
+outside the two guarded declaration helpers.
+
+**Live daemon-status re-check:** `agent-dispatch supervise daemon-status`
+still shows the original 6 `declared:repo:tmichon-cloud1-win-20260910-171507-5474:*`
+/ `logical:repo:...` override entries from the #2417 incident, but all are
+`disabled: true` with `at` timestamps (~2026-09-11T00:31Z) that **predate**
+#2421's merge (2026-09-11T02:57Z) -- confirming these are the original
+contained incident, not a recurrence. No new `declared:repo:<worktree-id>:...`
+entries have appeared since the fix landed.
+
+This closes out the scheduled-task-binstub audit slice of the operator's full
+ask; the #736 umbrella's own remaining sub-issues (#738, #742, #743, #744)
+are unrelated open work tracked separately above.
