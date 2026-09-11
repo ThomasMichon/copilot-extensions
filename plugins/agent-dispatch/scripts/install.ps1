@@ -2353,21 +2353,40 @@ function Install-SupervisorTaskInstance {
         return
     }
 
-    # Register-ONCE model (#689 / non-elevated live-update): if the task already
-    # exists AND we are non-elevated, it was registered once (one-time elevated
-    # install) and its action points at the STABLE launcher path, so we must NOT
-    # re-register on update (that needs elevation and is why the supervisor used to
-    # go stale). Just restart it in place to cycle onto the freshly-activated slot.
-    # When elevated we fall through and re-register so a task DEFINITION change is
-    # still applied (Register -Force cycles it too).
-    if ((-not (Test-Elevated)) -and (Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue)) {
-        Restart-SupervisorTaskInPlace -Name $Name -EnvFile $EnvFile -Mode $mode -DisplayName $DisplayName
-        return
-    }
-
     $action = New-ScheduledTaskAction -Execute 'conhost.exe' `
         -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Launcher`" -EnvFile `"$EnvFile`"" `
         -WorkingDirectory $InstallDir
+
+    # Register-ONCE model (#689 / #1837): re-registering (Register -Force, which
+    # needs elevation) is reserved for first install or an ACTUAL task-definition
+    # change -- never a routine update, elevated or not. Compare the
+    # already-registered task's action against the one this update would
+    # produce; the launcher/env-file/install-dir paths are all stable across
+    # ordinary updates, so a match here means "already correct", regardless of
+    # the caller's elevation state. Only a genuine drift (a real migration, e.g.
+    # an install-dir move) falls through to re-register.
+    $existingTask = Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
+    if ($existingTask) {
+        $existingAction = $existingTask.Actions | Select-Object -First 1
+        $matchesDesired = $existingAction -and
+            $existingAction.Execute -eq $action.Execute -and
+            $existingAction.Arguments -eq $action.Arguments -and
+            $existingAction.WorkingDirectory -eq $action.WorkingDirectory
+        if ($matchesDesired) {
+            Restart-SupervisorTaskInPlace -Name $Name -EnvFile $EnvFile -Mode $mode -DisplayName $DisplayName
+            return
+        }
+        if (-not (Test-Elevated)) {
+            # A genuine definition drift, but we cannot re-register without
+            # elevation -- keep the existing (stale) task registration rather
+            # than losing it, and just cycle the running process onto the new
+            # slot; say so instead of silently no-op'ing the migration.
+            Write-Warn "$DisplayName task definition changed but elevation is unavailable to migrate it -- run elevated once to update the task; refreshing the running process onto the new slot meanwhile"
+            Restart-SupervisorTaskInPlace -Name $Name -EnvFile $EnvFile -Mode $mode -DisplayName $DisplayName
+            return
+        }
+    }
+
     $trigger = New-ScheduledTaskTrigger -AtLogOn
     $settings = New-ScheduledTaskSettingsSet `
         -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
