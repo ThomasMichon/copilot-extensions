@@ -545,6 +545,18 @@ def claim(
         raise RuntimeError("claim requires an owner worktree")
     from .execution_claims import assert_access
 
+    prior_token = ""
+    same_owner = False
+    if coordinate and holder_ref:
+        peek = _read_leases().get(codespace)
+        same_owner = bool(peek and _claim_owner(peek) == owner)
+        prior_token = peek.lease_token if (same_owner and peek) else ""
+        if not (same_owner and prior_token):
+            readiness = preflight_result or coordination.preflight(holder_ref)
+            if readiness.rejected:
+                raise CoordinationRejected(
+                    f"{readiness.code}: {readiness.detail}"
+                )
     with _lease_lock():
         assert_access(codespace, execution_identity, owner)
 
@@ -553,18 +565,10 @@ def claim(
     # acquire (new/takeover) and to carry the prior fencing token.
     lease_token = ""
     if coordinate and holder_ref:
-        peek = _read_leases().get(codespace)
-        same_owner = bool(peek and _claim_owner(peek) == owner)
-        prior_token = peek.lease_token if (same_owner and peek) else ""
         lease_token = prior_token
         if same_owner and prior_token:
             res = coordination.renew(codespace, prior_token)
         else:
-            readiness = preflight_result or coordination.preflight(holder_ref)
-            if readiness.rejected:
-                raise CoordinationRejected(
-                    f"{readiness.code}: {readiness.detail}"
-                )
             res = coordination.acquire(codespace, holder_ref)
         if res.ok:
             lease_token = res.token

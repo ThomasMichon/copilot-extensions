@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import pytest
 from ssh_manager import CodespaceConfigSource, ConnectionManager
 
-from agent_codespaces import auth_preflight, config, coordination, gh_account, lease, lifecycle, native_transport
+from agent_codespaces import auth_preflight, config, coordination, gh_account, lease, lifecycle, native_transport, worktrees
 
 
 @pytest.mark.parametrize("token", ["scoped-token", None])
@@ -123,9 +123,9 @@ def test_admission_calls_close_stdin_without_extending_timeout(monkeypatch, inve
     config.cwd_repo_root,
     config._git_origin_remote,
     config._state_root_config_dir,
-    gh_account.account_for_repo,
-    gh_account.token_for_account,
-    gh_account.mapped_accounts,
+    gh_account._lookup,
+    gh_account._token_for_account,
+    worktrees.run,
     lifecycle._list_codespaces_under,
     CodespaceConfigSource._fetch_gh_config,
     auth_preflight.enforce_host_ado_login,
@@ -135,7 +135,11 @@ def test_audited_preparation_boundaries_explicitly_close_stdin(function):
     calls = [
         node for node in ast.walk(tree)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-        and node.func.attr in {"run", "create_subprocess_exec"}
+        and (
+            node.func.attr == "create_subprocess_exec"
+            or node.func.attr == "run" and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "subprocess"
+        )
     ]
     assert calls
     for call in calls:
