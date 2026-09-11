@@ -214,8 +214,17 @@ renumbering from the "acknowledges handoff" step onward.)
       mux subprocess call succeeds, not from the pure argv-builder
       `build_mux_new_window_argv()`) for the programmatic cutover path — both
       emitters, not one instead of the other.
-- [ ] Stage 3 (`copilot_invoked`) — emit from the launcher/pane-wrapper right
-      before exec'ing the `copilot` binary (both `.sh` and `.ps1`).
+- [ ] Stage 3 (`copilot_invoked`) — the pane wrapper only **forwards** an
+      already-resolved command; it is not where Copilot is actually resolved
+      and invoked, so logging there can report `copilot_invoked` even when
+      setup fails before Copilot ever starts. Emit from the true final
+      resolution/exec point — `default-setup.sh` / `default-setup.ps1` (and
+      any configured/legacy launch template) right before the `copilot`
+      binary is actually exec'd — or, if the pane wrapper is kept as the
+      emitter for implementation convenience, name its event an explicit
+      *invocation attempt* (e.g. `copilot_invocation_attempted`) distinct from
+      a confirmed `copilot_invoked`, so a setup failure before Copilot starts
+      is visibly distinguishable in the trace.
 - [ ] Stage 4 (`session_start_bound`) — emit from `cmd_register_session` once
       a session id + worktree are actually resolved (already close to
       `session_started`; make sure the *binding* moment, not just tool entry,
