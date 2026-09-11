@@ -467,6 +467,39 @@ scenarios.
 
 ## Journal
 
+### 2026-09-11 - Phase 10 item 2: idempotent replay for duplicate task-lifecycle requests
+
+- Resolved the item-2 design question raised in the prior correction:
+  operator confirmed extending `suspend`/`complete_with_outcome`'s
+  existing idempotent-replay pattern to the other five methods, scoped
+  narrowly -- a no-op fires only when the task is already sitting in the
+  exact target state **and** the existing owner/generation/session
+  fences still match, never as a blanket "swallow all errors" change.
+  This directly serves the effort's "duplicate request and response
+  delivery produces one analysis and at most one submission" Validation
+  Plan item.
+- Implemented as an opt-in `idempotent_replay: bool` parameter on
+  `queue.py`'s `_transition` (default `False`, so any call site not
+  explicitly updated keeps today's exact behavior). Enabled for
+  `approve`, `start`, `release_suspended`, `abandon`, `yield_task`
+  unconditionally, and for `resume` only when
+  `adopt_owner_session_id is None` -- a handoff-adoption resume must
+  always bump the generation and adopt the new session, so it
+  deliberately still raises on a bare replay rather than silently
+  dropping that effect.
+- Added `plugins/agent-dispatch/tests/test_transition_idempotent_replay.py`
+  (10 tests): a replay is a no-op for every enabled method; a wrong-owner
+  or wrong-state replay still raises exactly as before; the
+  adoption-resume path never no-ops, confirmed both across two real
+  handoffs (generation correctly advances) and on a bare replay attempt
+  (still raises).
+- Full `agent-dispatch` suite (640 tests) passes with zero regressions in
+  existing behavior. Bumped agent-dispatch's version to 0.1.2-dev71.
+- Ticks item 2's Plan checkbox. Next: item 3 (a real GitHub provider
+  adapter) or item 5 (spawn-reservation consistency checks wired into the
+  supervisor's reconciliation loop) -- item 4 (bridge liveness) still
+  depends on agent-bridge's own convergence.
+
 ### 2026-09-11 - Phase 10: declare and wire the missing `yield_task` transition
 
 - Found, while starting item 2's investigation, an eighth `_transition`

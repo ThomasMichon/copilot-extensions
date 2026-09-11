@@ -176,14 +176,25 @@ here but not blocking the start of 1/2/5.
   monkeypatching a transition's `from_states`/`to_state` and asserting the
   live method's behavior changes to match, not just that today's literals
   happen to agree with it.
-- [ ] **Blocked on a design decision, not ready to implement.** Item 2's
-  original plan assumed `_transition` already used a generation-
-  conditioned CAS `UPDATE`; direct reading during slice 1 found it
-  actually uses `BEGIN IMMEDIATE` serialization + a fresh in-lock status
-  check, and every method except `suspend`/`complete_with_outcome` raises
-  `TaskError` on a replayed request rather than no-op'ing. Get an
-  explicit answer to the (a)/(b) question in the corrected item 2
-  description above before writing any code here.
+- [x] **Resolved: option (b), scoped narrowly.** Operator confirmed (b):
+  extend the `suspend`/`complete_with_outcome` idempotent-replay pattern
+  to the other five methods, but only under a narrow safety condition --
+  a no-op fires **only** when the task is already sitting in the exact
+  target state (`task.status == to`) **and** the existing owner/
+  generation/session fences still match; anything else (wrong owner,
+  wrong state entirely, a fenced generation mismatch) still raises
+  exactly as before. Implemented as an opt-in `idempotent_replay: bool`
+  parameter on `_transition` (default `False`, so untouched call sites
+  are unaffected), enabled for `approve`, `start`,
+  `release_suspended`, `abandon`, `yield_task` unconditionally, and for
+  `resume` only when `adopt_owner_session_id is None` (a handoff-
+  adoption resume must always bump the generation and adopt the new
+  session -- a no-op there would silently drop that real effect, so
+  it deliberately still raises on a bare replay). Backed by
+  `test_transition_idempotent_replay.py` (10 tests): a replay is a no-op
+  for every enabled method, a wrong-owner or wrong-state replay still
+  raises, and the adoption-resume path never no-ops even on an
+  otherwise-matching replay.
 - [ ] Build the first live provider adapter (GitHub) driving
   `provider_state_machine`'s declared dimensions from real PR state (item
   3 above). Expect this to be split into its own sequence of slices as
