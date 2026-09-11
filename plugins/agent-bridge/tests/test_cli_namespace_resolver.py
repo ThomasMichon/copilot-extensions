@@ -494,3 +494,129 @@ async def test_signature_aware_fallback_drops_unsupported_kwargs():
         )
     assert t.spawn_command == ["fb"]
     assert fb.calls == ["resolve"]
+
+
+# --- list() caching (perf hardening: namespace-list is a slow, often
+# network-bound subprocess -- e.g. agent-codespaces enumerating CodeSpaces
+# across mapped GitHub accounts measured 4-10s in production) ---------------
+
+@pytest.mark.asyncio
+async def test_list_is_cached_within_ttl():
+    fb = _Fallback()
+    payload = json.dumps([{"name": "cs-a", "state": "available"}])
+    calls = 0
+
+    def _run(_argv, **_kw):
+        nonlocal calls
+        calls += 1
+        return _cp(0, payload)
+
+    resolver = CliNamespaceResolver("codespace", "agent-codespaces", fb)
+    with patch("shutil.which", _which), patch("subprocess.run", side_effect=_run):
+        first = await resolver.list()
+        second = await resolver.list()
+    assert [a.name for a in first] == ["cs-a"]
+    assert second == first
+    assert calls == 1  # second call served from the in-memory cache
+
+
+@pytest.mark.asyncio
+async def test_list_cache_disabled_via_env(monkeypatch):
+    monkeypatch.setenv("AGENT_BRIDGE_NAMESPACE_LIST_TTL", "0")
+    fb = _Fallback()
+    payload = json.dumps([{"name": "cs-a", "state": "available"}])
+    calls = 0
+
+    def _run(_argv, **_kw):
+        nonlocal calls
+        calls += 1
+        return _cp(0, payload)
+
+    resolver = CliNamespaceResolver("codespace", "agent-codespaces", fb)
+    with patch("shutil.which", _which), patch("subprocess.run", side_effect=_run):
+        await resolver.list()
+        await resolver.list()
+    assert calls == 2  # TTL=0 (off) re-queries every call
+
+
+@pytest.mark.asyncio
+async def test_list_cache_expires_after_ttl(monkeypatch):
+    monkeypatch.setenv("AGENT_BRIDGE_NAMESPACE_LIST_TTL", "5")
+    fb = _Fallback()
+    payload = json.dumps([{"name": "cs-a", "state": "available"}])
+    calls = 0
+
+    def _run(_argv, **_kw):
+        nonlocal calls
+        calls += 1
+        return _cp(0, payload)
+
+    fake_now = [1000.0]
+    resolver = CliNamespaceResolver("codespace", "agent-codespaces", fb)
+    with (
+        patch("shutil.which", _which),
+        patch("subprocess.run", side_effect=_run),
+        patch("time.monotonic", side_effect=lambda: fake_now[0]),
+    ):
+        await resolver.list()
+        fake_now[0] += 6  # past the 5s TTL
+        await resolver.list()
+    assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_invalidate_list_cache_forces_requery():
+    fb = _Fallback()
+    payload = json.dumps([{"name": "cs-a", "state": "available"}])
+    calls = 0
+
+    def _run(_argv, **_kw):
+        nonlocal calls
+        calls += 1
+        return _cp(0, payload)
+
+    resolver = CliNamespaceResolver("codespace", "agent-codespaces", fb)
+    with patch("shutil.which", _which), patch("subprocess.run", side_effect=_run):
+        await resolver.list()
+        resolver.invalidate_list_cache()
+        await resolver.list()
+    assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_successful_resolve_invalidates_list_cache():
+    fb = _Fallback()
+    list_payload = json.dumps([{"name": "cs-a", "state": "available"}])
+    resolve_payload = json.dumps(
+        {"type": "command", "spawn_command": ["ssh", "x"], "user": "me"}
+    )
+
+    def _run(argv, **_kw):
+        if argv[1] == "namespace-list":
+            return _cp(0, list_payload)
+        return _cp(0, resolve_payload)
+
+    resolver = CliNamespaceResolver("codespace", "agent-codespaces", fb)
+    with patch("shutil.which", _which), patch("subprocess.run", side_effect=_run):
+        await resolver.list()
+        assert resolver._list_cache is not None
+        await resolver.resolve("cs-a")
+        assert resolver._list_cache is None  # invalidated by the successful resolve
+
+
+@pytest.mark.asyncio
+async def test_successful_ensure_ready_invalidates_list_cache():
+    fb = _Fallback()
+    list_payload = json.dumps([{"name": "cs-a", "state": "available"}])
+
+    def _run(argv, **_kw):
+        if argv[1] == "namespace-list":
+            return _cp(0, list_payload)
+        return _cp(0)
+
+    resolver = CliNamespaceResolver("codespace", "agent-codespaces", fb)
+    with patch("shutil.which", _which), patch("subprocess.run", side_effect=_run):
+        await resolver.list()
+        assert resolver._list_cache is not None
+        await resolver.ensure_ready("cs-a")
+        assert resolver._list_cache is None
