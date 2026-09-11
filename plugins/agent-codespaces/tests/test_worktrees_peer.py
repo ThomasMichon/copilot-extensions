@@ -246,3 +246,85 @@ def test_guidance_refusal_preserves_session_files(tmp_path, monkeypatch, existin
         assert target.read_text(encoding="utf-8") == "unchanged guidance"
     else:
         assert not home.exists()
+
+
+@pytest.mark.parametrize("disabled", [False, True])
+@pytest.mark.parametrize("command", [cli._cmd_claim, cli._cmd_release_claim, cli._cmd_ssh])
+def test_claim_entrypoints_report_dedicated_context_refusal(
+    tmp_path, monkeypatch, capsys, command, disabled,
+):
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "{")
+    monkeypatch.setenv("AGENT_CODESPACES_HOME", str(tmp_path / "bad-owner"))
+    if disabled:
+        monkeypatch.setenv("AGENT_CODESPACES_DISABLE_CLAIM", "1")
+    else:
+        monkeypatch.delenv("AGENT_CODESPACES_DISABLE_CLAIM", raising=False)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("external call"))
+    assert command(SimpleNamespace(name="space", codespace="space")) == cli._COORDINATION_EXIT
+    assert "context refused" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("stage", ["account", "owner", "holder"])
+def test_early_ssh_setup_keeps_refusal_exit(monkeypatch, capsys, stage):
+    monkeypatch.setattr(cli, "validate_context", lambda: None)
+    monkeypatch.delenv("AGENT_CODESPACES_DISABLE_CLAIM", raising=False)
+    monkeypatch.setattr(lifecycle, "account_for_codespace", lambda _: None)
+    monkeypatch.setattr(cli, "load_merged_config", lambda: None)
+    monkeypatch.setattr("agent_codespaces.relay_launch.effective_relay_port", lambda _: 0)
+    monkeypatch.setattr(lease, "resolve_owner_worktree", lambda **k: "owner")
+    monkeypatch.setattr(coordination, "owner_ref", lambda **k: "machine/project/worktree")
+
+    def refused(*args, **kwargs):
+        raise worktrees.ContextRefused(f"{stage} refused")
+
+    module, name = {
+        "account": (lifecycle, "account_for_codespace"),
+        "owner": (lease, "resolve_owner_worktree"),
+        "holder": (coordination, "owner_ref"),
+    }[stage]
+    monkeypatch.setattr(module, name, refused)
+    assert cli._cmd_ssh(SimpleNamespace(name="space")) == cli._COORDINATION_EXIT
+    assert f"{stage} refused" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("operation", [lambda: lifecycle.stop_codespace("space"), lifecycle.cleanup_stale])
+def test_lifecycle_preserves_listing_context_refusal(monkeypatch, operation):
+    def refused():
+        raise worktrees.ContextRefused("listing refused")
+
+    monkeypatch.setattr(lifecycle, "list_codespaces", refused)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("ambient operation"))
+    with pytest.raises(worktrees.ContextRefused, match="listing refused"):
+        operation()
+
+
+def test_map_nonzero_peer_result_is_not_optional_absence(monkeypatch):
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "explicit")
+    monkeypatch.setattr(worktrees, "run", lambda *a, **k: _result(code=1, stderr="peer failed"))
+    with pytest.raises(worktrees.ContextRefused, match="peer failed"):
+        _hook()._aw("related", "list")
+
+
+def test_source_guidance_wrapper_preserves_refusal(tmp_path, monkeypatch):
+    scripts = Path(__file__).resolve().parents[1] / "scripts"
+    if os.name == "nt":
+        shell = (Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell"
+                 / "v1.0" / "powershell.exe")
+        argv = [str(shell), "-NoProfile", "-File", str(scripts / "write-session-guidance.ps1")]
+    else:
+        argv = ["/bin/bash", str(scripts / "write-session-guidance.sh")]
+    home = tmp_path / "profile"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "{")
+    monkeypatch.delenv("AGENT_CODESPACES_HOME", raising=False)
+    monkeypatch.setenv("COPILOT_PLUGIN_ROOT", str(tmp_path / "untrusted-payload"))
+    result = subprocess.run(
+        argv, input='{"sessionId":"example-session"}',
+        capture_output=True, encoding="utf-8", timeout=30,
+        **worktrees.no_window_kwargs(),
+    )
+    assert result.returncode == 126, (result.stdout, result.stderr)
+    assert "guidance refused" in result.stderr
+    assert not (home / ".copilot").exists()

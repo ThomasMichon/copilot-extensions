@@ -401,6 +401,12 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   CodeSpaces caller selection passed 459 tests on each platform (8 skips each).
   Shared packaging/sync, version, install-contract, payload-generation, and
   headless-launch checks also passed.
+- Public review additionally closed refusal propagation through early CLI
+  setup, claim-disabled release, best-effort lifecycle catches, and both
+  platform guidance wrappers. The shared scrubber also removes bridge
+  host-auth nonce and routing-table overrides. Follow-up CodeSpaces
+  authorization coverage passed 86 tests on Windows (1 skip) and 87 on POSIX;
+  dispatch/governance remained green at 63/62 passed with 3/4 skips.
 - This is another bounded conversion slice. The inventory remains report-only;
   neither the rest of the Phase 2/6 launcher/lease work nor the parent effort's
   validation is complete.

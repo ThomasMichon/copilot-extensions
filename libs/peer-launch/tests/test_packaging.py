@@ -20,14 +20,24 @@ def test_all_packaged_launchers_and_validators_match():
         assert (package / "_installation_context.py").read_bytes() == primitive.read_bytes()
 
 
+def _import_roots(source: str) -> set[str]:
+    roots = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            roots.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            roots.add(node.module.split(".")[0])
+    return roots
+
+
 def test_launcher_has_no_runtime_dependency():
     source = ROOT / "libs" / "peer-launch" / "peer_launch.py"
-    imports = {
-        node.module.split(".")[0]
-        for node in ast.walk(ast.parse(source.read_text(encoding="utf-8")))
-        if isinstance(node, ast.ImportFrom) and node.module
-    }
-    assert imports <= {"__future__", "pathlib", "types", "typing"}
+    assert _import_roots(source.read_text(encoding="utf-8")) <= sys.stdlib_module_names
+
+
+def test_dependency_guard_sees_both_import_forms():
+    for source in ("import agent_procutil", "from agent_worktrees import cli"):
+        assert _import_roots(source) - sys.stdlib_module_names
 
 
 def test_sync_tool_registers_both_packaged_primitives():

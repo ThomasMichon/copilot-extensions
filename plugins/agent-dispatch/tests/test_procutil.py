@@ -323,6 +323,7 @@ def test_namespaced_sibling_resolution_stays_in_active_marketplace_cell(
             "AGENT_BRIDGE_PAYLOAD_ROOT", "AGENT_BRIDGE_BASE_URL", "PYTHONPATH", "PYTHONHOME",
             "AGENT_DISPATCH_TOKEN", "AGENT_DISPATCH_CONTROL_TOKEN", "AGENT_DISPATCH_URL",
             "AGENT_CODESPACES_TOKEN", "GH_TOKEN", "GITHUB_TOKEN",
+            "AGENT_BRIDGE_SESSION_HOST_NONCE", "AGENT_BRIDGE_NO_ROUTING_TABLE",
         ):
             monkeypatch.setenv(name, str(tmp_path / "foreign"))
         if owner == "agent-codespaces":
@@ -354,6 +355,7 @@ def test_namespaced_sibling_resolution_stays_in_active_marketplace_cell(
             "AGENT_BRIDGE_BASE_URL", "AGENT_DISPATCH_TOKEN",
             "AGENT_DISPATCH_CONTROL_TOKEN", "AGENT_DISPATCH_URL",
             "AGENT_CODESPACES_HOME", "AGENT_CODESPACES_TOKEN", "GH_TOKEN", "GITHUB_TOKEN",
+            "AGENT_BRIDGE_SESSION_HOST_NONCE", "AGENT_BRIDGE_NO_ROUTING_TABLE",
         }
         assert os.environ["COPILOT_EXTENSIONS_CONTEXT"] == str(own_root / "install.json")
         if os.name != "nt":
@@ -376,6 +378,10 @@ def test_codespaces_peer_refusals_are_not_optional_absence(tmp_path, monkeypatch
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own))
     # Valid owner with no peer at all is the sole installation absence case.
     assert adapter.run("get", "owner-ref") is None
+    # A source hook has the explicit receipt but need not have runtime-gate env.
+    monkeypatch.delenv("AGENT_CODESPACES_HOME")
+    assert adapter.run("get", "owner-ref") is None
+    monkeypatch.setenv("AGENT_CODESPACES_HOME", str(own.parent))
     owner_activation = own.with_name("installation-activation.json")
     original_activation = owner_activation.read_bytes()
     try:

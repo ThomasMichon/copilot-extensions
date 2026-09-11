@@ -560,6 +560,8 @@ def stop_codespace(name: str, account: str | None = None) -> bool:
                     log.info("CodeSpace %s already Shutdown; nothing to stop", name)
                     return False
                 break
+    except ContextRefused:
+        raise
     except RuntimeError:
         # Can't list (auth/network) -- fall through and let `gh` decide.
         pass
@@ -603,6 +605,8 @@ def cleanup_stale(
     # Get live codespace names
     try:
         live = list_codespaces()
+    except ContextRefused:
+        raise
     except RuntimeError:
         log.warning("Cannot list codespaces; skipping cleanup")
         return {"ssh_configs": [], "sockets": []}

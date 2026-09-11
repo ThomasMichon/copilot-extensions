@@ -67,7 +67,11 @@ def _aw(*args: str, cwd: str | None = None) -> str | None:
         from agent_codespaces import worktrees
 
         proc = worktrees.run(*args, cwd=cwd, timeout=20)
-        return proc.stdout if proc is not None and proc.returncode == 0 else None
+        if proc is not None and proc.returncode != 0:
+            raise worktrees.ContextRefused(
+                proc.stderr.strip() or f"Same-cell map command exited {proc.returncode}"
+            )
+        return proc.stdout if proc is not None else None
     exe = _aw_binstub()
     if not exe:
         return None

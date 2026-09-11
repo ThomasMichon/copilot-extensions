@@ -1,6 +1,7 @@
 """Same-cell worktrees adapter; legacy selection stays with each caller."""
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -20,12 +21,17 @@ def validate_context() -> dict[str, Any] | None:
     """Validate even when a caller's explicit argument bypasses peer lookup."""
     if not explicit_context():
         return None
-    raw_root = os.environ.get("AGENT_CODESPACES_HOME", "")
-    if not raw_root:
-        raise ContextRefused("Explicit CodeSpaces context requires AGENT_CODESPACES_HOME")
-    root = Path(raw_root)
     try:
-        return validate_owner("agent-codespaces", root, os.environ["COPILOT_EXTENSIONS_CONTEXT"])
+        context = os.environ["COPILOT_EXTENSIONS_CONTEXT"]
+        raw_root = os.environ.get("AGENT_CODESPACES_HOME", "")
+        if raw_root:
+            root = Path(raw_root)
+        else:
+            pointer = json.loads(context).get("installReceipt") if context.lstrip().startswith("{") else context
+            if not isinstance(pointer, str) or not pointer:
+                raise ValueError("Explicit context must name its installation receipt")
+            root = Path(pointer).expanduser().parent
+        return validate_owner("agent-codespaces", root, context)
     except (OSError, ValueError, ImportError) as error:
         raise ContextRefused(f"CodeSpaces installation context refused: {error}") from error
 

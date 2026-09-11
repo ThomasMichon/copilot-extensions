@@ -28,10 +28,16 @@ Namespaced account lookups bypass legacy caches so switching cells or changing
 receipts cannot reuse another cell's results. Its coordination preflight
 distinguishes context refusal from an absent peer or a positively identified
 older peer lacking the optional readiness command.
+Claim, release-claim, and SSH CLI admission preserve context refusal as exit 78,
+including early setup and claim-disabled paths. Lifecycle best-effort catches
+must not turn context refusal into an ambient provider operation. Source hooks
+can derive their owner root from the validated explicit receipt without relying
+on a runtime-gate environment variable.
 Source hooks propagate explicit refusals as diagnostic failures. A rejected map
 probe stops the session-guidance writer before other producers or any file
 mutation; existing guidance is preserved rather than replaced with a success-shaped
 empty result.
+Both platform hook wrappers preserve the writer's explicit refusal status.
 
 ## Validation
 

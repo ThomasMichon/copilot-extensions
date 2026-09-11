@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import functools
 import json
 import logging
 import os
@@ -35,6 +36,7 @@ from typing import TYPE_CHECKING
 
 from . import pool as pool_mod
 from . import relay_launch
+from .worktrees import ContextRefused, validate_context
 from .codespace_config import CodespaceSource
 from .config import (
     CANONICAL_CONFIG_REL,
@@ -83,6 +85,21 @@ _SSH_BOOT_TIMEOUT = float(os.environ.get("AGENT_CODESPACES_BOOT_TIMEOUT", "180")
 # generic failures (1) and the --remote-cmd timeout (124) so callers can react.
 _BUSY_EXIT = 75
 _COORDINATION_EXIT = 78
+
+
+def _context_admitted(
+    command: Callable[[argparse.Namespace], int],
+) -> Callable[[argparse.Namespace], int]:
+    @functools.wraps(command)
+    def run(args: argparse.Namespace) -> int:
+        try:
+            validate_context()
+            return command(args)
+        except ContextRefused as error:
+            print(f"[BLOCKED] CodeSpace installation context refused: {error}", file=sys.stderr)
+            return _COORDINATION_EXIT
+
+    return run
 
 # Exit code when the host cannot mint an ADO REST bearer and enforcement is on
 # (credentials.enforce_ado_rest_login) -- the connect aborts cleanly rather than
@@ -862,6 +879,9 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_config_migrate()
         if args.command == "owner":
             return _cmd_owner(args)
+    except ContextRefused as error:
+        print(f"[BLOCKED] CodeSpace installation context refused: {error}", file=sys.stderr)
+        return _COORDINATION_EXIT
     except RuntimeError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
@@ -990,6 +1010,7 @@ async def _preflight_copilot_platform(manager, name: str) -> None:  # noqa: ANN0
         )
 
 
+@_context_admitted
 def _cmd_ssh(args: argparse.Namespace) -> int:
     """SSH into a CodeSpace using ssh-manager."""
     from ssh_manager import ConnectionManager, TargetBusyError, TargetLock
@@ -3876,6 +3897,7 @@ def _cmd_leases() -> int:
     return 0
 
 
+@_context_admitted
 def _cmd_claim(args: argparse.Namespace) -> int:
     """Acquire an exclusive worktree-keyed claim on a CodeSpace (#897).
 
@@ -3950,6 +3972,7 @@ def _cmd_claim(args: argparse.Namespace) -> int:
     return 0
 
 
+@_context_admitted
 def _cmd_release_claim(args: argparse.Namespace) -> int:
     """Release this worktree's exclusive claim on a CodeSpace (#897)."""
     from .lease import release_claim, resolve_owner_worktree
