@@ -137,6 +137,16 @@ jobs:
         run: >-
           python tools/check-trusted-ci.py &&
           python -m pytest -q tools/test_check_trusted_ci.py
+      - name: Feed neutrality (no hardcoded public package-feed pins)
+        # No config/Dockerfile/install-script/CI-workflow file may hardcode a
+        # public package-feed URL (pypi.org, registry.npmjs.org,
+        # download.pytorch.org, ...) as the only usable endpoint -- this repo
+        # runs on machines whose default feed is network-blocked and replaced
+        # with an internal mirror. See #2389 / tools/clean-room's
+        # --block-public-feeds mode, which reproduces that condition.
+        run: >-
+          python tools/check-feed-neutrality.py &&
+          python -m pytest -q tools/test_check_feed_neutrality.py
       - name: Asyncio timeout handlers (Python 3.10 daemon)
         # The agent-bridge daemon venv is pinned to Python 3.10 (uv venv
         # --python 3.10), where asyncio.wait_for raises asyncio.TimeoutError --

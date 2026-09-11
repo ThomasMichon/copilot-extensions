@@ -319,7 +319,7 @@ function Invoke-Build {
     Write-Host "== building $Image image ($BaseTag) from $Dockerfile ==" -ForegroundColor Cyan
     # No host-config auto-forward: pass a feed ONLY when explicitly requested
     # (installs the Copilot CLI prereq on a governed box). Public by default.
-    $reg = if ($NpmRegistry) { $NpmRegistry } elseif ($env:CR_NPM_REGISTRY) { $env:CR_NPM_REGISTRY } else { 'https://registry.npmjs.org/' }
+    $reg = if ($NpmRegistry) { $NpmRegistry } elseif ($env:CR_NPM_REGISTRY) { $env:CR_NPM_REGISTRY } else { 'https://registry.npmjs.org/' }  # feed-guard: allow real -NpmRegistry/CR_NPM_REGISTRY override precedes this default
     Write-Host "   npm registry (build-time, Copilot install only): $reg" -ForegroundColor DarkGray
     docker build --build-arg "NPM_REGISTRY=$reg" -f (Join-Path $Here $Dockerfile) -t $BaseTag $Here
     if ($LASTEXITCODE -ne 0) {

@@ -518,10 +518,13 @@ The repo ships git hooks under `tools/hooks/`:
   (the [install contract](docs/install-contract.md)),
   `tools/check-no-internal-identifiers.py`, `tools/check-vendored-libs-sync.py`,
   `tools/check-headless-launch.py`, `tools/check-skills.py`,
-  `tools/check-docs-consistency.py`, `tools/check-runbook-references.py`, and
+  `tools/check-docs-consistency.py`, `tools/check-runbook-references.py`,
   `tools/check-version-consistency.py` (every plugin's version identical across
   `plugin.json` / `pyproject.toml` / its `marketplace.json` entry — a one-file
-  bump wedges the Picker's update indicator).
+  bump wedges the Picker's update indicator), and `tools/check-feed-neutrality.py`
+  (no config/Dockerfile/install-script/CI-workflow file may hardcode a public
+  package-feed URL as the only usable endpoint — this repo runs on machines
+  whose default feed is network-blocked and replaced with an internal mirror).
 
 CI also runs `tools/check-marketplace-isolation.py` in report-only mode. It
 inventories legacy unqualified runtime roots, generic global plugin commands,
