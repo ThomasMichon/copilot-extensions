@@ -609,12 +609,22 @@ def parse_agent_names(out: str | None) -> set[str] | None:
     }
 
 
-def registered_agents(*, timeout: float = 8.0) -> list[dict] | None:
+def registered_agents(*, timeout: float = 20.0) -> list[dict] | None:
     """Best-effort agent records from the **local** agent-bridge.
 
     Returns ``None`` (indeterminate) whenever the registry can't be read -- the
     bridge CLI is absent, the command exits non-zero, times out, or emits
     unparseable output. Never raises.
+
+    ``timeout`` defaults generously (20s, was 8s): ``agent-bridge agents``
+    enumerates every registered namespace provider (e.g. CodeSpaces across
+    mapped GitHub accounts, or Docker containers), and even with agent-bridge's
+    own short-TTL namespace-list cache warm, a cold cache or a provider having
+    a genuinely slow moment can still take several seconds. A too-tight
+    timeout here silently degrades a real registry read to "indeterminate",
+    which upstream callers may then dead-letter a spawn reservation on -- this
+    is defense-in-depth headroom, not a substitute for the bridge-side caching
+    fix.
     """
     exe = _agent_bridge_launch_prefix()
     if exe is None:
@@ -632,7 +642,7 @@ def registered_agents(*, timeout: float = 8.0) -> list[dict] | None:
     return parse_agents(proc.stdout)
 
 
-def registered_agent_names(*, timeout: float = 8.0) -> set[str] | None:
+def registered_agent_names(*, timeout: float = 20.0) -> set[str] | None:
     """Best-effort set of names registered with the local agent-bridge."""
     rows = registered_agents(timeout=timeout)
     if rows is None:
@@ -647,7 +657,7 @@ def registered_agent_names(*, timeout: float = 8.0) -> set[str] | None:
 def registered_agent_project(
     agent: str,
     *,
-    timeout: float = 8.0,
+    timeout: float = 20.0,
     strict: bool = False,
 ) -> str | None:
     """Return a registered local agent's explicit project, when available."""
@@ -670,7 +680,7 @@ def preflight_headless_agent(
     agent: str,
     *,
     pool: Sequence[str] | None = None,
-    local_timeout: float = 8.0,
+    local_timeout: float = 20.0,
     remote_timeout: float = 15.0,
 ) -> list[str]:
     """Best-effort check that ``agent`` is a registered agent-bridge agent on the
