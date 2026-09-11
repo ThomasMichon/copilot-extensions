@@ -79,6 +79,7 @@ async def test_stop_suppresses_repeated_recovery_and_restart(
     ctx.attach.assert_awaited_once()
 
     await ctx.manager.stop_session(ctx.session.session_id)
+    assert ctx.manager._host_index.get(ctx.session.session_id).resume_on_reattach is False
     ctx.attach.reset_mock()
     ctx.available.reset_mock()
     for _ in range(3):
@@ -226,3 +227,64 @@ async def test_cancelled_startup_releases_authority_recovery_locks(context):
     assert not ctx.session._lifecycle_lock.locked()
     await asyncio.wait_for(ctx.manager.stop_session(ctx.session.session_id), 1)
     ctx.spawner.recover_record.assert_not_awaited()
+
+
+@pytest.mark.parametrize("kind", ["missing", "dead", "child_exit"])
+async def test_stop_serializes_destructive_recovery_settlement(
+    context, monkeypatch, kind,
+):
+    from agent_bridge.session_host.spawner import RemoteHostDeadError
+
+    ctx = context
+    entered, release = asyncio.Event(), asyncio.Event()
+    settled = []
+
+    async def blocked(*_args):
+        entered.set()
+        await release.wait()
+        assert ctx.session._lifecycle_lock.locked()
+        settled.append(kind)
+
+    if kind == "child_exit":
+        ctx.session.client = SimpleNamespace(
+            host_child_exit_code=0, shutdown=blocked,
+        )
+        monkeypatch.setattr(
+            ctx.manager, "_reap_host_record",
+            lambda *_args: ctx.manager._host_index.remove(ctx.session.session_id),
+        )
+        operation = ctx.manager.recover_disconnected_hosts()
+    else:
+        if kind == "dead":
+            ctx.spawner.recover_record.side_effect = RemoteHostDeadError("child exited")
+        else:
+            ctx.spawner.recover_record.return_value = None
+        monkeypatch.setattr(ctx.manager, "_drop_forward", blocked)
+        operation = ctx.manager.reattach_session_hosts()
+    recovery = asyncio.create_task(operation)
+    await asyncio.wait_for(entered.wait(), 1)
+    stop = asyncio.create_task(ctx.manager.stop_session(ctx.session.session_id))
+    await asyncio.sleep(0)
+    assert not stop.done()
+    release.set()
+    await asyncio.wait_for(asyncio.gather(recovery, stop), 2)
+    assert settled == [kind]
+    assert ctx.session.status == SessionStatus.STOPPED
+    assert ctx.manager._host_index.get(ctx.session.session_id) is None
+    ctx.factory.reset_mock()
+    for _ in range(2):
+        assert await ctx.manager.reattach_session_hosts() == 0
+        assert await ctx.manager.recover_disconnected_hosts() == 0
+    ctx.factory.assert_not_called()
+    assert settled == [kind]
+
+
+@pytest.mark.parametrize("for_restart", [False, True])
+async def test_stop_clears_redeploy_nudge_only_for_ordinary_stop(context, for_restart):
+    ctx = context
+    ctx.manager._host_index.set_resume_flag(ctx.session.session_id, True)
+    await ctx.manager.stop_session(ctx.session.session_id, for_restart=for_restart)
+    assert (
+        ctx.manager._host_index.get(ctx.session.session_id).resume_on_reattach
+        is for_restart
+    )
