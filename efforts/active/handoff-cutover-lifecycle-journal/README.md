@@ -39,6 +39,22 @@ operator explicitly declined remediation of the live case study worktree.
 Phase 4 stays in this doc as the root-cause *evidence* (already gathered) and
 as forward-looking fix items, but execution priority is Phases 1-3 first.
 
+**Explicit scope decision (2026-09-11, round 2):** the 13-stage trace in this
+effort covers the **mux/CLI resident-status-monitor cutover path** —
+`sessions.mux_new_session()`/`mux_new_window()`, `cmd_register_session`'s
+`sessionStart`/`sessionEnd` binding, and `_monitor_pending_handoff_request()`'s
+claim/spawn/retire flow. **agent-bridge's independent spawn path**
+(`agent-bridge handoff-request` → `SessionManager.handoff_session()`, which
+can create an ACP successor that bypasses the mux `sessionStart`/`sessionEnd`
+hooks entirely and has no participation in the resident monitor's
+exclusive-create claim file) is real, documented in Context below as a thing
+`trigger_handoff` can also wake, but instrumenting *it* to the same 13-stage
+model — including a cross-runner atomic claim between two independently
+owned processes — is **out of scope for this effort** and left as a named,
+deferred follow-on (see Phase 2's closing note). This keeps the schema,
+ordering, and validation plan coherent for one well-understood runner instead
+of speculatively designing for both at once.
+
 ## Participants
 
 Single local agent, no dispatch/coordination topology needed.
@@ -165,10 +181,14 @@ renumbering from the "acknowledges handoff" step onward.)
       `session_id` — **nullable**, since Stage 1 (`worktree_created`) fires
       before any Copilot session exists (the existing event already has no
       session id; pre-session correlation uses `worktree_id` + `launch_id`
-      alone) — `handoff_token` (when applicable),
-      `predecessor_session_id` / `successor_session_id` (the linked-list
-      pointers — null until known), `ts`, `source` (which component emitted
-      it: agent-worktrees / context-handoff / hook / agent-bridge).
+      alone) — `launch_id` (or an equivalent attempt id; **required and
+      nullable**: stages 1-3 all occur before `sessionStart` binding, and the
+      launcher already carries `launch_id` end to end, so it is the only
+      correlation key that can distinguish concurrent/retried launch attempts
+      on the same worktree before a session id exists), `handoff_token` (when
+      applicable), `predecessor_session_id` / `successor_session_id` (the
+      linked-list pointers — null until known), `ts`, `source` (which
+      component emitted it: agent-worktrees / context-handoff / hook).
 - [ ] Give the spawn stage (8) an explicit **start** event
       (`handoff_successor_spawn_started`, emitted before success is known)
       *and* a terminal **result** event/field
@@ -185,12 +205,15 @@ renumbering from the "acknowledges handoff" step onward.)
 ### Phase 2 — Instrument all 13 stages
 - [ ] Stage 1 (`worktree_created`) — confirm `cmd_create` already emits this
       with no gaps; add `predecessor_session_id: null` framing.
-- [ ] Stage 2 (`mux_session_assigned`) — emit **after** the mux subprocess
-      call actually succeeds, from `mux_new_session()` / `mux_new_window()`
-      themselves (not from `build_mux_new_window_argv()`, which only
-      constructs an argv and has no knowledge of whether the mux accepted
-      it — emitting there would either record false success or miss real
-      failures). Applies to ordinary launch, not just cutover.
+- [ ] Stage 2 (`mux_session_assigned`) — **ordinary launches don't go through
+      the Python `sessions.py` helpers at all**: `bin/launch-session.sh` /
+      `.ps1` invoke `tmux`/`psmux new-session` directly and already emit
+      `mux_attached` after success. Emit stage 2 from that existing
+      launcher creation/join boundary for the ordinary-launch path, and
+      additionally from `mux_new_session()` / `mux_new_window()` (after the
+      mux subprocess call succeeds, not from the pure argv-builder
+      `build_mux_new_window_argv()`) for the programmatic cutover path — both
+      emitters, not one instead of the other.
 - [ ] Stage 3 (`copilot_invoked`) — emit from the launcher/pane-wrapper right
       before exec'ing the `copilot` binary (both `.sh` and `.ps1`).
 - [ ] Stage 4 (`session_start_bound`) — emit from `cmd_register_session` once
@@ -203,45 +226,38 @@ renumbering from the "acknowledges handoff" step onward.)
 - [ ] Stage 6 (`handoff_triggered`) — covered by context-handoff's existing
       `handoff_requested` wire event; add the `stage`/`stage_name` fields to
       it in place rather than introducing a second event name.
-- [ ] Stage 7 (`handoff_host_acknowledged`) — carries a **`runner`** field
-      (`status-monitor` | `agent-bridge`) identifying which of the two
-      independent runners (see Context) actually accepted the baton, so a
-      duplicate/parallel acknowledgement from the other runner is
-      distinguishable rather than merged into one ambiguous stage-7 event.
-      Emitted by whichever runner first takes the pending handoff; the loser
-      of a race logs its own attempt with an explicit
-      `outcome: "already-acknowledged"` rather than silently doing nothing.
+- [ ] Stage 7 (`handoff_host_acknowledged`) — new: emit when the resident
+      status monitor's `_monitor_pending_handoff_request()` first observes and
+      accepts the pending handoff, distinct from the later claim. (Per the
+      scope decision above, this covers the resident-monitor runner only —
+      agent-bridge's independent `handoff-request` route is documented in
+      Context as a real alternate path but is explicitly out of scope for
+      this effort's instrumentation; see the deferred follow-on note below.)
 - [ ] Stage 8 (`handoff_successor_spawn_started`) — emit at the start of
-      `_handoff_cutover_spawn_result` / `mux_new_window` **or** agent-bridge's
-      `SessionManager.handoff_session()` (whichever runner won stage 7),
-      before success is known, so a spawn that later fails still leaves a
-      trace.
+      `_handoff_cutover_spawn_result` / `mux_new_window`, before success is
+      known, so a spawn that later fails still leaves a trace.
 - [ ] Stage 9 (`handoff_successor_session_start_bound`) — emit from the
       successor's own `cmd_register_session` when it recognizes the
       `--handoff-candidate-token` and calls `associate_handoff_candidate`.
 - [ ] Stage 10 (`handoff_successor_claimed`) — **must be emitted at the point
-      the tracking record's head is authoritatively transferred**, not solely
-      from `consume_handoff`: today's monitor flow
-      (`_monitor_trigger_handoff_cutover`) retires the predecessor right after
-      candidate association (stage 9), *before* `consume_handoff` ever runs in
-      the successor — `consume_handoff` itself only marks the baton consumed
-      and never calls `tracking.link_handoff()` or moves the head. Emitting
-      stage 10 only from `consume_handoff` would let stage 11 (predecessor
-      retire) land before stage 10 in the trace, violating the ordered
-      sequence. Define stage 10 at whichever event is actually authoritative
-      for the head transfer (the monitor's candidate-association/claim point,
-      via `tracking.link_handoff()`), and log the successor's
-      `consume_handoff` call as a *separate*, later "baton delivery consumed"
-      event rather than conflating the two.
-- [ ] Stage 11 (`handoff_pickup_confirmed_predecessor_closing`) — emit at the
-      **same authoritative head-transfer point as stage 10** (immediately
-      after it, same code path), since today's monitor retires the
-      predecessor right after candidate association — not from a later,
-      separate "runner acts on the successor's claim" event that may not
-      exist in the current flow. If a future change makes retirement wait for
-      the successor's explicit `consume_handoff` acknowledgement, stage 11
-      moves with it; until then, stage 10 and 11 are adjacent, not
-      independently timed.
+      the tracking record's head is authoritatively transferred**, not from
+      `associate_handoff_candidate()` (which only records a candidate without
+      takeover) and not from `consume_handoff` (which never calls
+      `tracking.link_handoff()` and can run after the predecessor is already
+      retired). The actual head-transfer point is wherever
+      `tracking.link_handoff()` is invoked in the monitor's flow — **locate
+      that exact call site as a Phase 2 task** (it is not
+      `associate_handoff_candidate()`, and today's retire timing suggests it
+      happens close to, but must be verified against, the monitor's
+      claim/retire sequence) and instrument stage 10 there, not at candidate
+      association. Log the successor's later `consume_handoff` call as a
+      *separate* "baton delivery consumed" event, not conflated with stage 10.
+- [ ] Stage 11 (`handoff_pickup_confirmed_predecessor_closing`) — emit
+      immediately after the same `tracking.link_handoff()` call site used for
+      stage 10 (today's monitor retires the predecessor right after the head
+      transfers, not after a separate later successor acknowledgement) — keep
+      10 and 11 adjacent in the same code path until/unless a future change
+      makes retirement wait for an explicit `consume_handoff` acknowledgement.
 - [ ] Stage 12 (`session_end_bound`) — a `sessionEnd` hook and its
       `session_ended` deregistration event **already exist**; extend that
       existing path to also emit `session_end_bound` with the stage/linkage
@@ -249,6 +265,17 @@ renumbering from the "acknowledges handoff" step onward.)
       second, duplicate hook path.
 - [ ] Stage 13 (`handoff_complete`) — emit once the runner has confirmed the
       predecessor pane is gone and the successor is head.
+
+> **Deferred follow-on (explicitly out of scope here):** instrumenting
+> agent-bridge's `SessionManager.handoff_session()` spawn path to the same
+> 13-stage model. That path can produce an ACP successor that bypasses the
+> mux `sessionStart`/`sessionEnd` hooks entirely (so stages 4, 9, 12, 13 as
+> defined above don't apply to it as written) and does not participate in the
+> resident monitor's exclusive-create claim file (so stage 7 has no built-in
+> cross-runner arbitration against it). A follow-on effort should define
+> runner-specific emitters and completion predicates for the bridge/ACP path,
+> or explicitly scope the 13-stage trace to mux/CLI handoffs in the
+> user-facing docs (Phase 5) until that follow-on lands.
 
 ### Phase 3 — Cross-linking (the "linked list") + durable persistence
 - [ ] When the successor's `session_start_bound` (stage 9) fires, stamp its
@@ -273,7 +300,13 @@ renumbering from the "acknowledges handoff" step onward.)
       from the rolling-window rotation, or an equivalent unrotated sink) that
       every stage's emitter writes to in addition to `activity.jsonl` and the
       session-state files, and treat *that* store — not `activity.jsonl` — as
-      the archival source of truth.
+      the archival source of truth. **This sink is written concurrently by
+      multiple independent processes** (the Python CLI, the hook client, the
+      status monitor, context-handoff's Node process) — specify its write
+      contract explicitly (append-only, `O_APPEND`-atomic single-`write()`
+      per JSON line, one file per worktree to bound the contention surface,
+      no read-modify-write) and cover it with a concurrent-writer race test
+      in the Validation Plan, not just a single-writer happy path.
 - [ ] Write/append the full per-stage trace into **both**:
       `~/.copilot/session-state/<predecessor-sid>/handoff-trace.jsonl` and
       `~/.copilot/session-state/<successor-sid>/handoff-trace.jsonl` — each
@@ -354,10 +387,15 @@ renumbering from the "acknowledges handoff" step onward.)
 - [ ] Unit/integration tests per plugin (existing test layout — see
       `plugins/agent-worktrees/tests/`, `plugins/context-handoff/tests/`)
       asserting each of the 13 events fires with the right fields on a
-      successful cutover.
+      successful cutover, scoped to the mux/CLI resident-monitor path (see
+      Phase 2's deferred-follow-on note for agent-bridge coverage).
 - [ ] A test that intentionally kills the spawn step and asserts
       `handoff-trace` shows stages 1-7 present and 8+ absent (proves the tool
       surfaces partial traces usefully, not just full ones).
+- [ ] A concurrent-writer race test against the durable per-worktree trace
+      store (Phase 3): multiple simulated emitters (Python + a stand-in for
+      the Node context-handoff process) appending in parallel produce no
+      interleaved/corrupted lines and no dropped events.
 - [ ] A live reproduction on this machine: trigger a real handoff on a
       disposable worktree, run `agent-worktrees handoff-trace`, confirm a
       complete 13-stage trace exists in both the predecessor's and successor's
