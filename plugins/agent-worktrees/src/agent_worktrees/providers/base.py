@@ -303,27 +303,26 @@ class PRProvider(Protocol):
         """
         ...
 
-    def get_viewer_permission(
-        self, repo: str, *, api_base: str = "", token: str | None = None,
-    ) -> str | None:
-        """What permission level does the authenticated caller hold on ``repo``?
+    def ensure_fork(
+        self, repo: str, *, token: str | None = None,
+    ) -> tuple[str, str] | None:
+        """Ensure the caller has a personal fork of ``repo``; return
+        ``(owner, clone_url)`` on success, or ``None`` on any failure.
 
-        The role-aware PR flow's resolution primitive (see
-        ``efforts/active/role-aware-fork-pr-flow`` in copilot-extensions):
-        ``create-pr``/``pr-merge`` use this to pick a ``PRRoleOverride`` from
-        the repo's ``pr.roles`` config, so a Contributor and a Maintainer on
-        the same repo config can get different flows automatically.
+        The role-aware fork-PR flow's fork-bootstrap primitive (see
+        ``efforts/active/role-aware-fork-pr-flow``): idempotent -- calling it
+        when a fork already exists returns that fork's ``(owner, clone_url)``
+        unchanged, never creates a duplicate. ``create-pr`` uses the returned
+        ``clone_url`` to point a local git remote at the fork (see
+        ``git_ops.ensure_remote``) and the returned ``owner`` to build the
+        ``<owner>:<branch>`` PR head.
 
-        - **github** reads ``gh api repos/<repo>`` and returns one of
-          ``config.GITHUB_ROLE_LEVELS`` (``read`` | ``triage`` | ``write`` |
-          ``maintain`` | ``admin``), derived from the response's ``role_name``
-          field (or, if absent, the legacy ``permissions`` booleans).
-        - other providers are unsupported (return ``None``).
+        - **github** creates (or reads) the fork via the REST API.
+        - other providers are unsupported (return ``None``) -- fork-mode is
+          GitHub-only today.
 
-        Returns ``None`` on any failure (no token, API error, unsupported
-        provider, or a repo the caller can't see at all) -- callers must treat
-        that as "flow unknown," not as a specific role, and fall back to the
-        repo's base (non-role-scoped) ``PRConfig``.
+        Never raises: an unsupported provider, a failed API call, or a
+        malformed response all collapse to ``None``.
         """
         ...
 
@@ -619,13 +618,19 @@ def scope_from_create_result(
 
     ``labels`` are templated with ``{machine}`` so a config entry like
     ``source:{machine}`` becomes ``source:anomalous-potato``.
+
+    ``head`` prefers ``result["pr_head"]`` (an explicit ``<owner>:<branch>``
+    head -- the role-aware fork-PR flow's publish step sets this when the
+    branch was pushed to the caller's fork rather than the repo itself) over
+    the plain ``result["branch"]``. Absent/empty ``pr_head`` falls back to
+    ``branch`` unchanged -- today's behavior for every non-fork repo.
     """
     labels = tuple(
         lbl.replace("{machine}", machine) for lbl in (getattr(prcfg, "labels", ()) or ())
     )
     return PRScope(
         repo=str(result.get("repo", "")),
-        head=str(result.get("branch", "")),
+        head=str(result.get("pr_head") or result.get("branch", "")),
         base=str(result.get("default_branch", "")),
         title=title,
         body=body,

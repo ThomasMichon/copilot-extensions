@@ -415,6 +415,17 @@ in-repo overlay (below); the in-repo version wins when both are present.
 | `delete_source_branch` | bool | `true` | Auto-complete completion option (Azure DevOps): delete the source branch on merge. |
 | `bypass_policy` | bool | `false` | Complete the PR **past** branch policies when requesting auto-complete (Azure DevOps). Needed for a default branch whose policy never auto-satisfies for our own PRs (e.g. a central governance **status** policy). Only set true where we are authorized to self-complete. |
 | `bypass_reason` | string | *(empty)* | Reason recorded on the policy bypass. |
+| `fork` | object | *(disabled)* | Role-aware fork-PR flow (see `efforts/active/role-aware-fork-pr-flow`, GitHub-only). `{enabled, remote, owner}` — repo-wide default for whether `create-pr` publishes through a personal fork instead of a direct push. `enabled` (bool, default `false`); `remote` (string, default `"fork"`) — the local git remote name pointed at the fork; `owner` (string, default `""`) — override the fork-owner login used to build the `<owner>:<branch>` PR head (default: whoever the resolved token belongs to). Disabled by default — an unconfigured repo's push/PR flow is unchanged. |
+| `roles` | map | `{}` | Per-**live-permission-level** overrides layered onto this `PRConfig`, keyed by one of `read` / `triage` / `write` / `maintain` / `admin` (GitHub's own `role_name` vocabulary — the same one the GitHub Inside Microsoft ACL policy's `role:` field uses). Each entry may set any of `reviewer`, `review_blocking`, `self_approve`, `merge_actor`, `fork` — omitted fields inherit the base `PRConfig` unchanged. `create-pr`/`pr-merge` resolve the caller's live GitHub permission on the repo (reusing `pr-merge --now`'s existing live-permission read, #2433) and layer the matching role's overrides before doing anything else. Empty (the default) means every caller gets the same flow — today's behavior. Example: a `write`-permission "Contributor" role clears `merge_actor` and turns on `fork`, while a `maintain`-permission "Maintainer" role keeps the repo's direct-push `submitter-direct` flow. |
+
+> **`pr.fork`/`pr.roles` confirmation gate.** When the resolved flow for a
+> `create-pr` call needs a fork, it does **not** silently fork anything or
+> push to an unexpected remote on the caller's first try. It returns
+> `needs_confirmation: "fork_setup"` with a human-readable `message` — the
+> calling agent relays this to the user, then re-runs `create-pr
+> --confirm-fork` (or `confirm_fork=True`) once they agree. Only that
+> confirmed call creates/verifies the fork (idempotent — a caller who already
+> has one is untouched) and points the local `fork` remote at it.
 
 > **"Request auto-complete" is the first-class concept; the label is an
 > implementation detail.** `pr-merge` asks the provider to *auto-complete* the

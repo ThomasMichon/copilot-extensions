@@ -538,6 +538,13 @@ class GiteaProvider:
             return len(commits) == 0
         return None
 
+    def ensure_fork(
+        self, repo: str, *, token: str | None = None,
+    ) -> tuple[str, str] | None:
+        """Not implemented: fork-mode publishing is GitHub-only today."""
+        _ = (repo, token)
+        return None
+
     def get_snapshot(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
     ) -> PRSnapshot:
@@ -834,13 +841,6 @@ class GiteaProvider:
             delete_branch_on_merge=_b("default_delete_branch_after_merge"),
             viewer_permission=_gitea_viewer_permission(data.get("permissions")),
         )
-
-    def get_viewer_permission(
-        self, repo: str, *, api_base: str = "", token: str | None = None,
-    ) -> str | None:
-        """Not implemented: role-aware PR flow resolution is GitHub-only today."""
-        _ = (repo, api_base, token)
-        return None
 
     def get_comment_threads(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None

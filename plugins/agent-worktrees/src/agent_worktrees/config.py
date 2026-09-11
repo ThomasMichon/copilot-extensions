@@ -99,13 +99,18 @@ class ProfileAssignmentPolicy:
 # Synthetic default when no profiles are configured.
 DEFAULT_PROFILE = CopilotProfile(name="cloud", label="☁️  Cloud (GitHub)")
 
-# The GitHub REST "get a repository" response's ``role_name`` field (and the
-# legacy ``permissions`` booleans, mapped to the same vocabulary) for the
-# *authenticated caller* on that repo. Ordered lowest -> highest so a resolver
-# can compare/clamp against it. Also matches the role vocabulary the GitHub
-# Inside Microsoft ACL policy uses for its own ``role:`` values (Read/Triage/
-# Write/Maintain -- Admin is never grantable via that ACL).
-GITHUB_ROLE_LEVELS: tuple[str, ...] = ("read", "triage", "write", "maintain", "admin")
+# The vocabulary ``pr_contract.RepoPolicy.viewer_permission`` /
+# ``providers.actor_viewer_permission()`` normalize every provider's live,
+# per-identity permission read to (see #2433's ``actor_merge_authority``).
+# ``"none"`` is a confident no-access read, distinct from an *unresolved* read
+# (empty string / unsupported provider), which callers must treat as unknown,
+# never as this level. Ordered lowest -> highest so a resolver can
+# compare/clamp against it. Excluding ``"none"``, this also matches the role
+# vocabulary the GitHub Inside Microsoft ACL policy uses for its own ``role:``
+# values (Read/Triage/Write/Maintain -- Admin is never grantable via that ACL).
+GITHUB_ROLE_LEVELS: tuple[str, ...] = (
+    "none", "read", "triage", "write", "maintain", "admin",
+)
 
 
 @dataclass(frozen=True)
