@@ -2249,7 +2249,7 @@ def _state_root_config_dir(repo_path: Path) -> Path | None:
         if proc is None:
             return None
     else:
-        exe = shutil.which("agent-worktrees")
+        exe = shutil.which("agent-worktrees")  # marketplace-isolation: allow no-context legacy state-root lookup; explicit context uses worktrees.run
         if not exe:
             return None
         try:

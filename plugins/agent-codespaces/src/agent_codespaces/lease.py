@@ -310,7 +310,7 @@ def _creation_flags() -> int:
 
 
 def _agent_worktrees_bin() -> str | None:
-    return shutil.which("agent-worktrees")
+    return shutil.which("agent-worktrees")  # marketplace-isolation: allow no-context legacy lease lookup; explicit context uses worktrees.run
 
 
 class ClaimConflict(RuntimeError):

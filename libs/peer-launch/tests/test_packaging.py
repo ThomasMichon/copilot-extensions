@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -41,3 +42,28 @@ def test_sync_tool_registers_both_packaged_primitives():
             ROOT / "plugins" / plugin / "src" / plugin.replace("-", "_")
             / "_installation_context.py"
         ) in destinations
+
+
+def test_converted_codespaces_paths_have_no_unexplained_sibling_launches(monkeypatch):
+    spec = importlib.util.spec_from_file_location(
+        "peer_launch_isolation_guard", ROOT / "tools" / "check-marketplace-isolation.py",
+    )
+    guard = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, guard)
+    spec.loader.exec_module(guard)
+    plugin = ROOT / "plugins" / "agent-codespaces"
+    files = [plugin / "scripts" / "emit_codespace_map.py"]
+    files.extend(
+        plugin / "src" / "agent_codespaces" / filename
+        for filename in (
+            "__main__.py", "config.py", "coordination.py", "gh_account.py", "lease.py",
+        )
+    )
+    patterns = guard._command_patterns(ROOT)
+    findings = [
+        finding
+        for path in files
+        for finding in guard._scan_file(path, ROOT, patterns)
+        if finding.category == "path-sibling-launch"
+    ]
+    assert findings == []

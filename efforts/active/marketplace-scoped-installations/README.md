@@ -386,6 +386,10 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   SSH admission, and session-guidance production rather than becoming ambient
   fallback or successful empty guidance writes. No-context behavior remains
   legacy-compatible.
+- Annotated only the seven converted callers' tested no-context PATH branches.
+  A focused scanner regression now requires those source files to have no
+  unexplained sibling-launch findings. This is not a blanket allowance for
+  unexamined inventory entries or declarative readiness metadata.
 - Both owner and peer must pass active receipt and activation/maintenance
   governance. Owner admission occurs before optional-peer absence and explicit
   caller-argument shortcuts, and is rechecked before peer execution. Only a

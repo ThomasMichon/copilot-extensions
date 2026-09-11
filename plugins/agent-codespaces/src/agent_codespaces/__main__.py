@@ -2414,7 +2414,7 @@ def _chdir_to_project(project: str) -> bool:
         if result is None:
             return False
     else:
-        exe = shutil.which("agent-worktrees")
+        exe = shutil.which("agent-worktrees")  # marketplace-isolation: allow no-context legacy project lookup; explicit context uses worktrees.run
         if not exe:
             print(f"WARNING: --project {name}: agent-worktrees not found on PATH; "
                   f"using current directory", file=sys.stderr)
@@ -2909,7 +2909,7 @@ def _account_login_remedy(login: str) -> str:
         else:
             import shutil
             import subprocess as sp
-            aw = shutil.which("agent-worktrees")
+            aw = shutil.which("agent-worktrees")  # marketplace-isolation: allow no-context legacy account lookup; explicit context uses worktrees.run
             r = sp.run([aw, "accounts", "show", login, "--json"],
                        capture_output=True, text=True, timeout=10) if aw else None
         if r is not None:

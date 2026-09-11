@@ -46,7 +46,7 @@ def _aw_binstub() -> str | None:
     ``current-version`` marker (#1106). PATH first, then the conventional
     ``~/.local/bin`` install location.
     """
-    exe = shutil.which("agent-worktrees")
+    exe = shutil.which("agent-worktrees")  # marketplace-isolation: allow no-context legacy map fallback; explicit context uses worktrees.run
     if exe:
         return exe
     local = os.path.join(os.path.expanduser("~"), ".local", "bin")

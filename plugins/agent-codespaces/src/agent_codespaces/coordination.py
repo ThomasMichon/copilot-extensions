@@ -145,7 +145,7 @@ class L2Lease:
 
 
 def _aw() -> str | None:
-    return shutil.which("agent-worktrees")
+    return shutil.which("agent-worktrees")  # marketplace-isolation: allow _run uses this only without explicit installation context
 
 
 def _creationflags() -> int:

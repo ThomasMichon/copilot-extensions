@@ -44,7 +44,7 @@ def _creation_flags() -> int:
 
 def _agent_worktrees_bin() -> str | None:
     """Locate the ``agent-worktrees`` CLI on PATH, or None."""
-    return shutil.which("agent-worktrees")
+    return shutil.which("agent-worktrees")  # marketplace-isolation: allow _lookup uses this only without explicit installation context
 
 
 def account_for_repo(slug: str | None) -> str | None:
