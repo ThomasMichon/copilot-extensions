@@ -2,7 +2,7 @@
 
 - **Slug:** `handoff-cutover-lifecycle-journal`
 - **Repo:** copilot-extensions (plugins/agent-worktrees, plugins/context-handoff)
-- **Branch(es):** `worktree/lambda-core-wsl-20260911-154029-3df3`
+- **Branch(es):** `worktree/<local-agent-worktree-branch>` (private branch name; not public-safe to record verbatim)
 - **Created:** 2026-09-11
 - **Status:** Draft
 - **Umbrella issue:** [#2457](https://github.com/ThomasMichon/copilot-extensions/issues/2457)
@@ -41,8 +41,7 @@ as forward-looking fix items, but execution priority is Phases 1-3 first.
 
 ## Participants
 
-Single-machine, single-agent effort (lambda-core). No dispatch/coordination
-topology needed.
+Single local agent, no dispatch/coordination topology needed.
 
 ## Context
 
@@ -89,7 +88,7 @@ both plugins:
     role calculation) and finally to the session explicitly calling
     `consume_handoff`.
 
-**Net finding:** the 12 stages the operator described map roughly onto real
+**Net finding:** the 13 stages the operator described map roughly onto real
 code, but only ~5 of them (`handoff_requested`, `handoff_cutover_claim`,
 `handoff_cutover_spawn`, `handoff_predecessor_retire`, `session_started`) are
 logged today, none are cross-linked into a single per-worktree trace, and none
@@ -137,22 +136,39 @@ renumbering from the "acknowledges handoff" step onward.)
 ## Plan
 
 ### Phase 1 — Unified event schema + shared emitter
-- [ ] Define one canonical event vocabulary covering all 13 stages:
-      `worktree_created`, `mux_session_assigned`, `copilot_invoked`,
-      `session_start_bound`, `status_reported`, `handoff_triggered`,
-      `handoff_host_acknowledged`, `handoff_successor_spawn_started`,
-      `handoff_successor_session_start_bound`, `handoff_successor_claimed`,
+- [ ] Define one canonical stage vocabulary covering all 13 stages, layered
+      **on top of** existing wire event names rather than replacing them —
+      `handoff_requested` (the resident monitor's pending scan reads this
+      exact event name; renaming it without an atomic producer+consumer
+      update would stop automatic cutovers from being discovered) keeps its
+      name and gains a `stage: 6` / `stage_name: handoff_triggered` pair of
+      fields alongside it. New stages with no existing event
+      (`mux_session_assigned`, `copilot_invoked`, `session_start_bound`,
+      `status_reported`, `handoff_host_acknowledged`,
+      `handoff_successor_spawn_started` + a paired terminal spawn-result
+      event, `handoff_successor_session_start_bound`,
+      `handoff_successor_claimed`,
       `handoff_pickup_confirmed_predecessor_closing`, `session_end_bound`,
-      `handoff_complete`. Reuse existing `activity.py` event names where they
-      already match 1:1; add the missing ones; do not rename existing events
-      relied on elsewhere without an audit of readers (`health.py`,
-      `disposition_history.py`, any docs).
+      `handoff_complete`) are added as new wire names. Do not rename any
+      existing event relied on elsewhere without an audit of readers
+      (`health.py`, `disposition_history.py`, any docs) and an atomic
+      producer+consumer update.
 - [ ] Every event carries: `worktree_id`, `stage` (ordinal + name),
-      `session_id` (the session emitting it), `handoff_token` (when
-      applicable), `predecessor_session_id` / `successor_session_id` (the
-      linked-list pointers — null until known), `ts`, `source` (which
-      component emitted it: agent-worktrees / context-handoff / hook /
-      agent-bridge).
+      `session_id` — **nullable**, since Stage 1 (`worktree_created`) fires
+      before any Copilot session exists (the existing event already has no
+      session id; pre-session correlation uses `worktree_id` + `launch_id`
+      alone) — `handoff_token` (when applicable),
+      `predecessor_session_id` / `successor_session_id` (the linked-list
+      pointers — null until known), `ts`, `source` (which component emitted
+      it: agent-worktrees / context-handoff / hook / agent-bridge).
+- [ ] Give the spawn stage (8) an explicit **start** event
+      (`handoff_successor_spawn_started`, emitted before success is known)
+      *and* a terminal **result** event/field
+      (`handoff_successor_spawn_result: succeeded|failed`, or reuse
+      `handoff_cutover_spawn`'s existing success-only shape plus a new
+      failure-path sibling) — a single one-shot event cannot distinguish "the
+      spawn is still in flight" from "the spawn failed," which the Phase 3/4
+      validation plan (stages 8+ absent on a killed spawn) depends on.
 - [ ] Make `activity.log_event()` (or a new sibling) **not** swallow errors
       silently in a way that's invisible — keep best-effort delivery (never
       block the caller) but surface a debug-level warning/counter so a
@@ -173,9 +189,9 @@ renumbering from the "acknowledges handoff" step onward.)
 - [ ] Stage 5 (`status_reported`) — emit from the `status`/status-report tool
       path when it first runs in a session (marks "Copilot did something in
       this worktree").
-- [ ] Stage 6 (`handoff_triggered`) — already covered by context-handoff's
-      `handoff_requested`; align the name/shape to the new schema instead of
-      duplicating.
+- [ ] Stage 6 (`handoff_triggered`) — covered by context-handoff's existing
+      `handoff_requested` wire event; add the `stage`/`stage_name` fields to
+      it in place rather than introducing a second event name.
 - [ ] Stage 7 (`handoff_host_acknowledged`) — new: emit when the resident
       status monitor (or `agent-bridge handoff-request` receiver) first
       observes and accepts the pending handoff, distinct from the later claim.
@@ -191,27 +207,51 @@ renumbering from the "acknowledges handoff" step onward.)
 - [ ] Stage 11 (`handoff_pickup_confirmed_predecessor_closing`) — emit from
       wherever the runner acts on the successor's claim to begin retiring the
       predecessor (near/alongside `handoff_predecessor_retire`).
-- [ ] Stage 12 (`session_end_bound`) — audit whether a `sessionEnd` hook
-      exists in agent-worktrees/context-handoff today; add one if missing, and
-      emit here.
+- [ ] Stage 12 (`session_end_bound`) — a `sessionEnd` hook and its
+      `session_ended` deregistration event **already exist**; extend that
+      existing path to also emit `session_end_bound` with the stage/linkage
+      fields rather than treating stage 12 as possibly missing or adding a
+      second, duplicate hook path.
 - [ ] Stage 13 (`handoff_complete`) — emit once the runner has confirmed the
       predecessor pane is gone and the successor is head.
 
-### Phase 3 — Cross-linking (the "linked list")
+### Phase 3 — Cross-linking (the "linked list") + durable persistence
 - [ ] When the successor's `session_start_bound` (stage 9) fires, stamp its
-      own session-state handoff record with `predecessor_session_id`.
+      own session-state handoff record with `predecessor_session_id`, **and
+      backfill stages 1-8** (which necessarily happened before the
+      successor's session-state directory existed) into the successor's
+      trace file at that moment, sourced from the durable per-worktree store
+      below — not from the predecessor's directory, which may already be
+      gone by the time anyone reads the successor's copy.
 - [ ] When the predecessor retires (stage 11/12), stamp its own session-state
       record with `successor_session_id` (it may not have known this at
-      trigger time).
+      trigger time), and append any later stage-9-through-13 events it can
+      still observe before it exits.
+- [ ] `~/.agent-worktrees/logs/activity.jsonl` is a **rolling log with a
+      retention window shorter than "at any time"** (days, not indefinite),
+      and Stage 1 happens before either session-state directory exists — so
+      neither `activity.jsonl` alone nor the two session-state files alone
+      can satisfy "re-trace at any time" / "persisted... for future auditing
+      from the archive" once the log rotates past a stage-1 event. Add a
+      **durable, per-worktree trace store** (e.g.
+      `~/.agent-worktrees/logs/handoff-traces/<worktree-id>.jsonl`, exempt
+      from the rolling-window rotation, or an equivalent unrotated sink) that
+      every stage's emitter writes to in addition to `activity.jsonl` and the
+      session-state files, and treat *that* store — not `activity.jsonl` — as
+      the archival source of truth.
 - [ ] Write/append the full per-stage trace into **both**:
       `~/.copilot/session-state/<predecessor-sid>/handoff-trace.jsonl` and
       `~/.copilot/session-state/<successor-sid>/handoff-trace.jsonl` — each
-      side gets every event it can see, plus the other side's session id, so
-      either session-state folder alone lets you walk the chain.
+      side gets every event it can see (plus the Phase-3 backfill above), plus
+      the other side's session id, so either session-state folder alone lets
+      you walk the chain for as long as that session-state folder itself is
+      retained.
 - [ ] Add a `agent-worktrees handoff-trace <worktree-id|session-id>` CLI
-      command that reads `activity.jsonl` + both session-state trace files and
-      renders the ordered 13-stage sequence for a worktree/handoff-token, with
-      gaps visibly marked ("stage 8 logged, stage 9 never observed").
+      command that reads the durable per-worktree store (falling back to
+      `activity.jsonl` + both session-state trace files for stages recent
+      enough to still be in the rolling log) and renders the ordered 13-stage
+      sequence for a worktree/handoff-token, with gaps visibly marked ("stage
+      8 logged, stage 9 never observed").
 
 ### Phase 4 — Fix the reported failure class (deferred; evidence only for now)
 
@@ -222,8 +262,8 @@ renumbering from the "acknowledges handoff" step onward.)
 > tracking for when fix work is greenlit — do not start them as part of this
 > effort's first execution pass.
 - [x] Reproduce the "ack but no pane, retry says already-claimed" symptom —
-      **found live**, not synthetic: `lambda-core-wsl-20260910-012212-9395`
-      (see Proposal § Case study). Two distinct bugs identified from real
+      **found live**, not synthetic: a real worktree observed mid-cutover
+      (identifiers withheld; see Proposal § Case study). Two distinct bugs identified from real
       `activity.jsonl` data:
       1. a second `trigger_handoff` from a session id reused across mux
          resume collides with its own already-consumed prior handoff
@@ -232,16 +272,24 @@ renumbering from the "acknowledges handoff" step onward.)
          `copilot_reaped: 0` on **every** observed cutover in this worktree,
          even ones with `successor_verified: true` — the predecessor pane may
          never actually be retired even on a "successful" cutover.
-- [ ] Fix bug 1: make the file-backed (and task-backed) handoff record keyed
-      by **token**, not solely derivable from a reused session id, or have
-      `storeHandoff()`/the monitor's pending scan detect "this session already
-      has a resolved handoff" and mint + arm a **new** token/claim rather than
-      silently treating the request as a no-op duplicate.
-- [ ] Fix bug 2: root-cause why the retire step consistently reports
-      `left-running`/`copilot_reaped: 0` despite `successor_verified: true` in
-      `_monitor_claim_handoff_cutover` (or wherever the retire branch lives in
-      `plugins/agent-worktrees/src/agent_worktrees/__main__.py`), and make it
-      actually retire the predecessor (or log why it deliberately doesn't).
+- [ ] Fix bug 1: the file-backed record keying is only half the problem —
+      `dispatchHandoff()` also creates agent-dispatch tasks with
+      `--dedup-key handoff-${sid}`, so a task-backed retrigger from the same
+      resumed session id would keep colliding with the old task even after
+      the file token is fixed. Mint a **fresh per-trigger ID** for both the
+      file token and the dispatch dedup key, propagate that same fresh ID
+      into the tracking record and the monitor's pending scan, and preserve
+      the *existing* behavior only for an explicit recovery-token reuse
+      (e.g. `trigger_handoff --handoff-token <token>` resuming a known
+      in-flight token), not for an ordinary fresh trigger.
+- [ ] Investigate bug 2 rather than assume it: `left-running` +
+      `copilot_reaped: 0` is what the retirement code **intentionally**
+      reports for guard paths (last-window, identity mismatch, unavailable
+      identity), which also emit a separate `handoff_retire_guard` event —
+      confirm via the guard/method fields and actual pane liveness whether
+      this worktree's retirements are a real bug or working-as-designed guard
+      behavior before treating it as a confirmed root cause and before
+      changing `_monitor_claim_handoff_cutover`'s retire branch.
 - [ ] With the new trace command (Phase 3), confirm both fixes against a fresh
       handoff cycle: full 13-stage trace, predecessor pane actually gone,
       reciprocal_relation no longer left `"ambiguous"`.
@@ -277,31 +325,34 @@ _Phase 1 schema is the next concrete design decision (exact field names,
 whether to extend `activity.py`'s existing event dataclass or add a sibling
 `handoff_trace.py` module)._
 
-### Case study: `lambda-core-wsl-20260910-012212-9395` (live, reproduces the bug)
+### Case study: a live worktree observed mid-cutover (identifiers redacted)
 
-Pulled directly from `agent-worktrees list --json` + `~/.agent-worktrees/logs/activity.jsonl`
-+ `~/.agent-worktrees/status-monitor-handoffs.d/lambda-core-wsl-20260910-012212-9395/`
-on 2026-09-11. This worktree's `reciprocal_relation` is currently
-`"state": "ambiguous"`, `binding.handoff_state: "pending"`,
-`binding.session_id: 0381a5d0-...` (a session that is **not** the live one),
+Pulled directly from `agent-worktrees list --json` + the local
+`activity.jsonl` lifecycle log + the local status-monitor handoff-claim
+directory on 2026-09-11 (a private, local worktree/session identifier is
+withheld per this repo's public-safe identity policy — see
+`efforts/README.md` § Local conventions). This worktree's `reciprocal_relation`
+is currently `"state": "ambiguous"`, `binding.handoff_state: "pending"`,
+`binding.session_id: <session A>` (a session that is **not** the live one),
 while `live_session_ids` names a completely different, fourth session id
-(`95645cff-...`). Timeline reconstructed from `activity.jsonl` (all times UTC,
-09-10/09-11):
+(`<session D>`). Timeline reconstructed from `activity.jsonl` (all times UTC,
+relative day 1/day 2; session labels are local aliases for this write-up, not
+literal ids):
 
 | time | event | session | notes |
 |---|---|---|---|
-| 08:23:48 | `session_started` | `205cc0f6` | original head |
-| 16:31:39 | `handoff_requested` (context-handoff) | `205cc0f6` | token `b2ccc...`, stored via agent-dispatch |
-| 16:31:39 | `handoff_cutover_claim` | `205cc0f6` | outcome **acquired** — monitor claim works |
-| 16:31:42 | `handoff_cutover_spawn` | `205cc0f6` | new pane `%3`, `candidate_status: awaiting-session-association` — spawn works |
-| 16:32:02 | `session_started` | `3697ec79` | successor's sessionStart fires |
-| 16:32:02 | `handoff_predecessor_retire` | `205cc0f6` | `successor_verified: true` but **`outcome: "left-running"`**, `copilot_reaped: 0` — predecessor pane is *never actually killed* |
-| 17:21:38–17:22:05 | (repeat cycle) | `3697ec79`→`0381a5d0` | same claim→spawn→retire pattern, same "left-running" outcome |
-| 19:10 – 09:42 (six `worktree_resumed` cycles over ~14h) | `session_started` for `205cc0f6` / `3697ec79` **recur verbatim** across unrelated launch ids | — | expected: ordinary mux resume reattaches the *same* Copilot session id |
-| 08:35:33 (09-11) | `handoff_requested` | `3697ec79` | **same `handoff_id`** (`65ae0764...`) as the 09-10 17:21 cycle, reused verbatim | 
+| day1 08:23 | `session_started` | `A` | original head |
+| day1 16:31 | `handoff_requested` (context-handoff) | `A` | token `T1`, stored via agent-dispatch |
+| day1 16:31 | `handoff_cutover_claim` | `A` | outcome **acquired** — monitor claim works |
+| day1 16:31 | `handoff_cutover_spawn` | `A` | new pane, `candidate_status: awaiting-session-association` — spawn works |
+| day1 16:32 | `session_started` | `B` | successor's sessionStart fires |
+| day1 16:32 | `handoff_predecessor_retire` | `A` | `successor_verified: true` but `outcome: "left-running"`, `copilot_reaped: 0` |
+| day1 17:21–17:22 | (repeat cycle) | `B`→`C` | same claim→spawn→retire pattern, same "left-running" outcome |
+| day1 19:10 – day2 09:42 (six `worktree_resumed` cycles over ~14h) | `session_started` for `A` / `B` **recur verbatim** across unrelated launch ids | — | expected: ordinary mux resume reattaches the *same* Copilot session id |
+| day2 08:35 | `handoff_requested` | `B` | **same `handoff_id`** (`T2`) as the day1 17:21 cycle, reused verbatim |
 | — | *(nothing)* | — | **no `handoff_cutover_claim`, no `handoff_cutover_spawn`, no "already-claimed" log entry follows** — the second trigger is silently absorbed |
-| 09:38:11 | `session_ended` | `3697ec79` | session just ends normally, unaware its handoff never re-armed |
-| 21:56:40 | `session_started` | `95645cff` | a **brand-new** session id, never seen before, becomes the live head after the next resume |
+| day2 09:38 | `session_ended` | `B` | session just ends normally, unaware its handoff never re-armed |
+| day2 21:56 | `session_started` | `D` | a **brand-new** session id, never seen before, becomes the live head after the next resume |
 
 **Root cause candidate (stronger than the original hypothesis in Context):**
 context-handoff's file-backed handoff record is keyed by **session id**
@@ -321,16 +372,15 @@ ack with no pane, and by the time they notice and look again, an unrelated
 resume has produced an entirely new, unaffiliated session id that the
 tracking record has no linkage to at all — hence `"ambiguous"`.
 
-Secondary bug found in the same trace, independent of the above: **every**
+Second observation from the same trace, **not yet confirmed as a bug**: every
 `handoff_predecessor_retire` in this worktree's history reports
 `outcome: "left-running"` with `copilot_reaped: 0` despite
-`successor_verified: true` — the predecessor pane/process is apparently never
-being retired even on a *successful* cutover generation. That alone would
-explain "no replacement pane" reports even on a technically-successful cutover
-if the operator is looking at the (still-running) predecessor pane instead of
-the new one — a second, distinct thing for Phase 4 to root-cause and fix
-(`_monitor_claim_handoff_cutover` / the retire step in
-`plugins/agent-worktrees/src/agent_worktrees/__main__.py`).
+`successor_verified: true`. The retirement code is known to report exactly
+this outcome deliberately for guard paths (last-window, identity mismatch,
+unavailable identity), alongside a separate `handoff_retire_guard` event — so
+this observation needs the guard/method fields and actual pane-liveness
+evidence checked (Phase 4, deferred) before concluding the predecessor is
+incorrectly left alive rather than intentionally guarded.
 
 This case study should become the primary Phase 4 validation fixture — it
 already has the exact "claimed-but-no-log, then orphaned" shape once we
@@ -352,8 +402,8 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
 - Drafted the 13-stage event vocabulary and a phased plan: schema →
   instrument all stages → cross-link predecessor/successor session-state
   journals as a linked list → root-cause + fix the reported failure → docs.
-- Operator flagged a **live** instance of the exact bug:
-  `lambda-core-wsl-20260910-012212-9395`. Traced it in full from
+- Operator flagged a **live** instance of the exact bug on a local worktree
+  (identifiers withheld per this repo's public-safe policy). Traced it in full from
   `activity.jsonl` + tracking record — see Proposal § Case study. Found two
   concrete, distinct root causes (handoff-token reuse across a resumed
   session id silently no-ops re-triggering; predecessor retire logs
