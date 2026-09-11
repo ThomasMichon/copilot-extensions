@@ -1831,8 +1831,8 @@ async def _register_codespace_plugins(
     related-repo lane uses); only the remote-marketplace specs go through the
     register + pre-install lane.
 
-    Best-effort and idempotent: logs a warning on failure but never raises, and
-    returns ``[]`` when there is nothing to register.
+    Best-effort and idempotent for ordinary failures; explicit installation
+    refusals propagate. Returns ``[]`` when there is nothing to register.
     """
     from .codespace_plugins import (
         parse_operator_plugins,
@@ -1844,6 +1844,7 @@ async def _register_codespace_plugins(
     from .config import repo_copilot_settings
 
     try:
+        validate_context()
         # The dispatch path doesn't pass --repo, so resolve the CodeSpace's
         # workspace repo ourselves (needed to apply repo-scoped codespacePlugins
         # entries; global entries apply regardless). A single `gh` lookup, only
@@ -1924,6 +1925,8 @@ async def _register_codespace_plugins(
             dirs += staged
 
         return dirs
+    except ContextRefused:
+        raise
     except Exception as exc:
         log.warning("CodeSpace plugin registration on %s failed: %s", name, exc)
     return []
@@ -2120,13 +2123,15 @@ async def _warm_remote_auth_cache(
 
 
 def _lookup_codespace_repo(name: str) -> str | None:
-    """Best-effort lookup of a CodeSpace's repository (owner/name)."""
+    """Look up a repository, preserving explicit installation refusals."""
     try:
         from .lifecycle import list_codespaces
 
         for cs in list_codespaces():
             if cs.name == name:
                 return cs.repository
+    except ContextRefused:
+        raise
     except Exception as exc:
         log.debug("Could not resolve repo for %s: %s", name, exc)
     return None
@@ -2143,11 +2148,13 @@ async def _provision_repo_hooks(
     The repo is taken from ``--repo`` when provided (hot path) and only
     looked up when per-repo hooks actually exist. When
     ``include_on_create`` is set, ``on_create`` commands run too (used
-    once during ``agent-codespaces create``). Best-effort and idempotent.
+    once during ``agent-codespaces create``). Best-effort and idempotent for
+    ordinary failures; explicit installation refusals propagate.
     """
     from .provision import build_provision_command
 
     try:
+        validate_context()
         # Only pay for a repo lookup when per-repo hooks are declared.
         if repo is None and any(rc.provision for rc in config.repos.values()):
             repo = _lookup_codespace_repo(name)
@@ -2170,6 +2177,8 @@ async def _provision_repo_hooks(
                 "Repo provision hooks on %s exited %s: %s",
                 name, result.exit_code, result.stderr.strip(),
             )
+    except ContextRefused:
+        raise
     except Exception as exc:
         log.warning("Repo provision hooks on %s failed: %s", name, exc)
 

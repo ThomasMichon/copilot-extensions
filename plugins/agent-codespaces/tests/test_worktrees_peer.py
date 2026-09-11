@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import asyncio
 import json
 import os
 import subprocess
@@ -363,3 +364,27 @@ def test_context_change_does_not_interrupt_best_effort_bookkeeping(monkeypatch, 
     assert caplog.text.count("Skipping coordination bookkeeping after context refusal") == 3
     with pytest.raises(worktrees.ContextRefused):
         coordination._run(["lease", "acquire"])
+
+
+def test_repo_lookup_refusal_cannot_authorize_remote_provisioning(monkeypatch):
+    monkeypatch.setattr(cli, "validate_context", lambda: None)
+
+    def refused():
+        raise worktrees.ContextRefused("repository lookup refused")
+
+    monkeypatch.setattr(lifecycle, "list_codespaces", refused)
+    config = SimpleNamespace(
+        repos={"project": SimpleNamespace(provision=True)},
+        provision_for_repo=lambda _: pytest.fail("global provisioning selected"),
+    )
+    manager = SimpleNamespace(
+        exec_command=lambda *a, **k: pytest.fail("remote provisioning attempted"),
+    )
+    with pytest.raises(worktrees.ContextRefused, match="repository lookup refused"):
+        cli._lookup_codespace_repo("space")
+    for call in (
+        cli._provision_repo_hooks(manager, "space", config=config, repo=None),
+        cli._register_codespace_plugins(manager, "space", config=config, repo=None),
+    ):
+        with pytest.raises(worktrees.ContextRefused, match="repository lookup refused"):
+            asyncio.run(call)

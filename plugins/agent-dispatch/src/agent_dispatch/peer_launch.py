@@ -76,13 +76,13 @@ def peer_environment(context: dict[str, Any], inherited: dict[str, str]) -> dict
         upper = key.upper()
         if upper in {
             CONTEXT_ENV, "COPILOT_PLUGIN_ROOT", "PYTHONPATH", "PYTHONHOME",
-            "AGENT_HOME", "AGENT_BRIDGE_BASE_URL", "AGENT_BRIDGE_CONNECT_LOG",
-            "AGENT_BRIDGE_SESSION_HOST_NONCE", "AGENT_BRIDGE_NO_ROUTING_TABLE",
+            "AGENT_HOME",
             "GH_TOKEN", "GITHUB_TOKEN",
         }:
             continue
         if upper.startswith((
-            "AGENT_RT_", "AGENT_DISPATCH_", "AGENT_CODESPACES_", "AGENT_WORKTREES_",
+            "AGENT_RT_", "AGENT_DISPATCH_", "AGENT_CODESPACES_",
+            "AGENT_WORKTREES_", "AGENT_BRIDGE_",
         )) or (
             upper.startswith("AGENT_")
             and upper.endswith(("_ROOT", "_DIR", "_HOME", "_INSTALLATION_ID"))
