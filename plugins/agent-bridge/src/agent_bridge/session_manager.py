@@ -2427,75 +2427,78 @@ class SessionManager:
                     self._remote_recovery_skipped.add(session.session_id)
                 continue
             for session, existing, status, record in results:
-                if background and not self._background_recovery_allowed(session):
-                    continue
-                if status == "live" and record is not None:
-                    container_target = (
-                        session.target.container
-                        if isinstance(session.target.container, dict)
-                        and session.target.container.get("name")
-                        else None
-                    )
-                    if container_target is not None:
-                        try:
-                            self._acquire_container_lock(
-                                session.session_id,
-                                container_target["name"],
-                            )
-                        except Exception:
-                            self._remote_recovery_inconclusive.add(
-                                session.session_id
-                            )
-                            log.warning(
-                                "Live container Session Host authority for %s "
-                                "could not reclaim target ownership",
-                                session.session_id,
-                                exc_info=True,
-                            )
+                async with contextlib.AsyncExitStack() as locks:
+                    if background:
+                        await locks.enter_async_context(session._lifecycle_lock)
+                        if not self._background_recovery_allowed(session):
                             continue
-                    self._remote_recovery_inconclusive.discard(session.session_id)
-                    self._remote_recovery_skipped.discard(session.session_id)
-                    if existing is not None:
-                        record.resume_on_reattach = existing.resume_on_reattach
-                    self._host_index.register(record)
-                    if existing is None:
-                        recovered += 1
-                elif status == "dead":
-                    self._release_container_lock(session.session_id)
-                    self._set_container_launch_pending(
-                        session.session_id,
-                        False,
-                    )
-                    self._remote_recovery_inconclusive.discard(session.session_id)
-                    self._remote_recovery_skipped.discard(session.session_id)
-                    if existing is not None:
-                        await self._drop_forward(session.session_id)
-                        self._host_index.remove(session.session_id)
-                        log.info(
-                            "Pruned confirmed-dead remote Session Host for %s",
-                            session.session_id,
+                    if status == "live" and record is not None:
+                        container_target = (
+                            session.target.container
+                            if isinstance(session.target.container, dict)
+                            and session.target.container.get("name")
+                            else None
                         )
-                elif status == "unknown":
-                    self._remote_recovery_skipped.discard(session.session_id)
-                    self._remote_recovery_inconclusive.add(session.session_id)
-                elif status == "missing":
-                    self._release_container_lock(session.session_id)
-                    self._set_container_launch_pending(
-                        session.session_id,
-                        False,
-                    )
-                    self._remote_recovery_inconclusive.discard(session.session_id)
-                    self._remote_recovery_skipped.discard(session.session_id)
-                    if existing is not None:
-                        await self._drop_forward(session.session_id)
-                        self._host_index.remove(session.session_id)
-                        log.info(
-                            "Pruned confirmed-absent remote Session Host "
-                            "authority for %s",
+                        if container_target is not None:
+                            try:
+                                self._acquire_container_lock(
+                                    session.session_id,
+                                    container_target["name"],
+                                )
+                            except Exception:
+                                self._remote_recovery_inconclusive.add(
+                                    session.session_id
+                                )
+                                log.warning(
+                                    "Live container Session Host authority for %s "
+                                    "could not reclaim target ownership",
+                                    session.session_id,
+                                    exc_info=True,
+                                )
+                                continue
+                        self._remote_recovery_inconclusive.discard(session.session_id)
+                        self._remote_recovery_skipped.discard(session.session_id)
+                        if existing is not None:
+                            record.resume_on_reattach = existing.resume_on_reattach
+                        self._host_index.register(record)
+                        if existing is None:
+                            recovered += 1
+                    elif status == "dead":
+                        self._release_container_lock(session.session_id)
+                        self._set_container_launch_pending(
                             session.session_id,
+                            False,
                         )
-                elif status == "skipped":
-                    self._remote_recovery_skipped.add(session.session_id)
+                        self._remote_recovery_inconclusive.discard(session.session_id)
+                        self._remote_recovery_skipped.discard(session.session_id)
+                        if existing is not None:
+                            await self._drop_forward(session.session_id)
+                            self._host_index.remove(session.session_id)
+                            log.info(
+                                "Pruned confirmed-dead remote Session Host for %s",
+                                session.session_id,
+                            )
+                    elif status == "unknown":
+                        self._remote_recovery_skipped.discard(session.session_id)
+                        self._remote_recovery_inconclusive.add(session.session_id)
+                    elif status == "missing":
+                        self._release_container_lock(session.session_id)
+                        self._set_container_launch_pending(
+                            session.session_id,
+                            False,
+                        )
+                        self._remote_recovery_inconclusive.discard(session.session_id)
+                        self._remote_recovery_skipped.discard(session.session_id)
+                        if existing is not None:
+                            await self._drop_forward(session.session_id)
+                            self._host_index.remove(session.session_id)
+                            log.info(
+                                "Pruned confirmed-absent remote Session Host "
+                                "authority for %s",
+                                session.session_id,
+                            )
+                    elif status == "skipped":
+                        self._remote_recovery_skipped.add(session.session_id)
         return recovered
 
     async def _ensure_forward(
@@ -3113,6 +3116,7 @@ class SessionManager:
             )
             session.client = None
             session.status = SessionStatus.STOPPED
+            session.restart_status = None
             self._db.update_session_status(
                 rec.session_id, SessionStatus.STOPPED.value, time.time()
             )
@@ -3551,64 +3555,58 @@ class SessionManager:
                 continue
             if not self._background_recovery_allowed(session):
                 continue
-            client = session.client
-            if (
-                client is not None
-                and client.host_child_exit_code is not None
-            ):
-                with contextlib.suppress(Exception):
-                    await client.shutdown()
-                self._reap_host_record(
-                    rec,
-                    "Session Host child exit observed by attached client",
-                )
-                session.client = None
-                session.status = SessionStatus.STOPPED
-                self._db.update_session_status(
-                    rec.session_id, SessionStatus.STOPPED.value, time.time()
-                )
-                if session.event_log:
-                    session.event_log.append("session_state_changed", {
-                        "status": SessionStatus.STOPPED.value,
-                        "host_child_exited": True,
-                        "exit_code": client.host_child_exit_code,
-                    })
-                continue
-            # A live, running client needs nothing; surface a stall and move on.
-            if client is not None and client.is_running:
-                if session.liveness_state(now) == "stalled":
-                    log.warning(
-                        "Session %s stalled (channel up, no output) -- "
-                        "surfaced, not reattached", rec.session_id,
-                    )
-                continue
-            # Transport is down. Only resume if the child is still there; a dead
-            # child is a real end, left to normal teardown/GC.
-            if not self._rec_child_alive(rec):
-                continue
-            # Respect version-mux: never drive a host this build can't speak to.
-            plan = plan_host(
-                protocol_version=rec.protocol_version,
-                child_alive=True,
-                age_seconds=(now - rec.created_at) if rec.created_at else None,
-                stale_reap_seconds=self._session_host_stale_reap_seconds,
-            )
-            if plan.disposition is not HostDisposition.REATTACH:
-                continue
-            # Preserve a RUNNING turn's status so its replayed buffered frames
-            # keep flowing; otherwise land it IDLE and drivable.
-            keep = (SessionStatus.RUNNING
-                    if session.status == SessionStatus.RUNNING
-                    else SessionStatus.IDLE)
-            # Same in-flight-resume race as the startup reattach path (see
-            # reattach_session_hosts): skip this session for this pass rather
-            # than race a concurrent resume_session()/lifecycle operation that
-            # already holds the lock.
+            # Skip sessions owned by an explicit lifecycle operation this pass.
             if session._lifecycle_lock.locked():
                 continue
             async with session._lifecycle_lock:
                 if not self._background_recovery_allowed(session):
                     continue
+                client = session.client
+                if (
+                    client is not None
+                    and client.host_child_exit_code is not None
+                ):
+                    with contextlib.suppress(Exception):
+                        await client.shutdown()
+                    self._reap_host_record(
+                        rec,
+                        "Session Host child exit observed by attached client",
+                    )
+                    session.client = None
+                    session.status = SessionStatus.STOPPED
+                    session.restart_status = None
+                    self._db.update_session_status(
+                        rec.session_id, SessionStatus.STOPPED.value, time.time()
+                    )
+                    if session.event_log:
+                        session.event_log.append("session_state_changed", {
+                            "status": SessionStatus.STOPPED.value,
+                            "host_child_exited": True,
+                            "exit_code": client.host_child_exit_code,
+                        })
+                    continue
+                # A live, running client needs nothing; surface a stall and move on.
+                if client is not None and client.is_running:
+                    if session.liveness_state(now) == "stalled":
+                        log.warning(
+                            "Session %s stalled (channel up, no output) -- "
+                            "surfaced, not reattached", rec.session_id,
+                        )
+                    continue
+                if not self._rec_child_alive(rec):
+                    continue
+                plan = plan_host(
+                    protocol_version=rec.protocol_version,
+                    child_alive=True,
+                    age_seconds=(now - rec.created_at) if rec.created_at else None,
+                    stale_reap_seconds=self._session_host_stale_reap_seconds,
+                )
+                if plan.disposition is not HostDisposition.REATTACH:
+                    continue
+                # Preserve a live turn while buffered frames replay.
+                keep = (SessionStatus.RUNNING
+                        if session.status == SessionStatus.RUNNING
+                        else SessionStatus.IDLE)
                 if (
                     getattr(rec, "boundary", "local") == "codespace"
                     and not await self._codespace_host_available(
@@ -6128,6 +6126,8 @@ class SessionManager:
                 )
             await self._quiesce_session(session, cancel_turn=cancel_turn)
 
+            if not for_restart and self._host_index is not None:
+                self._host_index.set_resume_flag(session_id, False)
             # Idle-reaper only: free the child; a plain stop stays resumable.
             if reap_host and self._host_index is not None:
                 rec = self._host_index.get(session_id)

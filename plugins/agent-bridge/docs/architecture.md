@@ -372,7 +372,10 @@ restart does not inherently close the child's pipes.
   cannot re-arm it. The host record and conversation remain available for an
   explicit resume (or a later send). Frontend shutdown instead records restart
   recovery intent, independently of the cancel-on-redeploy policy. That intent
-  survives repeated frontend restarts and is cleared by an ordinary stop.
+  survives repeated frontend restarts and is cleared by an ordinary stop,
+  together with any pending redeploy "Resume" nudge. Authority-result cleanup
+  and observed child-exit settlement hold the same lock through their final
+  mutations, not just through provider inspection.
   Legacy STOPPED rows without restart provenance remain dormant rather than
   guessing that an operator wanted recovery.
 - **Background CodeSpace recovery does not wake unavailable venues.** Before
