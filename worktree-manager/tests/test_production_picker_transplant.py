@@ -15,6 +15,17 @@ from worktree_manager.production_picker import runner
 from worktree_manager.production_picker import _engine_runtime as engine_runtime
 
 
+@pytest.fixture(autouse=True)
+def _no_relocated_launch_script_by_default(monkeypatch):
+    """Default every ``_run_launch`` test to the pre-relocation ``launcher.py``
+    path (Phase 3b Sub-slice 2a Step 2 added a relocated launch-session script
+    this checkout genuinely ships at ``worktree-manager/bin/``; without this
+    default, any test that doesn't mock subprocess spawning would try to run
+    that real script). Tests that specifically cover the relocated-script
+    delegation override this explicitly."""
+    monkeypatch.setattr(entrypoint, "_relocated_launch_script", lambda: None)
+
+
 def test_transplanted_picker_sources_match_production_copy():
     root = Path(__file__).resolve().parents[2]
     source = root / "plugins" / "agent-worktrees" / "src" / "agent_worktrees"
@@ -615,6 +626,239 @@ def test_run_launch_selects_ahp_after_plan_resolution(monkeypatch, tmp_path):
 
     assert entrypoint._run_launch(request) == 0
     assert calls == [(hosted, True)]
+
+
+def test_run_launch_delegates_to_relocated_script_on_windows(monkeypatch, tmp_path):
+    """The relocated launch-session script is the canonical mux implementation
+    (DQ9); when present, _run_launch delegates the whole local, non-AHP
+    launch to it instead of the never-wired launcher.compose_launch path."""
+    import subprocess
+
+    from worktree_manager import ahp_provider, launcher
+
+    plan = type(
+        "Plan",
+        (),
+        {"action": "exec", "exit_code": 0, "worktree_id": "resolved-id-1234"},
+    )()
+    script = tmp_path / "launch-session.ps1"
+    script.write_text("# stub\n", encoding="utf-8")
+    monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (plan, 0))
+    monkeypatch.setattr(entrypoint, "_relocated_launch_script", lambda: script)
+    monkeypatch.setattr(
+        ahp_provider,
+        "ensure_session",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("AHP is opt-in")),
+    )
+    monkeypatch.setattr(
+        launcher,
+        "launch",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("must not fall back to launcher.py when the "
+                           "relocated script is available")
+        ),
+    )
+    calls = []
+
+    class _FakeProc:
+        def wait(self, timeout=None):
+            return 0
+
+    def fake_popen(argv, **_kwargs):
+        calls.append(argv)
+        return _FakeProc()
+
+    monkeypatch.setattr(entrypoint, "_is_windows", lambda: True)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(entrypoint.subprocess, "Popen", fake_popen)
+    request = type(
+        "Request",
+        (),
+        {
+            "project": "demo",
+            "worktree_id": None,
+            "mode": "new",
+            "machine": None,
+            "no_mux": False,
+            "ahp": False,
+        },
+    )()
+
+    assert entrypoint._run_launch(request) == 0
+    assert len(calls) == 1
+    argv = calls[0]
+    assert argv[:4] == ["pwsh.exe", "-NoProfile", "-NoLogo", "-File"]
+    assert argv[4] == str(script)
+    # A "new" request must resolve to the ALREADY-created plan.worktree_id
+    # (--worktree-id), never re-issuing --new (which would create a SECOND
+    # worktree by re-triggering creation inside the script's own resolve).
+    assert "--new" not in argv
+    assert argv[-2:] == ["--worktree-id", "resolved-id-1234"]
+
+
+def test_run_launch_relocated_script_uses_base_flag_for_anchor_mode(
+    monkeypatch, tmp_path
+):
+    """``mode == "base"`` (anchor-repo launch) must pass ``--base`` and never
+    ``--worktree-id``, even though ``plan.worktree_id`` may be unset."""
+    from worktree_manager import ahp_provider, launcher
+
+    plan = type(
+        "Plan",
+        (),
+        {"action": "exec", "exit_code": 0, "worktree_id": None},
+    )()
+    script = tmp_path / "launch-session.ps1"
+    script.write_text("# stub\n", encoding="utf-8")
+    monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (plan, 0))
+    monkeypatch.setattr(entrypoint, "_relocated_launch_script", lambda: script)
+    monkeypatch.setattr(
+        ahp_provider,
+        "ensure_session",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("AHP is opt-in")),
+    )
+    monkeypatch.setattr(
+        launcher,
+        "launch",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("must not fall back to launcher.py")
+        ),
+    )
+    calls = []
+
+    class _FakeProc:
+        def wait(self, timeout=None):
+            return 0
+
+    def fake_popen(argv, **_kwargs):
+        calls.append(argv)
+        return _FakeProc()
+
+    monkeypatch.setattr(entrypoint, "_is_windows", lambda: True)
+    monkeypatch.setattr(entrypoint.subprocess, "Popen", fake_popen)
+    request = type(
+        "Request",
+        (),
+        {
+            "project": "demo",
+            "worktree_id": None,
+            "mode": "base",
+            "machine": None,
+            "no_mux": False,
+            "ahp": False,
+        },
+    )()
+
+    assert entrypoint._run_launch(request) == 0
+    assert len(calls) == 1
+    argv = calls[0]
+    assert "--base" in argv
+    assert "--worktree-id" not in argv
+
+
+def test_run_launch_relocated_script_sets_no_mux_env(monkeypatch, tmp_path):
+    from worktree_manager import ahp_provider, engine_client, launcher
+
+    plan = type(
+        "Plan",
+        (),
+        {"action": "exec", "exit_code": 0, "worktree_id": "demo-1234"},
+    )()
+    script = tmp_path / "launch-session.ps1"
+    script.write_text("# stub\n", encoding="utf-8")
+    monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (plan, 0))
+    monkeypatch.setattr(entrypoint, "_relocated_launch_script", lambda: script)
+    monkeypatch.setattr(
+        engine_client,
+        "execution_leg_get",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            engine_client.EngineFeatureUnavailable("older engine")
+        ),
+    )
+    monkeypatch.setattr(
+        ahp_provider,
+        "ensure_session",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("AHP is opt-in")),
+    )
+    monkeypatch.setattr(launcher, "launch", lambda *_a, **_k: 1 / 0)
+    monkeypatch.delenv("WORKTREE_NO_MUX", raising=False)
+
+    class _FakeProc:
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr(entrypoint, "_is_windows", lambda: True)
+    monkeypatch.setattr(entrypoint.subprocess, "Popen", lambda *_a, **_k: _FakeProc())
+    request = type(
+        "Request",
+        (),
+        {
+            "project": "demo",
+            "worktree_id": "demo-1234",
+            "mode": "resume",
+            "machine": None,
+            "no_mux": True,
+            "ahp": False,
+        },
+    )()
+
+    assert entrypoint._run_launch(request) == 0
+    assert entrypoint.os.environ.get("WORKTREE_NO_MUX") == "1"
+    monkeypatch.delenv("WORKTREE_NO_MUX", raising=False)
+
+
+def test_run_launch_relocated_script_posix_execs_bash(monkeypatch, tmp_path):
+    from worktree_manager import ahp_provider, engine_client, launcher
+
+    plan = type(
+        "Plan",
+        (),
+        {"action": "exec", "exit_code": 0, "worktree_id": "demo-1234"},
+    )()
+    script = tmp_path / "launch-session.sh"
+    script.write_text("# stub\n", encoding="utf-8")
+    monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (plan, 0))
+    monkeypatch.setattr(entrypoint, "_relocated_launch_script", lambda: script)
+    monkeypatch.setattr(
+        engine_client,
+        "execution_leg_get",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            engine_client.EngineFeatureUnavailable("older engine")
+        ),
+    )
+    monkeypatch.setattr(
+        ahp_provider,
+        "ensure_session",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("AHP is opt-in")),
+    )
+    monkeypatch.setattr(launcher, "launch", lambda *_a, **_k: 1 / 0)
+    calls = []
+
+    def fake_execvp(file, argv):
+        calls.append((file, argv))
+        raise SystemExit(0)
+
+    monkeypatch.setattr(entrypoint, "_is_windows", lambda: False)
+    monkeypatch.setattr(entrypoint.os, "execvp", fake_execvp)
+    request = type(
+        "Request",
+        (),
+        {
+            "project": "demo",
+            "worktree_id": "demo-1234",
+            "mode": "bare-resume",
+            "machine": None,
+            "no_mux": False,
+            "ahp": False,
+        },
+    )()
+
+    with pytest.raises(SystemExit):
+        entrypoint._run_launch(request)
+    assert calls[0][0] == "bash"
+    assert calls[0][1][0] == "bash"
+    assert str(script) in calls[0][1]
+    assert "--bare-resume" in calls[0][1]
 
 
 def test_run_launch_default_never_calls_ahp(monkeypatch):

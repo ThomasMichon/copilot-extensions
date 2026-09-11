@@ -192,7 +192,13 @@ if ($RecoveryMode) {
     Write-SetupLog 'Recovery fast-path — bypassing worktree resolution'
     # Explicit project config takes precedence over unrelated ambient CWD.
     $candidates = @()
-    if ($script:LaunchProject) {
+    if (
+        $env:COPILOT_EXTENSIONS_CONTEXT -and
+        $env:AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR
+    ) {
+        $candidates += $env:AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR
+    }
+    if ($script:LaunchProject -and -not $env:COPILOT_EXTENSIONS_CONTEXT) {
         $cfgPath = Join-Path $env:USERPROFILE ".$($script:LaunchProject)\config.yaml"
         if (Test-Path $cfgPath) {
             $anchorLine = Select-String -Path $cfgPath -Pattern '^\s+anchor:\s+(.+)$' | Select-Object -First 1
@@ -236,7 +242,26 @@ if ($RecoveryMode) {
 # point (a junction is blocked under RedirectionGuard / WinError 448, dotfiles
 # #637, and prone to drift; a marker file never is). Fallback: the newest
 # installed slot only -- the `.venv` link is retired (#1106).
-$RuntimeDir = Join-Path $env:USERPROFILE '.agent-worktrees'
+if ($env:COPILOT_EXTENSIONS_CONTEXT) {
+    $RuntimeDir = $env:AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT
+    try {
+        $contextRoot = Split-Path -Parent (
+            [IO.Path]::GetFullPath($env:COPILOT_EXTENSIONS_CONTEXT)
+        )
+        $resolvedRuntime = (Resolve-Path -LiteralPath $RuntimeDir).Path
+        $resolvedContext = (Resolve-Path -LiteralPath $contextRoot).Path
+        if ($resolvedRuntime -cne $resolvedContext) {
+            throw 'runtime root does not match context'
+        }
+        $RuntimeDir = $resolvedRuntime
+    } catch {
+        Write-SetupLog 'Validated cell runtime root is unavailable' 'ERROR'
+        Write-Error 'Validated cell runtime root is unavailable.'
+        exit 1
+    }
+} else {
+    $RuntimeDir = Join-Path $env:USERPROFILE '.agent-worktrees'
+}
 $AwPy = $null
 $runtimeResolver = Join-Path $RuntimeDir 'bin\resolve-runtime.ps1'
 if (Test-Path -LiteralPath $runtimeResolver -PathType Leaf) {

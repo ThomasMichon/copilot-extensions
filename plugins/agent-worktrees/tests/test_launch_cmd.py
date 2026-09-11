@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import json
 import os
 import shutil
 import subprocess
@@ -76,21 +77,15 @@ def test_resume_uses_equals_form():
     assert "--resume" not in cmd  # bare flag must not appear separately
 
 
-def test_namespaced_launch_uses_cell_launcher_without_legacy_fallback(
+def test_namespaced_launch_uses_direct_fallback_without_legacy_launcher(
     monkeypatch, tmp_path
 ):
     cell_runtime = tmp_path / "cell" / "plugins" / "agent-worktrees"
-    launcher = cell_runtime / "bin" / "launch-session.sh"
-    launcher.parent.mkdir(parents=True)
-    launcher.write_text("#!/bin/sh\n", encoding="utf-8")
-    legacy = tmp_path / "legacy"
-    (legacy / "bin").mkdir(parents=True)
-    (legacy / "bin" / "launch-session.sh").write_text(
-        "#!/bin/sh\n", encoding="utf-8"
-    )
+    cell_runtime.mkdir(parents=True)
     cfg.set_active_project("example")
     monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
-    monkeypatch.setattr(cfg, "install_dir", lambda: legacy)
+    monkeypatch.setattr(cfg, "install_dir", lambda: tmp_path / "legacy")
+    monkeypatch.setattr(m, "_usable_worktree_manager_launcher_dir", lambda: None)
     monkeypatch.setattr(
         registry_paths,
         "installation_context",
@@ -112,30 +107,75 @@ def test_namespaced_launch_uses_cell_launcher_without_legacy_fallback(
             },
         ),
     )
-    seen = {}
-    launch_env = {}
-    monkeypatch.setattr(
-        m,
-        "_env_set",
-        lambda key, value: launch_env.__setitem__(key, value),
-    )
+    resolve_calls = []
+    child = {}
+    post_exit = []
 
-    def execvp(file, argv):
-        seen.update(file=file, argv=argv)
-        raise RuntimeError("captured")
+    def fake_run(argv, **kwargs):
+        if "resolve" in argv:
+            resolve_calls.append((list(argv), kwargs))
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=json.dumps(
+                    {
+                        "action": "exec",
+                        "work_dir": str(tmp_path / "worktrees" / "wt1"),
+                        "cmd": ["copilot", "chat"],
+                        "env": {"COPILOT_THEME": "dark"},
+                        "worktree_id": "wt1",
+                        "post_exit": True,
+                        "project": "example",
+                    }
+                ),
+                stderr="picker stderr",
+            )
+        if "post-exit" in argv:
+            post_exit.append((list(argv), kwargs))
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        raise AssertionError(argv)
 
-    monkeypatch.setattr(m.os, "execvp", execvp)
+    class _Proc:
+        def wait(self, timeout=None):
+            return 0
 
-    with pytest.raises(RuntimeError, match="captured"):
-        m.cmd_launch([])
+    def fake_popen(argv, **kwargs):
+        child["argv"] = list(argv)
+        child["cwd"] = kwargs["cwd"]
+        child["env"] = kwargs["env"]
+        return _Proc()
 
-    assert seen["argv"][1] == str(launcher)
-    assert launch_env["AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT"] == str(
-        cell_runtime
-    )
-    assert launch_env["AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR"] == str(
+    monkeypatch.setattr(m.subprocess, "run", fake_run)
+    monkeypatch.setattr(m.subprocess, "Popen", fake_popen)
+
+    rc = m.cmd_launch([])
+
+    assert rc == 0
+    assert resolve_calls[0][0] == [
+        sys.executable,
+        "-m",
+        "agent_worktrees",
+        "--project",
+        "example",
+        "resolve",
+        "--no-mux",
+    ]
+    assert child["argv"] == ["copilot", "chat"]
+    assert child["cwd"] == str(tmp_path / "worktrees" / "wt1")
+    assert child["env"]["AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT"] == str(cell_runtime)
+    assert child["env"]["AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR"] == str(
         tmp_path / "anchor"
     )
+    assert child["env"]["COPILOT_THEME"] == "dark"
+    assert post_exit[0][0] == [
+        sys.executable,
+        "-m",
+        "agent_worktrees",
+        "--project",
+        "example",
+        "post-exit",
+        "wt1",
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -473,20 +513,55 @@ def test_repo_session_env_passthrough_on_bad_placeholder():
 
 
 def test_cmd_launch_passes_active_project_explicitly(monkeypatch, tmp_path):
-    """A bare project launch carries explicit identity into the shell launcher."""
+    """A bare project launch carries explicit identity into the resolved plan."""
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
     monkeypatch.setattr(m.cfg, "_ACTIVE_PROJECT", "dotfiles")
-    monkeypatch.setattr(m.cfg, "install_dir", lambda: tmp_path)
     monkeypatch.setattr(m.cfg, "detect_platform", lambda: "linux")
-    launch_script = tmp_path / "bin" / "launch-session.sh"
-    launch_script.parent.mkdir()
-    launch_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    monkeypatch.setattr(m, "_usable_worktree_manager_launcher_dir", lambda: None)
     calls = []
-    monkeypatch.setattr(m.os, "execvp", lambda exe, argv: calls.append((exe, argv)))
+
+    def fake_run(argv, **kwargs):
+        calls.append((list(argv), kwargs))
+        if "resolve" in argv:
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=json.dumps(
+                    {
+                        "action": "exec",
+                        "work_dir": str(tmp_path / "wt"),
+                        "cmd": ["copilot"],
+                        "env": {},
+                        "worktree_id": "wt1",
+                        "post_exit": False,
+                    }
+                ),
+                stderr="",
+            )
+        if "post-exit" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        raise AssertionError(argv)
+
+    class _Proc:
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr(m.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        m.subprocess,
+        "Popen",
+        lambda argv, **kwargs: _Proc(),
+    )
     rc = m.cmd_launch([])
-    assert rc == 1
-    assert calls == [
-        ("bash", ["bash", str(launch_script), "--project", "dotfiles"])
+    assert rc == 0
+    assert calls[0][0] == [
+        sys.executable,
+        "-m",
+        "agent_worktrees",
+        "--project",
+        "dotfiles",
+        "resolve",
+        "--no-mux",
     ]
     assert "WORKTREE_PROJECT" not in os.environ
 
@@ -975,7 +1050,7 @@ def _win_launch_dir(tmp_path):
 
 
 def test_windows_interactive_launch_bypasses_cmd_shim(monkeypatch, tmp_path):
-    monkeypatch.setattr(m.cfg, "install_dir", lambda: _win_launch_dir(tmp_path))
+    monkeypatch.setattr(m, "_usable_worktree_manager_launcher_dir", lambda: _win_launch_dir(tmp_path) / "bin")
     monkeypatch.setattr(m.cfg, "detect_platform", lambda: "windows")
     captured: list[list[str]] = []
     monkeypatch.setattr(m.subprocess, "Popen", _fake_popen(captured))
@@ -991,7 +1066,7 @@ def test_windows_interactive_launch_bypasses_cmd_shim(monkeypatch, tmp_path):
 
 
 def test_windows_stdio_launch_keeps_cmd_shim(monkeypatch, tmp_path):
-    monkeypatch.setattr(m.cfg, "install_dir", lambda: _win_launch_dir(tmp_path))
+    monkeypatch.setattr(m, "_usable_worktree_manager_launcher_dir", lambda: _win_launch_dir(tmp_path) / "bin")
     monkeypatch.setattr(m.cfg, "detect_platform", lambda: "windows")
     captured: list[list[str]] = []
     monkeypatch.setattr(m.subprocess, "Popen", _fake_popen(captured))
@@ -1011,7 +1086,7 @@ def test_windows_interactive_falls_back_to_cmd_when_ps1_absent(monkeypatch, tmp_
     bind = tmp_path / "bin"
     bind.mkdir()
     (bind / "launch-session.cmd").write_text("@echo off\n")  # no .ps1
-    monkeypatch.setattr(m.cfg, "install_dir", lambda: tmp_path)
+    monkeypatch.setattr(m, "_usable_worktree_manager_launcher_dir", lambda: tmp_path / "bin")
     monkeypatch.setattr(m.cfg, "detect_platform", lambda: "windows")
     captured: list[list[str]] = []
     monkeypatch.setattr(m.subprocess, "Popen", _fake_popen(captured))
@@ -1020,3 +1095,226 @@ def test_windows_interactive_falls_back_to_cmd_when_ps1_absent(monkeypatch, tmp_
         m.cmd_launch([])
     argv = captured[0]
     assert argv[0] == "cmd.exe"
+
+
+def test_cmd_launch_falls_back_to_in_plugin_scripts_when_relocated_unavailable(
+    monkeypatch, tmp_path
+):
+    """Sub-slice 2a Step 2 retains the in-plugin launch-session scripts as an
+    ACTIVE fallback tier (not merely undeleted files): when the relocated
+    Worktree Manager launcher is unusable, cmd_launch must still use the
+    in-plugin scripts at ``<inst_dir>/bin`` before degrading to the new
+    direct, non-mux path."""
+    cell_runtime = tmp_path / "cell" / "plugins" / "agent-worktrees"
+    legacy_bin = cell_runtime / "bin"
+    legacy_bin.mkdir(parents=True)
+    (legacy_bin / "launch-session.ps1").write_text("# ps\n", encoding="utf-8")
+    (legacy_bin / "launch-session.cmd").write_text("@echo off\r\n", encoding="utf-8")
+    monkeypatch.setattr(m.cfg, "_ACTIVE_PROJECT", "example")
+    monkeypatch.setattr(m.cfg, "detect_platform", lambda: "windows")
+    monkeypatch.setattr(m, "_usable_worktree_manager_launcher_dir", lambda: None)
+    monkeypatch.setattr(
+        registry_paths,
+        "installation_context",
+        lambda: {"pluginRoot": str(cell_runtime)},
+    )
+    monkeypatch.setattr(
+        cfg,
+        "load_config",
+        lambda **_kwargs: cfg.Config(
+            srcroot=str(tmp_path),
+            machine="test",
+            platform="windows",
+            repo_name="example",
+            repos={
+                "example": cfg.RepoConfig(
+                    anchor=str(tmp_path / "anchor"),
+                    worktree_root=str(tmp_path / "worktrees"),
+                )
+            },
+        ),
+    )
+    captured: list[list[str]] = []
+    monkeypatch.setattr(m.subprocess, "Popen", _fake_popen(captured))
+
+    with pytest.raises(SystemExit) as exc:
+        m.cmd_launch([])
+    assert exc.value.code == 0
+    argv = captured[0]
+    assert argv[0] == "pwsh.exe"
+    assert argv[argv.index("-File") + 1] == str(legacy_bin / "launch-session.ps1")
+
+
+def test_cmd_launch_uses_relocated_worktree_manager_launcher_when_available(
+    monkeypatch, tmp_path
+):
+    cell_runtime = tmp_path / "cell" / "plugins" / "agent-worktrees"
+    cell_runtime.mkdir(parents=True)
+    wm_root = tmp_path / "wmroot"
+    slot = wm_root / "versions" / "0.1.0-dev35"
+    bind = slot / "bin"
+    bind.mkdir(parents=True)
+    (wm_root / "current-version").write_text("0.1.0-dev35", encoding="utf-8")
+    (bind / "launch-session.cmd").write_text("@echo off\r\n", encoding="utf-8")
+    (bind / "launch-session.ps1").write_text("# ps\n", encoding="utf-8")
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(wm_root))
+    monkeypatch.setattr(m.cfg, "_ACTIVE_PROJECT", "example")
+    monkeypatch.setattr(m.cfg, "detect_platform", lambda: "windows")
+    monkeypatch.setattr(
+        registry_paths,
+        "installation_context",
+        lambda: {"pluginRoot": str(cell_runtime)},
+    )
+    monkeypatch.setattr(
+        cfg,
+        "load_config",
+        lambda **_kwargs: cfg.Config(
+            srcroot=str(tmp_path),
+            machine="test",
+            platform="windows",
+            repo_name="example",
+            repos={
+                "example": cfg.RepoConfig(
+                    anchor=str(tmp_path / "anchor"),
+                    worktree_root=str(tmp_path / "worktrees"),
+                )
+            },
+        ),
+    )
+
+    def fake_run(argv, **kwargs):
+        assert argv[:4] == ["uv", "run", "--quiet", "--project"]
+        assert argv[4] == str(slot)
+        assert argv[-2:] == ["worktree_manager", "--version"]
+        return subprocess.CompletedProcess(argv, 0, stdout="0.1.0-dev35\n", stderr="")
+
+    captured: list[list[str]] = []
+    monkeypatch.setattr(m.subprocess, "run", fake_run)
+    monkeypatch.setattr(m.subprocess, "Popen", _fake_popen(captured))
+
+    with pytest.raises(SystemExit) as exc:
+        m.cmd_launch(["--no-update", "--no-mux", "--verbose"])
+    assert exc.value.code == 0
+    argv = captured[0]
+    assert argv[0] == "pwsh.exe"
+    assert argv[argv.index("-File") + 1] == str(bind / "launch-session.ps1")
+    assert os.environ["AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT"] == str(cell_runtime)
+    assert os.environ["AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR"] == str(
+        tmp_path / "anchor"
+    )
+    assert os.environ["WORKTREE_NO_UPDATE"] == "1"
+    assert os.environ["WORKTREE_NO_MUX"] == "1"
+    assert os.environ["WORKTREE_VERBOSE"] == "1"
+
+
+def test_cmd_launch_direct_fallback_runs_post_exit_and_preserves_env(
+    monkeypatch, tmp_path
+):
+    cell_runtime = tmp_path / "cell" / "plugins" / "agent-worktrees"
+    cell_runtime.mkdir(parents=True)
+    monkeypatch.setattr(m.cfg, "_ACTIVE_PROJECT", "example")
+    monkeypatch.setattr(m.cfg, "detect_platform", lambda: "linux")
+    monkeypatch.setattr(
+        registry_paths,
+        "installation_context",
+        lambda: {"pluginRoot": str(cell_runtime)},
+    )
+    monkeypatch.setattr(
+        cfg,
+        "load_config",
+        lambda **_kwargs: cfg.Config(
+            srcroot=str(tmp_path),
+            machine="test",
+            platform="linux",
+            repo_name="example",
+            repos={
+                "example": cfg.RepoConfig(
+                    anchor=str(tmp_path / "anchor"),
+                    worktree_root=str(tmp_path / "worktrees"),
+                )
+            },
+        ),
+    )
+    monkeypatch.setattr(m, "_usable_worktree_manager_launcher_dir", lambda: None)
+    runs = []
+    child = {}
+
+    def fake_run(argv, **kwargs):
+        runs.append((list(argv), kwargs))
+        if "resolve" in argv:
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=json.dumps(
+                    {
+                        "launch": {
+                            "action": "exec",
+                            "work_dir": str(tmp_path / "worktrees" / "wt1"),
+                            "cmd": ["copilot", "--resume=abc"],
+                            "env": {"COPILOT_TEST_ENV": "1"},
+                            "worktree_id": "wt1",
+                            "post_exit": True,
+                            "project": "example",
+                        }
+                    }
+                ),
+                stderr="picker stderr",
+            )
+        if "post-exit" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        raise AssertionError(argv)
+
+    class _Proc:
+        def wait(self, timeout=None):
+            return 0
+
+    def fake_popen(argv, **kwargs):
+        child["argv"] = list(argv)
+        child["cwd"] = kwargs["cwd"]
+        child["env"] = kwargs["env"]
+        return _Proc()
+
+    monkeypatch.setattr(m.subprocess, "run", fake_run)
+    monkeypatch.setattr(m.subprocess, "Popen", fake_popen)
+
+    rc = m.cmd_launch(["--no-update", "--no-mux", "--verbose"])
+
+    assert rc == 0
+    resolve_argv = runs[0][0]
+    assert resolve_argv == [
+        sys.executable,
+        "-m",
+        "agent_worktrees",
+        "--project",
+        "example",
+        "resolve",
+        "--no-mux",
+    ]
+    post_exit_argv = runs[1][0]
+    assert post_exit_argv == [
+        sys.executable,
+        "-m",
+        "agent_worktrees",
+        "--project",
+        "example",
+        "post-exit",
+        "wt1",
+    ]
+    resolve_env = runs[0][1]["env"]
+    assert resolve_env["AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT"] == str(cell_runtime)
+    assert resolve_env["AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR"] == str(
+        tmp_path / "anchor"
+    )
+    assert resolve_env["WORKTREE_NO_UPDATE"] == "1"
+    assert resolve_env["WORKTREE_NO_MUX"] == "1"
+    assert resolve_env["WORKTREE_VERBOSE"] == "1"
+    assert child["argv"] == ["copilot", "--resume=abc"]
+    assert child["cwd"] == str(tmp_path / "worktrees" / "wt1")
+    assert child["env"]["AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT"] == str(cell_runtime)
+    assert child["env"]["AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR"] == str(
+        tmp_path / "anchor"
+    )
+    assert child["env"]["WORKTREE_NO_UPDATE"] == "1"
+    assert child["env"]["WORKTREE_NO_MUX"] == "1"
+    assert child["env"]["WORKTREE_VERBOSE"] == "1"
+    assert child["env"]["COPILOT_TEST_ENV"] == "1"
