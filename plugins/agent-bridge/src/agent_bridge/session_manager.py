@@ -2163,7 +2163,10 @@ class SessionManager:
                 continue
             async with contextlib.AsyncExitStack() as locks:
                 if session is not None:
-                    if session._lifecycle_lock.locked():
+                    if (
+                        session._turn_start_lock.locked()
+                        or session._lifecycle_lock.locked()
+                    ):
                         self._remote_recovery_inconclusive.add(rec.session_id)
                         log.info(
                             "Skipping startup reattach for %s: an in-flight "
@@ -2171,6 +2174,7 @@ class SessionManager:
                             rec.session_id,
                         )
                         continue
+                    await locks.enter_async_context(session._turn_start_lock)
                     await locks.enter_async_context(session._lifecycle_lock)
                     if not self._background_recovery_allowed(session):
                         continue
@@ -3247,9 +3251,12 @@ class SessionManager:
         # nudge it back to work with a single "Resume" now that the frontend is
         # reattached (a bare "Resume" re-orients a Copilot session well).
         if send_resume and self._host_index is not None:
-            self._host_index.set_resume_flag(rec.session_id, False)
             try:
-                await self.submit_prompt(rec.session_id, "Resume")
+                if session.client is None or not session.client.is_running:
+                    raise ConnectionError("Reattached transport dropped before resume nudge")
+                self._host_index.set_resume_flag(rec.session_id, False)
+                # Automatic reattach callers hold turn admission before lifecycle.
+                await self._submit_prompt_locked(rec.session_id, "Resume")
                 log.info(
                     "Sent 'Resume' to reattached session %s "
                     "(turn was graceful-cancelled for redeploy)",
@@ -3598,9 +3605,9 @@ class SessionManager:
             if not self._background_recovery_allowed(session):
                 continue
             # Skip sessions owned by an explicit lifecycle operation this pass.
-            if session._lifecycle_lock.locked():
+            if session._turn_start_lock.locked() or session._lifecycle_lock.locked():
                 continue
-            async with session._lifecycle_lock:
+            async with session._turn_start_lock, session._lifecycle_lock:
                 if not self._background_recovery_allowed(session):
                     continue
                 client = session.client
@@ -3729,7 +3736,12 @@ class SessionManager:
                 if (liveness == "stalled" and threshold > 0
                         and silent_for > threshold):
                     try:
-                        await self.interrupt_turn(sid)
+                        await self.interrupt_turn(sid, expected_task=task)
+                        if (
+                            session.status == SessionStatus.STOPPED
+                            or session._prompt_task is not task
+                        ):
+                            continue
                         healed += 1
                         log.warning(
                             "Interrupted live-stalled RUNNING session %s "
@@ -3767,7 +3779,7 @@ class SessionManager:
                 if not (threshold > 0 and silent_for > threshold):
                     continue
             try:
-                await self.resync_session(sid)
+                await self.resync_session(sid, background=True)
                 healed += 1
                 log.warning(
                     "Reconciled wedged RUNNING session %s to idle "
@@ -5344,7 +5356,7 @@ class SessionManager:
             await self._drain_pending_prompts(session)
         return session
 
-    async def resync_session(self, session_id: str) -> int:
+    async def resync_session(self, session_id: str, *, background: bool = False) -> int:
         """Rebuild a session's event log from the agent's authoritative replay.
 
         Reattaches to the persisted ACP session and captures the full
@@ -5375,6 +5387,10 @@ class SessionManager:
             )
 
         async with session._lifecycle_lock:
+            if background and session.status != SessionStatus.RUNNING:
+                raise ValueError(
+                    f"Session {session_id} is no longer running; skipping background resync"
+                )
             if session.status == SessionStatus.RUNNING:
                 turn_live = (
                     session._prompt_task is not None
@@ -5394,6 +5410,10 @@ class SessionManager:
                 if session._prompt_task is not None:
                     with contextlib.suppress(Exception):
                         session._prompt_task.cancel()
+
+            session.restart_status = None
+            if self._host_index is not None:
+                self._host_index.set_resume_flag(session_id, False)
 
             # Tear down any live client so we can reattach cleanly.
             if session.client:
@@ -5650,7 +5670,7 @@ class SessionManager:
                 and self._auto_handoff_eligible(session)):
             session._handoff_pending = False
             successor = await self.handoff_session(
-                session_id, reason="context-pressure-prompt"
+                session_id, reason="context-pressure-prompt", _turn_admission_owned=True,
             )
             return (
                 await self.submit_or_queue_prompt(
@@ -6071,7 +6091,9 @@ class SessionManager:
                 session.session_id, exc_info=True,
             )
 
-    async def interrupt_turn(self, session_id: str) -> "Session":
+    async def interrupt_turn(
+        self, session_id: str, *, expected_task: asyncio.Task | None = None,
+    ) -> "Session":
         """Interrupt the in-flight turn, leaving the session alive and idle.
 
         Sends an ACP cancel to the active prompt so the current turn stops and
@@ -6090,24 +6112,19 @@ class SessionManager:
         if not session:
             raise KeyError(f"Session {session_id} not found")
 
-        task = session._prompt_task
-        if (session.status != SessionStatus.RUNNING
-                or task is None or task.done()):
-            # Nothing live to interrupt -- return the session as-is.
-            return session
-
-        # Operator explicitly cancelled this turn: retire its durable queue too,
-        # BEFORE the runner settles IDLE (whose tail would otherwise drain it).
-        # Auto-firing a batch of queued follow-ups right after a manual
-        # interrupt would surprise the operator -- mirror NF's "queue cleared if
-        # cancelled" (#4114). Cleared before the ACP cancel so the drain that
-        # runs on settle finds nothing.
-        self._clear_pending_queue(session, reason="interrupted")
-
-        # Ask the agent to cancel the active turn (ACP session/cancel).
-        if session.client is not None:
-            with contextlib.suppress(Exception):
-                await session.client.cancel_prompt()
+        async with session._lifecycle_lock:
+            task = session._prompt_task
+            if (
+                session.status != SessionStatus.RUNNING
+                or task is None or task.done()
+                or (expected_task is not None and task is not expected_task)
+            ):
+                return session
+            # Clear queued follow-ups before cancellation can settle the turn.
+            self._clear_pending_queue(session, reason="interrupted")
+            if session.client is not None:
+                with contextlib.suppress(Exception):
+                    await session.client.cancel_prompt()
 
         # Give the runner a bounded moment to settle to a terminal state so the
         # caller sees idle promptly. `shield` so this wait never cancels the
@@ -6115,7 +6132,10 @@ class SessionManager:
         # over the event stream (and the wedged-session watchdog is the backstop).
         # Never force-kill the task here -- that would end the session.
         with contextlib.suppress(Exception):
-            await asyncio.wait_for(asyncio.shield(task), timeout=10.0)
+            await asyncio.wait_for(
+                asyncio.shield(asyncio.gather(task, return_exceptions=True)),
+                timeout=10.0,
+            )
 
         log.info("Interrupted in-flight turn for session %s", session_id)
         return session
@@ -6196,6 +6216,18 @@ class SessionManager:
         if not session:
             raise KeyError(f"Session {session_id} not found")
 
+        async with session._turn_start_lock:
+            await self._stop_session_admitted(
+                session, force=force, reap_host=reap_host,
+                cancel_turn=cancel_turn, for_restart=for_restart,
+            )
+
+    async def _stop_session_admitted(
+        self, session: Session, *, force: bool = False, reap_host: bool = False,
+        cancel_turn: bool = True, for_restart: bool = False,
+    ) -> None:
+        """Stop while the caller already owns this session's turn admission."""
+        session_id = session.session_id
         async with session._lifecycle_lock:
             if not force and session.has_active_background_tasks:
                 raise SessionBusyError(session_id, session.active_background_tasks)
@@ -6225,7 +6257,12 @@ class SessionManager:
 
             pending_reaps = list(self._remote_reaps_by_session.get(session_id, ()))
             if pending_reaps:
-                await asyncio.gather(*pending_reaps)
+                cleanup = asyncio.gather(*pending_reaps)
+                try:
+                    await asyncio.shield(cleanup)
+                except asyncio.CancelledError:
+                    await cleanup
+                    raise
 
             session.status = SessionStatus.STOPPED
             session.restart_status = restart_status
@@ -6616,6 +6653,7 @@ class SessionManager:
         seed: bool = True,
         seed_text: str | None = None,
         handoff_token: str | None = None,
+        _turn_admission_owned: bool = False,
     ) -> Session:
         """Hand a hosted session off to a fresh successor in the same worktree.
 
@@ -6816,7 +6854,10 @@ class SessionManager:
         # 6. Retire the predecessor: STOPPED keeps it resumable and preserves its
         #    transcript + succession link (end_session would delete both).
         with contextlib.suppress(Exception):
-            await self.stop_session(session_id, force=True)
+            if _turn_admission_owned:
+                await self._stop_session_admitted(session, force=True)
+            else:
+                await self.stop_session(session_id, force=True)
 
         log.info(
             "Handoff: session %s -> %s (worktree %s)",
