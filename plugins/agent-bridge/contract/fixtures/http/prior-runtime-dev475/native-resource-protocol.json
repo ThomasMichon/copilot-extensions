@@ -1,11 +1,11 @@
 {
   "captured_from": {
-    "commit": "2ea755fe464fcb93b298a191b10f60a489f6d721",
-    "plugin_version": "0.4.0-dev476",
+    "commit": "44cc5f4f2c46e71cdf6baf36b8c06152b5588677",
+    "plugin_version": "0.4.0-dev475",
     "protocol_generation": 15,
     "source_path": "plugins/agent-bridge/src/agent_bridge/native_resources.py",
-    "source_git_blob": "cfe7f2fc370b5a132476467e781a0035c7778259",
-    "source_sha256": "d1024b5e74ae66dc7d7a3b8bfa57773e75fd190969dfccb93e15922f7ff1ea75"
+    "source_git_blob": "696c301ae5e7be27c519c5e52923398cefc96003",
+    "source_sha256": "04ca03ac43fa6f956a7a5a1ef3ef70e0c5ba15e15d4aa400fa26ed23fb619d90"
   },
   "descriptor": {
     "schema": "copilot-extensions.native-host-resource-capability",

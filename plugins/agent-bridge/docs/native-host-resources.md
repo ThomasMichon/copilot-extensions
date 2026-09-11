@@ -79,6 +79,9 @@ Run the descriptor's exact `ensureCommand` from the real native session.
 `--timeout SECONDS` (1-120, default 120). Without a request ID it generates one;
 retries with an explicit ID must retain the same resource and input. No local
 terminal intervention, new Copilot session or presentation attachment is needed.
+At most 256 distinct request IDs are retained per execution. A completed
+successful ID replays its recorded result; reuse a new ID when requesting a fresh
+ensure check. An identical failed request can be retried using its original ID.
 
 The helper verifies execution/generation, the real registered session and its
 process ancestry, durably records the request on the venue, and waits for a

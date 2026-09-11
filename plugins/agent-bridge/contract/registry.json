@@ -35,7 +35,8 @@
           "0.4.0-dev468",
           "0.4.0-dev470",
           "0.4.0-dev474",
-          "0.4.0-dev475"
+          "0.4.0-dev475",
+          "0.4.0-dev476"
         ]
       },
       "capability_versions": {
@@ -114,7 +115,7 @@
           "path": "plugins/agent-bridge/src/agent_bridge/native_resources.py",
           "semantic": true,
           "non_semantic_reason": null,
-          "sha256": "04ca03ac43fa6f956a7a5a1ef3ef70e0c5ba15e15d4aa400fa26ed23fb619d90"
+          "sha256": "d1024b5e74ae66dc7d7a3b8bfa57773e75fd190969dfccb93e15922f7ff1ea75"
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/native_runtime.py",
@@ -245,26 +246,50 @@
           "generation": 14
         },
         {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-resource-launch.json",
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev475/native-resource-launch.json",
           "sha256": "c771d98fe8d2a79f8b9977c0f684e354b2146a537c7dce85d9aeb31ce68da327",
+          "role": "prior optional native host-resource contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev475/native-resource-controller-capabilities.json",
+          "sha256": "d424fc4d3683357ff3bd75e4cdb1e8e3d0803c4296cee6481ccd691c1a4dafb1",
+          "role": "prior optional native host-resource contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev475/native-resource-protocol.json",
+          "sha256": "e4caef401676e7c2b694095a34a4854b9ffea9bd7cb5b8c1c00254ccd6e6479d",
+          "role": "prior optional native host-resource contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev475/native-resource-runtime-capabilities.json",
+          "sha256": "f0feba55989b8c3c5672e8ac7514a17eb0645dec7d65a880237a984735d9d74b",
+          "role": "prior optional native host-resource contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-resource-launch.json",
+          "sha256": "f053803cd84144e89cf2d1502f17f7402e4d46dbb03f320f220f28ab2e08790f",
           "role": "current optional native host-resource contract",
           "generation": 15
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-resource-controller-capabilities.json",
-          "sha256": "d424fc4d3683357ff3bd75e4cdb1e8e3d0803c4296cee6481ccd691c1a4dafb1",
+          "sha256": "ea3235678d2216b8c9082709e796d3f50ba5513932e6b97f892802a2fd9390db",
           "role": "current optional native host-resource contract",
           "generation": 15
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-resource-protocol.json",
-          "sha256": "e4caef401676e7c2b694095a34a4854b9ffea9bd7cb5b8c1c00254ccd6e6479d",
+          "sha256": "194817583af7cd3f457a59c31d0b1aecb983b75ff9f37bc313343928c37f2c46",
           "role": "current optional native host-resource contract",
           "generation": 15
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-resource-runtime-capabilities.json",
-          "sha256": "f0feba55989b8c3c5672e8ac7514a17eb0645dec7d65a880237a984735d9d74b",
+          "sha256": "02bb24aa903e2ef446799166a4c6d91e85266c2e0fa8c23eeaa0c268953cb699",
           "role": "current optional native host-resource contract",
           "generation": 15
         }
@@ -521,6 +546,38 @@
         {
           "commit": "44cc5f4f2c46e71cdf6baf36b8c06152b5588677",
           "plugin_version": "0.4.0-dev475",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_runtime.py",
+          "source_git_blob": "afd094c66ecba176c660ca771fc99980985b15f9",
+          "capture_method": "Run the committed remote native-host capabilities command and retain platform-independent capability fields; the pre-existing platform support discriminator is not normalized into a support claim."
+        },
+        {
+          "commit": "2ea755fe464fcb93b298a191b10f60a489f6d721",
+          "plugin_version": "0.4.0-dev476",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_manager.py",
+          "source_git_blob": "8de491e0d8a59718c2bf49d148ee9832ea374da9",
+          "capture_method": "Invoke committed validate_request with and without optional resources; normalize only the existing owner directory and local Python executable to neutral placeholders."
+        },
+        {
+          "commit": "2ea755fe464fcb93b298a191b10f60a489f6d721",
+          "plugin_version": "0.4.0-dev476",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/native.py",
+          "source_git_blob": "b803e2c7aa4d278fd2135920d8a23ed4f5753727",
+          "capture_method": "Invoke the committed native capabilities route with an available synthetic provider; preserve the real public capability response."
+        },
+        {
+          "commit": "2ea755fe464fcb93b298a191b10f60a489f6d721",
+          "plugin_version": "0.4.0-dev476",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_resources.py",
+          "source_git_blob": "cfe7f2fc370b5a132476467e781a0035c7778259",
+          "capture_method": "Invoke committed descriptor, provider request, and result serializers with synthetic identities; normalize only the executable and controller resource directory. No resource provider or external venue is launched."
+        },
+        {
+          "commit": "2ea755fe464fcb93b298a191b10f60a489f6d721",
+          "plugin_version": "0.4.0-dev476",
           "generation": 15,
           "source_path": "plugins/agent-bridge/src/agent_bridge/native_runtime.py",
           "source_git_blob": "afd094c66ecba176c660ca771fc99980985b15f9",
