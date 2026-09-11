@@ -363,8 +363,18 @@ restart does not inherently close the child's pipes.
 
 - **Idle / stopped sessions survive transparently.** Session metadata, turns,
   events, and host connection data are persisted to SQLite/host state. On startup
-  the daemon reattaches to compatible surviving Session Hosts; otherwise it can
-  lazily resume from persisted Copilot state.
+  the daemon reattaches formerly active sessions to compatible surviving Session
+  Hosts; otherwise it can lazily resume from persisted Copilot state.
+- **Explicit stops remain dormant.** Startup and heartbeat recovery do not probe
+  a stopped session's provider, inspect its remote authority, or reconnect its
+  forward. Stop and recovery share the session lifecycle lock, so a stop waits
+  for an in-flight recovery before acknowledging containment; subsequent passes
+  cannot re-arm it. The host record and conversation remain available for an
+  explicit resume (or a later send). Frontend shutdown instead records restart
+  recovery intent, independently of the cancel-on-redeploy policy. That intent
+  survives repeated frontend restarts and is cleared by an ordinary stop.
+  Legacy STOPPED rows without restart provenance remain dormant rather than
+  guessing that an operator wanted recovery.
 - **Background CodeSpace recovery does not wake unavailable venues.** Before
   reattaching a disconnected CodeSpace session, the heartbeat reads the exact
   target's state through the GitHub API, once per CodeSpace per pass. It honors

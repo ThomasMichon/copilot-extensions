@@ -1049,6 +1049,7 @@ async def lifespan(app: FastAPI):
                 await mgr.stop_session(
                     session.session_id,
                     cancel_turn=mgr.cancel_turns_on_redeploy,
+                    for_restart=True,
                 )
             except Exception:
                 log.warning(

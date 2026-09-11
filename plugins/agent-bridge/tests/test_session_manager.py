@@ -2146,6 +2146,7 @@ async def test_startup_reattach_skips_session_with_inflight_lifecycle_op(
     manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path))
     session = Session("session-1", "agent", SpawnTarget(type="local", cwd=str(tmp_path)))
     session.status = SessionStatus.STOPPED
+    session.restart_status = SessionStatus.RUNNING.value
     session.acp_session_id = "acp-1"
     manager._sessions[session.session_id] = session
     rec = SimpleNamespace(

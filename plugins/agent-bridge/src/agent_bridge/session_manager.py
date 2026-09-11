@@ -690,9 +690,8 @@ class Session:
         self.client: AcpClient | None = None
         self.status = SessionStatus.CREATED
         # Status read from durable storage during daemon startup before
-        # rehydrate converts an adoptable session to STOPPED. Used only by the
-        # startup reattach path to decide whether a surviving Session Host needs
-        # an explicit driver nudge.
+        # rehydrate converts an adoptable session to STOPPED. Persisted across
+        # interrupted recovery; an explicit stop clears this recovery intent.
         self.restart_status: str | None = None
         self.turn_count = 0
         self.context_size: int | None = None
@@ -1506,7 +1505,11 @@ class SessionManager:
             session.created_at = row["created_at"]
             session.updated_at = row["updated_at"]
             session.acp_session_id = row.get("acp_session_id")
-            session.restart_status = status
+            session.restart_status = (
+                row.get("restart_status") or status
+                if status == SessionStatus.STOPPED.value
+                else status
+            )
 
             # Mark formerly-active sessions as stopped
             interrupted_on_restart = False
@@ -1516,7 +1519,10 @@ class SessionManager:
                 SessionStatus.STARTING.value,
             ):
                 session.status = SessionStatus.STOPPED
-                self._db.update_session_status(sid, SessionStatus.STOPPED.value, now)
+                self._db.update_session_status(
+                    sid, SessionStatus.STOPPED.value, now,
+                    restart_status=session.restart_status,
+                )
                 log.info("Session %s (%s) marked STOPPED after restart", sid, session.name)
 
                 # Mark incomplete turns as interrupted
@@ -2049,6 +2055,17 @@ class SessionManager:
             with contextlib.suppress(Exception):
                 self._host_index.remove(r.session_id)
 
+    @staticmethod
+    def _background_recovery_allowed(session: Session) -> bool:
+        """Keep deliberate stops dormant, but retain restart recovery intent."""
+        if session.status in {SessionStatus.ENDED, SessionStatus.FAILED}:
+            return False
+        return session.status != SessionStatus.STOPPED or session.restart_status in {
+            SessionStatus.RUNNING.value,
+            SessionStatus.IDLE.value,
+            SessionStatus.STARTING.value,
+        }
+
     async def reattach_session_hosts(
         self,
         *,
@@ -2081,7 +2098,7 @@ class SessionManager:
         startup_session_ids = {
             session.session_id
             for session in self._sessions.values()
-            if session.status not in {SessionStatus.ENDED, SessionStatus.FAILED}
+            if self._background_recovery_allowed(session)
         }
         recovery_budget = min(
             startup_budget / 2,
@@ -2090,6 +2107,7 @@ class SessionManager:
         recovered = await self._recover_remote_host_records(
             session_ids=startup_session_ids,
             timeout_seconds=recovery_budget,
+            background=True,
         )
         if recovered:
             log.info(
@@ -2104,10 +2122,10 @@ class SessionManager:
             session = self._sessions.get(rec.session_id)
             if (
                 session is not None
-                and session.status in {SessionStatus.ENDED, SessionStatus.FAILED}
+                and not self._background_recovery_allowed(session)
             ):
                 log.info(
-                    "Skipping startup reattach for terminal session %s (%s)",
+                    "Skipping startup reattach for dormant session %s (%s)",
                     rec.session_id, session.status.value,
                 )
                 continue
@@ -2179,6 +2197,8 @@ class SessionManager:
                 continue
             try:
                 async with session._lifecycle_lock:
+                    if not self._background_recovery_allowed(session):
+                        continue
                     attached = await asyncio.wait_for(
                         self._reattach_one(
                             rec, session, new_status=SessionStatus.IDLE,
@@ -2220,12 +2240,16 @@ class SessionManager:
         allow_wake: bool = False,
         session_ids: set[str] | None = None,
         timeout_seconds: float = 120.0,
+        background: bool = False,
     ) -> int:
         """Rebuild missing remote HostIndex rows from far-side records.
 
         The frontend DB identifies adoptable ACP sessions and their remote venue
         targets. The Session Host itself is authoritative for host/child PID,
         port, nonce, version, and relay-forward metadata.
+
+        Background callers lock and recheck eligibility before provider probes.
+        Explicit resume/cleanup callers already own their lifecycle decision.
         """
         if self._host_index is None:
             return 0
@@ -2239,6 +2263,8 @@ class SessionManager:
 
         groups: dict[str, tuple[Any, list[tuple[Session, Any]]]] = {}
         for session in self._sessions.values():
+            if background and not self._background_recovery_allowed(session):
+                continue
             if session_ids is not None and session.session_id not in session_ids:
                 continue
             target = session.target
@@ -2304,7 +2330,18 @@ class SessionManager:
         semaphore = asyncio.Semaphore(3)
 
         async def _inspect_group(spawner: Any, entries: list[tuple[Session, Any]]):
-            async with semaphore:
+            async with semaphore, contextlib.AsyncExitStack() as locks:
+                if background:
+                    eligible = []
+                    for session, existing in entries:
+                        if session._lifecycle_lock.locked():
+                            continue
+                        await locks.enter_async_context(session._lifecycle_lock)
+                        if self._background_recovery_allowed(session):
+                            eligible.append((session, existing))
+                    entries = eligible
+                    if not entries:
+                        return []
                 inspect_before_connect = (
                     not allow_wake
                     or getattr(spawner, "boundary", "") == "container"
@@ -2356,7 +2393,13 @@ class SessionManager:
         tasks = list(task_entries)
         if not tasks:
             return 0
-        done, pending = await asyncio.wait(tasks, timeout=timeout_seconds)
+        try:
+            done, pending = await asyncio.wait(tasks, timeout=timeout_seconds)
+        except asyncio.CancelledError:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
         for task in pending:
             task.cancel()
         if pending:
@@ -2384,6 +2427,8 @@ class SessionManager:
                     self._remote_recovery_skipped.add(session.session_id)
                 continue
             for session, existing, status, record in results:
+                if background and not self._background_recovery_allowed(session):
+                    continue
                 if status == "live" and record is not None:
                     container_target = (
                         session.target.container
@@ -3117,6 +3162,7 @@ class SessionManager:
             client.adopt_session(session.acp_session_id)
             session.client = client
             session.status = new_status
+            session.restart_status = None
             self._db.update_session_status(
                 rec.session_id, new_status.value, time.time(), pid=session.pid,
             )
@@ -3503,6 +3549,8 @@ class SessionManager:
             session = self._sessions.get(rec.session_id)
             if session is None or not session.acp_session_id:
                 continue
+            if not self._background_recovery_allowed(session):
+                continue
             client = session.client
             if (
                 client is not None
@@ -3559,6 +3607,8 @@ class SessionManager:
             if session._lifecycle_lock.locked():
                 continue
             async with session._lifecycle_lock:
+                if not self._background_recovery_allowed(session):
+                    continue
                 if (
                     getattr(rec, "boundary", "local") == "codespace"
                     and not await self._codespace_host_available(
@@ -6030,7 +6080,7 @@ class SessionManager:
 
     async def stop_session(
         self, session_id: str, *, force: bool = False, reap_host: bool = False,
-        cancel_turn: bool = True,
+        cancel_turn: bool = True, for_restart: bool = False,
     ) -> None:
         """Stop a session -- shut down ACP client, preserve state for resume.
 
@@ -6055,37 +6105,49 @@ class SessionManager:
         ``False`` (dotfiles#1661) so the frontend detaches without cancelling --
         the host + child + turn survive for reattach. An explicit operator stop
         keeps the default (a stop IS an explicit host cancel).
+
+        ``for_restart`` is reserved for frontend shutdown: persist recovery
+        intent independently of whether redeploy cancels turns. Ordinary stops
+        stay dormant until an explicit resume/send, including after restart.
         """
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
 
-        if not force and session.has_active_background_tasks:
-            raise SessionBusyError(session_id, session.active_background_tasks)
+        async with session._lifecycle_lock:
+            if not force and session.has_active_background_tasks:
+                raise SessionBusyError(session_id, session.active_background_tasks)
 
-        await self._quiesce_session(session, cancel_turn=cancel_turn)
+            restart_status = None
+            if for_restart:
+                restart_status = (
+                    session.restart_status
+                    if session.status == SessionStatus.STOPPED
+                    else session.status.value
+                )
+            await self._quiesce_session(session, cancel_turn=cancel_turn)
 
-        # Idle-reaper only: free the Session Host child (a plain stop detaches
-        # to keep it reattachable). Safe here because the session is idle.
-        if reap_host and self._host_index is not None:
-            rec = self._host_index.get(session_id)
-            if rec is not None:
-                self._reap_host_record(rec, "idle reap (#1826)")
+            # Idle-reaper only: free the child; a plain stop stays resumable.
+            if reap_host and self._host_index is not None:
+                rec = self._host_index.get(session_id)
+                if rec is not None:
+                    self._reap_host_record(rec, "idle reap (#1826)")
 
-        session.status = SessionStatus.STOPPED
-        now = time.time()
-        self._db.update_session_status(session_id, SessionStatus.STOPPED.value, now)
-        # Release the per-worktree ownership reservation (#2912): a stopped
-        # owned session is no longer actively controlling the worktree, so free
-        # it for a live CLI (or a later fresh owner) to claim.
-        self._db.release_worktree_ownership(session_id=session_id)
-        if session.event_log:
-            session.event_log.append("session_state_changed", {
-                "status": SessionStatus.STOPPED.value,
-            })
-        session.touch()
-        log.info("Session %s (%s) stopped", session_id, session.name)
+            session.status = SessionStatus.STOPPED
+            session.restart_status = restart_status
+            now = time.time()
+            self._db.update_session_status(
+                session_id, SessionStatus.STOPPED.value, now,
+                restart_status=restart_status,
+            )
+            self._db.release_worktree_ownership(session_id=session_id)
+            if session.event_log:
+                session.event_log.append("session_state_changed", {
+                    "status": SessionStatus.STOPPED.value,
+                })
+            session.touch()
+            log.info("Session %s (%s) stopped", session_id, session.name)
 
     async def end_session_if_idle(
         self,

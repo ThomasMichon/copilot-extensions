@@ -30,6 +30,7 @@ def _add_session(manager, session_id="example-session"):
     )
     session.acp_session_id = "example-acp"
     session.status = SessionStatus.STOPPED
+    session.restart_status = SessionStatus.RUNNING.value
     manager._sessions[session_id] = session
     record = HostRecord(
         session_id=session_id,
