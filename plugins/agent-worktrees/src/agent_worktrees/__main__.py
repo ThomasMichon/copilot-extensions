@@ -6673,6 +6673,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             draft=getattr(args, "draft", False),
             attribution=(False if getattr(args, "no_attribution", False) else None),
             dry_run=args.dry_run,
+            confirm_fork=getattr(args, "confirm_fork", False),
         )
 
         _reminder = _pr_reminder_for(
@@ -6735,6 +6736,12 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                     f"then record it with:\n"
                     f"  agent-worktrees set-pr {worktree_id} --url <URL> --number <N>"
                 )
+        elif result.get("needs_confirmation"):
+            # Not an error -- the repo's resolved flow needs a personal fork,
+            # and create-pr never forks/pushes anywhere without --confirm-fork.
+            # Relay this to the human verbatim; re-run with --confirm-fork once
+            # they say yes.
+            output.warn(result.get("message", "Confirmation needed before continuing."))
         else:
             output.err(result.get("error", "create-pr failed."))
 
@@ -21346,6 +21353,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         dest="no_attribution",
         help="Omit source-worktree attribution even when the repo enables pr.source_attribution",
+    )
+    p.add_argument(
+        "--confirm-fork",
+        action="store_true",
+        dest="confirm_fork",
+        help="Confirm setting up + publishing through a personal fork, when "
+        "this repo's resolved role requires it (pr.fork/pr.roles). Without "
+        "this flag, create-pr stops and asks for confirmation instead of "
+        "forking/pushing anywhere.",
     )
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")

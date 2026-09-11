@@ -586,6 +586,34 @@ def has_remote(remote: str, *, cwd: str | Path) -> bool:
     return remote in remotes
 
 
+def remote_url(remote: str, *, cwd: str | Path) -> str | None:
+    """Return *remote*'s configured fetch URL, or ``None`` if unset/absent."""
+    result = git("remote", "get-url", remote, cwd=cwd, check=False)
+    if result.returncode != 0:
+        return None
+    url = (result.stdout or "").strip()
+    return url or None
+
+
+def ensure_remote(name: str, url: str, *, cwd: str | Path) -> bool:
+    """Idempotently point local remote *name* at *url* (add or repoint it).
+
+    The role-aware fork-PR flow's remote-setup primitive: a repo's ``origin``
+    stays the upstream fetch/rebase source of truth throughout, while a
+    separate remote (conventionally ``fork``) is added/repointed to the
+    caller's personal fork for the actual publish step. Never touches any
+    OTHER remote. Returns ``True`` on success (added, repointed, or already
+    correct), ``False`` on a git failure (never raises).
+    """
+    if has_remote(name, cwd=cwd):
+        if remote_url(name, cwd=cwd) == url:
+            return True
+        result = git("remote", "set-url", name, url, cwd=cwd, check=False)
+    else:
+        result = git("remote", "add", name, url, cwd=cwd, check=False)
+    return result.returncode == 0
+
+
 #: Default bound (seconds) for a network ``fetch``. An unbounded fetch hangs the
 #: whole flow when the remote is unreachable (Gitea down / offline) -- every
 #: fetch caller here is best-effort or has a fast-path fallback, so a stalled

@@ -380,6 +380,110 @@ class TestCreatePR:
 
 
 # ---------------------------------------------------------------------------
+# create_pr -- role-aware fork-PR flow (efforts/active/role-aware-fork-pr-flow)
+# ---------------------------------------------------------------------------
+
+class TestCreatePRForkFlow:
+    def _fork_config(self, config, tmp_path: Path, **fork_overrides):
+        import dataclasses
+        repo = config.repos["ext"]
+        fork = cfg.ForkConfig(enabled=True, remote="fork", **fork_overrides)
+        pr = dataclasses.replace(repo.pr, provider="github", fork=fork)
+        return dataclasses.replace(
+            config, repos={"ext": dataclasses.replace(repo, pr=pr)},
+        )
+
+    def _fake_provider(self, fork_owner: str, fork_clone_url: str):
+        class _FakeProvider:
+            name = "github"
+
+            def ensure_fork(self, repo, *, token=None):
+                return (fork_owner, fork_clone_url)
+
+        return _FakeProvider()
+
+    def test_fork_mode_needs_confirmation_and_does_nothing(self, pr_repo, tmp_path):
+        config, wid, wt_path, _remote_dir = pr_repo
+        config = self._fork_config(config, tmp_path)
+
+        res = pr_ops.create_pr(wid, config)
+
+        assert res["success"] is False
+        assert res["needs_confirmation"] == "fork_setup"
+        assert "fork" in res["message"].lower()
+        assert res["fork_remote"] == "fork"
+        # Nothing was mutated: no fork remote configured, no branch pushed.
+        assert not git_ops.has_remote("fork", cwd=str(wt_path))
+        assert not git_ops.local_branch_exists(
+            "feature/work-2-aaaa", cwd=str(wt_path)
+        )
+
+    def test_fork_mode_confirmed_pushes_to_fork_not_origin(
+        self, pr_repo, tmp_path, monkeypatch,
+    ):
+        config, wid, wt_path, _remote_dir = pr_repo
+        config = self._fork_config(config, tmp_path)
+
+        fork_dir = tmp_path / "fork.git"
+        git_ops.git("init", "--bare", "-b", "master", str(fork_dir))
+        fake = self._fake_provider("theirfork", str(fork_dir))
+        monkeypatch.setattr(
+            "agent_worktrees.providers.get_provider", lambda name: fake,
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.providers.account_token_for_slug",
+            lambda *a, **k: None,
+        )
+
+        res = pr_ops.create_pr(wid, config, confirm_fork=True)
+
+        assert res["success"] is True, res
+        assert res["remote"] == "fork"
+        assert res["pr_head"] == "theirfork:feature/work-2-aaaa"
+        # The local 'fork' remote now points at the fake fork's clone URL.
+        assert git_ops.remote_url("fork", cwd=str(wt_path)) == str(fork_dir)
+        # The branch landed on the FORK, never on origin.
+        assert git_ops.remote_branch_exists(
+            "fork", "feature/work-2-aaaa", cwd=str(wt_path)
+        )
+        origin_refs = git_ops.git(
+            "ls-remote", "origin", cwd=str(wt_path)
+        ).stdout
+        assert "feature/work-2-aaaa" not in origin_refs
+
+    def test_fork_owner_override_wins_over_provider_login(
+        self, pr_repo, tmp_path, monkeypatch,
+    ):
+        config, wid, _wt_path, _remote_dir = pr_repo
+        config = self._fork_config(config, tmp_path, owner="explicit-owner")
+
+        fork_dir = tmp_path / "fork2.git"
+        git_ops.git("init", "--bare", "-b", "master", str(fork_dir))
+        fake = self._fake_provider("provider-login", str(fork_dir))
+        monkeypatch.setattr(
+            "agent_worktrees.providers.get_provider", lambda name: fake,
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.providers.account_token_for_slug",
+            lambda *a, **k: None,
+        )
+
+        res = pr_ops.create_pr(wid, config, confirm_fork=True)
+
+        assert res["success"] is True, res
+        assert res["pr_head"] == "explicit-owner:feature/work-2-aaaa"
+
+    def test_fork_mode_off_by_default(self, pr_repo):
+        """A repo that never sets pr.fork/pr.roles is fully unaffected."""
+        config, wid, _wt_path, _remote_dir = pr_repo
+        res = pr_ops.create_pr(wid, config)
+        assert res["success"] is True, res
+        assert "needs_confirmation" not in res
+        assert "pr_head" not in res
+        assert res["remote"] == "origin"
+
+
+# ---------------------------------------------------------------------------
 # create_pr -- refspec head scheme (#1815)
 # ---------------------------------------------------------------------------
 
