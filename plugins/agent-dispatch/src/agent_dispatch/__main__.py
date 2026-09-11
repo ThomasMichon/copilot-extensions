@@ -2473,6 +2473,58 @@ def _cmd_emitter(args: argparse.Namespace) -> int:
     raise SystemExit(f"unknown emitter command: {args.emitter_command!r}")
 
 
+#: The `agent-worktrees` worktree-root naming convention observed throughout
+#: this harness: `<project-repo-name>.worktrees/<machine>-<os>-<timestamp>-<hex>`
+#: (e.g. `dotfiles.worktrees\tmichon-cloud1-win-20260910-171507-5474`). A
+#: worktree checkout's own directory name is per-session/per-machine and is
+#: never a stable repo identity.
+_WORKTREE_PARENT_SUFFIX = ".worktrees"
+
+
+def _reject_worktree_checkout_as_repo_root(repo_root: Path) -> None:
+    """Refuse when ``repo_root`` looks like a worktree checkout, not a repo's
+    registered anchor.
+
+    A worktree's own directory name is per-session and per-machine -- never a
+    stable repo identity. If a reviewer-loop declaration is discovered under a
+    worktree checkout instead of the repo's registered anchor, deriving the
+    registration owner/pointer name from that path (``repo_root.name``) stamps
+    every resulting registration with a throwaway, non-reconciling identity:
+    every fresh worktree that hits this path registers a brand-new pointer
+    that never collides with (and is never cleaned up alongside) the last one,
+    so declared registrations -- and the workers the supervisor spawns for
+    them -- accumulate without bound (#2417).
+
+    Deliberately a **cheap, dependency-free path-pattern check** (does
+    ``repo_root``'s parent directory name end in ``.worktrees``, the naming
+    convention every ``agent-worktrees``-managed worktree root in this harness
+    follows) rather than an authoritative subprocess probe out to
+    ``agent-worktrees``: a per-invocation subprocess round-trip measured ~9s
+    on a busy/loaded host (the same process-count-scales-with-activity
+    pressure #2417/#2300 describe), which would make every reviewer-loop /
+    repository-issue-loop CLI call slow exactly when the host is already
+    struggling -- an unacceptable regression for what is meant to be a fast
+    safety check. This heuristic is best-effort, not a hard guarantee (a repo
+    anchor whose own name happens to end in ``.worktrees`` would be a false
+    positive; a worktree root that does NOT follow this harness's naming
+    convention would be a false negative) -- but it catches the actual
+    observed failure mode with zero added latency and no external dependency,
+    consistent with à-la-carte independence.
+    """
+    if repo_root.parent.name.endswith(_WORKTREE_PARENT_SUFFIX):
+        raise ValueError(
+            f"{repo_root} looks like a worktree checkout (its parent "
+            f"directory, {repo_root.parent.name!r}, follows this harness's "
+            "'<repo>.worktrees' naming convention), not a repo's registered "
+            "anchor. Run this reviewer-loop command from the anchor checkout "
+            "instead: a worktree's directory name is per-session and must "
+            "never be recorded as a repo's stable identity (see "
+            "visions/plugin-services -- repo/agent identity resolves by "
+            "registered NAME only; a filesystem path is never persisted "
+            "outside repos.yaml/projects.yaml)."
+        )
+
+
 def _reviewer_loop_declarations(
     args: argparse.Namespace,
 ) -> tuple[Path, tuple[ProfileDeclaration, ...], str]:
@@ -2495,6 +2547,13 @@ def _reviewer_loop_declarations(
     if owner is None and len(declared_owners) == 1:
         owner = next(iter(declared_owners))
     repo_root = dispatch_repo_config.repo_root_from_surface_path(path, "registrar")
+    if repo_root is not None:
+        # Guard unconditionally, even when `owner` is already explicit: the
+        # pointer this flow persists (see _reviewer_loop_setup) records
+        # repo_root itself as its `location`, and a worktree checkout path is
+        # never a valid thing to persist there regardless of what owner
+        # string ends up attached to it.
+        _reject_worktree_checkout_as_repo_root(repo_root)
     selected_dir = (
         dispatch_repo_config.selected_repo_surface_dir(repo_root, "registrar").resolve()
         if repo_root is not None
@@ -2975,6 +3034,9 @@ def _repository_issue_loop_declarations(
     if owner is None and len(declared_owners) == 1:
         owner = next(iter(declared_owners))
     repo_root = dispatch_repo_config.repo_root_from_surface_path(path, "registrar")
+    if repo_root is not None:
+        # See the identical guard + rationale in _reviewer_loop_declarations.
+        _reject_worktree_checkout_as_repo_root(repo_root)
     selected_dir = (
         dispatch_repo_config.selected_repo_surface_dir(repo_root, "registrar").resolve()
         if repo_root is not None
