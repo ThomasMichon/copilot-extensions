@@ -324,11 +324,12 @@ def prepare_ssh_config(container: str, user: str) -> SSHConfig:
             "    StrictHostKeyChecking accept-new",
             f'    UserKnownHostsFile "{_config_path(known_hosts)}"',
         ])
+        proxy_command = (
+            f"docker exec -i -u root {container} "
+            "/usr/sbin/sshd -i -e -o GatewayPorts=no"
+        )
         if not proxy_port:
-            lines.append(
-                f"    ProxyCommand docker exec -i -u root {container} "
-                "/usr/sbin/sshd -i -e -o GatewayPorts=no"
-            )
+            lines.append(f"    ProxyCommand {proxy_command}")
         lines.extend([
             "    LogLevel ERROR",
             "",
@@ -364,6 +365,13 @@ def prepare_ssh_config(container: str, user: str) -> SSHConfig:
         user=user,
         identity_file=str(private_key),
         config_file=str(config_file),
+        # Surfaced explicitly (not just embedded in the rendered config file's
+        # text) so a Windows caller (ssh_manager.create_ssh_subprocess) can
+        # detect it and route the ProxyCommand child through its windowless
+        # broker instead of letting OpenSSH spawn it directly -- a plain
+        # ``-F config_file`` consumer has no cheap way to see a file-embedded
+        # ProxyCommand without shelling out to ``ssh -G`` itself.
+        proxy_command=None if proxy_port else proxy_command,
     )
 
 
