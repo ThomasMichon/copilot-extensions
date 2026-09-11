@@ -79,6 +79,7 @@ From `tools/clean-room/` (`run.ps1` on Windows, `run.sh` on Linux/WSL/macOS):
 ./run.ps1 -Scenario agent-vault-eval -Mode eval   # Tier-E: setup -> drive Copilot (literal-mode) -> capture transcript + judge packet
 ./run.ps1 -Scenario agent-vault-eval -Mode eval -Runs 3   # N-run for a gating claim (see flake policy)
 ./run.ps1 -Image pristine -Mode down         # remove the container
+./run.ps1 -Mode prune                        # remove EVERY clean-room container this rig created
 ```
 
 ```bash
@@ -89,6 +90,7 @@ From `tools/clean-room/` (`run.ps1` on Windows, `run.sh` on Linux/WSL/macOS):
 ./run.sh --until 3 --then shell run
 ./run.sh --npm-registry https://…/npm/ run
 ./run.sh bridge-register
+./run.sh prune                                # remove EVERY clean-room container this rig created
 ```
 
 Notes:

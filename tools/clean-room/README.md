@@ -111,6 +111,7 @@ uninstall in addition to install, explicit update, rollback, and isolation.
 ./run.ps1 -Mode bridge-register          # expose the box as an agent-bridge agent
 ./run.ps1 -Scenario context-handoff-eval -Mode eval  # handoff speed/fidelity/lifecycle witness
 ./run.ps1 -Image pristine -Mode down     # remove the container
+./run.ps1 -Mode prune                    # remove EVERY clean-room container this rig created
 ```
 
 ```bash
@@ -126,6 +127,7 @@ uninstall in addition to install, explicit update, rollback, and isolation.
 ./run.sh --scenario context-handoff-eval eval    # handoff speed/fidelity/lifecycle witness
 ./run.sh bridge-register
 ./run.sh --image pristine down
+./run.sh prune                            # remove EVERY clean-room container this rig created
 ```
 
 ## Scenarios & the scenario contract
@@ -318,7 +320,12 @@ named container (`cr-<image>`), so you can run the automated scenario (all
 stages, or `-Until <n>` to stop early) and then `-Mode shell` / `-Then shell`
 into the *same* box to run the real interactive `copilot` — Copilot CLI does not
 fully enable every feature in `-p`/ACP, so the rig automates what it can and
-hands off for the rest. The container stays up until `-Mode down`.
+hands off for the rest. The container stays up until `-Mode down` -- by design,
+so you can come back and inspect it. Forgetting `down` for a concurrent
+`-NameSuffix` run, an ad-hoc debugging box, or an eval leaves debris; run
+`-Mode prune` (`./run.sh prune` / `./run.ps1 -Mode prune`) to sweep up **every**
+clean-room container this rig has created on the box, not just the
+currently-selected one.
 
 **Auth is automatic.** By default the runner grabs a Copilot token from your host
 `gh` and injects it into the container as `COPILOT_GITHUB_TOKEN`, so there is
@@ -392,7 +399,7 @@ stage N). The scenario name + stage list live in `manifest.json`.
 | `scenarios/<name>/manifest.json` | Scenario descriptor: image variant, prereqs, auth, expected artifacts, ordered stages. |
 | `scenarios/<name>/scenario.sh` | In-container driver + assertions for one scenario (bind-mounted at run, so edits need no rebuild). Sources the lib; honors `CR_UNTIL`. |
 | `scenarios/generic-single-plugin/` | The reference scenario (today's Layer-0 install check). |
-| `run.ps1` / `run.sh` | Host wrappers: build · one-time auth+commit · run (`-Scenario`) · **eval** (Tier-E agent-driven; `-Mode eval` / `eval`) · **shell** (interactive handoff) · **bridge-register/unregister** (drive over agent-bridge) · down; `-Image base\|pristine`, `-UvIndex`, `-BlockPublicFeeds`. |
+| `run.ps1` / `run.sh` | Host wrappers: build · one-time auth+commit · run (`-Scenario`) · **eval** (Tier-E agent-driven; `-Mode eval` / `eval`) · **shell** (interactive handoff) · **bridge-register/unregister** (drive over agent-bridge) · down · **prune** (bulk-remove every clean-room container on the box); `-Image base\|pristine`, `-UvIndex`, `-BlockPublicFeeds`. |
 | `bridge_register.py` | Stdlib-only helper: register/unregister the container as an agent-bridge `command` agent via the provider API (no copilot-extensions imports). |
 
 ## Scope / non-goals
