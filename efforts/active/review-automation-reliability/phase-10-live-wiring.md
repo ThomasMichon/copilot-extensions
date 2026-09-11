@@ -61,19 +61,55 @@ minimizes risk and unblocks the most Validation Plan items fastest:
    restart-at-any-boundary and duplicate-delivery Validation Plan items,
    which are fundamentally about the task machine's own transitions.
 2. **`machine_coupling.apply_transition`'s CAS primitive into `queue.py`'s
-   generation/lease fencing.** `queue.py` already implements
-   compare-and-set semantics per transition inline (each `_transition`
-   call reads current generation, conditions its `UPDATE` on it matching).
-   `machine_coupling.VersionedRecord`/`apply_transition` declare the same
-   three-outcome shape (applied / lost-CAS / already-advanced) as a
-   reusable primitive. Wiring this means confirming `_transition`'s SQL
-   `UPDATE ... WHERE generation = ?` pattern already produces exactly
-   these three outcomes (it does, per direct reading) and, where useful,
-   exposing that classification explicitly in `_transition`'s return
-   shape/logging rather than leaving "was this a fresh apply or a replay"
-   implicit in row-count-affected. Directly serves the "duplicate request
-   and response delivery produces one analysis and at most one submission"
-   Validation Plan item.
+   concurrency fencing.** **Correction (found during slice 1's direct
+   reading of `_transition`, which the original design here got wrong):**
+   `queue.py` does **not** implement a `WHERE generation = ?`-conditioned
+   `UPDATE` in the general path -- `_transition`'s SQL is
+   `UPDATE tasks SET ... WHERE id = ?`, with no generation clause. Its
+   real concurrency mechanism is `BEGIN IMMEDIATE` (SQLite's write-lock-
+   now transaction mode), which serializes every `_transition` call
+   against a given database, plus a fresh Python-level
+   `task.status not in allowed_set` check read *inside* that lock. This
+   is pessimistic locking, not optimistic CAS -- a different mechanism
+   than `machine_coupling`'s declared generation-conditioned `UPDATE`
+   primitive, though it achieves the same no-lost-updates guarantee by a
+   different route. A `WHERE generation = ?` clause only appears when a
+   caller explicitly supplies `expected_generation`, and a mismatch there
+   raises `TaskError` immediately rather than resolving to
+   `CASOutcome.LOST_CAS`/`ALREADY_ADVANCED` the way
+   `machine_coupling.apply_transition` does.
+
+   This means wiring item 2 is **not** a low-risk parity confirmation the
+   way item 1 was -- it is a genuine design question that must be
+   answered before any code changes: **does a replayed request against an
+   already-advanced task (e.g. a duplicate `approve` call after the first
+   one already succeeded) currently raise `TaskError`, and should that
+   change to a silent no-op** (matching `machine_coupling`'s
+   `ALREADY_ADVANCED` semantics and this effort's "duplicate delivery
+   produces... at most one submission" Validation Plan item)? Today's
+   answer, confirmed by reading every `_transition` call site: **yes, it
+   raises** for every method except `suspend` (which has its own
+   hand-written early-return for the specific same-owner-already-
+   suspended case) and `complete_with_outcome` (which has its own
+   hand-written idempotent-replay path for a result already recorded).
+   No existing test locks in "raise" as required behavior for the other
+   five methods, but changing it is an observable behavior change for any
+   caller currently catching `TaskError` to detect "someone already did
+   this" -- **this must not be decided unilaterally inside a wiring
+   slice**. Before implementing, get explicit confirmation on which of
+   these is wanted:
+   - (a) Leave every method's raise-on-already-advanced behavior exactly
+     as it is today, and only make the classification *observable*
+     (e.g. a distinguishable audit-log note or exception subtype) without
+     changing what callers experience, or
+   - (b) Extend `suspend`'s and `complete_with_outcome`'s existing
+     idempotent-replay pattern to the other five methods, making
+     duplicate delivery a true no-op everywhere, which is a real behavior
+     change validated by new tests, not merely "wiring."
+   Whichever is chosen, the shared `machine_coupling.apply_transition`
+   primitive is still the right vocabulary to express the outcome in
+   -- this correction only changes what work item 2 actually requires
+   before code is written, not the direction.
 3. **Provider machine into a real provider adapter (or adapters).**
    Unlike the task machine, there is today **no existing provider-adapter
    code in this plugin** to wire against -- `provider_state_machine.py`'s
@@ -133,11 +169,14 @@ here but not blocking the start of 1/2/5.
   monkeypatching a transition's `from_states`/`to_state` and asserting the
   live method's behavior changes to match, not just that today's literals
   happen to agree with it.
-- [ ] Make `machine_coupling`'s CAS outcome classification explicit in
-  `queue.py`'s own `_transition` return/logging (item 2 above), backed by
-  a test proving a replayed transition is classified as
-  `CASOutcome.ALREADY_ADVANCED` end-to-end through the real `TaskQueue`,
-  not only through the standalone `apply_transition` primitive.
+- [ ] **Blocked on a design decision, not ready to implement.** Item 2's
+  original plan assumed `_transition` already used a generation-
+  conditioned CAS `UPDATE`; direct reading during slice 1 found it
+  actually uses `BEGIN IMMEDIATE` serialization + a fresh in-lock status
+  check, and every method except `suspend`/`complete_with_outcome` raises
+  `TaskError` on a replayed request rather than no-op'ing. Get an
+  explicit answer to the (a)/(b) question in the corrected item 2
+  description above before writing any code here.
 - [ ] Build the first live provider adapter (GitHub) driving
   `provider_state_machine`'s declared dimensions from real PR state (item
   3 above). Expect this to be split into its own sequence of slices as
