@@ -128,6 +128,19 @@ def test_bin_directory_is_deployed_into_the_slot(tmp_path, monkeypatch):
     assert deployed.read_text() == (pd / "bin" / "launch-session.sh").read_text()
 
 
+def test_relocated_launchers_resolve_pane_wrappers_from_their_own_bin():
+    root = Path(__file__).resolve().parents[1] / "bin"
+    sh = (root / "launch-session.sh").read_text(encoding="utf-8")
+    ps1 = (root / "launch-session.ps1").read_text(encoding="utf-8")
+    assert 'PANE_WRAPPER="$SCRIPT_DIR/pane-wrapper.sh"' in sh
+    assert 'dirname -- "${BASH_SOURCE[0]}"' in sh
+    assert "$paneWrapper = Join-Path $PSScriptRoot 'pane-wrapper.ps1'" in ps1
+    assert 'RUNTIME_DIR="${AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT:-}"' in sh
+    assert 'AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR' in sh
+    assert '$RuntimeDir = $env:AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT' in ps1
+    assert '$env:AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR' in ps1
+
+
 def test_self_install_command_dry_run(capsys):
     rc = main(["self-install"])
     out = capsys.readouterr().out

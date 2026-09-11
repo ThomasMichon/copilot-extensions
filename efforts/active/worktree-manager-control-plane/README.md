@@ -212,9 +212,15 @@ realized in `main`; unchecked items are the remaining delta.
             `pane-wrapper.{sh,ps1}` verbatim (hash-verified) into
             `worktree-manager/bin/`; proved the existing `_copy_payload`
             deployment mechanism ships them with zero packaging changes.
-      - [ ] Sub-slice 2a Step 2 (the actual cutover): repoint `cmd_launch`,
-            add the direct non-mux fallback, delete the old in-plugin scripts
-            — validated against the full Picker golden/screenshot suite.
+      - [x] Sub-slice 2a Step 2, repoint + direct-fallback + Manager-Picker
+            wiring: `cmd_launch` repoints to the relocated launcher with a
+            direct non-mux fallback, and (the actual live-regression fix)
+            Worktree Manager's own `_run_launch` now delegates ordinary
+            local, non-AHP launches to that SAME relocated script instead of
+            the never-wired `launcher.compose_launch()` path — validated
+            against the full test suites (see journal). **Deletion of the
+            old in-plugin scripts deliberately deferred** to a follow-up PR
+            pending live-hardware proof.
       - [ ] Sub-slice 2b: split `cmd_remux` (detection stays, relaunch action
             moves).
 - [ ] Update the Worktree Manager Picker to select Mux presentation and/or the
@@ -426,6 +432,48 @@ its issues; the public artifacts stay self-contained and general-purpose.
   full suite hangs partway through `test_data_ssh_sources.py`/
   `test_launch_trace.py`, likely a real-SSH-subprocess test with no mock/
   timeout in this environment — a separate, pre-existing issue to file.
+- **2026-09-10** — Implemented Phase 3b Slice 2 Sub-slice 2a Step 2's
+  **repoint + direct-fallback** portion. `agent-worktrees cmd_launch` now
+  resolves Worktree Manager's relocated launcher from
+  `WORKTREE_MANAGER_ROOT` + `current-version`, health-probes the versioned
+  install before using it, and otherwise falls back to a new small direct
+  non-mux path that reuses the normal `resolve` plan and still runs
+  `post-exit` after the child exits. Also fixed the relocated POSIX launcher
+  to resolve `pane-wrapper.sh` relative to its own installed `bin/`
+  directory, matching the existing PowerShell `$PSScriptRoot` behavior. **Plan
+  deviation recorded deliberately:** the old in-plugin launcher/wrapper files
+  remain deployed as the rollback path until live hardware proves the relocated
+  path preserves mux, post-exit, and activity journaling; the plan's deletion
+  checkbox stays open for that follow-up cleanup PR. Version bumps:
+  agent-worktrees `1.5.5-dev58`, marketplace metadata `1.7.7-dev56`,
+  worktree-manager `0.1.0-dev36`.
+- **2026-09-10** — Diagnosed and closed the actual live regression this slice
+  exists to fix, one layer deeper than the `cmd_launch` repoint above. Once
+  Worktree Manager's own `worktree-manager` binstub first appeared on `PATH`
+  on live hardware, the bare-invocation seam handed the entire interactive
+  session to Worktree Manager's OWN transplanted production Picker, whose
+  `_run_launch` routed every local, non-AHP launch through
+  `launcher.compose_launch()`/`execute()` — a `MuxCapability` seam that has
+  **never** been wired to a real backend (`set_mux_capability()` is never
+  called anywhere), so every such launch silently ran non-muxed with no
+  `post-exit`/activity journaling, bypassing `cmd_launch`/`launch-session.ps1`
+  entirely. Fixed by making `_run_launch` delegate ordinary local, non-AHP
+  launches to the SAME relocated `<own-install>/bin/launch-session.*` script
+  (verbatim reuse, per the operator directive), passing the already-resolved
+  `plan.worktree_id` so a `mode == "new"` request cannot trigger a second
+  worktree creation by re-issuing `--new` inside the script's own resolve.
+  AHP-attached launches are deliberately left on `launcher.launch()` (AHP's
+  `attach_plan()` rewrite would be clobbered by the script's own re-resolve);
+  real mux support for AHP attachment remains a separate, explicitly scoped
+  follow-up. Added regression tests proving delegation on both platforms,
+  `--worktree-id` substitution for `new`, `WORKTREE_NO_MUX` threading, and
+  that AHP still bypasses the relocated script. Full `worktree-manager` suite:
+  761 passed / 2 skipped (only the 3 pre-existing, unrelated Windows
+  provider-registry POSIX-path failures remain, confirmed unaffected). As an
+  interim mitigation on the affected machine while this PR was in flight, the
+  Worktree Manager binstub was temporarily removed from `PATH` so the
+  bare-invocation seam fell back to the bundled, already-mux-capable Picker;
+  it should be safe to restore once this fix is deployed.
 - **2026-09-09** — Implemented the reviewed Phase 3b AHP relocation Steps 2-4
   without deleting the legacy path. agent-worktrees now exposes fenced,
   provider-neutral `execution-leg get/set/clear` JSON verbs, preserves legacy
