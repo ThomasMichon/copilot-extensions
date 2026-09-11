@@ -26,6 +26,7 @@ from .routes import (
     agents,
     health,
     live_sessions,
+    native,
     remote,
     sessions,
     ui,
@@ -72,6 +73,12 @@ def _count_active_sessions(mgr, db=None) -> int:
                     "Self-retire live-session registration count failed",
                     exc_info=True,
                 )
+    native_owner = getattr(mgr, "native_manager", None)
+    if native_owner is not None and native_owner.serving() is True:
+        try:
+            n += len(native_owner.records())
+        except Exception:
+            n += 1  # uncertain native ownership must not trigger idle shutdown
     return n
 
 
@@ -298,6 +305,8 @@ async def _start_credential_relay(app: FastAPI):
     can (re)bind the shared relay port (9857). Idempotent: if a relay is already
     running on this app it is returned unchanged.
     """
+    if not getattr(app.state.config, "enable_credential_relay", True):
+        return None
     existing = getattr(app.state, "credential_relay", None)
     if existing is not None and getattr(existing, "running", False):
         return existing
@@ -357,7 +366,7 @@ async def lifespan(app: FastAPI):
     # deploy manifest already matches (dotfiles #533). Only the **primary** daemon
     # writes it: the elevated sub-daemon (enable_credential_relay=False) shares the
     # runtime dir and would otherwise clobber the marker with a non-primary pid.
-    if getattr(cfg, "enable_credential_relay", True):
+    if getattr(cfg, "enable_credential_relay", True) and not getattr(app.state, "relay_start_deferred", False):
         from .runtime_version import write_running_version
 
         write_running_version()
@@ -377,6 +386,41 @@ async def lifespan(app: FastAPI):
     app.state.readiness_exception = None
     app.state.topology_ready = False
     app.state.credential_relay_ready = False
+    from .native_manager import NativeManager
+    from .session_manager import _codespace_claim_key, _ACTIVE_STATES
+
+    def native_provider_command():
+        provider = app.state.resolver.namespace_resolvers.get("codespace")
+        return getattr(provider, "management_command", None)
+
+    def acp_busy(codespace):
+        for session in getattr(mgr, "_sessions", {}).values():
+            key = _codespace_claim_key(session.target)
+            target_codespace = getattr(session.target, "codespace", None)
+            name = target_codespace.get("name") if isinstance(target_codespace, dict) else (key[0] if key else None)
+            if name == codespace and session.status in _ACTIVE_STATES:
+                return True
+        return False
+
+    def owns_native_control():
+        if not app.state.ready or getattr(mgr, "_draining", False):
+            return False
+        if getattr(app.state, "publish_on_ready", False):
+            import os
+            from zdd.routing import read_active_endpoint
+            from .config import config_dir
+
+            endpoint = read_active_endpoint(config_dir(), verify_listener=False)
+            return endpoint is not None and endpoint.pid == os.getpid()
+        return True
+
+    app.state.native_manager = NativeManager(
+        db_path.parent / "native-executions", native_provider_command,
+        acp_busy=acp_busy, serving=owns_native_control,
+    )
+    mgr.native_manager = app.state.native_manager
+    mgr.native_guard = app.state.native_manager.assert_acp_allowed
+    app.state.native_manager.start_monitor()
 
     # The launch path reserved the serving socket before entering lifespan.
     # Publish that concrete endpoint before topology, relay, or remote recovery
@@ -478,6 +522,8 @@ async def lifespan(app: FastAPI):
                         "Credential relay disabled for this daemon "
                         "(enable_credential_relay=False) -- reusing the primary daemon's relay"
                     )
+                elif getattr(app.state, "relay_start_deferred", False):
+                    log.info("Credential relay binding deferred until owner-directed cutover")
                 else:
                     await _ensure_relay()
 
@@ -538,12 +584,15 @@ async def lifespan(app: FastAPI):
             )
         )
 
-    # Expose a relay-adoption hook so a passive cutover instance can bind the
-    # shared relay port *after* the retiring daemon releases it (the relay is a
-    # singleton on 9857). The /api/v1/relay/adopt endpoint calls this.
+    # A passive instance may adopt only when its installation enables the relay.
     async def _adopt_relay():
+        if not getattr(cfg, "enable_credential_relay", True):
+            return False
         await _ensure_relay()
-        return relay_server is not None and getattr(relay_server, "running", False)
+        running = relay_server is not None and getattr(relay_server, "running", False)
+        if running:
+            app.state.relay_start_deferred = False
+        return running
 
     app.state.adopt_relay = _adopt_relay
 
@@ -938,6 +987,7 @@ async def lifespan(app: FastAPI):
         )
 
     yield
+    await app.state.native_manager.shutdown()
 
     # Shutdown: retract our routing-table claim so clients fall back (or follow
     # a successor that already flipped the table). Done first so no new client
@@ -1103,6 +1153,7 @@ def create_app(*, config=None, token: str | None = None) -> FastAPI:
     app.include_router(acp_ws.router)
     app.include_router(sessions.router)
     app.include_router(live_sessions.router)
+    app.include_router(native.router)
     app.include_router(remote.router)
     app.include_router(agents.router)
     app.include_router(worktrees.router)

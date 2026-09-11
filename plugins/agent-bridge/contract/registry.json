@@ -8,9 +8,9 @@
       "kind": "wire-protocol",
       "normative": true,
       "declared_range": {
-        "current": 14,
+        "current": 15,
         "minimum": 1,
-        "previous_generation": 13,
+        "previous_generation": 14,
         "previous_absent_reason": null
       },
       "evidence_window": {
@@ -20,7 +20,8 @@
           11,
           12,
           13,
-          14
+          14,
+          15
         ],
         "runtimes": [
           "0.4.0-dev423",
@@ -29,7 +30,14 @@
           "0.4.0-dev430",
           "0.4.0-dev432",
           "0.4.0-dev435",
-          "0.4.0-dev447"
+          "0.4.0-dev447",
+          "0.4.0-dev461",
+          "0.4.0-dev468",
+          "0.4.0-dev470",
+          "0.4.0-dev474",
+          "0.4.0-dev475",
+          "0.4.0-dev476",
+          "0.4.0-dev477"
         ]
       },
       "capability_versions": {
@@ -45,21 +53,22 @@
         "remote_operations": 11,
         "conditional_idle_end": 12,
         "remote_event_multiplex": 13,
-        "remote_commands": 14
+        "remote_commands": 14,
+        "native_executions": 15
       },
       "durable_records": [],
       "source_paths": [
         {
           "path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
-          "sha256": "3c2a43766ce10d69b42aaf9a9f8ce5331faff9cb7d9af8b87c36ab397e2c2cd5",
+          "sha256": "8e01593aaa622a33166fa1f95ce3863e11377e298d239b1becb12e9a3249249c",
           "semantic": true,
           "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/models.py",
-          "sha256": "6e7dd87611fa3080a219f2a06ed598ae21c581f6978bfba1341762bfe0b7652a",
-          "semantic": false,
-          "non_semantic_reason": "Installation-scoped runtime defaults do not alter the representative session-create wire shape."
+          "sha256": "5d6b0eae5980a136b65ce4355a7e7ec42ce38a06e0c75c01d47bb0c8400ea8d6",
+          "semantic": true,
+          "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
@@ -69,7 +78,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
-          "sha256": "49d51795792a12b55ed8cd93893abd26f24e1a5a84dde049f97e24525153f583",
+          "sha256": "8624e9c9577a277ba1e66157a2d755c28fd2abf1d6f8178e28f2cf63aef33b1c",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -84,14 +93,50 @@
           "sha256": "83728e07defb2ce501055554ec7c26e9707038a04c477e75e18b23525a0620a4",
           "semantic": false,
           "non_semantic_reason": "This guard asserts tolerant reading but does not produce the registered wire shape."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/native_store.py",
+          "sha256": "7b0432b7150ba18d15534e7081b36fbf2be5c329d1ec4581f31e56af4c955aba",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/routes/native.py",
+          "sha256": "2a6a84a6f55f9dd46036236fe1331f1f6fb6d4c2dbf2eafb57a2b764cdd8bd53",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/native_manager.py",
+          "sha256": "cd180cb14094046508d795133bf109839d2f805bffefd70c79e03784ac543654",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/native_resources.py",
+          "semantic": true,
+          "non_semantic_reason": null,
+          "sha256": "605725184fcd9e833b329d350271886022f1243b837a59a54711dbb41f2208a6"
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/native_runtime.py",
+          "semantic": true,
+          "non_semantic_reason": null,
+          "sha256": "cbb10ee26520315d2f53fb175d2f9232812f2652b06a68941f6e2f18e7881e9c"
         }
       ],
       "fixtures": [
         {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-incumbent-error.json",
+          "sha256": "97b7131bc1b991f0ec2797972caf45f5573aa7d3453ac18afacfa5d332b72a8d",
+          "role": "current native-owned venue refusal before ACP allocation",
+          "generation": 15
+        },
+        {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/health.json",
-          "sha256": "1837985cc0164c16a70f7baada477f560bde1f86d33cf120855642f9992607b0",
+          "sha256": "00a8f05e86943ebb907dc7ca3f04a9c84e7f7aa8725669947f26a546457c5a81",
           "role": "current health response",
-          "generation": 14
+          "generation": 15
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-13/health.json",
@@ -107,21 +152,21 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/session-create-request.json",
-          "sha256": "c12313ad80ddb5cfcc6b8670c9c3a46a4fac60eed473945ce531e59d43a7f0c9",
+          "sha256": "e13287c3a2e124d9fbd066515053f9c39e97efe70aae40a36dbfe93a96ff273a",
           "role": "current session-create request with unknown-field tolerance",
-          "generation": 14
+          "generation": 15
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/session-create-response.json",
-          "sha256": "a0611733dc87456e4402898cc13683c256a0140eb07fcd116864f3ab46c9857c",
+          "sha256": "54595295adb1da2a1cd86d2302a2f48072a65191708be9077a92286502f579bb",
           "role": "current session-create response",
-          "generation": 14
+          "generation": 15
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/representative-error.json",
-          "sha256": "0f3688382c014e60515802efe651166b7435f90a386799f86296489b4a3534ed",
+          "sha256": "44cb199bf6ca53897dc00ba2bd4f9dd26c7326e6ab6d006e3e48b7b96fba8656",
           "role": "current representative FastAPI error",
-          "generation": 14
+          "generation": 15
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-11/health.json",
@@ -143,18 +188,226 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/protocol-constants.json",
-          "sha256": "f889209fd08b28747e7ba7f1b78c0e22c1eaadf1d0135a25e3c0ae9d28b65eb9",
+          "sha256": "c98dddf53ab9247ba56746a4321bfc48ad5d916372e667d7f605aa685385f294",
           "role": "current HTTP range and capability constants",
-          "generation": 14
+          "generation": 15
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-command.json",
-          "sha256": "5166a807e2c68856f704b7ba9cd6c11c73a7ae4a00028f6c709f85edfa7fa5ae",
+          "sha256": "5fd3993bb5ae1d62135793a22b801e8061d17f3cb23fd8ecbae9e67d49ecc4af",
           "role": "current carrier-backed remote command request and response",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-14/health.json",
+          "sha256": "1837985cc0164c16a70f7baada477f560bde1f86d33cf120855642f9992607b0",
+          "role": "previous HTTP generation health evidence",
           "generation": 14
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-receipt.json",
+          "sha256": "a66c3273799090a24711a370a52d865ad568ab6141680d2f96b14128ab6438ff",
+          "role": "current native execution contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-routes.json",
+          "sha256": "1f0ce21588553aff08ce6a9a1a530d5a6076e0aa71bd8886f361d93c5eead87d",
+          "role": "current native execution contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-registration.json",
+          "sha256": "ff7437b51a6ff7ca8107c5a616d82924a0ac64ce7e5e03fe86983c966f221c0d",
+          "role": "current native execution contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-launch.json",
+          "sha256": "b8a9fd38eb55d9b563085e788d7dee63898890348b90692252bde826f7d3365f",
+          "role": "current native execution contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev468/native-launch.json",
+          "sha256": "293d381a6f96f0b013224903fb1b89af7845ebc6d5e12ecc46aee2d4d062cffb",
+          "role": "prior native launch contract before attachment progress",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev461/native-launch.json",
+          "sha256": "3cdeda92736cece271b097836d381300d8577cffbb49646bcc0d3ca7454198a1",
+          "role": "prior native launch contract before retirement corrections",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev447/session-create-request.json",
+          "sha256": "c12313ad80ddb5cfcc6b8670c9c3a46a4fac60eed473945ce531e59d43a7f0c9",
+          "role": "prior runtime session-create request evidence",
+          "generation": 14
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev475/native-resource-launch.json",
+          "sha256": "c771d98fe8d2a79f8b9977c0f684e354b2146a537c7dce85d9aeb31ce68da327",
+          "role": "prior optional native host-resource contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev475/native-resource-controller-capabilities.json",
+          "sha256": "d424fc4d3683357ff3bd75e4cdb1e8e3d0803c4296cee6481ccd691c1a4dafb1",
+          "role": "prior optional native host-resource contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev475/native-resource-protocol.json",
+          "sha256": "e4caef401676e7c2b694095a34a4854b9ffea9bd7cb5b8c1c00254ccd6e6479d",
+          "role": "prior optional native host-resource contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev475/native-resource-runtime-capabilities.json",
+          "sha256": "f0feba55989b8c3c5672e8ac7514a17eb0645dec7d65a880237a984735d9d74b",
+          "role": "prior optional native host-resource contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev476/native-resource-launch.json",
+          "sha256": "0bff5a27820cead57999c4307095ebba474e205d2d979c5af88a16dc0322ee61",
+          "role": "prior optional native host-resource contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev476/native-resource-controller-capabilities.json",
+          "sha256": "0c7c6af3c93607d1667a95f7dc2be0e23a0343a083390fd07ec4747c699279b7",
+          "role": "prior optional native host-resource contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev476/native-resource-protocol.json",
+          "sha256": "1ff581db7c3c64a0d594fa1e2f137c6750acd12f7c795045cad33bc882fc7ef0",
+          "role": "prior optional native host-resource contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev476/native-resource-runtime-capabilities.json",
+          "sha256": "9b50464a19ab4beb9f7a5f2e638be8880998f69da289b0b8be053027d82d9d8d",
+          "role": "prior optional native host-resource contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-resource-launch.json",
+          "sha256": "53fd39bacfaa6ec7b1018f7d3ba0aaa94530895c5db7adf313dee22cd6ccf067",
+          "role": "current optional native host-resource contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-resource-controller-capabilities.json",
+          "sha256": "5214c849f77a7d9873a0138479a0f731a49f728928ac61aa8706da273ad75b81",
+          "role": "current optional native host-resource contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-resource-protocol.json",
+          "sha256": "e647d7bdd41bbe6b622c2e928e844dc84ba6039ffa780da34192cd87c96620ee",
+          "role": "current optional native host-resource contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-resource-runtime-capabilities.json",
+          "sha256": "f40816f3d04b33a2dcc28c381334da747a2042558370bf64139b01afd778fe2c",
+          "role": "current optional native host-resource contract",
+          "generation": 15
         }
       ],
       "provenance": [
+        {
+          "commit": "5f9557edbc40b0d7c65d825608cc89df8607bd28",
+          "plugin_version": "0.4.0-dev474",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "31006d0701310979c379d552d2863111853501c1",
+          "capture_method": "POST through the real ASGI session-create route with a real native ownership guard and synthetic incumbent. Verify HTTP 409 and no ACP session allocation. Capture the exact committed source; retain earlier error fixtures as historical evidence."
+        },
+        {
+          "commit": "d06c85b681a0344aeb26e24b1402c5e2f9f32ff5",
+          "plugin_version": "0.4.0-dev470",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_manager.py",
+          "source_git_blob": "e70372aacc4e669df4edaa8c452ea0df684964ed",
+          "capture_method": "Invoke validate_request from the exact committed attachment/progress source, verify the unchanged generation-15 launch shape, and normalize the valid owner path. Preserve prior-runtime evidence; preparation/reconnect budgets and sanitized progress are covered by runtime regressions."
+        },
+        {
+          "commit": "0996f2a84a1dd1ba3c349b51bbbb0046038307f6",
+          "plugin_version": "0.4.0-dev468",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_manager.py",
+          "source_git_blob": "c188c379a03df2863e2075c5a2bce8b8c8fbc8f4",
+          "capture_method": "Invoke validate_request from the exact published corrected source, verify the unchanged launch wire shape, and normalize the valid controller owner path to a neutral public path. Preserve prior runtime evidence separately; retirement behavior is exercised by native retirement regression tests."
+        },
+        {
+          "commit": "e746dc19ca456e7e9e7f52107dd26a1348294df5",
+          "plugin_version": "0.4.0-dev461",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_manager.py",
+          "source_git_blob": "062a053904b1bc4b32f1db869b661866ec739d99",
+          "capture_method": "Serialize committed production constants, models, routes and native receipts using neutral synthetic inputs. Exact captured blobs verified against the published equivalent after rebase."
+        },
+        {
+          "commit": "e746dc19ca456e7e9e7f52107dd26a1348294df5",
+          "plugin_version": "0.4.0-dev461",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/native.py",
+          "source_git_blob": "a0310ead2712e3af52ba1436d058d053b7686538",
+          "capture_method": "Serialize committed production constants, models, routes and native receipts using neutral synthetic inputs. Exact captured blobs verified against the published equivalent after rebase."
+        },
+        {
+          "commit": "e746dc19ca456e7e9e7f52107dd26a1348294df5",
+          "plugin_version": "0.4.0-dev461",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_store.py",
+          "source_git_blob": "57f78af37313613f0e8b01f98bf4713f179218fe",
+          "capture_method": "Serialize committed production constants, models, routes and native receipts using neutral synthetic inputs. Exact captured blobs verified against the published equivalent after rebase."
+        },
+        {
+          "commit": "e746dc19ca456e7e9e7f52107dd26a1348294df5",
+          "plugin_version": "0.4.0-dev461",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
+          "source_git_blob": "8d3442fb7c93d5de0a8234ac2d6c66fef53174d8",
+          "capture_method": "Serialize committed production constants, models, routes and native receipts using neutral synthetic inputs. Exact captured blobs verified against the published equivalent after rebase."
+        },
+        {
+          "commit": "e746dc19ca456e7e9e7f52107dd26a1348294df5",
+          "plugin_version": "0.4.0-dev461",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "9d2fe10336225462929963237dd33acc8a4e3dfa",
+          "capture_method": "Serialize committed production constants, models, routes and native receipts using neutral synthetic inputs. Exact captured blobs verified against the published equivalent after rebase."
+        },
+        {
+          "commit": "e746dc19ca456e7e9e7f52107dd26a1348294df5",
+          "plugin_version": "0.4.0-dev461",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "8f0a0f10ce17e7bdd5e4a567cd856ed3f2891278",
+          "capture_method": "Serialize committed production constants, models, routes and native receipts using neutral synthetic inputs. Exact captured blobs verified against the published equivalent after rebase."
+        },
+        {
+          "commit": "e746dc19ca456e7e9e7f52107dd26a1348294df5",
+          "plugin_version": "0.4.0-dev461",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
+          "source_git_blob": "39c37dfbf4376294afb3d5670433b5a840f32077",
+          "capture_method": "Serialize committed production constants, models, routes and native receipts using neutral synthetic inputs. Exact captured blobs verified against the published equivalent after rebase."
+        },
+        {
+          "commit": "e746dc19ca456e7e9e7f52107dd26a1348294df5",
+          "plugin_version": "0.4.0-dev461",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
+          "source_git_blob": "3db42b622f914802f529fc1df83358020d382969",
+          "capture_method": "Serialize committed production constants, models, routes and native receipts using neutral synthetic inputs. Exact captured blobs verified against the published equivalent after rebase."
+        },
         {
           "commit": "783117b627819b728f9d0b26fd65c1edd321190a",
           "plugin_version": "0.4.0-dev435",
@@ -290,9 +543,105 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
           "source_git_blob": "3db42b622f914802f529fc1df83358020d382969",
           "capture_method": "Read the immutable health-route blob from the last published HTTP generation before attention waits."
+        },
+        {
+          "commit": "44cc5f4f2c46e71cdf6baf36b8c06152b5588677",
+          "plugin_version": "0.4.0-dev475",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_manager.py",
+          "source_git_blob": "8de491e0d8a59718c2bf49d148ee9832ea374da9",
+          "capture_method": "Invoke committed validate_request with and without optional resources; normalize only the existing owner directory and local Python executable to neutral placeholders."
+        },
+        {
+          "commit": "44cc5f4f2c46e71cdf6baf36b8c06152b5588677",
+          "plugin_version": "0.4.0-dev475",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/native.py",
+          "source_git_blob": "b803e2c7aa4d278fd2135920d8a23ed4f5753727",
+          "capture_method": "Invoke the committed native capabilities route with an available synthetic provider; preserve the real public capability response."
+        },
+        {
+          "commit": "44cc5f4f2c46e71cdf6baf36b8c06152b5588677",
+          "plugin_version": "0.4.0-dev475",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_resources.py",
+          "source_git_blob": "696c301ae5e7be27c519c5e52923398cefc96003",
+          "capture_method": "Invoke committed descriptor, provider request, and result serializers with synthetic identities; normalize only the executable and controller resource directory. No resource provider or external venue is launched."
+        },
+        {
+          "commit": "44cc5f4f2c46e71cdf6baf36b8c06152b5588677",
+          "plugin_version": "0.4.0-dev475",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_runtime.py",
+          "source_git_blob": "afd094c66ecba176c660ca771fc99980985b15f9",
+          "capture_method": "Run the committed remote native-host capabilities command and retain platform-independent capability fields; the pre-existing platform support discriminator is not normalized into a support claim."
+        },
+        {
+          "commit": "97418ab5684410ba73bc167e20101fae17e88d31",
+          "plugin_version": "0.4.0-dev476",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_manager.py",
+          "source_git_blob": "8de491e0d8a59718c2bf49d148ee9832ea374da9",
+          "capture_method": "Invoke committed validate_request with and without optional resources; normalize only the existing owner directory and local Python executable to neutral placeholders."
+        },
+        {
+          "commit": "97418ab5684410ba73bc167e20101fae17e88d31",
+          "plugin_version": "0.4.0-dev476",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/native.py",
+          "source_git_blob": "b803e2c7aa4d278fd2135920d8a23ed4f5753727",
+          "capture_method": "Invoke the committed native capabilities route with an available synthetic provider; preserve the real public capability response."
+        },
+        {
+          "commit": "97418ab5684410ba73bc167e20101fae17e88d31",
+          "plugin_version": "0.4.0-dev476",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_resources.py",
+          "source_git_blob": "cfe7f2fc370b5a132476467e781a0035c7778259",
+          "capture_method": "Invoke committed descriptor, provider request, and result serializers with synthetic identities; normalize only the executable and controller resource directory. No resource provider or external venue is launched."
+        },
+        {
+          "commit": "97418ab5684410ba73bc167e20101fae17e88d31",
+          "plugin_version": "0.4.0-dev476",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_runtime.py",
+          "source_git_blob": "afd094c66ecba176c660ca771fc99980985b15f9",
+          "capture_method": "Run the committed remote native-host capabilities command and retain platform-independent capability fields; the pre-existing platform support discriminator is not normalized into a support claim."
+        },
+        {
+          "commit": "f2da1c6471abae3127a606f4e7078d09f6a9a184",
+          "plugin_version": "0.4.0-dev477",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_manager.py",
+          "source_git_blob": "4ca1f98c260f340204468acccb4f5d9412220b7b",
+          "capture_method": "Invoke committed validate_request with and without optional resources; normalize only the existing owner directory and local Python executable to neutral placeholders."
+        },
+        {
+          "commit": "f2da1c6471abae3127a606f4e7078d09f6a9a184",
+          "plugin_version": "0.4.0-dev477",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/native.py",
+          "source_git_blob": "b803e2c7aa4d278fd2135920d8a23ed4f5753727",
+          "capture_method": "Invoke the committed native capabilities route with an available synthetic provider; preserve the real public capability response."
+        },
+        {
+          "commit": "f2da1c6471abae3127a606f4e7078d09f6a9a184",
+          "plugin_version": "0.4.0-dev477",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_resources.py",
+          "source_git_blob": "a21eac648718b14887ff19a4b14a0912f6669d3c",
+          "capture_method": "Invoke committed descriptor, provider request, and result serializers with synthetic identities; normalize only the executable and controller resource directory. No resource provider or external venue is launched."
+        },
+        {
+          "commit": "f2da1c6471abae3127a606f4e7078d09f6a9a184",
+          "plugin_version": "0.4.0-dev477",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_runtime.py",
+          "source_git_blob": "afd094c66ecba176c660ca771fc99980985b15f9",
+          "capture_method": "Run the committed remote native-host capabilities command and retain platform-independent capability fields; the pre-existing platform support discriminator is not normalized into a support claim."
         }
       ],
-      "support_window": "The daemon declares HTTP generations 1 through 12 supported; evidence currently exercises generations 9 through 12.",
+      "support_window": "HTTP generations 1 through 15 remain supported; evidence includes generations 9 through 15.",
       "bridge_contract_rollback_window": "Retain the generation 11 fixture, the older generation 9 fixture, and a generation 10 prior-runtime fixture until the live and recoverable reference census permits retirement.",
       "mixed_version_scenarios": [
         "new-client_old-daemon",
@@ -319,18 +668,20 @@
         ],
         "runtimes": [
           "0.4.0-dev150",
-          "0.4.0-dev425"
+          "0.4.0-dev425",
+          "0.4.0-dev461"
         ]
       },
       "capability_versions": {
         "length_prefixed_envelope": 1,
-        "unknown_message_skip": 1
+        "unknown_message_skip": 1,
+        "native_terminal_control": 1
       },
       "durable_records": [],
       "source_paths": [
         {
           "path": "plugins/agent-bridge/src/agent_bridge/session_host/protocol.py",
-          "sha256": "65ff14618e7a530a3d5177f3591e71edbc31760c3ebefd9e98e46f76abc45567",
+          "sha256": "0d3323db9cf2ec44c3074eca8322d4e3ef2636e2ec82a2604756d8fc1e48c810",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -350,7 +701,7 @@
       "fixtures": [
         {
           "path": "plugins/agent-bridge/contract/fixtures/session-host/current/messages.json",
-          "sha256": "2472605f0ddb8a543ca1a10a603cfd7dbfb940ee6e441055a956a16981d3377d",
+          "sha256": "e378a0f5c1a94116c65f31b4c95f22294ffd4f413a776fa91630841d729b954b",
           "role": "current framing and every control/data message shape",
           "generation": 1
         },
@@ -368,6 +719,14 @@
         }
       ],
       "provenance": [
+        {
+          "commit": "e746dc19ca456e7e9e7f52107dd26a1348294df5",
+          "plugin_version": "0.4.0-dev461",
+          "generation": 1,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_host/protocol.py",
+          "source_git_blob": "a7efa469939cb6a7d52e9a67292443f0def706d6",
+          "capture_method": "Serialize committed production constants, models, routes and native receipts using neutral synthetic inputs. Exact captured blobs verified against the published equivalent after rebase."
+        },
         {
           "commit": "340288212311ad6ce21e2539b9a5b67656bf8c7e",
           "plugin_version": "0.4.0-dev425",

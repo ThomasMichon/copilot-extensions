@@ -523,6 +523,8 @@ class RegisterLiveSessionRequest(BaseModel):
     pid: int | None = None
     role: str | None = None
     driven_by: str | None = None
+    execution_id: str | None = Field(default=None, max_length=128)
+    execution_generation: str | None = Field(default=None, max_length=128)
 
 
 class LiveSessionInfo(BaseModel):

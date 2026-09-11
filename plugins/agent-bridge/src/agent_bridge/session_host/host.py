@@ -16,6 +16,8 @@ identity (Phase 3 anchors event IDs to it).
 from __future__ import annotations
 
 import asyncio
+import errno
+import hmac
 import json
 import logging
 from collections.abc import Callable
@@ -74,7 +76,9 @@ class SessionHost:
     def __init__(self, child: ChildProcess, *, nonce: str = "",
                  unexpected_reap_seconds: float = 60.0,
                  active_reap_seconds: float = 0.0,
-                 on_child_exit: Callable[[int], None] | None = None) -> None:
+                 on_child_exit: Callable[[int], None] | None = None,
+                 terminal: bool = False,
+                 on_child_start: Callable[[], None] | None = None) -> None:
         self._child = child
         self._nonce = nonce or ""
         self._frames: dict[int, bytes] = {}
@@ -83,6 +87,11 @@ class SessionHost:
         self._front: _Front | None = None
         self._child_exit: int | None = None
         self._on_child_exit = on_child_exit
+        self._terminal = terminal
+        self._terminal_bytes = 0
+        self._on_child_start = on_child_start
+        self._exit_task: asyncio.Task | None = None
+        self._connections: set[asyncio.StreamWriter] = set()
         self._child_done = asyncio.Event()
         self._server: asyncio.base_events.Server | None = None
         self._reader_task: asyncio.Task | None = None
@@ -165,11 +174,21 @@ class SessionHost:
         stdout = self._child.stdout
         assert stdout is not None
         while True:
-            line = await stdout.readline()
+            try:
+                line = await stdout.read(4096) if self._terminal else await stdout.readline()
+            except OSError as exc:
+                if not self._terminal or exc.errno != errno.EIO:
+                    raise
+                break
             if not line:
                 break
             self._max_seq += 1
             self._frames[self._max_seq] = line
+            if self._terminal:
+                self._terminal_bytes += len(line)
+                while self._terminal_bytes > 1024 * 1024 and self._frames:
+                    oldest = next(iter(self._frames))
+                    self._terminal_bytes -= len(self._frames.pop(oldest))
             # Observe (never gate) the agent->client frame for turn state.
             self._observe_frame(line, to_child=False)
             front = self._front
@@ -231,6 +250,54 @@ class SessionHost:
 
     async def _handle_front(self, reader: asyncio.StreamReader,
                             writer: asyncio.StreamWriter) -> None:
+        first = await proto.read_message(reader)
+        if first is None or first[0] not in (
+            proto.MsgType.ATTACH, proto.MsgType.PROBE, proto.MsgType.START, proto.MsgType.TERMINATE,
+        ):
+            writer.close()
+            return
+        if len(first[1]) < 8:
+            writer.close()
+            return
+        last_acked, nonce = proto.unpack_attach(first[1])
+        if self._nonce and not hmac.compare_digest(nonce, self._nonce.encode("utf-8")):
+            log.warning("frontend presented an invalid connect nonce; rejecting")
+            writer.close()
+            return
+        hello = proto.pack_u64(self._max_seq) + proto.pack_u64(self._child.pid or 0)
+        if self._terminal:
+            hello += proto.pack_u64(next(iter(self._frames), self._max_seq + 1))
+        if first[0] in (proto.MsgType.START, proto.MsgType.TERMINATE):
+            if not self._terminal or last_acked != self._child.pid:
+                writer.close()
+                return
+            try:
+                if first[0] == proto.MsgType.START:
+                    self._child.start()
+                    if self._on_child_start is not None:
+                        self._on_child_start()
+                    await proto.write_message(writer, proto.MsgType.HELLO, hello)
+                else:
+                    await self._terminate_child()
+                    await asyncio.wait_for(self._child_done.wait(), timeout=10)
+                    await proto.write_message(
+                        writer, proto.MsgType.LIVENESS,
+                        proto.pack_liveness(False, self._child_exit or 0),
+                    )
+                    await self.close()
+            finally:
+                writer.close()
+            return
+        if first[0] == proto.MsgType.PROBE:
+            try:
+                await proto.write_message(writer, proto.MsgType.HELLO, hello)
+                await proto.write_message(
+                    writer, proto.MsgType.LIVENESS,
+                    proto.pack_liveness(self.child_alive, self._child_exit or 0),
+                )
+            finally:
+                writer.close()
+            return
         # Displace any stale front (its process almost always already gone).
         old = self._front
         if old is not None and not old.closed:
@@ -243,26 +310,17 @@ class SessionHost:
         self._cancel_reap_timer()
         self._graceful_detach = False
 
-        first = await proto.read_message(reader)
-        if first is None or first[0] != proto.MsgType.ATTACH:
-            writer.close()
-            return
-        last_acked, nonce = proto.unpack_attach(first[1])
         # Connect-auth: a host launched with a nonce refuses any front that does
         # not present the matching token (defense-in-depth against a same-user
         # process dialing the loopback/forwarded port). An unsecured host (no
         # nonce configured) accepts all, preserving legacy behavior.
-        if self._nonce and nonce.decode("utf-8", "replace") != self._nonce:
-            log.warning("frontend presented an invalid connect nonce; rejecting")
-            writer.close()
-            return
         self._ack_cursor = max(self._ack_cursor, last_acked)
         front = _Front(reader, writer, next_seq=last_acked + 1)
         self._front = front
 
         await self._safe_send(
             front, proto.MsgType.HELLO,
-            proto.pack_u64(self._max_seq) + proto.pack_u64(self._child.pid or 0),
+            hello,
         )
         # Replay every buffered frame before the terminal liveness marker. The
         # client ends iteration on LIVENESS(dead), so sending it first would
@@ -283,17 +341,22 @@ class SessionHost:
                 elif mtype == proto.MsgType.WRITE:
                     await self._on_write(payload)
                 elif mtype == proto.MsgType.STATUS:
-                    self._last_reapable = proto.unpack_flag(payload)
+                    self._last_reapable = not self._terminal and proto.unpack_flag(payload)
                 elif mtype == proto.MsgType.DETACH:
                     # Graceful disconnect: latch it (+ the reapable state it
                     # carries) and drop the connection. The finally below runs
                     # the front-lost decision, which reaps promptly if reapable.
-                    self._last_reapable = proto.unpack_flag(payload)
+                    self._last_reapable = not self._terminal and proto.unpack_flag(payload)
                     self._graceful_detach = True
                     break
                 elif mtype == proto.MsgType.TERMINATE:
                     await self._terminate_child()
+                    if self._terminal:
+                        await asyncio.wait_for(self._child_done.wait(), timeout=10)
+                        await self.close()
                     break
+                elif mtype == proto.MsgType.RESIZE and self._terminal:
+                    self._child.resize(*proto.unpack_resize(payload))
         except proto.ProtocolError:
             log.warning("protocol error from frontend; dropping connection")
         finally:
@@ -306,6 +369,8 @@ class SessionHost:
 
     def _on_ack(self, seq: int) -> None:
         self._ack_cursor = max(self._ack_cursor, seq)
+        if self._terminal:
+            return  # bounded terminal replay survives a new frontend's cursor
         # Trim durably-acked frames from the buffer.
         for s in [s for s in self._frames if s <= self._ack_cursor]:
             del self._frames[s]
@@ -344,6 +409,8 @@ class SessionHost:
         non-JSON bytes. It never raises and never mutates the frame; the caller
         relays the bytes verbatim regardless.
         """
+        if self._terminal:
+            return False
         was_in_turn = bool(self._inflight_prompt_ids)
         for chunk in raw.split(b"\n"):
             chunk = chunk.strip()
@@ -383,7 +450,7 @@ class SessionHost:
         # the whole tree (taskkill /T on Windows, /proc walk on POSIX). Called
         # via the module attribute so tests can stub it.
         pid = self._child.pid
-        if pid:
+        if pid and not self._terminal:
             try:
                 _tree_kill(int(pid), force=True)
             except Exception:  # noqa: S110 -- reaping is best-effort
@@ -420,7 +487,7 @@ class SessionHost:
         background sub-agent working) and lets the child go only after a full
         window with no output and no reattach (idle, resumable).
         """
-        if self._closing or self._front is not None:
+        if self._terminal or self._closing or self._front is not None:
             return
         if not self.child_alive:
             return
@@ -524,8 +591,24 @@ class SessionHost:
     async def serve(self, host: str = "127.0.0.1", port: int = 0) -> int:
         """Start serving on loopback. Returns the bound port."""
         self._reader_task = asyncio.create_task(self._reader_loop())
+        if self._terminal:
+            async def observe_exit() -> None:
+                self._child_exit = await self._child.wait()
+                if self._on_child_exit is not None:
+                    self._on_child_exit(self._child_exit)
+                self._child_done.set()
+
+            self._exit_task = asyncio.create_task(observe_exit())
+        async def accept(reader, writer):
+            self._connections.add(writer)
+            try:
+                await self._handle_front(reader, writer)
+            finally:
+                self._connections.discard(writer)
+                writer.close()
+
         self._server = await asyncio.start_server(
-            self._handle_front, host, port, limit=proto.MAX_MESSAGE_BYTES)
+            accept, host, port, limit=proto.MAX_MESSAGE_BYTES)
         sock = self._server.sockets[0]
         return sock.getsockname()[1]
 
@@ -537,8 +620,16 @@ class SessionHost:
     async def close(self) -> None:
         self._closing = True
         self._cancel_reap_timer()
+        if self._exit_task is not None and not self._exit_task.done():
+            self._exit_task.cancel()
+            try:
+                await self._exit_task
+            except asyncio.CancelledError:
+                pass
         if self._server is not None:
             self._server.close()
+        for writer in list(self._connections):
+            writer.close()
         if self._reader_task is not None:
             self._reader_task.cancel()
             try:

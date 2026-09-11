@@ -74,8 +74,10 @@ _HTTP_CAPABILITY_CONSTANTS = {
     "attention_wait": "ATTENTION_WAIT_PROTOCOL_VERSION",
     "remote_operations": "REMOTE_OPERATIONS_PROTOCOL_VERSION",
     "conditional_idle_end": "CONDITIONAL_IDLE_END_PROTOCOL_VERSION",
+    "native_executions": "NATIVE_EXECUTION_PROTOCOL_VERSION",
 }
 _FETCH_RECOVERY_ATTEMPTED = False
+_EXACT_FETCH_ATTEMPTED: set[str] = set()
 _MAIN_REFSPEC = "+refs/heads/main:refs/remotes/origin/main"
 
 
@@ -169,20 +171,27 @@ def _git(*args: str) -> subprocess.CompletedProcess[str]:
 def _ensure_commit_available(commit: str) -> bool:
     global _FETCH_RECOVERY_ATTEMPTED
 
+    if not _GIT_OBJECT_RE.fullmatch(commit):
+        return False
     if _git("cat-file", "-e", f"{commit}^{{commit}}").returncode == 0:
         return True
-    if _FETCH_RECOVERY_ATTEMPTED:
-        return False
-    _FETCH_RECOVERY_ATTEMPTED = True
-    for fetch_args in (
-        ("fetch", "--quiet", "origin", _MAIN_REFSPEC),
-        ("fetch", "--quiet", "--unshallow", "origin"),
-        ("fetch", "--quiet", "origin", _MAIN_REFSPEC),
-    ):
-        _git(*fetch_args)
-        if _git("cat-file", "-e", f"{commit}^{{commit}}").returncode == 0:
-            return True
-    return False
+    if not _FETCH_RECOVERY_ATTEMPTED:
+        _FETCH_RECOVERY_ATTEMPTED = True
+        for fetch_args in (
+            ("fetch", "--quiet", "origin", _MAIN_REFSPEC),
+            ("fetch", "--quiet", "--unshallow", "origin"),
+            ("fetch", "--quiet", "origin", _MAIN_REFSPEC),
+        ):
+            _git(*fetch_args)
+            if _git("cat-file", "-e", f"{commit}^{{commit}}").returncode == 0:
+                return True
+    # PR rebases can move a captured, already-published source off main/HEAD.
+    # Fetch only its exact object from the configured origin; all blob/version/
+    # protocol checks below still apply unchanged.
+    if commit not in _EXACT_FETCH_ATTEMPTED:
+        _EXACT_FETCH_ATTEMPTED.add(commit)
+        _git("fetch", "--quiet", "origin", commit)
+    return _git("cat-file", "-e", f"{commit}^{{commit}}").returncode == 0
 
 
 def _git_blob(commit: str, path: str) -> str | None:

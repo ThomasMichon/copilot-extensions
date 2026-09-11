@@ -93,6 +93,7 @@ def test_http_protocol_constant_fixture_matches_production() -> None:
             bridge_protocol.REMOTE_EVENT_MULTIPLEX_PROTOCOL_VERSION
         ),
         "remote_commands": bridge_protocol.REMOTE_COMMANDS_PROTOCOL_VERSION,
+        "native_executions": bridge_protocol.NATIVE_EXECUTION_PROTOCOL_VERSION,
     }
 
 
@@ -239,6 +240,13 @@ def _message_frames(protocol) -> dict[str, dict[str, str]]:
         ),
         "unknown": (None, b"future"),
     }
+    if hasattr(protocol.MsgType, "START"):
+        messages.update({
+            "probe": (protocol.MsgType.PROBE, protocol.pack_attach(0, b"nonce")),
+            "native_start": (protocol.MsgType.START, protocol.pack_attach(4242, b"nonce")),
+            "native_resize": (protocol.MsgType.RESIZE, protocol.pack_resize(24, 80)),
+            "native_retire": (protocol.MsgType.TERMINATE, protocol.pack_attach(4242, b"nonce")),
+        })
     result = {}
     for name, (message_type, payload) in messages.items():
         type_bytes = message_type.value if message_type is not None else b"Z"
@@ -308,5 +316,6 @@ async def test_session_host_fixture_frames_decode(relative: str) -> None:
         if name == "unknown":
             assert message_type is None
         else:
-            assert message_type is host_protocol.MsgType[name.upper()]
+            member = {"native_start": "START", "native_resize": "RESIZE", "native_retire": "TERMINATE"}.get(name, name.upper())
+            assert message_type is host_protocol.MsgType[member]
         assert payload == base64.b64decode(encoded_message["payload_base64"])

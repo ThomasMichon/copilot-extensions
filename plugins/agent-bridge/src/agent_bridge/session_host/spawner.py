@@ -290,6 +290,7 @@ def build_remote_launch(
     reverse_forwards: list[str] | None = None,
     unexpected_reap_seconds: float = 60.0,
     active_reap_seconds: float = 0.0,
+    venue_id: str = "",
 ) -> str:
     """Assemble the far-side bash command that launches a survivable Host.
 
@@ -320,7 +321,6 @@ def build_remote_launch(
     if state_dir:
         prep += (
             f"chmod 700 {shlex.quote(state_dir)} || exit 1; "
-            f"rm -f {shlex.quote(state_remote)} || exit 1; "
         )
     host_cmd = (
         f"python3 {shlex.quote(bundle_remote)} --port 0 "
@@ -338,6 +338,8 @@ def build_remote_launch(
         host_cmd += f"--cwd {shlex.quote(cwd)} "
     host_cmd += "-- " + " ".join(shlex.quote(a) for a in child_argv)
     env_prefix = f"{_NONCE_ENV}={shlex.quote(nonce)} " if nonce else ""
+    if venue_id:
+        env_prefix += f"AGENT_BRIDGE_HOST_VENUE={shlex.quote(venue_id)} "
     launch = (
         f"{env_prefix}setsid nohup {host_cmd} "
         f"</dev/null >{shlex.quote(log_remote)} 2>&1 & echo launched"
@@ -411,6 +413,17 @@ class CodeSpaceSpawner:
         )
 
         nonce = new_nonce()
+        if self.boundary == "codespace":
+            from .execution_guard import command as execution_guard_command
+
+            guard_rc, guard_out, guard_err = await self._transport.run(
+                execution_guard_command("acp"), timeout=30.0,
+            )
+            if guard_rc != 0 or "EXECUTION_MODE_CLEAR" not in guard_out.splitlines():
+                raise RuntimeError(
+                    "CodeSpace interaction-mode admission refused before ACP launch: "
+                    f"{guard_out or guard_err}"
+                )
         bundle_path, _sha = await asyncio.to_thread(build_session_host_bundle)
         remote_bundle = f"{self._remote_dir}/{bundle_path.name}"
         # Cache by content hash: only ship when the far side lacks this bundle.
@@ -476,6 +489,7 @@ class CodeSpaceSpawner:
             host_version=__version__, reverse_forwards=reverse,
             unexpected_reap_seconds=self._unexpected_reap_seconds,
             active_reap_seconds=self._active_reap_seconds,
+            venue_id="codespace" if self.boundary == "codespace" else "",
         )
         rc, out, err = await self._transport.run(
             launch, timeout=self._launch_timeout,

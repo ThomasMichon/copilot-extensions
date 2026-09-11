@@ -22,6 +22,7 @@ from . import protocol as proto
 class Hello:
     max_seq: int
     child_pid: int
+    min_seq: int = 0
 
 
 class SessionHostClient:
@@ -64,8 +65,41 @@ class SessionHostClient:
         if msg is None or msg[0] != proto.MsgType.HELLO:
             raise ConnectionError("session host did not send HELLO")
         payload = msg[1]
-        return Hello(max_seq=proto.unpack_u64(payload[:8]),
-                     child_pid=proto.unpack_u64(payload[8:16]))
+        return Hello(
+            max_seq=proto.unpack_u64(payload[:8]),
+            child_pid=proto.unpack_u64(payload[8:16]),
+            min_seq=proto.unpack_u64(payload[16:24]) if len(payload) >= 24 else 0,
+        )
+
+    async def probe(self, *, nonce: bytes) -> tuple[Hello, bool, int]:
+        """Read identity/liveness without taking the terminal's frontend lease."""
+        await proto.write_message(self._writer, proto.MsgType.PROBE, proto.pack_attach(0, nonce))
+        hello = await proto.read_message(self._reader)
+        status = await proto.read_message(self._reader)
+        if hello is None or hello[0] != proto.MsgType.HELLO or status is None or status[0] != proto.MsgType.LIVENESS:
+            raise ConnectionError("execution host did not authenticate its liveness response")
+        payload = hello[1]
+        alive, code = proto.unpack_liveness(status[1])
+        return Hello(proto.unpack_u64(payload[:8]), proto.unpack_u64(payload[8:16])), alive, code
+
+    async def resize(self, rows: int, columns: int) -> None:
+        await proto.write_message(self._writer, proto.MsgType.RESIZE, proto.pack_resize(rows, columns))
+
+    async def activate(self, *, child_pid: int, nonce: bytes) -> None:
+        await proto.write_message(self._writer, proto.MsgType.START, proto.pack_attach(child_pid, nonce))
+        answer = await proto.read_message(self._reader)
+        if answer is None or answer[0] != proto.MsgType.HELLO:
+            raise ConnectionError("native execution activation was not acknowledged")
+
+    async def retire(self, *, child_pid: int, nonce: bytes) -> int:
+        await proto.write_message(self._writer, proto.MsgType.TERMINATE, proto.pack_attach(child_pid, nonce))
+        answer = await proto.read_message(self._reader)
+        if answer is None or answer[0] != proto.MsgType.LIVENESS:
+            raise ConnectionError("native execution retirement was not acknowledged")
+        alive, code = proto.unpack_liveness(answer[1])
+        if alive:
+            raise ConnectionError("native child is still alive")
+        return code
 
     async def frames(self):
         """Async-iterate ``(seq, frame_bytes)`` until the connection ends.

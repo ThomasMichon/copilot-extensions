@@ -398,6 +398,41 @@ sequenceDiagram
 
 ## Communication paths
 
+The CodeSpace provider's caller-owned terminal path uses the same claims,
+target-lock, fence, and account-resolution gates as its diagnostic/ACP paths.
+`ssh --interactive-command-file` adds a forced-PTY shell payload, with optional
+strictly loopback `--local-forward` / `--reverse-forward` listeners carried by
+the interactive `gh codespace ssh` child rather than the provisioning connection.
+The child is awaited asynchronously so the independent credential relay remains
+supervised until the terminal exits. The managed command channel stays connected
+for periodic relay-serving probes and final cleanliness/obligation settlement;
+lease and deferred-owner tenant heartbeats run without blocking relay supervision
+and are joined before cleanup. The Connection Owner owns an isolated probe
+channel per relay, so its cleanup does not disconnect a terminal's channel.
+Local console handles are inherited;
+on POSIX the child owns a process group that borrows and restores the foreground
+terminal, and on Windows it inherits the existing console. Cancellation tears
+down only that owned tree. This does not add a session host, installer, or
+general SSH-options interface. `--no-plugin-staging` suppresses both automatic
+CodeSpace plugin delivery (registration/pre-install and local payload copying)
+and explicit related-plugin staging independently of credential/repo preparation.
+`--require-relay` adds fail-closed host protocol, owned/deferred forward,
+remote protocol, and auth-helper readiness gates, with a second remote probe
+after preparation. It checks launch admission, not perpetual credential
+availability, and does not start the shared credential-service daemon or an ACP
+session. Defaults remain best-effort. See the
+[interactive SSH contract](../plugins/agent-codespaces/README.md#caller-owned-interactive-ssh).
+
+Managed native Copilot uses agent-bridge's
+[`native` execution hosting](../plugins/agent-bridge/docs/native-executions.md)
+rather than making the foreground SSH process its owner. Native records remain
+separate from ACP SessionManager rows. The existing Session Host provides a
+nonce-authenticated PTY execution backend, the CodeSpace provider retains
+preparation/relay/forwarding/claims, and the official remote bridge extension
+proves the real native session registration. Durable mode reservations and the
+shared remote authority catalog exclude ACP fallback until verified retirement.
+Controller or registration loss recovers the same execution identity.
+
 ```mermaid
 flowchart TB
     A["Copilot CLI session<br/>(host machine)"]

@@ -1,0 +1,23 @@
+{
+  "captured_from": {
+    "commit": "e746dc19ca456e7e9e7f52107dd26a1348294df5",
+    "plugin_version": "0.4.0-dev461",
+    "protocol_generation": 15,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
+    "source_git_blob": "39c37dfbf4376294afb3d5670433b5a840f32077",
+    "source_sha256": "5d6b0eae5980a136b65ce4355a7e7ec42ce38a06e0c75c01d47bb0c8400ea8d6"
+  },
+  "request": {
+    "session_id": "session-example",
+    "machine": null,
+    "cwd": null,
+    "worktree_id": null,
+    "repo": null,
+    "branch": null,
+    "pid": 4242,
+    "role": null,
+    "driven_by": null,
+    "execution_id": "execution-example",
+    "execution_generation": "generation-example"
+  }
+}

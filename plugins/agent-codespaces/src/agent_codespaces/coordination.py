@@ -165,6 +165,7 @@ def _run(args: list[str], *, timeout: float = 45.0) -> subprocess.CompletedProce
         return subprocess.run(
             [aw, *args],
             capture_output=True, text=True, timeout=timeout,
+            stdin=subprocess.DEVNULL,
             creationflags=_creationflags(),
         )
     except Exception as exc:  # binstub vanished / exec error -> unavailable
@@ -375,24 +376,37 @@ def mirror_disposition(
     return True
 
 
-def harness_identity() -> str | None:
-    """Resolve THIS harness's identity -- the Git-ref lease store origin URL.
+def harness_identity(holder_ref: str | None = None) -> str | None:
+    """Resolve the owner's harness identity -- its Git-ref lease store origin.
 
-    Shells ``agent-worktrees get lease-origin``: the pushable store repo URL that
-    ``lease_config`` derives (the ``AGENT_WORKTREES_LEASE_ORIGIN`` override, else
-    the bound control-plane repo's origin, else the project's default remote).
-    Because every agent of one harness resolves the **same** origin, it is the
-    cross-harness identity for the in-CodeSpace lockfile fence (see ``fence.py``)
-    -- a marker written by a *different* harness carries a different origin.
+    A supplied qualified holder selects its declared project through
+    ``agent-worktrees --project PROJECT get lease-origin``. The owning registry
+    and lease configuration resolve the store; the caller's cwd is irrelevant.
+    Invalid or unresolved explicit ownership fails closed, without an ambient
+    retry. With no holder, preserve the legacy unscoped best-effort lookup.
 
-    Returns None when unresolvable / the binstub is absent -- the degrade-safe
-    signal the fence uses to switch itself off (no identity -> proceed, never a
-    blind block).
+    This is provenance for the remote fence, not a different lease store or an
+    override of another harness's marker.
     """
-    proc = _run(["get", "lease-origin"], timeout=10)
-    if proc is None or proc.returncode != 0:
+    args = ["get", "lease-origin"]
+    if holder_ref is not None:
+        from .lease import CoordinationRejected
+
+        project = _owner_project(holder_ref) if isinstance(holder_ref, str) else None
+        if not project:
+            raise CoordinationRejected("explicit fence owner has no valid qualified project")
+        args = ["--project", project, *args]
+    proc = _run(args, timeout=10)
+    origin = (
+        proc.stdout.strip()
+        if proc is not None and proc.returncode == 0 and isinstance(proc.stdout, str)
+        else ""
+    )
+    if not origin or any(char in origin for char in "\r\n\0"):
+        if holder_ref is not None:
+            raise CoordinationRejected("explicit fence owner's declared lease origin is unavailable")
         return None
-    return proc.stdout.strip() or None
+    return origin
 
 
 def _parse_token(proc: subprocess.CompletedProcess[str]) -> str:

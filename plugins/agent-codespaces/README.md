@@ -168,6 +168,195 @@ There are also bridge-facing seams (`namespace-list`, `namespace-resolve`,
 `relay-launch-env`, `provision-command`, `acp-model-flags`). They are invoked by
 agent-bridge and are not the normal human/operator surface.
 
+### Owner-derived fence provenance
+
+When a qualified holder is supplied, the remote fence's harness identity comes
+from that holder's declared project and owner-scoped lease origin, never the
+diagnostic process's working directory. This applies to shared native transport
+as well as ordinary SSH. Invalid or unresolved explicit ownership blocks the
+connection without an ambient fallback. Calls with no holder retain
+legacy best-effort discovery.
+
+A fresh foreign-harness marker still refuses entry; it is not rewritten merely
+because a holder string matches. Refusals report the marker's expiry timestamp
+and remaining seconds, including the existing clock-skew allowance. Natural
+expiry and same-harness admission are unchanged. No marker-release or takeover
+shortcut is introduced.
+
+### Native retirement control
+
+The native transport emits allowlisted preparation checkpoints for local
+configuration, owner admission, SSH, target auth/setup, worktree, and native-host
+readiness. The bridge can expose these through the existing native receipt's
+`phase`; no raw stderr, command payload, credential, or arbitrary detail is
+forwarded. Progress does not establish native readiness or alter ownership.
+
+Native retirement uses an identity-bound control-only reconnection when normal
+infrastructure is unavailable. It does not rebind application forwards or
+activate a paused native child. Shared required-relay/auth and ownership checks
+still apply. A reservation that failed admission before infrastructure started
+can be retired with its generation; uncertain prior cleanup still requires proof.
+
+Local Git root/origin discovery does not inherit the native JSON control stdin.
+Those noninteractive probes use null stdin and a 10-second timeout; an elapsed
+probe fails explicitly rather than treating repository configuration as absent.
+This preserves configuration discovery and leaves the control pipe owned by the
+native transport. It does not change generation-bound cancellation or authorize
+resetting an existing execution.
+
+The same stdin boundary applies to local worktree inventory, owner/L2
+coordination, account/token discovery, state-root lookup, SSH configuration
+fetching, and the browser-based host sign-in launcher. These local commands use
+null stdin with their existing timeouts; they cannot wait on the native control
+pipe. Explicit SSH/credential payload pipes and interactive terminal input are
+unchanged. A warm local admission stall is not a reason to extend the cold
+CodeSpace preparation window.
+
+### Diagnostic command input
+
+For a diagnostic command whose input exceeds local shell command-line limits,
+send a file through the managed command channel instead of embedding its content:
+
+```bash
+agent-codespaces ssh example-space --effort /path/to/owner \
+  --remote-cmd "node --input-type=module" --stdin-file preparation.mjs \
+  --no-plugin-staging --require-relay --timeout 900 --connect-timeout 1200
+```
+
+`--stdin-file PATH` requires a non-stdio `--remote-cmd` or `--remote-cmd-file`.
+The regular file is read and bounded to **16 MiB before claims or connections**.
+Its bytes are sent unchanged, including BOMs, NULs, non-UTF-8 data, and line
+endings; an empty file sends EOF. The input is a local snapshot, so later file
+changes do not change the submitted bytes. Neither input nor file metadata is
+rewritten. Interactive sessions, structured stdio, and missing/blank commands
+are rejected. Existing command timeout, relay, fencing, ownership, exit-code and
+cleanup behavior is unchanged. The usual minimal diagnostic provisioning default
+still applies; this is not native execution hosting or an ACP fallback.
+
+### Caller-owned interactive SSH
+
+Use a local UTF-8 command file when a terminal owner needs a startup command,
+especially across Windows shell quoting boundaries:
+
+```bash
+agent-codespaces ssh example-space \
+  --interactive-command-file terminal-command.txt \
+  --local-forward 8080:3000 \
+  --reverse-forward 9000:9001 \
+  --no-plugin-staging --require-relay
+```
+
+For example, `terminal-command.txt` can contain:
+
+```bash
+cd /workspaces/example-web &&
+exec bash -il
+```
+
+- `--interactive-command-file PATH` reads UTF-8 (an optional UTF-8 BOM is
+  accepted), without trimming whitespace or rewriting the file. Use LF line
+  endings for remote Bash scripts. Missing, unreadable, invalid-UTF-8, blank, or
+  NUL-containing payloads fail before claims or connections. The optional
+  `--interactive-command COMMAND` string form is mutually exclusive with the
+  file form.
+- The command is a **trusted caller-owned shell program**, not an argument list.
+  It travels as one SSH command argument through the existing `bash -l -c`
+  wrapper, after the normal relay environment and arrival prelude. No ACP model
+  or plugin flags are appended. SSH receives `-tt` to force a remote PTY, while
+  local stdin/stdout/stderr remain attached to the caller's terminal. A command
+  that should leave a shell open must explicitly launch one.
+- Repeat `--local-forward LOCAL:REMOTE` to listen on host
+  `127.0.0.1:LOCAL` and connect to CodeSpace `127.0.0.1:REMOTE`. Repeat
+  `--reverse-forward REMOTE:LOCAL` for the opposite direction. Both fields must
+  be decimal ports in `1..65535`; addresses, wildcards, sockets, and arbitrary
+  SSH options are not accepted. Duplicate listeners within a direction are
+  rejected, including differently formatted spellings of the same port.
+  The same number in opposite directions is valid. A reverse listener cannot
+  claim the credential relay's remote port while relay use is enabled.
+- Forwarded sessions use `ExitOnForwardFailure=yes`,
+  `ServerAliveInterval=30`, and `ServerAliveCountMax=3`. Failure to bind an SSH
+  listener aborts the session; this does not promise that a destination service
+  is listening. The remote SSH server must honor loopback binds (do not configure
+  `GatewayPorts yes` to widen remote listeners).
+- The new command and forward flags cannot combine with `--remote-cmd`,
+  `--remote-cmd-file`, or `--stdio`. Forward flags can also accompany a plain
+  interactive shell without a startup command. Existing diagnostic/ACP and
+  unadorned interactive behavior remain unchanged.
+- `--no-provision` and `--no-relay` retain their existing independent meanings.
+  Neither disables claims, target locks, fences, or account pinning.
+  `--no-provision` skips heavyweight provisioning **and plugin staging**; callers
+  own any required remote tools and official plugin installation. No installer
+  or copying behavior is added by this interface.
+- `--no-plugin-staging` independently skips **all provider-controlled Copilot
+  plugin delivery**: automatic CodeSpace-scoped registration/settings updates
+  and remote-marketplace pre-installation, local-marketplace `codespacePlugins`
+  host copying, and related-repo / explicit `--stage-plugin` payload copying.
+  It does **not** skip relay/auth helpers, configured dotfiles or harness repo
+  preparation, repo provision hooks, auth verification, or auth-cache warming.
+  These helper scripts are provider-owned auth plumbing, not host plugin
+  payloads. Caller-owned remote plugin installation remains explicit.
+  User-configured repo hooks or dotfiles installers are still arbitrary programs;
+  this flag does not rewrite or sandbox their behavior, nor remove existing
+  remote plugin settings or payloads.
+- `--require-relay` is an opt-in **launch admission** gate. It requires the host
+  credential service to answer the relay protocol before claims; requires an
+  owned live reverse-forward or a ready Connection Owner; requires a real
+  protocol round trip through the exact remote loopback listener; and requires
+  successful remote auth-helper setup. It repeats the remote probe after repo
+  preparation, immediately before launching the interactive/diagnostic/ACP
+  operation. Missing service, failed forwarding, owner readiness timeout,
+  protocol-probe failure, or failed helper setup exits **69**, with normal
+  owned-resource cleanup. Combining it with `--no-relay` is a usage error
+  (exit **2**). With no opt-in, existing best-effort behavior is unchanged.
+  Protocol probes request no credentials and use no auth-cache fallback: they
+  establish service/tunnel readiness, not authorization for every remote host
+  or resource. Existing auth verification and configured credential policy still
+  apply. A later outage retains existing relay supervision/reconnection; this
+  flag does not kill a terminal for a transient post-launch loss.
+- Relay supervision and any connection-owner hold remain active throughout the
+  interactive child. Owned claims and relay tenants are heartbeated every 30
+  seconds; a claim heartbeat asserts its owner and rejects a replacement that
+  appeared during distributed renewal. Refresh work is joined before cleanup.
+  Direct and Connection Owner relay supervisors perform periodic remote
+  protocol probes, in addition to process-death and host-port-rebinding checks.
+  An uncertain probe transport does not tear down a potentially healthy relay;
+  a definite bad protocol response triggers the shared supervisor's recovery.
+  The managed command channel remains available through final cleanliness and
+  obligation settlement, then disconnects. The child's exit status is returned unchanged. Cancellation
+  and an explicit `--connect-timeout` stop only the owned process tree and release
+  owned relay/lock resources. There is no implicit interactive timeout;
+  `--timeout` remains the diagnostic-command deadline.
+
+For a caller that wants host-backed credentials without plugin copying or ACP,
+keep relay/repo preparation enabled and use the example above. Do not substitute
+`--no-relay` or blanket `--no-provision` for plugin-delivery suppression.
+The shared credential service must already be available. Using the resolved
+agent-bridge command (not an unrelated same-named executable):
+
+```text
+agent-bridge service start
+agent-bridge installer-readiness
+```
+
+The second command is read-only JSON; require exit 0 and
+`{"schema":"copilot-extensions.module-readiness","version":1,
+"module":"agent-bridge/runtime","state":"ready",...}`. This checks daemon
+readiness and creates no ACP session; `--require-relay` separately verifies the
+credential service through the CodeSpace tunnel. SSH does not implicitly start
+the daemon. The optional `agent-codespaces owner --status` reports configuration
+only, **not** live relay readiness; when a live enabled Owner is used, the SSH
+operation places its hold, waits up to 30 seconds for readiness, and verifies the
+remote protocol before proceeding.
+
+This command is the transport/preparation primitive. For managed native Copilot,
+use agent-bridge's `native start/attach/resume/status/stop` hosting surface, which
+composes this provider's infrastructure with a survivable native execution host,
+real native registration, and identity-bound retirement. Do not substitute a
+foreground SSH process for that hosting contract. The provider's internal
+`native-transport` channel owns preparation, relay, and forwarding—not the
+remote Copilot process's lifetime. Interaction reservations prevent ACP/SSH
+fallback from taking a native-owned venue, even when its registration is lost.
+
 ### `create` options
 
 ```bash

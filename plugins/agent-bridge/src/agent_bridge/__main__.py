@@ -238,6 +238,18 @@ def _cmd_acp_connect(args: argparse.Namespace) -> None:
     cmd_acp_connect(args)
 
 
+def _cmd_native_host(args: argparse.Namespace) -> None:
+    from .native_runtime import command
+
+    raise SystemExit(command(args))
+
+
+def _cmd_native(args: argparse.Namespace) -> None:
+    from .native_cli import command
+
+    command(args)
+
+
 def _cmd_elevated(args: argparse.Namespace) -> None:
     """Manage the elevated sub-daemon (Windows)."""
     from . import elevated
@@ -383,12 +395,8 @@ def _cmd_start(args: argparse.Namespace) -> None:
     if idle is not None:
         cfg.idle_shutdown_seconds = idle
 
-    # A passive cutover instance never binds the shared credential relay (9857)
-    # -- the active daemon owns it until the flip completes -- mirroring the
-    # elevated sub-daemon's relay-reuse rule.
+    # Passive startup defers binding without changing the installation's policy.
     passive = bool(getattr(args, "passive", False))
-    if passive:
-        cfg.enable_credential_relay = False
 
     # Single-instance guard: refuse to start a duplicate daemon for this config
     # dir + port. Acquired BEFORE binding the port so a racing/duplicate start
@@ -420,6 +428,7 @@ def _cmd_start(args: argparse.Namespace) -> None:
     app = create_app(config=cfg, token=token)
     app.state.single_instance = singleton
     app.state.background_readiness = True
+    app.state.relay_start_deferred = passive
     # A normal start self-publishes the routing table once it is listening so
     # CLI clients discover it; a passive instance stays silent until the deploy
     # orchestrator flips the table after a health check.
@@ -2874,6 +2883,30 @@ def _cmd_send(args: argparse.Namespace) -> None:
     client = _get_client()
     target = args.target
     prompt = _resolve_prompt(args, required=True)
+
+    from .protocol import NATIVE_EXECUTION_PROTOCOL_VERSION
+
+    if getattr(client, "daemon_supports", lambda _: False)(NATIVE_EXECUTION_PROTOCOL_VERSION) is True:
+        native = client.native_resolve(target)
+        if native is not None:
+            if not native.get("ready") or not native.get("sessionId"):
+                raise SystemExit("Native execution owns this target but is not represented; refusing ACP fallback.")
+            expected = getattr(args, "expected_session_id", None)
+            if expected and expected != native["sessionId"]:
+                raise SystemExit("Native live-session identity changed; refusing delivery.")
+            import uuid
+
+            result = client.native_message(native["executionId"], {
+                "generation": native["generation"], "expectedSessionId": native["sessionId"],
+                "sender": _caller_id_for(args) or "operator", "body": prompt,
+                "messageId": getattr(args, "idempotency_key", None) or uuid.uuid4().hex,
+                "kind": getattr(args, "kind", "prompt"), "wait": not getattr(args, "no_wait", False),
+                "waitTimeout": getattr(args, "reply_timeout", 120),
+            })
+            print(json.dumps(result, indent=2))
+            return
+    if target.startswith("native:"):
+        raise SystemExit("Native execution is unavailable; refusing ACP fallback.")
 
     # Interactive-CLI target -> deliver via the live-session message queue
     # (attributed + answerable envelope), not the ACP turn path. This is how a
@@ -5668,6 +5701,56 @@ def build_parser() -> argparse.ArgumentParser:
 
     ver_p = sub.add_parser("version", help="Print version")
     ver_p.set_defaults(func=_cmd_version)
+
+    native_p = sub.add_parser("native", help="Shared native execution hosting (not ACP dispatch)")
+    native_sub = native_p.add_subparsers(dest="native_action", required=True)
+    for action in ("capabilities", "list"):
+        p = native_sub.add_parser(action)
+        p.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    native_start_p = native_sub.add_parser("start")
+    native_start_p.add_argument("--codespace", required=True)
+    native_start_p.add_argument("--owner", required=True)
+    native_start_p.add_argument("--cwd", required=True)
+    native_start_p.add_argument("--request-id", required=True)
+    native_start_p.add_argument("--command-file", "--interactive-command-file", dest="command_file", required=True)
+    native_start_p.add_argument("--host-resources-file")
+    native_start_p.add_argument("--local-forward", action="append", default=[])
+    native_start_p.add_argument("--reverse-forward", action="append", default=[])
+    native_start_p.add_argument("--no-plugin-staging", action="store_true", default=True)
+    native_start_p.add_argument("--require-relay", action="store_true", default=True)
+    native_start_p.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    for action in ("attach", "resume", "status", "stop"):
+        p = native_sub.add_parser(action)
+        p.add_argument("execution_id")
+        p.add_argument("--expected-generation", required=action != "status")
+        if action in {"status", "stop"}:
+            p.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    resource_p = native_sub.add_parser("resource", help="Request an allowlisted local host resource from the native session")
+    resource_sub = resource_p.add_subparsers(dest="resource_action", required=True)
+    resource_descriptor = resource_sub.add_parser("descriptor")
+    resource_descriptor.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    resource_ensure = resource_sub.add_parser("ensure")
+    resource_ensure.add_argument("resource")
+    resource_ensure.add_argument("--request-id")
+    resource_ensure.add_argument("--input-file")
+    resource_ensure.add_argument("--timeout", type=float, default=120)
+    resource_ensure.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    native_p.set_defaults(func=_cmd_native)
+
+    native_host_p = sub.add_parser("native-host", help="Official remote native execution-host management")
+    native_host_sub = native_host_p.add_subparsers(dest="native_host_action", required=True)
+    native_host_sub.add_parser("capabilities")
+    native_guard_p = native_host_sub.add_parser("guard")
+    native_guard_p.add_argument("--requested-mode", choices=["acp", "native"], required=True)
+    native_start = native_host_sub.add_parser("start")
+    native_start.add_argument("--request-stdin", action="store_true", required=True)
+    for action in ("activate", "status", "stop", "message", "result", "resource-complete"):
+        action_p = native_host_sub.add_parser(action)
+        action_p.add_argument("execution_id")
+        action_p.add_argument("--expected-generation", required=True)
+        if action in {"stop", "message", "result", "resource-complete"}:
+            action_p.add_argument("--request-stdin", action="store_true", required=action != "stop")
+    native_host_p.set_defaults(func=_cmd_native_host)
 
     carrier_p = sub.add_parser(
         "carrier",

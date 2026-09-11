@@ -90,6 +90,9 @@ def launch_session_host(
     host_version: str = "",
     unexpected_reap_seconds: float = 60.0,
     active_reap_seconds: float = 0.0,
+    terminal: bool = False,
+    state_file_name: str | None = None,
+    start_paused: bool = False,
 ) -> HostHandle:
     """Spawn a **survivable** Session Host process that owns ``child_argv``.
 
@@ -106,7 +109,7 @@ def launch_session_host(
     """
     sd = Path(state_dir) if state_dir else Path(tempfile.mkdtemp(prefix="agbridge-host-"))
     sd.mkdir(parents=True, exist_ok=True)
-    state_file = sd / f"host-{os.getpid()}-{int(time.time()*1000)}.json"
+    state_file = sd / (state_file_name or ("native-host.json" if terminal else f"host-{os.getpid()}-{int(time.time()*1000)}.json"))
 
     host_argv = [sys.executable, "-m", "agent_bridge.session_host",
                  "--port", "0", "--state-file", str(state_file)]
@@ -116,6 +119,10 @@ def launch_session_host(
         host_argv += ["--host-version", host_version]
     if cwd:
         host_argv += ["--cwd", cwd]
+    if terminal:
+        host_argv.append("--terminal")
+    if start_paused:
+        host_argv.append("--start-paused")
     host_argv += ["--unexpected-reap-seconds", str(unexpected_reap_seconds)]
     host_argv += ["--active-reap-seconds", str(active_reap_seconds)]
     host_argv += ["--", *child_argv]
@@ -204,6 +211,8 @@ def _resolve_child_exe(argv: list[str], path: str | None) -> list[str]:
 
 async def _spawn_child(
     argv: list[str], cwd: str | None, env: dict[str, str] | None,
+    *, terminal: bool = False,
+    start_paused: bool = False,
 ) -> asyncio.subprocess.Process:
     child_env = os.environ.copy()
     if env:
@@ -212,12 +221,19 @@ async def _spawn_child(
     # Copilot child's own plugin hooks, never inherited from this launcher.
     child_env.pop(_NONCE_ENV, None)
     child_env.pop("COPILOT_PLUGIN_ROOT", None)
+    if terminal:
+        for key in ("SESSION_ID", "COPILOT_AGENT_SESSION_ID", "COPILOT_SESSION_ID"):
+            child_env.pop(key, None)
     # POSIX/Linux: arm PR_SET_PDEATHSIG so copilot dies with the host even on a
     # hard host kill -- the Linux counterpart to the Windows kill-on-close job,
     # so a remote (mesh/CodeSpace) far side never orphans copilot. None (default)
     # on Windows, where preexec_fn is unsupported.
     preexec = child_preexec()
     spawn_argv = _resolve_child_exe(argv, child_env.get("PATH"))
+    if terminal:
+        from .terminal import spawn_terminal
+
+        return await spawn_terminal(spawn_argv, cwd, child_env, start_paused=start_paused)
     return await asyncio.create_subprocess_exec(
         *spawn_argv,
         stdin=asyncio.subprocess.PIPE,
@@ -245,6 +261,8 @@ async def run_host(
     reverse_forwards: list[str] | None = None,
     unexpected_reap_seconds: float = 60.0,
     active_reap_seconds: float = 0.0,
+    terminal: bool = False,
+    start_paused: bool = False,
 ) -> None:
     """Spawn the child, serve the reattachable endpoint, run until closed.
 
@@ -258,7 +276,17 @@ async def run_host(
     """
     apply_host_survival()
     nonce = nonce or os.environ.get(_NONCE_ENV, "")
-    child = await _spawn_child(child_argv, cwd, env)
+    venue = os.environ.get("AGENT_BRIDGE_HOST_VENUE", "")
+    if (venue == "codespace" or venue.startswith("codespace:")) and not terminal and state_file is not None:
+        from .execution_guard import admit_and_publish
+
+        admit_and_publish(Path(state_file), {
+            "version": 2, "mode": "acp", "session_id": session_id, "nonce": nonce,
+            "host_pid": os.getpid(), "child_pid": 0, "port": 0, "launch_pending": True,
+            "host_start_ticks": _process_start_ticks(os.getpid()), "child_start_ticks": "",
+            "boot_id": _boot_id(),
+        }, "acp")
+    child = await _spawn_child(child_argv, cwd, env, terminal=True, start_paused=start_paused) if terminal else await _spawn_child(child_argv, cwd, env)
     state_path = Path(state_file) if state_file is not None else None
     state: dict[str, Any] = {}
 
@@ -270,13 +298,22 @@ async def run_host(
         state["child_exited_at"] = time.time()
         _write_host_state(state_path, state)
 
+    def _publish_child_start() -> None:
+        if state_path is not None and state and child.returncode is None:
+            state["native_started"] = True
+            _write_host_state(state_path, state)
+
     host = SessionHost(child, nonce=nonce,
                        unexpected_reap_seconds=unexpected_reap_seconds,
                        active_reap_seconds=active_reap_seconds,
-                       on_child_exit=_publish_child_exit)
+                       on_child_exit=_publish_child_exit, terminal=terminal,
+                       on_child_start=_publish_child_start)
     bound_port = await host.serve(port=port)
     state.update({
         "version": 2,
+        "mode": "native" if terminal else "acp",
+        "native_started": terminal and not start_paused,
+        "execution_generation": os.environ.get("AGENT_BRIDGE_NATIVE_GENERATION", "") if terminal else "",
         "session_id": session_id,
         "pid": os.getpid(),
         "host_pid": os.getpid(),
@@ -320,6 +357,8 @@ async def run_host(
                 await child.wait()
             except ProcessLookupError:
                 pass
+        if terminal:
+            child.close()
 
 
 def _boot_id() -> str:
@@ -334,7 +373,8 @@ def _boot_id() -> str:
 def _process_start_ticks(pid: int) -> str:
     if sys.platform.startswith("linux") and pid > 1:
         try:
-            return Path(f"/proc/{pid}/stat").read_text().split()[21]
+            # The parenthesized process name can itself contain whitespace.
+            return Path(f"/proc/{pid}/stat").read_text().rpartition(")")[2].split()[19]
         except (OSError, IndexError):
             pass
     return ""
@@ -380,6 +420,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--host-version", default="")
     ap.add_argument("--reverse-forward", action="append", default=[])
     ap.add_argument("--cwd", default=None)
+    ap.add_argument("--terminal", action="store_true", help="Host a native Linux PTY, not ACP")
+    ap.add_argument("--start-paused", action="store_true", help="Wait for authenticated native activation")
     ap.add_argument("--unexpected-reap-seconds", type=float, default=60.0)
     ap.add_argument("--active-reap-seconds", type=float, default=0.0)
     ap.add_argument("child", nargs=argparse.REMAINDER,
@@ -403,6 +445,8 @@ def main(argv: list[str] | None = None) -> int:
             reverse_forwards=args.reverse_forward,
             unexpected_reap_seconds=args.unexpected_reap_seconds,
             active_reap_seconds=args.active_reap_seconds,
+            terminal=args.terminal,
+            start_paused=args.start_paused,
         ))
     except KeyboardInterrupt:
         return 0

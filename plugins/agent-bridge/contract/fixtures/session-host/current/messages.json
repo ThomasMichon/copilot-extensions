@@ -1,11 +1,11 @@
 {
   "captured_from": {
-    "commit": "340288212311ad6ce21e2539b9a5b67656bf8c7e",
-    "plugin_version": "0.4.0-dev425",
+    "commit": "e746dc19ca456e7e9e7f52107dd26a1348294df5",
+    "plugin_version": "0.4.0-dev461",
     "protocol_generation": 1,
     "source_path": "plugins/agent-bridge/src/agent_bridge/session_host/protocol.py",
-    "source_git_blob": "09f8fd20efb3a35915989883a3835c7dffcb9a1c",
-    "source_sha256": "65ff14618e7a530a3d5177f3591e71edbc31760c3ebefd9e98e46f76abc45567"
+    "source_git_blob": "a7efa469939cb6a7d52e9a67292443f0def706d6",
+    "source_sha256": "0d3323db9cf2ec44c3074eca8322d4e3ef2636e2ec82a2604756d8fc1e48c810"
   },
   "framing": "u32be body length, one-byte type, opaque payload",
   "messages": {
@@ -58,6 +58,26 @@
       "type_base64": "Wg==",
       "payload_base64": "ZnV0dXJl",
       "frame_base64": "AAAAB1pmdXR1cmU="
+    },
+    "probe": {
+      "type_base64": "UA==",
+      "payload_base64": "AAAAAAAAAABub25jZQ==",
+      "frame_base64": "AAAADlAAAAAAAAAAAG5vbmNl"
+    },
+    "native_start": {
+      "type_base64": "Qg==",
+      "payload_base64": "AAAAAAAAEJJub25jZQ==",
+      "frame_base64": "AAAADkIAAAAAAAAQkm5vbmNl"
+    },
+    "native_resize": {
+      "type_base64": "Ug==",
+      "payload_base64": "ABgAUA==",
+      "frame_base64": "AAAABVIAGABQ"
+    },
+    "native_retire": {
+      "type_base64": "VA==",
+      "payload_base64": "AAAAAAAAEJJub25jZQ==",
+      "frame_base64": "AAAADlQAAAAAAAAQkm5vbmNl"
     }
   }
 }

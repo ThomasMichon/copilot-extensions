@@ -95,6 +95,7 @@ def _token_for_account(login: str | None) -> str | None:
         result = subprocess.run(
             ["gh", "auth", "token", "--user", login],
             capture_output=True, text=True, timeout=10,
+            stdin=subprocess.DEVNULL,
             creationflags=_creation_flags(),
         )
     except Exception:
@@ -143,6 +144,7 @@ def _lookup(*args: str) -> subprocess.CompletedProcess[str] | None:
     try:
         return subprocess.run(
             [aw, *args], capture_output=True, text=True, timeout=10,
+            stdin=subprocess.DEVNULL,
             creationflags=_creation_flags(),
         )
     except Exception:

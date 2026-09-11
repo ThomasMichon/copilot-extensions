@@ -22,6 +22,7 @@ from fastapi import APIRouter, HTTPException, Request
 from ..agent_registry import AgentConfig, AgentResolver
 from ..loop_governance import LoopGovernance
 from ..models import SessionInfo, SessionStatus, WorktreeHandoffRequest
+from ..native_store import NativeError
 from ..session_manager import DaemonDrainingError, ProviderTargetRefreshError
 
 log = logging.getLogger("agent-bridge")
@@ -707,6 +708,8 @@ async def _start_fresh_worktree_session(
             fresh = await mgr.start_session(
                 target, agent_name=owner_agent, caller_id=worktree_id,
             )
+        except NativeError as exc:
+            raise HTTPException(exc.status, detail={"code": exc.code, "detail": exc.detail}) from exc
         except DaemonDrainingError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         except Exception as exc:
@@ -846,6 +849,8 @@ async def resume_worktree(
     try:
         resumed = await mgr.resume_session(session.session_id)
         return _session_info(resumed)
+    except NativeError as exc:
+        raise HTTPException(exc.status, detail={"code": exc.code, "detail": exc.detail}) from exc
     except KeyError as exc:
         raise HTTPException(
             status_code=404,
@@ -873,6 +878,8 @@ async def resume_worktree(
                 agent_name=session.agent_name,
                 caller_id=session.caller_id,
             )
+        except NativeError as exc:
+            raise HTTPException(exc.status, detail={"code": exc.code, "detail": exc.detail}) from exc
         except Exception as start_exc:
             raise HTTPException(
                 status_code=502,
@@ -914,6 +921,8 @@ async def handoff_worktree(
         successor = await mgr.handoff_session(
             session.session_id, reason=reason, seed=seed
         )
+    except NativeError as exc:
+        raise HTTPException(exc.status, detail={"code": exc.code, "detail": exc.detail}) from exc
     except DaemonDrainingError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except KeyError:
@@ -986,6 +995,8 @@ async def handoff_worktree_request(
             seed_text=handoff.seed_text,
             handoff_token=handoff.handoff_token,
         )
+    except NativeError as exc:
+        raise HTTPException(exc.status, detail={"code": exc.code, "detail": exc.detail}) from exc
     except DaemonDrainingError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except KeyError:
