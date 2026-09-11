@@ -237,16 +237,19 @@ def _extract_ps1_functions(*names: str) -> str:
     return "\n\n".join(chunks)
 
 
-@pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh is not installed")
+@pytest.mark.parametrize("shell", ["powershell.exe", "pwsh"])
 def test_windows_task_access_denied_classifier_downgrades_and_rethrows(
-    tmp_path: Path,
+    tmp_path: Path, shell: str
 ) -> None:
     """Regression for both catch outcomes of the stale-ACL handling: an
     Access Denied error is downgraded to a warning (install continues), while
-    any other exception still propagates (install still fails loudly)."""
-    pwsh = shutil.which("pwsh")
-    assert pwsh
-    harness = tmp_path / "harness.ps1"
+    any other exception still propagates (install still fails loudly). Runs
+    under both Windows PowerShell 5.1 (`powershell.exe`) and PowerShell 7
+    (`pwsh`) since the installer must work on either."""
+    exe = shutil.which(shell)
+    if not exe:
+        pytest.skip(f"{shell} is not installed")
+    harness = tmp_path / f"harness-{shell.replace('.exe', '')}.ps1"
     harness.write_text(
         _extract_ps1_functions("Test-IsAccessDenied", "Write-TaskAccessDeniedWarning")
         + """
@@ -275,7 +278,7 @@ try {
         encoding="utf-8",
     )
     result = subprocess.run(
-        [pwsh, "-NoProfile", "-File", str(harness)],
+        [exe, "-NoProfile", "-File", str(harness)],
         check=True,
         capture_output=True,
         text=True,
