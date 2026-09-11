@@ -90,8 +90,17 @@ class GitHubProvider:
                 return endpoint
         return (os.environ.get("GH_HOST") or "github.com").strip().lower()
 
-    def _env(self, token: str | None) -> dict[str, str]:
-        return {"GH_TOKEN": token} if token else {}
+    def _env(self, token: str | None, *, host: str = "") -> dict[str, str]:
+        env: dict[str, str] = {}
+        if token:
+            env["GH_TOKEN"] = token
+        if host:
+            # `gh pr merge`/`gh pr merge --auto` have no `--hostname` flag (unlike
+            # `gh api`) -- GH_HOST is the only way to pin them to a non-default
+            # host, matching authority_endpoint(api_base) so a merge never runs
+            # against a different host than the one viewer_permission verified.
+            env["GH_HOST"] = host
+        return env
 
     def create_pull(self, scope: PRScope, *, token: str | None = None) -> PullResult:
         args = [
@@ -524,15 +533,18 @@ class GitHubProvider:
         The ``pr-merge <#> --now`` submitter-direct primitive. ``--squash`` keeps
         the non-interactive merge method explicit; ``--admin`` is used only when
         the configured review is non-blocking. The source branch is deliberately
-        **not** deleted, so ``finalize`` can affirm the merge.
+        **not** deleted, so ``finalize`` can affirm the merge. Targets
+        ``authority_endpoint(api_base)`` (via ``GH_HOST``) so the merge always
+        runs against the same host ``pr-merge --now``'s live permission gate
+        just verified -- never a different ambient host.
         """
-        _ = api_base
+        host = self.authority_endpoint(api_base)
         args = ["gh", "pr", "merge", str(number), "--repo", repo]
         if squash:
             args.append("--squash")
         if admin:
             args.append("--admin")
-        proc = run_cli(args, env=self._env(token))
+        proc = run_cli(args, env=self._env(token, host=host))
         if proc.returncode != 0:
             return (
                 f"gh pr merge failed for {repo}#{number}: "
@@ -551,11 +563,11 @@ class GitHubProvider:
         eventual merge. Returns "" once auto-merge is armed (the PR is NOT yet
         merged), or an error string so the caller falls back to a direct merge.
         """
-        _ = api_base
+        host = self.authority_endpoint(api_base)
         args = ["gh", "pr", "merge", str(number), "--repo", repo, "--auto"]
         if squash:
             args.append("--squash")
-        proc = run_cli(args, env=self._env(token))
+        proc = run_cli(args, env=self._env(token, host=host))
         if proc.returncode != 0:
             return (
                 f"gh pr merge --auto failed for {repo}#{number}: "

@@ -869,6 +869,22 @@ class TestGitHubProvider:
         github.GitHubProvider().merge_pull("o/r", 7, squash=True, admin=False)
         assert "--admin" not in captured["args"]
 
+    def test_merge_pull_honors_explicit_host(self, monkeypatch):
+        # gh pr merge has no --hostname flag -- GH_HOST is the only way to pin
+        # it to an explicit api_base, matching get_repo_policy's host so a
+        # merge never targets a different host than the permission check did.
+        from agent_worktrees.providers import github
+        captured = {}
+        monkeypatch.setattr(
+            github, "run_cli",
+            lambda args, **kw: (captured.__setitem__("env", kw.get("env")), _proc())[1],
+        )
+        github.GitHubProvider().merge_pull(
+            "o/r", 7, api_base="https://ghe.example.com/api/v3", token="tok",
+        )
+        assert captured["env"]["GH_HOST"] == "ghe.example.com"
+        assert captured["env"]["GH_TOKEN"] == "tok"
+
     def test_merge_pull_surfaces_error(self, monkeypatch):
         from agent_worktrees.providers import github
         monkeypatch.setattr(
@@ -896,6 +912,18 @@ class TestGitHubProvider:
         assert a[:5] == ["gh", "pr", "merge", "7", "--repo"]
         assert "--auto" in a and "--squash" in a
         assert "--admin" not in a and "--delete-branch" not in a
+
+    def test_enable_auto_merge_honors_explicit_host(self, monkeypatch):
+        from agent_worktrees.providers import github
+        captured = {}
+        monkeypatch.setattr(
+            github, "run_cli",
+            lambda args, **kw: (captured.__setitem__("env", kw.get("env")), _proc())[1],
+        )
+        github.GitHubProvider().enable_auto_merge(
+            "o/r", 7, api_base="https://ghe.example.com/api/v3", token="tok",
+        )
+        assert captured["env"]["GH_HOST"] == "ghe.example.com"
 
     def test_enable_auto_merge_surfaces_error(self, monkeypatch):
         from agent_worktrees.providers import github
