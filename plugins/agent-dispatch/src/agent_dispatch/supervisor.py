@@ -1531,6 +1531,88 @@ class Supervisor:
                 )
         return reconciled
 
+    def sweep_spawn_consistency(self) -> dict[str, int]:
+        """Phase 10's live wiring of
+        :mod:`agent_dispatch.spawn_reservation_machine`'s declared
+        reservation<->bridge consistency relation and single-assignment
+        invariant against this pool's real, current reservation rows.
+
+        Read-only and additive: this never mutates a reservation or a
+        task, and it changes no other reconciliation method's behavior --
+        it only classifies today's real state and logs any detected
+        anomaly, so the declared classification functions are actually
+        exercised against live data rather than only proven sound in
+        isolation. Scheduling this sweep on a periodic cadence is left as
+        a follow-up decision; this method is safe to call at any time.
+
+        Liveness is resolved only for reservations carrying a local body
+        handle, via the same ``local_body_verdict_fn`` the rest of this
+        module already uses, translated through
+        :func:`spawn_reservation_machine.verdict_to_bridge_state`. A
+        reservation without a local handle, or whose verdict is
+        ``unknown``, is skipped (:attr:`ConsistencyTier.NOT_APPLICABLE`)
+        rather than guessed at.
+
+        Returns a summary dict: ``checked`` (reservations with a
+        resolvable bridge state), ``anomalies`` (count classified as
+        :attr:`ConsistencyTier.ANOMALY`), and
+        ``assignment_violations`` (task/exclusive-key groups with more
+        than one simultaneously ``ACTIVE`` reservation).
+        """
+        from . import spawn_reservation_machine as srm
+
+        active = self._pool_reservations(state=SpawnState.ACTIVE)
+        records = tuple(
+            srm.ReservationRecord(
+                key=str(res.get("key") or ""),
+                task_id=str(res.get("task_id") or ""),
+                state=str(res.get("state") or ""),
+                exclusive_key=res.get("exclusive_key"),
+            )
+            for res in active
+        )
+        violations = srm.violating_assignment_groups(records)
+        if violations:
+            log.warning(
+                "spawn-reservation single-assignment invariant violated for"
+                " group(s): %s",
+                ", ".join(sorted(violations)),
+            )
+
+        checked = 0
+        anomalies = 0
+        for res in active:
+            local_sid = _parse_local_body_handle(res.get("session_handle"))
+            if local_sid is None:
+                continue
+            try:
+                verdict = self.local_body_verdict_fn(local_sid)
+            except Exception:
+                verdict = _tracking().UNKNOWN
+            bridge_state = srm.verdict_to_bridge_state(verdict)
+            if bridge_state is None:
+                continue
+            checked += 1
+            tier = srm.classify_consistency(
+                res.get("state"),
+                bridge_state,
+                worktree_ownership=res.get("worktree_ownership"),
+            )
+            if tier is srm.ConsistencyTier.ANOMALY:
+                anomalies += 1
+                log.warning(
+                    "spawn-reservation %s: state %r inconsistent with"
+                    " observed bridge state %r",
+                    res.get("key"),
+                    res.get("state"),
+                    bridge_state,
+                )
+        return {
+            "checked": checked,
+            "anomalies": anomalies,
+            "assignment_violations": len(violations),
+        }
+
     def _conclude_released_attempt(
         self,
         reservation: dict,

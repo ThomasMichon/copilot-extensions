@@ -202,11 +202,29 @@ here but not blocking the start of 1/2/5.
 - [ ] Wire the bridge machine's `resolve_liveness`/`resolve_resume` against
   a real agent-bridge liveness read (item 4 above), coordinated with
   agent-bridge's own verb-vocabulary convergence.
-- [ ] Call `spawn_reservation_machine.violating_assignment_groups` and
+- [x] Call `spawn_reservation_machine.violating_assignment_groups` and
   `classify_consistency` from the supervisor's real reconciliation loop
   (item 5 above), with a live-behavior test proving an actual anomaly
   (e.g. a `SPAWNED` reservation whose live bridge read is `ABSENT`) is
-  detected and surfaced, not just classifiable in the abstract.
+  detected and surfaced, not just classifiable in the abstract. Added
+  `Supervisor.sweep_spawn_consistency()`: a read-only, additive method
+  (never mutates a reservation or task) that gathers real `ACTIVE`
+  reservation rows, resolves liveness for each carrying a local body
+  handle via the same `local_body_verdict_fn` the rest of this module
+  already uses, translates the coarse live/gone/unknown verdict to a
+  `BridgeState` via a new `spawn_reservation_machine.verdict_to_bridge_state`
+  (unknown maps to `None`/not-applicable rather than guessing), and logs
+  any detected anomaly or single-assignment violation. Scheduling this
+  sweep on a periodic cadence is left as a follow-up decision; the method
+  itself is safe to call at any time. Backed by
+  `test_spawn_consistency_sweep.py` (6 tests): a consistent live
+  reservation reports zero anomalies; a `SPAWNED` reservation whose
+  liveness read is `gone` is detected; a non-local-body or `unknown`-
+  verdict reservation is skipped rather than misclassified; the sweep
+  never mutates the reservation it classifies; and a simulated
+  single-assignment violation (constructed directly, since
+  `reserve_spawn`'s own atomic guarantee makes this unreachable through
+  normal usage) is caught.
 - [ ] Revisit this effort's Validation Plan once each of the above lands
   and check off whichever items each wiring slice actually makes
   checkable against live behavior.
