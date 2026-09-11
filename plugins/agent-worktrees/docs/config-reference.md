@@ -21,7 +21,7 @@ Copilot session database remains outside this path.
 | Precedence | Source | Path | Scope | Committed? |
 |------------|--------|------|-------|-----------|
 | **Highest** | **Machine-local** | legacy `~/.{project}/config.yaml`; namespaced `<cell>/repos/<repository-id>/agent-worktrees/config.yaml` | Per-machine overrides + machine paths (anchor, custom worktree_root). The **adapter** that makes a *foreign* repo compatible. | No |
-| *(conditional)* | **Knowledge overlay** | bound knowledge repo's config | For a **stateless harness** bound to a knowledge repo, portable operator-preference keys only (`copilot_profiles`, `profile_assignment`, `headless`, `auto_fast_forward`, `new_picker`). Machine-specifics and the binding never graft. | Yes |
+| *(conditional)* | **Knowledge overlay** | bound knowledge repo's config | For a **stateless harness** bound to a knowledge repo, portable operator-preference keys only (`copilot_profiles`, `profile_assignment`, `headless`, `auto_fast_forward`). Machine-specifics and the binding never graft. | Yes |
 | **Middle** | **In-repo** | `<anchor>/.copilot-extensions/agent-worktrees/config.yaml` | The repo's **own** committed settings — the base, shared by every machine. Legacy `<anchor>/.agent-worktrees/config.yaml` and `<anchor>/.agent-worktrees.yaml` remain readable. | Yes |
 | **Lowest** | **Global** | `~/.agent-worktrees/config.yaml` | Machine-wide defaults: `srcroot`, `machine`, `platform`, `copilot_profiles`, `session_backend`. | No |
 
@@ -33,8 +33,8 @@ specific machine, or to adopt a *foreign* repo (work product, external GitHub)
 that carries no in-repo config.
 
 - **Portable top-level fields** (`srcroot`/`machine`/`platform`/
-  `copilot_profiles`/`profile_assignment`/`headless`/`auto_fast_forward`/
-  `new_picker`) resolve **machine-local > knowledge overlay (portable prefs
+  `copilot_profiles`/`profile_assignment`/`headless`/`auto_fast_forward`)
+  resolve **machine-local > knowledge overlay (portable prefs
   only) > global > detected/default**.
 - **Machine-host fields** (`session_backend`) resolve **machine-local >
   global > default**. They are never read from committed in-repo config or a
@@ -131,7 +131,6 @@ repos:
 | `repo_name` | string | `""` | Which `repos.<name>` is the default repo. Optional when exactly one repo is defined. |
 | `headless` | bool | `false` | CLI-only project: the bare binstub lists worktrees instead of launching an interactive Copilot session. |
 | `auto_fast_forward` | bool | `true` | On resume, fast-forward a clean worktree that is strictly behind upstream. Only ever a FF — never touches dirty / ahead / diverged worktrees. |
-| `new_picker` | bool | `true` | Use the Textual picker. `picker disable` writes `false` to opt the machine out to the legacy picker. |
 | `copilot_profiles` | list | `[]` | Selectable Copilot backend profiles (Tab-cycle in the picker). |
 | `profile_assignment` | map | absent/off | Optional balanced assignment policy over existing `copilot_profiles`. Only a user-owned global, knowledge-overlay, or machine-local/per-project block can set `armed: true`. |
 | `session_backend` | map | `{kind: direct}` | Legacy machine-local AHP configuration retained temporarily for the old `session-backend` launcher path. New Picker launches configure AHP in Worktree Manager's user-owned TOML. Not accepted from in-repo config or a knowledge overlay. |

@@ -147,11 +147,9 @@ constants:
 | `Space` | Select / deselect the focused worktree row (multi-select set) |
 
 > On **Windows over SSH** the TUI auto-falls back to a simpler legacy picker
-> (a ConPTY keyboard limitation). You can force either one for a single run with
-> `AGENT_WORKTREES_LEGACY_PICKER=1` (the rollback switch) or
-> `AGENT_WORKTREES_NEW_PICKER=1`, or persist a machine default with
-> `agent-worktrees picker disable` / `enable` (writes `new_picker`). See
-> [config-reference.md](config-reference.md).
+> (a ConPTY keyboard limitation). This fallback is automatic and unconditional
+> -- there is no supported way to opt out of the Textual picker otherwise; the
+> legacy picker is retired everywhere else.
 
 ## Core actions
 
@@ -391,8 +389,6 @@ lying as open work.
 
 | Key / env | Effect |
 |-----------|--------|
-| `new_picker` (config; default `true`) | Textual TUI vs legacy picker. `picker disable`/`enable` persists it. |
-| `AGENT_WORKTREES_LEGACY_PICKER` / `AGENT_WORKTREES_NEW_PICKER` | Force one picker for a single invocation (legacy wins). |
 | `auto_fast_forward` (config; default `true`) | Auto-FF a clean, stale worktree on resume. |
 | `copilot_profiles` (config) | The backend profiles offered in the Configuration → Profiles grid. |
 | `WORKTREE_NO_UPDATE=1` / `WORKTREE_NO_RECONCILE=1` | Skip pre-flight auto-update / repo-plugin reconciliation at launch. |

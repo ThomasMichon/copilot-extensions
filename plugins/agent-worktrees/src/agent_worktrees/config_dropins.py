@@ -481,7 +481,7 @@ def _validate_config(raw: object) -> str | None:
             return (
                 "session_backend.connect_timeout_seconds must be a number"
             )
-    for name in ("headless", "auto_fast_forward", "new_picker"):
+    for name in ("headless", "auto_fast_forward"):
         if name in raw and not isinstance(raw[name], bool):
             return f"{name} must be a boolean"
     return None
