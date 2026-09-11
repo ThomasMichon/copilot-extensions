@@ -125,7 +125,7 @@ def test_now_refused_on_non_self_merge(monkeypatch):
     assert fake.calls == []  # never merged
 
 
-def test_now_refused_when_live_permission_is_read_only(monkeypatch):
+def test_now_refused_when_live_permission_is_read_only(monkeypatch, capsys):
     # Repo config selects pr-self-merge (a maintainer set it up), but the
     # ACTING identity's own live permission is read-only -- a contributor
     # running the same flow must be refused, not silently attempt (and fail)
@@ -138,6 +138,12 @@ def test_now_refused_when_live_permission_is_read_only(monkeypatch):
     rc = m._pr_merge_now(_args(), _prcfg(), _self_merge_flow(), apply=True)
     assert rc == 2
     assert fake.calls == []  # never attempted
+    # The refusal must NOT tell a permission-denied contributor to retry
+    # `pr-merge --now` -- that's the wrong-caller guidance meant for someone
+    # who forgot --now, not for a confirmed lack of write access.
+    err = capsys.readouterr().err
+    assert "pr-merge --now" not in err
+    assert "wait for a maintainer" in err
 
 
 def test_now_proceeds_when_live_permission_is_write(monkeypatch):

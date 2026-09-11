@@ -27668,7 +27668,7 @@ def _pr_merge_now(args, prcfg, flow, *, apply: bool) -> int:
             "maintainers, not every submitter -- a contributor's PR must wait "
             "for a maintainer to review and merge it"
         )
-        rem = pc.pr_reminder(flow, "pr-merge", ok=False, reason=reason)
+        rem = pc.pr_reminder_no_actor_authority(flow, reason=reason)
         if args.json:
             print(
                 _json.dumps(

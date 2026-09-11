@@ -685,6 +685,26 @@ class TestActorMergeAuthority:
         assert pc.actor_merge_authority("some-new-provider-level") is None
 
 
+class TestPrReminderNoActorAuthority:
+    def test_points_at_contributor_path_not_at_now_again(self):
+        flow = pc.classify_pr_flow(
+            enabled=True, required=True, provider="github",
+            automerge_label="", self_approve=True, reviewer="copilot",
+        )
+        rem = pc.pr_reminder_no_actor_authority(
+            flow, reason="acting identity lacks write access",
+        )
+        assert rem.ok is False
+        assert rem.headline == "acting identity lacks write access"
+        # Must NOT recommend retrying the very verb that was just refused for
+        # lacking permission -- that's the "you forgot --now" guidance meant
+        # for an already-authorized submitter, not a confirmed denial.
+        assert "pr-merge --now" not in rem.use_instead
+        assert "pr-watch" in rem.use_instead
+        assert "maintainer" in rem.next_step
+        assert "pr-merge --now" not in rem.text()
+
+
 # ---------------------------------------------------------------------------
 # PR-flow reminders (pr_reminder) -- state-aware, stay-on-the-rails guidance
 # ---------------------------------------------------------------------------
@@ -873,6 +893,11 @@ class TestPRReminder:
                         assert bad.lower() not in blob, (
                             f"reminder for {flow.profile}/{verb} ok={ok} "
                             f"leaked bypass token {bad!r}: {blob}")
+        # Same scan for the dedicated no-actor-authority reminder.
+        r = pc.pr_reminder_no_actor_authority(_self_merge_flow(), reason="blocked")
+        blob = (r.text() + " " + repr(r.as_dict())).lower()
+        for bad in _FORBIDDEN:
+            assert bad.lower() not in blob
 
 
 # ---------------------------------------------------------------------------

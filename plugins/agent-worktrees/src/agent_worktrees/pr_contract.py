@@ -1285,6 +1285,28 @@ def pr_reminder(
     )
 
 
+def pr_reminder_no_actor_authority(flow: PRFlowProfile, *, reason: str) -> PRReminder:
+    """The refusal reminder for ``pr-merge --now`` on a live-authority denial.
+
+    A distinct shape from :func:`pr_reminder`'s ``ok=False`` "pr-merge" /
+    ``pr-self-merge`` branch, which is written for a caller who forgot ``--now``
+    on an otherwise-authorized submitter -- its ``use_instead`` correctly points
+    back at ``pr-merge --now``. That guidance is wrong here: the caller already
+    used ``--now`` and was refused because a **live permission check** found
+    they lack write access, so retrying the same verb can only fail again. This
+    reminder instead names the contributor path -- wait for a maintainer, the
+    same shape :func:`pr_reminder` gives a genuine ``pr-human-merge`` repo.
+    """
+    return PRReminder(
+        flow.profile, "pr-merge", PR_STATE_UNKNOWN, False,
+        headline=reason,
+        next_step="wait for a maintainer to review and merge this PR",
+        waiting_on=("approved", "merged"),
+        use_instead=("pr-watch", "pr-status"),
+        cautions=(),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Adopt-time research: read a repo's ACTUAL provider settings, then derive the
 # policy matrix to match (#225). The read lives in the provider; the mapping
@@ -1404,4 +1426,7 @@ def actor_merge_authority(viewer_permission: str) -> bool | None:
     return None
 
 
-__all__ += ["RepoPolicy", "derive_policy_matrix", "actor_merge_authority"]
+__all__ += [
+    "RepoPolicy", "derive_policy_matrix", "actor_merge_authority",
+    "pr_reminder_no_actor_authority",
+]
