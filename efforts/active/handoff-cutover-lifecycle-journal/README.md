@@ -305,7 +305,16 @@ renumbering from the "acknowledges handoff" step onward.)
       can satisfy "re-trace at any time" / "persisted... for future auditing
       from the archive" once the log rotates past a stage-1 event. Add a
       **durable, per-worktree trace store** (e.g.
-      `~/.agent-worktrees/logs/handoff-traces/<worktree-id>.jsonl`, exempt
+      `~/.agent-worktrees/logs/handoff-traces/<project>/<worktree-id>.jsonl` —
+      **namespaced by project, not worktree id alone**: worktree ids are only
+      project-scoped (`_find_tracking_file_exact` explicitly raises when the
+      same id exists under multiple projects' tracking dirs), so a
+      machine-global path keyed on worktree id alone would let two projects'
+      same-named worktrees append into one file and let
+      `handoff-trace --token` render unrelated attempts together. Derive
+      `<project>` from the same resolved tracking record the rest of the
+      command uses, and require the CLI lookup (Phase 3's `handoff-trace`
+      command) to resolve and pass that identical discriminator — exempt
       from the rolling-window rotation, or an equivalent unrotated sink) that
       every stage's emitter writes to in addition to `activity.jsonl` and the
       session-state files, and treat *that* store — not `activity.jsonl` — as
