@@ -38,6 +38,30 @@ def _is_transient(status: int) -> bool:
     return status in _TRANSIENT_LABEL_HTTP or status >= 500
 
 
+#: Gitea's ``permissions`` object on ``GET /repos/{owner}/{repo}`` is
+#: admin/push/pull booleans for the *authenticated* identity. Highest-to-lowest
+#: so one true bit wins; ``push`` is Gitea's name for write access, matching
+#: ``actor_merge_authority``'s ``"write"`` token.
+_GITEA_PERMISSION_PRIORITY = ("admin", "push", "pull")
+_GITEA_PERMISSION_TOKEN = {"admin": "admin", "push": "write", "pull": "read"}
+
+
+def _gitea_viewer_permission(permissions: object) -> str:
+    """Normalize Gitea's ``permissions`` object to a merge-authority token.
+
+    Returns ``""`` when missing/malformed or every bit is false (an
+    authenticated read of a visible repo always has at least ``pull`` true, so
+    all-false means the field wasn't populated -- unknown, not a confident
+    "none").
+    """
+    if not isinstance(permissions, dict):
+        return ""
+    for bit in _GITEA_PERMISSION_PRIORITY:
+        if permissions.get(bit):
+            return _GITEA_PERMISSION_TOKEN[bit]
+    return ""
+
+
 class GiteaProvider:
     """Open + query pull requests on a Gitea instance via curl."""
 
@@ -759,10 +783,55 @@ class GiteaProvider:
         self, repo: str, *, default_branch: str = "", api_base: str = "",
         token: str | None = None,
     ):
-        """Not implemented: adopt-time settings research is GitHub-only today."""
-        from .base import _unsupported_repo_policy
-        _ = (repo, default_branch, api_base, token)
-        return _unsupported_repo_policy(self.name)
+        """Read Gitea repo settings + the caller's own permissions into a
+        ``RepoPolicy``.
+
+        One read: ``GET /repos/{repo}`` returns both the repo's merge-method
+        settings and a ``permissions`` object (``admin``/``push``/``pull``
+        booleans) for the **authenticated identity** -- whoever's token this
+        is, not a config value. Branch-protection detail (required reviews /
+        status checks) is not read here (Gitea's protection API needs admin
+        rights the acting token may not hold); those fields stay ``None``.
+        Never raises: a failed read yields ``RepoPolicy(supported=False,
+        error=...)``.
+        """
+        from ..pr_contract import RepoPolicy
+
+        if not token:
+            return RepoPolicy(
+                supported=False,
+                error="Gitea provider needs a token to read repo settings.",
+            )
+        try:
+            status, body = self._curl(
+                "GET", self._api(api_base, f"/repos/{repo}"), token,
+            )
+        except ProviderError as exc:
+            return RepoPolicy(supported=False, error=str(exc))
+        if status != 200:
+            return RepoPolicy(
+                supported=False,
+                error=f"gitea repos/{repo} GET returned HTTP {status}",
+            )
+        try:
+            data = json.loads(body)
+        except json.JSONDecodeError as exc:
+            return RepoPolicy(supported=False, error=f"non-JSON repo payload: {exc}")
+        if not isinstance(data, dict):
+            return RepoPolicy(supported=False, error="unexpected repo payload shape")
+
+        def _b(key):
+            v = data.get(key)
+            return bool(v) if isinstance(v, bool) else None
+
+        return RepoPolicy(
+            supported=True,
+            allow_squash=_b("allow_squash_merge"),
+            allow_merge_commit=_b("allow_merge_commits"),
+            allow_rebase=_b("allow_rebase_merge"),
+            delete_branch_on_merge=_b("default_delete_branch_after_merge"),
+            viewer_permission=_gitea_viewer_permission(data.get("permissions")),
+        )
 
     def get_comment_threads(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None

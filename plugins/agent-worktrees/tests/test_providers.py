@@ -964,9 +964,62 @@ class TestGitHubProvider:
         assert pol.supported is False and "gone" in pol.error
 
     def test_get_repo_policy_unsupported_on_gitea_and_azure(self):
+        # Gitea needs a token to read anything (no ambient CLI auth like `gh`);
+        # azure-devops has no settings-read primitive at all today.
         from agent_worktrees.providers import azure_devops, gitea
         assert gitea.GiteaProvider().get_repo_policy("o/r").supported is False
         assert azure_devops.AzureDevOpsProvider().get_repo_policy("o/r").supported is False
+
+    def test_get_repo_policy_viewer_permission_github(self, monkeypatch):
+        # #<role-aware-pr-policy>: the acting identity's own permission level
+        # rides the same repos/<repo> read -- no second call.
+        from agent_worktrees.providers import github
+
+        def fake(args, **kw):
+            return _proc(stdout=json.dumps({
+                "permissions": {
+                    "admin": False, "maintain": False, "push": True,
+                    "triage": True, "pull": True,
+                },
+            }))
+
+        monkeypatch.setattr(github, "run_cli", fake)
+        pol = github.GitHubProvider().get_repo_policy("o/r")
+        assert pol.viewer_permission == "write"
+
+    def test_get_repo_policy_viewer_permission_github_missing_is_unknown(
+        self, monkeypatch,
+    ):
+        from agent_worktrees.providers import github
+        monkeypatch.setattr(
+            github, "run_cli", lambda args, **kw: _proc(stdout=json.dumps({})),
+        )
+        pol = github.GitHubProvider().get_repo_policy("o/r")
+        assert pol.viewer_permission == ""
+
+    def test_get_repo_policy_viewer_permission_gitea(self, monkeypatch):
+        from agent_worktrees.providers import gitea
+
+        def fake(args, **kw):
+            body = json.dumps({
+                "permissions": {"admin": False, "push": True, "pull": True},
+            })
+            return _proc(stdout=f"{body}\n200")
+
+        monkeypatch.setattr(gitea, "run_cli", fake)
+        pol = gitea.GiteaProvider().get_repo_policy(
+            "o/r", api_base="https://gitea.example", token="tok",
+        )
+        assert pol.supported is True
+        assert pol.viewer_permission == "write"
+
+    def test_get_repo_policy_gitea_no_token_unsupported(self):
+        from agent_worktrees.providers import gitea
+        pol = gitea.GiteaProvider().get_repo_policy(
+            "o/r", api_base="https://gitea.example",
+        )
+        assert pol.supported is False
+
 
 
     def test_merge_pull_unsupported_on_gitea_and_azure(self):

@@ -659,6 +659,33 @@ class TestDerivePolicyMatrix:
 
 
 # ---------------------------------------------------------------------------
+# Live per-identity merge authority (actor_merge_authority) -- general repo
+# comprehension: config selects a repo's PR *flow*; this classifies whether
+# the ACTING identity actually holds the access that flow assumes.
+# ---------------------------------------------------------------------------
+
+class TestActorMergeAuthority:
+    def test_write_or_above_is_authorized(self):
+        for level in ("admin", "maintain", "write"):
+            assert pc.actor_merge_authority(level) is True
+
+    def test_read_or_none_is_denied(self):
+        for level in ("triage", "read", "none"):
+            assert pc.actor_merge_authority(level) is False
+
+    def test_empty_is_unknown(self):
+        assert pc.actor_merge_authority("") is None
+
+    def test_case_and_whitespace_insensitive(self):
+        assert pc.actor_merge_authority("  WRITE  ") is True
+        assert pc.actor_merge_authority("Read") is False
+
+    def test_unrecognized_token_fails_open_to_unknown(self):
+        # A future/unmapped token must never be read as a confident denial.
+        assert pc.actor_merge_authority("some-new-provider-level") is None
+
+
+# ---------------------------------------------------------------------------
 # PR-flow reminders (pr_reminder) -- state-aware, stay-on-the-rails guidance
 # ---------------------------------------------------------------------------
 

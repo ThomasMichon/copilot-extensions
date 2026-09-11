@@ -125,6 +125,44 @@ def test_now_refused_on_non_self_merge(monkeypatch):
     assert fake.calls == []  # never merged
 
 
+def test_now_refused_when_live_permission_is_read_only(monkeypatch):
+    # Repo config selects pr-self-merge (a maintainer set it up), but the
+    # ACTING identity's own live permission is read-only -- a contributor
+    # running the same flow must be refused, not silently attempt (and fail)
+    # a merge they have no rights to.
+    fake = _FakeProvider()
+    fake.get_repo_policy = lambda repo, **kw: SimpleNamespace(
+        supported=True, viewer_permission="read",
+    )
+    _patch_provider(monkeypatch, fake)
+    rc = m._pr_merge_now(_args(), _prcfg(), _self_merge_flow(), apply=True)
+    assert rc == 2
+    assert fake.calls == []  # never attempted
+
+
+def test_now_proceeds_when_live_permission_is_write(monkeypatch):
+    fake = _FakeProvider()
+    fake.get_repo_policy = lambda repo, **kw: SimpleNamespace(
+        supported=True, viewer_permission="write",
+    )
+    _patch_provider(monkeypatch, fake)
+    rc = m._pr_merge_now(_args(), _prcfg(), _self_merge_flow(), apply=True)
+    assert rc == 0
+    assert len(fake.calls) == 1
+
+
+def test_now_proceeds_when_permission_read_unsupported(monkeypatch):
+    # A provider/policy read that can't determine viewer_permission (unknown,
+    # not a confident denial) must fail OPEN -- unchanged from before this
+    # gate existed.
+    fake = _FakeProvider()
+    fake.get_repo_policy = lambda repo, **kw: SimpleNamespace(supported=False)
+    _patch_provider(monkeypatch, fake)
+    rc = m._pr_merge_now(_args(), _prcfg(), _self_merge_flow(), apply=True)
+    assert rc == 0
+    assert len(fake.calls) == 1
+
+
 def test_now_rejects_all_sweep(monkeypatch):
     fake = _FakeProvider()
     _patch_provider(monkeypatch, fake)

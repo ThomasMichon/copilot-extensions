@@ -44,6 +44,34 @@ def _gh_detail_is_transient(detail: str) -> bool:
     )
 
 
+#: GitHub's ``repos/{owner}/{repo}`` payload carries a ``permissions`` object
+#: of booleans for the *authenticated* identity -- the acting token/CLI-login,
+#: never a config value. Highest-to-lowest so one true bit wins.
+_GH_PERMISSION_PRIORITY = ("admin", "maintain", "push", "triage", "pull")
+#: GitHub's boolean key -> the provider-neutral token ``actor_merge_authority``
+#: understands (``push`` is GitHub's name for write access).
+_GH_PERMISSION_TOKEN = {
+    "admin": "admin", "maintain": "maintain", "push": "write",
+    "triage": "triage", "pull": "read",
+}
+
+
+def _github_viewer_permission(permissions: object) -> str:
+    """Normalize ``repos/{owner}/{repo}.permissions`` to a merge-authority token.
+
+    Returns ``""`` when the payload is missing/malformed or every bit is false
+    (an authenticated call always has at least ``pull`` true for a repo it can
+    see, so all-false means the field wasn't populated -- report unknown, not a
+    confident "none").
+    """
+    if not isinstance(permissions, dict):
+        return ""
+    for bit in _GH_PERMISSION_PRIORITY:
+        if permissions.get(bit):
+            return _GH_PERMISSION_TOKEN[bit]
+    return ""
+
+
 class GitHubProvider:
     """Open + query pull requests on GitHub via the ``gh`` CLI."""
 
@@ -567,6 +595,8 @@ class GitHubProvider:
             v = data.get(key)
             return bool(v) if isinstance(v, bool) else None
 
+        viewer_permission = _github_viewer_permission(data.get("permissions"))
+
         req_reviews: int | None = None
         req_checks: bool | None = None
         if default_branch:
@@ -600,6 +630,7 @@ class GitHubProvider:
             delete_branch_on_merge=_b("delete_branch_on_merge"),
             required_approving_reviews=req_reviews,
             has_required_status_checks=req_checks,
+            viewer_permission=viewer_permission,
         )
 
     def head_contained_in_base(

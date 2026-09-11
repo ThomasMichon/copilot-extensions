@@ -27574,7 +27574,12 @@ def _pr_merge_now(args, prcfg, flow, *, apply: bool) -> int:
     import json as _json
 
     from . import pr_contract as pc
-    from .providers import ProviderError, account_token_for_slug, get_provider
+    from .providers import (
+        ProviderError,
+        account_token_for_slug,
+        actor_viewer_permission,
+        get_provider,
+    )
 
     if args.sweep:
         output.err("pr-merge --now: name a single PR number (not --all).")
@@ -27642,6 +27647,46 @@ def _pr_merge_now(args, prcfg, flow, *, apply: bool) -> int:
         return 0
 
     tok = args.token if args.token is not None else account_token_for_slug(args.repo, prcfg)
+
+    # General repo comprehension: this repo's *config* selects pr-self-merge
+    # (a maintainer's choice), but that never implies the identity running
+    # THIS command holds merge rights -- a repo with several maintainers and
+    # outside contributors needs the actor's live permission checked, not
+    # assumed. Fail-open on an unknown/failed read (None): only a confident
+    # read-only/no-access verdict (False) refuses. A maintainer is never
+    # blocked by a permission-read hiccup; a contributor is never told to
+    # self-merge a PR they cannot actually merge.
+    live_permission = actor_viewer_permission(
+        provider, args.repo, api_base=base, token=tok,
+    )
+    authority = pc.actor_merge_authority(live_permission)
+    if authority is False:
+        reason = (
+            "a live permission check found the acting identity does not have "
+            f"write access to {args.repo} (reports '{live_permission}'). This "
+            "repo's config selects pr-self-merge, but that authorizes "
+            "maintainers, not every submitter -- a contributor's PR must wait "
+            "for a maintainer to review and merge it"
+        )
+        rem = pc.pr_reminder(flow, "pr-merge", ok=False, reason=reason)
+        if args.json:
+            print(
+                _json.dumps(
+                    {
+                        "repo": args.repo,
+                        "pr": args.pr,
+                        "error": "actor lacks live merge authority",
+                        "viewer_permission": live_permission,
+                        "flow_profile": flow.profile,
+                        "applied": False,
+                        "reminder": rem.as_dict(),
+                    }
+                )
+            )
+        else:
+            output.err(f"pr-merge --now: {reason}. Nothing merged.")
+            print(rem.text(), file=sys.stderr)
+        return 2
 
     # Azure DevOps exposes completion through request_auto_complete rather than
     # the GitHub-oriented enable_auto_merge / merge_pull interfaces.

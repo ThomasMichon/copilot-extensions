@@ -365,6 +365,31 @@ def _unsupported_repo_policy(name: str):
     )
 
 
+def actor_viewer_permission(
+    provider: PRProvider, repo: str, *, api_base: str = "", token: str | None = None,
+) -> str:
+    """Live, per-identity merge-authority read: "what CAN the acting identity
+    do on this repo right now?" -- the general-comprehension counterpart to a
+    repo's *config* (``pr.self_approve`` / ``pr.merge_actor``), which only says
+    what the repo's flow is designed for, not who is actually running it.
+
+    Reuses :meth:`PRProvider.get_repo_policy` (github/gitea already read the
+    caller's own permissions in that same settings call) rather than a second
+    provider-specific primitive. Fail-open by construction: any exception, an
+    unsupported provider, or a failed read all collapse to ``""`` (unknown) --
+    never raises, never fabricates a denial. Feed the result to
+    :func:`agent_worktrees.pr_contract.actor_merge_authority` to turn it into a
+    merge-eligibility verdict.
+    """
+    try:
+        policy = provider.get_repo_policy(repo, api_base=api_base, token=token)
+    except Exception:
+        return ""
+    if not getattr(policy, "supported", False):
+        return ""
+    return getattr(policy, "viewer_permission", "") or ""
+
+
 def resolve_token(prcfg) -> str | None:
     """Resolve a provider token from config.
 
