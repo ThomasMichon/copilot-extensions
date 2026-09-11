@@ -239,14 +239,14 @@ provider-approval one) plus `step_task`/`step_bridge`/
 `step_provider_approval` helpers that resolve a named transition from the
 owning declared table and apply it through `machine_coupling.apply_transition`
 -- it declares no new machine behavior, it only drives the already-declared
-tables. Seven of the ten scenarios below are implemented and covered
-(`../../../plugins/agent-dispatch/tests/test_simulation.py` and
-`../../../plugins/agent-dispatch/tests/test_simulation_revision.py`). The
-remaining three are now **designed but not yet implemented** -- no fixture
-exists for any of them yet -- after a design review corrected the earlier
-belief that they needed new declared vocabulary:
+tables. All ten scenarios below are now implemented and covered
+(`../../../plugins/agent-dispatch/tests/test_simulation.py`,
+`../../../plugins/agent-dispatch/tests/test_simulation_revision.py`, and
+`../../../plugins/agent-dispatch/tests/test_simulation_deferred_scenarios.py`).
+The final three landed after a design review corrected the earlier belief
+that they needed new declared vocabulary:
 
-- [ ] Bridge caught mid-version-update while a task holds an active
+- [x] Bridge caught mid-version-update while a task holds an active
   session against it. *(Corrected from the earlier "needs a version/EOL
   concept on the bridge machine" note: agent-bridge, not agent-dispatch,
   owns the actual session-host instances and their zero-downtime-deploy
@@ -264,7 +264,7 @@ belief that they needed new declared vocabulary:
   while a task believes its agent is running.
 - [x] The bridge's discovered port/endpoint changes underneath an
   already-attached task.
-- [ ] The dispatch supervisor is about to end-of-life a bridge/runtime
+- [x] The dispatch supervisor is about to end-of-life a bridge/runtime
   version while tasks are still attached to it. *(Designed as a pure
   predicate, `eol_safe_to_retire(active_lease_count) -> bool`, true only
   at zero -- no new bridge state. The supervisor's decision to stop
@@ -287,7 +287,7 @@ belief that they needed new declared vocabulary:
   transition.
 - [x] Two provider events for the same task arrive out of order or
   duplicated (idempotent-replay proof for Phase 2's dedup requirement).
-- [ ] A steering input arrives while the evaluator is mid-transition on the
+- [x] A steering input arrives while the evaluator is mid-transition on the
   same task (steer-vs-transition race). *(Corrected from the earlier
   "needs a declared steer transition on the task machine" note: reading
   `queue.py` found steering is already a real, implemented mechanism --
@@ -300,10 +300,12 @@ belief that they needed new declared vocabulary:
   `TASK_TRANSITION_BRIDGE_CONFIRMATION["resume"]` already uses. No
   `VersionedRecord` payload change, no new task-machine transition, and no
   `SuspendReason` enum are needed -- that was scaffolding for a mechanism
-  that turned out not to match the real system. Designing this now means
-  declaring the existing `awaiting_steer`/steer-inbox contract as
-  checkable data (the refusal-while-untaken-steer invariant, the
-  dual-outcome resolution) rather than inventing new vocabulary.)*
+  that turned out not to match the real system. Declared as
+  `task_state_machine.SteerOutcome`/`STEER_OUTCOME_TRANSITION`/
+  `resolve_steer_outcome`/`suspend_blocked_by_pending_steer` -- the
+  existing `awaiting_steer`/steer-inbox contract made checkable data (the
+  refusal-while-untaken-steer invariant, the dual-outcome resolution)
+  rather than new vocabulary.)*
 - [x] A resume is requested against a target whose liveness cache is
   empty, stale, or missing the entry entirely; the live hot/warm/cold
   check must still classify it correctly rather than the resume failing
@@ -530,11 +532,14 @@ inside this checklist item.
   `test_every_transition_has_exactly_one_recovery_mode` (or dimension
   equivalent) structural test -- no transition was left unclassified to
   be discovered ad hoc.
-- [ ] Build the simulation/test track as deterministic fixtures, one per
-  scenario above. Seven of ten designed and implemented; the remaining
-  three (mid-version-update, EOL, steer-vs-transition race) are now
-  **designed** (see "Simulation and test track" above) but have **zero
-  fixtures landed** -- implementation is a follow-up slice, not this one.
+- [x] Build the simulation/test track as deterministic fixtures, one per
+  scenario above. All ten scenarios designed and implemented -- the final
+  three (mid-version-update, EOL, steer-vs-transition race) landed in
+  `../../../plugins/agent-dispatch/tests/test_simulation_deferred_scenarios.py`
+  alongside their declarations in `bridge_state_machine.py`
+  (`resolve_liveness_with_recovery`, `eol_safe_to_retire`) and
+  `task_state_machine.py` (`SteerOutcome`, `STEER_OUTCOME_TRANSITION`,
+  `resolve_steer_outcome`, `suspend_blocked_by_pending_steer`).
 - [ ] Declare the reservation/assignment allocation-fencing layer as a
   checkable relation coupled to the bridge machine (see "Assignment: the
   reservation/allocation-fencing layer" above): the single-assignment
