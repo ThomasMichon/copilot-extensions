@@ -318,6 +318,38 @@ _fail() { echo "  [FAIL] $*" >&2; }
 _step() { echo "  ...    $*"; }
 _warn() { echo "  [WARN] $*" >&2; }
 
+# Detects `AssertionError: SRE module mismatch` -- a transient race on a
+# shared uv-managed Python interpreter that surfaces when several installers
+# hit it in quick succession during one big `agent-worktrees update --force`
+# sweep (#6785). The interpreter reliably heals within seconds once the
+# sweep's other uv invocations finish touching it, so a short-delay retry
+# recovers cleanly.
+_is_sre_module_mismatch() {
+    grep -q 'SRE module mismatch' <<<"$1"
+}
+
+# Runs `uv pip install "$@"`, capturing combined output. On the transient SRE
+# module mismatch signature (see _is_sre_module_mismatch), retries once after
+# a short pause; any other failure, or a mismatch persisting after the retry,
+# is returned as-is for the caller to handle/fail on as before.
+_uv_pip_install_resilient() {
+    local out
+    if out="$(uv pip install "$@" 2>&1)"; then
+        printf '%s\n' "$out"
+        return 0
+    fi
+    if _is_sre_module_mismatch "$out"; then
+        _warn "uv build hit a transient SRE module mismatch (shared Python cache race, #6785) -- retrying once after a short pause"
+        sleep 3
+        if out="$(uv pip install "$@" 2>&1)"; then
+            printf '%s\n' "$out"
+            return 0
+        fi
+    fi
+    printf '%s\n' "$out" >&2
+    return 1
+}
+
 # === install-contract:v3 versioned-venv helpers (agent-bridge) ===
 _versioned_activate() {
     # Swap the stable `venv` symlink to this version's freshly-built slot, moving
@@ -1119,7 +1151,7 @@ do_install() {
     _step "Installing agent-bridge package..."
     local ssh_manager_dir
     if ssh_manager_dir="$(_resolve_ssh_manager)"; then
-        if ! uv pip install --python "$VENV_DIR/bin/python" "$ssh_manager_dir" --quiet; then
+        if ! _uv_pip_install_resilient --python "$VENV_DIR/bin/python" "$ssh_manager_dir" --quiet; then
             _fail "ssh-manager install failed"
             exit 1
         fi
@@ -1132,7 +1164,7 @@ do_install() {
     # credential-relay (the relay framework agent-bridge runs in its daemon).
     local cred_relay_dir
     if cred_relay_dir="$(_resolve_credential_relay)"; then
-        if ! uv pip install --python "$VENV_DIR/bin/python" "$cred_relay_dir" --quiet; then
+        if ! _uv_pip_install_resilient --python "$VENV_DIR/bin/python" "$cred_relay_dir" --quiet; then
             _fail "credential-relay install failed"
             exit 1
         fi
@@ -1145,7 +1177,7 @@ do_install() {
     # zdd (zero-downtime cutover primitives: routing table + orchestrator).
     local zdd_dir
     if zdd_dir="$(_resolve_zdd)"; then
-        if ! uv pip install --python "$VENV_DIR/bin/python" "$zdd_dir" --quiet; then
+        if ! _uv_pip_install_resilient --python "$VENV_DIR/bin/python" "$zdd_dir" --quiet; then
             _fail "zdd install failed"
             exit 1
         fi
@@ -1158,7 +1190,7 @@ do_install() {
     # single-instance-lease (one active daemon per host: lease + self-retire + reaper).
     local sil_dir
     if sil_dir="$(_resolve_single_instance_lease)"; then
-        if ! uv pip install --python "$VENV_DIR/bin/python" --reinstall-package agent-single-instance-lease --refresh-package agent-single-instance-lease "$sil_dir" --quiet; then
+        if ! _uv_pip_install_resilient --python "$VENV_DIR/bin/python" --reinstall-package agent-single-instance-lease --refresh-package agent-single-instance-lease "$sil_dir" --quiet; then
             _fail "single-instance-lease install failed"
             exit 1
         fi
@@ -1171,7 +1203,7 @@ do_install() {
     # config-migrate (config schema versioning + migration).
     local cfg_migrate_dir
     if cfg_migrate_dir="$(_resolve_config_migrate)"; then
-        if ! uv pip install --python "$VENV_DIR/bin/python" "$cfg_migrate_dir" --quiet; then
+        if ! _uv_pip_install_resilient --python "$VENV_DIR/bin/python" "$cfg_migrate_dir" --quiet; then
             _fail "config-migrate install failed"
             exit 1
         fi
@@ -1181,7 +1213,7 @@ do_install() {
         _fail "Cannot locate config-migrate library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer."
         exit 1
     fi
-    if ! uv pip install --python "$VENV_DIR/bin/python" "$PLUGIN_DIR" --quiet; then
+    if ! _uv_pip_install_resilient --python "$VENV_DIR/bin/python" "$PLUGIN_DIR" --quiet; then
         _fail "Package install failed"
         exit 1
     fi
@@ -1643,7 +1675,7 @@ _update_core() {
     _step "Updating agent-bridge package..."
     local ssh_manager_dir
     if ssh_manager_dir="$(_resolve_ssh_manager)"; then
-        if ! uv pip install --python "$VENV_DIR/bin/python" --reinstall-package agent-ssh-manager \
+        if ! _uv_pip_install_resilient --python "$VENV_DIR/bin/python" --reinstall-package agent-ssh-manager \
                 "$ssh_manager_dir" --quiet; then
             _fail "ssh-manager update failed"
             return 1
@@ -1658,7 +1690,7 @@ _update_core() {
     # without a version bump (uv otherwise skips a same-version path dep).
     local cred_relay_dir
     if cred_relay_dir="$(_resolve_credential_relay)"; then
-        if ! uv pip install --python "$VENV_DIR/bin/python" --reinstall-package agent-credential-relay \
+        if ! _uv_pip_install_resilient --python "$VENV_DIR/bin/python" --reinstall-package agent-credential-relay \
                 "$cred_relay_dir" --quiet; then
             _fail "credential-relay update failed"
             return 1
@@ -1673,7 +1705,7 @@ _update_core() {
     # version bump (uv otherwise skips a same-version path dep).
     local zdd_dir
     if zdd_dir="$(_resolve_zdd)"; then
-        if ! uv pip install --python "$VENV_DIR/bin/python" --reinstall-package agent-zdd \
+        if ! _uv_pip_install_resilient --python "$VENV_DIR/bin/python" --reinstall-package agent-zdd \
                 "$zdd_dir" --quiet; then
             _fail "zdd update failed"
             return 1
@@ -1687,7 +1719,7 @@ _update_core() {
     # single-instance-lease: force-reinstall so a local code change propagates.
     local sil_dir
     if sil_dir="$(_resolve_single_instance_lease)"; then
-        if ! uv pip install --python "$VENV_DIR/bin/python" --reinstall-package agent-single-instance-lease --refresh-package agent-single-instance-lease \
+        if ! _uv_pip_install_resilient --python "$VENV_DIR/bin/python" --reinstall-package agent-single-instance-lease --refresh-package agent-single-instance-lease \
                 "$sil_dir" --quiet; then
             _fail "single-instance-lease update failed"
             return 1
@@ -1701,7 +1733,7 @@ _update_core() {
     # config-migrate: force-reinstall so a local code change propagates.
     local cfg_migrate_dir
     if cfg_migrate_dir="$(_resolve_config_migrate)"; then
-        if ! uv pip install --python "$VENV_DIR/bin/python" --reinstall-package agent-config-migrate \
+        if ! _uv_pip_install_resilient --python "$VENV_DIR/bin/python" --reinstall-package agent-config-migrate \
                 "$cfg_migrate_dir" --quiet; then
             _fail "config-migrate update failed"
             return 1
@@ -1712,7 +1744,7 @@ _update_core() {
         _fail "Cannot locate config-migrate library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer."
         return 1
     fi
-    if ! uv pip install --python "$VENV_DIR/bin/python" --reinstall-package agent-bridge \
+    if ! _uv_pip_install_resilient --python "$VENV_DIR/bin/python" --reinstall-package agent-bridge \
             "$PLUGIN_DIR" --quiet; then
         _fail "Package update failed"
         return 1
