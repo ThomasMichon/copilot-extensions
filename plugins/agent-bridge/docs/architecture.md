@@ -381,7 +381,11 @@ restart does not inherently close the child's pipes.
   lifecycle-owned sessions. Blocking local process teardown stays off-loop
   while retaining that lifecycle lock, including during sweep cancellation.
   Stop also awaits any previously scheduled remote reap for that session before
-  acknowledging.
+  acknowledging, shielding that cleanup from request cancellation. When both
+  locks are needed, turn admission precedes lifecycle ownership: a send admitted
+  before stop is quiesced, while a later explicit send may resume normally.
+  Background wedged-session resync and interrupt recheck under lifecycle
+  ownership rather than acting on a pre-stop snapshot.
   Ordinary stop also stops per-session credential-relay supervisors and cancels
   live forwards before acknowledgement; transport teardown failures are surfaced
   rather than reported as containment. Host descriptors and venue ownership are
