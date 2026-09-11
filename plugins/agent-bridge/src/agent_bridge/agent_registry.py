@@ -46,6 +46,34 @@ log = logging.getLogger("agent-bridge")
 _PROJECTS_YAML_DEFAULT = "~/.agent-worktrees/projects.yaml"
 _REPOS_YAML_DEFAULT = "~/.agent-worktrees/repos.yaml"
 
+#: Default TTL (seconds) for a CliNamespaceResolver's cached ``list()`` result.
+#: A namespace provider's ``namespace-list`` seam (e.g. ``agent-codespaces``
+#: enumerating CodeSpaces across mapped GitHub accounts, or ``agent-containers``
+#: querying Docker) is a genuinely expensive, often network-bound subprocess
+#: call -- observed 4-10s, not a fast local read. The daemon is long-lived, so
+#: caching its result in memory for a short window (instead of re-paying that
+#: cost on every ``agents`` listing request) is the same "fast-cached API
+#: access backed by a resident daemon" pattern agent-worktrees already uses for
+#: its own ``list --json`` path (see ``list_cache.py``). Override via
+#: ``AGENT_BRIDGE_NAMESPACE_LIST_TTL`` (``0``/``off``/``false`` disables).
+_NAMESPACE_LIST_TTL_ENV = "AGENT_BRIDGE_NAMESPACE_LIST_TTL"
+_NAMESPACE_LIST_DEFAULT_TTL = 12.0
+_NAMESPACE_LIST_OFF = frozenset({"0", "off", "false", "no"})
+
+
+def _namespace_list_ttl() -> float:
+    """Resolve the namespace-list cache TTL from the environment."""
+    raw = str(os.environ.get(_NAMESPACE_LIST_TTL_ENV, "")).strip().lower()
+    if raw in _NAMESPACE_LIST_OFF:
+        return 0.0
+    if not raw:
+        return _NAMESPACE_LIST_DEFAULT_TTL
+    try:
+        value = float(raw)
+        return value if value > 0 else 0.0
+    except ValueError:
+        return _NAMESPACE_LIST_DEFAULT_TTL
+
 
 def _normalize_repo_basename(name: str) -> str:
     """Normalize a repo name/key to its comparable basename.
@@ -336,6 +364,18 @@ class CliNamespaceResolver(NamespaceResolver):
         # daemon -- whose venv/PATH cannot see the provider's binstub -- can
         # still drive the provider over the process boundary.
         self._command = list(command) if command else None
+        # Short-TTL, in-memory cache for ``list()`` -- see
+        # ``_NAMESPACE_LIST_DEFAULT_TTL`` docstring. Lives for the daemon
+        # process's lifetime; a mutating call through this same resolver
+        # (``resolve``/``ensure_ready``) invalidates it immediately afterward
+        # (the "write updates the resident cache" half of the fix -- both the
+        # provider call and the cache invalidation happen in the same
+        # in-process daemon, so there is no cross-process race to bridge).
+        self._list_cache: tuple[float, list[NamespaceAgentInfo]] | None = None
+
+    def invalidate_list_cache(self) -> None:
+        """Drop the cached ``list()`` result so the next call re-queries live."""
+        self._list_cache = None
 
     @property
     def prefix(self) -> str:
@@ -399,15 +439,24 @@ class CliNamespaceResolver(NamespaceResolver):
         return await fn(*args, **kwargs)
 
     async def list(self) -> list[NamespaceAgentInfo]:
+        ttl = _namespace_list_ttl()
+        if ttl > 0 and self._list_cache is not None:
+            stamped_at, cached = self._list_cache
+            if (time.monotonic() - stamped_at) <= ttl:
+                return cached
         res = await self._run(["namespace-list"])
         if res is not None and res[0] == 0:
             try:
-                return [NamespaceAgentInfo(**d) for d in json.loads(res[1])]
+                agents = [NamespaceAgentInfo(**d) for d in json.loads(res[1])]
             except Exception:
                 log.warning(
                     "namespace-list output unparseable (%s) -- falling back",
                     self._binstub, exc_info=True,
                 )
+            else:
+                if ttl > 0:
+                    self._list_cache = (time.monotonic(), agents)
+                return agents
         if self._fallback is None:
             # A missing/unreachable provider binstub with no in-process fallback
             # means "this provider contributes no dynamic agents here" -- a
@@ -593,6 +642,11 @@ class CliNamespaceResolver(NamespaceResolver):
                             f"{self._binstub} namespace-resolve returned an "
                             "invalid spawn_command"
                         )
+                    # A successful resolve may have just provisioned/woken the
+                    # target (e.g. created or started a CodeSpace); the next
+                    # ``list()`` should reflect that rather than serving a
+                    # pre-provisioning snapshot for up to the full TTL.
+                    self.invalidate_list_cache()
                     return SpawnTarget(
                         type=target_type,
                         spawn_command=spawn_command,
@@ -614,6 +668,10 @@ class CliNamespaceResolver(NamespaceResolver):
             return
         rc, _out, err = res
         if rc == 0:
+            # Ready-state transitions (e.g. resuming a shutdown CodeSpace)
+            # change what ``list()`` should report; invalidate eagerly rather
+            # than waiting out the TTL.
+            self.invalidate_list_cache()
             return
         # A ran-but-non-zero ensure-ready is the authoritative "not ready".
         raise RuntimeError(err.strip() or f"{self._prefix}:{name} is not ready")
@@ -2695,45 +2753,58 @@ class AgentResolver:
 
         Calls ``list()`` on each registered namespace resolver to
         include dynamically discovered agents (e.g. live codespaces).
+        Resolvers are queried **concurrently**: each ``list()`` can be a slow,
+        network-bound subprocess call (e.g. ``agent-codespaces`` enumerating
+        CodeSpaces across mapped GitHub accounts measured 4-10s), and awaiting
+        them one at a time made every provider's latency additive instead of
+        the max of any one -- the dominant cost of every ``agents`` listing
+        under a multi-provider roster. ``list()`` itself is now also
+        short-TTL cached per resolver (see ``CliNamespaceResolver``), so a
+        cache hit here is effectively free.
         """
         self.refresh_provider_resolvers()
         result = self.list_agents()
 
-        for prefix, resolver in self._namespace_resolvers.items():
-            try:
-                ns_agents = await resolver.list()
-                for agent in ns_agents:
-                    result.append({
-                        "name": f"{prefix}:{agent.name}",
-                        "display_name": agent.display_name or agent.name,
-                        "description": agent.description,
-                        "icon": agent.icon,
-                        "aliases": [
-                            f"{prefix}:{a}" for a in getattr(agent, "aliases", [])
-                        ],
-                        "managed": False,
-                        "spawnable": True,
-                        "target_type": "command",
-                        "host": "",
-                        "ssh_user": None,
-                        "ssh_environment": None,
-                        "cwd": None,
-                        "copilot_path": None,
-                        "copilot_args": [],
-                        "worktree_root": None,
-                        "env": {},
-                        "project": None,
-                        "auto_discovered": False,
-                        "provider": prefix,
-                        "bare_addressable": getattr(
-                            resolver, "bare_addressable", True
-                        ),
-                        "state": agent.state,
-                    })
-            except Exception:
+        prefixes = list(self._namespace_resolvers.keys())
+        listings = await asyncio.gather(
+            *(self._namespace_resolvers[prefix].list() for prefix in prefixes),
+            return_exceptions=True,
+        )
+        for prefix, outcome in zip(prefixes, listings):
+            if isinstance(outcome, BaseException):
                 log.warning(
                     "Namespace resolver '%s' failed to list agents",
-                    prefix, exc_info=True,
+                    prefix, exc_info=outcome,
                 )
+                continue
+            resolver = self._namespace_resolvers[prefix]
+            for agent in outcome:
+                result.append({
+                    "name": f"{prefix}:{agent.name}",
+                    "display_name": agent.display_name or agent.name,
+                    "description": agent.description,
+                    "icon": agent.icon,
+                    "aliases": [
+                        f"{prefix}:{a}" for a in getattr(agent, "aliases", [])
+                    ],
+                    "managed": False,
+                    "spawnable": True,
+                    "target_type": "command",
+                    "host": "",
+                    "ssh_user": None,
+                    "ssh_environment": None,
+                    "cwd": None,
+                    "copilot_path": None,
+                    "copilot_args": [],
+                    "worktree_root": None,
+                    "env": {},
+                    "project": None,
+                    "auto_discovered": False,
+                    "provider": prefix,
+                    "bare_addressable": getattr(
+                        resolver, "bare_addressable", True
+                    ),
+                    "state": agent.state,
+                })
 
         return result

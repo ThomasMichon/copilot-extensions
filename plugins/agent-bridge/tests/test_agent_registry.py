@@ -11,6 +11,7 @@ from agent_bridge.agent_registry import (
     AgentConfig,
     AgentRegistryLoadError,
     AgentResolver,
+    NamespaceAgentInfo,
     build_resolver,
     discover_local_agents,
     load_agent_registry,
@@ -772,6 +773,72 @@ class TestNamespaceResolvers:
         agents = resolver.list_agents()
         ns_agents = [a for a in agents if a["name"].startswith("mock:")]
         assert len(ns_agents) == 0
+
+    @pytest.mark.asyncio
+    async def test_list_agents_async_queries_namespaces_concurrently(self):
+        # Perf hardening: two slow namespace resolvers (e.g. codespace +
+        # container) must be awaited concurrently, not sequentially -- their
+        # ``list()`` calls can each be a multi-second, network-bound subprocess
+        # in production, and sequential awaiting made every provider's latency
+        # additive instead of bounded by the slowest one.
+        import asyncio
+
+        class _SlowResolver:
+            def __init__(self, prefix_val: str, delay: float) -> None:
+                self._prefix = prefix_val
+                self._delay = delay
+
+            @property
+            def prefix(self) -> str:
+                return self._prefix
+
+            async def list(self):
+                await asyncio.sleep(self._delay)
+                return [NamespaceAgentInfo(name=f"{self._prefix}-agent")]
+
+            async def resolve(self, name):  # pragma: no cover - unused here
+                raise NotImplementedError
+
+            async def ensure_ready(self, name):  # pragma: no cover - unused
+                raise NotImplementedError
+
+        resolver = AgentResolver({}, {})
+        resolver.register_namespace_resolver(_SlowResolver("slow-a", 0.2))
+        resolver.register_namespace_resolver(_SlowResolver("slow-b", 0.2))
+
+        start = asyncio.get_event_loop().time()
+        agents = await resolver.list_agents_async()
+        elapsed = asyncio.get_event_loop().time() - start
+
+        names = {a["name"] for a in agents}
+        assert "slow-a:slow-a-agent" in names
+        assert "slow-b:slow-b-agent" in names
+        # Sequential would take >= 0.4s; concurrent stays well under it.
+        assert elapsed < 0.35
+
+    @pytest.mark.asyncio
+    async def test_list_agents_async_one_namespace_failure_does_not_block_others(self):
+        class _FailingResolver:
+            @property
+            def prefix(self) -> str:
+                return "broken"
+
+            async def list(self):
+                raise RuntimeError("boom")
+
+            async def resolve(self, name):  # pragma: no cover - unused here
+                raise NotImplementedError
+
+            async def ensure_ready(self, name):  # pragma: no cover - unused
+                raise NotImplementedError
+
+        resolver = AgentResolver({}, {})
+        resolver.register_namespace_resolver(_FailingResolver())
+        resolver.register_namespace_resolver(_MockResolver("ok"))
+        agents = await resolver.list_agents_async()
+        names = {a["name"] for a in agents}
+        assert "ok:test-agent" in names
+        assert not any(n.startswith("broken:") for n in names)
 
 
 # -- AdminResolver tests ------------------------------------------------------
