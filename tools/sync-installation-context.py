@@ -5,6 +5,10 @@ The exemplar files remain non-operative until each plugin explicitly changes
 its installer and payload-invocation contract. Agent Worktrees consumes the
 same validator for read-only reconciliation and update guards. This tool keeps
 every standalone payload byte-identical.
+
+Dispatch's read-only peer launcher consumes only the Python primitive, packaged
+inside its wheel. It must bootstrap validation from its own installed bytes,
+not import a validator from an as-yet-unvalidated receipt's payload pointer.
 """
 from __future__ import annotations
 
@@ -31,6 +35,7 @@ ADOPTERS = (
     "agent-bridge",
     "agent-codespaces",
     "agent-containers",
+    "agent-dispatch",
     "agent-machines",
     "agent-index",
     "agent-logger",
@@ -49,7 +54,15 @@ def vendor_pairs() -> list[tuple[Path, Path]]:
             REPO / "plugins" / plugin / "scripts" / "installation-context" / name,
         )
         for plugin in ADOPTERS
+        if plugin != "agent-dispatch"
         for name in FILES
+    ] + [
+        (
+            CANONICAL_DIR / "installation_context.py",
+            REPO / "plugins" / plugin / "src" / "agent_dispatch"
+            / "_installation_context.py",
+        )
+        for plugin in ADOPTERS if plugin == "agent-dispatch"
     ] + [
         (
             CANONICAL_DIR / name,

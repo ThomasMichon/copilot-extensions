@@ -2,17 +2,13 @@
 
 from __future__ import annotations
 
-import hashlib
-import importlib.util
-import json
 import os
-import sys
 import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from .install_paths import install_dir, legacy_install_dir
+from .install_paths import legacy_install_dir
 from .repo_config import _load_installation_context
 
 PLUGIN_ID = "agent-dispatch"
@@ -52,35 +48,7 @@ def _load_governance_module() -> dict[str, Any] | None:
             or not context_path
         ):
             raise ValueError("installation context omitted marketplace or receipt identity")
-        root = install_dir().expanduser()
-        manifest_path = root / "deploy-manifest.json"
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        source = manifest.get("source")
-        payload_root_value = source.get("path") if isinstance(source, dict) else None
-        if not isinstance(payload_root_value, str) or not payload_root_value.strip():
-            raise ValueError("deploy manifest source.path is missing")
-        payload_root = Path(payload_root_value).expanduser().resolve(strict=True)
-        script = payload_root / "scripts" / "installation-context" / "installation_context.py"
-        if not script.is_file():
-            raise FileNotFoundError(script)
-        module_name = (
-            "agent_dispatch_installation_context_"
-            + hashlib.sha256(os.fsencode(script)).hexdigest()[:16]
-        )
-        spec = importlib.util.spec_from_file_location(module_name, script)
-        if spec is None or spec.loader is None:
-            raise ImportError("installation-context module cannot be loaded")
-        module = importlib.util.module_from_spec(spec)
-        prior = sys.modules.get(module_name)
-        sys.modules[module_name] = module
-        try:
-            spec.loader.exec_module(module)
-        except Exception:
-            if prior is None:
-                sys.modules.pop(module_name, None)
-            else:
-                sys.modules[module_name] = prior
-            raise
+        from . import _installation_context as module
         return {
             "module": module,
             "context": context_path,
@@ -89,7 +57,7 @@ def _load_governance_module() -> dict[str, Any] | None:
             "legacy_root": str(legacy_install_dir()),
             "durable_home": str(_durable_home_from_context(context_path)),
         }
-    except Exception as exc:
+    except (OSError, ValueError, ImportError) as exc:
         return {
             "error": {
                 "status": "backoff",
