@@ -346,10 +346,12 @@ restart does not inherently close the child's pipes.
   the daemon reattaches to compatible surviving Session Hosts; otherwise it can
   lazily resume from persisted Copilot state.
 - **Background CodeSpace recovery does not wake unavailable venues.** Before
-  reattaching a disconnected CodeSpace session, the heartbeat checks current
-  availability without SSH, once per CodeSpace per pass. Unavailable or
-  indeterminate venues remain untouched; a later Available result permits
-  recovery. Healthy attached sessions need no availability check.
+  reattaching a disconnected CodeSpace session, the heartbeat reads the exact
+  target's state through the GitHub API, once per CodeSpace per pass. It honors
+  explicitly pinned credentials; otherwise an inaccessible target is retried
+  under the other authenticated GitHub accounts. All lookup commands share a
+  30-second budget. Unavailable or unverifiable venues remain untouched; a later
+  Available result permits recovery. Healthy attached sessions need no check.
 - **Active turns are preserved across frontend restarts when the Session Host
   survives.** A streaming `send`/`read`/`wait` reconnects through the routing
   table and resumes from the caller's acked delivery cursor. If a host is

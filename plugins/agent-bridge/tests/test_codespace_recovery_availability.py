@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import subprocess
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -46,6 +48,7 @@ def _add_session(manager, session_id="example-session"):
 @pytest.fixture
 def recovery_context(tmp_db, tmp_path, monkeypatch):
     manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path))
+    real_transport = codespace_transport.CodeSpaceTransport
     transport = SimpleNamespace(
         boundary="codespace",
         is_running=AsyncMock(return_value=False),
@@ -59,7 +62,7 @@ def recovery_context(tmp_db, tmp_path, monkeypatch):
     session, record = _add_session(manager)
     return SimpleNamespace(
         manager=manager, transport=transport, factory=factory,
-        attach=attach, session=session, record=record,
+        attach=attach, session=session, record=record, real_transport=real_transport,
     )
 
 
@@ -187,3 +190,27 @@ async def test_non_codespace_recovery_does_not_query_availability(recovery_conte
     assert await ctx.manager.recover_disconnected_hosts() == 1
     ctx.factory.assert_not_called()
     ctx.attach.assert_awaited_once()
+
+
+@pytest.mark.parametrize("state", ["Available", "Shutdown"])
+async def test_recovery_uses_exact_target_lookup_across_accounts(
+    recovery_context, monkeypatch, state,
+):
+    ctx = recovery_context
+    monkeypatch.setattr(codespace_transport, "CodeSpaceTransport", ctx.real_transport)
+    run = Mock(side_effect=[
+        subprocess.CompletedProcess([], 1, "", "gh: Not Found (HTTP 404)"),
+        subprocess.CompletedProcess([], 0, "Logged in to github.com account owning-account", ""),
+        subprocess.CompletedProcess([], 0, "owner-token", ""),
+        subprocess.CompletedProcess(
+            [], 0, json.dumps({"name": "example-space", "state": state}), "",
+        ),
+    ])
+    monkeypatch.setattr(codespace_transport.subprocess, "run", run)
+
+    assert await ctx.manager.recover_disconnected_hosts() == (
+        1 if state == "Available" else 0
+    )
+    assert ctx.attach.await_count == (1 if state == "Available" else 0)
+    assert run.call_args.args[0][1:3] == ["api", "/user/codespaces/example-space"]
+    assert run.call_args.kwargs["env"]["GH_TOKEN"] == "owner-token"
