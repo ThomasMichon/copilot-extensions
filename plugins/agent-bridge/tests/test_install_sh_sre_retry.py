@@ -4,6 +4,11 @@ wrapper (#6785) in ``install.sh`` -- the Linux/WSL counterpart to
 ``_uv_pip_install_resilient``'s behavior from silently drifting between the
 two installers: retry with backoff on the SRE-mismatch signature, surface any
 other failure immediately, and give up after the bounded number of attempts.
+
+Mirrors production's stdout/stderr split exactly (the real ``_warn`` writes
+to stderr, and the wrapper's success payload goes to stdout while its
+failure payload goes to stderr) so the harness can't accidentally pass by
+conflating the two streams.
 """
 
 from __future__ import annotations
@@ -47,13 +52,16 @@ def _run_harness(tmp_path: Path, uv_stub_body: str, extra_script: str) -> subpro
     harness.write_text(
         "#!/bin/sh\nset -eu\n"
         + _extract_sh_functions("_is_sre_module_mismatch", "_uv_pip_install_resilient")
-        + f"""
-_warn() {{ echo "WARN: $*"; }}
+        # Matches the real `_warn() { echo "  [WARN] $*" >&2; }` -- routed to
+        # stderr so it never pollutes the wrapper's captured stdout payload.
+        + """
+_warn() { echo "WARN: $*" >&2; }
 
-{uv_stub_body}
-
-{extra_script}
-""",
+"""
+        + uv_stub_body
+        + "\n\n"
+        + extra_script
+        + "\n",
         encoding="utf-8",
     )
     harness.chmod(0o755)
@@ -98,8 +106,10 @@ fi
 echo "OUT:$out"
 """
     result = _run_harness(tmp_path, uv_stub, extra)
-    # Two retries needed (three total attempts) -- both backoff warnings fire.
-    assert result.stdout.count("uv build hit a transient SRE module mismatch") == 2
+    # Two retries needed (three total attempts) -- both backoff warnings fire
+    # on stderr (matches production's stderr-only `_warn`), never on stdout.
+    assert result.stderr.count("uv build hit a transient SRE module mismatch") == 2
+    assert "uv build hit a transient SRE module mismatch" not in result.stdout
     assert "EXIT:0" in result.stdout
     assert "OUT:Installed 1 package" in result.stdout
     assert counter_file.read_text(encoding="utf-8").strip() == "3"
@@ -123,12 +133,12 @@ if out=$(_uv_pip_install_resilient --python fake-python some-package --quiet); t
 else
     echo "EXIT:1"
 fi
-echo "OUT:$out"
 """
     result = _run_harness(tmp_path, uv_stub, extra)
-    assert "uv build hit a transient SRE module mismatch" not in result.stdout
+    assert "uv build hit a transient SRE module mismatch" not in result.stderr
     assert "EXIT:1" in result.stdout
-    assert "OUT:error: network unreachable" in result.stdout
+    # The wrapper's final (unretried) failure payload goes to stderr.
+    assert "error: network unreachable" in result.stderr
     # Only one attempt -- an unrelated failure must not trigger the retry.
     assert counter_file.read_text(encoding="utf-8").strip() == "1"
 
@@ -153,7 +163,9 @@ else
 fi
 """
     result = _run_harness(tmp_path, uv_stub, extra)
-    assert "uv build hit a transient SRE module mismatch" in result.stdout
+    # One initial attempt plus three backoff retries -- three warnings fire
+    # (one before each retry), all on stderr.
+    assert result.stderr.count("uv build hit a transient SRE module mismatch") == 3
     assert "EXIT:1" in result.stdout
     # One initial attempt plus three backoff retries -- four total, never more.
     assert counter_file.read_text(encoding="utf-8").strip() == "4"
