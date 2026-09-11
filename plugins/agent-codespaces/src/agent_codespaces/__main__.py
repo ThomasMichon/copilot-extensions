@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import functools
 import json
 import logging
 import os
@@ -35,6 +36,7 @@ from typing import TYPE_CHECKING
 
 from . import pool as pool_mod
 from . import relay_launch
+from .worktrees import ContextRefused, validate_context
 from .codespace_config import CodespaceSource
 from .config import (
     CANONICAL_CONFIG_REL,
@@ -83,6 +85,21 @@ _SSH_BOOT_TIMEOUT = float(os.environ.get("AGENT_CODESPACES_BOOT_TIMEOUT", "180")
 # generic failures (1) and the --remote-cmd timeout (124) so callers can react.
 _BUSY_EXIT = 75
 _COORDINATION_EXIT = 78
+
+
+def _context_admitted(
+    command: Callable[[argparse.Namespace], int],
+) -> Callable[[argparse.Namespace], int]:
+    @functools.wraps(command)
+    def run(args: argparse.Namespace) -> int:
+        try:
+            validate_context()
+            return command(args)
+        except ContextRefused as error:
+            print(f"[BLOCKED] CodeSpace installation context refused: {error}", file=sys.stderr)
+            return _COORDINATION_EXIT
+
+    return run
 
 # Exit code when the host cannot mint an ADO REST bearer and enforcement is on
 # (credentials.enforce_ado_rest_login) -- the connect aborts cleanly rather than
@@ -759,6 +776,13 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
 
+    try:
+        if args.command and args.command not in {"doctor", "status", "version", "installer-readiness"}:
+            validate_context()
+    except ContextRefused as error:
+        print(f"[BLOCKED] CodeSpace installation context refused: {error}", file=sys.stderr)
+        return _COORDINATION_EXIT
+
     # --remote-cmd-file: the internal bridge-dispatch path passes the ACP launch
     # payload as a file PATH (a clean argv token) rather than a --remote-cmd
     # string, so no shell (cmd.exe %VAR% expansion in particular) can mangle it.
@@ -779,8 +803,12 @@ def main(argv: list[str] | None = None) -> int:
     # the cwd; on a name/CodeSpace-addressed verb an *explicit* --project bounces
     # (fail loud, #1080) while a router-injected one stays a silent no-op.
     # Best-effort otherwise: an unresolvable project warns but never blocks.
-    if _guard_project_scope(parser, args):
-        _chdir_to_project(args.project)
+    try:
+        if _guard_project_scope(parser, args):
+            _chdir_to_project(args.project)
+    except ContextRefused as error:
+        print(f"[BLOCKED] CodeSpace installation context refused: {error}", file=sys.stderr)
+        return _COORDINATION_EXIT
 
     if not args.command:
         parser.print_help()
@@ -862,6 +890,9 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_config_migrate()
         if args.command == "owner":
             return _cmd_owner(args)
+    except ContextRefused as error:
+        print(f"[BLOCKED] CodeSpace installation context refused: {error}", file=sys.stderr)
+        return _COORDINATION_EXIT
     except RuntimeError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
@@ -990,11 +1021,13 @@ async def _preflight_copilot_platform(manager, name: str) -> None:  # noqa: ANN0
         )
 
 
+@_context_admitted
 def _cmd_ssh(args: argparse.Namespace) -> int:
     """SSH into a CodeSpace using ssh-manager."""
     from ssh_manager import ConnectionManager, TargetBusyError, TargetLock
 
     from .lifecycle import account_for_codespace
+    from .worktrees import ContextRefused
 
     source = CodespaceSource(args.name, account=account_for_codespace(args.name))
     config = load_merged_config()
@@ -1067,7 +1100,7 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return _BUSY_EXIT
-        except CoordinationRejected as exc:
+        except (CoordinationRejected, ContextRefused) as exc:
             print(
                 f"[BLOCKED] CodeSpace claim requires durable coordination: {exc}",
                 file=sys.stderr,
@@ -1798,8 +1831,8 @@ async def _register_codespace_plugins(
     related-repo lane uses); only the remote-marketplace specs go through the
     register + pre-install lane.
 
-    Best-effort and idempotent: logs a warning on failure but never raises, and
-    returns ``[]`` when there is nothing to register.
+    Best-effort and idempotent for ordinary failures; explicit installation
+    refusals propagate. Returns ``[]`` when there is nothing to register.
     """
     from .codespace_plugins import (
         parse_operator_plugins,
@@ -1811,6 +1844,7 @@ async def _register_codespace_plugins(
     from .config import repo_copilot_settings
 
     try:
+        validate_context()
         # The dispatch path doesn't pass --repo, so resolve the CodeSpace's
         # workspace repo ourselves (needed to apply repo-scoped codespacePlugins
         # entries; global entries apply regardless). A single `gh` lookup, only
@@ -1891,6 +1925,8 @@ async def _register_codespace_plugins(
             dirs += staged
 
         return dirs
+    except ContextRefused:
+        raise
     except Exception as exc:
         log.warning("CodeSpace plugin registration on %s failed: %s", name, exc)
     return []
@@ -2087,13 +2123,15 @@ async def _warm_remote_auth_cache(
 
 
 def _lookup_codespace_repo(name: str) -> str | None:
-    """Best-effort lookup of a CodeSpace's repository (owner/name)."""
+    """Look up a repository, preserving explicit installation refusals."""
     try:
         from .lifecycle import list_codespaces
 
         for cs in list_codespaces():
             if cs.name == name:
                 return cs.repository
+    except ContextRefused:
+        raise
     except Exception as exc:
         log.debug("Could not resolve repo for %s: %s", name, exc)
     return None
@@ -2110,11 +2148,13 @@ async def _provision_repo_hooks(
     The repo is taken from ``--repo`` when provided (hot path) and only
     looked up when per-repo hooks actually exist. When
     ``include_on_create`` is set, ``on_create`` commands run too (used
-    once during ``agent-codespaces create``). Best-effort and idempotent.
+    once during ``agent-codespaces create``). Best-effort and idempotent for
+    ordinary failures; explicit installation refusals propagate.
     """
     from .provision import build_provision_command
 
     try:
+        validate_context()
         # Only pay for a repo lookup when per-repo hooks are declared.
         if repo is None and any(rc.provision for rc in config.repos.values()):
             repo = _lookup_codespace_repo(name)
@@ -2137,6 +2177,8 @@ async def _provision_repo_hooks(
                 "Repo provision hooks on %s exited %s: %s",
                 name, result.exit_code, result.stderr.strip(),
             )
+    except ContextRefused:
+        raise
     except Exception as exc:
         log.warning("Repo provision hooks on %s failed: %s", name, exc)
 
@@ -2400,26 +2442,33 @@ def _chdir_to_project(project: str) -> bool:
     runs. Returns True iff the cwd was changed."""
     import shutil
     import subprocess as sp
+    from . import worktrees
 
+    worktrees.validate_context()
     name = (project or "").strip()
     if not name:
         return False
     # Resolve the binstub via PATHEXT (on Windows it is a .cmd/.ps1, not a bare
     # executable, so a plain ["agent-worktrees", ...] argv fails with WinError 2).
-    exe = shutil.which("agent-worktrees")
-    if not exe:
-        print(f"WARNING: --project {name}: agent-worktrees not found on PATH; "
-              f"using current directory", file=sys.stderr)
-        return False
-    try:
-        result = sp.run(
-            [exe, "repos", "find", name],
-            capture_output=True, text=True, timeout=15,
-        )
-    except Exception as exc:  # pragma: no cover - environment-dependent
-        print(f"WARNING: --project {name}: could not resolve checkout ({exc}); "
-              f"using current directory", file=sys.stderr)
-        return False
+    if worktrees.explicit_context():
+        result = worktrees.run("repos", "find", name, timeout=15)
+        if result is None:
+            return False
+    else:
+        exe = shutil.which("agent-worktrees")  # marketplace-isolation: allow no-context legacy project lookup; explicit context uses worktrees.run
+        if not exe:
+            print(f"WARNING: --project {name}: agent-worktrees not found on PATH; "
+                  f"using current directory", file=sys.stderr)
+            return False
+        try:
+            result = sp.run(
+                [exe, "repos", "find", name],
+                capture_output=True, text=True, timeout=15,
+            )
+        except Exception as exc:  # pragma: no cover - environment-dependent
+            print(f"WARNING: --project {name}: could not resolve checkout ({exc}); "
+                  f"using current directory", file=sys.stderr)
+            return False
     path = (result.stdout or "").strip().splitlines()
     checkout = path[0].strip() if path else ""
     if result.returncode != 0 or not checkout or not Path(checkout).is_dir():
@@ -2893,18 +2942,25 @@ def _cmd_doctor(*, json_output: bool = False) -> int:
 
 def _account_login_remedy(login: str) -> str:
     """Return the recorded login flow for ``login``, or a sane default."""
+    from . import worktrees
+
     try:
-        import shutil
-        aw = shutil.which("agent-worktrees")
-        if aw:
+        if worktrees.explicit_context():
+            r = worktrees.run("accounts", "show", login, "--json", timeout=10)
+        else:
+            import shutil
             import subprocess as sp
+            aw = shutil.which("agent-worktrees")  # marketplace-isolation: allow no-context legacy account lookup; explicit context uses worktrees.run
             r = sp.run([aw, "accounts", "show", login, "--json"],
-                       capture_output=True, text=True, timeout=10)
+                       capture_output=True, text=True, timeout=10) if aw else None
+        if r is not None:
             if r.returncode == 0:
                 data = json.loads(r.stdout or "{}")
                 flow = (data.get("login_flow") or "").strip()
                 if flow:
                     return f"run: {flow}"
+    except worktrees.ContextRefused:
+        raise
     except Exception:
         pass
     return f"run: gh auth login -h github.com (account {login})"
@@ -3861,6 +3917,7 @@ def _cmd_leases() -> int:
     return 0
 
 
+@_context_admitted
 def _cmd_claim(args: argparse.Namespace) -> int:
     """Acquire an exclusive worktree-keyed claim on a CodeSpace (#897).
 
@@ -3935,6 +3992,7 @@ def _cmd_claim(args: argparse.Namespace) -> int:
     return 0
 
 
+@_context_admitted
 def _cmd_release_claim(args: argparse.Namespace) -> int:
     """Release this worktree's exclusive claim on a CodeSpace (#897)."""
     from .lease import release_claim, resolve_owner_worktree

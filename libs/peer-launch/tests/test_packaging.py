@@ -1,0 +1,79 @@
+"""Cheap canonical/vendor and bootstrap independence contracts."""
+from __future__ import annotations
+
+import ast
+import importlib.util
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[3]
+
+
+def test_all_packaged_launchers_and_validators_match():
+    canonical = ROOT / "libs" / "peer-launch" / "peer_launch.py"
+    primitive = ROOT / "libs" / "installation-context" / "installation_context.py"
+    for plugin, filename in (
+        ("agent-dispatch", "peer_launch.py"), ("agent-codespaces", "_peer_launch.py"),
+    ):
+        package = ROOT / "plugins" / plugin / "src" / plugin.replace("-", "_")
+        assert (package / filename).read_bytes() == canonical.read_bytes()
+        assert (package / "_installation_context.py").read_bytes() == primitive.read_bytes()
+
+
+def _import_roots(source: str) -> set[str]:
+    roots = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            roots.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            roots.add(node.module.split(".")[0])
+    return roots
+
+
+def test_launcher_has_no_runtime_dependency():
+    source = ROOT / "libs" / "peer-launch" / "peer_launch.py"
+    assert _import_roots(source.read_text(encoding="utf-8")) <= sys.stdlib_module_names
+
+
+def test_dependency_guard_sees_both_import_forms():
+    for source in ("import agent_procutil", "from agent_worktrees import cli"):
+        assert _import_roots(source) - sys.stdlib_module_names
+
+
+def test_sync_tool_registers_both_packaged_primitives():
+    spec = importlib.util.spec_from_file_location(
+        "sync_installation_context", ROOT / "tools" / "sync-installation-context.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    destinations = {destination for _, destination in module.vendor_pairs()}
+    for plugin in ("agent-dispatch", "agent-codespaces"):
+        assert (
+            ROOT / "plugins" / plugin / "src" / plugin.replace("-", "_")
+            / "_installation_context.py"
+        ) in destinations
+
+
+def test_converted_codespaces_paths_have_no_unexplained_sibling_launches(monkeypatch):
+    spec = importlib.util.spec_from_file_location(
+        "peer_launch_isolation_guard", ROOT / "tools" / "check-marketplace-isolation.py",
+    )
+    guard = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, guard)
+    spec.loader.exec_module(guard)
+    plugin = ROOT / "plugins" / "agent-codespaces"
+    files = [plugin / "scripts" / "emit_codespace_map.py"]
+    files.extend(
+        plugin / "src" / "agent_codespaces" / filename
+        for filename in (
+            "__main__.py", "config.py", "coordination.py", "gh_account.py", "lease.py",
+        )
+    )
+    patterns = guard._command_patterns(ROOT)
+    findings = [
+        finding
+        for path in files
+        for finding in guard._scan_file(path, ROOT, patterns)
+        if finding.category == "path-sibling-launch"
+    ]
+    assert findings == []
