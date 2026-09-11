@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import _io
 import asyncio
+import codecs
 import contextlib
 import json
 import math
@@ -85,6 +87,34 @@ class Input:
                 self.loop.call_soon_threadsafe(self.detached.set)
 
 
+class Output:
+    def __init__(self, stream):
+        self.buffer = stream.buffer
+        raw = getattr(self.buffer, "raw", self.buffer)
+        console_type = getattr(_io, "_WindowsConsoleIO", None)
+        self.decoder = (
+            codecs.getincrementaldecoder("utf-8")(errors="replace")
+            if console_type is not None and isinstance(raw, console_type) else None
+        )
+
+    def _emit(self, data):
+        if data:
+            self.buffer.write(data)
+            self.buffer.flush()
+
+    def write(self, data):
+        if self.decoder is not None:
+            # WindowsConsoleIO cannot flush an incomplete UTF-8 codepoint.
+            # Re-encode complete text to avoid TextIO newline translation.
+            data = self.decoder.decode(data).encode("utf-8")
+        self._emit(data)
+
+    def finish(self):
+        if self.decoder is not None:
+            self._emit(self.decoder.decode(b"", final=True).encode("utf-8"))
+            self.decoder.reset()
+
+
 async def connection(
     client: BridgeClient, execution_id: str, generation: str, input_source: Input,
     *, handshake_timeout: float | None = None,
@@ -92,6 +122,7 @@ async def connection(
     from wsproto import ConnectionType, WSConnection
     from wsproto.events import AcceptConnection, BytesMessage, CloseConnection, Ping, RejectConnection, Request, TextMessage
 
+    output = Output(sys.stdout)
     url = client._base.replace("http://", "ws://", 1).replace("https://", "wss://", 1)
     url += f"/api/v1/native-executions/{quote(execution_id, safe='')}/terminal?generation={quote(generation, safe='')}"
     host, port, target, tls = _parse_ws_url(url)
@@ -145,8 +176,7 @@ async def connection(
                         if len(binary) < 8:
                             raise NativeError("invalid_frame", "Native terminal sequence is missing")
                         sequence = struct.unpack(">Q", binary[:8])[0]
-                        sys.stdout.buffer.write(binary[8:])
-                        sys.stdout.buffer.flush()
+                        output.write(binary[8:])
                         binary.clear()
                         await send(TextMessage(data=json.dumps({"type": "ack", "sequence": sequence})))
                 elif isinstance(event, TextMessage):
@@ -194,6 +224,9 @@ async def connection(
         writer.close()
         with contextlib.suppress(OSError):
             await writer.wait_closed()
+        # Each connection replays its own tail; do not join partial codepoints
+        # from a disconnected stream to bytes from the next presentation.
+        output.finish()
 
 
 _DETACHED = object()

@@ -52,6 +52,17 @@ process. Transport loss retries the same execution/generation; uncertain input
 is not replayed. The terminal has a bounded replay tail and supports resize.
 The native CLI retains its own permissions and interactive prompts.
 
+Windows console output incrementally decodes UTF-8 across terminal frames and
+writes only complete codepoints. This avoids blocking `_WindowsConsoleIO.flush`
+on a frame ending partway through a character. ANSI sequences and carriage
+returns remain intact; redirected output and POSIX terminals retain raw bytes.
+Acknowledgement follows consumption of a frame, including at most three
+pending UTF-8 bytes held by the decoder. Invalid bytes are displayed as Unicode
+replacement characters. On exit, detach, cancellation or transport loss, the
+connection closes and any truncated codepoint is finalized with replacement;
+a reconnect starts a new decoder for its independently replayed tail. This
+changes only presentation output, not input, remote execution or service state.
+
 The activated terminal is attachable during `starting` / `registration`, before
 a live session is represented. This lets the operator answer folder-trust and
 extension-consent prompts that may otherwise block registration. The terminal
