@@ -403,8 +403,14 @@ the three machines rather than an independent patch, and resolves Phase
 (hand-back unless a provider/repository's declared policy explicitly
 permits branch mutation).
 
-- [ ] See the sub-doc's own Plan checklist; this phase's design must clear
-  its own review gate before any implementation begins.
+- [x] See the sub-doc's own Plan checklist; this phase's design must clear
+  its own review gate before any implementation begins. All checklist
+  items are now checked (design, all four declared machines/relations,
+  full simulation/test track, and the Phase 8 re-validation pass). Five
+  Phase 8 candidates remain intentionally deferred as conceptual-only
+  follow-up design work (see the sub-doc's "Re-validation pass" table);
+  this phase's own scope boundary ("designs the model... does not
+  implement it end to end") is otherwise satisfied.
 
 ## Validation Plan
 
@@ -422,11 +428,14 @@ permits branch mutation).
   review rubric, merge policy, scheduling policy, or organizational telemetry.
 - [ ] Reviewer declarations use the existing registrar schema and discovery
   convention without a competing reviewer-specific format.
-- [ ] Phase 9's full simulation/test track
+- [x] Phase 9's full simulation/test track
   ([`phase-9-state-machine-architecture.md`](phase-9-state-machine-architecture.md)
   § Simulation and test track) passes: every listed interleaving reaches
   the correct next state regardless of ordering, replays idempotently, and
-  takes the recovery mode its transition is classified under.
+  takes the recovery mode its transition is classified under. All ten
+  scenarios landed and pass
+  (`plugins/agent-dispatch/tests/test_simulation.py`,
+  `test_simulation_revision.py`, `test_simulation_deferred_scenarios.py`).
 
 ## Proposal
 
@@ -435,6 +444,48 @@ drivers and prove reliability with deterministic interruption and duplication
 scenarios.
 
 ## Journal
+
+### 2026-09-11 - Phase 9: design/declaration work complete
+
+- Every checkbox in the phase-9 sub-doc's own Plan checklist is now
+  checked: all four declared machines/relations (task, provider, bridge,
+  and the reservation/allocation-fencing layer coupled to it), the
+  explicit control-flow coupling rules, the recovery taxonomy applied to
+  every transition, the full ten-scenario simulation/test track, and the
+  Phase 8 re-validation pass. Ticked the corresponding Phase 9 checkbox
+  and the matching Validation Plan item in this README.
+- **What remains genuinely open, and why it is not folded in here:**
+  - Five Phase 8 candidates (attempt-budget choke point, event ledger
+    with reason-code classification, official-vs-candidate
+    approval-authority split, worktree-pool force-clean/dirty-tolerance,
+    relay/host liveness and health-fencing) are still only a *conceptual*
+    home assignment to one of the four modules -- no declared table or
+    function backs any of them yet. This is real, deliberate deferral
+    (see the sub-doc's "Re-validation pass" table), not an oversight.
+  - This README's own Validation Plan items above the Phase 9 line
+    (concurrent claim ownership, duplicate/reordered delivery, restart-
+    at-any-boundary resumption, stale-revision feedback blocking,
+    verdict-vs-transport-success separation, terminal-failure visibility,
+    generic-contract cleanliness, registrar-schema reuse) are about the
+    **live, running** review pipeline (Phases 1-4's original scope) --
+    Phase 9 explicitly declared its own scope boundary as "designs the
+    model... does not implement it end to end" (see the sub-doc's "Why
+    this phase exists" section), and that boundary has been honored
+    throughout: every module added is a declared table plus deterministic,
+    in-process structural/simulation tests, never a live-queue,
+    live-bridge, or live-provider integration. Wiring the four now-
+    declared machines into `queue.py`/the coordinator/a real provider
+    adapter so those items become checkable against live behavior is a
+    materially different, larger tranche of work than any single slice
+    landed so far -- it is not scoped as a Phase 9 sub-item, and opening
+    that scope (a "Phase 10: wire the declared machines into the live
+    runtime," or however the operator wants to frame it) is a decision
+    left for explicit operator direction rather than assumed here.
+- **Effort status remains `Draft`** -- Phase 9's own design-and-
+  declaration work is complete, but the effort as a whole is not `Done`
+  until its Validation Plan is satisfied or its remaining items are
+  explicitly transferred to a named tracked objective, per this repo's
+  effort-completion discipline.
 
 ### 2026-09-11 - Phase 9: tenth slice (reservation/allocation-fencing layer)
 
