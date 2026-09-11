@@ -66,6 +66,13 @@ def test_prepare_ssh_config_uses_docker_directly_off_windows(monkeypatch, tmp_pa
     assert f'IdentityFile "{transport._config_path(Path(config.identity_file))}"' in text
     assert config.host_alias.endswith("-" + ("a" * 12))
     assert config.user == "vscode"
+    # Surfaced on the returned SSHConfig too (not just embedded in the
+    # rendered file's text) so a Windows caller reconstructing SSHConfig from
+    # this value alone (e.g. over the agent-bridge provider seam) can still
+    # detect the ProxyCommand and route it through a windowless broker.
+    assert config.proxy_command == (
+        "docker exec -i -u root repo-1 /usr/sbin/sshd -i -e -o GatewayPorts=no"
+    )
 
 
 def test_prepare_ssh_config_uses_windowless_broker_on_windows(monkeypatch, tmp_path):
@@ -88,6 +95,9 @@ def test_prepare_ssh_config_uses_windowless_broker_on_windows(monkeypatch, tmp_p
     assert "HostKeyAlias agent-container-repo-1-aaaaaaaaaaaa" in text
     assert "ProxyCommand docker exec" not in text
     assert f'IdentityFile "{transport._config_path(Path(config.identity_file))}"' in text
+    # No file-embedded ProxyCommand to surface when the windowless broker
+    # already owns the docker-exec child (HostName/Port route there instead).
+    assert config.proxy_command is None
 
 
 def test_docker_broker_uses_binary_pipes_and_suppresses_window(monkeypatch):
