@@ -81,6 +81,16 @@ def test_suspend_is_sourced_from_the_declared_table(q, monkeypatch):
         q.suspend(claimed.id, "worker-1", reason="pausing")
 
 
+def test_yield_task_is_sourced_from_the_declared_table(q, monkeypatch):
+    task = q.create("t", status=Status.PROPOSED)
+    q.approve(task.id)
+    claimed = q.claim_one("worker-1")
+    assert claimed is not None
+    _patch_transition(monkeypatch, "yield_task", from_states=frozenset())
+    with pytest.raises(TaskError):
+        q.yield_task(claimed.id, "worker-1")
+
+
 def test_resume_is_sourced_from_the_declared_table(q, monkeypatch):
     task = q.create("t", status=Status.PROPOSED)
     q.approve(task.id)
