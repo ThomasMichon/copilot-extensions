@@ -11,6 +11,7 @@ SOURCE = REPO / "libs" / "peer-launch" / "peer_launch.py"
 DESTINATIONS = (
     REPO / "plugins" / "agent-dispatch" / "src" / "agent_dispatch" / "peer_launch.py",
     REPO / "plugins" / "agent-codespaces" / "src" / "agent_codespaces" / "_peer_launch.py",
+    REPO / "plugins" / "agent-containers" / "src" / "agent_containers" / "_peer_launch.py",
 )
 
 
@@ -23,7 +24,7 @@ def main() -> int:
         for path in different:
             print(f"Out of sync: {path.relative_to(REPO)}")
         if not different:
-            print("peer-launch: canonical and both packaged vendors in sync")
+            print("peer-launch: canonical and all packaged vendors in sync")
         return int(bool(different))
     for path in different:
         shutil.copyfile(SOURCE, path)
