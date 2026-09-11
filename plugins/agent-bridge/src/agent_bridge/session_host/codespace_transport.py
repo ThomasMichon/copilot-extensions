@@ -20,9 +20,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import posixpath
+import re
 import shlex
 import subprocess
+import time
+from urllib.parse import quote
 
 from agent_procutil import no_window_flags
 from ssh_manager import CodespaceConfigSource, ConnectionManager
@@ -88,40 +92,81 @@ class CodeSpaceTransport:
         return home
 
     async def is_running(self) -> bool:
-        """Read CodeSpace state without opening SSH (never wakes the venue)."""
+        """Read the exact target without SSH, scoped to an account that can see it."""
+        return await asyncio.to_thread(self._read_availability)
 
-        def _list() -> subprocess.CompletedProcess:
-            env = getattr(self._source, "_gh_env", None)
-            return subprocess.run(
-                [
-                    "gh",
-                    "codespace",
-                    "list",
-                    "--json",
-                    "name,state",
-                    "--limit",
-                    "100",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=30.0,
-                env=env,
-                creationflags=_creation_flags(),
-            )
+    def _read_availability(self) -> bool:
+        if not self._name or self._name.strip() != self._name:
+            raise RuntimeError("CodeSpace availability requires an exact target name")
+        deadline = time.monotonic() + 30.0
 
-        result = await asyncio.to_thread(_list)
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"Could not list CodeSpaces before recovery: {result.stderr.strip()}"
-            )
-        try:
-            rows = json.loads(result.stdout)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError("gh codespace list returned invalid JSON") from exc
-        return any(
-            row.get("name") == self._name and row.get("state") == "Available"
-            for row in rows
-        )
+        def run(args: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError("CodeSpace availability lookup timed out")
+            try:
+                return subprocess.run(
+                    ["gh", *args], capture_output=True, text=True,
+                    encoding="utf-8", errors="replace",
+                    timeout=remaining, env=env, creationflags=_creation_flags(),
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                raise RuntimeError("CodeSpace availability lookup failed") from exc
+
+        def query(env: dict[str, str]) -> bool | None:
+            result = run([
+                "api", f"/user/codespaces/{quote(self._name, safe='')}",
+                "--method", "GET", "--hostname", "github.com",
+                "--jq", "{name: .name, state: .state}",
+            ], env)
+            if result.returncode != 0:
+                if re.search(r"\(HTTP (401|403|404)\)", result.stderr or ""):
+                    return None
+                raise RuntimeError("GitHub could not verify CodeSpace availability")
+            try:
+                data = json.loads(result.stdout)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError("CodeSpace availability returned invalid JSON") from exc
+            if (
+                not isinstance(data, dict)
+                or data.get("name") != self._name
+                or not isinstance(data.get("state"), str)
+                or not data["state"].strip()
+            ):
+                raise RuntimeError("CodeSpace availability did not identify the requested target")
+            return data["state"] == "Available"
+
+        pinned_env = getattr(self._source, "_gh_env", None)
+        env = dict(pinned_env if pinned_env is not None else os.environ)
+        state = query(env)
+        if state is not None:
+            return state
+        if pinned_env is not None:
+            raise RuntimeError("The configured account could not verify CodeSpace availability")
+
+        # A denied lookup is not evidence that the target is stopped. Inspect
+        # the keyring without inherited tokens, then pin each candidate explicitly.
+        env = dict(env)
+        env.pop("GH_TOKEN", None)
+        env.pop("GITHUB_TOKEN", None)
+        env["NO_COLOR"] = "1"
+        result = run(["auth", "status", "--hostname", "github.com"], env)
+        # Some supported gh versions lack auth-status JSON. Keep only the
+        # account names from its two supported logged-in status formats.
+        accounts = dict.fromkeys(re.findall(
+            r"Logged in to github\.com (?:account|as) ([A-Za-z0-9_-]+)",
+            (result.stdout or "") + "\n" + (result.stderr or ""),
+        ))
+        if not accounts:
+            raise RuntimeError("Could not enumerate GitHub accounts for CodeSpace availability")
+        for login in accounts:
+            token = run(["auth", "token", "--hostname", "github.com", "--user", login], env)
+            if token.returncode != 0 or not token.stdout.strip():
+                continue
+            state = query({**env, "GH_TOKEN": token.stdout.strip()})
+            if state is not None:
+                return state
+        raise RuntimeError("No authenticated GitHub account could verify CodeSpace availability")
 
     async def push_file(self, local_path: str, remote_path: str) -> None:
         # scp (under gh cp) will not create the destination dir -- ensure it.
