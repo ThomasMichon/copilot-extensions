@@ -198,7 +198,24 @@ here but not blocking the start of 1/2/5.
 - [ ] Build the first live provider adapter (GitHub) driving
   `provider_state_machine`'s declared dimensions from real PR state (item
   3 above). Expect this to be split into its own sequence of slices as
-  scope becomes clearer once adapter work starts.
+  scope becomes clearer once adapter work starts. **First slice landed:**
+  a read-only observer, `github_provider_adapter.py`. `observe_pr_state`
+  is a pure function classifying a raw GitHub GraphQL `pullRequest` node
+  into `ApprovalStatus`/`Mergeability`/`HoldReason` (via `reviewDecision`,
+  `mergeable` + `statusCheckRollup`, `isDraft`/title-or-label WIP markers/
+  unresolved review threads) plus the raw `Revision` fingerprints
+  (`headRefOid`/`baseRefOid`). `GitHubPRAdapter` is the thin `gh`-CLI
+  fetch wrapper (mirrors `repository_issue_loops.GitHubProvider`'s
+  injectable-runner + identity-verification pattern). Deliberately does
+  **not** decide `ApprovalStatus.STALE` (that needs a previously-recorded
+  `Revision` an evaluator holds, not a single snapshot), write anything
+  back to GitHub, or feed any task/coordinator loop -- a read model only,
+  same "declare/observe first, wire later" sequencing Phase 9 used for
+  the declared tables themselves. An unrecognized `reviewDecision`/
+  `mergeable`/`statusCheckRollup.state` value raises rather than guesses.
+  Remaining slices for item 3: an evaluator that holds prior `Revision`
+  state and actually drives `APPROVAL_TRANSITIONS` (incl. `STALE`), and
+  wiring the observer into a real polling/webhook-driven loop.
 - [ ] Wire the bridge machine's `resolve_liveness`/`resolve_resume` against
   a real agent-bridge liveness read (item 4 above), coordinated with
   agent-bridge's own verb-vocabulary convergence.
