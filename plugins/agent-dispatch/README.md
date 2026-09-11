@@ -135,7 +135,9 @@ the canonical installation-context primitive, then checks the peer's own shipped
 governance API and calls its `scripts/resolve-runtime.{sh,ps1}`. Runtime selection
 belongs to that peer, including completion-marker and last-known-good semantics;
 dispatch does not reconstruct a slot resolver or require exemplar-only
-`.runtime-slot-completion` receipts from generic runtime peers.
+`.runtime-slot-completion` receipts from generic runtime peers. Dispatch's
+resident loop-governance rechecks use the same packaged canonical primitive,
+without loading code through a deploy-manifest payload pointer.
 
 The boundary rebinds `COPILOT_EXTENSIONS_CONTEXT` to the peer's `install.json`,
 `COPILOT_PLUGIN_ROOT` and its plugin-specific payload root to the peer payload,

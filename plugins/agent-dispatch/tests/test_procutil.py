@@ -168,6 +168,24 @@ def _update_receipt(path: Path, update) -> None:
     path.write_text(json.dumps(value), encoding="utf-8")
 
 
+def test_loop_governance_loads_packaged_primitive_without_payload_copy(tmp_path, monkeypatch):
+    from agent_dispatch import _installation_context, loop_governance
+
+    cell = tmp_path / "marketplaces" / FIRST_MARKETPLACE_ID
+    own = _make_namespaced_context(cell)
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own))
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(own.parent))
+    assert not (own.parent / "deploy-manifest.json").exists()
+    assert not (cell / "payloads" / "agent-dispatch" / "scripts").exists()
+
+    helper = loop_governance._load_governance_module()
+    assert helper is not None and "error" not in helper
+    assert helper["module"] is _installation_context
+    assert helper["context"] == str(own)
+    assert helper["durable_home"] == str(tmp_path)
+    assert callable(helper["module"].recheck_loop_governance)
+
+
 def _assert_peer_refused(prefix: list[str]) -> None:
     result = subprocess.run(
         [*prefix, "must-not-execute"], capture_output=True, encoding="utf-8",
@@ -516,7 +534,12 @@ def test_namespaced_peer_from_windowless_parent(tmp_path, monkeypatch):
                 if process_name(hwnd) in process_names
             )
             current = user32.GetForegroundWindow()
-            if current != foreground and process_name(current) in process_names:
+            # Switching among existing desktop windows is operator activity,
+            # not evidence that this probe acquired a console.
+            if (
+                current != foreground and current not in baseline
+                and process_name(current) in process_names
+            ):
                 focus_changes.add(current)
             time.sleep(.02)
         if proc.poll() is None:

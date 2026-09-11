@@ -394,6 +394,12 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   peer-boundary selection passed 31 tests, including POSIX interpreter symlinks
   and linked-root refusal. A Windows windowless-parent probe exercised two
   launch cycles without observed child windows or focus transitions.
+- PR review identified that resident loop governance still loaded a payload-side
+  validator. It now imports the same packaged primitive as the peer launcher,
+  with a regression proving it loads without a deploy manifest or payload-side
+  copy. Follow-up Windows coverage passed 8 tests and WSL coverage passed 33.
+  The desktop observation now excludes foreground changes among pre-existing
+  windows, which cannot by themselves identify a console created by the probe.
 - This is one conversion slice, not Phase 6 completion. The initial full
   inventory classifications remain provisional: a literal legacy fallback
   does not prove a defect, but an allowance also requires evidence that active
