@@ -111,6 +111,33 @@ def test_verifier_requires_selected_complete_current_runtime(installed):
     assert (item.slot / ".install-complete.json").read_bytes() == before
 
 
+def test_posix_gate_resolver_preserves_stale_marker_fallback(installed):
+    if os.name == "nt":
+        bash = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Git/bin/bash.exe"
+        if not bash.is_file():
+            pytest.skip("Git Bash unavailable")
+    else:
+        bash = shutil.which("bash")
+        if not bash:
+            pytest.skip("Bash unavailable")
+    gate = (SCRIPTS / "runtime-gate.sh").read_text()
+    function = "resolve_runtime() {" + gate.split("resolve_runtime() {", 1)[1].split(
+        "\n}\n", 1,
+    )[0] + "\n}\n"
+    (installed.root / "current-version").write_text("0.0.1")
+    result = subprocess.run(
+        [str(bash), "--noprofile", "--norc"],
+        input='set -euo pipefail\n' + function + '\nresolve_runtime\nprintf "%s" "$AGENT_RT_PY"\n',
+        text=True, capture_output=True, timeout=10,
+        env={
+            **os.environ, "RUNTIME_ROOT": installed.root.as_posix(),
+            "RUNTIME_RESOLVER": (SCRIPTS / "resolve-runtime.sh").as_posix(),
+        },
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == installed.python.as_posix()
+
+
 def test_namespace_verifier_delegates_receipt_proof_without_mutation(
     installed, monkeypatch, tmp_path,
 ):
@@ -242,10 +269,18 @@ def test_payload_gate_legacy_current_stale_and_failed_owner_update(installed, tm
     assert snapshot(item.root) == before
     assert not Path(env["TEST_INSTALL_LOG"]).exists()
 
+    old_slot = item.root / "versions" / "0.0.1"
+    shutil.copytree(item.slot, old_slot, symlinks=True)
+    old_marker = json.loads((old_slot / ".install-complete.json").read_text())
+    old_marker["version"] = "0.0.1"
+    write_json(old_slot / ".install-complete.json", old_marker)
     for installer_mode in ("fail", "noop", "update"):
         (item.root / "current-version").write_text("0.0.1")
         env["TEST_INSTALL_MODE"] = installer_mode
         result = run_gate(command, env)
+        assert Path(env["TEST_INSTALL_LOG"]).exists(), (
+            result.returncode, result.stdout, result.stderr,
+        )
         log = Path(env["TEST_INSTALL_LOG"]).read_text(encoding="utf-8-sig")
         assert log.splitlines() == [
             "update", "-InstallDir" if os.name == "nt" else "--install-dir", str(item.root),

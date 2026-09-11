@@ -123,10 +123,10 @@ On exit zero, stdout contains exactly one JSON object:
   "mode": "legacy",
   "action": "updated",
   "payloadRoot": "/path/to/payload",
-  "payloadVersion": "0.4.0-dev479",
+  "payloadVersion": "0.4.0-dev480",
   "runtimeRoot": "/path/to/selected-runtime",
-  "runtimeVersion": "0.4.0-dev479",
-  "python": "/path/to/selected-runtime/versions/0.4.0-dev479/bin/python",
+  "runtimeVersion": "0.4.0-dev480",
+  "python": "/path/to/selected-runtime/versions/0.4.0-dev480/bin/python",
   "complete": true,
   "currentPayload": true,
   "serviceChecked": false

@@ -43,8 +43,12 @@ resolve_runtime() {
     AGENT_RT_PY=""
     AGENT_RT_ROOT="$RUNTIME_ROOT"
     export AGENT_RT_ROOT
+    # The resolver deliberately probes missing/stale slots before its fallbacks.
     # shellcheck source=/dev/null
-    . "$RUNTIME_RESOLVER"
+    . "$RUNTIME_RESOLVER" || {
+        printf '[agent-bridge] runtime resolver failed.\n' >&2
+        return 126
+    }
 }
 
 apply_runtime_env() {
