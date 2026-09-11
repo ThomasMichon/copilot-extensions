@@ -37,6 +37,10 @@
   shell : drop into an interactive login shell in the container (start one if
           none is up). Use after `run -Then shell`, or standalone to poke a box.
   down  : remove the container for the selected variant.
+  prune : remove EVERY clean-room container this rig has created on this box
+          (all -NameSuffix variants), not just the currently-selected one --
+          the bulk backstop for containers left up after `run`/`eval`/`shell`
+          (by design, so you can inspect them) but never individually `down`'d.
   all   : build -> (auth if needed) -> run.
 
 .PARAMETER Image     base | pristine (default base).
@@ -66,10 +70,13 @@
   ./run.ps1 -BlockPublicFeeds -UvIndex https://…  # reproduce a network-blocked
                                                     # machine (book2) from an
                                                     # unrestricted dev box
+.EXAMPLE
+  ./run.ps1 -Mode prune                       # remove EVERY clean-room container
+                                                # this rig created, all -NameSuffix
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('build','auth','run','eval','shell','down','bridge-register','bridge-unregister','all')]
+    [ValidateSet('build','auth','run','eval','shell','down','prune','bridge-register','bridge-unregister','all')]
     [string]$Mode = 'run',
     [ValidateSet('base','pristine')]
     [string]$Image = 'base',
@@ -294,6 +301,12 @@ $NameTail   = if ($NameSuffix) { "-$NameSuffix" } else { '' }
 $Container  = "cr-$Image$NameTail"
 $AgentName  = "cleanroom-$Image$NameTail"   # legacy label (kept for logs)
 $DriveAgent = "cleanroom:$Container"        # the namespaced agent-bridge address
+# Marks every container this rig creates (including the short-lived cr-auth
+# login box) so -Mode prune can sweep them all regardless of -NameSuffix,
+# without touching unrelated containers on the box. Legacy pre-label
+# containers (created before this existed) are still caught by prune's
+# name-prefix fallback.
+$CleanRoomLabel = 'copilot-extensions.clean-room=1'
 # The in-container Copilot ACP command the cleanroom: provider resolves to. The
 # eval path overrides this to add --plugin-dir for the scenario's plugins (a bare
 # copilot --acp does not reliably load enabled plugins headless). Script-scoped so
@@ -335,7 +348,7 @@ function Invoke-Auth {
     Write-Host "An interactive Copilot session opens. Run '/login' if not prompted," -ForegroundColor Yellow
     Write-Host "authorize the device code in your browser, then '/exit'." -ForegroundColor Yellow
     docker rm -f cr-auth 2>$null | Out-Null
-    docker run -it --name cr-auth --entrypoint /bin/bash $BaseTag -lc 'copilot; echo "--- login session ended ---"'
+    docker run -it --name cr-auth --label $CleanRoomLabel --entrypoint /bin/bash $BaseTag -lc 'copilot; echo "--- login session ended ---"'
     Write-Host "== committing authed image ($AuthTag) ==" -ForegroundColor Cyan
     docker commit cr-auth $AuthTag | Out-Null
     docker rm -f cr-auth | Out-Null
@@ -469,6 +482,7 @@ function Start-Container {
         Write-Host "block-public-feeds: pypi.org, files.pythonhosted.org, registry.npmjs.org, download.pytorch.org null-routed" -ForegroundColor DarkGray
     }
     docker run -d --name $Container `
+        --label $CleanRoomLabel `
         -v "${scenDir}:/home/operator/scenario:ro" `
         -v "${libDir}:/home/operator/lib:ro" `
         -v "${res}:/home/operator/out" `
@@ -546,6 +560,54 @@ function Invoke-Down {
         throw "removed $Container but could not unregister it from agent-bridge: $_"
     }
     Write-Host "removed $Container" -ForegroundColor Green
+}
+
+function Invoke-Prune {
+    # Sweep EVERY clean-room container this rig has ever created on this box --
+    # not just the currently-selected $Container -- regardless of -NameSuffix.
+    # run/eval/shell deliberately leave a container up for inspection (see
+    # README "the container stays up until -Mode down"), which is by design but
+    # means containers a caller forgets to `down` individually accumulate
+    # forever (concurrent -NameSuffix runs, ad-hoc debugging boxes, etc.).
+    # prune is the bulk backstop: label-match first (every container this rig
+    # creates now carries $CleanRoomLabel), falling back to the legacy `cr-*`
+    # name prefix so containers created before the label existed are still
+    # swept.
+    $ids = (& docker ps -a -q --filter "label=$CleanRoomLabel" | Out-String).Trim() -split "`n" | Where-Object { $_ }
+    if (-not $ids) {
+        $ids = (& docker ps -a -q --filter 'name=^cr-' | Out-String).Trim() -split "`n" | Where-Object { $_ }
+    }
+    if (-not $ids) {
+        Write-Host "no clean-room containers found" -ForegroundColor DarkGray
+        return
+    }
+    $savedContainer = $script:Container
+    $savedAgentName = $script:AgentName
+    $failures = 0
+    foreach ($id in $ids) {
+        $name = (& docker inspect -f '{{.Name}}' $id 2>$null | Out-String).Trim().TrimStart('/')
+        if (-not $name) { $name = $id }
+        try {
+            # Best-effort agent-bridge unregister before removal -- a stray
+            # registration for a container that's about to disappear is
+            # exactly the kind of debris this command exists to prevent.
+            $script:Container = $name
+            $script:AgentName = "cleanroom-$($name -replace '^cr-', '')"
+            Invoke-BridgeUnregister -ContainerId $id | Out-Null
+        } catch {
+            # unregister failures are best-effort here; removal still proceeds.
+        }
+        docker rm -f $id 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "removed $name" -ForegroundColor Green
+        } else {
+            Write-Host "error: could not remove $name ($id)" -ForegroundColor Red
+            $failures++
+        }
+    }
+    $script:Container = $savedContainer
+    $script:AgentName = $savedAgentName
+    if ($failures -gt 0) { throw "prune: failed to remove $failures container(s)" }
 }
 
 # Register the running container with agent-bridge so you can drive the
@@ -1228,6 +1290,7 @@ switch ($Mode) {
     'eval'  { Invoke-Eval }
     'shell' { Invoke-Shell }
     'down'  { Invoke-Down }
+    'prune' { Invoke-Prune }
     'bridge-register'   { Invoke-BridgeRegister }
     'bridge-unregister' { Invoke-BridgeUnregister }
     'all'   { Invoke-Build; Invoke-Run }

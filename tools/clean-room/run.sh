@@ -13,6 +13,9 @@
 #                                                 # blocked machine (book2) from
 #                                                 # an unrestricted dev box
 #   ./run.sh --image pristine down              # remove the pristine container
+#   ./run.sh prune                              # remove EVERY clean-room container
+#                                                 # this rig created (all name
+#                                                 # suffixes), not just $CONTAINER
 #
 # The --scenario seam mounts a scenario dir (scenarios/<name>/ or an explicit
 # path) plus the shared lib/ read-only into the box and runs scenario.sh, which
@@ -71,8 +74,8 @@ while [ $# -gt 0 ]; do
         --runs) RUNS_OVERRIDE="$2"; shift 2 ;;
         --skip-tier-p-gate) SKIP_TIER_P=1; shift ;;
         --no-token) NO_TOKEN=1; shift ;;
-        build|auth|run|eval|shell|down|bridge-register|bridge-unregister|all) MODE="$1"; shift ;;
-        *) echo "usage: $0 [--image base|pristine] [--name-suffix SUFFIX] [--scenario NAME|DIR] [--until N|all] [--then shell|down] [--npm-registry URL] [--uv-index URL] [--block-public-feeds] [--token-account USER] [--pass-env NAME]... [--harness-mount DIR] [--runs N] [--skip-tier-p-gate] [--no-token] {build|auth|run|eval|shell|down|bridge-register|bridge-unregister|all}" >&2; exit 2 ;;
+        build|auth|run|eval|shell|down|prune|bridge-register|bridge-unregister|all) MODE="$1"; shift ;;
+        *) echo "usage: $0 [--image base|pristine] [--name-suffix SUFFIX] [--scenario NAME|DIR] [--until N|all] [--then shell|down] [--npm-registry URL] [--uv-index URL] [--block-public-feeds] [--token-account USER] [--pass-env NAME]... [--harness-mount DIR] [--runs N] [--skip-tier-p-gate] [--no-token] {build|auth|run|eval|shell|down|prune|bridge-register|bridge-unregister|all}" >&2; exit 2 ;;
     esac
 done
 
@@ -111,6 +114,12 @@ NAME_TAIL=""; [ -n "$NAME_SUFFIX" ] && NAME_TAIL="-$NAME_SUFFIX"
 CONTAINER="cr-$IMAGE$NAME_TAIL"
 AGENT_NAME="cleanroom-$IMAGE$NAME_TAIL"   # legacy label (kept for logs)
 DRIVE_AGENT="cleanroom:$CONTAINER"        # the namespaced agent-bridge address
+# Marks every container this rig creates (including the short-lived cr-auth
+# login box) so `prune` can sweep them all regardless of --name-suffix,
+# without touching unrelated containers on the box. Legacy pre-label
+# containers (created before this existed) are still caught by `prune`'s
+# name-prefix fallback.
+CLEAN_ROOM_LABEL="copilot-extensions.clean-room=1"
 # Keep Copilot's subprocess crashes from dirtying the fixture, and use the
 # hidden distro rg because the bundled ARM64 binary rejects 16 KiB pages.
 ACP_PREFIX='ulimit -c 0 && env USE_BUILTIN_RIPGREP=false PATH=/opt/copilot-cleanroom/bin:$PATH'
@@ -146,7 +155,7 @@ do_auth() {
     echo "== one-time device-code login ($AUTH_TAG) =="
     echo "Run '/login' if not prompted, authorize the device code, then '/exit'."
     docker rm -f cr-auth >/dev/null 2>&1 || true
-    docker run -it --name cr-auth --entrypoint /bin/bash "$BASE_TAG" -lc 'copilot; echo "--- login session ended ---"'
+    docker run -it --name cr-auth --label "$CLEAN_ROOM_LABEL" --entrypoint /bin/bash "$BASE_TAG" -lc 'copilot; echo "--- login session ended ---"'
     echo "== committing authed image ($AUTH_TAG) =="
     docker commit cr-auth "$AUTH_TAG" >/dev/null
     docker rm -f cr-auth >/dev/null
@@ -306,6 +315,7 @@ print("true" if manifest.get("tier") == "P" and manifest.get("auth", {}).get("co
         echo "block-public-feeds: pypi.org, files.pythonhosted.org, registry.npmjs.org, download.pytorch.org null-routed"
     fi
     docker run -d --name "$CONTAINER" \
+        --label "$CLEAN_ROOM_LABEL" \
         -v "$SCENARIO_DIR:/home/operator/scenario:ro" \
         -v "$LIB_DIR:/home/operator/lib:ro" \
         -v "$RESULTS:/home/operator/out" \
@@ -364,6 +374,43 @@ do_down() {
         return 1
     fi
     echo "removed $CONTAINER"
+}
+# Sweep EVERY clean-room container this rig has ever created on this box --
+# not just the currently-selected $CONTAINER -- regardless of --name-suffix.
+# `run`/`eval`/`shell` deliberately leave a container up for inspection (see
+# README "the container stays up until -Mode down"), which is by design but
+# means containers a caller forgets to `down` individually accumulate forever
+# (concurrent --name-suffix runs, ad-hoc debugging boxes, etc.). `prune` is the
+# bulk backstop: label-match first (every container this rig creates now
+# carries $CLEAN_ROOM_LABEL), falling back to the legacy `cr-*` name prefix so
+# containers created before the label existed are still swept.
+do_prune() {
+    local ids
+    ids="$(docker ps -a -q --filter "label=$CLEAN_ROOM_LABEL")"
+    if [ -z "$ids" ]; then
+        ids="$(docker ps -a -q --filter 'name=^cr-')"
+    fi
+    if [ -z "$ids" ]; then
+        echo "no clean-room containers found"
+        return 0
+    fi
+    local id name failures=0
+    for id in $ids; do
+        name="$(docker inspect -f '{{.Name}}' "$id" 2>/dev/null | sed 's#^/##')"
+        [ -n "$name" ] || name="$id"
+        # Best-effort agent-bridge unregister before removal -- a stray
+        # registration for a container that's about to disappear is exactly
+        # the kind of debris this command exists to prevent.
+        BRIDGE_CONTAINER_ID="$id" AGENT_NAME="cleanroom-${name#cr-}" CONTAINER="$name" \
+            do_bridge_unregister >/dev/null 2>&1 || true
+        if docker rm -f "$id" >/dev/null 2>&1; then
+            echo "removed $name"
+        else
+            echo "error: could not remove $name ($id)" >&2
+            failures=$((failures + 1))
+        fi
+    done
+    [ "$failures" -eq 0 ]
 }
 # Register/unregister the container with agent-bridge (drive the in-container
 # Copilot with `agent-bridge create cleanroom:<container> ...`). Uses the
@@ -963,6 +1010,7 @@ case "$MODE" in
     eval)  do_eval ;;
     shell) do_shell ;;
     down)  do_down ;;
+    prune) do_prune ;;
     bridge-register)   do_bridge_register ;;
     bridge-unregister) do_bridge_unregister ;;
     all)   do_build; do_run ;;
