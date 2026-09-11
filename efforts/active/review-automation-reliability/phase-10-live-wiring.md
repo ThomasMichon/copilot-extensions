@@ -60,6 +60,13 @@ minimizes risk and unblocks the most Validation Plan items fastest:
    it. Lowest risk (behavior-preserving by construction) and unblocks the
    restart-at-any-boundary and duplicate-delivery Validation Plan items,
    which are fundamentally about the task machine's own transitions.
+   **Correction found while wiring:** `TaskQueue.yield_task` (a worker's
+   own deliberate, voluntary give-back on a recoverable snag -- distinct
+   from `requeue_held`'s automatic owner-gone reconciliation, though both
+   move `HELD -> QUEUED`) was entirely missing from the original
+   declaration. Added as its own named transition rather than folded into
+   `requeue_held`, since it has a different actor and a different
+   recovery mode (`SAFE_RETRY`, not `SELF_REPAIR`).
 2. **`machine_coupling.apply_transition`'s CAS primitive into `queue.py`'s
    concurrency fencing.** **Correction (found during slice 1's direct
    reading of `_transition`, which the original design here got wrong):**

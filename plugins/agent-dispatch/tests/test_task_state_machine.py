@@ -83,7 +83,7 @@ def test_transition_names_are_unique():
 
 @pytest.mark.parametrize(
     "held_transition_name",
-    ["requeue_held", "dead_letter_held"],
+    ["requeue_held", "dead_letter_held", "yield_task"],
 )
 def test_held_transitions_match_queue_held_definition(held_transition_name):
     """``Status.HELD`` transitions must track the real HELD set, not a copy."""

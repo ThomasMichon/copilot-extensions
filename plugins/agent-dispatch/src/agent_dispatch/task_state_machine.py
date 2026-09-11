@@ -140,6 +140,22 @@ TRANSITIONS: tuple[Transition, ...] = (
         implemented_by="TaskQueue.release / liveness GC (owner-gone reconciliation)",
     ),
     Transition(
+        name="yield_task",
+        #: Distinct from ``requeue_held`` despite sharing the same
+        #: (HELD -> QUEUED) states: ``requeue_held`` is liveness GC's
+        #: automatic owner-gone reconciliation; ``yield_task`` is the
+        #: *owning* worker's own deliberate, voluntary give-back (e.g. a
+        #: recoverable snag such as a merge conflict) -- a different
+        #: actor and a different recovery mode. Phase 10's live-wiring
+        #: pass found this transition entirely missing from the original
+        #: Phase 9 declaration (``TaskQueue.yield_task`` already existed
+        #: and already worked; the declared table simply never named it).
+        from_states=Status.HELD,
+        to_state=Status.QUEUED,
+        recovery_mode=RecoveryMode.SAFE_RETRY,
+        implemented_by="TaskQueue.yield_task (worker-initiated recoverable-snag release)",
+    ),
+    Transition(
         name="dead_letter_held",
         from_states=Status.HELD,
         to_state=Status.DEAD_LETTER,
