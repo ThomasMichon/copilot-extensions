@@ -1141,13 +1141,21 @@ function Invoke-VersionedSlotClean {
     <# Toss an INCOMPLETE prior slot before building so we never `uv venv
        --allow-existing` over a corpse (#935); the current/active slot is never
        tossed (link-name derived from $LinkDir so the guard works per plugin).
-       No-op in legacy mode. #>
-    if (-not $VersionedRuntime) { return }
+       No-op ($true -- nothing to clean) in legacy mode.
+
+       Returns $true iff the slot is confirmed clean (or cleaning was a no-op);
+       $false when the underlying `slot --clean-incomplete` call failed (e.g.
+       "incomplete runtime slot is still in use") -- callers must not build a
+       signed-Python venv straight into a slot this reports dirty (#2413): a
+       still-populated $VenvDir predictably fails `--copies` and silently
+       downgrades to an unsigned uv-built interpreter. #>
+    if (-not $VersionedRuntime) { return $true }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = Get-BootstrapPython
-    if (-not $py) { return }
+    if (-not $py) { return $true }
     & $py $vr --root $InstallDir --link-name (Split-Path -Leaf $LinkDir) slot $SrcVersion --clean-incomplete 2>&1 |
         ForEach-Object { Write-Host "  ...    $_" }
+    return ($LASTEXITCODE -eq 0)
 }
 
 function Invoke-VersionedMarkComplete {
@@ -1813,10 +1821,22 @@ function Deploy-Venv {
     # (the signed python.exe is embedded in the venv); fall back to uv when no
     # signed Python is present (fine on machines without Smart App Control).
     if (-not (Test-Path $VenvPython)) {
-        Invoke-VersionedSlotClean
+        $slotClean = Invoke-VersionedSlotClean
+        if (-not $slotClean) {
+            # "Still in use" is typically a transient Windows file-handle race
+            # (a just-exited process hasn't released the slot yet) -- retry
+            # briefly rather than immediately falling through to a doomed
+            # signed-Python `--copies` attempt against the still-dirty
+            # $VenvDir, which would otherwise silently downgrade to an
+            # unsigned uv-built interpreter (#2413).
+            for ($i = 0; $i -lt 3 -and -not $slotClean; $i++) {
+                Start-Sleep -Milliseconds 750
+                $slotClean = Invoke-VersionedSlotClean
+            }
+        }
         $signedBase = Get-SignedBasePython
         $created = $false
-        if ($signedBase) {
+        if ($signedBase -and $slotClean) {
             $result = Invoke-NativeCapture {
                 & $signedBase -m venv --copies $VenvDir
             }
@@ -1830,6 +1850,12 @@ function Deploy-Venv {
         if (-not $created) {
             if (-not $signedBase) {
                 Write-ServiceWarn "No signed system Python found -- using uv (unsigned). On Smart App Control machines, install python.org Python 3.11+ and re-run update."
+            } elseif (-not $slotClean) {
+                # Loud, not a soft warning: a signed Python IS available, but
+                # the stale slot couldn't be cleared, so this venv is being
+                # built UNSIGNED instead. Silently downgrading the SAC
+                # guarantee here is the exact failure mode of #2413.
+                Write-ServiceErr "Runtime slot still in use after retries -- building an UNSIGNED uv Python venv instead of the signed system Python. Smart App Control compatibility is NOT guaranteed for $VenvDir; re-run update once the prior process has exited."
             }
             # Run uv from a trusted CWD (SystemDrive root), never the profile
             # mount -- launching the WinGet uv.exe reparse shim with the profile
