@@ -436,6 +436,51 @@ scenarios.
 
 ## Journal
 
+### 2026-09-11 - Phase 9: tenth slice (reservation/allocation-fencing layer)
+
+- Declared the spawn-reservation/allocation-fencing layer as a checkable
+  relation coupled to the bridge machine
+  (`plugins/agent-dispatch/src/agent_dispatch/spawn_reservation_machine.py`),
+  following `agent_dispatch.queue.SpawnState`'s real, already-implemented
+  lifecycle rather than a fresh design: `record_spawn`/`record_cold`/
+  `request_spawn_release`/`fail_spawn`/`defer_spawn`/`settle_spawn`/
+  `retire_spawn`/`rearm_spawn` each named as a declared transition, tagged
+  with a `RecoveryMode`. Confirmed `FAILED` is releasable
+  (`SpawnState.RELEASABLE`) but not machine-terminal here, since `rearm`
+  is a real declared exit from it -- a distinction the terminal-state
+  check now makes explicit rather than conflating the two concepts.
+- `violating_assignment_groups()` makes the single-assignment invariant
+  (`reserve_spawn`'s existing atomic guarantee: no second reservation
+  minted while one is `ACTIVE` for the same task or exclusive-key group)
+  a checkable structural property over a snapshot of reservation rows.
+- `LetGoReason` (failed/deferred/settled/retired-rearm/preempted) declares
+  the closed "letting go" vocabulary, each mapped to a real transition and
+  the sub-doc's exact recovery-mode classification; preemption resolves
+  through the graceful release path, distinct from an ordinary failure.
+- `classify_consistency()` declares the three-tier (not-applicable/
+  consistent/anomaly) reservation<->bridge relation as an explicit
+  whitelist of consistent `(SpawnState, BridgeState)` pairings -- **any
+  pairing not whitelisted defaults to anomaly**, including combinations
+  the sub-doc's prose never explicitly addressed (e.g. RELEASING +
+  HYDRATING), matching Phase 9's "never assume the safer state without
+  evidence" rule rather than leaving a silent gap.
+- Added
+  `plugins/agent-dispatch/tests/test_spawn_reservation_machine.py` (51
+  structural tests): lifecycle reachability/exit-checking, the
+  releasable-but-not-terminal distinction for FAILED, every let-go reason
+  and its exact recovery mode, the single-assignment invariant across
+  both task-id and exclusive-key groupings, and every whitelisted /
+  documented-anomaly / intentionally-undeclared consistency pairing.
+- This ticks the phase-9 sub-doc's last open Plan checkbox for the
+  declared-machine work. The launch-to-claim grace/recovery monitor
+  remains explicitly out of scope (its own component, consuming this
+  contract from the outside). The five still-conceptual-only Phase 8
+  candidates (attempt-budget, event ledger, approval-authority split,
+  worktree-pool dirty-tolerance, relay health-fencing) remain open
+  follow-up design work, untouched this slice.
+- Bumped agent-dispatch's version (plugin.json, pyproject.toml,
+  marketplace.json) to 0.1.2-dev66.
+
 ### 2026-09-10 - Phase 9: ninth slice (implement the three deferred simulation scenarios)
 
 - Implemented the three scenarios the prior design-review slice designed
