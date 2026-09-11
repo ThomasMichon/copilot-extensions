@@ -76,6 +76,46 @@ def test_installers_scope_service_identity_by_install_root() -> None:
     assert "AGENT_VAULT_PORT = '0'" in install_ps1
 
 
+def test_scheduled_task_launcher_resolves_slot_at_every_run() -> None:
+    """#1836: the Windows Scheduled Task launcher must resolve the active
+    versioned slot itself at process start (the same resolve-runtime.ps1 chain
+    the binstub uses), never a concrete versions/<v> interpreter path baked in
+    at registration time -- so an activated version cutover takes effect on
+    the daemon's next restart without needing a task re-registration."""
+    install_ps1 = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
+    idx = install_ps1.index("function Register-AgentVaultTask")
+    body = install_ps1[idx : install_ps1.index("\nfunction ", idx + 1)]
+
+    # The launcher body written to $TaskLauncher must dot-source the resolver
+    # and resolve $_py fresh every time it runs, not at registration time.
+    launcher_start = body.index("[System.IO.File]::WriteAllText($TaskLauncher")
+    launcher_body = body[launcher_start : body.index('"@, $utf8NoBom)', launcher_start)]
+    assert "resolve-runtime.ps1" in launcher_body
+    assert "$_py = $null" in launcher_body.replace("`$", "$")
+    assert "& `$_py -m agent_vault.service --foreground --persistent" in launcher_body
+
+    # The registration-time code path must NOT resolve/bake a concrete slot
+    # path itself (that responsibility moved into the launcher body above).
+    pre_launcher = body[:launcher_start]
+    assert "AgentRtPy" not in pre_launcher
+    assert "taskPy" not in pre_launcher
+
+
+def test_scheduled_task_registration_skips_reregister_when_already_correct() -> None:
+    """#1836: re-registering the Scheduled Task (Set-ScheduledTask) is reserved
+    for a genuine Action drift, not every install/update -- the launcher path
+    and working directory are stable, so a match means already-correct."""
+    install_ps1 = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
+    idx = install_ps1.index("function Register-AgentVaultTask")
+    body = install_ps1[idx : install_ps1.index("\nfunction ", idx + 1)]
+    assert "$matchesDesired = $existingAction -and" in body
+    assert "if ($matchesDesired) {" in body
+    matches_idx = body.index("if ($matchesDesired) {")
+    match_block = body[matches_idx : body.index("} else {", matches_idx)]
+    assert "Set-ScheduledTask" not in match_block
+    assert "Register-ScheduledTask" not in match_block
+
+
 def test_session_catalog_producer_is_not_registered_as_a_hook() -> None:
     hooks = json.loads((PLUGIN / "hooks.json").read_text(encoding="utf-8"))
     session_hooks = hooks["hooks"]["sessionStart"]
