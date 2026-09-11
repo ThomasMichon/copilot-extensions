@@ -170,16 +170,23 @@ def _cmd_mesh_status(args: argparse.Namespace) -> int:
 
 def _cmd_doctor(args: argparse.Namespace) -> int:
     report = fragment_registry.scan_fragment_registry(args.config_d)
+    shadow_findings = fragment_registry.find_shadowed_aliases(report, args.ssh_config)
     if args.json:
         print(
             json.dumps(
-                fragment_registry.doctor_payload(report, args.config_d),
+                fragment_registry.doctor_payload(
+                    report, args.config_d, ssh_config=args.ssh_config
+                ),
                 indent=2,
             )
         )
     else:
-        print(fragment_registry.format_doctor(report, args.config_d))
-    return 1 if report.findings else 0
+        print(
+            fragment_registry.format_doctor(
+                report, args.config_d, ssh_config=args.ssh_config
+            )
+        )
+    return 1 if (report.findings or shadow_findings) else 0
 
 
 def _cmd_restore_host(args: argparse.Namespace) -> int:
@@ -278,6 +285,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Emit exhaustive structured managed-fragment findings.",
     )
     doctor.add_argument("--config-d", type=Path, default=None, help="Override ~/.ssh/config.d.")
+    doctor.add_argument(
+        "--ssh-config",
+        type=Path,
+        default=None,
+        help="Override ~/.ssh/config (used only to detect alias shadowing).",
+    )
     doctor.set_defaults(func=_cmd_doctor)
 
     restore_host = sub.add_parser(
