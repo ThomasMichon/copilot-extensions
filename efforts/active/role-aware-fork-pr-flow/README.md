@@ -4,7 +4,8 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-slice worktrees and pull requests
 - **Created:** 2026-09-10
-- **Status:** Active
+- **Status:** Done — all Phase 1/2a/2b/3 items landed; two Phase 2b items
+  remain explicitly deferred (see Proposal)
 - **Vision:** `visions/plugins/agent-worktrees` — `contribution-aware-lifecycle`
 - **Umbrella issue:** _none yet — file on submission of Phase 2a's PR_
 - **Sub-issues:** _none yet_
@@ -260,14 +261,16 @@ publishes there.
     GitHub's side depending on how it resolves the conflict. Untested because
     this session worked around it by pre-creating the fork under a custom
     name first; worth a follow-up if it surfaces in practice.
-- [ ] `gim-home/odsp-web-harness` (separate repo, its own PR): adopt
+- [x] `gim-home/odsp-web-harness` (separate repo, its own PR): adopt
   `pr.roles`/`pr.fork` in its `.agent-worktrees/config.yaml`, replacing its
   current "Tooling note" plain-`git`/`gh` workaround in `CONTRIBUTING.md` with
-  real `agent-worktrees`-driven guidance. Tracked by that repo's own
-  `role-aware-fork-pr-flow` pointer effort, not here.
-- [ ] Point that repo (and any other adopter) at `turnkey-reviewer-loops` for
+  real `agent-worktrees`-driven guidance. Merged
+  [gim-home/odsp-web-harness#292](https://github.com/gim-home/odsp-web-harness/pull/292);
+  tracked by that repo's own `role-aware-fork-pr-flow` pointer effort
+  (archived), not here.
+- [x] Point that repo (and any other adopter) at `turnkey-reviewer-loops` for
   the "automated self-reviewer with approval/verdict power" piece, rather than
-  treating it as new work.
+  treating it as new work. Same PR (#292).
 
 ## Validation Plan
 
@@ -286,6 +289,10 @@ publishes there.
 - [x] Phase 3: `gim-home/odsp-web-harness` successfully drove a real
       fork-based PR via `agent-worktrees` (not by hand) —
       `gim-home/odsp-web-harness#290`, closed test-only, see Phase 3 above.
+- [x] Phase 3: `gim-home/odsp-web-harness` adopted `pr.roles`/`pr.fork` in its
+      own `.agent-worktrees/config.yaml` and rewrote its `CONTRIBUTING.md` —
+      [gim-home/odsp-web-harness#292](https://github.com/gim-home/odsp-web-harness/pull/292),
+      merged.
 
 ## Proposal
 
@@ -293,10 +300,33 @@ Phase 2a + Phase 2b are implemented, tested, and **live-validated end-to-end
 against a real GitHub repo** this session, submitted together as one PR
 (Phase 2a's own PR #2435 was still open/unmerged when Phase 2b work started,
 so it absorbed both slices rather than stacking a second PR on an unmerged
-one). Phase 3's remaining item — downstream adoption in
-`gim-home/odsp-web-harness`'s own config/docs — is unblocked and open.
+one). Phase 3's downstream-adoption item — `gim-home/odsp-web-harness`'s own
+config/docs — has landed
+([gim-home/odsp-web-harness#292](https://github.com/gim-home/odsp-web-harness/pull/292),
+merged). All Plan and Validation Plan items for Phase 3 are resolved; the two
+remaining checkbox items under Phase 2b (branch-reuse/stale-PR pruning and a
+`pr.roles`-driven `merge_actor` override for `pr-merge`'s own flow
+classification) are explicitly deferred follow-ups, not blockers — they cover
+non-default combinations left for a later increment only if they prove
+necessary in practice. This effort is ready to move to `Done`.
 
 ## Journal
+
+### 2026-09-11 — Phase 3 downstream adoption landed
+- Merged `gim-home/odsp-web-harness#292`: adopted `pr.roles.write`
+  (fork-based, no self-merge) / `pr.roles.maintain` (unchanged direct-push
+  `submitter-direct`) plus a base `pr.fork` block in that repo's
+  `.agent-worktrees/config.yaml`, and rewrote its `CONTRIBUTING.md`'s "How to
+  submit a change" / "Tooling note" / automated-reviewer bullet to describe
+  the real `create-pr --confirm-fork` flow (rather than the old plain-`git`/
+  `gh` workaround) and point at `turnkey-reviewer-loops` for the automated
+  self-reviewer piece. Had to first merge that repo's own unrelated,
+  already-open Tiered-ACL PR (#281) sharing the same worktree, since its
+  `CONTRIBUTING.md` "Tooling note" section didn't exist on `main` without it.
+  Archived that repo's local `role-aware-fork-pr-flow` pointer effort.
+- All Phase 3 Plan/Validation Plan items are now checked; this effort is
+  ready to move to `Done` (two Phase 2b items remain deliberately deferred,
+  see Proposal).
 
 ### 2026-09-11 — Live end-to-end validation
 - Ran the real `agent-worktrees create-pr` CLI (runtime updated post-merge,
