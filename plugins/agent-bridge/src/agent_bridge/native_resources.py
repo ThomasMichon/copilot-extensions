@@ -264,7 +264,8 @@ class HostResources:
             digest = signature(inputs)
             if previous.get("inputSignature", digest) != digest:
                 raise NativeError("resource_conflict", "Resource input is fixed after its first ensure")
-            state = {**previous, "attempted": True, "inputSignature": digest, "input": inputs}
+            state = {**previous, "attempted": True, "owned": None, "released": False,
+                     "inputSignature": digest, "input": inputs}
             row["data"][key] = state
             db.execute("UPDATE executions SET data=?,updated=? WHERE id=? AND generation=?",
                        (json.dumps(row["data"]), time.time(), execution, generation))

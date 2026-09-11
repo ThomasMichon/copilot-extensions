@@ -176,9 +176,19 @@ the same identity envelope with `ok: true, released: true`. A never-requested
 resource receives no release call. A proven unowned resource is not released.
 An attempted ensure with a lost reply receives release so the provider can
 reconcile its durable journal and remove **only resources it created**.
+Every newly admitted ensure invalidates earlier ownership/release proof until
+its response is validated. The previous receipt is retained for reconciliation,
+but an earlier `owned: false` cannot justify skipping cleanup after a later
+attempt. Replaying a completed request ID does not invoke the provider or reset
+that proof.
 Release must be idempotent, including after a lost acknowledgement. Failed
 cleanup remains a durable obligation and prevents reporting clean native stop.
 Frontend detach and controller redeploy do **not** release resources.
+
+A remote status observation of retirement is not provider settlement. Native
+stop still requires the provider's stop/retirement proof and closure of its owned
+transport before finalizing host-resource cleanup and reporting stopped. Only
+that confirmed settlement permits a resource-cleanup-only retry.
 
 ## Capability and compatibility
 

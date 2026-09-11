@@ -223,6 +223,7 @@ async def test_retired_native_keeps_cleanup_obligation_until_provider_confirms(t
     store = manager.store(create=True)
     store.reserve("execution", "generation", "launch", "example", str(tmp_path), "hash", {
         "spec": {"hostResources": definition}, "launchRequested": True, "retired": True,
+        "providerRetirementConfirmed": True,
         "_host_resource_preview": {"attempted": True},
     })
     store.update("execution", "generation", state="stopping")

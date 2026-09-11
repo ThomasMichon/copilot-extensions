@@ -238,8 +238,10 @@ class NativeManager:
             )
 
     async def _finish_retirement(self, execution, generation, **changes):
+        """Persist provider settlement after its owned transport has closed."""
         store = self.store()
-        row = store.update(execution, generation, retired=True, represented=False, **changes)
+        row = store.update(execution, generation, retired=True, represented=False,
+                           providerRetirementConfirmed=True, **changes)
         if row["data"].get("spec", {}).get("hostResources"):
             await self.host_resources().cleanup(execution, generation)
         return receipt(store.update(execution, generation, state="stopped", phase="stopped"))
@@ -478,20 +480,24 @@ class NativeManager:
         if store is None:
             raise NativeError("not_found", "Native execution is not recorded", 404)
         row = store.get(execution_id, generation)
-        if row["state"] == "stopped" and row["data"].get("retired"):
+        if row["state"] == "stopped" and row["data"].get("retired") and execution_id not in self.transports:
             return receipt(row)
         store.update(execution_id, generation, state="stopping", represented=False, phase="stopping")
         resources = [task for key, task in self.resource_tasks.items() if key[:2] == (execution_id, generation)]
         if resources:
             await asyncio.gather(*resources, return_exceptions=True)
-        if row["data"].get("retired"):
-            return await self._finish_retirement(execution_id, generation)
         pending = self.tasks.get(execution_id)
         if pending is not None:
             if not store.get(execution_id, generation)["data"].get("launchRequested"):
                 pending.cancel()
             await asyncio.gather(pending, return_exceptions=True)
         row = store.get(execution_id, generation)
+        if row["data"].get("providerRetirementConfirmed"):
+            transport = self.transports.get(execution_id)
+            if transport is not None:
+                await transport.close()
+                self.transports.pop(execution_id, None)
+            return await self._finish_retirement(execution_id, generation)
         if not row["data"].get("launchRequested"):
             transport = self.transports.get(execution_id)
             if transport is not None:
