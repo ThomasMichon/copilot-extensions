@@ -630,3 +630,91 @@ async def test_frontend_exit_reports_failure_but_closes_other_channels(context):
     assert ctx.manager._forwards == {}
     assert ctx.manager._relays[ctx.session.session_id] == [relay]
     assert not ctx.session._lifecycle_lock.locked()
+
+
+@pytest.mark.parametrize("kind", ["dead", "stranded"])
+@pytest.mark.parametrize("stopping", [False, True])
+async def test_host_sweeps_preserve_stopped_or_lifecycle_owned_records(
+    context, monkeypatch, kind, stopping,
+):
+    from agent_bridge.session_host import version_mux
+
+    ctx = context
+    ctx.record.boundary = "local"
+    ctx.manager._host_index.register(ctx.record)
+    monkeypatch.setattr(ctx.manager, "_rec_host_alive", lambda _rec: kind != "dead")
+    plan = Mock(return_value=SimpleNamespace(
+        disposition=version_mux.HostDisposition.FORCE_REAP,
+        reason="expired incompatible host",
+    ))
+    monkeypatch.setattr(version_mux, "plan_host", plan)
+    monkeypatch.setattr(ctx.manager, "_rec_child_alive", lambda _rec: True)
+    reap = Mock()
+    monkeypatch.setattr(ctx.manager, "_reap_host_record", reap)
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def quiesce(*_args, **_kwargs):
+        entered.set()
+        await release.wait()
+
+    if stopping:
+        monkeypatch.setattr(ctx.manager, "_quiesce_session", quiesce)
+        stop = asyncio.create_task(ctx.manager.stop_session(ctx.session.session_id))
+        await asyncio.wait_for(entered.wait(), 1)
+    else:
+        await ctx.manager.stop_session(ctx.session.session_id)
+    try:
+        ctx.manager._prune_dead_hosts()
+        assert await ctx.manager.sweep_stranded_hosts() == 0
+        plan.assert_not_called()
+        reap.assert_not_called()
+        assert ctx.manager._host_index.get(ctx.session.session_id) is not None
+    finally:
+        if stopping:
+            release.set()
+            await asyncio.wait_for(stop, 1)
+    assert await ctx.manager.sweep_stranded_hosts() == 0
+    ctx.session.status = SessionStatus.RUNNING
+    count = await ctx.manager.sweep_stranded_hosts()
+    if kind == "dead":
+        assert ctx.manager._host_index.get(ctx.session.session_id) is None
+    else:
+        assert count == 1
+        reap.assert_called_once()
+
+
+async def test_stop_waits_for_its_pending_remote_reap_only(context, monkeypatch):
+    from dataclasses import replace
+
+    ctx = context
+    entered, release = asyncio.Event(), asyncio.Event()
+    other_release = asyncio.Event()
+
+    async def remote_reap(record, _endpoint):
+        if record.session_id == ctx.session.session_id:
+            entered.set()
+            await release.wait()
+        else:
+            await other_release.wait()
+        return True
+
+    monkeypatch.setattr(ctx.manager, "_remote_reap", remote_reap)
+    ctx.manager._schedule_remote_reap(ctx.record, "prior maintenance")
+    other = replace(ctx.record, session_id="other-session")
+    ctx.manager._schedule_remote_reap(other, "independent maintenance")
+    other_task = next(iter(ctx.manager._remote_reaps_by_session[other.session_id]))
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        stop = asyncio.create_task(ctx.manager.stop_session(ctx.session.session_id))
+        await asyncio.sleep(0)
+        assert not stop.done()
+        release.set()
+        await asyncio.wait_for(stop, 1)
+        assert ctx.session.status == SessionStatus.STOPPED
+        assert ctx.session.session_id not in ctx.manager._remote_reaps_by_session
+        assert not other_task.done()
+    finally:
+        other_release.set()
+        await asyncio.wait_for(other_task, 1)
+    assert ctx.manager._remote_reap_tasks == set()
+    assert ctx.manager._remote_reaps_by_session == {}

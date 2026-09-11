@@ -914,6 +914,7 @@ class SessionManager:
         # Strong refs to in-flight best-effort remote-reap tasks (so they are not
         # GC'd mid-flight); each removes itself on completion.
         self._remote_reap_tasks: set[Any] = set()
+        self._remote_reaps_by_session: dict[str, set[asyncio.Task[bool]]] = {}
         from pathlib import Path as _Path
 
         from .session_host.host_index import HostIndex
@@ -2051,12 +2052,23 @@ class SessionManager:
 
     def _prune_dead_hosts(self) -> None:
         """Drop records whose host is dead (local only -- remote is verified by
-        the reattach probe, never by a local pid check)."""
+        the reattach probe, never by a local pid check).
+
+        Runs on the lifecycle event loop without yielding; skips records owned
+        by an in-flight lifecycle operation or a dormant session.
+        """
         if self._host_index is None:
             return
-        for r in [r for r in self._host_index.all() if not self._rec_host_alive(r)]:
-            with contextlib.suppress(Exception):
-                self._host_index.remove(r.session_id)
+        for rec in self._host_index.all():
+            session = self._sessions.get(rec.session_id)
+            if session is not None and (
+                session._lifecycle_lock.locked()
+                or not self._background_recovery_allowed(session)
+            ):
+                continue
+            if not self._rec_host_alive(rec):
+                with contextlib.suppress(Exception):
+                    self._host_index.remove(rec.session_id)
 
     @staticmethod
     def _background_recovery_allowed(session: Session) -> bool:
@@ -3877,7 +3889,16 @@ class SessionManager:
             return
         task = loop.create_task(self._remote_reap(rec, endpoint))
         self._remote_reap_tasks.add(task)
-        task.add_done_callback(self._remote_reap_tasks.discard)
+        owned = self._remote_reaps_by_session.setdefault(rec.session_id, set())
+        owned.add(task)
+
+        def settled(completed: asyncio.Task[bool]) -> None:
+            self._remote_reap_tasks.discard(completed)
+            owned.discard(completed)
+            if not owned:
+                self._remote_reaps_by_session.pop(rec.session_id, None)
+
+        task.add_done_callback(settled)
 
     async def _remote_reap(self, rec: Any, endpoint: dict) -> bool:
         from ssh_manager import ConnectionManager
@@ -3951,7 +3972,7 @@ class SessionManager:
                 self._release_container_lock(rec.session_id)
         return confirmed_dead
 
-    def sweep_stranded_hosts(self) -> int:
+    async def sweep_stranded_hosts(self) -> int:
         """Reap stranded incompatible Session Hosts that are now reapable.
 
         A periodic counterpart to the startup-time gate in
@@ -3970,16 +3991,24 @@ class SessionManager:
         now = time.time()
         reaped = 0
         for rec in self._live_host_records():
-            plan = plan_host(
-                protocol_version=rec.protocol_version,
-                child_alive=self._rec_child_alive(rec),
-                age_seconds=(now - rec.created_at) if rec.created_at else None,
-                stale_reap_seconds=self._session_host_stale_reap_seconds,
-            )
-            if plan.disposition in (HostDisposition.REAP_STOPPED,
-                                    HostDisposition.FORCE_REAP):
-                self._reap_host_record(rec, plan.reason)
-                reaped += 1
+            session = self._sessions.get(rec.session_id)
+            async with contextlib.AsyncExitStack() as locks:
+                if session is not None:
+                    if session._lifecycle_lock.locked():
+                        continue
+                    await locks.enter_async_context(session._lifecycle_lock)
+                    if not self._background_recovery_allowed(session):
+                        continue
+                plan = plan_host(
+                    protocol_version=rec.protocol_version,
+                    child_alive=self._rec_child_alive(rec),
+                    age_seconds=(now - rec.created_at) if rec.created_at else None,
+                    stale_reap_seconds=self._session_host_stale_reap_seconds,
+                )
+                if plan.disposition in (HostDisposition.REAP_STOPPED,
+                                        HostDisposition.FORCE_REAP):
+                    self._reap_host_record(rec, plan.reason)
+                    reaped += 1
         return reaped
 
     # -- Subscriber tracking + idle reaper (#1826) ----------------------------
@@ -6182,6 +6211,10 @@ class SessionManager:
                 rec = self._host_index.get(session_id)
                 if rec is not None:
                     self._reap_host_record(rec, "idle reap (#1826)")
+
+            pending_reaps = list(self._remote_reaps_by_session.get(session_id, ()))
+            if pending_reaps:
+                await asyncio.gather(*pending_reaps)
 
             session.status = SessionStatus.STOPPED
             session.restart_status = restart_status
