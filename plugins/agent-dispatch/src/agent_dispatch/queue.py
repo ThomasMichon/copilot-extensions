@@ -3895,10 +3895,11 @@ class TaskQueue:
             if exclude not in existing:
                 existing.append(exclude)
             extra["excludes"] = json.dumps(existing)
+        allowed, to = _task_transition_spec("yield_task")
         return self._transition(
             task_id,
-            allowed=Status.HELD,
-            to=Status.QUEUED,
+            allowed=allowed,
+            to=to,
             worker_id=worker_id,
             now=now,
             note=note or "yield",

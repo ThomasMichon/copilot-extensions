@@ -467,6 +467,29 @@ scenarios.
 
 ## Journal
 
+### 2026-09-11 - Phase 10: declare and wire the missing `yield_task` transition
+
+- Found, while starting item 2's investigation, an eighth `_transition`
+  call site that slice 1 missed: `TaskQueue.yield_task` (a worker's own
+  deliberate, voluntary give-back of a task on a recoverable snag, e.g. a
+  merge conflict) moves `HELD -> QUEUED` but was never declared in
+  `task_state_machine.py` at all -- distinct from `requeue_held`'s
+  automatic owner-gone reconciliation, which shares the same states but a
+  different actor and recovery mode.
+- Declared it as its own named transition (`SAFE_RETRY`, since it is a
+  deliberate worker action, not a system self-repair) and wired
+  `yield_task`'s hardcoded `allowed=Status.HELD, to=Status.QUEUED` to the
+  same `_task_transition_spec()` lookup slice 1 introduced. Added a
+  regression test (`test_yield_task_is_sourced_from_the_declared_table`)
+  matching the pattern the other seven wired methods already use.
+- Full `agent-dispatch` suite (630 tests) passes. Bumped agent-dispatch's
+  version to 0.1.2-dev70.
+- This closes the gap before starting item 2's actual implementation
+  (approved direction: extend `suspend`/`complete_with_outcome`'s
+  existing idempotent-replay pattern to the other transition methods,
+  scoped to exact-target-state + matching identity fences) -- item 2
+  needs every real `_transition` call site accounted for first.
+
 ### 2026-09-11 - Phase 10 slice 1: wire the task machine into `queue.py`
 
 - Replaced every hardcoded `allowed=`/`to=` pair in `queue.py`'s task-
