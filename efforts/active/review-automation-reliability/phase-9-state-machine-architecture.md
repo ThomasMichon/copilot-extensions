@@ -540,16 +540,29 @@ inside this checklist item.
   (`resolve_liveness_with_recovery`, `eol_safe_to_retire`) and
   `task_state_machine.py` (`SteerOutcome`, `STEER_OUTCOME_TRANSITION`,
   `resolve_steer_outcome`, `suspend_blocked_by_pending_steer`).
-- [ ] Declare the reservation/assignment allocation-fencing layer as a
+- [x] Declare the reservation/assignment allocation-fencing layer as a
   checkable relation coupled to the bridge machine (see "Assignment: the
-  reservation/allocation-fencing layer" above): the single-assignment
-  invariant as a structural fixture, the closed "let go" reason vocabulary
-  (`fail_spawn`/`defer_spawn`/`settle_spawn`/`retire_spawn`/preemption)
-  tagged with recovery modes, and the three-tier (N/A/consistent/anomaly)
-  reservation<->bridge consistency relation. **Designed, not yet
-  implemented** -- no module or test exists for this yet. The
-  launch-to-claim grace/recovery monitor is explicitly out of scope for
-  this item (see "Explicitly out of scope" above).
+  reservation/allocation-fencing layer" above)
+  (`../../../plugins/agent-dispatch/src/agent_dispatch/spawn_reservation_machine.py`):
+  the lifecycle transition table sourced from the real
+  `agent_dispatch.queue.SpawnState`; the single-assignment invariant as a
+  structural fixture (`violating_assignment_groups`); the closed "let go"
+  reason vocabulary (`LetGoReason`: failed/deferred/settled/
+  retired-rearm/preempted) tagged with recovery modes matching the
+  sub-doc's classification exactly; and the three-tier
+  (not-applicable/consistent/anomaly) reservation<->bridge consistency
+  relation (`classify_consistency`), which defaults every undeclared
+  pairing to anomaly rather than assuming consistency. Structural tests
+  (`../../../plugins/agent-dispatch/tests/test_spawn_reservation_machine.py`)
+  prove reachability/exit-checking (including that `FAILED` is releasable
+  but not machine-terminal, since `rearm` is a real exit from it), every
+  let-go reason naming a real transition and carrying the sub-doc's exact
+  recovery mode, the single-assignment invariant across both task-id and
+  exclusive-key groupings, and every whitelisted/documented-anomaly/
+  undeclared consistency pairing. The launch-to-claim grace/recovery
+  monitor remains explicitly out of scope (see "Explicitly out of scope"
+  above) -- this module declares the contract that component would
+  consume, not the component itself.
 - [x] Re-validate each Phase 8 candidate against the declared machines;
   fold each into the relevant machine's spec rather than implementing it
   standalone. Done as the "Re-validation pass" table above: three
