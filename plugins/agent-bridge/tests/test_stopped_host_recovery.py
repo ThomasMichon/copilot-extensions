@@ -239,7 +239,9 @@ async def test_stop_serializes_destructive_recovery_settlement(
     entered, release = asyncio.Event(), asyncio.Event()
     settled = []
 
-    async def blocked(*_args):
+    async def blocked(*_args, **kwargs):
+        if kwargs.get("strict"):
+            return
         entered.set()
         await release.wait()
         assert ctx.session._lifecycle_lock.locked()
@@ -288,3 +290,95 @@ async def test_stop_clears_redeploy_nudge_only_for_ordinary_stop(context, for_re
         ctx.manager._host_index.get(ctx.session.session_id).resume_on_reattach
         is for_restart
     )
+
+
+@pytest.mark.parametrize("inflight", [False, True])
+@pytest.mark.parametrize("for_restart", [False, True])
+async def test_stop_contains_independent_relay_monitor(
+    context, monkeypatch, inflight, for_restart,
+):
+    from ssh_manager.config_sources import SSHConfig
+    from ssh_manager.relay_channel import SupervisedRelayForward
+
+    ctx = context
+    relay = SupervisedRelayForward(SSHConfig(host_alias="example-host"), 51001)
+    ticks = asyncio.Queue()
+    retry_entered, retry_waiting = asyncio.Event(), asyncio.Event()
+    calls = []
+
+    async def establish():
+        calls.append("provider")
+        if len(calls) == 1:
+            return
+        retry_entered.set()
+        if inflight:
+            await asyncio.Event().wait()
+        raise ConnectionError("provider unavailable")
+
+    async def sleep(_delay):
+        if retry_entered.is_set():
+            retry_waiting.set()
+        await ticks.get()
+
+    monkeypatch.setattr(relay, "establish", establish)
+    monkeypatch.setattr(relay, "_sleep", sleep)
+    forward = SimpleNamespace(cancel=AsyncMock())
+    ctx.manager._relays[ctx.session.session_id] = [relay]
+    ctx.manager._forwards[ctx.session.session_id] = forward
+    release_ownership = Mock()
+    monkeypatch.setattr(ctx.manager, "_release_container_lock", release_ownership)
+    await relay.start()
+    monitor = relay._monitor_task
+    try:
+        ticks.put_nowait(None)
+        await asyncio.wait_for(retry_entered.wait(), 1)
+        if not inflight:
+            await asyncio.wait_for(retry_waiting.wait(), 1)
+        await asyncio.wait_for(
+            ctx.manager.stop_session(ctx.session.session_id, for_restart=for_restart), 1,
+        )
+        if for_restart:
+            assert not monitor.done()
+            forward.cancel.assert_not_awaited()
+            assert ctx.manager._relays[ctx.session.session_id] == [relay]
+        else:
+            assert monitor.done()
+            assert relay._monitor_task is None
+            forward.cancel.assert_awaited_once()
+            assert ctx.session.session_id not in ctx.manager._relays
+            assert ctx.session.session_id not in ctx.manager._forwards
+            count = len(calls)
+            for _ in range(3):
+                ticks.put_nowait(None)
+                await asyncio.sleep(0)
+                assert await ctx.manager.recover_disconnected_hosts() == 0
+            assert len(calls) == count
+        assert ctx.manager._host_index.get(ctx.session.session_id) is not None
+        release_ownership.assert_not_called()
+    finally:
+        await relay.stop()
+
+
+@pytest.mark.parametrize("failure", ["relay", "forward"])
+async def test_stop_surfaces_transport_teardown_failure_and_retains_retry_handle(
+    context, failure,
+):
+    ctx = context
+    relay = SimpleNamespace(stop=AsyncMock())
+    forward = SimpleNamespace(cancel=AsyncMock())
+    ctx.manager._relays[ctx.session.session_id] = [relay]
+    ctx.manager._forwards[ctx.session.session_id] = forward
+    failing = relay.stop if failure == "relay" else forward.cancel
+    failing.side_effect = RuntimeError("teardown failed")
+    with pytest.raises(RuntimeError, match="teardown failed"):
+        await ctx.manager.stop_session(ctx.session.session_id)
+    assert ctx.db.get_session(ctx.session.session_id)["status"] == "running"
+    assert ctx.manager._forwards[ctx.session.session_id] is forward
+    if failure == "relay":
+        assert ctx.manager._relays[ctx.session.session_id] == [relay]
+    failing.side_effect = None
+    await ctx.manager.stop_session(ctx.session.session_id)
+    assert ctx.session.status == SessionStatus.STOPPED
+    assert ctx.session.session_id not in ctx.manager._relays
+    assert ctx.session.session_id not in ctx.manager._forwards
+    assert ctx.manager._host_index.get(ctx.session.session_id) is not None

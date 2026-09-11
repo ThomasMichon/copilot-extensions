@@ -376,6 +376,11 @@ restart does not inherently close the child's pipes.
   together with any pending redeploy "Resume" nudge. Authority-result cleanup
   and observed child-exit settlement hold the same lock through their final
   mutations, not just through provider inspection.
+  Ordinary stop also stops per-session credential-relay supervisors and cancels
+  live forwards before acknowledgement; transport teardown failures are surfaced
+  rather than reported as containment. Host descriptors and venue ownership are
+  retained so explicit resume can rebuild channels. Frontend restart preserves
+  the relay channels instead of treating a transport detach as an operator stop.
   Legacy STOPPED rows without restart provenance remain dormant rather than
   guessing that an operator wanted recovery.
 - **Background CodeSpace recovery does not wake unavailable venues.** Before
