@@ -407,6 +407,11 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   host-auth nonce and routing-table overrides. Follow-up CodeSpaces
   authorization coverage passed 86 tests on Windows (1 skip) and 87 on POSIX;
   dispatch/governance remained green at 63/62 passed with 3/4 skips.
+- Final admission hardening removes inherited worktrees credentials/routing,
+  preserves exit 78 before top-level project/tool preflights, and separates
+  best-effort obligation bookkeeping from admission so a refused update cannot
+  interrupt transport cleanup. The expanded caller selection passed 90 tests
+  on Windows (1 skip) and 91 on POSIX.
 - This is another bounded conversion slice. The inventory remains report-only;
   neither the rest of the Phase 2/6 launcher/lease work nor the parent effort's
   validation is complete.

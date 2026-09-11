@@ -324,6 +324,8 @@ def test_namespaced_sibling_resolution_stays_in_active_marketplace_cell(
             "AGENT_DISPATCH_TOKEN", "AGENT_DISPATCH_CONTROL_TOKEN", "AGENT_DISPATCH_URL",
             "AGENT_CODESPACES_TOKEN", "GH_TOKEN", "GITHUB_TOKEN",
             "AGENT_BRIDGE_SESSION_HOST_NONCE", "AGENT_BRIDGE_NO_ROUTING_TABLE",
+            "AGENT_WORKTREES_OWNER_REF", "AGENT_WORKTREES_AHP_AUTH_TOKEN",
+            "AGENT_WORKTREES_BIND", "AGENT_WORKTREES_PROJECT",
         ):
             monkeypatch.setenv(name, str(tmp_path / "foreign"))
         if owner == "agent-codespaces":
@@ -356,6 +358,8 @@ def test_namespaced_sibling_resolution_stays_in_active_marketplace_cell(
             "AGENT_DISPATCH_CONTROL_TOKEN", "AGENT_DISPATCH_URL",
             "AGENT_CODESPACES_HOME", "AGENT_CODESPACES_TOKEN", "GH_TOKEN", "GITHUB_TOKEN",
             "AGENT_BRIDGE_SESSION_HOST_NONCE", "AGENT_BRIDGE_NO_ROUTING_TABLE",
+            "AGENT_WORKTREES_OWNER_REF", "AGENT_WORKTREES_AHP_AUTH_TOKEN",
+            "AGENT_WORKTREES_BIND", "AGENT_WORKTREES_PROJECT",
         }
         assert os.environ["COPILOT_EXTENSIONS_CONTEXT"] == str(own_root / "install.json")
         if os.name != "nt":

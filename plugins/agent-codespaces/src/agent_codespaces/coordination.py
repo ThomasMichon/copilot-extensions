@@ -273,6 +273,16 @@ def preflight(holder_ref: str) -> PreflightResult:
     return PreflightResult("absent", detail="preflight response is incompatible")
 
 
+def _bookkeeping_run(args: list[str]) -> subprocess.CompletedProcess[str] | None:
+    from .worktrees import ContextRefused
+
+    try:
+        return _run(args)
+    except ContextRefused as error:
+        log.warning("Skipping coordination bookkeeping after context refusal: %s", error)
+        return None
+
+
 def journal_obligation(name: str, holder_ref: str | None) -> bool:
     """Journal a CodeSpace obligation onto the BORROWING worktree's ledger.
 
@@ -289,7 +299,7 @@ def journal_obligation(name: str, holder_ref: str | None) -> bool:
     """
     if not holder_ref or not holder_ref.strip():
         return False
-    proc = _run(
+    proc = _bookkeeping_run(
         ["claims", "add", KIND, name, "--owner-ref", holder_ref.strip(), "--json"],
     )
     if proc is None:
@@ -318,7 +328,7 @@ def settle_obligation(
     args = ["claims", "settle", name, "--owner-ref", holder_ref.strip(), "--json"]
     if released:
         args.append("--released")
-    proc = _run(args)
+    proc = _bookkeeping_run(args)
     if proc is None:
         return False
     if proc.returncode != 0:
@@ -355,7 +365,7 @@ def mirror_disposition(
             "--disposition", disposition]
     if origin:
         args += ["--origin", origin]
-    proc = _run(args)
+    proc = _bookkeeping_run(args)
     if proc is None:
         return False
     if proc.returncode != _EXIT_OK:

@@ -81,7 +81,9 @@ def peer_environment(context: dict[str, Any], inherited: dict[str, str]) -> dict
             "GH_TOKEN", "GITHUB_TOKEN",
         }:
             continue
-        if upper.startswith(("AGENT_RT_", "AGENT_DISPATCH_", "AGENT_CODESPACES_")) or (
+        if upper.startswith((
+            "AGENT_RT_", "AGENT_DISPATCH_", "AGENT_CODESPACES_", "AGENT_WORKTREES_",
+        )) or (
             upper.startswith("AGENT_")
             and upper.endswith(("_ROOT", "_DIR", "_HOME", "_INSTALLATION_ID"))
         ):

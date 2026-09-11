@@ -33,6 +33,11 @@ including early setup and claim-disabled paths. Lifecycle best-effort catches
 must not turn context refusal into an ambient provider operation. Source hooks
 can derive their owner root from the validated explicit receipt without relying
 on a runtime-gate environment variable.
+Best-effort obligation journaling and disposition mirroring are not admission:
+they log a refused bookkeeping update and return false so cleanup can still
+disconnect an existing transport. Authorization/preflight calls retain refusal.
+Top-level CLI project and external-tool preflights run after context admission;
+read-only status, doctor, version, and readiness diagnostics remain exempt.
 Source hooks propagate explicit refusals as diagnostic failures. A rejected map
 probe stops the session-guidance writer before other producers or any file
 mutation; existing guidance is preserved rather than replaced with a success-shaped

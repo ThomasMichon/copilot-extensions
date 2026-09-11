@@ -328,3 +328,38 @@ def test_source_guidance_wrapper_preserves_refusal(tmp_path, monkeypatch):
     assert result.returncode == 126, (result.stdout, result.stderr)
     assert "guidance refused" in result.stderr
     assert not (home / ".copilot").exists()
+
+
+@pytest.mark.parametrize("argv", [
+    ["ssh", "space"],
+    ["--project", "project", "config", "show"],
+])
+def test_main_refuses_context_before_project_and_gh_preflights(
+    tmp_path, monkeypatch, capsys, argv,
+):
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "{")
+    monkeypatch.setenv("AGENT_CODESPACES_HOME", str(tmp_path / "invalid-owner"))
+    monkeypatch.setattr(cli, "_gh_binary_available", lambda: pytest.fail("gh preflight ran"))
+    monkeypatch.setattr(cli, "_chdir_to_project", lambda _: pytest.fail("project preflight ran"))
+    assert cli.main(argv) == cli._COORDINATION_EXIT
+    assert "context refused" in capsys.readouterr().err
+
+
+def test_main_retains_read_only_diagnostics(monkeypatch):
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "{")
+    monkeypatch.setattr(cli, "validate_context", lambda: pytest.fail("diagnostics gated"))
+    monkeypatch.setattr(cli, "_cmd_version", lambda: 0)
+    assert cli.main(["version"]) == 0
+
+
+def test_context_change_does_not_interrupt_best_effort_bookkeeping(monkeypatch, caplog):
+    def refused(*args, **kwargs):
+        raise worktrees.ContextRefused("generation changed")
+
+    monkeypatch.setattr(coordination, "_run", refused)
+    assert coordination.journal_obligation("space", "machine/project/worktree") is False
+    assert coordination.settle_obligation("space", "machine/project/worktree") is False
+    assert coordination.mirror_disposition("space", "at-rest", "test-token") is False
+    assert caplog.text.count("Skipping coordination bookkeeping after context refusal") == 3
+    with pytest.raises(worktrees.ContextRefused):
+        coordination._run(["lease", "acquire"])

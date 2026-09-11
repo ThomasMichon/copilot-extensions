@@ -776,6 +776,13 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
 
+    try:
+        if args.command and args.command not in {"doctor", "status", "version", "installer-readiness"}:
+            validate_context()
+    except ContextRefused as error:
+        print(f"[BLOCKED] CodeSpace installation context refused: {error}", file=sys.stderr)
+        return _COORDINATION_EXIT
+
     # --remote-cmd-file: the internal bridge-dispatch path passes the ACP launch
     # payload as a file PATH (a clean argv token) rather than a --remote-cmd
     # string, so no shell (cmd.exe %VAR% expansion in particular) can mangle it.
@@ -796,8 +803,12 @@ def main(argv: list[str] | None = None) -> int:
     # the cwd; on a name/CodeSpace-addressed verb an *explicit* --project bounces
     # (fail loud, #1080) while a router-injected one stays a silent no-op.
     # Best-effort otherwise: an unresolvable project warns but never blocks.
-    if _guard_project_scope(parser, args):
-        _chdir_to_project(args.project)
+    try:
+        if _guard_project_scope(parser, args):
+            _chdir_to_project(args.project)
+    except ContextRefused as error:
+        print(f"[BLOCKED] CodeSpace installation context refused: {error}", file=sys.stderr)
+        return _COORDINATION_EXIT
 
     if not args.command:
         parser.print_help()
