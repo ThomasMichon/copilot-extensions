@@ -99,6 +99,62 @@ class ProfileAssignmentPolicy:
 # Synthetic default when no profiles are configured.
 DEFAULT_PROFILE = CopilotProfile(name="cloud", label="☁️  Cloud (GitHub)")
 
+# The vocabulary ``pr_contract.RepoPolicy.viewer_permission`` /
+# ``providers.actor_viewer_permission()`` normalize every provider's live,
+# per-identity permission read to (see #2433's ``actor_merge_authority``).
+# ``"none"`` is a confident no-access read, distinct from an *unresolved* read
+# (empty string / unsupported provider), which callers must treat as unknown,
+# never as this level. Ordered lowest -> highest so a resolver can
+# compare/clamp against it. Excluding ``"none"``, this also matches the role
+# vocabulary the GitHub Inside Microsoft ACL policy uses for its own ``role:``
+# values (Read/Triage/Write/Maintain -- Admin is never grantable via that ACL).
+GITHUB_ROLE_LEVELS: tuple[str, ...] = (
+    "none", "read", "triage", "write", "maintain", "admin",
+)
+
+
+@dataclass(frozen=True)
+class ForkConfig:
+    """How ``create-pr`` should publish a PR head when a role can't push to
+    the repo directly (see ``efforts/active/role-aware-fork-pr-flow`` in
+    copilot-extensions).
+
+    ``enabled`` on the base ``pr.fork`` block is a repo-wide default; a role
+    override (``pr.roles.<role>.fork``) may turn it on/off for just that role
+    without repeating the other fields. When active, ``create-pr`` publishes
+    the PR head to the caller's fork instead of ``repo.remote`` and opens the
+    PR with a ``<fork-owner>:<branch>`` head. GitHub-only today; the
+    fork-push/PR-open integration in ``create_pr`` itself is a later phase of
+    the same effort, not yet implemented -- this config shape is accepted and
+    parsed now so repos can declare intent ahead of that landing. Other
+    providers ignore this block.
+    """
+
+    enabled: bool = False
+    remote: str = "fork"    # local git remote name used for the fork
+    owner: str = ""         # explicit fork-owner override; "" = caller's own account
+
+
+@dataclass(frozen=True)
+class PRRoleOverride:
+    """Per-role overrides layered onto the repo's base ``PRConfig`` (see
+    ``efforts/active/role-aware-fork-pr-flow`` in copilot-extensions).
+
+    Keyed in ``PRConfig.roles`` by one of ``GITHUB_ROLE_LEVELS``. Every field
+    is optional (``None`` = inherit the base ``PRConfig`` value unchanged) so a
+    role only needs to state what's *different* about its flow -- e.g. a
+    ``write``-permission "Contributor" role might set ``merge_actor=""`` (never
+    self-merge; derive to reviewer/consent-gate) and ``fork=ForkConfig(enabled=True)``,
+    while a ``maintain``-permission "Maintainer" role keeps the repo's default
+    ``submitter-direct`` merge_actor and leaves ``fork`` unset (direct push).
+    """
+
+    reviewer: str | None = None
+    review_blocking: bool | None = None
+    self_approve: bool | None = None
+    merge_actor: str | None = None
+    fork: ForkConfig | None = None
+
 
 @dataclass(frozen=True)
 class PRConfig:
@@ -281,6 +337,15 @@ class PRConfig:
     branch_update_strategy: str = "rebase"
     merge_strategy: str = "squash"
     prefer_auto_merge: bool = True
+    # ── Role-aware PR flow (see ``efforts/active/role-aware-fork-pr-flow`` in
+    # copilot-extensions). ``roles`` maps a GitHub permission level
+    # (``GITHUB_ROLE_LEVELS``) to a ``PRRoleOverride`` layered onto this
+    # PRConfig for a caller resolved at that level. Empty (the default) means
+    # every caller gets the same flow, exactly today's behavior. ``fork`` is
+    # the repo-wide fork-publish default (see ``ForkConfig``); a role may
+    # override it via its own ``fork`` field.
+    roles: dict[str, PRRoleOverride] = field(default_factory=dict)
+    fork: ForkConfig = field(default_factory=ForkConfig)
 
 
 @dataclass(frozen=True)
@@ -1724,7 +1789,79 @@ def _parse_pr(raw: Any) -> PRConfig:
             raw.get("merge_strategy", "squash"), ("squash", "merge", "rebase"),
             "squash"),
         prefer_auto_merge=bool(raw.get("prefer_auto_merge", True)),
+        roles=_parse_pr_roles(raw.get("roles")),
+        fork=_parse_fork(raw.get("fork")),
     )
+
+
+def _parse_fork(raw: Any) -> ForkConfig:
+    """Parse an optional ``pr.fork`` (or ``pr.roles.<role>.fork``) block."""
+    if not isinstance(raw, dict):
+        return ForkConfig()
+    return ForkConfig(
+        enabled=bool(raw.get("enabled", False)),
+        remote=str(raw.get("remote", "fork")).strip() or "fork",
+        owner=str(raw.get("owner", "")).strip(),
+    )
+
+
+def _parse_pr_roles(raw: Any) -> dict[str, PRRoleOverride]:
+    """Parse the optional ``pr.roles`` map into ``{role: PRRoleOverride}``.
+
+    Unknown role keys (not in ``GITHUB_ROLE_LEVELS``) are dropped rather than
+    raising -- a typo'd role name should degrade to "no override for anyone
+    matching it", not break config loading for the whole repo.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    result: dict[str, PRRoleOverride] = {}
+    for role, block in raw.items():
+        role_key = str(role).strip().lower()
+        if role_key not in GITHUB_ROLE_LEVELS or not isinstance(block, dict):
+            continue
+        fork_raw = block.get("fork")
+        result[role_key] = PRRoleOverride(
+            reviewer=(str(block["reviewer"]).strip()
+                      if "reviewer" in block else None),
+            review_blocking=(bool(block["review_blocking"])
+                              if "review_blocking" in block else None),
+            self_approve=(bool(block["self_approve"])
+                          if "self_approve" in block else None),
+            merge_actor=(str(block["merge_actor"]).strip().lower()
+                         if "merge_actor" in block else None),
+            fork=(_parse_fork(fork_raw) if fork_raw is not None else None),
+        )
+    return result
+
+
+def resolve_role_pr_config(prcfg: PRConfig, role: str | None) -> PRConfig:
+    """Layer ``prcfg.roles[role]`` (if any) onto the base ``PRConfig``.
+
+    Pure and total: an unrecognized/``None``/unconfigured ``role`` returns
+    ``prcfg`` unchanged (today's single-flow behavior). Only the fields the
+    matching :class:`PRRoleOverride` actually sets (non-``None``) are
+    replaced; everything else -- including ``fork`` when the override leaves
+    it ``None`` -- is inherited from ``prcfg``.
+    """
+    if not role:
+        return prcfg
+    override = prcfg.roles.get(str(role).strip().lower())
+    if override is None:
+        return prcfg
+    from dataclasses import replace
+
+    changes: dict[str, Any] = {}
+    if override.reviewer is not None:
+        changes["reviewer"] = override.reviewer
+    if override.review_blocking is not None:
+        changes["review_blocking"] = override.review_blocking
+    if override.self_approve is not None:
+        changes["self_approve"] = override.self_approve
+    if override.merge_actor is not None:
+        changes["merge_actor"] = override.merge_actor
+    if override.fork is not None:
+        changes["fork"] = override.fork
+    return replace(prcfg, **changes) if changes else prcfg
 
 
 def _parse_profiles(raw_list: list[Any]) -> list[CopilotProfile]:

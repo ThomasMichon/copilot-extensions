@@ -368,6 +368,69 @@ def _title_from_commits(worktree_path: str, upstream: str) -> str | None:
     return subject or None
 
 
+def _resolve_caller_role(prcfg, repo_slug: str) -> str | None:
+    """Resolve the caller's live permission on ``repo_slug`` for role-aware PR
+    flow resolution (efforts/active/role-aware-fork-pr-flow, GitHub-only).
+
+    Reuses the already-landed ``providers.actor_viewer_permission()`` (#2433)
+    rather than a second provider-specific primitive -- no extra request shape
+    to maintain. Returns ``None`` (never raises) when the repo's provider
+    isn't ``"github"``, ``repo_slug`` is empty, or the live read is unknown/
+    failed -- callers must treat that exactly like "no role resolved" (the
+    base, non-role-scoped ``PRConfig`` applies), never as a denial.
+    """
+    if prcfg.provider != "github" or not repo_slug:
+        return None
+    from . import providers
+    try:
+        provider = providers.get_provider(prcfg.provider)
+        token = providers.account_token_for_slug(repo_slug, prcfg)
+        permission = providers.actor_viewer_permission(
+            provider, repo_slug, api_base=prcfg.api_base, token=token,
+        )
+    except Exception:
+        return None
+    return permission or None
+
+
+def _ensure_fork_and_remote(worktree_path: str, repo_slug: str, prcfg) -> dict:
+    """Ensure the caller's fork of ``repo_slug`` exists and a local git remote
+    (``prcfg.fork.remote``) points at it.
+
+    Returns ``{"owner": <fork-owner>}`` on success, or ``{"error": <message>}``
+    on any failure (never raises) -- GitHub-only, matching ``pr.fork``'s scope.
+    An explicit ``prcfg.fork.owner`` overrides the fork-owner login used to
+    build the PR head, in case the caller pushes through a differently-named
+    fork than the one their own token would create/read.
+    """
+    if prcfg.provider != "github":
+        return {"error": (
+            f"pr.fork is only supported for provider 'github' today "
+            f"(this repo is configured for provider {prcfg.provider!r})."
+        )}
+    from . import providers
+    try:
+        provider = providers.get_provider(prcfg.provider)
+        token = providers.account_token_for_slug(repo_slug, prcfg)
+        fork = provider.ensure_fork(repo_slug, token=token)
+    except (providers.ProviderError, OSError) as exc:
+        return {"error": f"Could not create/verify a fork of '{repo_slug}': {exc}"}
+    if fork is None:
+        return {"error": (
+            f"Could not create/verify a fork of '{repo_slug}' (no 'gh' auth, "
+            f"an API error, or an unsupported provider)."
+        )}
+    owner, clone_url = fork
+    if prcfg.fork.owner:
+        owner = prcfg.fork.owner
+    if not git_ops.ensure_remote(prcfg.fork.remote, clone_url, cwd=worktree_path):
+        return {"error": (
+            f"Could not point local git remote '{prcfg.fork.remote}' at "
+            f"'{clone_url}'."
+        )}
+    return {"owner": owner}
+
+
 def create_pr(
     worktree_id: str,
     config: Config,
@@ -382,6 +445,7 @@ def create_pr(
     draft: bool = False,
     attribution: bool | None = None,
     dry_run: bool = False,
+    confirm_fork: bool = False,
 ) -> dict:
     """Squash worktree commits, create + push a feature branch for a PR.
 
@@ -397,6 +461,19 @@ def create_pr(
     values are unsuitable for public PRs. Provider failure is non-fatal: the
     feature branch is already pushed, so the result carries ``pr_open_error``
     and the agent can fall back to delegating PR creation manually.
+
+    ``confirm_fork`` gates the role-aware fork-PR flow (see
+    ``efforts/active/role-aware-fork-pr-flow`` in this repo, GitHub-only
+    today): when the repo's ``pr.roles``/``pr.fork`` config resolves the
+    caller's live role to a flow that publishes through a personal fork
+    rather than a direct push, ``create_pr`` does **not** silently fork or
+    push anywhere on a caller's first call. It returns a
+    ``needs_confirmation: "fork_setup"`` result explaining what it would do,
+    for the calling agent to relay to the human. Only a second call with
+    ``confirm_fork=True`` actually creates/verifies the fork, points a local
+    remote at it, and publishes there. A repo that never configures
+    ``pr.fork``/``pr.roles`` never resolves a fork flow, so this parameter is
+    a no-op for it -- fully backward compatible.
 
     A worktree can track multiple PRs.  When the active PR is **terminal**
     (merged/closed) -- or ``new`` is set, or none exists -- a *fresh* PR is
@@ -559,6 +636,50 @@ def create_pr(
             "draft": want_draft,
         }
 
+    # Resolve the PR's target repo as the hosting ``owner/name`` slug (what the
+    # provider API needs), in order: explicit --repo > the remote's slug > a
+    # previously-recorded value > the local project name (last-resort).
+    # Resolved here (rather than just before it's first consumed, further
+    # down) because the role-aware fork-PR resolution right below also needs
+    # it, and re-deriving it twice risked drifting the two apart.
+    host_slug = git_ops.remote_slug(remote, cwd=worktree_path)
+    default_pr_repo = (
+        target_repo or host_slug or (record.repo if record else "") or ""
+    )
+
+    # --- Role-aware PR flow resolution + fork-publish confirmation gate ----
+    # (efforts/active/role-aware-fork-pr-flow, Phase 2b, GitHub-only). Only
+    # touches anything when the repo opts in via `pr.roles` and/or
+    # `pr.fork.enabled`; an unconfigured repo's `prcfg`/`publish_remote` are
+    # unchanged from here on -- byte-for-byte today's behavior.
+    publish_remote = remote
+    fork_owner = ""
+    if prcfg.roles:
+        prcfg = cfg.resolve_role_pr_config(
+            prcfg, _resolve_caller_role(prcfg, default_pr_repo),
+        )
+    if prcfg.fork.enabled:
+        if not confirm_fork:
+            return {
+                **base, "success": False,
+                "needs_confirmation": "fork_setup",
+                "repo": default_pr_repo,
+                "fork_remote": prcfg.fork.remote,
+                "message": (
+                    f"This repo's resolved PR flow publishes through a "
+                    f"personal fork of '{default_pr_repo}' rather than a "
+                    f"direct push. Ask the user to confirm forking it to "
+                    f"their own GitHub account and pushing the branch "
+                    f"there, then re-run create-pr with --confirm-fork "
+                    f"(or confirm_fork=True) once they agree."
+                ),
+            }
+        fork_setup = _ensure_fork_and_remote(worktree_path, default_pr_repo, prcfg)
+        if fork_setup.get("error"):
+            return {**base, "error": fork_setup["error"]}
+        publish_remote = prcfg.fork.remote
+        fork_owner = fork_setup["owner"]
+
     if not git_ops.is_clean(cwd=worktree_path):
         return {**base, "error": (
             "Working tree has uncommitted changes; commit or stash them "
@@ -577,9 +698,10 @@ def create_pr(
     # --- Re-run path: already on the feature branch -> (re)push + record. ---
     if head_branch == feature_branch:
         return _push_existing_feature(
-            worktree_path, feature_branch, remote, repo, prcfg, record, base,
-            config=config, worktree_id=worktree_id, title=eff_title, body=body,
-            open_pr=open_pr, draft=want_draft, attribution=attribution,
+            worktree_path, feature_branch, publish_remote, repo, prcfg, record,
+            base, config=config, worktree_id=worktree_id, title=eff_title,
+            body=body, open_pr=open_pr, draft=want_draft, attribution=attribution,
+            pr_head=(f"{fork_owner}:{feature_branch}" if fork_owner else ""),
         )
 
     if head_branch != wt_branch:
@@ -606,17 +728,18 @@ def create_pr(
         feature_branch, cwd=worktree_path
     ):
         return _push_existing_feature(
-            worktree_path, feature_branch, remote, repo, prcfg, record, base,
-            config=config, worktree_id=worktree_id, title=eff_title, body=body,
-            open_pr=open_pr, draft=want_draft, attribution=attribution,
+            worktree_path, feature_branch, publish_remote, repo, prcfg, record,
+            base, config=config, worktree_id=worktree_id, title=eff_title,
+            body=body, open_pr=open_pr, draft=want_draft, attribution=attribution,
+            pr_head=(f"{fork_owner}:{feature_branch}" if fork_owner else ""),
         )
 
     if not reusing:
         if git_ops.local_branch_exists(feature_branch, cwd=worktree_path) or \
-                git_ops.remote_branch_exists(remote, feature_branch, cwd=worktree_path):
+                git_ops.remote_branch_exists(publish_remote, feature_branch, cwd=worktree_path):
             return {**base, "error": (
                 f"Feature branch '{feature_branch}' already exists locally or on "
-                f"'{remote}'. Pass --branch to choose a different name."
+                f"'{publish_remote}'. Pass --branch to choose a different name."
             )}
 
     if not ahead:
@@ -630,13 +753,6 @@ def create_pr(
     # Resolve the target PRRecord: reuse the live active PR, or append a fresh
     # one (serial re-PR / parallel / explicit --new).  Record the transitional
     # 'creating' state up front so a later failure is recoverable.
-    # Resolve the PR's target repo as the hosting ``owner/name`` slug (what the
-    # provider API needs), in order: explicit --repo > the remote's slug > a
-    # previously-recorded value > the local project name (last-resort).
-    host_slug = git_ops.remote_slug(remote, cwd=worktree_path)
-    default_pr_repo = (
-        target_repo or host_slug or (record.repo if record else "") or ""
-    )
     target_pr: PRRecord | None = None
     if record is not None:
         if reusing and active is not None:
@@ -733,12 +849,12 @@ def create_pr(
         # (a later `git sync` fast-forwards it clean on merge).
         with hooks.allow_pr_push():
             pushed = git_ops.push(
-                remote, f"{wt_branch}:refs/heads/{feature_branch}",
+                publish_remote, f"{wt_branch}:refs/heads/{feature_branch}",
                 cwd=worktree_path, force_with_lease=reusing,
             )
         if not pushed:
             return {**base, "error": (
-                f"Failed to push '{wt_branch}' to '{remote}/{feature_branch}'. "
+                f"Failed to push '{wt_branch}' to '{publish_remote}/{feature_branch}'. "
                 f"The squashed work is on '{wt_branch}'; tracking state left as "
                 f"'creating' for retry (re-run create-pr)."
                 + (f"\ngit: {pushed.stderr.strip()}" if pushed.stderr else "")
@@ -766,11 +882,11 @@ def create_pr(
         git_ops.git("branch", "-f", feature_branch, "HEAD", cwd=worktree_path, check=False)
         with hooks.allow_pr_push():
             pushed = git_ops.push(
-                remote, feature_branch, cwd=worktree_path, force_with_lease=reusing
+                publish_remote, feature_branch, cwd=worktree_path, force_with_lease=reusing
             )
         if not pushed:
             return {**base, "error": (
-                f"Failed to push '{feature_branch}' to '{remote}'. The squashed "
+                f"Failed to push '{feature_branch}' to '{publish_remote}'. The squashed "
                 f"work is on '{wt_branch}' (and the local '{feature_branch}' "
                 f"snapshot); tracking state left as 'creating' for retry "
                 f"(re-run create-pr)."
@@ -795,13 +911,15 @@ def create_pr(
 
     result = {
         **base, "success": True, "state": "open",
-        "branch": feature_branch, "remote": remote,
+        "branch": feature_branch, "remote": publish_remote,
         "base_sha": base_sha, "head_sha": head_sha, "patch_id": patch_id,
         "provider": prcfg.provider, "default_branch": repo.default_branch,
         "repo": (target_pr.repo if target_pr else default_pr_repo),
         "pr_count": len(record.prs) if record else 0,
         "draft": want_draft,
     }
+    if fork_owner:
+        result["pr_head"] = f"{fork_owner}:{feature_branch}"
     if reusing:
         # This call iterated an existing *live* PR (re-squash + force-push onto
         # the reused head) rather than opening a fresh one -- flag it so callers
@@ -1745,6 +1863,7 @@ def _push_existing_feature(
     open_pr: bool | None,
     draft: bool,
     attribution: bool | None,
+    pr_head: str = "",
 ) -> dict:
     """Re-run helper: push an already-created feature branch and record state.
 
@@ -1752,6 +1871,12 @@ def _push_existing_feature(
     opened now; if it is already open its number/url is surfaced.  This keeps a
     re-run from leaving a pushed branch with no reported PR -- which otherwise
     leads the agent to open a duplicate (#1167).
+
+    ``pr_head``, when non-empty, is an explicit ``<owner>:<branch>`` PR head
+    (the role-aware fork-PR flow's publish step, when ``remote`` here is
+    actually the caller's fork remote rather than the repo's own) -- carried
+    onto the result for ``_finish_auto_open``/``scope_from_create_result`` to
+    prefer over the plain branch name.
     """
     # Resolve the head from the feature branch ref, not HEAD: a #1804 re-run
     # from the worktree base branch leaves HEAD off the feature branch, so
@@ -1805,6 +1930,8 @@ def _push_existing_feature(
         "pr_count": len(record.prs) if record else 0,
         "draft": draft,
     }
+    if pr_head:
+        result["pr_head"] = pr_head
     _finish_auto_open(
         result, config, record, target, title=title, body=body,
         worktree_id=worktree_id, head_sha=head_sha, open_pr=open_pr,

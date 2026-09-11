@@ -298,6 +298,91 @@ class TestPRConfigParsing:
         assert pr.squash is True
         assert pr.delete_source_branch is False
 
+    def test_pr_roles_and_fork_absent_defaults_empty(self, tmp_path: Path):
+        cfgfile = tmp_path / "config.yaml"
+        self._write(cfgfile, "    pr:\n      enabled: true\n")
+        pr = cfg.load_config(cfgfile).repos["ext"].pr
+        assert pr.roles == {}
+        assert pr.fork == cfg.ForkConfig()
+        assert pr.fork.enabled is False
+
+    def test_pr_fork_block_parsed(self, tmp_path: Path):
+        cfgfile = tmp_path / "config.yaml"
+        self._write(
+            cfgfile,
+            "    pr:\n"
+            "      enabled: true\n"
+            "      fork:\n"
+            "        enabled: true\n"
+            "        remote: myfork\n"
+            "        owner: someone\n",
+        )
+        pr = cfg.load_config(cfgfile).repos["ext"].pr
+        assert pr.fork == cfg.ForkConfig(enabled=True, remote="myfork", owner="someone")
+
+    def test_pr_roles_block_parsed(self, tmp_path: Path):
+        cfgfile = tmp_path / "config.yaml"
+        self._write(
+            cfgfile,
+            "    pr:\n"
+            "      enabled: true\n"
+            "      merge_actor: submitter-direct\n"
+            "      roles:\n"
+            "        maintain:\n"
+            "          merge_actor: submitter-direct\n"
+            "        write:\n"
+            "          merge_actor: \"\"\n"
+            "          fork:\n"
+            "            enabled: true\n"
+            "        bogus-role:\n"
+            "          merge_actor: submitter-direct\n",
+        )
+        pr = cfg.load_config(cfgfile).repos["ext"].pr
+        # An unrecognized role key is dropped, not raised.
+        assert set(pr.roles) == {"maintain", "write"}
+        assert pr.roles["maintain"].merge_actor == "submitter-direct"
+        assert pr.roles["maintain"].fork is None
+        assert pr.roles["write"].merge_actor == ""
+        assert pr.roles["write"].fork == cfg.ForkConfig(enabled=True)
+
+    def test_resolve_role_pr_config_no_role_returns_base(self, tmp_path: Path):
+        cfgfile = tmp_path / "config.yaml"
+        self._write(
+            cfgfile,
+            "    pr:\n"
+            "      enabled: true\n"
+            "      merge_actor: submitter-direct\n"
+            "      roles:\n"
+            "        write:\n"
+            "          merge_actor: \"\"\n",
+        )
+        pr = cfg.load_config(cfgfile).repos["ext"].pr
+        assert cfg.resolve_role_pr_config(pr, None) is pr
+        assert cfg.resolve_role_pr_config(pr, "unconfigured-role") is pr
+
+    def test_resolve_role_pr_config_layers_matching_role(self, tmp_path: Path):
+        cfgfile = tmp_path / "config.yaml"
+        self._write(
+            cfgfile,
+            "    pr:\n"
+            "      enabled: true\n"
+            "      merge_actor: submitter-direct\n"
+            "      reviewer: copilot\n"
+            "      roles:\n"
+            "        write:\n"
+            "          merge_actor: \"\"\n"
+            "          fork:\n"
+            "            enabled: true\n"
+            "            remote: myfork\n",
+        )
+        pr = cfg.load_config(cfgfile).repos["ext"].pr
+        resolved = cfg.resolve_role_pr_config(pr, "Write")  # case-insensitive
+        assert resolved.merge_actor == ""
+        assert resolved.fork == cfg.ForkConfig(enabled=True, remote="myfork")
+        # Everything not overridden by the role is inherited unchanged.
+        assert resolved.reviewer == "copilot"
+        assert resolved.enabled is True
+
     def test_pr_required_parsed(self, tmp_path: Path):
         cfgfile = tmp_path / "config.yaml"
         self._write(

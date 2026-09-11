@@ -1115,7 +1115,6 @@ class TestGitHubProvider:
         assert seen_hosts == ["ghe.example.com", "ghe.example.com"]
 
 
-
     def test_merge_pull_unsupported_on_gitea_and_azure(self):
         # Direct merge (pr-merge --now) is GitHub-only today; the other
         # providers return a non-empty "unsupported" message, never "".
