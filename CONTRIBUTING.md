@@ -69,10 +69,14 @@ closing keyword next to that issue number, even in a sentence saying the PR
 does *not* close it: GitHub recognizes the keyword/reference pair without
 honoring the negation.
 
-Before merging a partial slice, inspect the PR's `closingIssuesReferences`
-field with `gh pr view <number> --json closingIssuesReferences` through the
-repository-scoped GitHub wrapper. It must not contain an unfinished parent
-tracker. After merge, verify both the PR's merged state and the parent issue's
+Before merging a partial slice, inspect its closing references:
+
+```bash
+agent-worktrees repos gh ThomasMichon/copilot-extensions -- pr view <number> --repo ThomasMichon/copilot-extensions --json closingIssuesReferences
+```
+
+The result must not contain an unfinished parent tracker. After merge, verify
+both the PR's merged state and the parent issue's
 expected open state. If accidental closure occurs, remove the closing phrase,
 reopen the issue, and record the correction; a null `commit_id` in an issue
 closure event is not by itself evidence that an agent called an issue-close API.
