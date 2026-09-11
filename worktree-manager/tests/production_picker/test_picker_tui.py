@@ -23,7 +23,7 @@ import pytest
 # suite with a module-level ImportError.
 pytest.importorskip("textual", reason="textual not installed (optional TUI dep)")
 
-from worktree_manager.production_picker.picker_tui import derive, new_picker_enabled  # noqa: E402
+from worktree_manager.production_picker.picker_tui import derive  # noqa: E402
 from worktree_manager.production_picker.picker_tui import capture as pcap  # noqa: E402
 from worktree_manager.production_picker.picker_tui.engine import (  # noqa: E402
     PickerApp,
@@ -2798,18 +2798,6 @@ def test_bucket_fallback_no_classify_finalized_is_clean_not_wip():
          "started_at": "2026-06-25T10:00:00"}, "Emancipation-Cube", "WSL")
     assert w2["cleanup_bucket"] == "unknown"
     assert derive.BUCKET_DISPO[w2["cleanup_bucket"]] == ""   # no chip
-
-
-def test_new_picker_flag_gating(monkeypatch):
-    monkeypatch.delenv("AGENT_WORKTREES_NEW_PICKER", raising=False)
-    monkeypatch.delenv("AGENT_WORKTREES_LEGACY_PICKER", raising=False)
-    # Default everywhere: the Textual picker is on with no config/env.
-    assert new_picker_enabled() is True
-    monkeypatch.setenv("AGENT_WORKTREES_NEW_PICKER", "1")
-    assert new_picker_enabled() is True
-    # Legacy override always wins (the rollback switch).
-    monkeypatch.setenv("AGENT_WORKTREES_LEGACY_PICKER", "1")
-    assert new_picker_enabled() is False
 
 
 def test_tui_renders_local_worktrees():

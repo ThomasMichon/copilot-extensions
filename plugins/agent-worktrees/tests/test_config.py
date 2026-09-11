@@ -1158,7 +1158,7 @@ class TestKnowledgeConfigOverlay:
 
     def test_overlay_grafts_prefs_for_stateless_harness(self, tmp_path, monkeypatch):
         h = self._mk_harness(tmp_path, stateless=True)
-        k = self._mk_knowledge(tmp_path, "headless: true\nnew_picker: false\n")
+        k = self._mk_knowledge(tmp_path, "headless: true\nauto_fast_forward: false\n")
         self._registry(monkeypatch, harness=h, knowledge=k)
         # machine-local: binds the knowledge repo, does NOT set the prefs.
         mfile = tmp_path / "machine.yaml"
@@ -1168,8 +1168,8 @@ class TestKnowledgeConfigOverlay:
             f"repos:\n  harness:\n    anchor: {h}\n    worktree_root: /tmp/wt\n",
             encoding="utf-8")
         conf = cfg.load_config(mfile)
-        assert conf.headless is True        # from the knowledge overlay
-        assert conf.new_picker is False     # from the knowledge overlay
+        assert conf.headless is True                # from the knowledge overlay
+        assert conf.auto_fast_forward is False       # from the knowledge overlay
 
     def test_overlay_may_arm_profile_assignment(self, tmp_path, monkeypatch):
         h = self._mk_harness(tmp_path, stateless=True)
