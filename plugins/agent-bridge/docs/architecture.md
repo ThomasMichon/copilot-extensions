@@ -367,20 +367,25 @@ restart does not inherently close the child's pipes.
   Hosts; otherwise it can lazily resume from persisted Copilot state.
 - **Explicit stops remain dormant.** Startup and heartbeat recovery do not probe
   a stopped session's provider, inspect its remote authority, or reconnect its
-  forward. Stop and recovery share the session lifecycle lock, so a stop waits
-  for an in-flight recovery before acknowledging containment; subsequent passes
-  cannot re-arm it. The host record and conversation remain available for an
+  forward. Initial launch, stop, and recovery share the session lifecycle lock,
+  so a stop waits for an in-flight launch or recovery before acknowledging
+  containment; subsequent passes cannot re-arm it. The host record and conversation remain available for an
   explicit resume (or a later send). Frontend shutdown instead records restart
   recovery intent, independently of the cancel-on-redeploy policy. That intent
   survives repeated frontend restarts and is cleared by an ordinary stop,
   together with any pending redeploy "Resume" nudge. Authority-result cleanup
   and observed child-exit settlement hold the same lock through their final
-  mutations, not just through provider inspection.
+  mutations, not just through provider inspection. Startup version-mux reaping
+  and opt-in redeploy nudge production share that lock as well.
   Ordinary stop also stops per-session credential-relay supervisors and cancels
   live forwards before acknowledgement; transport teardown failures are surfaced
   rather than reported as containment. Host descriptors and venue ownership are
   retained so explicit resume can rebuild channels. Frontend restart preserves
   the relay channels instead of treating a transport detach as an operator stop.
+  Retaining descriptors and conversation state does not pin idle child processes:
+  the existing graceful-detach policy may reap an idle child, while busy children
+  survive. Explicit resume adopts a surviving host or loads the persisted
+  conversation into a fresh child; this fix does not change that idle-reap policy.
   Legacy STOPPED rows without restart provenance remain dormant rather than
   guessing that an operator wanted recovery.
 - **Background CodeSpace recovery does not wake unavailable venues.** Before
