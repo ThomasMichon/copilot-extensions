@@ -378,11 +378,15 @@ restart does not inherently close the child's pipes.
   mutations, not just through provider inspection. Startup version-mux reaping
   and opt-in redeploy nudge production share that lock as well. Dead-host pruning
   and stranded-host sweeps run on the lifecycle event loop and skip dormant or
-  lifecycle-owned sessions. Blocking local process teardown stays off-loop
-  while retaining that lifecycle lock, including during sweep cancellation.
+  lifecycle-owned sessions. Stranded sweeps keep blocking local process teardown
+  off-loop while retaining that lifecycle lock, including during cancellation.
   Only process termination is offloaded; shared host-index cleanup stays on the
   event loop. Child-exit settlement joins the old prompt driver before its final
   stopped-state write.
+  Remote authority results are applied only if the snapshotted host record and
+  lifecycle generation still match; a stop/resume cycle cannot revive a stale
+  probe result. Other existing synchronous local-reap entry points remain
+  unchanged; their offloading is tracked separately in #2465.
   Stop also awaits any previously scheduled remote reap for that session before
   acknowledging, shielding that cleanup from request cancellation. When both
   locks are needed, turn admission precedes lifecycle ownership: a send admitted

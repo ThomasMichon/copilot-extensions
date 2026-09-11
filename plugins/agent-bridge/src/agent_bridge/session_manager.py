@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
 import inspect
 import json
 import logging
@@ -732,6 +733,7 @@ class Session:
         self.progress: dict[str, str] = {}
         self._prompt_task: asyncio.Task | None = None
         self._lifecycle_lock = asyncio.Lock()
+        self._lifecycle_generation = 0
         self._turn_start_lock = asyncio.Lock()
         # Set when a context-pressure handoff is owed but the session is not yet
         # idle (usage crosses critical mid-turn). The turn-settle path fires the
@@ -2272,6 +2274,7 @@ class SessionManager:
         from .session_host.spawner import RemoteHostDeadError
 
         groups: dict[str, tuple[Any, list[tuple[Session, Any]]]] = {}
+        candidate_generations: dict[str, int] = {}
         for session in self._sessions.values():
             if background and not self._background_recovery_allowed(session):
                 continue
@@ -2284,7 +2287,7 @@ class SessionManager:
             )
             if not session.acp_session_id and not has_container_target:
                 continue
-            existing = self._host_index.get(session.session_id)
+            existing = copy.deepcopy(self._host_index.get(session.session_id))
             if (
                 existing is not None
                 and not (getattr(existing, "extra", {}) or {}).get(
@@ -2336,6 +2339,7 @@ class SessionManager:
                     )
                     groups[name] = (spawner, [])
             groups[name][1].append((session, existing))
+            candidate_generations[session.session_id] = session._lifecycle_generation
 
         semaphore = asyncio.Semaphore(3)
 
@@ -2347,7 +2351,12 @@ class SessionManager:
                         if session._lifecycle_lock.locked():
                             continue
                         await locks.enter_async_context(session._lifecycle_lock)
-                        if self._background_recovery_allowed(session):
+                        if (
+                            self._background_recovery_allowed(session)
+                            and self._host_index.get(session.session_id) == existing
+                            and candidate_generations[session.session_id]
+                            == session._lifecycle_generation
+                        ):
                             eligible.append((session, existing))
                     entries = eligible
                     if not entries:
@@ -2441,6 +2450,17 @@ class SessionManager:
                     if background:
                         await locks.enter_async_context(session._lifecycle_lock)
                         if not self._background_recovery_allowed(session):
+                            continue
+                        if (
+                            self._sessions.get(session.session_id) is not session
+                            or self._host_index.get(session.session_id) != existing
+                            or candidate_generations[session.session_id]
+                            != session._lifecycle_generation
+                        ):
+                            log.info(
+                                "Discarding stale remote authority result for %s",
+                                session.session_id,
+                            )
                             continue
                     if status == "live" and record is not None:
                         container_target = (
@@ -3214,6 +3234,7 @@ class SessionManager:
             session.client = client
             session.status = new_status
             session.restart_status = None
+            session._lifecycle_generation += 1
             self._db.update_session_status(
                 rec.session_id, new_status.value, time.time(), pid=session.pid,
             )
@@ -5044,6 +5065,7 @@ class SessionManager:
                 )
             # The caller now owns recovery; a failed explicit attempt must not
             # leave stale restart intent rearming background provider probes.
+            session._lifecycle_generation += 1
             session.restart_status = None
             self._db.update_session_status(
                 session_id, SessionStatus.STOPPED.value, time.time(),
@@ -5422,6 +5444,7 @@ class SessionManager:
                     with contextlib.suppress(Exception):
                         session._prompt_task.cancel()
 
+            session._lifecycle_generation += 1
             session.restart_status = None
             if self._host_index is not None:
                 self._host_index.set_resume_flag(session_id, False)
@@ -6251,6 +6274,7 @@ class SessionManager:
             if not force and session.has_active_background_tasks:
                 raise SessionBusyError(session_id, session.active_background_tasks)
 
+            session._lifecycle_generation += 1
             restart_status = None
             if for_restart:
                 restart_status = (
