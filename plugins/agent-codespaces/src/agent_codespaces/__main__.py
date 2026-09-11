@@ -4288,7 +4288,7 @@ async def _check_remote_execution_mode(name: str) -> tuple[int, str]:
     manager = ConnectionManager()
     source = CodespaceSource(name, account=account_for_codespace(name))
     command = (
-        "if command -v agent-bridge >/dev/null 2>&1; then "
+        "if command -v agent-bridge >/dev/null 2>&1; then "  # marketplace-isolation: allow remote CodeSpace-owned native-host probe, not a local sibling launch
         "agent-bridge native-host guard --requested-mode acp; rc=$?; "
         "if [ \"$rc\" = 0 ] || [ \"$rc\" = 75 ] || [ \"$rc\" = 78 ]; then exit \"$rc\"; fi; fi; "
         "for p in \"$HOME\"/.agent-bridge/session-hosts/host-native-*.json; do "
