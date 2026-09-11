@@ -693,3 +693,66 @@ stamp-now/provision-on-first-use model applying to every version update. Its
 Phase 3 is where agent-dispatch's and agent-ssh's confirmed deviations
 actually get fixed — this effort's Phase 4b(ii) is now fully closed, with
 implementation handed off rather than duplicated into a new phase here.
+
+### 2026-09-10 — Worktree-scoped registrar pointer: a distinct root cause (#2417)
+
+A live incident on a shared dev box ("agent-dispatch ran amok spawning headed
+processes") led to a newly-diagnosed, **distinct** contributing bug — related
+to this effort's theme but not part of the Phase 4b(ii) hook-transience audit
+above, which is already closed:
+
+- **Root cause**: `agent-dispatch reviewer-loop setup` / `repository-issue-loop
+  setup` (and their shared `status`/`doctor`/`enable`/`disable` declaration
+  loader) derived a declaration's registration **owner** from raw filesystem
+  path structure (`repo_root.name`), with zero awareness of worktree-vs-anchor
+  identity. Run from inside a worktree checkout instead of the repo's
+  registered anchor, this silently registered a **permanent global pointer**
+  (in `~/.agent-dispatch/registrar/pointers.json`) scoped to that worktree's
+  ephemeral directory name. Because the resulting registration id is unique
+  per worktree, it never reconciled with prior registrations, so every
+  occurrence spawned a **brand-new set of headed reviewer-loop workers** that
+  worktree deletion never cleaned up.
+- Traced the exact trigger: the `missing-pointer` doctor diagnostic literally
+  suggests `agent-dispatch reviewer-loop setup <relative-path>` as its fix
+  action — an agent following that suggestion from inside a worktree is
+  exactly how this fires. Confirmed via evidence on the affected machine: a
+  `dotfiles` worktree's declared registrations were already disabled (by a
+  different agent noticing the runaway spawns) and the bad pointer entry was
+  already removed from `pointers.json` — contained, but the code path that
+  produced it was still live.
+- Filed as issue #2417 with full code-level root cause and fix directions.
+- **Landed the fix** (this entry's own change): added
+  `_reject_worktree_checkout_as_repo_root()`, wired into both
+  `_reviewer_loop_declarations` and `_repository_issue_loop_declarations` (the
+  shared chokepoint both `setup` paths and every other reviewer-loop/
+  repository-issue-loop subcommand funnel through). Deliberately a **cheap,
+  dependency-free path-pattern check** (does the parent directory name end in
+  `.worktrees`, this harness's own worktree-root naming convention) rather
+  than an authoritative subprocess probe out to `agent-worktrees`: an early
+  subprocess-based version of this guard measured ~9s per invocation on this
+  loaded box, which would have made every reviewer-loop CLI call slow exactly
+  when the host is already struggling — the wrong tradeoff for what should be
+  a fast safety check. Added a regression test
+  (`test_setup_refuses_worktree_checkout_path`) proving a worktree-scoped
+  declaration is refused rather than silently registered. Full agent-dispatch
+  suite: 2410 passed, 3 pre-existing unrelated failures (bootstrap/session-
+  guidance tests, confirmed untouched by this diff), 8 skipped.
+- **Extended `visions/plugin-services`** with the operator-directed strong
+  invariant this bug violates: **`identity-resolves-by-name-not-path`** — the
+  only place a repo's current filesystem path may ever be recorded is its
+  owning registry (e.g. `repos.yaml`/`projects.yaml`); every other component
+  (a registrar pointer, a registered task's repo binding, a scheduled-task
+  action) carries the repo's **name** and resolves the path fresh at the
+  point of use. Added companion Behaviors `refuse-not-silently-misidentify`
+  and `registered-tasks-target-by-name`. Cross-referenced from
+  `visions/plugins/agent-worktrees` (the canonical name-to-path registry
+  owner) and `visions/plugins/agent-dispatch` (the registrar pointer
+  convention this incident hit directly).
+- Not yet done: a broader audit of "task registrations specify at most agent
+  or repo names" and "scheduled tasks only invoke installed binstubs" across
+  the rest of the suite, per the operator's full ask. The scheduled-task half
+  is likely already covered by the existing `Stable lifecycle launcher`
+  concept + `register-once-cutover-on-update` behavior (audited for
+  agent-bridge/agent-dispatch/agent-vault under #625), but that audit
+  predates this new, more general invariant and should be re-checked against
+  it explicitly as a follow-up.

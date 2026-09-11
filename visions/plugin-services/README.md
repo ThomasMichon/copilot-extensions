@@ -94,6 +94,18 @@ thing, and it never spawns one just to be sure.
   and by nature short-lived; the service model requires it to **stay** that way
   — resolve identity, reach the live daemon it needs, hand off, exit — rather
   than becoming, or spawning, a long-running process of its own.
+- **Name-resolved repo/agent identity** — a repository, worktree-managed
+  project, or agent is referenced everywhere in the suite by its **registered
+  name** (or, for a not-yet-registered remote, its **remote URL**) — never by a
+  filesystem path copied into a second store. Exactly **one** canonical
+  registry per identity kind owns the current path for that name (e.g. a repo's
+  `repos.yaml`/`projects.yaml`); every other component — a supervised-work
+  pointer, a registered task's repo binding, a scheduled-task action, a drop-in
+  declaration — carries the **name** and resolves today's path through that
+  owner's own lookup at the moment it is needed, never by persisting a copy of
+  the path into its own state. A worktree checkout's own directory name is a
+  **per-session, per-machine identifier**, never a stable identity a downstream
+  system may adopt as if it were the repo's name.
 - **Install contract** — the uniform deploy/version/footprint agreement every
   runtime plugin follows, so services deploy, update, and are audited the same
   way. See [`docs/install-contract.md`](../../docs/install-contract.md).
@@ -471,6 +483,44 @@ competing copy inline every time. Direct in-process computation remains the
 correct, always-available degrade path when no daemon is reachable or reachable
 in time; it is the *steady-state* default this behavior argues against, not the
 fallback.
+
+### identity-resolves-by-name-not-path
+The **only** place a repository's (or other named, registered identity's)
+*current* filesystem path is ever recorded is the one canonical registry its
+owning plugin maintains for that purpose (e.g. `repos.yaml`/`projects.yaml`).
+Every other component that needs to act on a named repo or agent — a
+supervised-work pointer, a registered task's repo binding, a scheduled-task
+action, a drop-in declaration, a cross-plugin reference of any kind — stores
+and passes the **name** (or, pre-registration, a remote URL), and resolves
+today's path through that registry's own lookup **at the moment it is
+needed**, never by copying the path into its own persistent state. A path is a
+**derived, disposable fact**; a name is the durable identity. This closes the
+exact failure class #2417 found: a component that derives a stable-looking
+identity (an "owner", a pointer name) from a raw filesystem path silently
+adopts whatever ephemeral thing happens to be at that path — a worktree
+checkout's own per-session directory name — as if it were the repo's name,
+producing a fresh, non-reconciling identity every time a new ephemeral
+checkout hits that code path.
+
+### refuse-not-silently-misidentify
+When a component cannot verify a path against a name it recognizes as that
+identity's registered anchor — or the path structurally matches an ephemeral
+worktree-checkout convention rather than a stable anchor — it refuses loudly
+with an actionable message, rather than silently deriving and persisting an
+identity from the raw path. Silence here is the failure mode: a bad identity
+recorded once keeps reproducing bad behavior (spawned work, mismatched
+registrations) every time it is read back, often long after the original
+mistake and its causing process are gone.
+
+### registered-tasks-target-by-name
+A registered or supervised task's stored declaration references at most an
+**agent name** or a **repo name** — never an absolute or worktree-scoped
+filesystem path. Resolving a name to its current live location is the
+*runtime's* job, done fresh each time the registration is acted on, never
+baked in as a snapshot at registration time. This is what keeps a
+registration meaningful across the registered repo's own moves, worktree
+churn, and reinstalls — the registration's identity never goes stale because
+it never held a path to begin with.
 
 ## Non-Goals / Boundaries
 

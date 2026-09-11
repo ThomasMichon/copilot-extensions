@@ -503,6 +503,19 @@ exactly as it would a declaration authored by any other means. The declaration
 *is* the registration; there is **no second, in-memory registry** standing beside
 the files (*no-second-store*, applied to supervision).
 
+A pointer's **provenance** must be a repo's or system's **registered name**, never
+a raw filesystem path (or anything derived from one, like a directory's basename).
+The agent-fabric-wide
+[*identity-resolves-by-name-not-path*](../../plugin-services/README.md#identity-resolves-by-name-not-path)
+guarantee applies here directly: a pointer records *where to look today*, but the
+**identity** that names it must come from the registered repo name (resolved
+through the repo's owning registry, e.g. agent-worktrees), never be inferred from
+the path itself. A worktree checkout's directory name is per-session and
+per-machine; deriving a pointer's owner from it stamps every declaration
+discovered there with a throwaway identity that never reconciles with the next
+one, so declared registrations accumulate without bound instead of converging —
+the exact failure #2417 diagnosed and fixed.
+
 ## Behaviors
 
 ### focus-is-an-early-signal-not-a-heartbeat
