@@ -329,23 +329,30 @@ _is_sre_module_mismatch() {
 }
 
 # Runs `uv pip install "$@"`, capturing combined output. On the transient SRE
-# module mismatch signature (see _is_sre_module_mismatch), retries once after
-# a short pause; any other failure, or a mismatch persisting after the retry,
-# is returned as-is for the caller to handle/fail on as before.
+# module mismatch signature (see _is_sre_module_mismatch), retries with
+# backoff (up to 3 extra attempts: 3s/6s/10s); any other failure, or a
+# mismatch persisting after all retries, is returned as-is for the caller to
+# handle/fail on as before. A single 3s retry proved insufficient when many
+# plugins hammer the shared interpreter at once during a full
+# `agent-worktrees update --force` sweep -- the backoff schedule gives the
+# race more room to clear.
 _uv_pip_install_resilient() {
-    local out
+    local out delay
     if out="$(uv pip install "$@" 2>&1)"; then
         printf '%s\n' "$out"
         return 0
     fi
-    if _is_sre_module_mismatch "$out"; then
-        _warn "uv build hit a transient SRE module mismatch (shared Python cache race, #6785) -- retrying once after a short pause"
-        sleep 3
+    for delay in 3 6 10; do
+        if ! _is_sre_module_mismatch "$out"; then
+            break
+        fi
+        _warn "uv build hit a transient SRE module mismatch (shared Python cache race, #6785) -- retrying in ${delay}s"
+        sleep "$delay"
         if out="$(uv pip install "$@" 2>&1)"; then
             printf '%s\n' "$out"
             return 0
         fi
-    fi
+    done
     printf '%s\n' "$out" >&2
     return 1
 }

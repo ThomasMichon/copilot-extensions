@@ -400,15 +400,21 @@ function Test-IsSreModuleMismatch {
 function Invoke-UvPipInstallResilient {
     <# Runs `uv pip install` with the given arguments, capturing combined
        output and exit code. On the transient SRE-module-mismatch signature
-       (see Test-IsSreModuleMismatch), retries once after a short pause; any
-       other failure, or a persisting SRE mismatch after the retry, is
-       returned as-is for the caller to handle/fail on as before. #>
+       (see Test-IsSreModuleMismatch), retries with backoff (up to 3 extra
+       attempts: 3s/6s/10s); any other failure, or a mismatch persisting after
+       all retries, is returned as-is for the caller to handle/fail on as
+       before. A single 3s retry proved insufficient when many plugins hammer
+       the shared interpreter at once during a full `agent-worktrees update
+       --force` sweep (observed in deployment after the first fix landed) --
+       the backoff schedule gives the race more room to clear. #>
     param([Parameter(Mandatory)][string[]]$Arguments)
+    $delays = @(3, 6, 10)
     $out = & uv pip install @Arguments 2>&1
     $exit = $LASTEXITCODE
-    if ($exit -ne 0 -and (Test-IsSreModuleMismatch ($out | Out-String))) {
-        Write-Warn 'uv build hit a transient SRE module mismatch (shared Python cache race, #6785) -- retrying once after a short pause'
-        Start-Sleep -Seconds 3
+    foreach ($delay in $delays) {
+        if ($exit -eq 0 -or -not (Test-IsSreModuleMismatch ($out | Out-String))) { break }
+        Write-Warn "uv build hit a transient SRE module mismatch (shared Python cache race, #6785) -- retrying in ${delay}s"
+        Start-Sleep -Seconds $delay
         $out = & uv pip install @Arguments 2>&1
         $exit = $LASTEXITCODE
     }
