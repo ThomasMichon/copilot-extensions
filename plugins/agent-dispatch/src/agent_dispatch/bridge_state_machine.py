@@ -235,3 +235,58 @@ def create_fresh_allowed(registry_class: RegistryClass) -> bool:
     """Whether a distinct "create fresh" gesture is legal for this target's
     registry class, as opposed to resume being the only correct verb."""
     return registry_class is RegistryClass.MULTI_HEAD
+
+
+def resolve_liveness_with_recovery(
+    cache_hint: Liveness | None,
+    live_probe,
+    discover_port,
+    *,
+    max_attempts: int = 3,
+) -> Liveness:
+    """Resolve liveness with a bounded transient-blip recovery wrapper.
+
+    agent-bridge, not agent-dispatch, owns the actual session-host
+    instances and their zero-downtime-deploy mechanics; a bridge caught
+    mid-version-update is *that* module's concern, not a new ``Liveness``
+    tier or a version dimension on this machine. What agent-dispatch's
+    resume path needs is narrower: notice a transient connection/call blip
+    against a bridge whose discovered port just changed underneath it,
+    re-resolve the port, and retry the live probe -- composing with the
+    already-declared ``PORT_CHANGED`` bridge event rather than inventing
+    new vocabulary.
+
+    ``discover_port`` is **injected**, never called internally by
+    ``live_probe`` -- this is what lets a deterministic fixture drive a
+    stale-port-then-fresh-port sequence: the caller controls exactly what
+    each attempt discovers. ``live_probe`` is called once per attempt and
+    may raise (a transient connection/call blip) or return a
+    :class:`Liveness`; a raise triggers a fresh ``discover_port()`` call
+    before the next attempt. Falls back to :attr:`Liveness.COLD` -- never
+    assumes :attr:`Liveness.HOT` -- once ``max_attempts`` is exhausted
+    without a successful probe, per this module's "never treat a miss as
+    an anomaly, never assume the more dangerous state" rule.
+    """
+    del cache_hint  # never authoritative -- see resolve_liveness().
+    port = discover_port()
+    for attempt in range(max_attempts):
+        try:
+            return live_probe(port)
+        except Exception:
+            if attempt + 1 >= max_attempts:
+                return Liveness.COLD
+            port = discover_port()
+    return Liveness.COLD
+
+
+def eol_safe_to_retire(active_lease_count: int) -> bool:
+    """Whether a bridge/runtime version is safe to retire.
+
+    A pure predicate, true only at zero: the supervisor's decision to stop
+    routing new spawns to a retiring version is a dispatch *policy*, not a
+    bridge-machine transition -- the existing ``suspend``/``end``/
+    ``end_suspended`` transitions already express graceful drain of each
+    individual lease. This function only answers "are there still leases
+    that would be orphaned by retiring now," never how to drain them.
+    """
+    return active_lease_count == 0
