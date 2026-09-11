@@ -3100,7 +3100,7 @@ async def test_sweep_strands_then_force_reaps_over_bound(tmp_path, monkeypatch):
         mgr._host_index.register(rec)
 
         # Bound disabled -> a live-child stranded host is left alone (goal 1).
-        assert mgr.sweep_stranded_hosts() == 0
+        assert await mgr.sweep_stranded_hosts() == 0
         assert osutil_pid_alive(host_pid)
         assert rec.session_id in mgr._host_index
 
@@ -3108,7 +3108,7 @@ async def test_sweep_strands_then_force_reaps_over_bound(tmp_path, monkeypatch):
         mgr._session_host_stale_reap_seconds = 5.0
         rec.created_at = _time.time() - 1000.0
         mgr._host_index.register(rec)
-        assert mgr.sweep_stranded_hosts() == 1
+        assert await mgr.sweep_stranded_hosts() == 1
         assert rec.session_id not in mgr._host_index
         from agent_bridge.session_host.osutil import pid_alive
         for _ in range(100):
