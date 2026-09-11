@@ -213,9 +213,28 @@ here but not blocking the start of 1/2/5.
   same "declare/observe first, wire later" sequencing Phase 9 used for
   the declared tables themselves. An unrecognized `reviewDecision`/
   `mergeable`/`statusCheckRollup.state` value raises rather than guesses.
+  **Second slice landed:** `pr_polling_policy.py`, the trigger/cadence
+  policy for the "real polling/webhook-driven loop" the first slice left
+  open. Operator resolution: webhooks are the primary, low-latency
+  trigger; polling is only a fallback that fires once a PR's last
+  observed state (from *any* source) is older than a declared,
+  repository-tier-scoped interval -- `RepoTier.OWNED_PRIVATE` (5 min),
+  `QUICK_COLLAB` (30 min), `PUBLIC_UNOWNED` (60 min, and the default for
+  any undeclared repository -- the conservative choice to avoid tripping
+  a shared rate limit on a repo this identity does not control). The
+  repository -> tier mapping is caller-supplied config, not committed to
+  this public, organization-neutral repo (no specific repository name
+  belongs in plugin source here) -- same pattern
+  `provider_state_machine.REPOSITORY_OVERRIDES` already uses. `poll_due`
+  is the pure decision function; a fresh observation (webhook or poll)
+  simply pushes the next poll out, so polling never fires while webhooks
+  keep flowing.
   Remaining slices for item 3: an evaluator that holds prior `Revision`
-  state and actually drives `APPROVAL_TRANSITIONS` (incl. `STALE`), and
-  wiring the observer into a real polling/webhook-driven loop.
+  state and actually drives `APPROVAL_TRANSITIONS` (incl. `STALE`), a real
+  webhook receiver for review/check-status events (the existing
+  `producers/webhook.py` only handles PR-merge events), and the
+  persistent per-(repo, PR) state store both the evaluator and the
+  poll-fallback timer need.
 - [ ] Wire the bridge machine's `resolve_liveness`/`resolve_resume` against
   a real agent-bridge liveness read (item 4 above), coordinated with
   agent-bridge's own verb-vocabulary convergence.
