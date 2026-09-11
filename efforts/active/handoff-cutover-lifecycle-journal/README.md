@@ -80,9 +80,17 @@ both plugins:
     `agent-worktrees note-handoff` and `agent-worktrees activity-log
     handoff_requested` — both swallow failures.
   - `trigger_handoff` **does not itself spawn anything** — by design it is
-    process-manager agnostic. Actual spawning is the resident agent-worktrees
-    status monitor's job. If that monitor is absent, misconfigured, or fails
-    silently, `trigger_handoff` still reports success.
+    process-manager agnostic. There are **two independent runners** that can
+    actually spawn the successor: the resident agent-worktrees status monitor
+    (polls for pending handoffs, per `_monitor_pending_handoff_request()`),
+    and **agent-bridge**, which `trigger_handoff` best-effort pings via
+    `agent-bridge handoff-request` — that route awaits
+    `SessionManager.handoff_session()` and can itself create the successor
+    before returning
+    (`plugins/agent-bridge/src/agent_bridge/routes/worktrees.py:939-1000`),
+    independently of the resident monitor. Both runners can observe and act
+    on the same stored baton. If neither runner is present/reachable, or both
+    race on the same baton, `trigger_handoff` still reports success.
   - No context-handoff sessionStart hook inspects or claims a pending handoff;
     that is left to `agent-worktrees` (a session becomes `successor-elect` via
     role calculation) and finally to the session explicitly calling
@@ -177,9 +185,12 @@ renumbering from the "acknowledges handoff" step onward.)
 ### Phase 2 — Instrument all 13 stages
 - [ ] Stage 1 (`worktree_created`) — confirm `cmd_create` already emits this
       with no gaps; add `predecessor_session_id: null` framing.
-- [ ] Stage 2 (`mux_session_assigned`) — emit from `sessions.mux_new_session` /
-      `build_mux_new_window_argv` success path (ordinary launch, not just
-      cutover).
+- [ ] Stage 2 (`mux_session_assigned`) — emit **after** the mux subprocess
+      call actually succeeds, from `mux_new_session()` / `mux_new_window()`
+      themselves (not from `build_mux_new_window_argv()`, which only
+      constructs an argv and has no knowledge of whether the mux accepted
+      it — emitting there would either record false success or miss real
+      failures). Applies to ordinary launch, not just cutover.
 - [ ] Stage 3 (`copilot_invoked`) — emit from the launcher/pane-wrapper right
       before exec'ing the `copilot` binary (both `.sh` and `.ps1`).
 - [ ] Stage 4 (`session_start_bound`) — emit from `cmd_register_session` once
@@ -192,21 +203,45 @@ renumbering from the "acknowledges handoff" step onward.)
 - [ ] Stage 6 (`handoff_triggered`) — covered by context-handoff's existing
       `handoff_requested` wire event; add the `stage`/`stage_name` fields to
       it in place rather than introducing a second event name.
-- [ ] Stage 7 (`handoff_host_acknowledged`) — new: emit when the resident
-      status monitor (or `agent-bridge handoff-request` receiver) first
-      observes and accepts the pending handoff, distinct from the later claim.
+- [ ] Stage 7 (`handoff_host_acknowledged`) — carries a **`runner`** field
+      (`status-monitor` | `agent-bridge`) identifying which of the two
+      independent runners (see Context) actually accepted the baton, so a
+      duplicate/parallel acknowledgement from the other runner is
+      distinguishable rather than merged into one ambiguous stage-7 event.
+      Emitted by whichever runner first takes the pending handoff; the loser
+      of a race logs its own attempt with an explicit
+      `outcome: "already-acknowledged"` rather than silently doing nothing.
 - [ ] Stage 8 (`handoff_successor_spawn_started`) — emit at the start of
-      `_handoff_cutover_spawn_result` / `mux_new_window`, before success is
-      known, so a spawn that later fails still leaves a trace.
+      `_handoff_cutover_spawn_result` / `mux_new_window` **or** agent-bridge's
+      `SessionManager.handoff_session()` (whichever runner won stage 7),
+      before success is known, so a spawn that later fails still leaves a
+      trace.
 - [ ] Stage 9 (`handoff_successor_session_start_bound`) — emit from the
       successor's own `cmd_register_session` when it recognizes the
       `--handoff-candidate-token` and calls `associate_handoff_candidate`.
-- [ ] Stage 10 (`handoff_successor_claimed`) — emit from `consume_handoff`'s
-      success path (both task-backed and file-backed), not just from
-      agent-worktrees' internal claim file.
-- [ ] Stage 11 (`handoff_pickup_confirmed_predecessor_closing`) — emit from
-      wherever the runner acts on the successor's claim to begin retiring the
-      predecessor (near/alongside `handoff_predecessor_retire`).
+- [ ] Stage 10 (`handoff_successor_claimed`) — **must be emitted at the point
+      the tracking record's head is authoritatively transferred**, not solely
+      from `consume_handoff`: today's monitor flow
+      (`_monitor_trigger_handoff_cutover`) retires the predecessor right after
+      candidate association (stage 9), *before* `consume_handoff` ever runs in
+      the successor — `consume_handoff` itself only marks the baton consumed
+      and never calls `tracking.link_handoff()` or moves the head. Emitting
+      stage 10 only from `consume_handoff` would let stage 11 (predecessor
+      retire) land before stage 10 in the trace, violating the ordered
+      sequence. Define stage 10 at whichever event is actually authoritative
+      for the head transfer (the monitor's candidate-association/claim point,
+      via `tracking.link_handoff()`), and log the successor's
+      `consume_handoff` call as a *separate*, later "baton delivery consumed"
+      event rather than conflating the two.
+- [ ] Stage 11 (`handoff_pickup_confirmed_predecessor_closing`) — emit at the
+      **same authoritative head-transfer point as stage 10** (immediately
+      after it, same code path), since today's monitor retires the
+      predecessor right after candidate association — not from a later,
+      separate "runner acts on the successor's claim" event that may not
+      exist in the current flow. If a future change makes retirement wait for
+      the successor's explicit `consume_handoff` acknowledgement, stage 11
+      moves with it; until then, stage 10 and 11 are adjacent, not
+      independently timed.
 - [ ] Stage 12 (`session_end_bound`) — a `sessionEnd` hook and its
       `session_ended` deregistration event **already exist**; extend that
       existing path to also emit `session_end_bound` with the stage/linkage
@@ -246,12 +281,23 @@ renumbering from the "acknowledges handoff" step onward.)
       the other side's session id, so either session-state folder alone lets
       you walk the chain for as long as that session-state folder itself is
       retained.
-- [ ] Add a `agent-worktrees handoff-trace <worktree-id|session-id>` CLI
-      command that reads the durable per-worktree store (falling back to
+- [ ] Add a `agent-worktrees handoff-trace <worktree-id|session-id>
+      [--project <name>] [--token <handoff-token>]` CLI command. Tracking
+      lookup is **project-scoped**, and neither a bare worktree id nor a
+      session id identifies the active project when the command runs from a
+      neutral CWD (e.g. a daemon), so `--project` is required in that case (or
+      the command implements and documents an all-project resolver, with a
+      neutral-CWD test proving it actually resolves). A worktree can have
+      **multiple handoff attempts over its lifetime** (the case study has
+      three) — accepting only a worktree/session id is ambiguous about which
+      attempt to render, so require `--token` to select one specific attempt,
+      or define and document an explicit "most recent attempt" default rather
+      than merging/nondeterministically picking among unrelated attempts. The
+      command reads the durable per-worktree store (falling back to
       `activity.jsonl` + both session-state trace files for stages recent
-      enough to still be in the rolling log) and renders the ordered 13-stage
-      sequence for a worktree/handoff-token, with gaps visibly marked ("stage
-      8 logged, stage 9 never observed").
+      enough to still be in the rolling log) and renders the ordered
+      13-stage sequence for the selected worktree/token, with gaps visibly
+      marked ("stage 8 logged, stage 9 never observed").
 
 ### Phase 4 — Fix the reported failure class (deferred; evidence only for now)
 
