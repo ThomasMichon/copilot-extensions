@@ -208,6 +208,84 @@ def test_windows_update_rebinds_existing_sync_task_runtime() -> None:
     assert "Update-SyncTaskBinding" in update_action
 
 
+def test_windows_sync_task_writes_wrap_both_register_and_update_branches() -> None:
+    """Both Register-SyncTask branches (existing-task update AND new-task
+    creation), not just Update-SyncTaskBinding, must downgrade an Access
+    Denied failure to a warning instead of aborting the install (a stale
+    admin-only task ACL can just as easily block *creation* on a machine that
+    has no task yet, e.g. after `schtasks /Delete`)."""
+    install_ps1 = _INSTALL_PS1.read_text(encoding="utf-8")
+    register_sync_task = install_ps1.split(
+        "function Register-SyncTask", 1
+    )[1].split("function Test-IsAccessDenied", 1)[0]
+
+    assert register_sync_task.count("try {") == 2
+    assert register_sync_task.count("Write-TaskAccessDeniedWarning") == 2
+    assert "Write-TaskAccessDeniedWarning $_ 'update'" in register_sync_task
+    assert "Write-TaskAccessDeniedWarning $_ 'register'" in register_sync_task
+
+
+def _extract_ps1_functions(*names: str) -> str:
+    install_ps1 = _INSTALL_PS1.read_text(encoding="utf-8")
+    chunks = []
+    for name in names:
+        rest = install_ps1.split(f"function {name}", 1)[1]
+        # Each of these functions is closed by a `}` at column 0 (the file's
+        # top-level function-closing convention).
+        body = rest.split("\n}\n", 1)[0]
+        chunks.append(f"function {name}{body}\n}}")
+    return "\n\n".join(chunks)
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh is not installed")
+def test_windows_task_access_denied_classifier_downgrades_and_rethrows(
+    tmp_path: Path,
+) -> None:
+    """Regression for both catch outcomes of the stale-ACL handling: an
+    Access Denied error is downgraded to a warning (install continues), while
+    any other exception still propagates (install still fails loudly)."""
+    pwsh = shutil.which("pwsh")
+    assert pwsh
+    harness = tmp_path / "harness.ps1"
+    harness.write_text(
+        _extract_ps1_functions("Test-IsAccessDenied", "Write-TaskAccessDeniedWarning")
+        + """
+
+function Write-Warn2 { param([string]$m) Write-Host "WARN: $m" }
+$TaskName = 'Test Task'
+
+$deniedRecord = $null
+try { throw [System.UnauthorizedAccessException]::new('Access is denied.') }
+catch { $deniedRecord = $_ }
+
+$otherRecord = $null
+try { throw [System.IO.IOException]::new('disk full') }
+catch { $otherRecord = $_ }
+
+Write-TaskAccessDeniedWarning $deniedRecord 'update'
+Write-Host 'DENIED-HANDLED-WITHOUT-THROW'
+
+try {
+    Write-TaskAccessDeniedWarning $otherRecord 'update'
+    Write-Host 'SHOULD-NOT-REACH-HERE'
+} catch {
+    Write-Host "OTHER-RETHROWN: $($_.Exception.Message)"
+}
+""",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [pwsh, "-NoProfile", "-File", str(harness)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "WARN: could not update scheduled task 'Test Task' (Access is denied)" in result.stdout
+    assert "DENIED-HANDLED-WITHOUT-THROW" in result.stdout
+    assert "OTHER-RETHROWN: disk full" in result.stdout
+    assert "SHOULD-NOT-REACH-HERE" not in result.stdout
+
+
 def test_installers_scope_sync_supervision_by_install_root() -> None:
     install_ps1 = _INSTALL_PS1.read_text(encoding="utf-8")
     install_sh = _INSTALL_SH.read_text(encoding="utf-8")
