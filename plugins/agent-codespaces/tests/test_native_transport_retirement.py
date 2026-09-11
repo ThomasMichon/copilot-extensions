@@ -129,23 +129,6 @@ def test_native_preparation_reuses_sanitized_connect_checkpoints(state, ssh_runt
 
 
 @pytest.mark.asyncio
-async def test_required_host_resources_fail_before_native_launch_on_old_remote(capsys):
-    manager = SimpleNamespace(exec_command=AsyncMock(return_value=SimpleNamespace(
-        exit_code=0, stdout=json.dumps({"capability": "codespace-native-host-v1", "supported": True}),
-    )))
-    args = SimpleNamespace(
-        execution_id="execution", generation="generation", name="example-space",
-        require_host_resources=True, retirement_only=False,
-    )
-    assert await native_transport.serve(args, manager, object(), "") == 69
-    manager.exec_command.assert_awaited_once()
-    assert json.loads(capsys.readouterr().out) == {
-        "event": "failed", "code": "resource_capability_unavailable",
-        "executionId": "execution", "generation": "generation",
-    }
-
-
-@pytest.mark.asyncio
 async def test_retirement_control_skips_all_forwarding_and_rejects_activation(state, monkeypatch):
     import ssh_manager
 

@@ -207,10 +207,6 @@ async def serve(args, manager, ssh_config, relay_env: str) -> int:
         if capability.get("capability") != "codespace-native-host-v1" or capability.get("supported") is not True:
             raise RuntimeError("remote native execution hosting capability is unavailable")
         resources = capability.get("hostResources") == "native-host-resources-v1"
-        if getattr(args, "require_host_resources", False) and not resources:
-            await emit({"event": "failed", "code": "resource_capability_unavailable",
-                        "executionId": args.execution_id, "generation": args.generation})
-            return 69
         started = await manager.exec_command(
             args.name, "bash -lc 'agent-bridge service start'", timeout=150.0,
         )

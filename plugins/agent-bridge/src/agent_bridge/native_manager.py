@@ -83,8 +83,6 @@ class ProviderTransport:
         ]
         if resume:
             argv.append("--resume-infrastructure")
-        if "hostResources" in spec:
-            argv.append("--require-host-resources")
         if retirement_only:
             argv.append("--retirement-only")
         else:
@@ -130,15 +128,6 @@ class ProviderTransport:
                 elif value.get("event") == "rejected":
                     if not self.ready.done():
                         self.ready.set_exception(NativeError("venue_busy", "Another execution owns the CodeSpace"))
-                elif (
-                    value.get("event") == "failed" and value.get("code") == "resource_capability_unavailable"
-                    and value.get("executionId") == self.row["id"]
-                    and value.get("generation") == self.row["generation"]
-                ):
-                    if not self.ready.done():
-                        self.ready.set_exception(NativeError(
-                            "resource_capability_unavailable", "Remote native host lacks registered resource support", 503,
-                        ))
                 elif value.get("event") == "ready":
                     if value.get("capability") != "codespace-native-transport-v1":
                         raise NativeError("provider_unavailable", "Native transport capability does not match", 503)

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from pathlib import Path
 import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -9,10 +10,10 @@ from unittest.mock import AsyncMock
 import pytest
 
 from agent_bridge import native_resource_cli, native_runtime
-from agent_bridge.native_manager import NativeManager, validate_request
+from agent_bridge.native_manager import NativeManager, ProviderTransport, validate_request
 from agent_bridge.native_resources import (
     CAPABILITY, DEFINITIONS_SCHEMA, DESCRIPTOR_SCHEMA, EMPTY_SCHEMA, HostResources,
-    ResourceMailbox, public_definitions, resource_result,
+    ResourceMailbox, descriptor, public_definitions, resource_result,
     validate_definitions, validate_input, validate_schema,
 )
 from agent_bridge.native_store import NativeError, NativeStore
@@ -76,6 +77,21 @@ def test_registration_is_inert_and_public_capability_has_no_local_policy(tmp_pat
     assert "privatePolicy" not in json.dumps(public)
 
 
+@pytest.mark.guard
+def test_host_resource_descriptor_and_result_match_captured_contract():
+    path = Path(__file__).parents[1] / "contract" / "fixtures" / "http" / "current" / "native-resource-protocol.json"
+    captured = json.loads(path.read_text())
+    public = descriptor("execution-example", "generation-example", {"preview": EMPTY_SCHEMA})
+    public["resources"]["preview"]["ensureCommand"][0] = "<official-remote-python>"
+    assert public == captured["descriptor"]
+    request = {
+        "executionId": "execution-example", "generation": "generation-example",
+        "sessionId": "session-example", "requestId": "request-example", "resource": "preview", "input": {},
+    }
+    assert resource_result(request, value={"endpoint": "http://127.0.0.1:45123"}) == captured["result"]
+    assert EMPTY_SCHEMA == captured["empty_input_schema"]
+
+
 @pytest.mark.parametrize("value", [
     {"port": 1234}, {"argv": ["unapproved"]}, {"profile": "other"}, [], {"x": float("nan")},
 ])
@@ -96,6 +112,30 @@ def test_schema_is_closed_primitive_and_bounded():
             validate_input(invalid, schema)
     with pytest.raises(NativeError):
         validate_schema({**schema, "additionalProperties": True})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("required,advertised", [(False, False), (True, False), (True, True)])
+async def test_resource_capability_negotiation_reuses_existing_transport_argv(required, advertised):
+    stream = asyncio.StreamReader()
+    frame = {"event": "ready", "capability": "codespace-native-transport-v1", "version": 1}
+    if advertised:
+        frame["hostResources"] = CAPABILITY
+    stream.feed_data(json.dumps(frame).encode() + b"\n")
+    stream.feed_eof()
+    transport = ProviderTransport([], {
+        "id": "execution", "generation": "generation",
+        "data": {"spec": {"hostResources": {}} if required else {}},
+    }, lambda: None)
+    transport.process = SimpleNamespace(stdout=stream)
+    transport.ready = asyncio.get_running_loop().create_future()
+    await transport._read()
+    if required and not advertised:
+        with pytest.raises(NativeError) as exc:
+            await transport.ready
+        assert exc.value.code == "resource_capability_unavailable"
+    else:
+        assert await transport.ready is True
 
 
 @pytest.mark.asyncio

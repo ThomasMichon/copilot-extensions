@@ -391,7 +391,6 @@ def main(argv: list[str] | None = None) -> int:
     native_p.add_argument("--repo")
     native_p.add_argument("--no-plugin-staging", action="store_true", default=True)
     native_p.add_argument("--require-relay", action="store_true", default=True)
-    native_p.add_argument("--require-host-resources", action="store_true")
     native_p.add_argument("--local-forward", action="append", default=[])
     native_p.add_argument("--reverse-forward", action="append", default=[])
     native_p.add_argument("--resume-infrastructure", dest="no_provision", action="store_true")

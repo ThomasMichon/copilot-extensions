@@ -218,7 +218,7 @@ class ResourceMailbox:
     def complete(self, execution, generation, result):
         bounded_json(result)
         self.store.get(execution, generation)
-        if result.get("schema") != RESULT_SCHEMA or result.get("version") != 1 or result.get("state") not in {"ready", "failed"}:
+        if result.get("schema") != RESULT_SCHEMA or type(result.get("version")) is not int or result.get("version") != 1 or result.get("state") not in {"ready", "failed"}:
             raise NativeError("invalid_resource", "Invalid native resource result", 400)
         with self.store._connection() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -340,7 +340,7 @@ class HostResources:
 
     @staticmethod
     def _validate_reply(payload, reply, operation):
-        if not isinstance(reply, dict) or any(reply.get(k) != payload[k] for k in (
+        if not isinstance(reply, dict) or type(reply.get("version")) is not int or any(reply.get(k) != payload[k] for k in (
             "schema", "version", "executionId", "generation", "resource", "operationId",
         )) or reply.get("ok") is not True:
             raise NativeError("resource_provider_failed", "Host resource provider identity/result is invalid", 502)
