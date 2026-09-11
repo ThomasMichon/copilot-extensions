@@ -20,6 +20,10 @@ _SUBPROCESS_TIMEOUT_S = 10.0
 _GUIDANCE_HEADER = "# Agent Codespaces session guidance\n\n"
 
 
+class GuidanceRefused(RuntimeError):
+    """An explicit installation failure must not become a guidance write."""
+
+
 def _read_bounded_stdin() -> bytes:
     raw = sys.stdin.buffer.read(_MAX_INPUT_BYTES + 1)
     return b"" if len(raw) > _MAX_INPUT_BYTES else raw
@@ -35,6 +39,8 @@ def _producer_context(raw: bytes) -> str:
 
 
 def _plugin_root() -> Path:
+    if os.environ.get("COPILOT_EXTENSIONS_CONTEXT", ""):
+        return Path(__file__).resolve().parents[1]
     for name in ("COPILOT_PLUGIN_ROOT", "PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT"):
         root = os.environ.get(name)
         if root:
@@ -69,13 +75,23 @@ def _run_producer(root: Path, payload: bytes) -> str:
             check=False,
             env={**os.environ, "PYTHONPATH": ""},
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError) as error:
+        if os.environ.get("COPILOT_EXTENSIONS_CONTEXT", ""):
+            raise GuidanceRefused(f"CodeSpaces guidance probe failed: {error}") from error
         return ""
+    if completed.returncode and os.environ.get("COPILOT_EXTENSIONS_CONTEXT", ""):
+        detail = completed.stderr.decode("utf-8", errors="replace").strip()
+        raise GuidanceRefused(detail or f"CodeSpaces guidance probe exited {completed.returncode}")
     return _producer_context(completed.stdout) if completed.returncode == 0 else ""
 
 
 def _codespace_map_argv(root: Path, cwd: str | None) -> list[str] | None:
     extra = ["--cwd", cwd] if cwd else []
+    if os.environ.get("COPILOT_EXTENSIONS_CONTEXT", ""):
+        # The source-only hook bootstraps its packaged boundary itself. Do not
+        # route explicit context through legacy runtime-discovering wrappers.
+        script = Path(__file__).with_name("emit_codespace_map.py").resolve()
+        return [sys.executable, "-I", "-X", "utf8", str(script), *extra]
     if os.name == "nt":
         script = root / "scripts" / "emit-codespace-map.ps1"
         shell = shutil.which("pwsh") or shutil.which("powershell.exe")
@@ -98,6 +114,12 @@ def _run_codespace_map(root: Path, payload: dict) -> str:
     argv = _codespace_map_argv(root, valid_cwd)
     if argv is None:
         return ""
+    launch_kwargs = {}
+    if os.environ.get("COPILOT_EXTENSIONS_CONTEXT", ""):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+        from agent_codespaces._peer_launch import no_window_kwargs
+
+        launch_kwargs = no_window_kwargs()
     try:
         completed = subprocess.run(
             argv,
@@ -105,9 +127,15 @@ def _run_codespace_map(root: Path, payload: dict) -> str:
             timeout=_SUBPROCESS_TIMEOUT_S,
             check=False,
             env={**os.environ, "PYTHONPATH": ""},
+            **launch_kwargs,
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError) as error:
+        if os.environ.get("COPILOT_EXTENSIONS_CONTEXT", ""):
+            raise GuidanceRefused(f"CodeSpaces map probe failed: {error}") from error
         return ""
+    if completed.returncode and os.environ.get("COPILOT_EXTENSIONS_CONTEXT", ""):
+        detail = (completed.stderr or b"").decode("utf-8", errors="replace").strip()
+        raise GuidanceRefused(detail or f"CodeSpaces map probe exited {completed.returncode}")
     return _producer_context(completed.stdout) if completed.returncode == 0 else ""
 
 
@@ -130,9 +158,11 @@ def write_session_guidance(payload: dict, *, home: Path | None = None) -> bool:
 
     raw_payload = json.dumps(payload, separators=(",", ":")).encode("utf-8")
     contexts = []
+    # Validate explicit owner governance before invoking any other producer.
+    codespace_map = _run_codespace_map(_plugin_root(), payload)
     for context in (
         _run_producer(_plugin_root(), raw_payload),
-        _run_codespace_map(_plugin_root(), payload),
+        codespace_map,
     ):
         if context and context not in contexts:
             contexts.append(context)
@@ -202,7 +232,15 @@ def main() -> int:
         raw = _read_bounded_stdin()
         payload = json.loads(raw) if raw.strip() else {}
         write_session_guidance(payload if isinstance(payload, dict) else {})
-    except Exception:
+    except GuidanceRefused as error:
+        print(f"CodeSpaces guidance refused: {error}", file=sys.stderr)
+        sys.stdout.write("{}")
+        return 126
+    except Exception as error:
+        if os.environ.get("COPILOT_EXTENSIONS_CONTEXT", ""):
+            print(f"CodeSpaces guidance refused: {error}", file=sys.stderr)
+            sys.stdout.write("{}")
+            return 126
         pass
     sys.stdout.write("{}")
     return 0

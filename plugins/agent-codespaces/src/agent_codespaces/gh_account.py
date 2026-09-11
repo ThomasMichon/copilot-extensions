@@ -15,9 +15,11 @@ each plugin has its own venv and a cross-plugin Python import is fragile -- and
 mints a per-account ``GH_TOKEN`` via ``gh auth token --user <login>`` for the
 subprocess environment.
 
-Everything degrades to today's **ambient** behavior when agent-worktrees or
-``gh`` is unavailable, or when no account maps for the owner -- so wiring this
+Without explicit installation context, lookups degrade to **ambient** behavior
+when agent-worktrees or ``gh`` is unavailable, or when no account maps for the owner -- so wiring this
 in is additive and safe: a repo with no mapping behaves exactly as before.
+With explicit context, lookups use the same-cell peer boundary; rejected
+receipts propagate and cannot select ambient authentication.
 """
 
 from __future__ import annotations
@@ -31,6 +33,8 @@ import subprocess
 
 from agent_procutil import no_window_flags
 
+from . import worktrees
+
 log = logging.getLogger("agent-codespaces")
 
 
@@ -40,11 +44,19 @@ def _creation_flags() -> int:
 
 def _agent_worktrees_bin() -> str | None:
     """Locate the ``agent-worktrees`` CLI on PATH, or None."""
-    return shutil.which("agent-worktrees")
+    return shutil.which("agent-worktrees")  # marketplace-isolation: allow _lookup uses this only without explicit installation context
+
+
+def account_for_repo(slug: str | None) -> str | None:
+    """Resolve an account without reusing another installation's cached state."""
+    if worktrees.explicit_context():
+        worktrees.validate_context()
+        return _account_for_repo.__wrapped__(slug)
+    return _account_for_repo(slug)
 
 
 @functools.lru_cache(maxsize=256)
-def account_for_repo(slug: str | None) -> str | None:
+def _account_for_repo(slug: str | None) -> str | None:
     """Resolve the gh login for a repo ``owner/name`` slug, or None.
 
     Shells ``agent-worktrees repos account-for <slug>``.  Returns None when
@@ -53,16 +65,8 @@ def account_for_repo(slug: str | None) -> str | None:
     """
     if not slug:
         return None
-    aw = _agent_worktrees_bin()
-    if not aw:
-        return None
-    try:
-        result = subprocess.run(
-            [aw, "repos", "account-for", slug],
-            capture_output=True, text=True, timeout=10,
-            creationflags=_creation_flags(),
-        )
-    except Exception:
+    result = _lookup("repos", "account-for", slug)
+    if result is None:
         return None
     if result.returncode != 0:
         return None
@@ -70,8 +74,16 @@ def account_for_repo(slug: str | None) -> str | None:
     return login or None
 
 
-@functools.lru_cache(maxsize=64)
 def token_for_account(login: str | None) -> str | None:
+    """Avoid reusing credentials across explicit installation contexts."""
+    if worktrees.explicit_context():
+        worktrees.validate_context()
+        return _token_for_account.__wrapped__(login)
+    return _token_for_account(login)
+
+
+@functools.lru_cache(maxsize=64)
+def _token_for_account(login: str | None) -> str | None:
     """Mint a ``gh`` OAuth token for ``login`` via ``gh auth token --user``.
 
     Returns None when ``gh`` is unavailable or ``login`` is not an
@@ -115,8 +127,30 @@ def env_for_repo(slug: str | None, base: dict | None = None) -> dict:
     return env_for_account(account_for_repo(slug), base)
 
 
-@functools.lru_cache(maxsize=1)
 def mapped_accounts() -> tuple[str, ...]:
+    """Keep namespaced account reads fresh across cells and receipt changes."""
+    if worktrees.explicit_context():
+        return _mapped_accounts.__wrapped__()
+    return _mapped_accounts()
+
+
+def _lookup(*args: str) -> subprocess.CompletedProcess[str] | None:
+    if worktrees.explicit_context():
+        return worktrees.run(*args, timeout=10)
+    aw = _agent_worktrees_bin()
+    if not aw:
+        return None
+    try:
+        return subprocess.run(
+            [aw, *args], capture_output=True, text=True, timeout=10,
+            creationflags=_creation_flags(),
+        )
+    except Exception:
+        return None
+
+
+@functools.lru_cache(maxsize=1)
+def _mapped_accounts() -> tuple[str, ...]:
     """Distinct gh logins in the agent-worktrees ``account_map``.
 
     The candidate set for cross-account CodeSpace discovery: to see a CodeSpace
@@ -125,16 +159,8 @@ def mapped_accounts() -> tuple[str, ...]:
     exists (caller then lists under the ambient account only -- today's
     behavior).
     """
-    aw = _agent_worktrees_bin()
-    if not aw:
-        return ()
-    try:
-        result = subprocess.run(
-            [aw, "repos", "account", "list", "--json"],
-            capture_output=True, text=True, timeout=10,
-            creationflags=_creation_flags(),
-        )
-    except Exception:
+    result = _lookup("repos", "account", "list", "--json")
+    if result is None:
         return ()
     if result.returncode != 0:
         return ()
@@ -153,6 +179,6 @@ def mapped_accounts() -> tuple[str, ...]:
 
 def clear_caches() -> None:
     """Drop memoized lookups (test hook / after an auth change)."""
-    account_for_repo.cache_clear()
-    token_for_account.cache_clear()
-    mapped_accounts.cache_clear()
+    _account_for_repo.cache_clear()
+    _token_for_account.cache_clear()
+    _mapped_accounts.cache_clear()

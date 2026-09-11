@@ -157,11 +157,10 @@ def test_claim_force_takes_over_live_owner(leases):
 
 
 def test_claim_auto_releases_dead_owner(leases):
-    # /wt/a holds it but is absent from the active set and its path doesn't
-    # exist -> positively dead -> /wt/b takes over WITHOUT --force.
-    lease_mod.claim("cs-one", "/wt/a", active={"/wt/a"})
-    cl = lease_mod.claim("cs-one", "/wt/b", active={"/wt/b"})
-    assert cl.worktree == "/wt/b"
+    first, second = str(leases / "a"), str(leases / "b")
+    lease_mod.claim("cs-one", first, active={first})
+    cl = lease_mod.claim("cs-one", second, active={second})
+    assert cl.worktree == second
 
 
 def test_claim_live_by_path_existence_bounces(leases, tmp_path):
@@ -256,8 +255,9 @@ def test_release_worktree_claims_releases_all_for_owner(leases):
 
 
 def test_sweep_dead_releases_gone_worktree(leases):
-    lease_mod.claim("cs-one", "/wt/gone", active={"/wt/gone"})
-    released = lease_mod.sweep_dead(active=set())  # /wt/gone no longer active
+    gone = str(leases / "gone")
+    lease_mod.claim("cs-one", gone, active={gone})
+    released = lease_mod.sweep_dead(active=set())
     assert released == ["cs-one"]
     assert lease_mod.get_lease("cs-one") is None
 

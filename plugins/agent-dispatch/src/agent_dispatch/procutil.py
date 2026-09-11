@@ -207,14 +207,9 @@ def _sibling_runtime_launch_prefix(
     if explicit_context:
         # Validate again at execution, not when a caller constructs its argv.
         # Only this native child boundary may rebind context/environment.
-        bootstrap = Path(sys.executable)
-        if bootstrap.name.lower() == "pythonw.exe":
-            bootstrap = bootstrap.with_name("python.exe")
-        return [
-            str(bootstrap), "-I", "-X", "utf8",
-            str(Path(__file__).with_name("peer_launch.py")),
-            str(install_dir()), explicit_context, plugin_id,
-        ]
+        from .peer_launch import launch_prefix
+
+        return launch_prefix("agent-dispatch", install_dir(), explicit_context, plugin_id)
     root = Path.home() / f".{plugin_id}"
     py = resolve_runtime_python(root)
     if py is not None:

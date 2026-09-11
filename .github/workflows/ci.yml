@@ -115,6 +115,10 @@ jobs:
           libs/installation-context/tests
       - name: Installation context vendoring
         run: python tools/sync-installation-context.py --check
+      - name: Same-cell peer launcher vendoring
+        run: >-
+          python tools/sync-peer-launch.py --check &&
+          python -m pytest -q libs/peer-launch/tests
       - name: Installer readiness contract tests
         run: python -m pytest -q libs/installer-readiness/tests
       - name: Vendored library synchronization

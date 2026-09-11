@@ -163,6 +163,8 @@ python tools/check-version-consistency.py      # plugin.json / pyproject / marke
 python tools/check-marketplace-isolation.py    # report-only legacy installation inventory
 python libs/payload-invocation/generate.py --all --check  # generated payload shims match manifests
 python tools/sync-installation-context.py --check  # inert exemplar copies match the canonical primitive
+python tools/sync-peer-launch.py --check  # shared native peer boundary matches packaged consumers
+python -m pytest -q libs/peer-launch/tests  # canonical/vendor packaging contracts
 python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fixtures
 ```
 
@@ -190,6 +192,11 @@ python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fix
   inertness, and ordered direct-SSH routing parity. Agent-dispatch also consumes
   the shipped declaration/provider in its materialization and launch tests.
 - **agent-codespaces:** config, lifecycle, resolver, and the credential relay.
+  The focused `-k worktrees_peer` lane covers every same-cell worktrees adapter,
+  refusal propagation (including claim and auth fallbacks), and cross-context
+  cache isolation. The dispatch `-k procutil` lane owns the shared real-process
+  proof for both plugins, including the source-only CodeSpaces hook outside the
+  repository with a dependency-free disposable bootstrap interpreter.
 - **agent-containers:** config, lifecycle, the lease broker, and the resolver.
 - **agent-mcp:** config loading, auth injectors, transports, bridge framing, the
   decorator pipeline; the code-mode Node tests skip automatically when `node` is

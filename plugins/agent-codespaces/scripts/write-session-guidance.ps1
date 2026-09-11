@@ -3,7 +3,9 @@
 # exact-session guidance file. See scripts/write_session_guidance.py.
 $ErrorActionPreference = 'SilentlyContinue'
 
-$root = if ($env:COPILOT_PLUGIN_ROOT) {
+$root = if ($env:COPILOT_EXTENSIONS_CONTEXT) {
+    Split-Path -Parent $PSScriptRoot
+} elseif ($env:COPILOT_PLUGIN_ROOT) {
     $env:COPILOT_PLUGIN_ROOT
 } elseif ($env:PLUGIN_ROOT) {
     $env:PLUGIN_ROOT
@@ -24,16 +26,28 @@ foreach ($candidate in @('python3', 'python', 'py')) {
     }
 }
 if (-not $python -or -not (Test-Path -LiteralPath $script -PathType Leaf)) {
+    if ($env:COPILOT_EXTENSIONS_CONTEXT) {
+        [Console]::Error.WriteLine('CodeSpaces guidance refused: Python or writer is unavailable')
+        exit 126
+    }
     [Console]::Out.Write('{}')
     exit 0
 }
 $env:PYTHONPATH = ''
 try {
+    if ($env:COPILOT_EXTENSIONS_CONTEXT) {
+        & $python.Source -I -X utf8 $script
+        exit $LASTEXITCODE
+    }
     & $python.Source $script
     if ($LASTEXITCODE -ne 0) {
         [Console]::Out.Write('{}')
     }
 } catch {
+    if ($env:COPILOT_EXTENSIONS_CONTEXT) {
+        [Console]::Error.WriteLine("CodeSpaces guidance refused: $_")
+        exit 126
+    }
     [Console]::Out.Write('{}')
 }
 exit 0

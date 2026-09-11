@@ -6,8 +6,8 @@ its installer and payload-invocation contract. Agent Worktrees consumes the
 same validator for read-only reconciliation and update guards. This tool keeps
 every standalone payload byte-identical.
 
-Dispatch's read-only peer launcher consumes only the Python primitive, packaged
-inside its wheel. It must bootstrap validation from its own installed bytes,
+Dispatch and CodeSpaces peer launchers consume the Python primitive packaged
+inside their wheels. They must bootstrap validation from their own installed bytes,
 not import a validator from an as-yet-unvalidated receipt's payload pointer.
 """
 from __future__ import annotations
@@ -59,10 +59,10 @@ def vendor_pairs() -> list[tuple[Path, Path]]:
     ] + [
         (
             CANONICAL_DIR / "installation_context.py",
-            REPO / "plugins" / plugin / "src" / "agent_dispatch"
+            REPO / "plugins" / plugin / "src" / plugin.replace("-", "_")
             / "_installation_context.py",
         )
-        for plugin in ADOPTERS if plugin == "agent-dispatch"
+        for plugin in ADOPTERS if plugin in {"agent-dispatch", "agent-codespaces"}
     ] + [
         (
             CANONICAL_DIR / name,
