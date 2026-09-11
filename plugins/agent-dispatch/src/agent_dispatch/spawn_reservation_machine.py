@@ -331,3 +331,26 @@ def classify_consistency(
     if (spawn_state, bridge_state) in _CONSISTENT_PAIRS:
         return ConsistencyTier.CONSISTENT
     return ConsistencyTier.ANOMALY
+
+
+#: Maps :mod:`agent_dispatch.tracking`'s coarse liveness verdicts
+#: (``live``/``gone``/``unknown``) to a :class:`BridgeState` for
+#: :func:`classify_consistency`. This is deliberately coarse: the local
+#: supervisor's tracking module only distinguishes a live process from a
+#: gone one, not the finer HYDRATING/SUSPENDED/ENDED distinctions
+#: ``bridge_state_machine.py`` declares -- ``unknown`` maps to ``None``
+#: (not-applicable) rather than guessing, per Phase 9's "never assume the
+#: safer state without evidence" rule.
+_VERDICT_TO_BRIDGE_STATE: dict[str, BridgeState | None] = {
+    "live": BridgeState.RUNNING,
+    "gone": BridgeState.ABSENT,
+    "unknown": None,
+}
+
+
+def verdict_to_bridge_state(verdict: str) -> BridgeState | None:
+    """Translate a tracking-module liveness verdict to a coarse
+    :class:`BridgeState`, or ``None`` when the verdict carries no
+    positive evidence either way (``unknown``, or any value this module
+    does not recognize)."""
+    return _VERDICT_TO_BRIDGE_STATE.get(verdict)

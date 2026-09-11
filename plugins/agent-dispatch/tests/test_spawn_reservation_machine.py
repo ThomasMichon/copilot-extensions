@@ -30,6 +30,7 @@ from agent_dispatch.spawn_reservation_machine import (
     reachable_states,
     states_without_exit,
     terminal_states_with_exit,
+    verdict_to_bridge_state,
     violating_assignment_groups,
 )
 
@@ -253,3 +254,22 @@ def test_undeclared_pairings_default_to_anomaly_not_consistency():
     assert (
         classify_consistency(SpawnState.SETTLED, BridgeState.SUSPENDED) is ConsistencyTier.ANOMALY
     )
+
+
+# --- verdict_to_bridge_state: tracking-verdict -> BridgeState translation ---
+
+
+def test_live_verdict_maps_to_running():
+    assert verdict_to_bridge_state("live") is BridgeState.RUNNING
+
+
+def test_gone_verdict_maps_to_absent():
+    assert verdict_to_bridge_state("gone") is BridgeState.ABSENT
+
+
+def test_unknown_verdict_maps_to_none_not_a_guess():
+    assert verdict_to_bridge_state("unknown") is None
+
+
+def test_an_unrecognized_verdict_maps_to_none_not_a_guess():
+    assert verdict_to_bridge_state("something-new") is None
