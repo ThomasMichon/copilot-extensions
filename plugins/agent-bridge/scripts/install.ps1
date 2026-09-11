@@ -386,6 +386,35 @@ function Invoke-NativeCapture {
     return [pscustomobject]@{ ExitCode = $exitCode; Output = $output }
 }
 
+function Test-IsSreModuleMismatch {
+    <# Detects `AssertionError: SRE module mismatch` -- a transient race on
+       uv's shared managed-Python cache/junction (cpython-3.11-windows-x86_64-none)
+       that surfaces when several installers hit it in quick succession during
+       one big `agent-worktrees update --force` sweep (#6785). The interpreter
+       reliably heals within seconds once the sweep's other uv invocations
+       finish touching it, so a short-delay retry recovers cleanly. #>
+    param([string]$Output)
+    return $Output -match 'SRE module mismatch'
+}
+
+function Invoke-UvPipInstallResilient {
+    <# Runs `uv pip install` with the given arguments, capturing combined
+       output and exit code. On the transient SRE-module-mismatch signature
+       (see Test-IsSreModuleMismatch), retries once after a short pause; any
+       other failure, or a persisting SRE mismatch after the retry, is
+       returned as-is for the caller to handle/fail on as before. #>
+    param([Parameter(Mandatory)][string[]]$Arguments)
+    $out = & uv pip install @Arguments 2>&1
+    $exit = $LASTEXITCODE
+    if ($exit -ne 0 -and (Test-IsSreModuleMismatch ($out | Out-String))) {
+        Write-Warn 'uv build hit a transient SRE module mismatch (shared Python cache race, #6785) -- retrying once after a short pause'
+        Start-Sleep -Seconds 3
+        $out = & uv pip install @Arguments 2>&1
+        $exit = $LASTEXITCODE
+    }
+    return [pscustomobject]@{ Output = $out; ExitCode = $exit }
+}
+
 function Ensure-Uv {
     $existing = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue
     if ($existing) {
@@ -1822,10 +1851,11 @@ function Invoke-Install {
         # cached wheel for the same version and new modules never land -- the
         # #186 CodespaceConfigSource regression). Both selectors must name the
         # `agent-ssh-manager` distribution declared by the vendored pyproject.
-        $sshOut = & uv pip install --python $VenvPython "$SshManagerDir" --reinstall-package agent-ssh-manager --refresh-package agent-ssh-manager --quiet 2>&1
-        if ($LASTEXITCODE -ne 0) {
+        $sshResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, "$SshManagerDir", '--reinstall-package', 'agent-ssh-manager', '--refresh-package', 'agent-ssh-manager', '--quiet')
+        $sshOut = $sshResult.Output
+        if ($sshResult.ExitCode -ne 0) {
             $ErrorActionPreference = $prevEAP
-            Write-Fail "ssh-manager install failed (exit $LASTEXITCODE)"
+            Write-Fail "ssh-manager install failed (exit $($sshResult.ExitCode))"
             if ($sshOut) { Write-Host ($sshOut | Out-String) }
             throw 'ssh-manager install failed'
         }
@@ -1837,10 +1867,11 @@ function Invoke-Install {
     # credential-relay (the relay framework agent-bridge runs in its daemon).
     $CredRelayDir = Resolve-CredentialRelay
     if ($CredRelayDir) {
-        $crOut = & uv pip install --python $VenvPython "$CredRelayDir" --reinstall-package agent-credential-relay --refresh-package agent-credential-relay --quiet 2>&1
-        if ($LASTEXITCODE -ne 0) {
+        $crResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, "$CredRelayDir", '--reinstall-package', 'agent-credential-relay', '--refresh-package', 'agent-credential-relay', '--quiet')
+        $crOut = $crResult.Output
+        if ($crResult.ExitCode -ne 0) {
             $ErrorActionPreference = $prevEAP
-            Write-Fail "credential-relay install failed (exit $LASTEXITCODE)"
+            Write-Fail "credential-relay install failed (exit $($crResult.ExitCode))"
             if ($crOut) { Write-Host ($crOut | Out-String) }
             throw 'credential-relay install failed'
         }
@@ -1852,10 +1883,11 @@ function Invoke-Install {
     # zdd (zero-downtime cutover primitives: routing table + orchestrator).
     $ZddDir = Resolve-Zdd
     if ($ZddDir) {
-        $zddOut = & uv pip install --python $VenvPython "$ZddDir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet 2>&1
-        if ($LASTEXITCODE -ne 0) {
+        $zddResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, "$ZddDir", '--reinstall-package', 'agent-zdd', '--refresh-package', 'agent-zdd', '--quiet')
+        $zddOut = $zddResult.Output
+        if ($zddResult.ExitCode -ne 0) {
             $ErrorActionPreference = $prevEAP
-            Write-Fail "zdd install failed (exit $LASTEXITCODE)"
+            Write-Fail "zdd install failed (exit $($zddResult.ExitCode))"
             if ($zddOut) { Write-Host ($zddOut | Out-String) }
             throw 'zdd install failed'
         }
@@ -1867,10 +1899,11 @@ function Invoke-Install {
     # single-instance-lease (one active daemon per host: lease + self-retire + reaper).
     $SilDir = Resolve-SingleInstanceLease
     if ($SilDir) {
-        $silOut = & uv pip install --python $VenvPython "$SilDir" --reinstall-package agent-single-instance-lease --refresh-package agent-single-instance-lease --quiet 2>&1
-        if ($LASTEXITCODE -ne 0) {
+        $silResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, "$SilDir", '--reinstall-package', 'agent-single-instance-lease', '--refresh-package', 'agent-single-instance-lease', '--quiet')
+        $silOut = $silResult.Output
+        if ($silResult.ExitCode -ne 0) {
             $ErrorActionPreference = $prevEAP
-            Write-Fail "single-instance-lease install failed (exit $LASTEXITCODE)"
+            Write-Fail "single-instance-lease install failed (exit $($silResult.ExitCode))"
             if ($silOut) { Write-Host ($silOut | Out-String) }
             throw 'single-instance-lease install failed'
         }
@@ -1882,10 +1915,11 @@ function Invoke-Install {
     # config-migrate (config schema versioning + migration).
     $CfgMigrateDir = Resolve-ConfigMigrate
     if ($CfgMigrateDir) {
-        $cmOut = & uv pip install --python $VenvPython "$CfgMigrateDir" --reinstall-package agent-config-migrate --refresh-package agent-config-migrate --quiet 2>&1
-        if ($LASTEXITCODE -ne 0) {
+        $cmResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, "$CfgMigrateDir", '--reinstall-package', 'agent-config-migrate', '--refresh-package', 'agent-config-migrate', '--quiet')
+        $cmOut = $cmResult.Output
+        if ($cmResult.ExitCode -ne 0) {
             $ErrorActionPreference = $prevEAP
-            Write-Fail "config-migrate install failed (exit $LASTEXITCODE)"
+            Write-Fail "config-migrate install failed (exit $($cmResult.ExitCode))"
             if ($cmOut) { Write-Host ($cmOut | Out-String) }
             throw 'config-migrate install failed'
         }
@@ -1894,8 +1928,9 @@ function Invoke-Install {
     } else {
         throw 'Cannot locate config-migrate library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
     }
-    $bridgeOut = & uv pip install --python $VenvPython "$PluginDir" --quiet 2>&1
-    $installResult = $LASTEXITCODE
+    $bridgeResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, "$PluginDir", '--quiet')
+    $bridgeOut = $bridgeResult.Output
+    $installResult = $bridgeResult.ExitCode
     $ErrorActionPreference = $prevEAP
     if ($installResult -ne 0) {
         Write-Fail "Package install failed (exit $installResult)"
@@ -2516,12 +2551,12 @@ function Invoke-Update {
         if ($SshManagerDir) {
             # Refresh the vendored agent-ssh-manager distribution's build cache
             # so a same-version source change lands (#186).
-            $sshOut = & uv pip install --python $VenvPython --reinstall-package agent-ssh-manager --refresh-package agent-ssh-manager `
-                "$SshManagerDir" --quiet 2>&1
-            if ($LASTEXITCODE -ne 0) {
+            $sshResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--reinstall-package', 'agent-ssh-manager', '--refresh-package', 'agent-ssh-manager', "$SshManagerDir", '--quiet')
+            $sshOut = $sshResult.Output
+            if ($sshResult.ExitCode -ne 0) {
                 $ErrorActionPreference = $prevEAP
                 if ($sshOut) { Write-Host ($sshOut | Out-String) }
-                throw "ssh-manager update failed (exit $LASTEXITCODE)"
+                throw "ssh-manager update failed (exit $($sshResult.ExitCode))"
             }
         } elseif (Test-SshManagerInstalled) {
             Write-Step 'ssh-manager already installed in venv (marketplace layout)'
@@ -2532,12 +2567,12 @@ function Invoke-Update {
         # without a version bump (uv otherwise skips a same-version path dep).
         $CredRelayDir = Resolve-CredentialRelay
         if ($CredRelayDir) {
-            $crOut = & uv pip install --python $VenvPython --reinstall-package agent-credential-relay --refresh-package agent-credential-relay `
-                "$CredRelayDir" --quiet 2>&1
-            if ($LASTEXITCODE -ne 0) {
+            $crResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--reinstall-package', 'agent-credential-relay', '--refresh-package', 'agent-credential-relay', "$CredRelayDir", '--quiet')
+            $crOut = $crResult.Output
+            if ($crResult.ExitCode -ne 0) {
                 $ErrorActionPreference = $prevEAP
                 if ($crOut) { Write-Host ($crOut | Out-String) }
-                throw "credential-relay update failed (exit $LASTEXITCODE)"
+                throw "credential-relay update failed (exit $($crResult.ExitCode))"
             }
         } elseif (Test-CredentialRelayInstalled) {
             Write-Step 'credential-relay already installed in venv (marketplace layout)'
@@ -2548,12 +2583,12 @@ function Invoke-Update {
         # version bump (uv otherwise skips a same-version path dep).
         $ZddDir = Resolve-Zdd
         if ($ZddDir) {
-            $zddOut = & uv pip install --python $VenvPython --reinstall-package agent-zdd --refresh-package agent-zdd `
-                "$ZddDir" --quiet 2>&1
-            if ($LASTEXITCODE -ne 0) {
+            $zddResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--reinstall-package', 'agent-zdd', '--refresh-package', 'agent-zdd', "$ZddDir", '--quiet')
+            $zddOut = $zddResult.Output
+            if ($zddResult.ExitCode -ne 0) {
                 $ErrorActionPreference = $prevEAP
                 if ($zddOut) { Write-Host ($zddOut | Out-String) }
-                throw "zdd update failed (exit $LASTEXITCODE)"
+                throw "zdd update failed (exit $($zddResult.ExitCode))"
             }
         } elseif (Test-ZddInstalled) {
             Write-Step 'zdd already installed in venv (marketplace layout)'
@@ -2563,12 +2598,12 @@ function Invoke-Update {
         # single-instance-lease: force-reinstall so a local code change propagates.
         $SilDir = Resolve-SingleInstanceLease
         if ($SilDir) {
-            $silOut = & uv pip install --python $VenvPython --reinstall-package agent-single-instance-lease --refresh-package agent-single-instance-lease `
-                "$SilDir" --quiet 2>&1
-            if ($LASTEXITCODE -ne 0) {
+            $silResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--reinstall-package', 'agent-single-instance-lease', '--refresh-package', 'agent-single-instance-lease', "$SilDir", '--quiet')
+            $silOut = $silResult.Output
+            if ($silResult.ExitCode -ne 0) {
                 $ErrorActionPreference = $prevEAP
                 if ($silOut) { Write-Host ($silOut | Out-String) }
-                throw "single-instance-lease update failed (exit $LASTEXITCODE)"
+                throw "single-instance-lease update failed (exit $($silResult.ExitCode))"
             }
         } elseif (Test-SingleInstanceLeaseInstalled) {
             Write-Step 'single-instance-lease already installed in venv (marketplace layout)'
@@ -2578,21 +2613,21 @@ function Invoke-Update {
         # config-migrate: force-reinstall so a local code change propagates.
         $CfgMigrateDir = Resolve-ConfigMigrate
         if ($CfgMigrateDir) {
-            $cmOut = & uv pip install --python $VenvPython --reinstall-package agent-config-migrate --refresh-package agent-config-migrate `
-                "$CfgMigrateDir" --quiet 2>&1
-            if ($LASTEXITCODE -ne 0) {
+            $cmResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--reinstall-package', 'agent-config-migrate', '--refresh-package', 'agent-config-migrate', "$CfgMigrateDir", '--quiet')
+            $cmOut = $cmResult.Output
+            if ($cmResult.ExitCode -ne 0) {
                 $ErrorActionPreference = $prevEAP
                 if ($cmOut) { Write-Host ($cmOut | Out-String) }
-                throw "config-migrate update failed (exit $LASTEXITCODE)"
+                throw "config-migrate update failed (exit $($cmResult.ExitCode))"
             }
         } elseif (Test-ConfigMigrateInstalled) {
             Write-Step 'config-migrate already installed in venv (marketplace layout)'
         } else {
             throw 'Cannot locate config-migrate library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
         }
-        $bridgeOut = & uv pip install --python $VenvPython --reinstall-package agent-bridge `
-            "$PluginDir" --quiet 2>&1
-        $updateResult = $LASTEXITCODE
+        $bridgeResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--reinstall-package', 'agent-bridge', "$PluginDir", '--quiet')
+        $bridgeOut = $bridgeResult.Output
+        $updateResult = $bridgeResult.ExitCode
         $ErrorActionPreference = $prevEAP
         if ($updateResult -ne 0) {
             if ($bridgeOut) { Write-Host ($bridgeOut | Out-String) }
