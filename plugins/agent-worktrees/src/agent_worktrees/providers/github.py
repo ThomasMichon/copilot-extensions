@@ -571,14 +571,21 @@ class GitHubProvider:
 
         Two reads: ``gh api repos/<repo>`` (merge methods, native auto-merge,
         delete-branch-on-merge) and, best-effort, the default branch's protection
-        (required approving reviews, required status checks). Never raises: a
-        failed settings read yields ``RepoPolicy(supported=False, error=...)``;
-        an unreadable/absent protection leaves those fields ``None``.
+        (required approving reviews, required status checks). Both explicitly
+        target ``authority_endpoint(api_base)`` (GitHub Enterprise host, ambient
+        ``GH_HOST``, or ``github.com``) rather than gh's ambient default host --
+        required for ``viewer_permission`` to actually describe the acting
+        identity's access on *this* repo's real host, not whichever host `gh`
+        would otherwise fall back to. Never raises: a failed settings read
+        yields ``RepoPolicy(supported=False, error=...)``; an unreadable/absent
+        protection leaves those fields ``None``.
         """
         from ..pr_contract import RepoPolicy
 
+        host = self.authority_endpoint(api_base)
         proc = run_cli(
-            ["gh", "api", f"repos/{repo}"], env=self._env(token),
+            ["gh", "api", "--hostname", host, f"repos/{repo}"],
+            env=self._env(token),
         )
         if proc.returncode != 0:
             return RepoPolicy(
@@ -601,7 +608,7 @@ class GitHubProvider:
         req_checks: bool | None = None
         if default_branch:
             pproc = run_cli(
-                ["gh", "api",
+                ["gh", "api", "--hostname", host,
                  f"repos/{repo}/branches/{default_branch}/protection"],
                 env=self._env(token),
             )

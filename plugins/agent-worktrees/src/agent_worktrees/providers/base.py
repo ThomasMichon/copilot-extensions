@@ -261,10 +261,18 @@ class PRProvider(Protocol):
         (allowed merge methods, native auto-merge availability, delete-branch-on-
         merge, required approving reviews, required status checks) so ``register``
         / ``pr-research`` can prepare the config policy matrix to match reality.
+        It also carries ``viewer_permission`` -- the acting identity's own live
+        permission level, read from the same call -- the primitive behind
+        :func:`actor_viewer_permission` and ``pr-merge --now``'s live
+        merge-authority gate.
 
         - **github** reads ``gh api repos/<repo>`` + the default branch's
           protection.
-        - **gitea / azure-devops** are unsupported today (return a
+        - **gitea** reads ``GET /repos/<repo>`` (merge-method settings +
+          ``viewer_permission``); it needs a token (no ambient CLI auth like
+          `gh`) and does not read branch protection (those fields stay
+          ``None``).
+        - **azure-devops** is unsupported today (returns a
           ``RepoPolicy(supported=False)``).
 
         Never raises: a failed read yields ``RepoPolicy(supported=False, error=...)``.
@@ -361,7 +369,7 @@ def _unsupported_repo_policy(name: str):
     return RepoPolicy(
         supported=False,
         error=(f"Provider '{name}' does not support settings reads (adopt-time "
-               "research is GitHub-only today)."),
+               "research is github/gitea only today)."),
     )
 
 

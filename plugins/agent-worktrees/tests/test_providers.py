@@ -929,7 +929,7 @@ class TestGitHubProvider:
         })
 
         def fake(args, **kw):
-            if args[:2] == ["gh", "api"] and args[2].endswith("/protection"):
+            if args[:2] == ["gh", "api"] and args[-1].endswith("/protection"):
                 return _proc(stdout=prot_json)
             return _proc(stdout=repo_json)
 
@@ -946,7 +946,7 @@ class TestGitHubProvider:
         repo_json = json.dumps({"allow_squash_merge": True})
 
         def fake(args, **kw):
-            if args[2].endswith("/protection"):
+            if args[-1].endswith("/protection"):
                 return _proc(returncode=1, stderr="Not Found")
             return _proc(stdout=repo_json)
 
@@ -1013,12 +1013,47 @@ class TestGitHubProvider:
         assert pol.supported is True
         assert pol.viewer_permission == "write"
 
+    def test_get_repo_policy_gitea_reads_allow_rebase_field(self, monkeypatch):
+        # Gitea's field is `allow_rebase` (not GitHub's `allow_rebase_merge`).
+        from agent_worktrees.providers import gitea
+
+        def fake(args, **kw):
+            body = json.dumps({"allow_rebase": True})
+            return _proc(stdout=f"{body}\n200")
+
+        monkeypatch.setattr(gitea, "run_cli", fake)
+        pol = gitea.GiteaProvider().get_repo_policy(
+            "o/r", api_base="https://gitea.example", token="tok",
+        )
+        assert pol.allow_rebase is True
+
     def test_get_repo_policy_gitea_no_token_unsupported(self):
         from agent_worktrees.providers import gitea
         pol = gitea.GiteaProvider().get_repo_policy(
             "o/r", api_base="https://gitea.example",
         )
         assert pol.supported is False
+
+    def test_get_repo_policy_honors_explicit_host(self, monkeypatch):
+        # An explicit api_base (GHE) must be the host BOTH gh calls target --
+        # otherwise viewer_permission would describe the wrong host's access.
+        from agent_worktrees.providers import github
+
+        seen_hosts = []
+
+        def fake(args, **kw):
+            assert args[:3] == ["gh", "api", "--hostname"]
+            seen_hosts.append(args[3])
+            if args[-1].endswith("/protection"):
+                return _proc(stdout="{}")
+            return _proc(stdout=json.dumps({"permissions": {"push": True}}))
+
+        monkeypatch.setattr(github, "run_cli", fake)
+        pol = github.GitHubProvider().get_repo_policy(
+            "o/r", default_branch="main", api_base="https://ghe.example.com/api/v3",
+        )
+        assert pol.viewer_permission == "write"
+        assert seen_hosts == ["ghe.example.com", "ghe.example.com"]
 
 
 

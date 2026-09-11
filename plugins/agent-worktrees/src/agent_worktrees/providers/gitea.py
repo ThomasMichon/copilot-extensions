@@ -828,7 +828,7 @@ class GiteaProvider:
             supported=True,
             allow_squash=_b("allow_squash_merge"),
             allow_merge_commit=_b("allow_merge_commits"),
-            allow_rebase=_b("allow_rebase_merge"),
+            allow_rebase=_b("allow_rebase"),
             delete_branch_on_merge=_b("default_delete_branch_after_merge"),
             viewer_permission=_gitea_viewer_permission(data.get("permissions")),
         )
