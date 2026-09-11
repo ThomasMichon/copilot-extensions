@@ -133,7 +133,7 @@ do_build() {
     # No host-config auto-forward: pass a feed ONLY when explicitly requested
     # (installs the Copilot CLI prereq on a governed box). Public by default.
     local reg="${NPM_REGISTRY:-https://registry.npmjs.org/}"
-    [ -z "$reg" ] && reg='https://registry.npmjs.org/'
+    [ -z "$reg" ] && reg='https://registry.npmjs.org/'  # feed-guard: allow defensive empty-string fallback, same default as the expansion above
     echo "   npm registry (build-time, Copilot install only): $reg"
     if ! docker build --build-arg "NPM_REGISTRY=$reg" -f "$HERE/$DOCKERFILE" -t "$BASE_TAG" "$HERE"; then
         echo "docker build failed. On a governed box the public npm feed is TLS-blocked;" >&2

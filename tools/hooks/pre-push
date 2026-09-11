@@ -44,6 +44,10 @@ fi
 # Keep each plugin's version identical across plugin.json / pyproject.toml /
 # marketplace.json (a one-file bump wedges the Picker's update indicator).
 "${PY[@]}" "$ROOT/tools/check-version-consistency.py"
+# No config/Dockerfile/install-script/CI-workflow file may hardcode a public
+# package-feed URL as the only usable endpoint (this repo runs on machines
+# whose default feed is network-blocked and replaced with an internal mirror).
+"${PY[@]}" "$ROOT/tools/check-feed-neutrality.py"
 # Freeze registered agent-bridge contracts and require a registry update when a
 # contract-sensitive source changes.
 "${PY[@]}" "$ROOT/tools/check-agent-bridge-contracts.py" --base origin/main
