@@ -683,15 +683,19 @@ class TestControlPlaneRelatedPRTier:
         )
         seen = {}
 
-        def _load_project_config(project):
+        def _load_project_config(project, **kwargs):
             seen["project"] = project
+            seen["kwargs"] = kwargs
             return object()
 
         monkeypatch.setattr(cfg, "load_project_config", _load_project_config)
 
         got = cfg._control_plane_related_pr_map()
 
-        assert seen == {"project": "harness"}
+        assert seen == {
+            "project": "harness",
+            "kwargs": {"include_control_plane_related_pr": False},
+        }
         assert got["ext"]["merge_actor"] == "submitter-direct"
 
     def test_cp_related_pr_map_does_not_load_unproven_project(

@@ -15,6 +15,7 @@ Everything here is **programmatic and non-agentic**: no AI agent is in the loop.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -860,6 +861,66 @@ def _resolve_for(req) -> "tuple[object | None, int]":
     return plan, 0
 
 
+def _is_windows() -> bool:
+    """Monkeypatchable platform seam so tests need not mutate global ``os.name``."""
+    return os.name == "nt"
+
+
+def _relocated_launch_script():
+    """Locate the Manager-owned launch-session script, this package's own
+    canonical muxed-launch implementation (Phase 3b Sub-slice 2a).
+
+    ``worktree-manager/bin/launch-session.{ps1,sh}`` is copied verbatim into
+    this package's own ``bin/`` sibling directory -- present both in an
+    installed versioned slot (``<root>/versions/<ver>/{src,bin}``) and in a
+    source checkout (``worktree-manager/{src,bin}``), since both layouts put
+    ``bin/`` two levels above this file. Returns ``None`` when the sibling
+    script is absent, so callers degrade to the graceful non-muxed launcher.py
+    path (DQ9) exactly as before this script existed.
+    """
+    root = Path(__file__).resolve().parents[2]
+    name = "launch-session.ps1" if _is_windows() else "launch-session.sh"
+    script = root / "bin" / name
+    return script if script.exists() else None
+
+
+def _run_relocated_mux_launch(req, plan, script) -> int:
+    """Delegate an ordinary local launch to the relocated launch-session
+    script -- the ONE canonical muxed-launch implementation (DQ9). The script
+    performs its own resolve/launch/attach/post-exit; this passes the
+    already-resolved ``plan.worktree_id`` (never re-issuing ``--new``/
+    ``--base``), so a ``mode == "new"`` request cannot create a second
+    worktree by re-triggering creation inside the script's own resolve call.
+    """
+    args = ["--project", req.project]
+    if req.mode == "base":
+        args.append("--base")
+    else:
+        worktree_id = str(getattr(plan, "worktree_id", None) or req.worktree_id or "")
+        if not worktree_id:
+            print("error: could not resolve a worktree id for this launch.")
+            return 1
+        args += ["--worktree-id", worktree_id]
+        if req.mode == "bare-resume":
+            args.append("--bare-resume")
+    if getattr(req, "no_mux", False):
+        os.environ["WORKTREE_NO_MUX"] = "1"
+
+    if _is_windows():
+        argv = ["pwsh.exe", "-NoProfile", "-NoLogo", "-File", str(script), *args]
+        proc = subprocess.Popen(argv)
+        try:
+            return proc.wait()
+        except KeyboardInterrupt:
+            try:
+                return proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                return 130  # 128 + SIGINT(2)
+    os.execvp("bash", ["bash", str(script), *args])
+    return 1  # unreachable -- os.execvp replaces the process
+
+
 def _run_launch(req) -> int:
     """Resolve + execute the operator's launch/resume (real engine)."""
     from . import launcher
@@ -935,6 +996,16 @@ def _run_launch(req) -> int:
         ) as error:
             print(f"error: could not prepare AHP launch: {error}")
             return 1
+        # AHP already rewrote plan.cmd to the attach client; the relocated
+        # launch-session script would re-resolve a vanilla plan and clobber
+        # that rewrite, so AHP stays on the direct-exec path (no mux wrapping
+        # for AHP attachment in this pass -- a known follow-up gap, not a
+        # regression: AHP launches never went through launch-session.ps1).
+        return launcher.launch(plan, want_mux=not getattr(req, "no_mux", False))
+    if getattr(req, "machine", None) is None and plan.action == "exec":
+        script = _relocated_launch_script()
+        if script is not None:
+            return _run_relocated_mux_launch(req, plan, script)
     return launcher.launch(plan, want_mux=not getattr(req, "no_mux", False))
 
 

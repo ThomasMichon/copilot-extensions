@@ -34,6 +34,13 @@ def _reset_engine_override():
     ec.set_engine_command(None)
 
 
+@pytest.fixture(autouse=True)
+def _no_relocated_launch_script_by_default(monkeypatch):
+    """Default to the pre-relocation ``launcher.py`` path (see the matching
+    fixture in test_production_picker_transplant.py for why)."""
+    monkeypatch.setattr(entrypoint, "_relocated_launch_script", lambda: None)
+
+
 def _run_demo_engine(args: list[str]) -> tuple[int, str]:
     buf = io.StringIO()
     with redirect_stdout(buf):

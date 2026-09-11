@@ -193,6 +193,7 @@ def test_extract_project_flag_trailing_value_missing():
 
 def test_bare_no_project_routes_to_help(monkeypatch, capsys):
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.setattr(m, "_usable_worktree_manager", lambda: None)
     monkeypatch.setattr(m.inst, "read_projects_registry", lambda: {"projects": {}})
     monkeypatch.setattr(m, "_git_toplevel", lambda p: None)
     rc = m.main([])
@@ -280,6 +281,7 @@ def test_installer_registry_commands_run_without_project(
 
 def test_project_flag_bypasses_help(monkeypatch):
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.setattr(m, "_usable_worktree_manager", lambda: None)
     called = {}
 
     def fake_launch(argv):
@@ -369,6 +371,7 @@ def test_router_worktrees_folds_back_to_launch(monkeypatch):
     """`worktrees` strips + continues (== the bare `<repo> <verb>` alias); it
     must never dispatch to a sibling plugin."""
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.setattr(m, "_usable_worktree_manager", lambda: None)
     monkeypatch.setattr(
         m, "_route_to_sibling_plugin",
         lambda *a, **k: (_ for _ in ()).throw(
@@ -476,6 +479,7 @@ def test_router_worktree_singular_folds_back(monkeypatch):
     """`<repo> worktree …` (singular) folds back into this binstub, same as
     `worktrees`."""
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.setattr(m, "_usable_worktree_manager", lambda: None)
     monkeypatch.setattr(
         m, "_route_to_sibling_plugin",
         lambda *a, **k: (_ for _ in ()).throw(
@@ -716,6 +720,7 @@ def test_bare_invocation_ignores_inherited_worktree_id(monkeypatch):
     WORKTREE_ID is neither consulted nor deleted (it is simply irrelevant)."""
     import os
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.setattr(m, "_usable_worktree_manager", lambda: None)
     monkeypatch.setenv("WORKTREE_ID", "keep-me")
     # Context comes from CWD resolution (not the retired $WORKTREE_PROJECT).
     monkeypatch.setattr(m, "_resolve_active_project", lambda proj: ("demo", None))
@@ -972,6 +977,7 @@ def test_bare_headless_project_lists_not_launches(monkeypatch):
 
 def test_bare_non_headless_project_launches(monkeypatch):
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.setattr(m, "_usable_worktree_manager", lambda: None)
     monkeypatch.setattr(m, "_resolve_active_project", lambda proj: ("demo", None))
     monkeypatch.setattr(m, "_is_headless_project", lambda: False)
     launched = {"v": False}

@@ -27,8 +27,10 @@
   siblings) and clean-room scenarios, so "clean cutover" means *proven*, not
   merely *fast*.
 - **Status:** In progress — Sub-slice 2a Step 1 landed (script files copied
-  verbatim; deployment mechanism proven). Repointing `cmd_launch` (the actual
-  cutover) is next.
+  verbatim; deployment mechanism proven). Sub-slice 2a Step 2's
+  `cmd_launch` repoint + direct non-mux fallback is now implemented; the
+  old in-plugin scripts are intentionally still deployed as a temporary
+  rollback until the relocated path is proven live on real hardware.
 
 ## Why this is a different shape of problem than AHP
 
@@ -122,20 +124,50 @@ about leaving Mux itself half-migrated.
    `pane-wrapper.{sh,ps1}` verbatim into `worktree-manager/bin/`. Zero logic
    changes. Proved deployable via the existing `_copy_payload` mechanism
    (no packaging code change needed) with a new self-install test.
-2. **Step 2 (the cutover):** in the same PR:
-   - Change `agent-worktrees`'s `cmd_launch` to resolve
-     `<worktree-manager install dir>/bin/launch-session.*` (mirroring the
-     version-marker lookup pattern `worktree_manager/production_picker/
-     _engine_runtime.py` already uses in the opposite direction).
-   - Add the **direct, non-mux fallback**: when no usable Worktree Manager is
-     found (health-probed, same pattern as the bare-invocation Picker seam),
-     `cmd_launch` execs Copilot directly in the worktree instead of a mux
-     pane. This is new, small code — not a retained copy of the old scripts.
-   - **Delete** `plugins/agent-worktrees/bin/launch-session.{sh,ps1,cmd}` and
-     `pane-wrapper.{sh,ps1}` from agent-worktrees in this same PR.
-   - The scripts' own calls into `agent-worktrees resolve` / `agent-worktrees
-     post-exit` are unchanged — still the same CLI subprocess boundary, now
-     invoked from a different installed location.
+2. **Step 2 (repoint + direct fallback portion done; deletion deferred by an
+   explicit deviation):**
+   - [x] Changed `agent-worktrees`'s `cmd_launch` to resolve
+     `<worktree-manager install dir>/bin/launch-session.*` via
+     `WORKTREE_MANAGER_ROOT` + `current-version`, reusing the same
+     `--version` health-probe pattern as the bare-invocation Manager seam.
+   - [x] Added the **direct, non-mux fallback**: when no usable Worktree
+     Manager / relocated launcher is found, `cmd_launch` now resolves the
+     normal launch plan and runs Copilot directly in the target worktree, then
+     calls `agent-worktrees post-exit` after the child exits.
+   - [ ] **Delete** `plugins/agent-worktrees/bin/launch-session.{sh,ps1,cmd}`
+     and `pane-wrapper.{sh,ps1}` from agent-worktrees. **Temporary
+     deviation:** keep them deployed as the explicit rollback path until live
+     proof shows the relocated Worktree Manager launcher preserves mux,
+     post-exit, and activity journaling on real hardware. The prior regression
+     that silently degraded interactive launches makes "prove first, delete
+     second" the safer sequencing here.
+   - [x] The scripts' own calls into `agent-worktrees resolve` /
+     `agent-worktrees post-exit` are unchanged in contract — still the same CLI
+     subprocess boundary, now invoked from a different installed location.
+   - [x] **Closed the actual live regression this slice exists to fix:**
+     Worktree Manager's OWN transplanted production Picker (`_run_launch` in
+     `worktree_manager/__main__.py`) previously routed every local, non-AHP
+     launch through `launcher.compose_launch()`/`execute()` -- whose
+     `MuxCapability` has **never** been wired to a real backend (`_capability`
+     stays `_NO_MUX` unless something calls `set_mux_capability()`, which
+     nothing does). Once the Manager's own `worktree-manager` binstub is on
+     `PATH`, the bare-invocation seam hands the WHOLE interactive session to
+     that Picker, bypassing `cmd_launch`/`launch-session.ps1` entirely --  so
+     the `cmd_launch` repoint above, while correct and necessary for
+     agent-worktrees' own standalone/fallback path, does **not** by itself
+     restore muxed launches once Worktree Manager is installed. `_run_launch`
+     now delegates the whole local, non-AHP launch to the SAME relocated
+     `<own-install>/bin/launch-session.*` script (verbatim reuse, per the
+     operator directive above) instead of `launcher.launch()`: it passes the
+     **already-resolved** `plan.worktree_id` (never re-issuing `--new`/`--base`,
+     which would create a second worktree), threads `--bare-resume` and
+     `WORKTREE_NO_MUX` exactly as `cmd_launch` does, and lets the script's own
+     resolve/launch/attach/post-exit take over. AHP-attached launches are
+     deliberately excluded (unchanged, still `launcher.launch()`) -- AHP
+     already rewrites `plan.cmd` to the attach client via `attach_plan()`,
+     and routing that through the script would re-resolve a vanilla plan and
+     clobber the rewrite; AHP mux-wrapping remains a known, separately-scoped
+     follow-up.
 3. **Validation gate for the cutover PR (required, not optional):**
    - Full `worktree-manager/tests/production_picker/` suite, especially
      `test_picker_capture.py`'s golden character-grid, ANSI, and SVG
@@ -196,10 +228,11 @@ about leaving Mux itself half-migrated.
 1. **(Done)** Copy launcher/wrapper scripts into `worktree-manager/bin/`,
    unchanged; prove the deployment mechanism with a self-install test.
 2. Add the health-probed new-location resolution **and** the direct non-mux
-   fallback to `cmd_launch`; delete the old in-plugin scripts. One PR, one
-   cutover — validated against the full Picker golden/screenshot suite,
-   both plugins' test suites, and the `agent-worktrees-solo` /
-   `worktree-manager-bootstrap` clean-room scenarios.
+   fallback to `cmd_launch`; **defer deleting** the old in-plugin scripts until
+   a follow-up live-proof cleanup PR removes the temporary rollback. The
+   repoint/fallback portion is validated against the full Picker
+   golden/screenshot suite, both plugins' test suites, and the
+   `agent-worktrees-solo` / `worktree-manager-bootstrap` clean-room scenarios.
 3. Author (or extend) a combined clean-room scenario proving an actual
    interactive mux launch end-to-end across both installed plugins, if not
    already done as part of step 2.
@@ -240,4 +273,3 @@ about leaving Mux itself half-migrated.
 - **Not a reconciliation with Worktree Manager's earlier, fledgling
   Picker-launch prototype.** That code is retired scaffolding; the migrated
   agent-worktrees implementation is authoritative and unmodified in substance.
-

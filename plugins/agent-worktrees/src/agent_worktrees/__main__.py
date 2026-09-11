@@ -178,23 +178,36 @@ def cmd_launch(argv: list[str]) -> int:
         except (OSError, RuntimeError, ValueError):
             os.environ.pop("AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR", None)
     plat = cfg.detect_platform()
+    legacy_name = "launch-session.cmd" if plat == "windows" else "launch-session.sh"
+    # Temporary deviation from efforts/active/worktree-manager-control-plane/
+    # phase-3b-mux-relocation.md Sub-slice 2a Step 2: the in-plugin
+    # launch-session/pane-wrapper files are deliberately NOT deleted yet, and
+    # are an ACTIVE fallback tier here (not just inert rollback files) until
+    # the relocated Worktree Manager path is proven live on real hardware.
+    # Try each candidate bin dir in order (relocated Worktree Manager, then
+    # the in-plugin scripts) and use the FIRST one whose script actually
+    # exists -- a "usable" relocated install (its Python module runs and
+    # reports a compatible version) does not by itself guarantee its bin/
+    # payload copy completed, so a partial deploy there must still fall
+    # through to the in-plugin tier rather than jumping straight to the new
+    # direct, non-mux path.
+    launch_bin = None
+    for candidate in (_usable_worktree_manager_launcher_dir(), inst_dir / "bin"):
+        if candidate is not None and (candidate / legacy_name).exists():
+            launch_bin = candidate
+            break
+    if launch_bin is None:
+        output.warn(
+            "No launch-session script found (neither the relocated "
+            "Worktree Manager launcher nor the in-plugin fallback); "
+            "launching Copilot directly without mux."
+        )
+        return _run_direct_launch_fallback(launch_project, passthrough)
 
     if plat == "windows":
-        launch_script = inst_dir / "bin" / "launch-session.cmd"
+        launch_script = launch_bin / "launch-session.cmd"
     else:
-        launch_script = inst_dir / "bin" / "launch-session.sh"
-
-    # Fall back to legacy location
-    if not launch_script.exists() and context is None:
-        legacy_name = "launch-session.sh"
-        legacy = Path.home() / f".{cfg.project_name()}" / "bin" / legacy_name
-        if legacy.exists():
-            launch_script = legacy
-
-    if not launch_script.exists():
-        output.err(f"{launch_script.name} not found at {launch_script}")
-        output.err("Run 'agent-worktrees install' first.")
-        return 1
+        launch_script = launch_bin / "launch-session.sh"
 
     if plat == "windows":
         # Two launch shapes on Windows (copilot-extensions #102 -- launcher
@@ -26582,6 +26595,7 @@ def cmd_help_unrouted(requested: str | None = None) -> int:
 _WORKTREE_MANAGER_BIN = "worktree-manager"
 _WORKTREE_MANAGER_MIN_PICKER_VERSION = (0, 1, 0, 21)
 _WORKTREE_MANAGER_ENGINE_ARGV_ENV = "WORKTREE_MANAGER_ENGINE_ARGV"
+_WORKTREE_MANAGER_ROOT_ENV = "WORKTREE_MANAGER_ROOT"
 
 # The Worktree Manager's canonical, human-visitable source (shown so a user can
 # verify the install command is ours before running it -- not an attack) and the
@@ -26610,6 +26624,45 @@ def _worktree_manager_path() -> str | None:
     return shutil.which(_WORKTREE_MANAGER_BIN)
 
 
+def _launch_probe_env() -> dict[str, str]:
+    """Subprocess env for Manager/launch probes.
+
+    Strip inherited Python-home overrides so marker-selected Python/uv commands
+    resolve against their own runtime rather than an ancestor process tree.
+    """
+    env = {**os.environ, "PYTHONUTF8": "1"}
+    env.pop("PYTHONHOME", None)
+    env.pop("UV_INTERNAL__PYTHONHOME", None)
+    return env
+
+
+def _probe_worktree_manager_version(
+    command: list[str],
+) -> tuple[tuple[int, int, int, int] | None, subprocess.CompletedProcess[str] | None]:
+    """Run a fast ``--version`` probe and parse a comparable version tuple."""
+    try:
+        proc = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            env=_launch_probe_env(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None, None
+    if proc.returncode != 0:
+        return None, proc
+    match = re.search(
+        r"\b(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?\b",
+        proc.stdout or "",
+    )
+    if match is None:
+        return None, proc
+    major, minor, patch = (int(match.group(i)) for i in range(1, 4))
+    dev = int(match.group(4)) if match.group(4) is not None else 1_000_000
+    return (major, minor, patch, dev), proc
+
+
 def _usable_worktree_manager() -> str | None:
     """The Manager binstub, but only if it is actually invocable (DQ8 guard).
 
@@ -26633,21 +26686,14 @@ def _usable_worktree_manager() -> str | None:
     mgr = _worktree_manager_path()
     if not mgr:
         return None
-    try:
-        proc = subprocess.run(
-            [mgr, "--version"],
-            capture_output=True,
-            text=True,
-            timeout=15,
-            env={**os.environ, "PYTHONUTF8": "1"},
-        )
-    except (OSError, subprocess.SubprocessError):
+    version, proc = _probe_worktree_manager_version([mgr, "--version"])
+    if proc is None:
         output.err(
             f"Ignoring an unusable '{_WORKTREE_MANAGER_BIN}' on PATH ({mgr}): "
             "it could not be run. Falling back to the bundled picker."
         )
         return None
-    if proc.returncode != 0:
+    if version is None and proc.returncode != 0:
         output.err(
             f"Ignoring a broken '{_WORKTREE_MANAGER_BIN}' on PATH ({mgr}): it "
             f"failed a --version health check (exit {proc.returncode}). This is "
@@ -26655,20 +26701,14 @@ def _usable_worktree_manager() -> str | None:
             "it. Falling back to the bundled picker."
         )
         return None
-    match = re.search(
-        r"\b(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?\b",
-        proc.stdout or "",
-    )
-    if match is None:
+    if version is None:
         output.err(
             f"Ignoring an incompatible '{_WORKTREE_MANAGER_BIN}' on PATH ({mgr}): "
             "its --version output did not include a supported version. Falling "
             "back to the bundled picker."
         )
         return None
-    major, minor, patch = (int(match.group(i)) for i in range(1, 4))
-    dev = int(match.group(4)) if match.group(4) is not None else 1_000_000
-    if (major, minor, patch, dev) < _WORKTREE_MANAGER_MIN_PICKER_VERSION:
+    if version < _WORKTREE_MANAGER_MIN_PICKER_VERSION:
         output.err(
             f"Ignoring an older '{_WORKTREE_MANAGER_BIN}' on PATH ({mgr}): "
             f"production Picker handoff requires 0.1.0-dev21 or newer. "
@@ -26676,6 +26716,167 @@ def _usable_worktree_manager() -> str | None:
         )
         return None
     return mgr
+
+
+def _worktree_manager_root() -> Path:
+    configured = os.environ.get(_WORKTREE_MANAGER_ROOT_ENV, "").strip()
+    return Path(configured).expanduser() if configured else Path.home() / ".worktree-manager"
+
+
+def _current_version_slot(root: Path) -> Path | None:
+    try:
+        version = (root / "current-version").read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if not version:
+        return None
+    versions_dir = (root / "versions").resolve()
+    slot = (versions_dir / version).resolve()
+    try:
+        slot.relative_to(versions_dir)
+    except ValueError:
+        return None
+    return slot
+
+
+def _usable_worktree_manager_launcher_dir() -> Path | None:
+    """Return the relocated Worktree Manager launcher directory when usable."""
+    slot = _current_version_slot(_worktree_manager_root())
+    if slot is None:
+        return None
+    version, proc = _probe_worktree_manager_version(
+        ["uv", "run", "--quiet", "--project", str(slot), "python", "-m", "worktree_manager", "--version"]
+    )
+    if proc is None:
+        output.warn(
+            "Ignoring an unusable Worktree Manager install at "
+            f"{slot}: its versioned runtime could not be started."
+        )
+        return None
+    if version is None and proc.returncode != 0:
+        output.warn(
+            "Ignoring a broken Worktree Manager install at "
+            f"{slot}: its versioned runtime failed a --version health check "
+            f"(exit {proc.returncode})."
+        )
+        return None
+    if version is None:
+        output.warn(
+            "Ignoring an incompatible Worktree Manager install at "
+            f"{slot}: its --version output did not include a supported version."
+        )
+        return None
+    return slot / "bin"
+
+
+def _agent_worktrees_launch_command(project: str | None) -> list[str]:
+    argv = [sys.executable, "-m", "agent_worktrees"]
+    if project:
+        argv += ["--project", project]
+    return argv
+
+
+def _resolve_direct_launch_plan(
+    project: str | None, passthrough: list[str]
+) -> tuple[dict[str, object], str | None]:
+    """Resolve the same launch plan the mux launchers consume, but in Python."""
+    resolve_args = _agent_worktrees_launch_command(project)
+    resolve_args += ["resolve", "--no-mux", *passthrough]
+    proc = subprocess.run(
+        resolve_args,
+        stdout=subprocess.PIPE,
+        stderr=None,
+        text=True,
+        env=_launch_probe_env(),
+    )
+    if proc.returncode != 0:
+        return {"action": "none", "exit_code": proc.returncode}, project
+    if not proc.stdout.strip():
+        output.err("resolve produced no output on stdout")
+        return {"action": "none", "exit_code": 1}, project
+    plan = json.loads(proc.stdout)
+    if isinstance(plan, dict) and isinstance(plan.get("launch"), dict):
+        plan = plan["launch"]
+    if not isinstance(plan, dict):
+        raise RuntimeError("resolve did not return a launch plan object")
+    plan_project = plan.get("project")
+    if isinstance(plan_project, str) and plan_project:
+        project = plan_project
+    return plan, project
+
+
+def _wait_for_launch_child(proc: subprocess.Popen) -> int:
+    try:
+        return proc.wait()
+    except KeyboardInterrupt:
+        try:
+            return proc.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            return 130
+
+
+def _run_post_exit_for_direct_launch(project: str | None, worktree_id: str) -> None:
+    post_args = _agent_worktrees_launch_command(project)
+    post_args += ["post-exit", worktree_id]
+    result = subprocess.run(post_args, env=_launch_probe_env())
+    if result.returncode != 0:
+        output.warn(
+            f"Post-exit finalization failed (exit code {result.returncode}). "
+            "Run 'agent-worktrees finalize' to retry."
+        )
+
+
+def _run_direct_launch_fallback(project: str | None, passthrough: list[str]) -> int:
+    """Launch Copilot directly from the resolved plan when mux support is absent."""
+    while True:
+        plan, project = _resolve_direct_launch_plan(project, passthrough)
+        action = str(plan.get("action", "none"))
+        if action == "none":
+            return int(plan.get("exit_code", 0) or 0)
+        if action == "refresh":
+            if _env_get("WORKTREE_NO_UPDATE") != "1":
+                update_args = _agent_worktrees_launch_command(project)
+                update_args.append("update")
+                result = subprocess.run(update_args, env=_launch_probe_env())
+                if result.returncode != 0:
+                    output.warn(
+                        "Full update returned non-zero -- continuing to relaunch"
+                    )
+            continue
+        if action == "remote":
+            ssh_alias = plan.get("ssh_alias")
+            remote_cmd = plan.get("remote_command")
+            if not isinstance(ssh_alias, str) or not isinstance(remote_cmd, str):
+                output.err("Remote launch plan is missing ssh handoff details.")
+                return 1
+            proc = subprocess.Popen(["ssh", "-t", ssh_alias, remote_cmd])
+            return _wait_for_launch_child(proc)
+        if action != "exec":
+            output.err(f"Unknown launch action: {action}")
+            return 1
+        work_dir = plan.get("work_dir")
+        cmd = plan.get("cmd")
+        if not isinstance(work_dir, str) or not work_dir:
+            output.err("Resolved launch plan is missing work_dir.")
+            return 1
+        if not isinstance(cmd, list) or not all(isinstance(item, str) for item in cmd):
+            output.err("Resolved launch plan is missing an executable command.")
+            return 1
+        child_env = _launch_probe_env()
+        plan_env = plan.get("env")
+        if isinstance(plan_env, dict):
+            for key, value in plan_env.items():
+                if isinstance(key, str):
+                    child_env[key] = str(value)
+        child_env.pop("WORKTREE_ID", None)
+        child_env.pop("WORKTREE_PROJECT", None)
+        proc = subprocess.Popen(cmd, cwd=work_dir, env=child_env)
+        rc = _wait_for_launch_child(proc)
+        worktree_id = plan.get("worktree_id")
+        if isinstance(worktree_id, str) and worktree_id and plan.get("post_exit"):
+            _run_post_exit_for_direct_launch(project, worktree_id)
+        return rc
 
 
 def _exec_worktree_manager(
