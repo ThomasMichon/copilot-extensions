@@ -113,12 +113,26 @@ here but not blocking the start of 1/2/5.
 
 ## Plan (this phase)
 
-- [ ] Wire the task machine into `queue.py`'s `_transition` call sites
-  (item 1 above): replace each hardcoded `allowed=`/`to=` pair with a
-  lookup against `task_state_machine.TRANSITIONS_BY_NAME`. Add a
-  regression test proving no `_transition` call site can pass a pair that
-  disagrees with the declared table (a call site drifting from the table
-  becomes a test failure, not a silent gap).
+- [x] Wire the task machine into `queue.py`'s `_transition` call sites
+  (item 1 above): replaced each hardcoded `allowed=`/`to=` pair (`approve`,
+  `start`, `suspend`, `resume`, `release_suspended`, `abandon`, and
+  `complete_with_outcome`'s local `allowed` set) with a lookup against a
+  new `task_state_machine.TRANSITIONS_BY_NAME`, via a lazily-imported
+  `_task_transition_spec()` helper in `queue.py` (a lazy import avoids the
+  circular-import risk, since `task_state_machine` itself imports `Status`
+  from `queue`). Wiring surfaced one real, previously-undetected
+  discrepancy: the declared `complete` transition only named `started`,
+  but `complete_with_outcome` has always also allowed completing a
+  `suspended` task directly (a suspended task may resolve while no worker
+  process is running). Corrected the declared table to match the real,
+  already-working behavior, per this phase's own scope boundary ("the
+  gap is fixed in the declared table first... not patched directly in
+  `queue.py`"). Added
+  `plugins/agent-dispatch/tests/test_task_transition_wiring.py` (9 tests)
+  proving each call site genuinely *reads* the declared table --
+  monkeypatching a transition's `from_states`/`to_state` and asserting the
+  live method's behavior changes to match, not just that today's literals
+  happen to agree with it.
 - [ ] Make `machine_coupling`'s CAS outcome classification explicit in
   `queue.py`'s own `_transition` return/logging (item 2 above), backed by
   a test proving a replayed transition is classified as
