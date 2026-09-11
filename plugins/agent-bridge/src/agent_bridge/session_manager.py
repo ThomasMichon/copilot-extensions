@@ -3153,7 +3153,8 @@ class SessionManager:
                 with contextlib.suppress(Exception):
                     await sock.close()
 
-        def _settle_dead_child(exit_code: int) -> None:
+        async def _settle_dead_child(exit_code: int) -> None:
+            await self._join_exited_child_prompt(session)
             client_obj = session.client
             if client_obj is not None:
                 client_obj.mark_host_child_exited(exit_code)
@@ -3207,7 +3208,7 @@ class SessionManager:
             if streams.child_exit_code is not None:
                 client.mark_host_child_exited(streams.child_exit_code)
                 await _close_partial_reattach()
-                _settle_dead_child(streams.child_exit_code)
+                await _settle_dead_child(streams.child_exit_code)
                 return False
             client.adopt_session(session.acp_session_id)
             session.client = client
@@ -3232,7 +3233,7 @@ class SessionManager:
                 raise
             if child_exit_code is not None:
                 session.client = client
-                _settle_dead_child(child_exit_code)
+                await _settle_dead_child(child_exit_code)
                 return False
             log.warning(
                 "Failed to reattach session %s to host pid=%s%s",
@@ -3615,6 +3616,7 @@ class SessionManager:
                     client is not None
                     and client.host_child_exit_code is not None
                 ):
+                    await self._join_exited_child_prompt(session)
                     with contextlib.suppress(Exception):
                         await client.shutdown()
                     self._reap_host_record(
@@ -3822,20 +3824,13 @@ class SessionManager:
         job also takes the child). Used for both the explicit-terminate reap
         (#1786) and the version-mux stranded/forced reap.
         """
-        from .session_host.osutil import kill_pid, reap_zombie
-
         log.info(
             "Reaping Session Host for session %s (host pid=%s, child pid=%s): %s",
             rec.session_id, rec.host_pid, rec.child_pid, reason,
         )
         boundary = getattr(rec, "boundary", "local")
         if boundary == "local":
-            kill_pid(rec.child_pid, force=True)
-            kill_pid(rec.host_pid, force=True)
-            # Clear the zombie a host we parented leaves behind (no-op for a
-            # reattached host that init reaps, or on Windows).
-            reap_zombie(rec.child_pid)
-            reap_zombie(rec.host_pid)
+            self._terminate_local_host_processes(rec)
         else:
             # Remote (CodeSpace / mesh) boundary: host_pid/child_pid live on the
             # FAR side -- killing those pid numbers locally would hit unrelated
@@ -3846,6 +3841,20 @@ class SessionManager:
                 release_container_lock=False,
             )
             self._schedule_remote_reap(rec, reason)
+        self._forget_host_record(rec)
+
+    @staticmethod
+    def _terminate_local_host_processes(rec: Any) -> None:
+        """Blocking process teardown only; safe to offload without manager state."""
+        from .session_host.osutil import kill_pid, reap_zombie
+
+        kill_pid(rec.child_pid, force=True)
+        kill_pid(rec.host_pid, force=True)
+        reap_zombie(rec.child_pid)
+        reap_zombie(rec.host_pid)
+
+    def _forget_host_record(self, rec: Any) -> None:
+        """Remove reaped host metadata on the lifecycle event loop."""
         with contextlib.suppress(Exception):
             self._host_index.remove(rec.session_id)
         # #4272 bridge-lock: best-effort clear the lattice lock at teardown.
@@ -4022,13 +4031,15 @@ class SessionManager:
                                         HostDisposition.FORCE_REAP):
                     if getattr(rec, "boundary", "local") == "local":
                         teardown = asyncio.create_task(
-                            asyncio.to_thread(self._reap_host_record, rec, plan.reason)
+                            asyncio.to_thread(self._terminate_local_host_processes, rec)
                         )
                         try:
                             await asyncio.shield(teardown)
                         except asyncio.CancelledError:
                             await teardown
+                            self._forget_host_record(rec)
                             raise
+                        self._forget_host_record(rec)
                     else:
                         self._reap_host_record(rec, plan.reason)
                     reaped += 1
@@ -6040,6 +6051,14 @@ class SessionManager:
         genuinely idle one (#51)."""
         for session in list(self._sessions.values()):
             await self._notify_host_reapable(session)
+
+    @staticmethod
+    async def _join_exited_child_prompt(session: Session) -> None:
+        """Join the old driver before publishing authoritative child-exit state."""
+        task = session._prompt_task
+        if task is not None and task is not asyncio.current_task() and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
     async def _quiesce_session(
         self, session: Session, *, cancel_turn: bool = True
