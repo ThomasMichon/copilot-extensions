@@ -311,7 +311,7 @@ class HostResources:
             if result.get("workerError") in {"resource_busy", "resource_provider_failed"}:
                 raise NativeError(result["workerError"], "Host resource operation is unavailable; retry the same request", 503)
             return result
-        except (TimeoutError, OSError) as exc:
+        except (TimeoutError, asyncio.TimeoutError, OSError) as exc:
             raise NativeError("resource_provider_unavailable", "Host resource reply unavailable; owned state is preserved", 503) from exc
         finally:
             if not process.stdin.is_closing():
@@ -322,7 +322,7 @@ class HostResources:
                 async def reap():
                     try:
                         await asyncio.wait_for(process.communicate(), 105)
-                    except TimeoutError:
+                    except (TimeoutError, asyncio.TimeoutError):
                         if process.returncode is None:
                             process.kill()
                         await process.wait()

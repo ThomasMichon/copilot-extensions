@@ -55,7 +55,7 @@ def main():
         sys.stdout.buffer.flush()
     except AlreadyRunningError:
         print(json.dumps({"workerError": "resource_busy"}))
-    except (ValueError, OSError, TimeoutError):
+    except (ValueError, OSError, TimeoutError, asyncio.TimeoutError):
         print(json.dumps({"workerError": "resource_provider_failed"}))
 
 
