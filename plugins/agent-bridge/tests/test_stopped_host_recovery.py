@@ -690,7 +690,8 @@ async def test_host_sweeps_preserve_stopped_or_lifecycle_owned_records(
         reap.assert_called_once()
 
 
-async def test_stop_waits_for_its_pending_remote_reap_only(context, monkeypatch):
+@pytest.mark.parametrize("cancel_stop", [False, True])
+async def test_stop_waits_for_its_pending_remote_reap_only(context, monkeypatch, cancel_stop):
     from dataclasses import replace
 
     ctx = context
@@ -715,8 +716,21 @@ async def test_stop_waits_for_its_pending_remote_reap_only(context, monkeypatch)
         stop = asyncio.create_task(ctx.manager.stop_session(ctx.session.session_id))
         await asyncio.sleep(0)
         assert not stop.done()
+        if cancel_stop:
+            stop.cancel()
+            await asyncio.sleep(0)
+            assert not stop.done()
+            assert all(
+                not task.cancelled()
+                for task in ctx.manager._remote_reaps_by_session[ctx.session.session_id]
+            )
         release.set()
-        await asyncio.wait_for(stop, 1)
+        if cancel_stop:
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(stop, 1)
+            await ctx.manager.stop_session(ctx.session.session_id)
+        else:
+            await asyncio.wait_for(stop, 1)
         assert ctx.session.status == SessionStatus.STOPPED
         assert ctx.session.session_id not in ctx.manager._remote_reaps_by_session
         assert not other_task.done()
@@ -763,3 +777,116 @@ async def test_cancelled_local_sweep_keeps_lock_until_worker_settles(context, mo
         await sweep
     await asyncio.wait_for(stop, 1)
     assert ctx.session.status == SessionStatus.STOPPED
+
+
+@pytest.mark.parametrize("live_turn", [False, True])
+async def test_wedged_reconciliation_rechecks_after_stop(
+    context, monkeypatch, mock_acp_client, live_turn,
+):
+    ctx = context
+    entered, release = asyncio.Event(), asyncio.Event()
+    turn_done = asyncio.Event()
+
+    async def quiesce(*_args, **_kwargs):
+        entered.set()
+        await release.wait()
+
+    monkeypatch.setattr(ctx.manager, "_quiesce_session", quiesce)
+    monkeypatch.setattr(
+        ctx.session, "liveness_state",
+        lambda _now: "stalled" if live_turn else "disconnected",
+    )
+    spawn = AsyncMock(side_effect=AssertionError("unexpected recovery spawn"))
+    monkeypatch.setattr("agent_bridge.session_manager.spawn", spawn)
+    if live_turn:
+        ctx.session.client = mock_acp_client
+        ctx.session._prompt_task = asyncio.create_task(turn_done.wait())
+        ctx.session.last_output_at = time.time() - 100
+        ctx.manager._live_stall_interrupt_after_s = 1
+    stop = asyncio.create_task(ctx.manager.stop_session(ctx.session.session_id))
+    await asyncio.wait_for(entered.wait(), 1)
+    recovery = asyncio.create_task(ctx.manager.reconcile_wedged_running())
+    await asyncio.sleep(0)
+    assert not recovery.done()
+    release.set()
+    try:
+        await asyncio.wait_for(stop, 1)
+        assert await asyncio.wait_for(recovery, 1) == 0
+        assert ctx.session.status == SessionStatus.STOPPED
+        spawn.assert_not_awaited()
+        mock_acp_client.cancel_prompt.assert_not_awaited()
+    finally:
+        turn_done.set()
+        if live_turn:
+            await ctx.session._prompt_task
+
+
+async def test_stop_serializes_with_already_admitted_prompt(
+    context, monkeypatch, mock_acp_client,
+):
+    ctx = context
+    ctx.session.status = SessionStatus.IDLE
+    ctx.session.client = mock_acp_client
+    mock_acp_client.session_host_client = None
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def prompt(_text):
+        await asyncio.Event().wait()
+
+    mock_acp_client.send_prompt.side_effect = prompt
+
+    async def submit(session_id, text):
+        entered.set()
+        await release.wait()
+        return await SessionManager._submit_prompt_locked(ctx.manager, session_id, text)
+
+    monkeypatch.setattr(ctx.manager, "_submit_prompt_locked", submit)
+    monkeypatch.setattr(
+        ctx.manager, "_quiesce_session", SessionManager._quiesce_session.__get__(ctx.manager),
+    )
+    monkeypatch.setattr("agent_bridge.session_manager._cleanup_worktree", AsyncMock())
+    send = asyncio.create_task(ctx.manager.submit_prompt(ctx.session.session_id, "work"))
+    await asyncio.wait_for(entered.wait(), 1)
+    stop = asyncio.create_task(ctx.manager.stop_session(ctx.session.session_id))
+    await asyncio.sleep(0)
+    assert not stop.done()
+    release.set()
+    await asyncio.wait_for(asyncio.gather(send, stop), 1)
+    assert ctx.session._prompt_task.done()
+    assert ctx.session.status == SessionStatus.STOPPED
+    assert ctx.db.get_session(ctx.session.session_id)["status"] == "stopped"
+
+
+@pytest.mark.parametrize("transport_lost", [False, True])
+async def test_startup_resume_nudge_respects_lock_order_and_transport_loss(
+    context, monkeypatch, mock_acp_client, transport_lost,
+):
+    ctx = context
+    ctx.manager._host_index.set_resume_flag(ctx.session.session_id, True)
+    monkeypatch.setattr(
+        ctx.manager, "_reattach_one", SessionManager._reattach_one.__get__(ctx.manager),
+    )
+    monkeypatch.setattr(ctx.manager, "_recover_remote_host_records", AsyncMock(return_value=0))
+    monkeypatch.setattr(ctx.manager, "_ensure_forward", AsyncMock())
+    sock = SimpleNamespace(attach=AsyncMock(), close=AsyncMock(), send_status=AsyncMock())
+    streams = SimpleNamespace(
+        reader=Mock(), writer=Mock(), child_exit_code=None, aclose=AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_host.client.SessionHostClient.connect", AsyncMock(return_value=sock),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_host.acp_adapter.open_acp_streams", AsyncMock(return_value=streams),
+    )
+    mock_acp_client.start_streams = AsyncMock()
+    mock_acp_client.is_running = not transport_lost
+    monkeypatch.setattr("agent_bridge.session_manager.AcpClient", lambda **_kwargs: mock_acp_client)
+    assert await asyncio.wait_for(ctx.manager.reattach_session_hosts(), 1) == 1
+    if transport_lost:
+        assert ctx.session._prompt_task is None
+        assert ctx.manager._host_index.get(ctx.session.session_id).resume_on_reattach is True
+    else:
+        await asyncio.wait_for(ctx.session._prompt_task, 1)
+        mock_acp_client.send_prompt.assert_awaited_once_with("Resume")
+    assert not ctx.session._turn_start_lock.locked()
+    assert not ctx.session._lifecycle_lock.locked()
