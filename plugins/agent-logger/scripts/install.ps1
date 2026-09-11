@@ -1014,15 +1014,53 @@ function Register-SyncTask {
     $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
 
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
-        Set-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
-            -Settings $settings -Principal $principal | Out-Null
-        Write-Changed "scheduled task updated (every 4h)"
+        try {
+            Set-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
+                -Settings $settings -Principal $principal -ErrorAction Stop | Out-Null
+            Write-Changed "scheduled task updated (every 4h)"
+        } catch {
+            Write-TaskAccessDeniedWarning $_ 'update'
+        }
     } else {
-        Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
-            -Settings $settings -Principal $principal `
-            -Description 'Agent Logger -- push Copilot session data to the configured target every 4 hours.' | Out-Null
-        Write-Changed "scheduled task registered (every 4h)"
+        try {
+            Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
+                -Settings $settings -Principal $principal `
+                -Description 'Agent Logger -- push Copilot session data to the configured target every 4 hours.' `
+                -ErrorAction Stop | Out-Null
+            Write-Changed "scheduled task registered (every 4h)"
+        } catch {
+            Write-TaskAccessDeniedWarning $_ 'register'
+        }
     }
+}
+
+function Test-IsAccessDenied {
+    param($ErrorRecord)
+    # Mirror agent-index's Test-AccessDenied classifier (scripts/install.ps1):
+    # check the exception TYPE first (locale-independent), and only fall back
+    # to the message text -- Task Scheduler's Access Denied surfaces as a .NET
+    # UnauthorizedAccessException, but a non-English Windows can localize the
+    # message string.
+    return ("$($ErrorRecord.Exception.Message)" -match '(?i)access is denied' `
+            -or $ErrorRecord.Exception -is [UnauthorizedAccessException])
+}
+
+function Write-TaskAccessDeniedWarning {
+    param($ErrorRecord, [string]$Verb)
+    if (-not (Test-IsAccessDenied $ErrorRecord)) {
+        throw $ErrorRecord
+    }
+    # A task (or, for a brand-new task, the Tasks folder entry Task Scheduler
+    # creates for it) whose DACL only grants the current user Read/Synchronize
+    # (owner BUILTIN\Administrators) was registered/touched by a prior elevated
+    # run. Task Scheduler enforces that ACL regardless of who the task *runs
+    # as* -- a non-elevated Set-ScheduledTask/Register-ScheduledTask/
+    # Unregister-ScheduledTask on it fails with Access Denied even though the
+    # task's own principal is the current user. Recovering the ACL itself
+    # requires one elevated action; don't fail the whole install over it.
+    Write-Warn2 "could not $Verb scheduled task '$TaskName' (Access is denied); left unchanged"
+    Write-Warn2 "one-time fix (run once from an elevated prompt, then re-run this installer):"
+    Write-Warn2 "  schtasks /Delete /TN `"$TaskName`" /F"
 }
 
 function Update-SyncTaskBinding {
@@ -1032,8 +1070,12 @@ function Update-SyncTaskBinding {
             Write-Warn2 "scheduled task left unchanged: no provisioned runtime"
             return
         }
-        Set-ScheduledTask -TaskName $TaskName -Action $action | Out-Null
-        Write-Changed "scheduled task runtime updated"
+        try {
+            Set-ScheduledTask -TaskName $TaskName -Action $action -ErrorAction Stop | Out-Null
+            Write-Changed "scheduled task runtime updated"
+        } catch {
+            Write-TaskAccessDeniedWarning $_ 'update'
+        }
     } else {
         Write-Ok "package updated (task not registered)"
     }
