@@ -816,3 +816,28 @@ entries have appeared since the fix landed.
 This closes out the scheduled-task-binstub audit slice of the operator's full
 ask; the #736 umbrella's own remaining sub-issues (#738, #742, #743, #744)
 are unrelated open work tracked separately above.
+
+### 2026-09-11 (later) — Landed #1837 fix (force-register-on-elevated-update)
+
+Fixed the `agent-dispatch` boot-mode supervisor task registration gap found
+during the audit above: `Install-SupervisorTaskInstance` used the caller's
+elevation state as a proxy for "does the task need re-registering", so an
+elevated update always fell through to `Register-ScheduledTask -Force` even
+when the existing task's action already matched the desired one. Now compares
+the registered task's `Action` (Execute/Arguments/WorkingDirectory) against
+the one the update would produce; a match means already-correct regardless of
+elevation (cycle in place via `Restart-SupervisorTaskInPlace`), and
+re-registration is reserved for a missing task or a genuine definition drift.
+A drift with no elevation available degrades to an in-place restart of the
+stale task (warned) rather than silently no-op'ing the migration. Full
+`agent-dispatch` suite: `test_supervisor_install.py` 42/42; the other 37
+failures observed in a full-suite run are pre-existing installed-venv/source
+version skew (build-info/procutil/task-transition tests unrelated to this
+change), confirmed absent from this diff's touched files. Landed via
+[ThomasMichon/copilot-extensions#1837](https://github.com/ThomasMichon/copilot-extensions/issues/1837).
+
+Remaining #736-adjacent open work not picked up this session: #742 (atomic
+`current-version` marker), #743 (agent-vault drain-safe cutover), #744
+(work-coalescing singleton tier design), #1836 (agent-vault register-once
+through a stable launcher -- a larger structural change than #1837's,
+deferred).
