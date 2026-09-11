@@ -2669,12 +2669,17 @@ class SessionManager:
         if started:
             self._relays[session_id] = started
 
-    async def _stop_relays(self, session_id: str) -> None:
+    async def _stop_relays(self, session_id: str, *, strict: bool = False) -> None:
         """Stop and forget a session's credential-relay supervisors."""
-        relays = self._relays.pop(session_id, [])
-        for relay in relays:
-            with contextlib.suppress(Exception):
+        relays = self._relays.get(session_id, [])
+        for relay in list(relays):
+            if strict:
                 await relay.stop()
+            else:
+                with contextlib.suppress(Exception):
+                    await relay.stop()
+            relays.remove(relay)
+        self._relays.pop(session_id, None)
 
     async def interrupt_relays_for_parity(
         self,
@@ -3039,14 +3044,22 @@ class SessionManager:
             session.target.cwd,
         )
 
-    async def _drop_forward(self, session_id: str) -> None:
+    async def _drop_forward(
+        self, session_id: str, *, strict: bool = False,
+        preserve_ownership: bool = False,
+    ) -> None:
         """Cancel and forget a session's remote-boundary forwards (if any)."""
-        await self._stop_relays(session_id)
-        fwd = self._forwards.pop(session_id, None)
+        await self._stop_relays(session_id, strict=strict)
+        fwd = self._forwards.get(session_id)
         if fwd is not None:
-            with contextlib.suppress(Exception):
+            if strict:
                 await fwd.cancel()
-        self._release_container_lock(session_id)
+            else:
+                with contextlib.suppress(Exception):
+                    await fwd.cancel()
+        self._forwards.pop(session_id, None)
+        if not preserve_ownership:
+            self._release_container_lock(session_id)
 
     async def _reattach_one(
         self,
@@ -6126,6 +6139,12 @@ class SessionManager:
                 )
             await self._quiesce_session(session, cancel_turn=cancel_turn)
 
+            if not for_restart:
+                # Relay monitors reconnect independently of the heartbeat.
+                # Keep host/venue ownership for lazy resume, not live channels.
+                await self._drop_forward(
+                    session_id, strict=True, preserve_ownership=True,
+                )
             if not for_restart and self._host_index is not None:
                 self._host_index.set_resume_flag(session_id, False)
             # Idle-reaper only: free the child; a plain stop stays resumable.
