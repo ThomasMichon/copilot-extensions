@@ -380,6 +380,9 @@ restart does not inherently close the child's pipes.
   and stranded-host sweeps run on the lifecycle event loop and skip dormant or
   lifecycle-owned sessions. Blocking local process teardown stays off-loop
   while retaining that lifecycle lock, including during sweep cancellation.
+  Only process termination is offloaded; shared host-index cleanup stays on the
+  event loop. Child-exit settlement joins the old prompt driver before its final
+  stopped-state write.
   Stop also awaits any previously scheduled remote reap for that session before
   acknowledging, shielding that cleanup from request cancellation. When both
   locks are needed, turn admission precedes lifecycle ownership: a send admitted

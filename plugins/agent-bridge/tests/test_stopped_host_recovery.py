@@ -657,7 +657,13 @@ async def test_host_sweeps_preserve_stopped_or_lifecycle_owned_records(
         assert ctx.session._lifecycle_lock.locked()
 
     reap = Mock(side_effect=assert_off_loop)
-    monkeypatch.setattr(ctx.manager, "_reap_host_record", reap)
+    monkeypatch.setattr(ctx.manager, "_terminate_local_host_processes", reap)
+
+    def forget(record):
+        assert threading.get_ident() == loop_thread
+        ctx.manager._host_index.remove(record.session_id)
+
+    monkeypatch.setattr(ctx.manager, "_forget_host_record", forget)
     entered, release = asyncio.Event(), asyncio.Event()
 
     async def quiesce(*_args, **_kwargs):
@@ -761,7 +767,11 @@ async def test_cancelled_local_sweep_keeps_lock_until_worker_settles(context, mo
         assert release.wait(timeout=2)
         assert ctx.session._lifecycle_lock.locked()
 
-    monkeypatch.setattr(ctx.manager, "_reap_host_record", reap)
+    monkeypatch.setattr(ctx.manager, "_terminate_local_host_processes", reap)
+    monkeypatch.setattr(
+        ctx.manager, "_forget_host_record",
+        lambda rec: ctx.manager._host_index.remove(rec.session_id),
+    )
     sweep = asyncio.create_task(ctx.manager.sweep_stranded_hosts())
     try:
         await asyncio.wait_for(entered.wait(), 1)
@@ -857,9 +867,9 @@ async def test_stop_serializes_with_already_admitted_prompt(
     assert ctx.db.get_session(ctx.session.session_id)["status"] == "stopped"
 
 
-@pytest.mark.parametrize("transport_lost", [False, True])
+@pytest.mark.parametrize("outcome", ["healthy", "transport_lost", "child_exited"])
 async def test_startup_resume_nudge_respects_lock_order_and_transport_loss(
-    context, monkeypatch, mock_acp_client, transport_lost,
+    context, monkeypatch, mock_acp_client, outcome,
 ):
     ctx = context
     ctx.manager._host_index.set_resume_flag(ctx.session.session_id, True)
@@ -868,9 +878,12 @@ async def test_startup_resume_nudge_respects_lock_order_and_transport_loss(
     )
     monkeypatch.setattr(ctx.manager, "_recover_remote_host_records", AsyncMock(return_value=0))
     monkeypatch.setattr(ctx.manager, "_ensure_forward", AsyncMock())
+    monkeypatch.setattr(ctx.manager, "_reap_host_record", Mock())
     sock = SimpleNamespace(attach=AsyncMock(), close=AsyncMock(), send_status=AsyncMock())
     streams = SimpleNamespace(
-        reader=Mock(), writer=Mock(), child_exit_code=None, aclose=AsyncMock(),
+        reader=Mock(), writer=Mock(),
+        child_exit_code=0 if outcome == "child_exited" else None,
+        aclose=AsyncMock(),
     )
     monkeypatch.setattr(
         "agent_bridge.session_host.client.SessionHostClient.connect", AsyncMock(return_value=sock),
@@ -879,10 +892,26 @@ async def test_startup_resume_nudge_respects_lock_order_and_transport_loss(
         "agent_bridge.session_host.acp_adapter.open_acp_streams", AsyncMock(return_value=streams),
     )
     mock_acp_client.start_streams = AsyncMock()
-    mock_acp_client.is_running = not transport_lost
+    mock_acp_client.is_running = outcome != "transport_lost"
     monkeypatch.setattr("agent_bridge.session_manager.AcpClient", lambda **_kwargs: mock_acp_client)
-    assert await asyncio.wait_for(ctx.manager.reattach_session_hosts(), 1) == 1
-    if transport_lost:
+    if outcome == "child_exited":
+        async def old_driver():
+            try:
+                await asyncio.Event().wait()
+            finally:
+                ctx.session.status = SessionStatus.IDLE
+                ctx.db.update_session_status(ctx.session.session_id, "idle", time.time())
+
+        ctx.session._prompt_task = asyncio.create_task(old_driver())
+        await asyncio.sleep(0)
+    assert await asyncio.wait_for(ctx.manager.reattach_session_hosts(), 1) == (
+        0 if outcome == "child_exited" else 1
+    )
+    if outcome == "child_exited":
+        assert ctx.session._prompt_task.done()
+        assert ctx.session.status == SessionStatus.STOPPED
+        assert ctx.db.get_session(ctx.session.session_id)["status"] == "stopped"
+    elif outcome == "transport_lost":
         assert ctx.session._prompt_task is None
         assert ctx.manager._host_index.get(ctx.session.session_id).resume_on_reattach is True
     else:
@@ -890,3 +919,34 @@ async def test_startup_resume_nudge_respects_lock_order_and_transport_loss(
         mock_acp_client.send_prompt.assert_awaited_once_with("Resume")
     assert not ctx.session._turn_start_lock.locked()
     assert not ctx.session._lifecycle_lock.locked()
+
+
+async def test_child_exit_settlement_joins_late_prompt_state_writer(
+    context, monkeypatch, mock_acp_client,
+):
+    ctx = context
+    cancelled, release = asyncio.Event(), asyncio.Event()
+
+    async def old_driver():
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            await release.wait()
+            ctx.session.status = SessionStatus.IDLE
+            ctx.db.update_session_status(ctx.session.session_id, "idle", time.time())
+            raise
+
+    ctx.session._prompt_task = asyncio.create_task(old_driver())
+    await asyncio.sleep(0)
+    mock_acp_client.host_child_exit_code = 0
+    ctx.session.client = mock_acp_client
+    monkeypatch.setattr(ctx.manager, "_reap_host_record", Mock())
+    recovery = asyncio.create_task(ctx.manager.recover_disconnected_hosts())
+    await asyncio.wait_for(cancelled.wait(), 1)
+    assert not recovery.done()
+    release.set()
+    assert await asyncio.wait_for(recovery, 1) == 0
+    assert ctx.session._prompt_task.done()
+    assert ctx.session.status == SessionStatus.STOPPED
+    assert ctx.db.get_session(ctx.session.session_id)["status"] == "stopped"
