@@ -375,6 +375,35 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-11 — Containers same-cell knowledge configuration
+
+- Verified [PR #2431](https://github.com/ThomasMichon/copilot-extensions/pull/2431)
+  merged and the parent migration tracker remains open. Continued the same
+  Phase 6 responsibility in the next serial implementation worktree.
+- Added Containers to the canonical peer launcher's packaged consumers. Its
+  knowledge-repository config fallback now validates the owning installation
+  before optional-peer absence, invokes only same-cell worktrees, and refuses
+  invalid ownership, blocked governance, failed/malformed probes, or an unbound
+  required knowledge root rather than selecting fleet defaults. Explicit
+  config overrides cannot bypass owner admission.
+- Removed inherited Containers credentials and routing from all peer launches.
+  Only the converted config caller's tested legacy PATH branch receives an
+  isolation allowance; the remaining inventory stays report-only.
+- Native Windows and POSIX config/caller selections each passed 95 tests.
+  The expanded real-process peer selection passed 59 tests on Windows
+  (4 skips) and 58 on POSIX (5 skips), including two-cell Containers routing,
+  exact argv/environment isolation, and owner/peer refusal.
+  Existing CodeSpaces adapter coverage remains green on both platforms.
+  No persistent installation was activated or deployed by this slice.
+- Advisory review identified a relay-profile catch that could replace refused
+  configuration with a permissive allowlist. Both CLI and in-process relay
+  registration now preserve refusal before token-store mutation; returned
+  knowledge roots must also be existing directories. The expanded config/relay
+  selection passed 103 tests on both Windows and POSIX.
+- This advances `cell-local-invocation` and `provenance-safe-transition`;
+  remaining Phase 2/6 boundaries, lease migration, Phase 7 intake, and final
+  validation remain the parent completion gate.
+
 ### 2026-09-10 — Shared peer invocation and CodeSpaces callers
 
 - Extracted dispatch's proven native child boundary into the canonical

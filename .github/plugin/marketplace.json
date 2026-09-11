@@ -24,13 +24,13 @@
     {
       "name": "agent-codespaces",
       "description": "GitHub Codespaces lifecycle management, SSH transport, credential relay, and agent-bridge provider integration",
-      "version": "0.4.0-dev134",
+      "version": "0.4.0-dev135",
       "source": "plugins/agent-codespaces"
     },
     {
       "name": "agent-containers",
       "description": "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver with trusted OpenSSH and restricted provider-exec transport",
-      "version": "0.1.2-dev139",
+      "version": "0.1.2-dev140",
       "source": "plugins/agent-containers"
     },
     {
@@ -78,7 +78,7 @@
     {
       "name": "agent-dispatch",
       "description": "Portable durable agent task-loop + per-host coordinator: a single-writer SQLite work queue (eight-state model with owner-preserving suspension, capability-gated atomic claim, affinity routing, liveness-reconciled recovery) so agents coordinate without push latency or an account per agent.",
-      "version": "0.1.2-dev73",
+      "version": "0.1.2-dev74",
       "source": "plugins/agent-dispatch"
     },
     {

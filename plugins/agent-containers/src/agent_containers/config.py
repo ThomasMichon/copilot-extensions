@@ -23,9 +23,11 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import yaml
 
+from . import _peer_launch
 from .private_state import ensure_private_dir
 
 log = logging.getLogger("agent-containers")
@@ -445,6 +447,19 @@ class ContainersConfig:
         )
 
 
+def _installation_owner() -> dict[str, Any] | None:
+    """Admit an explicit cell before config precedence can bypass peer lookup."""
+    raw = os.environ.get(_peer_launch.CONTEXT_ENV, "")
+    if not raw:
+        return None
+    try:
+        return _peer_launch.validate_owner("agent-containers", RUNTIME_DIR, raw)
+    except (OSError, ValueError, ImportError) as error:
+        raise _peer_launch.ContextRefused(
+            f"Containers installation context refused: {error}"
+        ) from error
+
+
 def _knowledge_overlay_config() -> Path | None:
     """Resolve the bound knowledge repo's ``containers.yaml`` (the knowledge overlay).
 
@@ -456,31 +471,68 @@ def _knowledge_overlay_config() -> Path | None:
     config-READ axis, distinct from where personal state is written -- and returns
     its ``containers.yaml`` when present.
 
-    Purely additive + fail-open: it is consulted only as a **fallback** after the
+    It is consulted only as a **fallback** after the
     explicit env / cwd / machine-local locations miss (so a deliberate machine-local
     ``~/.agent-containers/containers.yaml`` still wins), and a missing binstub /
-    non-stateless / unbound repo / any error yields ``None``. Never raises.
+    non-stateless / unbound repo / any error yields ``None`` in legacy mode.
+    Explicit context admits only the same-cell peer; failed probes raise rather
+    than silently selecting defaults. A genuinely absent optional peer is allowed.
     """
     import json
     import shutil
     import subprocess
 
-    exe = shutil.which("agent-worktrees")
-    if not exe:
-        return None
+    own = _installation_owner()
+    if own is not None:
+        peer = Path(own["cellRoot"]) / "plugins" / "agent-worktrees"
+        if not peer.exists() and not peer.is_symlink():
+            return None
+        prefix = _peer_launch.launch_prefix(
+            "agent-containers", Path(own["pluginRoot"]),
+            os.environ[_peer_launch.CONTEXT_ENV], "agent-worktrees",
+        )
+    else:
+        exe = shutil.which("agent-worktrees")  # marketplace-isolation: allow legacy-compatibility
+        if not exe:
+            return None
+        prefix = [exe]
     try:
         proc = subprocess.run(
-            [exe, "state-root", "--json"],
+            [*prefix, "state-root", "--json"],
             capture_output=True, text=True, timeout=20,
+            **({"encoding": "utf-8", **_peer_launch.no_window_kwargs()} if own else {}),
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError) as error:
+        if own is not None:
+            raise _peer_launch.ContextRefused(
+                f"Same-cell worktrees config lookup failed: {error}"
+            ) from error
         return None
     if proc.returncode != 0 or not (proc.stdout or "").strip():
+        if own is not None:
+            raise _peer_launch.ContextRefused(
+                proc.stderr.strip() or "Same-cell worktrees config lookup failed"
+            )
         return None
     try:
         data = json.loads(proc.stdout)
-    except ValueError:
+        if not isinstance(data, dict):
+            raise ValueError("state-root response must be an object")
+    except ValueError as error:
+        if own is not None:
+            raise _peer_launch.ContextRefused(
+                f"Invalid same-cell worktrees config response: {error}"
+            ) from error
         return None
+    if own is not None and (
+        not isinstance(data.get("requires_external"), bool)
+        or not isinstance(data.get("bound"), bool)
+        or (data["requires_external"] and not data["bound"])
+        or not isinstance(data.get("state_root"), str)
+        or not Path(data["state_root"]).is_absolute()
+        or not Path(data["state_root"]).is_dir()
+    ):
+        raise _peer_launch.ContextRefused("Same-cell worktrees state root is invalid or unbound")
     if not data.get("requires_external") or not data.get("bound"):
         return None
     root = data.get("state_root")
@@ -492,6 +544,7 @@ def _knowledge_overlay_config() -> Path | None:
 
 def _config_path() -> Path | None:
     """Locate the containers.yaml config file, or None if not found."""
+    _installation_owner()
     env = os.environ.get("AGENT_CONTAINERS_CONFIG")
     if env:
         p = Path(env).expanduser()

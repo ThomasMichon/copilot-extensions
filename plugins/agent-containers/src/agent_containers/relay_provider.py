@@ -21,6 +21,7 @@ from pathlib import Path
 
 from credential_relay import TokenRegistry
 
+from ._peer_launch import ContextRefused
 from .config import RUNTIME_DIR, STATE_DIR
 from .private_state import atomic_write_json, enforce_mode, ensure_private_dir
 
@@ -100,6 +101,8 @@ def relay_profile() -> dict:
 
         cfg = load_config()
         resources = getattr(cfg, "relay_azure_resources", None) or DEFAULT_AZURE_RESOURCES
+    except ContextRefused:
+        raise
     except Exception:  # pragma: no cover - config optional
         log.debug("containers relay config unavailable; using defaults")
 

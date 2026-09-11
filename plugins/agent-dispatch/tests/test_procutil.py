@@ -281,12 +281,12 @@ def _make_live_peer(cell: Path, plugin: str, version: str) -> Path:
         (procutil.agent_bridge_launch_prefix, "agent-bridge", "agent_bridge"),
     ],
 )
-@pytest.mark.parametrize("owner", ["agent-dispatch", "agent-codespaces"])
+@pytest.mark.parametrize("owner", ["agent-dispatch", "agent-codespaces", "agent-containers"])
 def test_namespaced_sibling_resolution_stays_in_active_marketplace_cell(
     tmp_path, monkeypatch, resolver, sibling_id, module, owner
 ):
-    if owner == "agent-codespaces" and sibling_id != "agent-worktrees":
-        pytest.skip("CodeSpaces only composes with worktrees")
+    if owner != "agent-dispatch" and sibling_id != "agent-worktrees":
+        pytest.skip("Venue plugins only compose with worktrees")
     tmp_path = tmp_path / "cells & ' \u96ea"
     first_cell = tmp_path / "marketplaces" / FIRST_MARKETPLACE_ID
     second_cell = tmp_path / "marketplaces" / SECOND_MARKETPLACE_ID
@@ -323,6 +323,8 @@ def test_namespaced_sibling_resolution_stays_in_active_marketplace_cell(
             "AGENT_BRIDGE_PAYLOAD_ROOT", "AGENT_BRIDGE_BASE_URL", "PYTHONPATH", "PYTHONHOME",
             "AGENT_DISPATCH_TOKEN", "AGENT_DISPATCH_CONTROL_TOKEN", "AGENT_DISPATCH_URL",
             "AGENT_CODESPACES_TOKEN", "GH_TOKEN", "GITHUB_TOKEN",
+            "AGENT_CONTAINERS_TOKEN", "AGENT_CONTAINERS_CONFIG",
+            "AGENT_CONTAINERS_RELAY_ENABLED",
             "AGENT_BRIDGE_SESSION_HOST_NONCE", "AGENT_BRIDGE_NO_ROUTING_TABLE",
             "AGENT_WORKTREES_OWNER_REF", "AGENT_WORKTREES_AHP_AUTH_TOKEN",
             "AGENT_WORKTREES_BIND", "AGENT_WORKTREES_PROJECT",
@@ -332,6 +334,16 @@ def test_namespaced_sibling_resolution_stays_in_active_marketplace_cell(
         if owner == "agent-codespaces":
             adapter = _codespaces_adapter(monkeypatch)
             result = adapter.run(*raw_args)
+        elif owner == "agent-containers":
+            from agent_dispatch import peer_launch
+
+            prefix = peer_launch.launch_prefix(
+                owner, own_root, str(own_root / "install.json"), sibling_id,
+            )
+            result = subprocess.run(
+                [*prefix, *raw_args], capture_output=True, encoding="utf-8",
+                timeout=15, **procutil.no_window_kwargs(),
+            )
         else:
             prefix = resolver()
             result = subprocess.run(
@@ -358,6 +370,8 @@ def test_namespaced_sibling_resolution_stays_in_active_marketplace_cell(
             "AGENT_BRIDGE_BASE_URL", "AGENT_DISPATCH_TOKEN",
             "AGENT_DISPATCH_CONTROL_TOKEN", "AGENT_DISPATCH_URL",
             "AGENT_CODESPACES_HOME", "AGENT_CODESPACES_TOKEN", "GH_TOKEN", "GITHUB_TOKEN",
+            "AGENT_CONTAINERS_TOKEN", "AGENT_CONTAINERS_CONFIG",
+            "AGENT_CONTAINERS_RELAY_ENABLED",
             "AGENT_BRIDGE_SESSION_HOST_NONCE", "AGENT_BRIDGE_NO_ROUTING_TABLE",
             "AGENT_WORKTREES_OWNER_REF", "AGENT_WORKTREES_AHP_AUTH_TOKEN",
             "AGENT_WORKTREES_BIND", "AGENT_WORKTREES_PROJECT",
@@ -374,6 +388,41 @@ def _codespaces_adapter(monkeypatch):
     from agent_codespaces import worktrees
 
     return worktrees
+
+
+def test_containers_config_validates_owner_before_optional_peer(tmp_path, monkeypatch):
+    source = Path(__file__).resolve().parents[2] / "agent-containers" / "src"
+    monkeypatch.syspath_prepend(str(source))
+    from agent_containers import config
+
+    cell = tmp_path / "marketplaces" / FIRST_MARKETPLACE_ID
+    own = _make_namespaced_context(cell, plugin_id="agent-containers")
+    monkeypatch.setattr(config, "RUNTIME_DIR", own.parent)
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own))
+    monkeypatch.delenv("AGENT_CONTAINERS_CONFIG", raising=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("shutil.which", lambda _: pytest.fail("ambient PATH selected"))
+    assert config.load_config().exec_user == "vscode"
+    activation = own.with_name("installation-activation.json")
+    original = activation.read_bytes()
+    activation.write_text("{", encoding="utf-8")
+    with pytest.raises(config._peer_launch.ContextRefused, match="activation-invalid"):
+        config.load_config()
+    activation.write_bytes(original)
+    maintenance = own.parent / "maintenance"
+    maintenance.touch()
+    with pytest.raises(config._peer_launch.ContextRefused, match="maintenance"):
+        config.load_config()
+    maintenance.unlink()
+    peer = cell / "plugins" / "agent-worktrees"
+    peer.mkdir()
+    with pytest.raises(config._peer_launch.ContextRefused):
+        config.load_config()
+    _make_live_peer(cell, "agent-worktrees", "1.0.0-dev1")
+    peer_activation = peer / "installation-activation.json"
+    peer_activation.write_text("{", encoding="utf-8")
+    with pytest.raises(config._peer_launch.ContextRefused, match="activation-invalid"):
+        config.load_config()
 
 
 def test_codespaces_peer_refusals_are_not_optional_absence(tmp_path, monkeypatch):
