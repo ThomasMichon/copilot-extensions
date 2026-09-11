@@ -301,6 +301,7 @@ def test_namespaced_sibling_resolution_stays_in_active_marketplace_cell(
             "AGENT_WORKTREES_PAYLOAD_ROOT", "AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT",
             "AGENT_BRIDGE_INSTALL_DIR", "AGENT_BRIDGE_CONFIG_DIR",
             "AGENT_BRIDGE_PAYLOAD_ROOT", "AGENT_BRIDGE_BASE_URL", "PYTHONPATH", "PYTHONHOME",
+            "AGENT_DISPATCH_TOKEN", "AGENT_DISPATCH_CONTROL_TOKEN", "AGENT_DISPATCH_URL",
         ):
             monkeypatch.setenv(name, str(tmp_path / "foreign"))
         prefix = resolver()
@@ -325,7 +326,8 @@ def test_namespaced_sibling_resolution_stays_in_active_marketplace_cell(
         assert not set(child_env) & {
             "PYTHONPATH", "PYTHONHOME", "AGENT_HOME", "AGENT_RT_PY",
             "AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT", "AGENT_DISPATCH_INSTALL_DIR",
-            "AGENT_BRIDGE_BASE_URL",
+            "AGENT_BRIDGE_BASE_URL", "AGENT_DISPATCH_TOKEN",
+            "AGENT_DISPATCH_CONTROL_TOKEN", "AGENT_DISPATCH_URL",
         }
         assert os.environ["COPILOT_EXTENSIONS_CONTEXT"] == str(own_root / "install.json")
         if os.name != "nt":

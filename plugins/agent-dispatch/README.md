@@ -141,8 +141,9 @@ without loading code through a deploy-manifest payload pointer.
 
 The boundary rebinds `COPILOT_EXTENSIONS_CONTEXT` to the peer's `install.json`,
 `COPILOT_PLUGIN_ROOT` and its plugin-specific payload root to the peer payload,
-and runtime/config routing to the peer installation. Inherited generic and sibling
-root overrides and Python import overrides are removed. Peer code runs under
+and runtime/config routing to the peer installation. The entire `AGENT_DISPATCH_`
+environment namespace is removed, including credentials and endpoint routing,
+along with generic/sibling root overrides and Python import overrides. Peer code runs under
 isolated native Python with UTF-8 and inherited stdio. User argv, including seed
 JSON, quotes, empty strings, and shell metacharacters, never enters a shell:
 PowerShell 5.1 or POSIX shell executes only a constant, read-only resolver probe.

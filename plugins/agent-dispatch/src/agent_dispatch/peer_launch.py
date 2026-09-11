@@ -58,8 +58,8 @@ def peer_environment(context: dict[str, Any], inherited: dict[str, str]) -> dict
             "AGENT_HOME", "AGENT_BRIDGE_BASE_URL", "AGENT_BRIDGE_CONNECT_LOG",
         }:
             continue
-        if upper.startswith("AGENT_RT_") or (
-            upper.startswith(("AGENT_WORKTREES_", "AGENT_BRIDGE_", "AGENT_DISPATCH_"))
+        if upper.startswith(("AGENT_RT_", "AGENT_DISPATCH_")) or (
+            upper.startswith(("AGENT_WORKTREES_", "AGENT_BRIDGE_"))
             and upper.endswith(("_ROOT", "_DIR", "_HOME", "_INSTALLATION_ID"))
         ):
             continue
