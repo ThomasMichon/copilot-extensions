@@ -36,7 +36,15 @@ launched, presented, prompted, reattached, or retired.
 Repositories, source checkouts, worktrees, branches, remotes, contribution
 contracts, and management classes form the stable spatial identity on which the
 rest of the fabric coordinates. Paths vary by machine; identity and declared
-relationships remain stable.
+relationships remain stable. agent-worktrees is the **canonical owner** of the
+name-to-path mapping for a registered repo (its `repos.yaml`/`projects.yaml`):
+every other component in the suite that needs a repo's current path resolves
+it by name through agent-worktrees at the moment of use, rather than copying a
+path into its own state — the suite-wide
+[*identity-resolves-by-name-not-path*](../../plugin-services/README.md#identity-resolves-by-name-not-path)
+guarantee, with agent-worktrees as its repo-identity anchor. A worktree
+checkout's own directory name is a per-session, per-machine identifier that
+must never be adopted downstream as if it were the repo's registered name.
 
 ### The worktree as a unit of agency
 

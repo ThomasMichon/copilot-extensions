@@ -68,6 +68,30 @@ class FakeClient:
         ]
 
 
+def test_setup_refuses_worktree_checkout_path(tmp_path, monkeypatch):
+    """A declaration discovered under a `<repo>.worktrees\\<id>` checkout must
+    be refused, never silently registered under the worktree's own throwaway
+    directory name as its owner/pointer identity (#2417)."""
+    declaration = (
+        tmp_path
+        / "dotfiles.worktrees"
+        / "tmichon-cloud1-win-20260910-171507-5474"
+        / ".agent-dispatch"
+        / "registrar"
+        / "issues.json"
+    )
+    registrar_dir = tmp_path / "registrar-state"
+    _write_loop(declaration)
+    monkeypatch.setenv("AGENT_DISPATCH_REGISTRAR_DIR", str(registrar_dir))
+
+    rc = main(["repository-issue-loop", "setup", str(declaration)])
+    assert rc != 0
+    # No pointer must have been persisted for the worktree-scoped path.
+    pointers_file = registrar_dir / "pointers.json"
+    if pointers_file.exists():
+        assert json.loads(pointers_file.read_text(encoding="utf-8")) == []
+
+
 def test_inspect_disable_and_enable_cover_both_units(
     tmp_path, monkeypatch, capsys
 ):
