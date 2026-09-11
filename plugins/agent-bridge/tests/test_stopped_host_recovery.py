@@ -382,3 +382,130 @@ async def test_stop_surfaces_transport_teardown_failure_and_retains_retry_handle
     assert ctx.session.session_id not in ctx.manager._relays
     assert ctx.session.session_id not in ctx.manager._forwards
     assert ctx.manager._host_index.get(ctx.session.session_id) is not None
+
+
+@pytest.mark.parametrize("disposition", ["REAP_STOPPED", "FORCE_REAP"])
+async def test_startup_version_mux_cannot_reap_during_stop(
+    context, monkeypatch, disposition,
+):
+    from agent_bridge.session_host import version_mux
+
+    ctx = context
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def quiesce(*_args, **_kwargs):
+        entered.set()
+        await release.wait()
+
+    monkeypatch.setattr(ctx.manager, "_quiesce_session", quiesce)
+    monkeypatch.setattr(ctx.manager, "_recover_remote_host_records", AsyncMock(return_value=0))
+    plan = Mock(return_value=SimpleNamespace(
+        disposition=getattr(version_mux.HostDisposition, disposition),
+        reason="incompatible host",
+    ))
+    monkeypatch.setattr(version_mux, "plan_host", plan)
+    reap = Mock()
+    monkeypatch.setattr(ctx.manager, "_reap_host_record", reap)
+    stop = asyncio.create_task(ctx.manager.stop_session(ctx.session.session_id))
+    await asyncio.wait_for(entered.wait(), 1)
+    assert await ctx.manager.reattach_session_hosts() == 0
+    plan.assert_not_called()
+    reap.assert_not_called()
+    release.set()
+    await asyncio.wait_for(stop, 1)
+    assert await ctx.manager.reattach_session_hosts() == 0
+    reap.assert_not_called()
+    assert ctx.manager._host_index.get(ctx.session.session_id) is not None
+
+
+@pytest.mark.parametrize("stop_first", [False, True])
+async def test_redeploy_cannot_rearm_resume_nudge_after_stop(
+    context, monkeypatch, stop_first,
+):
+    ctx = context
+    ctx.manager._cancel_turns_on_redeploy = True
+    entered, release = asyncio.Event(), asyncio.Event()
+    client = SimpleNamespace(
+        cancel_prompt=AsyncMock(),
+        has_active_background_tasks=False,
+        active_background_tasks=[],
+    )
+    ctx.session.client = client
+
+    async def blocked(*_args, **_kwargs):
+        entered.set()
+        await release.wait()
+
+    if stop_first:
+        monkeypatch.setattr(ctx.manager, "_quiesce_session", blocked)
+        first = asyncio.create_task(ctx.manager.stop_session(ctx.session.session_id))
+    else:
+        client.cancel_prompt.side_effect = blocked
+        first = asyncio.create_task(ctx.manager.graceful_cancel_for_redeploy(settle_timeout=0))
+    await asyncio.wait_for(entered.wait(), 1)
+    second = asyncio.create_task(
+        ctx.manager.graceful_cancel_for_redeploy(settle_timeout=0)
+        if stop_first else ctx.manager.stop_session(ctx.session.session_id)
+    )
+    await asyncio.sleep(0)
+    assert not second.done()
+    release.set()
+    await asyncio.wait_for(asyncio.gather(first, second), 2)
+    assert ctx.session.status == SessionStatus.STOPPED
+    assert ctx.manager._host_index.get(ctx.session.session_id).resume_on_reattach is False
+    assert await ctx.manager.reattach_session_hosts() == 0
+    ctx.attach.assert_not_awaited()
+
+
+@pytest.mark.parametrize("fails", [False, True])
+async def test_stop_waits_for_initial_launch(
+    tmp_db, tmp_path, monkeypatch, mock_acp_client, fails,
+):
+    manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path / "hosts"))
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def connect(*_args, **_kwargs):
+        entered.set()
+        await release.wait()
+        if fails:
+            raise ConnectionError("launch failed")
+        return mock_acp_client, "example-acp"
+
+    monkeypatch.setattr(manager, "_connect_via_session_host", connect)
+    monkeypatch.setattr(manager, "_detach_host", AsyncMock())
+    monkeypatch.setattr("agent_bridge.session_manager._cleanup_worktree", AsyncMock())
+    start = asyncio.create_task(manager.start_session(
+        SpawnTarget(type="local", cwd=str(tmp_path)),
+    ))
+    await asyncio.wait_for(entered.wait(), 1)
+    session = manager.list_sessions()[0]
+    stop = asyncio.create_task(manager.stop_session(session.session_id))
+    await asyncio.sleep(0)
+    assert not stop.done()
+    release.set()
+    await asyncio.wait_for(asyncio.gather(start, stop), 2)
+    assert session.status == SessionStatus.STOPPED
+    assert session.client is None
+    assert not session._lifecycle_lock.locked()
+    assert tmp_db.get_session(session.session_id)["status"] == "stopped"
+
+
+@pytest.mark.parametrize("status,reapable", [("idle", True), ("running", False)])
+@pytest.mark.parametrize("for_restart", [False, True])
+async def test_stop_preserves_existing_idle_vs_busy_detach_policy(
+    context, monkeypatch, mock_acp_client, status, reapable, for_restart,
+):
+    ctx = context
+    monkeypatch.setattr(
+        ctx.manager, "_quiesce_session",
+        SessionManager._quiesce_session.__get__(ctx.manager),
+    )
+    monkeypatch.setattr("agent_bridge.session_manager._cleanup_worktree", AsyncMock())
+    host_client = SimpleNamespace(detach=AsyncMock())
+    mock_acp_client.session_host_client = host_client
+    ctx.session.client = mock_acp_client
+    ctx.session.status = SessionStatus(status)
+    await ctx.manager.stop_session(ctx.session.session_id, for_restart=for_restart)
+    host_client.detach.assert_awaited_once_with(reapable)
+    assert ctx.manager._host_index.get(ctx.session.session_id) is not None
+    assert ctx.session.acp_session_id == "example-acp"
