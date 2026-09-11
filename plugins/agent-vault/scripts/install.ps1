@@ -1040,12 +1040,23 @@ function Invoke-Update {
 
 function Invoke-Start {
     $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-    if (-not $task) {
-        Write-Fail "No AgentVault task installed -- run: install.ps1 -Action install"
+    if ($task) {
+        Start-ScheduledTask -TaskName $TaskName
+        Write-Ok 'agent-vault service started (Scheduled Task)'
+        return
+    }
+    # #1836: `start` must not depend on a registered Scheduled Task (a
+    # client-only -NoService host, or the ScheduledTasks module being
+    # unavailable, must still be able to start the daemon). Converge on the
+    # SAME idempotent, health-gated user-mode ensure path the CLI's own
+    # `agent-vault start` uses (cmd_start -> ensure_service/start_service in
+    # cli.py) -- no PowerShell-side process-spawning logic duplicated here.
+    if (-not (Test-Path $LinkPython)) {
+        Write-Fail "agent-vault runtime not installed -- run: install.ps1 -Action install"
         exit 1
     }
-    Start-ScheduledTask -TaskName $TaskName
-    Write-Ok 'agent-vault service started'
+    & $LinkPython -m agent_vault start
+    exit $LASTEXITCODE
 }
 
 function Invoke-Stop {

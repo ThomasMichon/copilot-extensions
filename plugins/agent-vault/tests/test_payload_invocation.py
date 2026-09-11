@@ -116,6 +116,19 @@ def test_scheduled_task_registration_skips_reregister_when_already_correct() -> 
     assert "Register-ScheduledTask" not in match_block
 
 
+def test_start_does_not_require_a_registered_scheduled_task() -> None:
+    """#1836: `install.ps1 start` must converge on the same user-mode ensure
+    path the CLI's own `agent-vault start` uses (ensure_service/start_service
+    in cli.py) when no Scheduled Task is registered -- a client-only
+    (-NoService) host, or one where the ScheduledTasks module is unavailable,
+    must still be able to start the daemon directly rather than failing."""
+    install_ps1 = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
+    idx = install_ps1.index("function Invoke-Start")
+    body = install_ps1[idx : install_ps1.index("\nfunction ", idx + 1)]
+    assert "No AgentVault task installed" not in body
+    assert "& $LinkPython -m agent_vault start" in body
+
+
 def test_session_catalog_producer_is_not_registered_as_a_hook() -> None:
     hooks = json.loads((PLUGIN / "hooks.json").read_text(encoding="utf-8"))
     session_hooks = hooks["hooks"]["sessionStart"]
