@@ -43,83 +43,6 @@ def _addr_in_use(exc: OSError) -> bool:
     return exc.errno in codes
 
 
-def _pid_on_port(port: int) -> int | None:
-    """Best-effort: find the PID listening on 127.0.0.1:*port* (cross-platform)."""
-    import subprocess as sp
-    import sys
-
-    if sys.platform == "win32":
-        ps = (
-            f"(Get-NetTCPConnection -LocalPort {port} -State Listen "
-            "-ErrorAction SilentlyContinue | Select-Object -First 1)"
-            ".OwningProcess"
-        )
-        try:
-            out = sp.run(["powershell", "-NoProfile", "-Command", ps],  # noqa: S603, S607
-                         capture_output=True, text=True, timeout=15)
-            val = (out.stdout or "").strip()
-            return int(val) if val.isdigit() else None
-        except (OSError, sp.TimeoutExpired, ValueError):
-            return None
-    for cmd in (["ss", "-lptnH", f"sport = :{port}"], ["lsof", "-ti", f"tcp:{port}"]):
-        try:
-            out = sp.run(cmd, capture_output=True, text=True, timeout=15)  # noqa: S603
-        except (OSError, sp.TimeoutExpired):
-            continue
-        text = out.stdout or ""
-        if cmd[0] == "lsof":
-            lines = text.strip().splitlines()
-            if lines and lines[0].isdigit():
-                return int(lines[0])
-        else:
-            import re
-
-            m = re.search(r"pid=(\d+)", text)
-            if m:
-                return int(m.group(1))
-    return None
-
-
-def _terminate_pid(pid: int) -> None:
-    """Best-effort terminate a local process by pid (cross-platform)."""
-    import subprocess as sp
-    import sys
-
-    if sys.platform == "win32":
-        sp.run(["taskkill", "/PID", str(pid), "/F", "/T"],  # noqa: S603, S607
-               capture_output=True, text=True)
-    else:
-        import signal as _signal
-
-        try:
-            os.kill(pid, _signal.SIGTERM)
-        except OSError:
-            pass
-
-
-def _reclaim_port(port: int) -> bool:
-    """Evict a stale holder of the dedicated relay *port* and wait for release.
-
-    The relay port is dedicated, so a process holding it after our bind fails is
-    an orphaned previous relay (e.g. an ungracefully-killed agent-bridge daemon).
-    Terminate it and wait briefly for the OS to release the binding. Returns True
-    if the port appears free afterwards. Never evicts the current process.
-    """
-    pid = _pid_on_port(port)
-    if not pid or pid == os.getpid():
-        return False
-    log.warning(
-        "Relay port %d held by stale process pid %d -- evicting to reclaim it",
-        port, pid,
-    )
-    _terminate_pid(pid)
-    for _ in range(20):  # up to ~2s for the OS to release the binding
-        if _pid_on_port(port) != pid:
-            return True
-        time.sleep(0.1)
-    return _pid_on_port(port) != pid
-
-
 # Actions the relay recognizes
 _KNOWN_ACTIONS = frozenset({
     "get", "store", "erase",
@@ -262,20 +185,15 @@ class CredentialRelayServer:
         return self._server is not None and self._server.is_serving()
 
     async def start(self) -> None:
-        """Start the TCP relay server, reclaiming the port from a stale holder.
+        """Bind the relay without claiming authority over another listener.
 
         The relay binds ``self.port``. When that is **0** (the dynamic default --
         no fixed port was pinned) the OS assigns an ephemeral port and nothing
         well-known is reserved (dotfiles #694). A pinned fixed port binds as
-        given; if a previous relay (e.g. an ungracefully-killed agent-bridge
-        daemon) still holds it, the first bind fails with "address already in
-        use" and we evict the stale owner (#19) and retry once so the relay --
-        and therefore ADO auth over the tunnel -- comes up instead of being
-        silently disabled.
-
-        If a pinned port is held by a *live* occupant that cannot be reclaimed
-        (a sibling/elevated daemon, or eviction failed), we fall back to an
-        OS-assigned ephemeral port rather than raising (#540). In every case the
+        given. If it is occupied, choose an OS-assigned ephemeral port instead
+        (#540). A bind collision is not proof of process or installation
+        ownership: only the lifecycle owner may retire an attested predecessor.
+        In every case the
         **actually-bound** port is read back into ``self.port`` after the bind,
         and consumers discover it via ``relay_state`` (which reads ``server.port``
         after start), so auth works regardless of which port we ended up on.
@@ -289,28 +207,16 @@ class CredentialRelayServer:
         except OSError as exc:
             if not self.port or not _addr_in_use(exc):
                 raise
-            if _reclaim_port(self.port):
-                await asyncio.sleep(0.5)
-                self._server = await asyncio.start_server(
-                    self._handle_client,
-                    host="127.0.0.1",
-                    port=self.port,
-                )
-            else:
-                # A live occupant holds the preferred port and can't be evicted
-                # (e.g. a sibling/elevated daemon, or the current process). Bind
-                # an OS-assigned ephemeral port instead of failing (#540).
-                log.warning(
-                    "Relay port %d held by a live occupant -- binding an "
-                    "ephemeral port instead", self.port,
-                )
-                self._server = await asyncio.start_server(
-                    self._handle_client,
-                    host="127.0.0.1",
-                    port=0,
-                )
+            log.warning(
+                "Relay port %d is occupied; ownership is not established -- "
+                "binding an ephemeral port without stopping its owner",
+                self.port,
+            )
+            self._server = await asyncio.start_server(
+                self._handle_client, host="127.0.0.1", port=0,
+            )
         # Read back the actually-bound port for ALL paths: a pinned fixed port,
-        # a reclaimed one, an ephemeral fallback, or -- the common case now --
+        # an ephemeral fallback, or -- the common case now --
         # the dynamic default (port 0 -> OS-assigned). relay_state publishes THIS
         # to consumers, so discovery follows the real port (dotfiles #694/#540).
         self.port = self._server.sockets[0].getsockname()[1]

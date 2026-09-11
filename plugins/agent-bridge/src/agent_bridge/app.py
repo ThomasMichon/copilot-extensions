@@ -305,6 +305,8 @@ async def _start_credential_relay(app: FastAPI):
     can (re)bind the shared relay port (9857). Idempotent: if a relay is already
     running on this app it is returned unchanged.
     """
+    if not getattr(app.state.config, "enable_credential_relay", True):
+        return None
     existing = getattr(app.state, "credential_relay", None)
     if existing is not None and getattr(existing, "running", False):
         return existing
@@ -364,7 +366,7 @@ async def lifespan(app: FastAPI):
     # deploy manifest already matches (dotfiles #533). Only the **primary** daemon
     # writes it: the elevated sub-daemon (enable_credential_relay=False) shares the
     # runtime dir and would otherwise clobber the marker with a non-primary pid.
-    if getattr(cfg, "enable_credential_relay", True):
+    if getattr(cfg, "enable_credential_relay", True) and not getattr(app.state, "relay_start_deferred", False):
         from .runtime_version import write_running_version
 
         write_running_version()
@@ -520,6 +522,8 @@ async def lifespan(app: FastAPI):
                         "Credential relay disabled for this daemon "
                         "(enable_credential_relay=False) -- reusing the primary daemon's relay"
                     )
+                elif getattr(app.state, "relay_start_deferred", False):
+                    log.info("Credential relay binding deferred until owner-directed cutover")
                 else:
                     await _ensure_relay()
 
@@ -580,12 +584,15 @@ async def lifespan(app: FastAPI):
             )
         )
 
-    # Expose a relay-adoption hook so a passive cutover instance can bind the
-    # shared relay port *after* the retiring daemon releases it (the relay is a
-    # singleton on 9857). The /api/v1/relay/adopt endpoint calls this.
+    # A passive instance may adopt only when its installation enables the relay.
     async def _adopt_relay():
+        if not getattr(cfg, "enable_credential_relay", True):
+            return False
         await _ensure_relay()
-        return relay_server is not None and getattr(relay_server, "running", False)
+        running = relay_server is not None and getattr(relay_server, "running", False)
+        if running:
+            app.state.relay_start_deferred = False
+        return running
 
     app.state.adopt_relay = _adopt_relay
 

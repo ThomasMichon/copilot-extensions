@@ -395,12 +395,8 @@ def _cmd_start(args: argparse.Namespace) -> None:
     if idle is not None:
         cfg.idle_shutdown_seconds = idle
 
-    # A passive cutover instance never binds the shared credential relay (9857)
-    # -- the active daemon owns it until the flip completes -- mirroring the
-    # elevated sub-daemon's relay-reuse rule.
+    # Passive startup defers binding without changing the installation's policy.
     passive = bool(getattr(args, "passive", False))
-    if passive:
-        cfg.enable_credential_relay = False
 
     # Single-instance guard: refuse to start a duplicate daemon for this config
     # dir + port. Acquired BEFORE binding the port so a racing/duplicate start
@@ -432,6 +428,7 @@ def _cmd_start(args: argparse.Namespace) -> None:
     app = create_app(config=cfg, token=token)
     app.state.single_instance = singleton
     app.state.background_readiness = True
+    app.state.relay_start_deferred = passive
     # A normal start self-publishes the routing table once it is listening so
     # CLI clients discover it; a passive instance stays silent until the deploy
     # orchestrator flips the table after a health check.

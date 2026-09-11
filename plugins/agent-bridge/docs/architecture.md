@@ -103,10 +103,19 @@ profiles decide which sources and token gates are enabled.
 
 **Single owner of the credential relay.** Only the **primary** daemon hosts the relay. The
 Windows elevated sub-daemon sets `enable_credential_relay: false` in its seeded
-config (`elevated.py` -> `_seed_config`), so it never re-binds -- and thus never
-evicts -- the primary's relay; local elevated agents reuse the primary's relay on
-the same host. The `enable_credential_relay` config flag (default `true`) gates
-relay startup in the `app.py` lifespan.
+config (`elevated.py` -> `_seed_config`), so it never re-binds the primary's relay;
+local elevated agents reuse it. The `enable_credential_relay` config flag
+(default `true`) gates both startup and `/api/v1/relay/adopt`, including the
+underlying start helper. Passive startup defers binding in separate process
+state; it never overwrites the installation's declared policy. An enabled
+passive may adopt after owner-directed cutover; an explicitly disabled one may
+not.
+
+A relay-port collision does not prove that its owner is stale or belongs to this
+installation. The shared relay server never discovers or terminates that PID:
+it logs the collision and uses its existing ephemeral-port fallback, publishing
+the actual bound port. Retirement of a real predecessor remains with the
+authenticated, config-root-directed cutover lifecycle, not with the listener.
 
 ## Persistent SSH Carrier Foundation
 
