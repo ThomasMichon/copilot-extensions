@@ -310,12 +310,18 @@ renumbering from the "acknowledges handoff" step onward.)
       every stage's emitter writes to in addition to `activity.jsonl` and the
       session-state files, and treat *that* store — not `activity.jsonl` — as
       the archival source of truth. **This sink is written concurrently by
-      multiple independent processes** (the Python CLI, the hook client, the
-      status monitor, context-handoff's Node process) — specify its write
-      contract explicitly (append-only, `O_APPEND`-atomic single-`write()`
-      per JSON line, one file per worktree to bound the contention surface,
-      no read-modify-write) and cover it with a concurrent-writer race test
-      in the Validation Plan, not just a single-writer happy path.
+      multiple independent processes on both Linux/WSL and Windows** (the
+      Python CLI, the hook client, the status monitor, context-handoff's Node
+      process) — `O_APPEND` + single-`write()` is a **POSIX-specific**
+      guarantee and does not by itself establish atomicity on Windows. Define
+      the append/locking primitive **per platform**
+      (POSIX: `O_APPEND` + a single bounded `write()` per line; Windows: an
+      equivalent atomic-append primitive, e.g. Node's/Python's append-mode
+      handle combined with a short-lived advisory lock, or routing all writes
+      for a given worktree through one lock-holding writer) and run the
+      concurrent-writer race test (below) on **each** supported OS, not just
+      a POSIX-side Node stand-in — or explicitly document a platform-specific
+      fallback if true lock-free atomicity isn't achievable on one platform.
 - [ ] Write/append the full per-stage trace into **both**:
       `~/.copilot/session-state/<predecessor-sid>/handoff-trace.jsonl` and
       `~/.copilot/session-state/<successor-sid>/handoff-trace.jsonl` — each
@@ -404,7 +410,9 @@ renumbering from the "acknowledges handoff" step onward.)
 - [ ] A concurrent-writer race test against the durable per-worktree trace
       store (Phase 3): multiple simulated emitters (Python + a stand-in for
       the Node context-handoff process) appending in parallel produce no
-      interleaved/corrupted lines and no dropped events.
+      interleaved/corrupted lines and no dropped events — run **on both
+      Linux/WSL and Windows** (this repo supports both), since the append
+      contract is platform-specific per Phase 3.
 - [ ] A live reproduction on this machine: trigger a real handoff on a
       disposable worktree, run `agent-worktrees handoff-trace`, confirm a
       complete 13-stage trace exists in both the predecessor's and successor's
