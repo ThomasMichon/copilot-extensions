@@ -386,6 +386,106 @@ def test_global_binstub_tier3_prefers_dev10_over_dev9(tmp_path):
     assert result.stdout == "1.5.3"
 
 
+@pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX sh binstub")
+def test_posix_binstub_sanitizes_inherited_python_env(tmp_path):
+    """#2411: a stray, mismatched-architecture PYTHONHOME (or any of the same
+    class of inherited Python runtime variable) in the CALLER's ambient
+    environment must not survive into the dispatched interpreter -- it can
+    crash a resolved runtime-slot python that honors it."""
+    import os
+    import subprocess
+
+    runtime = tmp_path / ".agent-worktrees"
+    runtime_bin = runtime / "bin"
+    runtime_bin.mkdir(parents=True)
+    shutil.copy2(_SCRIPTS / "resolve-runtime.sh", runtime_bin / "resolve-runtime.sh")
+    slot = runtime / "versions" / "1.5.3"
+    command = slot / "bin" / "python"
+    command.parent.mkdir(parents=True)
+    command.write_text(
+        "#!/bin/sh\n"
+        "printf 'PYTHONHOME=%s\\n' \"${PYTHONHOME:-<unset>}\"\n"
+        "printf 'PYTHONPATH=%s\\n' \"${PYTHONPATH:-<unset>}\"\n"
+        "printf 'UV_INTERNAL__PYTHONHOME=%s\\n' \"${UV_INTERNAL__PYTHONHOME:-<unset>}\"\n",
+        encoding="utf-8",
+    )
+    command.chmod(0o755)
+    (slot / ".install-complete.json").write_text(
+        json.dumps({
+            "version": "1.5.3",
+            "completed_at": "2026-08-27T00:00:00Z",
+            "pid": 1,
+        }),
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path)
+    env["PYTHONHOME"] = "/some/mismatched-architecture/python"
+    env["PYTHONPATH"] = "/some/stray/site-packages"
+    env["UV_INTERNAL__PYTHONHOME"] = "/some/uv-managed/python"
+
+    result = subprocess.run(
+        ["sh", str(_BIN / "agent-worktrees"), "status"],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "PYTHONHOME=<unset>" in result.stdout
+    assert "PYTHONPATH=<unset>" in result.stdout
+    assert "UV_INTERNAL__PYTHONHOME=<unset>" in result.stdout
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell is unavailable")
+def test_windows_binstub_sanitizes_inherited_python_env():
+    """#2411, Windows binstub parity: extracts and runs ONLY the sanitization
+    prologue from agent-worktrees.ps1 (the binstub's real dispatch paths all
+    end in `exit`, making a full end-to-end invocation unsuitable for
+    asserting on post-run environment state) and proves it clears every
+    inherited Python runtime variable this class of bug can involve."""
+    import subprocess
+
+    text = (_BIN / "agent-worktrees.ps1").read_text(encoding="utf-8")
+    marker = "# Resolve the runtime slot python SOLELY"
+    prologue_end = text.index(marker)
+    prologue = text[:prologue_end]
+    assert "Remove-Item" in prologue and "PYTHONHOME" in prologue, (
+        "sanitization prologue not found before the resolver comment -- "
+        "update this test's extraction marker if agent-worktrees.ps1 moved it"
+    )
+    script = (
+        "$env:PYTHONHOME = 'C:\\mismatched\\architecture\\python'; "
+        "$env:PYTHONPATH = 'C:\\stray\\site-packages'; "
+        "$env:PYTHONEXECUTABLE = 'C:\\stray\\python.exe'; "
+        "$env:VIRTUAL_ENV = 'C:\\stray\\venv'; "
+        "$env:UV_INTERNAL__PYTHONHOME = 'C:\\uv\\managed\\python'; "
+        "$env:__PYVENV_LAUNCHER__ = 'C:\\stray\\python.exe'; "
+        f"{prologue}\n"
+        "[pscustomobject]@{ "
+        "PYTHONHOME = $env:PYTHONHOME; "
+        "PYTHONPATH = $env:PYTHONPATH; "
+        "PYTHONEXECUTABLE = $env:PYTHONEXECUTABLE; "
+        "VIRTUAL_ENV = $env:VIRTUAL_ENV; "
+        "UV_INTERNAL__PYTHONHOME = $env:UV_INTERNAL__PYTHONHOME; "
+        "__PYVENV_LAUNCHER__ = $env:__PYVENV_LAUNCHER__ "
+        "} | ConvertTo-Json -Compress"
+    )
+    result = subprocess.run(
+        ["pwsh", "-NoProfile", "-Command", script],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    resolved = json.loads(result.stdout.strip().splitlines()[-1])
+    for name in (
+        "PYTHONHOME", "PYTHONPATH", "PYTHONEXECUTABLE",
+        "VIRTUAL_ENV", "UV_INTERNAL__PYTHONHOME", "__PYVENV_LAUNCHER__",
+    ):
+        assert resolved[name] is None, f"{name} was not sanitized"
+
+
 @pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX sh resolver")
 def test_resolver_empty_when_nothing_installed(tmp_path):
     assert _resolve(tmp_path) == ""

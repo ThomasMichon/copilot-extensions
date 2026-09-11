@@ -1,4 +1,20 @@
 $env:PYTHONUTF8 = '1'
+# Sanitize inherited Python runtime variables before dispatching to the
+# resolved, architecture-correct runtime-slot interpreter (#2411). A stray
+# mismatched-architecture PYTHONHOME/PYTHONPATH -- set at Windows User scope,
+# inherited from a parent shell, or leaked from an unrelated venv activation
+# -- otherwise survives into every dispatch below and can crash the resolved
+# interpreter (e.g. an x64 PYTHONHOME under an ARM64 python.exe fails
+# `import socket` with "DLL load failed"). This is the same sanitization
+# class #2359 applied to Worktree Manager's own engine-launch subprocesses,
+# applied here at the binstub entry point so it protects every direct
+# invocation, not only Manager-spawned children. Clearing these here is safe
+# regardless of downstream provisioning path: this script never itself
+# imports Python modules, and the resolved interpreter's own site/venv
+# machinery re-establishes whatever of these it legitimately needs.
+foreach ($_pyEnvVar in @('PYTHONHOME', 'PYTHONPATH', 'PYTHONEXECUTABLE', 'VIRTUAL_ENV', 'UV_INTERNAL__PYTHONHOME', '__PYVENV_LAUNCHER__')) {
+    Remove-Item "Env:\$_pyEnvVar" -ErrorAction SilentlyContinue
+}
 # Resolve the runtime slot python SOLELY via the junction-free `current-version`
 # marker and launch it directly. The `.venv` junction is retired (marker model,
 # #581/#1085/#1106): nothing traverses/parses a reparse point (blocked under

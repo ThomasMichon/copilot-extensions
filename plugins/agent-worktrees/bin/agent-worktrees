@@ -7,6 +7,14 @@
 # Windows python via -m, then the newest installed slot; PATH python is the last
 # resort (#234 defect 2).
 export PYTHONUTF8=1
+# Sanitize inherited Python runtime variables before dispatching to the
+# resolved, architecture-correct runtime-slot interpreter (#2411 parity with
+# the Windows binstub fix). A stray mismatched-architecture PYTHONHOME/
+# PYTHONPATH (or a leaked venv activation) otherwise survives into every
+# dispatch below.
+for _pyenvvar in PYTHONHOME PYTHONPATH PYTHONEXECUTABLE VIRTUAL_ENV UV_INTERNAL__PYTHONHOME __PYVENV_LAUNCHER__; do
+  unset "$_pyenvvar" 2>/dev/null || true
+done
 _awroot="$HOME/.agent-worktrees"
 _aw_exec_resolved() {
   AW_PY=""
