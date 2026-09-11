@@ -388,6 +388,9 @@ restart does not inherently close the child's pipes.
   conversation into a fresh child; this fix does not change that idle-reap policy.
   Legacy STOPPED rows without restart provenance remain dormant rather than
   guessing that an operator wanted recovery.
+  An explicit resume takes over recovery intent; a failed attempt leaves both
+  in-memory and durable restart provenance cleared rather than silently
+  restarting background probes.
 - **Background CodeSpace recovery does not wake unavailable venues.** Before
   reattaching a disconnected CodeSpace session, the heartbeat reads the exact
   target's state through the GitHub API, once per CodeSpace per pass. It honors
