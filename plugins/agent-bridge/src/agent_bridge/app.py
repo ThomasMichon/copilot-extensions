@@ -720,7 +720,7 @@ async def lifespan(app: FastAPI):
                     loop_name="host sweep",
                 ):
                     continue
-                n = await asyncio.to_thread(mgr.sweep_stranded_hosts)
+                n = await mgr.sweep_stranded_hosts()
                 if n:
                     log.info("Version-mux sweep reaped %d stranded host(s)", n)
             except Exception:
