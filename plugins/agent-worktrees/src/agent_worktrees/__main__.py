@@ -3969,16 +3969,15 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         tracking_path.mkdir(parents=True, exist_ok=True)
         current_platform = cfg.detect_platform()
 
-        # Textual picker -- the DEFAULT everywhere (no opt-in). A machine can
-        # opt out to the legacy ANSI picker below via `picker disable`
-        # (new_picker: false) or the AGENT_WORKTREES_LEGACY_PICKER rollback env;
-        # Windows-over-SSH auto-falls-back (_new_picker_blocked_by_ssh).
-        from . import picker_tui
+        # Textual picker -- the ONLY supported picker, everywhere, with no
+        # opt-out. The legacy ANSI picker below is retained solely as the
+        # automatic, unconditional fallback for Windows-over-SSH sessions
+        # (_new_picker_blocked_by_ssh); it is not user-configurable.
 
         # Interactive TUI: do not load_config / heal the anchor before the
         # first frame (#1504). Heal in the background; config is loaded after
         # the operator picks (or immediately for the legacy ANSI fallback).
-        if picker_tui.new_picker_enabled() and not _new_picker_blocked_by_ssh():
+        if not _new_picker_blocked_by_ssh():
 
             def _heal_bg():
                 try:
@@ -15232,58 +15231,23 @@ def _terminal_fragment_doctor(machine: str, current: str | None) -> int:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# picker -- persistent new-picker opt-in (machine-wide global config)
+# picker -- Textual picker status (no opt-out; see picker_tui module docstring)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-def _set_global_config_key(key: str, value) -> Path:
-    """Read-modify-write one top-level key into the global machine config.
-
-    Preserves every other key. Creates the file (and parent) if absent.
-    Returns the path written.
-    """
-    import yaml as _yaml
-
-    gpath = cfg.global_config_path()
-    data: dict = {}
-    if gpath.exists():
-        try:
-            with open(gpath, encoding="utf-8") as f:
-                loaded = _yaml.safe_load(f)
-            if isinstance(loaded, dict):
-                data = loaded
-        except (OSError, _yaml.YAMLError):
-            data = {}
-    data[key] = value
-    gpath.parent.mkdir(parents=True, exist_ok=True)
-    with open(gpath, "w", encoding="utf-8") as f:
-        _yaml.safe_dump(data, f, sort_keys=False, default_flow_style=False)
-    return gpath
-
-
 def cmd_picker(args: argparse.Namespace) -> int:
-    """Inspect / opt out of the Textual picker for this machine.
+    """Inspect the Textual picker for this machine.
 
-    The Textual picker is the **default everywhere**. ``disable`` writes
-    ``new_picker: false`` into the machine-wide global config
-    (``~/.agent-worktrees/config.yaml``) to opt this machine *out* to the legacy
-    ANSI picker; ``enable`` restores the default. ``status`` reports the
-    effective value and where it comes from; ``mock`` launches the picker in the
-    mock dev sandbox. SSH-able so a fleet migration can flip it per machine.
+    The Textual picker is the **only supported picker, with no opt-out**.
+    ``status`` reports whether it's effectively in use here (it always is,
+    unless this session is blocked by the Windows-over-SSH ConPTY keyboard
+    limitation, in which case the legacy ANSI picker is used automatically).
+    ``mock`` launches the picker in the mock dev sandbox.
     """
     from . import picker_tui
 
     action = getattr(args, "picker_action", "status")
     as_json = getattr(args, "json", False)
-
-    if action in ("enable", "disable"):
-        val = action == "enable"
-        gpath = _set_global_config_key("new_picker", val)
-        if as_json:
-            _json_output({"new_picker": val, "path": str(gpath)})
-        else:
-            output.ok(f"new_picker = {str(val).lower()} ({gpath})")
-        return 0
 
     if action == "mock":
         # Explicit dev sandbox: launch the picker in mock mode -- real data is
@@ -15343,39 +15307,17 @@ def cmd_picker(args: argparse.Namespace) -> int:
         return 0
 
     # status
-    persisted = None
-    try:
-        persisted = bool(cfg.load_config().new_picker)
-    except Exception:
-        # No project context -- read the global config directly (default True:
-        # the picker is on unless a machine explicitly opted out).
-        import yaml as _yaml
-
-        gpath = cfg.global_config_path()
-        if gpath.exists():
-            try:
-                with open(gpath, encoding="utf-8") as f:
-                    raw = _yaml.safe_load(f)
-                if isinstance(raw, dict):
-                    persisted = bool(raw.get("new_picker", True))
-            except (OSError, _yaml.YAMLError):
-                persisted = None
-    effective = picker_tui.new_picker_enabled(type("_C", (), {"new_picker": bool(persisted)})())
-    env_override = None
-    if os.environ.get("AGENT_WORKTREES_LEGACY_PICKER"):
-        env_override = "AGENT_WORKTREES_LEGACY_PICKER"
-    elif os.environ.get("AGENT_WORKTREES_NEW_PICKER"):
-        env_override = "AGENT_WORKTREES_NEW_PICKER"
+    ssh_blocked = _new_picker_blocked_by_ssh()
+    effective = not ssh_blocked
     if as_json:
-        _json_output(
-            {"new_picker": bool(persisted), "effective": effective, "env_override": env_override}
-        )
+        _json_output({"effective": effective, "ssh_fallback": ssh_blocked})
     else:
-        print(f"new_picker (persisted): {str(bool(persisted)).lower()}")
-        print(
-            f"effective:              {str(effective).lower()}"
-            + (f"  (env override: {env_override})" if env_override else "")
-        )
+        print(f"effective:    {str(effective).lower()}")
+        if ssh_blocked:
+            print(
+                "              (Windows-over-SSH auto-fallback to the legacy "
+                "ANSI picker; not user-configurable)"
+            )
     return 0
 
 
@@ -22421,24 +22363,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Repair only project binstubs (default: both terminal and binstubs)",
     )
 
-    # picker (Textual picker is default everywhere; disable = machine opt-out)
+    # picker (Textual picker is the only supported picker; no opt-out)
     p = sub.add_parser(
         "picker",
-        help="Inspect / opt out of the Textual worktree picker (the default) for this machine",
+        help="Inspect the Textual worktree picker for this machine (no opt-out)",
     )
     p.add_argument(
         "picker_action",
-        choices=["enable", "disable", "status", "mock", "screenshot"],
+        choices=["status", "mock", "screenshot"],
         nargs="?",
         default="status",
-        help="the Textual picker is the default everywhere; "
-        "disable writes new_picker:false to opt this machine out "
-        "to the legacy picker, enable restores the default "
-        "(~/.agent-worktrees/config.yaml); status (default) "
-        "reports the effective value; mock launches the picker "
-        "in the mock dev sandbox (real data, simulated actions, "
-        "no side effects); screenshot renders the picker "
-        "headlessly and captures it for auditing",
+        help="the Textual picker is the only supported picker, everywhere, "
+        "with no opt-out; status (default) reports whether it's effectively "
+        "in use here (always, unless this session hits the Windows-over-SSH "
+        "ConPTY keyboard limitation, which auto-falls-back to the legacy "
+        "picker); mock launches the picker in the mock dev sandbox (real "
+        "data, simulated actions, no side effects); screenshot renders the "
+        "picker headlessly and captures it for auditing",
     )
     p.add_argument("--json", action="store_true", help="Emit a JSON result")
     p.add_argument(

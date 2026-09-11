@@ -413,15 +413,6 @@ class Config:
     the session and setup script see an up-to-date tree.  Only ever a
     fast-forward (clean + no local commits ahead); dirty/ahead/diverged
     worktrees are left untouched.  Set false to opt out of auto-update."""
-    new_picker: bool = True
-    """Whether the bare binstub launches the overhauled Textual worktree picker.
-    **True by default** -- the Textual picker is the default everywhere; no
-    opt-in is needed.  ``picker disable`` writes ``new_picker: false`` to opt a
-    machine *out* to the legacy ANSI picker (persistent, machine-local > global);
-    ``picker enable`` restores the default.  The env vars still override for a
-    single invocation: ``AGENT_WORKTREES_LEGACY_PICKER`` forces the legacy picker
-    (rollback) and ``AGENT_WORKTREES_NEW_PICKER`` forces the new one.  (Windows
-    over SSH always auto-falls-back to legacy -- see _new_picker_blocked_by_ssh.)"""
 
     @property
     def default_repo(self) -> RepoConfig:
@@ -859,7 +850,7 @@ def load_config(
     1b. **Knowledge overlay (E1e, #947)** -- for a **stateless harness** bound to
        a knowledge repo, the knowledge repo's ``config.yaml`` contributes portable
        **operator-preference** keys (``copilot_profiles``/``headless``/
-       ``auto_fast_forward``/``new_picker``) as a tier BETWEEN the in-repo base and
+       ``auto_fast_forward``) as a tier BETWEEN the in-repo base and
        machine-local, so those prefs can be versioned in the knowledge repo while
        machine-local stays minimal. Machine-specifics + the binding never graft;
        ``{}`` (no effect) for a normal repo.
@@ -1107,14 +1098,6 @@ def load_config(
                 ),
             )
         ),
-        new_picker=bool(
-            machine_raw.get(
-                "new_picker",
-                knowledge_raw.get(
-                    "new_picker", global_raw.get("new_picker", True)
-                ),
-            )
-        ),
     )
 
 
@@ -1314,7 +1297,6 @@ def _resolve_anchor_from_registry(name: str, platform: str) -> str | None:
 # not dictate a machine's paths, its own binding, or another repo's settings).
 _KNOWLEDGE_OVERLAY_TOP_KEYS: tuple[str, ...] = (
     "copilot_profiles", "profile_assignment", "headless", "auto_fast_forward",
-    "new_picker",
 )
 
 

@@ -654,26 +654,18 @@ def test_profiles_apply_rejects_bad_json(monkeypatch, tmp_path):
     assert rc == 2
 
 
-def test_picker_enable_disable_persists(monkeypatch, tmp_path):
-    """`picker enable/disable` writes new_picker into the global config and
-    preserves other keys."""
+def test_picker_status_reports_ssh_fallback(monkeypatch):
+    """`picker status` reports effective=false only when the Windows-over-SSH
+    ConPTY fallback applies; there is no persisted opt-out any more."""
     import argparse
 
-    import yaml
+    monkeypatch.setattr(m, "_new_picker_blocked_by_ssh", lambda: False)
+    rc = m.cmd_picker(argparse.Namespace(picker_action="status", json=True))
+    assert rc == 0
 
-    from agent_worktrees import config as cfg
-
-    gpath = tmp_path / "global.yaml"
-    gpath.write_text("machine: anomalous-potato\nplatform: windows\n", encoding="utf-8")
-    monkeypatch.setattr(cfg, "global_config_path", lambda: gpath)
-
-    assert m.cmd_picker(argparse.Namespace(picker_action="enable", json=False)) == 0
-    data = yaml.safe_load(gpath.read_text(encoding="utf-8"))
-    assert data["new_picker"] is True
-    assert data["machine"] == "anomalous-potato"   # other keys preserved
-
-    assert m.cmd_picker(argparse.Namespace(picker_action="disable", json=False)) == 0
-    assert yaml.safe_load(gpath.read_text(encoding="utf-8"))["new_picker"] is False
+    monkeypatch.setattr(m, "_new_picker_blocked_by_ssh", lambda: True)
+    rc = m.cmd_picker(argparse.Namespace(picker_action="status", json=True))
+    assert rc == 0
 
 
 def test_picker_mock_launches_in_mock_mode(monkeypatch):
@@ -696,26 +688,6 @@ def test_picker_mock_launches_in_mock_mode(monkeypatch):
     rc = m.cmd_picker(argparse.Namespace(picker_action="mock", json=True))
     assert rc == 0
     assert seen["mock_mode"] is True
-
-
-def test_new_picker_enabled_precedence(monkeypatch):
-    import types
-
-    from agent_worktrees import picker_tui
-
-    monkeypatch.delenv("AGENT_WORKTREES_NEW_PICKER", raising=False)
-    monkeypatch.delenv("AGENT_WORKTREES_LEGACY_PICKER", raising=False)
-    # Default is on: opt-out (new_picker=False) -> legacy; unset/None -> on.
-    assert picker_tui.new_picker_enabled(types.SimpleNamespace(new_picker=True))
-    assert not picker_tui.new_picker_enabled(types.SimpleNamespace(new_picker=False))
-    assert picker_tui.new_picker_enabled(None)          # default everywhere
-    # A machine opted out still gets the new picker for one invocation via env.
-    monkeypatch.setenv("AGENT_WORKTREES_NEW_PICKER", "1")
-    assert picker_tui.new_picker_enabled(types.SimpleNamespace(new_picker=False))
-    monkeypatch.delenv("AGENT_WORKTREES_NEW_PICKER", raising=False)
-    # Legacy env always wins (rollback switch).
-    monkeypatch.setenv("AGENT_WORKTREES_LEGACY_PICKER", "1")
-    assert not picker_tui.new_picker_enabled(types.SimpleNamespace(new_picker=True))
 
 
 def test_project_flag_sets_active_project_and_ignores_worktree_id(monkeypatch):
