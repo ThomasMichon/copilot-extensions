@@ -148,10 +148,19 @@ TRANSITIONS: tuple[Transition, ...] = (
     ),
     Transition(
         name="complete",
-        from_states=frozenset({Status.STARTED}),
+        #: Phase 10's live-wiring pass found the real
+        #: ``TaskQueue.complete_with_outcome`` allows completing a
+        #: ``suspended`` task directly (a suspended task may resolve while
+        #: no worker process is running -- e.g. an awaited external
+        #: condition became true -- and forcing a fake resume/active turn
+        #: solely to reach the terminal state would be worse). The
+        #: original declaration only named ``started``; corrected here to
+        #: match the real, already-working behavior rather than the other
+        #: way around.
+        from_states=frozenset({Status.STARTED, Status.SUSPENDED}),
         to_state=Status.COMPLETED,
         recovery_mode=RecoveryMode.SAFE_RETRY,
-        implemented_by="TaskQueue.complete",
+        implemented_by="TaskQueue.complete_with_outcome",
     ),
     Transition(
         name="abandon",
@@ -161,6 +170,11 @@ TRANSITIONS: tuple[Transition, ...] = (
         implemented_by="TaskQueue.abandon (requires permitted=True)",
     ),
 )
+
+#: Lookup by name, for callers (Phase 10's live-wiring: ``queue.py``'s own
+#: transition call sites) that want to source a transition's declared
+#: ``from_states``/``to_state`` rather than duplicating them inline.
+TRANSITIONS_BY_NAME: dict[str, Transition] = {t.name: t for t in TRANSITIONS}
 
 
 def reachable_states(start: str = INITIAL_STATE) -> frozenset[str]:
