@@ -3248,7 +3248,9 @@ class TaskQueue:
     def approve(self, task_id: str, *, now: float | None = None) -> Task:
         """Move a ``proposed`` task to ``queued`` (makes it claimable)."""
         allowed, to = _task_transition_spec("approve")
-        return self._transition(task_id, allowed=allowed, to=to, now=now, note="approve")
+        return self._transition(
+            task_id, allowed=allowed, to=to, now=now, note="approve", idempotent_replay=True
+        )
 
     # -- consumer / lease ----------------------------------------------------
 
@@ -3510,6 +3512,7 @@ class TaskQueue:
             note="start",
             stamp="started_at",
             extra=extra,
+            idempotent_replay=True,
         )
 
     def complete(
@@ -3792,6 +3795,11 @@ class TaskQueue:
             reembody_headless_on_wake=not reuse_session,
             wake_requested=wake_requested,
             wake_message=wake_message,
+            #: Only the plain "wake me again" resume is idempotent-safe.
+            #: A handoff-adoption resume (``adopt_owner_session_id`` set)
+            #: must always bump the generation and adopt the new owner
+            #: session -- a no-op would silently drop that real effect.
+            idempotent_replay=adopt_owner_session_id is None,
         )
 
     def release_suspended(
@@ -3828,6 +3836,7 @@ class TaskQueue:
             },
             release_spawn=True,
             release_spawn_detail="task released from suspension",
+            idempotent_replay=True,
         )
 
     def yield_task(
@@ -3906,6 +3915,7 @@ class TaskQueue:
             extra=extra,
             release_spawn=release_spawn,
             release_spawn_detail="task yielded",
+            idempotent_replay=True,
         )
 
     def abandon(
@@ -3934,6 +3944,7 @@ class TaskQueue:
             now=now,
             note=reason or "abandon",
             extra={"owner": None, "lease_expires_at": None},
+            idempotent_replay=True,
         )
 
     def heartbeat(self, task_id: str, worker_id: str, *, now: float | None = None) -> Task:
@@ -5054,7 +5065,21 @@ class TaskQueue:
         expected_generation: int | None = None,
         reembody_headless_on_wake: bool = False,
         reject_pending_steer: bool = False,
+        idempotent_replay: bool = False,
     ) -> Task:
+        """``idempotent_replay=True`` (Phase 10's live-wiring of
+        :mod:`agent_dispatch.machine_coupling`'s CAS outcome
+        classification): a request that finds the task **already sitting
+        in the exact target state** (``task.status == to``), under
+        matching identity fences (owner, and generation/owner-session
+        when the caller supplied ``expected_generation``), is treated as
+        an already-succeeded replay -- a no-op that returns the current
+        task rather than raising. This is deliberately narrow: any other
+        mismatch (wrong owner, wrong state entirely, a stale generation
+        the caller explicitly fenced on) still raises exactly as before.
+        Defaults to ``False`` so untouched call sites keep today's
+        behavior; opted into per call site, not globally.
+        """
         ts = self._now(now)
         allowed_set = set(allowed)
         wake_enqueued = False
@@ -5065,6 +5090,29 @@ class TaskQueue:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
             if task.status not in allowed_set:
+                if idempotent_replay and task.status == to:
+                    owner_ok = (
+                        not require_owner
+                        or worker_id is None
+                        or task.owner in (None, worker_id)
+                    )
+                    generation_ok = expected_generation is None or (
+                        task.generation == expected_generation
+                        and task.owner_session_id == expected_owner_session_id
+                    )
+                    if owner_ok and generation_ok:
+                        self._audit(
+                            conn,
+                            task_id,
+                            ts=ts,
+                            from_status=task.status,
+                            to_status=to,
+                            worker=worker_id,
+                            note=f"{note or to} (idempotent replay, already {to})",
+                        )
+                        result = self._fetch(conn, task_id)
+                        conn.execute("COMMIT")
+                        return result  # type: ignore[return-value]
                 conn.execute("COMMIT")
                 raise TaskError(
                     f"cannot {note or to} a {task.status!r} task (allowed: {sorted(allowed_set)})"
