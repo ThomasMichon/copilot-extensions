@@ -467,6 +467,46 @@ scenarios.
 
 ## Journal
 
+### 2026-09-11 - Phase 10 item 3: first slice of the GitHub provider adapter (read-only observer)
+
+- Added `plugins/agent-dispatch/src/agent_dispatch/github_provider_adapter.py`:
+  the first slice of item 3 (no prior provider-adapter code existed for
+  `provider_state_machine.py` to wire against). `observe_pr_state` is a
+  pure function classifying a raw GitHub GraphQL `pullRequest` node into
+  the declared `ApprovalStatus` (via `reviewDecision`), `Mergeability`
+  (via `mergeable` + the last commit's `statusCheckRollup.state`), and
+  `HoldReason` set (`isDraft`, a WIP title/label marker, any unresolved
+  review thread) -- plus the raw `Revision` fingerprints (`headRefOid`/
+  `baseRefOid`). `GitHubPRAdapter` is the thin `gh`-CLI fetch wrapper,
+  mirroring `repository_issue_loops.GitHubProvider`'s injectable-runner +
+  identity-verification pattern (a fresh, narrow adapter rather than a
+  shared base class -- issue polling and PR review state are different
+  read shapes).
+- Deliberately scoped as a **read model only**, following Phase 9's own
+  "declare/observe first, wire later" sequencing: it does not decide
+  `ApprovalStatus.STALE` (that needs a previously-recorded `Revision` an
+  evaluator holds across two observations, not a single snapshot -- see
+  `classify_revision_change`), does not call any declared transition,
+  write anything back to GitHub, or feed a task/coordinator loop. An
+  unrecognized `reviewDecision`/`mergeable`/`statusCheckRollup.state`
+  value raises (`GitHubPRObservationError`) rather than guessing a state,
+  per Phase 9's "never assume the safer state without evidence" rule.
+- Added `plugins/agent-dispatch/tests/test_github_provider_adapter.py`
+  (39 tests): pure-classification fixtures for every declared enum value
+  plus unrecognized-value rejections, hold-combination tests (multiple
+  holds co-occurring independently), and `gh`-CLI wrapper tests against a
+  fake runner (identity/repo verification order and caching, GraphQL
+  error surfacing, non-zero `gh` exit handling) -- no network in any test.
+- Full `agent-dispatch` suite (674 tests) passes via
+  `tools/run-plugin-tests.py agent-dispatch`. Bumped agent-dispatch's
+  version to 0.1.2-dev76.
+- Item 3 remains open (`phase-10-live-wiring.md`'s Plan checkbox): this
+  slice is the read-only observer only. Remaining slices: an evaluator
+  that holds prior `Revision` state and actually drives
+  `APPROVAL_TRANSITIONS` (including `STALE`), and wiring the observer into
+  a real polling- or webhook-driven loop. Item 4 (bridge liveness) is
+  still blocked on `agent-bridge-ahp-convergence` (status: Draft).
+
 ### 2026-09-11 - Phase 10 item 5: wire the spawn-reservation consistency sweep into the supervisor
 
 - Added `Supervisor.sweep_spawn_consistency()`
