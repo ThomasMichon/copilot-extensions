@@ -467,6 +467,43 @@ scenarios.
 
 ## Journal
 
+### 2026-09-11 - Phase 10 item 3: third slice, revision-history evaluator (STALE)
+
+- Added `plugins/agent-dispatch/src/agent_dispatch/pr_revision_evaluator.py`:
+  `evaluate_observation(previous, current)` decides whether an
+  `APPROVED` status should be corrected to `STALE`, by reusing the
+  already-declared `APPROVAL_TRANSITIONS` table directly -- looks up the
+  `revision_invalidates_approval` transition by name and checks
+  `current.approval_status` against its `from_states` -- rather than
+  re-deciding the staleness rule inline. Same "the declared table is the
+  actual governing data" discipline Phase 10 items 1/2 already
+  established for the task machine.
+- A first-ever observation (`previous is None`) is returned unchanged:
+  staleness is a property of *two* observations
+  (`classify_revision_change`), not something a lone snapshot can
+  classify.
+- Never applies `revalidate_stale` itself: that recovery is simply
+  whatever the provider's own `reviewDecision` already reports on the next
+  observation (e.g. `REVIEW_REQUIRED` once someone re-requests review) --
+  this evaluator always recomputes from the provider's current raw status,
+  never from a locally cached "STALE" flag, so there is nothing to
+  explicitly un-stick.
+- Added `plugins/agent-dispatch/tests/test_pr_revision_evaluator.py` (9
+  tests): first-observation pass-through, unchanged/base-only revision
+  leaves `APPROVED` untouched, a substantive change invalidates `APPROVED`
+  to `STALE`, a substantive change with an already-non-`APPROVED` current
+  status is a no-op (parametrized over `NONE`/`PENDING`/`STALE`), and every
+  other observation field is preserved through evaluation.
+- Full `agent-dispatch` suite passes via `tools/run-plugin-tests.py
+  agent-dispatch`. Bumped agent-dispatch's version to 0.1.2-dev78.
+- Item 3 remains open: still needed are the persistent per-(repo, PR)
+  state store (a new `queue.py` table, following the plugin's existing
+  one-table-per-declared-machine convention) both this evaluator and the
+  polling-cadence policy's fallback timer need to actually hold `previous`
+  observations across calls, and a real webhook receiver for review/
+  check-status events (today's `producers/webhook.py` only handles
+  PR-merge).
+
 ### 2026-09-11 - Phase 10 item 3: second slice, polling-fallback cadence policy
 
 - Added `plugins/agent-dispatch/src/agent_dispatch/pr_polling_policy.py`,
