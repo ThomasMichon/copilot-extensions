@@ -436,6 +436,51 @@ scenarios.
 
 ## Journal
 
+### 2026-09-10 - Phase 9: ninth slice (implement the three deferred simulation scenarios)
+
+- Implemented the three scenarios the prior design-review slice designed
+  but left as zero landed fixtures:
+  - **Bridge mid-version-update / transient port blip:**
+    `bridge_state_machine.resolve_liveness_with_recovery(cache_hint,
+    live_probe, discover_port, max_attempts=3)` -- a bounded-retry
+    wrapper around `resolve_liveness`; `discover_port` is injected (never
+    called internally), so a fixture can deterministically drive a
+    stale-port-then-fresh-port sequence. Falls back to `Liveness.COLD` --
+    never assumes `HOT` -- once attempts exhaust.
+  - **Bridge/runtime EOL retirement safety:**
+    `bridge_state_machine.eol_safe_to_retire(active_lease_count) -> bool`,
+    a pure predicate true only at zero. No new bridge state; the
+    supervisor's routing decision stays a dispatch policy.
+  - **Steer-vs-transition race:** `task_state_machine.SteerOutcome`
+    (`RESUME_WITH_WAKE` / `RELEASE_TO_QUEUED`),
+    `STEER_OUTCOME_TRANSITION` (mapping each outcome to a real declared
+    task transition -- `resume` / `release_suspended`),
+    `resolve_steer_outcome(is_headless_reservation=...)`, and
+    `suspend_blocked_by_pending_steer(has_untaken_steer=...)` -- the
+    existing `awaiting_steer`/steer-inbox contract in `queue.py`'s
+    `submit_steer`/`suspend` made checkable data, not new vocabulary.
+- Added
+  `plugins/agent-dispatch/tests/test_simulation_deferred_scenarios.py`
+  (17 structural tests): the liveness-recovery wrapper's first-attempt-
+  success, blip-then-recover, exhausted-attempts-falls-back-to-COLD, and
+  cache-hint-ignored cases with `discover_port` verified as externally
+  injected; the EOL predicate at zero/nonzero/negative lease counts; both
+  steer outcomes mapping to real task transitions, and the suspend-
+  blocked-while-untaken-steer invariant.
+- This lands **all ten** of the phase-9 sub-doc's simulation scenarios
+  (previously seven; the remaining three were design-only until this
+  slice) and ticks its Plan checkbox.
+- Full `agent-dispatch` suite still green (see Validation below); bumped
+  agent-dispatch's version (plugin.json, pyproject.toml, marketplace.json)
+  to 0.1.2-dev65.
+- Remaining Plan item: the reservation/allocation-fencing layer
+  (single-assignment invariant, closed "let go" vocabulary, three-tier
+  reservation<->bridge consistency) -- designed in the prior slice but
+  still zero fixtures landed. The five still-conceptual-only Phase 8
+  candidates (attempt-budget, event ledger, approval-authority split,
+  worktree-pool dirty-tolerance, relay health-fencing) remain open
+  follow-up design work, not touched this slice.
+
 ### 2026-09-10 - Phase 9: eighth slice (design review -- the three deferred scenarios corrected + assignment/reservation coupling declared; docs-only, zero fixtures implemented)
 
 A design-review/rubber-duck conversation with the operator, grounded by
