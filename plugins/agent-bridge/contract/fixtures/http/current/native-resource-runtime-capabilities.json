@@ -1,6 +1,6 @@
 {
   "captured_from": {
-    "commit": "d12bcca4101841f47c3c6a0f5458e85042c1ce10",
+    "commit": "44cc5f4f2c46e71cdf6baf36b8c06152b5588677",
     "plugin_version": "0.4.0-dev475",
     "protocol_generation": 15,
     "source_path": "plugins/agent-bridge/src/agent_bridge/native_runtime.py",
