@@ -836,8 +836,43 @@ version skew (build-info/procutil/task-transition tests unrelated to this
 change), confirmed absent from this diff's touched files. Landed via
 [ThomasMichon/copilot-extensions#1837](https://github.com/ThomasMichon/copilot-extensions/issues/1837).
 
+### 2026-09-11 (later still) — Landed the Windows half of #1836
+
+Fixed agent-vault's Windows Scheduled Task: `Register-AgentVaultTask` used to
+resolve the active versioned slot ONCE at registration time and bake that
+concrete `versions/<v>/Scripts/python.exe` path into the launcher script body
+-- so an activated version cutover only took effect once the task was
+re-registered (every install/update rewrote it, masking the issue in
+practice, but a hand-invoked `Start-ScheduledTask` between updates could run a
+stale slot). Moved the `resolve-runtime.ps1` dot-source into the launcher body
+itself, so it resolves the active slot fresh at every process start --
+matching agent-bridge's/agent-dispatch's launchers exactly ("SINGLE routing
+point... never a pinned path"). Also added the same register-once guard as
+#1837: `Register-AgentVaultTask` now compares the existing task's `Action`
+against the desired one and skips `Set-ScheduledTask` when they already
+match, reserving re-registration for a genuine definition drift. Confirmed
+via `resolve-runtime.ps1`/`ExecStart=$LINK_PYTHON` review that the POSIX
+systemd-unit side does NOT have this bug: `.venv/bin/python` is a real symlink
+re-pointed at every activate (no Windows-junction RedirectionGuard problem),
+so `ExecStart`'s baked path already tracks the active version correctly --
+no POSIX change needed. Added two regression tests
+(`test_scheduled_task_launcher_resolves_slot_at_every_run`,
+`test_scheduled_task_registration_skips_reregister_when_already_correct`);
+full `agent-vault` suite: 255 passed (2 pre-existing, unrelated WSL-bash
+path-translation failures in `test_bootstrap_check_reconcile_opt_in.py`,
+confirmed present before this diff). Bumped to `0.1.0-dev101`.
+
+**Deliberately NOT attempted this session** (the larger, riskier half of
+#1836's ask, left open): decoupling `Invoke-Start`/session-start readiness
+from Scheduled Task existence entirely (a "user-mode ensure" fallback that
+can cold-start the daemon without a registered task at all). agent-vault is a
+credential store; a behavior change to its start path deserves its own
+focused pass with more test coverage than this session budgeted, rather than
+folding it into the same diff as the launcher-resolution fix. #1836 stays
+open for that remaining piece.
+
 Remaining #736-adjacent open work not picked up this session: #742 (atomic
 `current-version` marker), #743 (agent-vault drain-safe cutover), #744
-(work-coalescing singleton tier design), #1836 (agent-vault register-once
-through a stable launcher -- a larger structural change than #1837's,
-deferred).
+(work-coalescing singleton tier design), #1836 (start/session-start
+convergence, per above).
+

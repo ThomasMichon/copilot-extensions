@@ -868,21 +868,14 @@ function Register-AgentVaultTask {
         return
     }
 
-    # Launch the daemon through the RESOLVED versions/<v> slot python, not the
-    # `.venv` junction: a RedirectionGuard-enforcing task context would be blocked
-    # from *traversing* the junction (dotfiles #637), and conhost execs the target
-    # directly with no launcher script to resolve it at runtime -- so resolve the
-    # slot here via the canonical marker chain (uniform-runtime-resolution, #765):
-    # current-version -> last-known-good -> newest complete slot, so the at-logon
-    # daemon binds the same slot as the binstub. The task is re-registered every
-    # install/update and `gc` keeps the current slot, so this tracks the active
-    # version. Falls back to $LinkPython only if the resolver isn't deployed yet.
-    $_root = Split-Path $LinkDir
-    if ((Split-Path -Leaf $_root) -eq 'versions') { $_root = Split-Path $_root }
-    $taskPy = $null
-    $_resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
-    if (Test-Path -LiteralPath $_resolver) { $env:AGENT_RT_ROOT = $_root; . $_resolver; $taskPy = $AgentRtPy }
-    if (-not ($taskPy -and (Test-Path -LiteralPath $taskPy))) { $taskPy = $LinkPython }
+    # #1836: the launcher itself resolves the active slot via the canonical
+    # marker chain (uniform-runtime-resolution, #765; the SAME resolve-runtime.ps1
+    # chain the binstub uses) at PROCESS START, exactly like agent-bridge's/
+    # agent-dispatch's launchers -- never a concrete versions/<v> path baked in
+    # at registration time. `.venv` itself is never traversed here (a
+    # RedirectionGuard-enforcing task context would be blocked from *traversing*
+    # the junction, dotfiles #637); $LinkPython is only the last-resort fallback
+    # for a host where the resolver hasn't been deployed yet.
     New-Item -ItemType Directory -Force -Path $RunDir, (Join-Path $InstallDir 'logs') | Out-Null
     $portDirective = if ($installationId) {
         "`$env:AGENT_VAULT_PORT = '0'"
@@ -902,7 +895,12 @@ function Register-AgentVaultTask {
 `$env:AGENT_VAULT_TASK_NAME = '$($TaskName -replace "'","''")'
 `$env:AGENT_VAULT_INSTALLATION_ID = '$($installationId -replace "'","''")'
 $portDirective
-& '$($taskPy -replace "'","''")' -m agent_vault.service --foreground --persistent
+`$_root = '$($InstallDir -replace "'","''")'
+`$_resolver = Join-Path `$_root 'bin\resolve-runtime.ps1'
+`$_py = `$null
+if (Test-Path -LiteralPath `$_resolver) { `$env:AGENT_RT_ROOT = `$_root; . `$_resolver; `$_py = `$AgentRtPy }
+if (-not (`$_py -and (Test-Path -LiteralPath `$_py))) { `$_py = '$($LinkPython -replace "'","''")' }
+& `$_py -m agent_vault.service --foreground --persistent
 exit `$LASTEXITCODE
 "@, $utf8NoBom)
     $action = New-ScheduledTaskAction `
@@ -920,10 +918,25 @@ exit `$LASTEXITCODE
         -RestartCount 3 `
         -RestartInterval (New-TimeSpan -Minutes 1)
 
+    # Register-ONCE model (#1836), same as agent-bridge/agent-dispatch: the
+    # launcher path/working directory are stable across ordinary updates (the
+    # launcher body above is what resolves the active slot, dynamically, at
+    # every run), so a task whose Action already matches is already correct --
+    # re-registering (Set-ScheduledTask) is reserved for a genuine definition
+    # migration (e.g. an install-dir move), not every install/update.
     $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     if ($existing) {
-        Set-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings | Out-Null
-        Write-Ok "Scheduled task updated ($TaskName, at logon, 15s delay)"
+        $existingAction = $existing.Actions | Select-Object -First 1
+        $matchesDesired = $existingAction -and
+            $existingAction.Execute -eq $action.Execute -and
+            $existingAction.Arguments -eq $action.Arguments -and
+            $existingAction.WorkingDirectory -eq $action.WorkingDirectory
+        if ($matchesDesired) {
+            Write-Ok "Scheduled task already correct ($TaskName, at logon, 15s delay) -- left registered as-is"
+        } else {
+            Set-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings | Out-Null
+            Write-Ok "Scheduled task updated ($TaskName, at logon, 15s delay)"
+        }
     } else {
         Register-ScheduledTask -TaskName $TaskName `
             -Action $action -Trigger $trigger -Settings $settings `
@@ -933,6 +946,7 @@ exit `$LASTEXITCODE
 
     Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 }
+
 
 function Invoke-Stamp {
     # Fast base install (#1393, snapshot slot model): copy the payload SOURCE into
