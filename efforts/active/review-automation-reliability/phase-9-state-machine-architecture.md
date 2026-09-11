@@ -239,23 +239,38 @@ provider-approval one) plus `step_task`/`step_bridge`/
 `step_provider_approval` helpers that resolve a named transition from the
 owning declared table and apply it through `machine_coupling.apply_transition`
 -- it declares no new machine behavior, it only drives the already-declared
-tables. Seven of the ten scenarios below are now covered
+tables. Seven of the ten scenarios below are implemented and covered
 (`../../../plugins/agent-dispatch/tests/test_simulation.py` and
-`../../../plugins/agent-dispatch/tests/test_simulation_revision.py`); the
-remaining three need a vocabulary extension (version/EOL on the bridge
-machine, a steer transition on the task machine) and are deferred to a
-follow-up slice, tracked as open items below:
+`../../../plugins/agent-dispatch/tests/test_simulation_revision.py`). The
+remaining three are now **designed but not yet implemented** -- no fixture
+exists for any of them yet -- after a design review corrected the earlier
+belief that they needed new declared vocabulary:
 
 - [ ] Bridge caught mid-version-update while a task holds an active
-  session against it. *(deferred -- needs a version/EOL concept on the
-  bridge machine, not yet declared.)*
+  session against it. *(Corrected from the earlier "needs a version/EOL
+  concept on the bridge machine" note: agent-bridge, not agent-dispatch,
+  owns the actual session-host instances and their zero-downtime-deploy
+  mechanics. agent-dispatch's job shrinks to noticing a transient
+  connection/call blip and recovering by re-resolving the dynamic port
+  binding before retrying -- no new `Liveness` tier or version dimension.
+  Designed as a bounded-retry wrapper,
+  `resolve_liveness_with_recovery(cache_hint, probe, discover_port,
+  max_attempts)`, with `discover_port` **injected** (not called
+  internally) so a fixture can deterministically drive a
+  stale-port-then-fresh-port sequence; falls back to `COLD` -- never
+  assumes `HOT` -- once attempts exhaust. Composes with the
+  already-declared `PORT_CHANGED` bridge event.)*
 - [x] Session host detached (network partition / process host restart)
   while a task believes its agent is running.
 - [x] The bridge's discovered port/endpoint changes underneath an
   already-attached task.
 - [ ] The dispatch supervisor is about to end-of-life a bridge/runtime
-  version while tasks are still attached to it. *(deferred -- same
-  version/EOL gap as above.)*
+  version while tasks are still attached to it. *(Designed as a pure
+  predicate, `eol_safe_to_retire(active_lease_count) -> bool`, true only
+  at zero -- no new bridge state. The supervisor's decision to stop
+  routing new spawns to a retiring version is a dispatch policy, not a
+  bridge-machine transition; existing `suspend`/`end`/`end_suspended`
+  transitions already express graceful drain.)*
 - [x] The provider's base revision moves (unrelated commits land) while a
   task's analysis is in flight, with and without the submitter's actual
   diff changing (base-only vs. substantive -- Phase 8's base-only
@@ -273,8 +288,22 @@ follow-up slice, tracked as open items below:
 - [x] Two provider events for the same task arrive out of order or
   duplicated (idempotent-replay proof for Phase 2's dedup requirement).
 - [ ] A steering input arrives while the evaluator is mid-transition on the
-  same task (steer-vs-transition race). *(deferred -- needs a declared
-  steer transition on the task machine, not yet present.)*
+  same task (steer-vs-transition race). *(Corrected from the earlier
+  "needs a declared steer transition on the task machine" note: reading
+  `queue.py` found steering is already a real, implemented mechanism --
+  `awaiting_steer` is an existing **boolean** flag orthogonal to `Status`
+  (settable while `claimed`/`started`/`suspended`, not a new lifecycle
+  state), `suspend` already refuses while an untaken steer answer exists,
+  and a submitted steer already resolves to exactly one of two declared
+  outcomes: resume-with-wake (interactive owner) or release-to-queued
+  (headless re-embodiment) -- the same dual-outcome shape
+  `TASK_TRANSITION_BRIDGE_CONFIRMATION["resume"]` already uses. No
+  `VersionedRecord` payload change, no new task-machine transition, and no
+  `SuspendReason` enum are needed -- that was scaffolding for a mechanism
+  that turned out not to match the real system. Designing this now means
+  declaring the existing `awaiting_steer`/steer-inbox contract as
+  checkable data (the refusal-while-untaken-steer invariant, the
+  dual-outcome resolution) rather than inventing new vocabulary.)*
 - [x] A resume is requested against a target whose liveness cache is
   empty, stale, or missing the entry entirely; the live hot/warm/cold
   check must still classify it correctly rather than the resume failing
@@ -286,6 +315,113 @@ follow-up slice, tracked as open items below:
 Each fixture asserts: the correct terminal/next state is reached regardless
 of interleaving order, the transition is idempotent under replay, and the
 recovery mode taken matches the taxonomy above.
+
+## Assignment: the reservation/allocation-fencing layer, coupled to the bridge machine
+
+A fourth piece of durable state exists alongside the three machines above:
+`agent_dispatch.queue.SpawnReservation` (`SpawnState`: `RESERVING` ->
+`SPAWNED` -> `COLD`/`RELEASING` -> `SETTLED`/`FAILED`/`REARMED`/`DEFERRED`).
+This is **not a fourth top-level machine** -- it answers a different
+question than either the task or the bridge machine ("which attempt
+currently owns the right to spawn a body for this task, so two bodies are
+never dispatched for the same task"), and it belongs in the same
+conceptual slot as `machine_coupling.py`: a declared **relation** between
+an already-real allocation table and the bridge machine, not a new
+lifecycle a caller has to separately learn.
+
+### The single-assignment invariant (already enforced; now to be declared as checkable)
+
+`SpawnReservation.reserve_spawn()` already atomically enforces, under one
+write lock: no second reservation may be minted while one is
+`SpawnState.ACTIVE` (`RESERVING`/`SPAWNED`/`COLD`/`RELEASING`) for the same
+task, or -- when an `exclusive_key` is set -- for the same exclusive-key
+group. This is a real, existing guarantee; the design work is declaring it
+as a Phase-9-style checkable structural property (a fixture proving no two
+reservations can simultaneously hold an `ACTIVE` state for the same task
+or exclusive-key group) rather than leaving it as "true because the SQL
+transaction happens to be written correctly."
+
+### Intentional "letting go" -- a closed, reasoned vocabulary
+
+Every exit from `ACTIVE` into `SpawnState.RELEASABLE`
+(`SETTLED`/`FAILED`/`REARMED`/`DEFERRED`) already goes through one of a
+small set of named operations (`fail_spawn`, `defer_spawn`, `settle_spawn`,
+`retire_spawn`), each requiring a caller-supplied reason (`detail`) --
+never a silent drop. The design work is naming this as the **contract** any
+future consumer (an operator, or a separately-scoped monitor component --
+see below) calls into, tagged with a `RecoveryMode`:
+
+- `fail_spawn` -- the attempt is dead (exhausted retries, confirmed gone);
+  `SAFE_RETRY` (a fresh attempt gets a new key).
+- `defer_spawn` -- not a failure: a carried session was confirmed still
+  live/busy; `SELF_RECOVERING` (the next cycle re-checks).
+- `settle_spawn` -- the task reached a terminal outcome; no further
+  spawning needed; `SAFE_RETRY`.
+- `retire_spawn`/rearm -- an explicit, permission-gated operator override
+  of a dead-lettered spawn history; `SELF_REPAIR`.
+- **Preemption** (a different claim wins the task while this reservation
+  is still `RESERVING`/unclaimed-`SPAWNED`) is its own reason, distinct
+  from failure: the reservation agent-dispatch itself assigned is
+  gracefully terminated and released with a `preempted` conclusion --
+  never the winning claimant, which may be a different bridge-managed
+  agent or a human's own CLI-driven session. `SELF_RECOVERING` (the
+  system's own next state is simply correct once the winning claim lands).
+
+### Reservation <-> bridge consistency: three tiers, not a strict pairwise map
+
+A reservation's `SpawnState` is a claim about its bridge; the bridge's own
+`Liveness`/`BridgeState` is the fresh, live-probed fact. The relation
+between them has three tiers, not two, because **a bridge is not the only
+thing that can drive a task** (a resolver can complete a suspended task
+directly with no bridge ever spawned; a pool/fleet body can be live and
+`RUNNING` while genuinely unbound to any specific reservation between
+claims):
+
+- **N/A** -- no reservation exists for the task, or the live body isn't
+  bound to any specific reservation right now. Never an anomaly; the check
+  is scoped per-reservation and simply doesn't apply.
+- **Consistent** -- a reservation names a specific live process, and the
+  fresh bridge read agrees:
+  - `RESERVING` + `ABSENT` (about to spawn fresh; `worktree_ownership`
+    `created`/`targeted`/`unknown`).
+  - `RESERVING` + `RUNNING`, **only** when `worktree_ownership == "reused"`
+    / `inherited_worktree` is set (deliberately carrying forward a
+    still-live session).
+  - `SPAWNED` + `HYDRATING`/`RUNNING`.
+  - `COLD` + `SUSPENDED`/`ABSENT` (intentionally stopped; either paused or
+    fully torn down are both legitimate).
+  - `RELEASING` + any of `SUSPENDED`/`RUNNING`/`ABSENT`/`ENDED`
+    (transitional).
+  - `SETTLED`/`FAILED`/`REARMED` + `ABSENT`/`ENDED`.
+  - `DEFERRED` + `RUNNING`/`HYDRATING` -- definitionally, since `DEFERRED`
+    exists *because* the allocator already confirmed the carried session
+    is still live/busy.
+- **Anomaly** -- a reservation claims a specific live process and the
+  fresh read contradicts it:
+  - `SPAWNED` + `ABSENT`/`ENDED` -- the headline `reconcile_reserving`-class
+    bug this effort exists to catch.
+  - `RESERVING` (not reused/inherited) + `RUNNING` -- a live process
+    already exists before this reservation ever spawned one.
+  - `COLD` + `RUNNING` -- a "stopped" body that's actually still running.
+  - `COLD` + `ENDED` -- claims resumability against a permanently-dead
+    process; resume will fail.
+  - `SETTLED`/`FAILED`/`REARMED` + `RUNNING` -- a leaked process under a
+    concluded reservation's handle.
+  - `DEFERRED` + `ABSENT`/`ENDED` -- the deferral's premise was wrong; a
+    fresh attempt should trigger, not continued deferral.
+
+### Explicitly out of scope: the launch-to-claim grace/recovery monitor
+
+A separate concern -- monitoring a freshly-spawned body for evidence of
+progress toward actually claiming its task (a bounded grace deadline, a
+kill-and-resume-with-nudge recovery ladder before truly declaring an
+attempt dead) -- is **deliberately not designed here**. It is a distinct
+component with its own internal state (grace deadlines, evidence
+counters, kill-attempt counts), consuming the reservation contract above
+(`set_activity` already exists, already fenced to a reservation key,
+already callable pre-claim) from the outside. Phase 9 declares the
+contract that component calls into; it does not declare the component
+itself.
 
 ## Phase 8 candidates, re-seated as required behaviors (not a parallel checklist)
 
@@ -395,7 +531,20 @@ inside this checklist item.
   equivalent) structural test -- no transition was left unclassified to
   be discovered ad hoc.
 - [ ] Build the simulation/test track as deterministic fixtures, one per
-  scenario above.
+  scenario above. Seven of ten designed and implemented; the remaining
+  three (mid-version-update, EOL, steer-vs-transition race) are now
+  **designed** (see "Simulation and test track" above) but have **zero
+  fixtures landed** -- implementation is a follow-up slice, not this one.
+- [ ] Declare the reservation/assignment allocation-fencing layer as a
+  checkable relation coupled to the bridge machine (see "Assignment: the
+  reservation/allocation-fencing layer" above): the single-assignment
+  invariant as a structural fixture, the closed "let go" reason vocabulary
+  (`fail_spawn`/`defer_spawn`/`settle_spawn`/`retire_spawn`/preemption)
+  tagged with recovery modes, and the three-tier (N/A/consistent/anomaly)
+  reservation<->bridge consistency relation. **Designed, not yet
+  implemented** -- no module or test exists for this yet. The
+  launch-to-claim grace/recovery monitor is explicitly out of scope for
+  this item (see "Explicitly out of scope" above).
 - [x] Re-validate each Phase 8 candidate against the declared machines;
   fold each into the relevant machine's spec rather than implementing it
   standalone. Done as the "Re-validation pass" table above: three

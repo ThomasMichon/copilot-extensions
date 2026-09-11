@@ -436,6 +436,73 @@ scenarios.
 
 ## Journal
 
+### 2026-09-10 - Phase 9: eighth slice (design review -- the three deferred scenarios corrected + assignment/reservation coupling declared; docs-only, zero fixtures implemented)
+
+A design-review/rubber-duck conversation with the operator, grounded by
+reading the real `queue.py`/`client.py`/`embody.py`/`supervisor.py`
+runtime (not just the declared machines), corrected two of the prior
+slice's deferral reasons and produced a new declared design:
+
+- **Steer (scenario 8) was wrong to defer as "needs a new task-machine
+  transition."** Reading `queue.py` found steering is already fully real:
+  `awaiting_steer` is an existing **boolean** flag orthogonal to `Status`
+  (settable while `claimed`/`started`/`suspended`), `suspend` already
+  refuses while an untaken steer answer exists, and a submitted steer
+  already resolves to exactly one of two outcomes (resume-with-wake or
+  release-to-queued) -- the same dual-outcome shape
+  `TASK_TRANSITION_BRIDGE_CONFIRMATION["resume"]` already uses. The
+  `SuspendReason`/`VersionedRecord`-payload design floated earlier in this
+  slice's own design conversation was scaffolding for a mechanism that
+  doesn't match the real system, and was dropped entirely -- not carried
+  into the sub-doc.
+- **Mid-version-update (scenario 1) was wrong to defer as "needs a
+  version/EOL dimension on the bridge machine."** agent-bridge, not
+  agent-dispatch, owns the actual session-host instances and their
+  zero-downtime-deploy mechanics; agent-dispatch's job is only to notice a
+  transient connection/call blip and recover by re-resolving the dynamic
+  port binding before retrying. Designed as a bounded-retry wrapper with
+  an **injected** `discover_port` callable (so a fixture can deterministically
+  drive stale-port-then-fresh-port), composing with the already-declared
+  `PORT_CHANGED` bridge event.
+- **EOL (scenario 2)** confirmed as a pure `eol_safe_to_retire(active_lease_count)`
+  predicate -- no new bridge state, reusing existing drain transitions.
+- All three are now **designed, not implemented** -- corrected/added to the
+  sub-doc's "Simulation and test track" section with the grounding
+  evidence; zero fixtures exist for any of the three yet.
+- **New: declared the reservation/assignment allocation-fencing layer**
+  (`agent_dispatch.queue.SpawnReservation`) as a relation coupled to the
+  bridge machine -- explicitly **not** a fourth top-level machine, kept in
+  the same conceptual slot as `machine_coupling.py`. Covers: the
+  single-assignment invariant (`reserve_spawn()` already atomically
+  enforces it; declaring it as a checkable structural fixture is the
+  remaining work), a closed "let go" reason vocabulary tagged with
+  recovery modes (`fail_spawn`/`defer_spawn`/`settle_spawn`/`retire_spawn`/
+  preemption), and a three-tier (N/A / consistent / anomaly)
+  reservation<->bridge consistency relation grounded in real code paths
+  (`worktree_ownership` `reused`/`inherited_worktree`, the cold-body-resume
+  path in `supervisor.py`). Explicitly scoped **out**: a launch-to-claim
+  grace/recovery monitor (bounded grace deadline, evidence-of-progress
+  signals, a kill-and-resume-with-nudge ladder) -- left to a separate
+  future component consuming this contract from the outside; its own
+  internal state (timers, evidence counters, kill-attempt counts) is
+  deliberately not declared here.
+- **Vision update:** `visions/plugins/agent-dispatch/README.md`'s
+  *nudge-before-recover* behavior was clarified to state explicitly that
+  the graduated recovery ladder is scoped to bodies agent-dispatch itself
+  spawned (a reservation exists) and never applies to an operator's own
+  interactively-driven CLI session -- this was standing intent implied by
+  the design but not previously stated, and is structural (recovery acts
+  on a reservation; a human's own claim never creates one), not a policy
+  check to remember.
+- **Explicitly out of this slice:** a full command-surface caller
+  taxonomy (external-input / external-observe / dispatched-agent /
+  producer-emitter / evaluator / diagnostic, with per-command
+  valid-state/role annotations) was worked out in the same conversation
+  but deliberately left out of this PR -- it's reference material for the
+  `agent-dispatch` plugin's own docs, not phase-9 state-machine design,
+  and bundling it would make this review unreviewable. Noted for a
+  follow-up doc under `plugins/agent-dispatch/docs/`.
+
 ### 2026-09-10 - Phase 9: seventh slice (Phase 8 candidate re-validation, docs-only)
 
 - Re-validated all eight Phase 8 candidates against what the four Phase 9
