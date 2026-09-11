@@ -27684,7 +27684,7 @@ def _pr_merge_now(args, prcfg, flow, *, apply: bool) -> int:
                 )
             )
         else:
-            output.err(f"pr-merge --now: {reason}. Nothing merged.")
+            output.err(f"pr-merge refused: {reason}. Nothing merged.")
             print(rem.text(), file=sys.stderr)
         return 2
 

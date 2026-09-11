@@ -140,10 +140,13 @@ def test_now_refused_when_live_permission_is_read_only(monkeypatch, capsys):
     assert fake.calls == []  # never attempted
     # The refusal must NOT tell a permission-denied contributor to retry
     # `pr-merge --now` -- that's the wrong-caller guidance meant for someone
-    # who forgot --now, not for a confirmed lack of write access.
-    err = capsys.readouterr().err
-    assert "pr-merge --now" not in err
-    assert "wait for a maintainer" in err
+    # who forgot --now, not for a confirmed lack of write access. output.err
+    # prints to stdout (not stderr) so check the combined captured output,
+    # not just capsys.err.
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err
+    assert "pr-merge --now" not in combined
+    assert "wait for a maintainer" in combined
 
 
 def test_now_proceeds_when_live_permission_is_write(monkeypatch):
