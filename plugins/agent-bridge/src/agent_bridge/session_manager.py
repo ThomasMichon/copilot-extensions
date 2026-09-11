@@ -1301,14 +1301,17 @@ class SessionManager:
         cancelled: list[str] = []
         for sid in targets:
             session = self._sessions.get(sid)
-            if session is None or session.client is None:
+            if session is None:
                 continue
-            with contextlib.suppress(Exception):
-                await session.client.cancel_prompt()
-            if self._host_index is not None:
+            async with session._lifecycle_lock:
+                if session.status != SessionStatus.RUNNING or session.client is None:
+                    continue
                 with contextlib.suppress(Exception):
-                    self._host_index.set_resume_flag(sid, True)
-            cancelled.append(sid)
+                    await session.client.cancel_prompt()
+                if self._host_index is not None:
+                    with contextlib.suppress(Exception):
+                        self._host_index.set_resume_flag(sid, True)
+                cancelled.append(sid)
         if cancelled:
             log.info(
                 "Graceful-cancel: sent ACP cancel to %d in-flight turn(s); "
@@ -2146,59 +2149,50 @@ class SessionManager:
                     rec.session_id,
                 )
                 continue
-            plan = plan_host(
-                protocol_version=rec.protocol_version,
-                child_alive=self._rec_child_alive(rec),
-                age_seconds=(now - rec.created_at) if rec.created_at else None,
-                stale_reap_seconds=self._session_host_stale_reap_seconds,
-            )
-            if plan.disposition is HostDisposition.STRAND:
-                log.info(
-                    "Session %s pinned to incompatible Session Host "
-                    "(proto=%s, build=%s, pid=%s); %s",
-                    rec.session_id, rec.protocol_version, rec.host_version,
-                    rec.host_pid, plan.reason,
-                )
-                continue
-            if plan.disposition in (HostDisposition.REAP_STOPPED,
-                                    HostDisposition.FORCE_REAP):
-                self._reap_host_record(rec, plan.reason)
-                continue
-            session = self._sessions.get(rec.session_id)
-            if session is None or not session.acp_session_id:
-                # A live host with no adoptable session -- ended out from under
-                # it (its row was deleted) or a pre-#1786 orphan. Reap it rather
-                # than leak the host + child forever.
-                self._reap_host_record(rec, "no adoptable session on reattach")
-                continue
-
-            remaining = deadline - loop.time()
-            if remaining <= 0:
-                self._remote_recovery_inconclusive.add(rec.session_id)
-                log.warning(
-                    "Startup Session Host reattach budget exhausted before %s",
-                    rec.session_id,
-                )
-                continue
-            # A request-driven resume_session() already holds this session's
-            # `_lifecycle_lock` for the exact same reattach-or-respawn decision.
-            # Racing it from this background startup pass would let both paths
-            # read/recover the far-side authority and establish competing
-            # forwards concurrently. Skip here (non-blocking check-then-acquire
-            # is safe -- no `await` happens between them) and leave the session
-            # for resume_session (or a later reconciliation pass) to finish.
-            if session._lifecycle_lock.locked():
-                self._remote_recovery_inconclusive.add(rec.session_id)
-                log.info(
-                    "Skipping startup reattach for %s: an in-flight "
-                    "resume/lifecycle operation already owns it",
-                    rec.session_id,
-                )
-                continue
-            try:
-                async with session._lifecycle_lock:
+            async with contextlib.AsyncExitStack() as locks:
+                if session is not None:
+                    if session._lifecycle_lock.locked():
+                        self._remote_recovery_inconclusive.add(rec.session_id)
+                        log.info(
+                            "Skipping startup reattach for %s: an in-flight "
+                            "resume/lifecycle operation already owns it",
+                            rec.session_id,
+                        )
+                        continue
+                    await locks.enter_async_context(session._lifecycle_lock)
                     if not self._background_recovery_allowed(session):
                         continue
+                plan = plan_host(
+                    protocol_version=rec.protocol_version,
+                    child_alive=self._rec_child_alive(rec),
+                    age_seconds=(now - rec.created_at) if rec.created_at else None,
+                    stale_reap_seconds=self._session_host_stale_reap_seconds,
+                )
+                if plan.disposition is HostDisposition.STRAND:
+                    log.info(
+                        "Session %s pinned to incompatible Session Host "
+                        "(proto=%s, build=%s, pid=%s); %s",
+                        rec.session_id, rec.protocol_version, rec.host_version,
+                        rec.host_pid, plan.reason,
+                    )
+                    continue
+                if plan.disposition in (HostDisposition.REAP_STOPPED,
+                                        HostDisposition.FORCE_REAP):
+                    self._reap_host_record(rec, plan.reason)
+                    continue
+                if session is None or not session.acp_session_id:
+                    self._reap_host_record(rec, "no adoptable session on reattach")
+                    continue
+
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    self._remote_recovery_inconclusive.add(rec.session_id)
+                    log.warning(
+                        "Startup Session Host reattach budget exhausted before %s",
+                        rec.session_id,
+                    )
+                    continue
+                try:
                     attached = await asyncio.wait_for(
                         self._reattach_one(
                             rec, session, new_status=SessionStatus.IDLE,
@@ -2221,15 +2215,15 @@ class SessionManager:
                         ),
                         timeout=remaining,
                     )
-            except asyncio.TimeoutError:
-                self._remote_recovery_inconclusive.add(rec.session_id)
-                log.warning(
-                    "Startup Session Host reattach timed out for %s after %.1fs",
-                    rec.session_id, remaining,
-                )
-                continue
-            if attached:
-                reattached += 1
+                except asyncio.TimeoutError:
+                    self._remote_recovery_inconclusive.add(rec.session_id)
+                    log.warning(
+                        "Startup Session Host reattach timed out for %s after %.1fs",
+                        rec.session_id, remaining,
+                    )
+                    continue
+                if attached:
+                    reattached += 1
         if reattached:
             log.info("Reattached %d session(s) to surviving Session Hosts", reattached)
         return reattached
@@ -4295,6 +4289,9 @@ class SessionManager:
                 agent_proc.alive,
             )
 
+        # No await separates publishing the STARTING row from taking this lock.
+        # A stop must wait for initial launch just as it waits for reattachment.
+        await session._lifecycle_lock.acquire()
         try:
             cs_target = None
             # Prefer the structured provider metadata (#177); fall back to
@@ -4822,6 +4819,8 @@ class SessionManager:
             self._mark_session_failed(session, trigger="start_exception")
             session.event_log.append("error", {"message": str(exc)})
             log.error("Failed to start session %s: %s", session_id, exc, exc_info=True)
+        finally:
+            session._lifecycle_lock.release()
 
         session.touch()
         return session
