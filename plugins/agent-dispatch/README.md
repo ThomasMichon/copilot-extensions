@@ -126,6 +126,35 @@ such as `--pool host-a,host-b --origin origin --headless` in
 [`docs/spawn-supervisor.md`](docs/spawn-supervisor.md#running-as-a-persistent-service-the-always-on-last-mile)
 for the full supervisor/profile contract.
 
+### Same-cell sibling invocation
+
+With an explicit `COPILOT_EXTENSIONS_CONTEXT`, dispatch's worktrees/bridge
+`list[str]` launch prefixes enter the packaged `agent_dispatch/peer_launch.py`
+native child boundary. It validates dispatch, the namespace, and the peer using
+the canonical installation-context primitive, then checks the peer's own shipped
+governance API and calls its `scripts/resolve-runtime.{sh,ps1}`. Runtime selection
+belongs to that peer, including completion-marker and last-known-good semantics;
+dispatch does not reconstruct a slot resolver or require exemplar-only
+`.runtime-slot-completion` receipts from generic runtime peers. Dispatch's
+resident loop-governance rechecks use the same packaged canonical primitive,
+without loading code through a deploy-manifest payload pointer.
+
+The boundary rebinds `COPILOT_EXTENSIONS_CONTEXT` to the peer's `install.json`,
+`COPILOT_PLUGIN_ROOT` and its plugin-specific payload root to the peer payload,
+and runtime/config routing to the peer installation. The entire `AGENT_DISPATCH_`
+environment namespace is removed, including credentials and endpoint routing,
+along with generic/sibling root overrides and Python import overrides. Peer code runs under
+isolated native Python with UTF-8 and inherited stdio. User argv, including seed
+JSON, quotes, empty strings, and shell metacharacters, never enters a shell:
+PowerShell 5.1 or POSIX shell executes only a constant, read-only resolver probe.
+
+Receipt/governance failures report a diagnostic and exit 126 before running peer
+code, even if the dispatch install root points at legacy. Missing runtimes fail
+without provisioning, activating, or starting services. Validation is repeated
+at invocation time so a previously constructed prefix cannot bypass deactivation.
+Without an explicit context, the historical home-root resolver and POSIX PATH
+fallback are unchanged, including their argv and environment behavior.
+
 ### Worktree-picker "Tasks" pivot
 
 The installer drops a pivot manifest at
