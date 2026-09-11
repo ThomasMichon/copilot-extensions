@@ -375,6 +375,30 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-10 — Dispatch slice merged; accidental closing reference corrected
+
+- [PR #2418](https://github.com/ThomasMichon/copilot-extensions/pull/2418)
+  merged as `39fb1cbd98351422a8927fc4829786b9f749038f`, delivering the
+  dispatch same-cell peer launcher and packaged loop-governance primitive.
+  Final required CI passed. Review also required removing the entire
+  dispatch-specific environment namespace so credentials and endpoint routing
+  cannot propagate to peers; real Windows and WSL subprocess assertions passed
+  for both peer commands.
+- Post-merge verification found the parent migration tracker closed. The PR's
+  live `closingIssuesReferences` explicitly contained that tracker: a negated
+  sentence in the PR body still formed a GitHub closing-keyword reference.
+  Replaced it with neutral wording that the parent remains open, reopened
+  [#1110](https://github.com/ThomasMichon/copilot-extensions/issues/1110), and
+  verified an empty closing-reference list plus the issue's open state.
+- Correction to the earlier process diagnosis: a closure event with a null
+  commit ID is not sufficient to attribute closure to a delegate's API call.
+  That earlier attribution was unproven. For this recurrence, the accidental
+  PR closing reference is directly observed. Contribution guidance now requires
+  checking closing references before merging any partial effort slice.
+- No additional Plan or Validation Plan boxes are checked by this accounting
+  update. The effort remains active, including the remaining Phase 2/6
+  boundaries, deferred lease migration, Phase 7 intake, and final validation.
+
 ### 2026-09-10 — Dispatch same-cell peer invocation
 
 - Replaced dispatch's explicit-context sibling legacy-root lookup with a
