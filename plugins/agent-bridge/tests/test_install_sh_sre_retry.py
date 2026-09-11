@@ -47,7 +47,9 @@ def _executable(path: Path, text: str) -> None:
     path.chmod(0o755)
 
 
-def _run_harness(tmp_path: Path, uv_stub_body: str, extra_script: str) -> subprocess.CompletedProcess:
+def _run_harness(
+    tmp_path: Path, uv_stub_body: str, extra_script: str, delays_file: Path
+) -> subprocess.CompletedProcess:
     harness = tmp_path / "harness.sh"
     harness.write_text(
         "#!/bin/sh\nset -eu\n"
@@ -67,9 +69,10 @@ _warn() { echo "WARN: $*" >&2; }
     harness.chmod(0o755)
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir(exist_ok=True)
-    # Stub `sleep` as a no-op so the test doesn't actually wait through the
-    # 3s/6s/10s backoff schedule.
-    _executable(fake_bin / "sleep", "#!/bin/sh\nexit 0\n")
+    # Stub `sleep` so the test doesn't actually wait through the 3s/6s/10s
+    # backoff schedule, while recording each requested delay so the caller
+    # can assert the actual schedule, not just the retry count.
+    _executable(fake_bin / "sleep", f'#!/bin/sh\necho "$1" >> "{delays_file}"\nexit 0\n')
     env = {**os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"}
     return subprocess.run(
         [_BASH, str(harness)],
@@ -81,9 +84,16 @@ _warn() { echo "WARN: $*" >&2; }
     )
 
 
+def _delays(delays_file: Path) -> list[int]:
+    if not delays_file.exists():
+        return []
+    return [int(line) for line in delays_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
 def test_sre_mismatch_retries_then_succeeds(tmp_path: Path) -> None:
     counter_file = tmp_path / "attempt-count.txt"
     counter_file.write_text("0", encoding="utf-8")
+    delays_file = tmp_path / "delays.txt"
     uv_stub = f"""
 uv() {{
     n=$(cat '{counter_file}')
@@ -105,7 +115,7 @@ else
 fi
 echo "OUT:$out"
 """
-    result = _run_harness(tmp_path, uv_stub, extra)
+    result = _run_harness(tmp_path, uv_stub, extra, delays_file)
     # Two retries needed (three total attempts) -- both backoff warnings fire
     # on stderr (matches production's stderr-only `_warn`), never on stdout.
     assert result.stderr.count("uv build hit a transient SRE module mismatch") == 2
@@ -113,11 +123,14 @@ echo "OUT:$out"
     assert "EXIT:0" in result.stdout
     assert "OUT:Installed 1 package" in result.stdout
     assert counter_file.read_text(encoding="utf-8").strip() == "3"
+    # The first two entries of the 3s/6s/10s backoff schedule, in order.
+    assert _delays(delays_file) == [3, 6]
 
 
 def test_unrelated_failure_is_not_retried(tmp_path: Path) -> None:
     counter_file = tmp_path / "attempt-count.txt"
     counter_file.write_text("0", encoding="utf-8")
+    delays_file = tmp_path / "delays.txt"
     uv_stub = f"""
 uv() {{
     n=$(cat '{counter_file}')
@@ -134,18 +147,20 @@ else
     echo "EXIT:1"
 fi
 """
-    result = _run_harness(tmp_path, uv_stub, extra)
+    result = _run_harness(tmp_path, uv_stub, extra, delays_file)
     assert "uv build hit a transient SRE module mismatch" not in result.stderr
     assert "EXIT:1" in result.stdout
     # The wrapper's final (unretried) failure payload goes to stderr.
     assert "error: network unreachable" in result.stderr
     # Only one attempt -- an unrelated failure must not trigger the retry.
     assert counter_file.read_text(encoding="utf-8").strip() == "1"
+    assert _delays(delays_file) == []
 
 
 def test_persisting_sre_mismatch_still_fails_after_all_retries(tmp_path: Path) -> None:
     counter_file = tmp_path / "attempt-count.txt"
     counter_file.write_text("0", encoding="utf-8")
+    delays_file = tmp_path / "delays.txt"
     uv_stub = f"""
 uv() {{
     n=$(cat '{counter_file}')
@@ -162,10 +177,12 @@ else
     echo "EXIT:1"
 fi
 """
-    result = _run_harness(tmp_path, uv_stub, extra)
+    result = _run_harness(tmp_path, uv_stub, extra, delays_file)
     # One initial attempt plus three backoff retries -- three warnings fire
     # (one before each retry), all on stderr.
     assert result.stderr.count("uv build hit a transient SRE module mismatch") == 3
     assert "EXIT:1" in result.stdout
     # One initial attempt plus three backoff retries -- four total, never more.
     assert counter_file.read_text(encoding="utf-8").strip() == "4"
+    # The complete 3s/6s/10s backoff schedule, in order.
+    assert _delays(delays_file) == [3, 6, 10]
