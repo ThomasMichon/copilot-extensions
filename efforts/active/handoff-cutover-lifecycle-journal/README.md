@@ -203,8 +203,6 @@ renumbering from the "acknowledges handoff" step onward.)
       `successor_session_id` are never initialized yet — that's Phase 3's
       cross-linking work. Leave this item open until Phase 3 populates the
       linkage fields; re-close it then rather than now.
-      `predecessor_session_id`/`successor_session_id` are Phase 3's job (the
-      cross-linking work), not stamped yet.
 - [ ] Give the spawn stage (8) an explicit **start** event
       (`handoff_successor_spawn_started`, emitted before success is known)
       *and* a terminal **result** event/field
