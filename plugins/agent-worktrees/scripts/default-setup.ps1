@@ -213,6 +213,34 @@ Write-Host "  Path:     $PWD"
 Write-Host ''
 
 # ── Launch Copilot ───────────────────────────────────────────────────────
+# Stage 3 (copilot_invoked): fired right before Copilot actually starts, so a
+# setup failure earlier never falsely reports invocation. Best-effort and
+# detached, mirroring launch-session.ps1's Write-ActivityLog.
+function Invoke-CopilotInvokedLog {
+    $awPy = $RuntimePython
+    if (-not $awPy) {
+        # Honor a contextual/cell launch's validated runtime root (same
+        # precedence as launch-session.ps1) before the legacy per-user
+        # fallback, which may not exist for a cell-based install.
+        $runtimeRoot = if ($env:AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT) {
+            $env:AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT
+        } else {
+            Join-Path $env:USERPROFILE '.agent-worktrees'
+        }
+        $resolver = Join-Path $runtimeRoot 'bin\resolve-runtime.ps1'
+        if (Test-Path -LiteralPath $resolver) { . $resolver; $awPy = $AwPy }
+    }
+    if (-not ($awPy -and (Test-Path -LiteralPath $awPy))) { return }
+    try {
+        $wtId = & $awPy -I -m agent_worktrees get worktree-id 2>$null
+        if (-not $wtId) { return }
+        Start-Process -FilePath 'conhost.exe' -ArgumentList (@('--headless', "`"$awPy`"",
+            '-I', '-m', 'agent_worktrees', 'activity-log', 'copilot_invoked',
+            '--worktree-id', $wtId, '--source', 'launcher')) `
+            -WindowStyle Hidden -ErrorAction Stop | Out-Null
+    } catch { }
+}
+
 function Resolve-CopilotApplication {
     <# A broken Windows App Execution Alias can shadow a concrete CLI later on
        PATH. Prefer an existing non-WindowsApps application, but retain the
@@ -239,16 +267,19 @@ if ($CopilotPath) {
         Write-Error "Configured Copilot executable not found: $CopilotPath"
         exit 1
     }
+    Invoke-CopilotInvokedLog
     & $overrideCmd.Source @CopilotArgs
 } elseif (-not $copilotCmd) {
     $ghCmd = Get-Command gh -ErrorAction SilentlyContinue
     if ($ghCmd) {
+        Invoke-CopilotInvokedLog
         gh copilot @CopilotArgs
     } else {
         Write-Error 'Neither copilot nor gh found on PATH.'
         exit 1
     }
 } else {
+    Invoke-CopilotInvokedLog
     & $copilotCmd.Source @CopilotArgs
 }
 

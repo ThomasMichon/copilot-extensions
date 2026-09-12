@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -416,3 +417,126 @@ def test_posix_launch_wrapper_reconciles_before_child(tmp_path):
     assert nested_result.returncode == 0, nested_result.stderr
     assert len(calls.read_text(encoding="utf-8").splitlines()) == 2
     assert child.read_text(encoding="utf-8").strip() == "alpha"
+
+
+def _fake_resolver_and_runtime(home: Path, activity_marker: Path) -> None:
+    """Build a fake ``resolve-runtime.sh`` + AW_PY the launch-command wrapper
+    can use to emit its Stage 3 (copilot_invocation_attempted) mark without a
+    real agent-worktrees install."""
+    runtime_bin = home / ".agent-worktrees" / "bin"
+    runtime_bin.mkdir(parents=True)
+    fake_py = runtime_bin / "fake-agent-worktrees-python"
+    fake_py.write_text(
+        "#!/usr/bin/env bash\n"
+        'shift 2  # drop -I -m\n'
+        'if [[ "$1" == "agent_worktrees" && "$2" == "get" && "$3" == "worktree-id" ]]; then\n'
+        '    printf "wt-fake\\n"\n'
+        '    exit 0\n'
+        'fi\n'
+        'if [[ "$1" == "agent_worktrees" && "$2" == "activity-log" ]]; then\n'
+        f'    printf "%s\\n" "$*" >> "{activity_marker}"\n'
+        '    exit 0\n'
+        'fi\n'
+        'exit 1\n',
+        encoding="ascii",
+    )
+    fake_py.chmod(0o755)
+    (runtime_bin / "resolve-runtime.sh").write_text(
+        f'AW_PY="{fake_py}"\nexport AW_PY\n', encoding="ascii",
+    )
+
+
+def _fake_agent_machines(bin_dir: Path) -> None:
+    """A no-op ``agent-machines`` so the wrapper's reconcile step succeeds
+    without a real install (same pattern as the reconcile-before-child test
+    above)."""
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    fake = bin_dir / "agent-machines"
+    fake.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="ascii")
+    fake.chmod(0o755)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX shell behavior is non-Windows")
+def test_posix_launch_wrapper_emits_stage_3_for_non_default_setup_target(
+    tmp_path, monkeypatch,
+):
+    """Stage 3 (copilot_invoked): the config-template/legacy-setup path never
+    reaches default-setup.sh's own emitter, so launch-command.sh -- the one
+    seam every resolved command passes through -- marks it with the coarser
+    copilot_invocation_attempted event instead."""
+    bash = shutil.which("bash")
+    if not bash:
+        pytest.skip("bash is unavailable")
+
+    wrapper = SCRIPTS / "launch-command.sh"
+    home = tmp_path / "home"
+    activity_marker = tmp_path / "activity.txt"
+    _fake_resolver_and_runtime(home, activity_marker)
+    _fake_agent_machines(tmp_path / "bin")
+    target = tmp_path / "legacy-setup.sh"
+    target.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="ascii")
+    target.chmod(0o755)
+
+    env = os.environ.copy()
+    # A prior test in the same process may have left this set on the real
+    # os.environ (cmd_launch sets it for a real cell/contextual launch and
+    # relies on the child process's own lifetime to bound it) -- clear it so
+    # this test deterministically exercises the legacy $HOME fallback.
+    env.pop("AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT", None)
+    env["HOME"] = str(home)
+    env["PATH"] = f"{tmp_path / 'bin'}{os.pathsep}{env['PATH']}"
+    result = subprocess.run(
+        [bash, str(wrapper), "--", str(target)],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    deadline = time.monotonic() + 10.0
+    while not activity_marker.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    logged = activity_marker.read_text(encoding="utf-8").strip()
+    assert "copilot_invocation_attempted" in logged
+    assert "--worktree-id wt-fake" in logged
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX shell behavior is non-Windows")
+def test_posix_launch_wrapper_skips_stage_3_for_default_setup_target(
+    tmp_path,
+):
+    """default-setup.sh emits its own precise copilot_invoked -- the wrapper
+    must not also emit the coarser attempted mark for that path."""
+    bash = shutil.which("bash")
+    if not bash:
+        pytest.skip("bash is unavailable")
+
+    wrapper = SCRIPTS / "launch-command.sh"
+    home = tmp_path / "home"
+    activity_marker = tmp_path / "activity.txt"
+    _fake_resolver_and_runtime(home, activity_marker)
+    _fake_agent_machines(tmp_path / "bin")
+    default_setup = tmp_path / "other" / "default-setup.sh"
+    default_setup.parent.mkdir()
+    default_setup.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="ascii")
+    default_setup.chmod(0o755)
+
+    env = os.environ.copy()
+    env.pop("AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT", None)
+    env["HOME"] = str(home)
+    env["PATH"] = f"{tmp_path / 'bin'}{os.pathsep}{env['PATH']}"
+    # Match _build_launch_cmd's real shape for the normalized path: arg1 is
+    # literally "bash", arg2 ends with "default-setup.sh" -- the exact pair
+    # the wrapper's own detection checks for.
+    result = subprocess.run(
+        [bash, str(wrapper), "--", "bash", str(default_setup)],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    time.sleep(0.2)
+    assert not activity_marker.exists()

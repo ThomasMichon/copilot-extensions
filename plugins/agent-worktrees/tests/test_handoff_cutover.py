@@ -169,6 +169,27 @@ class TestMuxNewWindow:
         assert out["ok"] is True
         assert out["new_pane"] == "%7"
 
+    def test_success_emits_stage_2_mux_session_assigned(self, monkeypatch, tmp_path):
+        """Stage 2 (mux_session_assigned): the programmatic cutover path's own
+        emitter, fired right after the mux subprocess call succeeds."""
+        monkeypatch.setattr(
+            "agent_worktrees.config.install_dir", lambda: tmp_path / ".agent-worktrees"
+        )
+
+        class R:
+            returncode = 0
+            stdout = "%7\n"
+            stderr = ""
+
+        import subprocess
+        monkeypatch.setattr(subprocess, "run", lambda *a, **k: R())
+        sessions.mux_new_window("id", "/w", ["copilot"], None, mux="tmux")
+        events = activity.read_events(worktree_id="id", event="mux_session_assigned")
+        assert len(events) == 1
+        assert events[0]["stage"] == 2
+        assert events[0]["stage_name"] == "mux_session_assigned"
+        assert events[0]["new_pane"] == "%7"
+
     def test_failure_returns_error(self, monkeypatch):
         class R:
             returncode = 1
@@ -180,6 +201,21 @@ class TestMuxNewWindow:
         out = sessions.mux_new_window("id", "/w", ["copilot"], None, mux="tmux")
         assert out["ok"] is False
         assert "no such session" in out["error"]
+
+    def test_failure_does_not_emit_stage_2(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            "agent_worktrees.config.install_dir", lambda: tmp_path / ".agent-worktrees"
+        )
+
+        class R:
+            returncode = 1
+            stdout = ""
+            stderr = "no such session"
+
+        import subprocess
+        monkeypatch.setattr(subprocess, "run", lambda *a, **k: R())
+        sessions.mux_new_window("id", "/w", ["copilot"], None, mux="tmux")
+        assert activity.read_events(worktree_id="id", event="mux_session_assigned") == []
 
     def test_required_prompt_wrapper_failure_is_structured(self, monkeypatch):
         monkeypatch.setattr(

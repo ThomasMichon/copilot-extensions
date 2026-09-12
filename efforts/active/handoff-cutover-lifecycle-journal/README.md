@@ -238,7 +238,7 @@ renumbering from the "acknowledges handoff" step onward.)
       first-class field the same way Phase 1's schema item already defers —
       leave this item open until Phase 3's cross-linking work adds that
       field generally, then re-close it here alongside that.
-- [ ] Stage 2 (`mux_session_assigned`) — **ordinary launches don't go through
+- [x] Stage 2 (`mux_session_assigned`) — **ordinary launches don't go through
       the Python `sessions.py` helpers at all**: `bin/launch-session.sh` /
       `.ps1` invoke `tmux`/`psmux new-session` directly and already emit
       `mux_attached` after success. Emit stage 2 from that existing
@@ -247,7 +247,15 @@ renumbering from the "acknowledges handoff" step onward.)
       mux subprocess call succeeds, not from the pure argv-builder
       `build_mux_new_window_argv()`) for the programmatic cutover path — both
       emitters, not one instead of the other.
-- [ ] Stage 3 (`copilot_invoked`) — the pane wrapper only **forwards** an
+      **Landed:** `mux_new_session()` (the embody/programmatic path) and
+      `mux_new_window()` (the handoff-cutover spawn path) each now emit
+      `mux_session_assigned` right after their mux subprocess call succeeds
+      — `mux_new_window()`'s emission sits before the seed/prompt-receipt
+      wait, since pane creation and seed-readiness are distinct concerns.
+      The ordinary-launch path's pre-existing `mux_attached` already covered
+      the other emitter (both already mapped to stage 2 in
+      `HANDOFF_STAGE_MAP`).
+- [x] Stage 3 (`copilot_invoked`) — the pane wrapper only **forwards** an
       already-resolved command; it is not where Copilot is actually resolved
       and invoked, so logging there can report `copilot_invoked` even when
       setup fails before Copilot ever starts. Emit from the true final
@@ -258,6 +266,17 @@ renumbering from the "acknowledges handoff" step onward.)
       *invocation attempt* (e.g. `copilot_invocation_attempted`) distinct from
       a confirmed `copilot_invoked`, so a setup failure before Copilot starts
       is visibly distinguishable in the trace.
+      **Landed:** both `default-setup.sh` and `default-setup.ps1` now emit
+      `copilot_invoked` (best-effort, detached) right before each of their
+      `exec`/launch branches (override path, ambient `copilot`, `gh copilot`
+      fallback). Added a new `get worktree-id` CLI key so the launcher can
+      resolve the worktree id from CWD without a session id in hand. The
+      config-driven launch-template and legacy `tools/setup/setup.{sh,ps1}`
+      paths (which never reach default-setup's own emitter) are covered too:
+      `launch-command.{sh,ps1}` -- the one wrapper seam every resolved
+      command passes through -- emits the coarser `copilot_invocation_attempted`
+      event for them, gated on the wrapper's existing default-setup
+      detection so the two paths don't double-emit.
 - [x] Stage 4 (`session_start_bound`) — emit from `cmd_register_session` once
       a session id + worktree are actually resolved (already close to
       `session_started`; make sure the *binding* moment, not just tool entry,
@@ -266,12 +285,24 @@ renumbering from the "acknowledges handoff" step onward.)
       `session_started` immediately after `tracking.register_session()`
       succeeds — the actual binding moment, not mere tool entry; no code
       change needed, ticked off as a Phase 2 confirmation.
-- [ ] Stage 5 (`status_reported`) — emit from the `status`/status-report tool
+- [x] Stage 5 (`status_reported`) — emit from the `status`/status-report tool
       path when it first runs in a session (marks "Copilot did something in
       this worktree").
-- [ ] Stage 6 (`handoff_triggered`) — covered by context-handoff's existing
+      **Landed:** `_cmd_status_write` (the `status --summary/--title/
+      --follow-up/--resolved` disposition write) now emits `status_reported`
+      once per `COPILOT_AGENT_SESSION_ID`, gated by checking prior events for
+      that session id so a chatty session's repeated disposition edits don't
+      spam the trace.
+- [x] Stage 6 (`handoff_triggered`) — covered by context-handoff's existing
       `handoff_requested` wire event; add the `stage`/`stage_name` fields to
       it in place rather than introducing a second event name.
+      **Confirmed landed (no code change):** Phase 1's `HANDOFF_STAGE_MAP`
+      already maps `handoff_requested` → stage 6/`handoff_triggered`, and
+      `log_event()` auto-stamps it regardless of caller (the context-handoff
+      extension calls this via the `activity-log` CLI, which is a thin
+      wrapper over `log_event()`) — already covered by
+      `test_log_event_stamps_known_handoff_stage`. Ticked off as a Phase 2
+      confirmation, same pattern as stage 4.
 - [ ] Stage 7 (`handoff_host_acknowledged`) — new: emit when the resident
       status monitor's `_monitor_pending_handoff_request()` first observes and
       accepts the pending handoff, distinct from the later claim. (Per the
@@ -699,3 +730,124 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   review-response commit within this PR (module-size-only compaction, no
   further plugin content growth). Remaining Phase 2 stages: 2, 3, 5, 6, 7,
   10, 11, 12, 13.
+- **Phase 2 continuation: stages 2, 3, 5, 6 landed.** `sessions.py`'s
+  `mux_new_session()` (embody/programmatic path) and `mux_new_window()`
+  (handoff-cutover spawn path) now each emit `mux_session_assigned` (stage
+  2) right after their mux subprocess call succeeds — `mux_new_window()`'s
+  emission is placed before the seed/prompt-receipt wait so it reflects
+  pane creation, not Copilot readiness. `default-setup.sh`/`.ps1` now emit
+  `copilot_invoked` (stage 3) right before each of their `exec`/launch
+  branches, resolving the worktree id via a new `get worktree-id` CLI key
+  (added since the launcher has no session id in hand at that point).
+  `_cmd_status_write` now emits `status_reported` (stage 5) once per
+  `COPILOT_AGENT_SESSION_ID`, gated against prior events for that session.
+  Stage 6 (`handoff_triggered`) needed **no code change** — Phase 1's
+  `HANDOFF_STAGE_MAP` already stamps `handoff_requested` as stage 6
+  regardless of caller, already covered by
+  `test_log_event_stamps_known_handoff_stage` — ticked off as a
+  confirmation, same as stage 4. Both `sessions.py` and `__main__.py` sit at
+  their exact module-size-baseline ceilings, so each addition was offset by
+  an equal-or-greater compaction elsewhere in the same file (collapsing
+  multi-line dict/set literals and call args that already fit the 99-column
+  limit on one line) — `tools/check-module-size.py` passes at zero slack in
+  both files. New/updated tests: `test_handoff_cutover.py` (stage-2 emission
+  + non-emission-on-failure for `mux_new_window`), `test_embody.py`
+  (stage-2 emission for `mux_new_session`), `test_status_write.py`
+  (stage-5 emission, once-per-session dedup, no-session-id no-op),
+  `test_context_resolution.py` (`get worktree-id`, both inside-worktree and
+  at-anchor cases). Full plugin suite: 4167 passed / 20 skipped / 3
+  pre-existing unrelated installer/binstub failures (same three noted
+  against PR #2472/#2479 — confirmed still present on `origin/main` before
+  this change, unaffected by it). `agent-worktrees` bumped 1.5.5-dev73 →
+  dev74. Remaining Phase 2 stages: 7, 10, 11, 12, 13.
+- **PR #2491 review response (same slice).** Copilot's review caught three
+  real gaps. (1) Stage 3 coverage was incomplete: `_build_launch_cmd` also
+  supports config-driven `launch`/`launch_recovery` templates and legacy
+  `tools/setup/setup.{sh,ps1}` paths that never reach default-setup's own
+  emitter. Fixed by instrumenting `launch-command.{sh,ps1}` -- the one
+  wrapper seam every resolved launch command passes through -- with a new,
+  coarser `copilot_invocation_attempted` event (mapped to stage 3 in
+  `HANDOFF_STAGE_MAP` alongside `copilot_invoked`, same convention as stage
+  8's started/failed pair), gated on the wrapper's own existing
+  default-setup detection so the two normalized paths don't double-emit.
+  (2) The stage-5 status dedup (once-per-session-id) was racy: the
+  check-then-append happened *after* releasing the tracking record's
+  cross-process lock, so two concurrent `status` processes sharing a
+  session id could both observe "no prior event". Fixed by moving the
+  check+emit inside the same `tracking._RecordLock` critical section as the
+  disposition write, so it's serialized per worktree. (3) The Windows
+  `default-setup.ps1` emitter had no test coverage. Added a cross-platform
+  integration test that runs the actual `.ps1` under PowerShell Core (pwsh
+  is cross-platform, so this doesn't need a native Windows box) covering
+  the no-runtime-available early-return path; full event-content coverage
+  (via the `conhost.exe`-spawned writer) remains untested here, matching the
+  existing, accepted gap for `launch-session.ps1`'s own `Write-ActivityLog`
+  helper -- neither has direct test coverage of the actual Windows-only
+  spawn, both share the same `-WindowStyle Hidden`/`conhost.exe` mechanism.
+  New/updated tests: `test_machine_settings_reconcile.py` (two new tests for
+  the wrapper's stage-3 emission and its default-setup skip),
+  `test_launch_cmd.py` (one new pwsh-based no-runtime-path test). Full
+  plugin suite: 4170 passed / 20 skipped / same 3 pre-existing unrelated
+  failures. No version bump needed for this same-PR review-response commit
+  (still dev74; only the final shipped version needs to differ from the
+  PR's base per convention).
+- **PR #2491, unrelated-merge collision + a second review round.** Rebasing
+  onto `origin/main` (to satisfy CI's version-bump check, which diffs
+  against the PR's live base, not its fork point) pulled in two already-
+  merged, unrelated PRs: one added +43 lines to `__main__.py` without its
+  own compaction (using up module-size headroom another PR had opened),
+  and another independently bumped `agent-worktrees` to the same
+  `1.5.5-dev74` this PR had already claimed -- a version-number collision.
+  Fixed by compacting `__main__.py` (~45 more lines, same multi-line-
+  literal technique) and `repos.py` (1 line, an unrelated pre-existing
+  1-over-cap violation surfaced by the rebase, not caused by this PR) back
+  under their ceilings, and bumping to `1.5.5-dev75`. The next review round
+  caught one more real bug plus two process gaps: (1) the stage-5 dedup
+  query's `limit=500` was applied *after* filtering by `read_events`, so a
+  worktree with 500+ newer `status_reported` events could silently drop an
+  older matching one and re-emit -- removed the limit for this specific
+  query (the log is already retention-pruned, so unbounded is cheap and
+  correct). (2) The new Windows no-runtime-path test used a POSIX `#!/bin/sh`
+  fixture unconditionally, which a real Windows `pwsh` runner cannot execute
+  -- fixed to branch on `os.name == "nt"` for a `.cmd` fixture, matching the
+  adjacent test's own pattern (this repo's CI runs both an `ubuntu-latest`
+  and a `windows-latest` runner, so the mismatch would have failed there
+  even though it passed locally on Linux). (3) The marketplace catalog's
+  top-level `metadata.version` was left stale at `1.7.7-dev68` while the
+  `agent-worktrees` plugin entry advanced to `dev75` -- bumped the catalog
+  version to `1.7.7-dev69` too, per `CONTRIBUTING.md`'s two-version
+  requirement. The remaining flagged items (config/legacy launch-path stage
+  3 coverage, and the RecordLock-based dedup race) are the SAME threads from
+  the prior round, already fixed there -- the bot's diff view doesn't always
+  re-evaluate a carried-over thread against a fix landed in an earlier
+  commit of the same PR, a known quirk from prior PRs in this effort.
+  Verified via `git show HEAD:<file>` that both are still fixed as landed.
+  Full plugin suite: 4184 passed / 20 skipped / same 3 pre-existing
+  unrelated failures.
+- **PR #2491, review round 4 (a real bug + reply/resolve hygiene).**
+  Replied to and explicitly resolved the three still-open review threads
+  (the stale config/legacy-launch-path thread, the Windows-coverage thread,
+  and the PR-description-version thread) via the GraphQL
+  `resolveReviewThread` mutation, updated the PR description to `dev75` with
+  an `Additional fixes` section, and requested a fresh review. That review
+  caught one genuinely new, real bug: `_log_copilot_invoked` (both
+  `default-setup.{sh,ps1}`) and the `launch-command.{sh,ps1}` wrapper's
+  Stage 3 emitter only ever resolved the runtime from the legacy
+  `$HOME/.agent-worktrees` (or `%USERPROFILE%`) path -- but a
+  contextual/cell launch validates and exports its own runtime root as
+  `AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT` (`bin/launch-session.{sh,ps1}`),
+  which may have no install at the legacy path at all, silently dropping
+  Stage 3 for exactly those launches. Fixed all four emitters (plus
+  `default-setup.ps1`'s pre-existing identical gap in its own setup-hook
+  config-root guard resolution, since it's the same one-line fix in the
+  same file) to prefer `AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT` before the
+  legacy fallback, matching `bin/launch-session.{sh,ps1}`'s own precedence.
+  This also surfaced a pre-existing test-isolation gap: `cmd_launch`
+  (production code, not test scaffolding) sets
+  `AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT` directly on the real `os.environ`
+  (not via `monkeypatch`), so it leaks across tests in the same pytest
+  process -- an earlier test's stale value made two of my own new
+  `launch-command.sh` tests flaky (only visible running the full suite,
+  not in isolation). Fixed by explicitly popping the var in the three
+  affected tests before building each subprocess's env. Full plugin suite:
+  4184 passed / 20 skipped / same 3 pre-existing unrelated failures.
