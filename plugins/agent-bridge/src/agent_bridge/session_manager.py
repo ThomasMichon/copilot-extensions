@@ -5449,7 +5449,7 @@ class SessionManager:
                 f"Session {session_id} has no ACP session ID -- cannot resync"
             )
 
-        async with session._lifecycle_lock:
+        async with session._turn_start_lock, session._lifecycle_lock:
             if self._sessions.get(session_id) is not session:
                 raise KeyError(f"Session {session_id} not found")
             if background and session.status != SessionStatus.RUNNING:
@@ -5708,8 +5708,11 @@ class SessionManager:
                 prompt,
                 caller_id=caller_id,
             )
+            kick_generation = session._lifecycle_generation
         if kick_session is not None:
-            await self._kick_pending_drain(kick_session)
+            await self._kick_pending_drain(
+                kick_session, expected_generation=kick_generation,
+            )
         return result
 
     async def _submit_or_queue_prompt_locked(
@@ -5796,7 +5799,9 @@ class SessionManager:
             kick_session,
         )
 
-    async def _kick_pending_drain(self, session: Session) -> None:
+    async def _kick_pending_drain(
+        self, session: Session, *, expected_generation: int,
+    ) -> None:
         """Start draining a queue when no turn-settle will do it for us.
 
         For an IDLE session with a live client, drain directly. For a
@@ -5806,12 +5811,20 @@ class SessionManager:
         queued for the next resume/settle, never lost.
         """
         try:
-            if (session.status == SessionStatus.IDLE
-                    and session.client and session.client.is_running):
-                await self._drain_pending_prompts(session)
-            elif (session.status == SessionStatus.STOPPED
-                    and session.acp_session_id):
-                await self.resume_session(session.session_id)
+            async with session._turn_start_lock:
+                if (
+                    self._sessions.get(session.session_id) is not session
+                    or session._lifecycle_generation != expected_generation
+                    or self._draining
+                ):
+                    return
+                if (session.status == SessionStatus.IDLE
+                        and session.client and session.client.is_running):
+                    await self._drain_pending_prompts_locked(session)
+                elif (session.status == SessionStatus.STOPPED
+                        and session.acp_session_id):
+                    await self.resume_session(session.session_id, drain=False)
+                    await self._drain_pending_prompts_locked(session)
         except Exception as exc:
             log.warning(
                 "Kick-drain for session %s failed (queue preserved): %s",
