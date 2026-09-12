@@ -467,6 +467,43 @@ scenarios.
 
 ## Journal
 
+### 2026-09-11 - Phase 10 item 3: fourth slice, persistent observation store
+
+- Added `plugins/agent-dispatch/src/agent_dispatch/pr_observation_store.py`:
+  `PRObservationStore`, a small self-contained SQLite-backed store keyed by
+  `(repo, number)` with `get`/`put`/`last_observed_at`, plus
+  `record_observation()` -- the glue that reads the stored previous
+  observation, evaluates the new one via `pr_revision_evaluator`, persists
+  the result, and returns it.
+- Deliberately **its own database file, not a new `queue.py` table**: this
+  repo now enforces a 1,000-line module-size cap
+  (`tools/check-module-size.py`, landed this session), and `queue.py` is
+  already grandfathered at its current size. A PR-observation cache has no
+  owner/generation/claim semantics in common with `queue.py`'s existing
+  task/spawn-reservation/routing-assignment rows, so folding it in would
+  be exactly the unbounded single-module growth the guard now exists to
+  catch -- a small standalone module is the componentized alternative.
+- Concurrency is intentionally minimal (a plain SQLite upsert, no CAS/
+  generation fencing): unlike `queue.py`'s multi-worker task rows, exactly
+  one process writes a given PR's observation in every deployment this
+  targets today (a single coordinator's polling/webhook loop). Documented
+  as a scope choice, not an oversight -- add real fencing only if a future
+  slice introduces a genuinely concurrent writer.
+- Added `plugins/agent-dispatch/tests/test_pr_observation_store.py` (9
+  tests): round-trip of every field, overwrite-on-put, independence across
+  repos and PR numbers, persistence across store instances against the
+  same db path, and `record_observation`'s first-observation and
+  staleness-detection behavior (reusing the evaluator's own logic through
+  the store).
+- Full `agent-dispatch` suite passes via `tools/run-plugin-tests.py
+  agent-dispatch`. Bumped agent-dispatch's version to 0.1.2-dev80.
+- Item 3 remaining: the real webhook receiver for review/check-status
+  events (today's `producers/webhook.py` only handles PR-merge) and the
+  loop that actually invokes this machinery on a schedule (poll on
+  `pr_polling_policy.poll_due`, call `record_observation` on each
+  observation). Item 4 (bridge liveness) is still blocked on
+  `agent-bridge-ahp-convergence` (status: Draft).
+
 ### 2026-09-11 - Phase 10 item 3: third slice, revision-history evaluator (STALE)
 
 - Added `plugins/agent-dispatch/src/agent_dispatch/pr_revision_evaluator.py`:
