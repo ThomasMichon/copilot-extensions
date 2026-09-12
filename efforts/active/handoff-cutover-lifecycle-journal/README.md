@@ -637,11 +637,20 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   no longer swallows a write failure invisibly: it still never raises into
   the caller, but a failure now increments a new
   `log_event_failure_count()` and logs a `logging.getLogger(
-  "agent-worktrees").debug(...)` line. Two new tests added
-  (`test_log_event_stamps_spawn_failure_as_stage_8`,
-  `test_log_event_never_raises_and_counts_failures`); full plugin suite:
-  4155 passed / 20 skipped / 3 pre-existing unrelated installer/binstub
-  failures (same three noted against PR #2472). `agent-worktrees` bumped
-  1.5.5-dev69 → dev70. Stage 8's Phase 2 checklist item is also now done as
-  a side effect (ticked off above). Phase 2 (instrumenting the remaining 10
-  stages' actual emitter call sites) is next.
+  "agent-worktrees").debug(...)` line. Submitted as PR #2479; review caught
+  two real gaps beyond the initial landing, both fixed: (1) no command-level
+  test asserted the new events' emission/ordering — added
+  `test_spawn_success_emits_started_then_success_event` and
+  `test_spawn_failure_emits_started_then_failed_event`; (2) an exception
+  `sessions.mux_new_window()` doesn't itself catch (it only guards
+  `OSError`/`RuntimeError`/`TimeoutExpired`) would have left the trace stuck
+  at "started" forever with no terminal event — wrapped the call in
+  `try`/`except Exception`, log `handoff_successor_spawn_failed` with the
+  exception message, then re-raise unchanged (`test_spawn_exception_from_mux_still_emits_failed_event`
+  covers this). Also fixed a version-count error a review caught in this
+  same journal entry. Four new tests total; full plugin suite: 4159 passed /
+  20 skipped / 3 pre-existing unrelated installer/binstub failures (same
+  three noted against PR #2472). `agent-worktrees` bumped 1.5.5-dev69 →
+  dev72 across the fix rounds. Stage 8's Phase 2 checklist item is also now
+  done as a side effect (ticked off above). Phase 2 (instrumenting the
+  remaining 10 stages' actual emitter call sites) is next.

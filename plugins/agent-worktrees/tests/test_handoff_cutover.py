@@ -1548,3 +1548,51 @@ class TestCmdHandoffCutover:
             "handoff_successor_spawn_started",
             "handoff_successor_spawn_failed",
         ]
+
+    def test_spawn_exception_from_mux_still_emits_failed_event(
+        self, monkeypatch, tmp_path,
+    ):
+        """An exception `mux_new_window` doesn't itself guard against (it only
+        catches OSError/RuntimeError/TimeoutExpired) must not leave the trace
+        stuck at 'started' -- the failure event still fires, and the
+        exception still propagates to the caller unchanged."""
+        monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", lambda: "wtZ")
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: True)
+        monkeypatch.setattr(sessions, "mux_active_pane", lambda w: "%2")
+        (tmp_path / "wtZ.yaml").write_text("x", encoding="utf-8")
+        monkeypatch.setattr(m.cfg, "load_config", lambda: object())
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+
+        class _Rec:
+            worktree_path = str(tmp_path / "w")
+
+        monkeypatch.setattr(m.tracking, "load_record", lambda p: _Rec())
+        monkeypatch.setattr(
+            m, "_preflight_launch", lambda c, a, w: m.LaunchPreflight(),
+        )
+        monkeypatch.setattr(
+            m, "_build_launch_cmd", lambda *a, **k: ["copilot"],
+        )
+        monkeypatch.setattr(m, "_build_env", lambda p, s, work_dir=None: {})
+        monkeypatch.setattr(m, "_repo_session_env", lambda c, w: {})
+
+        def _raise(*a, **k):
+            raise ValueError("unexpected mux blowup")
+
+        monkeypatch.setattr(sessions, "mux_new_window", _raise)
+
+        recorded: list[tuple[str, object]] = []
+        monkeypatch.setattr(
+            activity,
+            "log_event",
+            lambda event, **kwargs: recorded.append((event, kwargs.get("error"))),
+        )
+
+        with pytest.raises(ValueError, match="unexpected mux blowup"):
+            m.cmd_handoff_cutover(_ns(seed="continue"))
+
+        assert [event for event, _ in recorded] == [
+            "handoff_successor_spawn_started",
+            "handoff_successor_spawn_failed",
+        ]
+        assert recorded[1][1] == "unexpected mux blowup"

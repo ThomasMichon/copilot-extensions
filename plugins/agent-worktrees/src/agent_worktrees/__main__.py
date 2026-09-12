@@ -2802,10 +2802,8 @@ def _handoff_cutover_spawn_result(
     seed = getattr(args, "seed", None)
     if not seed:
         return 1, {
-            "ok": False,
-            "error": "handoff-cutover requires --seed (or --retire-pane)",
+            "ok": False, "error": "handoff-cutover requires --seed (or --retire-pane)",
         }
-
     raw_id = getattr(args, "worktree_id", None)
     session_id = getattr(args, "session_id", None)
     config = None
@@ -3030,28 +3028,30 @@ def _handoff_cutover_spawn_result(
         "expected_mux_session": expected_mux_session,
         "method": "mux_new_window_interactive_argv",
     }
-    activity.log_event("handoff_successor_spawn_started", **spawn_event_ctx)
-    result = sessions.mux_new_window(
-        wt_id, work_dir, launch_cmd, env,
-        initial_prompt=seed, session_name=mux_session,
-    )
-    if not result.get("ok"):
-        failure = dict(result)
-        failure["ok"] = False
-        failure["error"] = f"failed to open successor window: {result.get('error')}"
+    def _spawn_failed(error: object) -> None:
         activity.log_event(
-            "handoff_successor_spawn_failed", error=result.get("error"),
-            **spawn_event_ctx,
-        )
+            "handoff_successor_spawn_failed", error=error, **spawn_event_ctx)
+    activity.log_event("handoff_successor_spawn_started", **spawn_event_ctx)
+    try:
+        result = sessions.mux_new_window(
+            wt_id, work_dir, launch_cmd, env,
+            initial_prompt=seed, session_name=mux_session)
+    except Exception as exc:
+        # mux_new_window guards only a known subset; an uncaught exception
+        # must not leave the spawn stuck at "started".
+        _spawn_failed(str(exc))
+        raise
+    if not result.get("ok"):
+        failure = dict(result, ok=False)
+        failure["error"] = f"failed to open successor window: {result.get('error')}"
+        _spawn_failed(result.get("error"))
         return 4, failure
-
     new_pane = result.get("new_pane")
     activity.log_event(
         "handoff_cutover_spawn", new_pane=new_pane,
         seeded=bool(result.get("prompt_received")),
         seed_ready=bool(result.get("prompt_received")),
-        candidate_session=None,
-        candidate_status="awaiting-session-association",
+        candidate_session=None, candidate_status="awaiting-session-association",
         predecessor_copilot_pid=predecessor_pid,
         predecessor_copilot_start_time=predecessor_start,
         **spawn_event_ctx,
