@@ -841,10 +841,7 @@ def _worktree_to_dict(
         d["last_session_id"] = head_session
     if rec.session_backend is not None:
         d["session_backend"] = rec.session_backend.to_dict()
-        d["session_ahp_live"] = rec.session_backend.state in {
-            "active",
-            "unknown",
-        }
+        d["session_ahp_live"] = rec.session_backend.state in {"active", "unknown"}
         if not head_session and rec.session_backend.state != "disposed":
             d["last_session_id"] = rec.session_backend.session_id
     elif rec.session_backend_opaque:
@@ -857,10 +854,7 @@ def _worktree_to_dict(
         execution_leg = tracking.derive_execution_leg(rec)
         if execution_leg is not None:
             d["execution_leg"] = execution_leg.to_dict()
-            d["execution_leg_live"] = execution_leg.state in {
-            "active",
-            "unknown",
-            }
+            d["execution_leg_live"] = execution_leg.state in {"active", "unknown"}
     if rec.completed_at:
         d["completed_at"] = rec.completed_at
     if rec.kind in tracking.MANAGED_KINDS:
@@ -3162,8 +3156,7 @@ def _handoff_cutover_retire_result(
         result = sessions.mux_retire_pane(retire_pane)
     reap = {"checked": False}
     identity_skip = result.get("method") in {
-        "process-identity-unavailable",
-        "process-identity-mismatch",
+        "process-identity-unavailable", "process-identity-mismatch",
     }
     if session_id and result.get("method") != "last-window-skip" and not identity_skip:
         if strict_process_identity:
@@ -7175,9 +7168,7 @@ def _cmd_status_write(
     with tracking._RecordLock(yaml_path):
         record = tracking.load_record(yaml_path)
         if record.kind in tracking.MANAGED_KINDS and record.status in {
-            "complete",
-            "completed",
-            "finalized",
+            "complete", "completed", "finalized",
         }:
             output.err(
                 f"Worktree {worktree_id} is terminal and managed; refusing disposition changes."
@@ -7191,15 +7182,22 @@ def _cmd_status_write(
             return 1
         if follow_up is True and record.status == "finalized":
             tracking.update_status(record, "active", save=False)
+        session_id = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
         tracking.set_disposition(
             record,
             summary=summary,
             title=title,
             follow_up=follow_up,
-            session_id=(os.environ.get("COPILOT_AGENT_SESSION_ID") or None),
+            session_id=session_id,
             save=False,
         )
         tracking.save_record(record)
+    # Stage 5 (status_reported): once per session_id, not every summary edit.
+    if session_id and not any(
+        e.get("session_id") == session_id
+        for e in activity.read_events(worktree_id=worktree_id, event="status_reported", limit=500)
+    ):
+        activity.log_event("status_reported", worktree_id=worktree_id, session_id=session_id)
     flag = "follow-ups pending" if record.follow_up else "resolved"
     msg = f"[OK] Worktree {worktree_id[-4:]} disposition: {flag}"
     if title is not None and record.title:
@@ -17783,6 +17781,7 @@ def cmd_machine_context(args: argparse.Namespace) -> int:
 _GET_KEYS: dict[str, str] = {
     "repo-dir": "Anchor repo directory",
     "worktree-dir": "Current worktree root (the worktree you are in; empty if not inside one)",
+    "worktree-id": "Current worktree id (empty if not inside one)",
     "worktree-state-dir": "Per-worktree or adopted-anchor state directory outside the repo checkout",
     "worktrees-root": "Parent directory that holds all worktrees (formerly 'worktree-dir')",
     "src-dir": "Source root (parent of repos)",
@@ -18015,6 +18014,7 @@ def cmd_get(args: argparse.Namespace) -> int:
     values = {
         "repo-dir": repo.anchor,
         "worktree-dir": current_worktree,
+        "worktree-id": wt_id or "",
         "worktree-state-dir": (str(state_dir) if state_dir is not None else ""),
         "worktrees-root": repo.worktree_root,
         "src-dir": config.srcroot,

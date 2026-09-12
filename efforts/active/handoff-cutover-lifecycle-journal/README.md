@@ -238,7 +238,7 @@ renumbering from the "acknowledges handoff" step onward.)
       first-class field the same way Phase 1's schema item already defers —
       leave this item open until Phase 3's cross-linking work adds that
       field generally, then re-close it here alongside that.
-- [ ] Stage 2 (`mux_session_assigned`) — **ordinary launches don't go through
+- [x] Stage 2 (`mux_session_assigned`) — **ordinary launches don't go through
       the Python `sessions.py` helpers at all**: `bin/launch-session.sh` /
       `.ps1` invoke `tmux`/`psmux new-session` directly and already emit
       `mux_attached` after success. Emit stage 2 from that existing
@@ -247,7 +247,15 @@ renumbering from the "acknowledges handoff" step onward.)
       mux subprocess call succeeds, not from the pure argv-builder
       `build_mux_new_window_argv()`) for the programmatic cutover path — both
       emitters, not one instead of the other.
-- [ ] Stage 3 (`copilot_invoked`) — the pane wrapper only **forwards** an
+      **Landed:** `mux_new_session()` (the embody/programmatic path) and
+      `mux_new_window()` (the handoff-cutover spawn path) each now emit
+      `mux_session_assigned` right after their mux subprocess call succeeds
+      — `mux_new_window()`'s emission sits before the seed/prompt-receipt
+      wait, since pane creation and seed-readiness are distinct concerns.
+      The ordinary-launch path's pre-existing `mux_attached` already covered
+      the other emitter (both already mapped to stage 2 in
+      `HANDOFF_STAGE_MAP`).
+- [x] Stage 3 (`copilot_invoked`) — the pane wrapper only **forwards** an
       already-resolved command; it is not where Copilot is actually resolved
       and invoked, so logging there can report `copilot_invoked` even when
       setup fails before Copilot ever starts. Emit from the true final
@@ -258,6 +266,11 @@ renumbering from the "acknowledges handoff" step onward.)
       *invocation attempt* (e.g. `copilot_invocation_attempted`) distinct from
       a confirmed `copilot_invoked`, so a setup failure before Copilot starts
       is visibly distinguishable in the trace.
+      **Landed:** both `default-setup.sh` and `default-setup.ps1` now emit
+      `copilot_invoked` (best-effort, detached) right before each of their
+      `exec`/launch branches (override path, ambient `copilot`, `gh copilot`
+      fallback). Added a new `get worktree-id` CLI key so the launcher can
+      resolve the worktree id from CWD without a session id in hand.
 - [x] Stage 4 (`session_start_bound`) — emit from `cmd_register_session` once
       a session id + worktree are actually resolved (already close to
       `session_started`; make sure the *binding* moment, not just tool entry,
@@ -266,12 +279,24 @@ renumbering from the "acknowledges handoff" step onward.)
       `session_started` immediately after `tracking.register_session()`
       succeeds — the actual binding moment, not mere tool entry; no code
       change needed, ticked off as a Phase 2 confirmation.
-- [ ] Stage 5 (`status_reported`) — emit from the `status`/status-report tool
+- [x] Stage 5 (`status_reported`) — emit from the `status`/status-report tool
       path when it first runs in a session (marks "Copilot did something in
       this worktree").
-- [ ] Stage 6 (`handoff_triggered`) — covered by context-handoff's existing
+      **Landed:** `_cmd_status_write` (the `status --summary/--title/
+      --follow-up/--resolved` disposition write) now emits `status_reported`
+      once per `COPILOT_AGENT_SESSION_ID`, gated by checking prior events for
+      that session id so a chatty session's repeated disposition edits don't
+      spam the trace.
+- [x] Stage 6 (`handoff_triggered`) — covered by context-handoff's existing
       `handoff_requested` wire event; add the `stage`/`stage_name` fields to
       it in place rather than introducing a second event name.
+      **Confirmed landed (no code change):** Phase 1's `HANDOFF_STAGE_MAP`
+      already maps `handoff_requested` → stage 6/`handoff_triggered`, and
+      `log_event()` auto-stamps it regardless of caller (the context-handoff
+      extension calls this via the `activity-log` CLI, which is a thin
+      wrapper over `log_event()`) — already covered by
+      `test_log_event_stamps_known_handoff_stage`. Ticked off as a Phase 2
+      confirmation, same pattern as stage 4.
 - [ ] Stage 7 (`handoff_host_acknowledged`) — new: emit when the resident
       status monitor's `_monitor_pending_handoff_request()` first observes and
       accepts the pending handoff, distinct from the later claim. (Per the
@@ -699,3 +724,33 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   review-response commit within this PR (module-size-only compaction, no
   further plugin content growth). Remaining Phase 2 stages: 2, 3, 5, 6, 7,
   10, 11, 12, 13.
+- **Phase 2 continuation: stages 2, 3, 5, 6 landed.** `sessions.py`'s
+  `mux_new_session()` (embody/programmatic path) and `mux_new_window()`
+  (handoff-cutover spawn path) now each emit `mux_session_assigned` (stage
+  2) right after their mux subprocess call succeeds — `mux_new_window()`'s
+  emission is placed before the seed/prompt-receipt wait so it reflects
+  pane creation, not Copilot readiness. `default-setup.sh`/`.ps1` now emit
+  `copilot_invoked` (stage 3) right before each of their `exec`/launch
+  branches, resolving the worktree id via a new `get worktree-id` CLI key
+  (added since the launcher has no session id in hand at that point).
+  `_cmd_status_write` now emits `status_reported` (stage 5) once per
+  `COPILOT_AGENT_SESSION_ID`, gated against prior events for that session.
+  Stage 6 (`handoff_triggered`) needed **no code change** — Phase 1's
+  `HANDOFF_STAGE_MAP` already stamps `handoff_requested` as stage 6
+  regardless of caller, already covered by
+  `test_log_event_stamps_known_handoff_stage` — ticked off as a
+  confirmation, same as stage 4. Both `sessions.py` and `__main__.py` sit at
+  their exact module-size-baseline ceilings, so each addition was offset by
+  an equal-or-greater compaction elsewhere in the same file (collapsing
+  multi-line dict/set literals and call args that already fit the 99-column
+  limit on one line) — `tools/check-module-size.py` passes at zero slack in
+  both files. New/updated tests: `test_handoff_cutover.py` (stage-2 emission
+  + non-emission-on-failure for `mux_new_window`), `test_embody.py`
+  (stage-2 emission for `mux_new_session`), `test_status_write.py`
+  (stage-5 emission, once-per-session dedup, no-session-id no-op),
+  `test_context_resolution.py` (`get worktree-id`, both inside-worktree and
+  at-anchor cases). Full plugin suite: 4167 passed / 20 skipped / 3
+  pre-existing unrelated installer/binstub failures (same three noted
+  against PR #2472/#2479 — confirmed still present on `origin/main` before
+  this change, unaffected by it). `agent-worktrees` bumped 1.5.5-dev73 →
+  dev74. Remaining Phase 2 stages: 7, 10, 11, 12, 13.

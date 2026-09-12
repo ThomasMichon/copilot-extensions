@@ -92,6 +92,29 @@ class TestMuxNewSession:
         assert out["session"] == "wt-id"
         assert out["new_pane"] == "%2"
 
+    def test_success_emits_stage_2_mux_session_assigned(self, monkeypatch, tmp_path):
+        """Stage 2 (mux_session_assigned): the programmatic cutover path's own
+        emitter for the embody flow, alongside the ordinary-launch path's
+        mux_attached."""
+        from agent_worktrees import activity
+
+        monkeypatch.setattr(
+            "agent_worktrees.config.install_dir", lambda: tmp_path / ".agent-worktrees"
+        )
+
+        class R:
+            returncode = 0
+            stdout = "%2\n"
+            stderr = ""
+
+        import subprocess
+        monkeypatch.setattr(subprocess, "run", lambda *a, **k: R())
+        sessions.mux_new_session("id", "/w", ["copilot"], None, mux="tmux")
+        events = activity.read_events(worktree_id="id", event="mux_session_assigned")
+        assert len(events) == 1
+        assert events[0]["stage"] == 2
+        assert events[0]["stage_name"] == "mux_session_assigned"
+
     def test_failure_returns_error(self, monkeypatch):
         class R:
             returncode = 1

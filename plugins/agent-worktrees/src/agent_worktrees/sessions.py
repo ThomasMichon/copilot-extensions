@@ -21,6 +21,8 @@ from pathlib import Path
 
 import yaml
 
+from . import activity
+
 try:  # libyaml (C) is dramatically faster; the one sanctioned sweep uses it.
     from yaml import CSafeLoader as _YamlSafeLoader
 except ImportError:  # pragma: no cover - pure-Python fallback
@@ -964,15 +966,11 @@ def _session_meta(session_dir: Path, session_id: str) -> dict | None:
             title = name.strip()
 
     return {
-        "id": session_id,
-        "name": title,
-        "cwd": str(ws_data.get("cwd", "")),
-        "branch": str(ws_data.get("branch", "")),
+        "id": session_id, "name": title,
+        "cwd": str(ws_data.get("cwd", "")), "branch": str(ws_data.get("branch", "")),
         "created_at": str(ws_data.get("created_at", "")),
         "updated_at": str(ws_data.get("updated_at", "")),
-        "event_count": event_count,
-        "turn_count": turn_count,
-        "live": _has_live_session(entry),
+        "event_count": event_count, "turn_count": turn_count, "live": _has_live_session(entry),
     }
 
 
@@ -1912,9 +1910,7 @@ def mux_new_session(
 
     sess = mux_session_name(worktree_id)
     try:
-        argv = build_mux_new_session_argv(
-            worktree_id, work_dir, cmd, env, mux=mux,
-        )
+        argv = build_mux_new_session_argv(worktree_id, work_dir, cmd, env, mux=mux)
         r = subprocess.run(argv, capture_output=True, text=True, timeout=15)
     except (OSError, RuntimeError, subprocess.TimeoutExpired) as e:
         return {"ok": False, "session": sess, "new_pane": None, "error": str(e)}
@@ -1923,6 +1919,13 @@ def mux_new_session(
             "ok": False, "session": sess, "new_pane": None,
             "error": r.stderr.strip() or f"exit {r.returncode}",
         }
+    # Stage 2 (mux_session_assigned): the programmatic cutover path's own
+    # emitter -- the ordinary-launch path already emits mux_attached (mapped
+    # to the same stage) from bin/launch-session.{sh,ps1}.
+    activity.log_event(
+        "mux_session_assigned", worktree_id=worktree_id, mux_session=sess,
+        method="mux_new_session",
+    )
     return {
         "ok": True, "session": sess,
         "new_pane": r.stdout.strip() or None, "error": None,
@@ -2394,6 +2397,14 @@ def mux_new_window(
             "error": r.stderr.strip() or f"exit {r.returncode}",
         }
     new_pane = r.stdout.strip() or None
+    # Stage 2 (mux_session_assigned): fired here, right after the mux
+    # subprocess call succeeds -- not after the seed/prompt-receipt wait
+    # below, which is a distinct concern (Copilot readiness, not pane
+    # creation). The ordinary-launch path emits mux_attached separately.
+    activity.log_event(
+        "mux_session_assigned", worktree_id=worktree_id, new_pane=new_pane,
+        method="mux_new_window",
+    )
     prompt_received = initial_prompt is None
     prompt_status = None
     if receipt_path:
@@ -2435,11 +2446,7 @@ def mux_new_window(
             # the wrapper starts Copilot after writing its provisional receipt,
             # so only the late tree is guaranteed to include the real child.
             process_tree = _mux_pane_process_tree(new_pane, mux=mux)
-            cleanup = _retire_failed_successor(
-                new_pane,
-                process_tree,
-                mux=mux,
-            )
+            cleanup = _retire_failed_successor(new_pane, process_tree, mux=mux)
             return {
                 "ok": False,
                 "new_pane": new_pane,
@@ -2452,11 +2459,8 @@ def mux_new_window(
                 ),
             }
     return {
-        "ok": True,
-        "new_pane": new_pane,
-        "prompt_received": prompt_received,
-        "prompt_status": prompt_status,
-        "error": None,
+        "ok": True, "new_pane": new_pane, "prompt_received": prompt_received,
+        "prompt_status": prompt_status, "error": None,
     }
 
 
@@ -2555,11 +2559,8 @@ def _retire_failed_successor(
     except OSError:
         survivors = sorted(process_tree)
     return {
-        "retire": retire,
-        "process_tree": sorted(process_tree),
-        "terminated": terminated,
-        "survivors": survivors,
-        "ok": bool(retire.get("gone")) and not survivors,
+        "retire": retire, "process_tree": sorted(process_tree), "terminated": terminated,
+        "survivors": survivors, "ok": bool(retire.get("gone")) and not survivors,
     }
 
 
@@ -2698,8 +2699,7 @@ def mux_retire_pane(
             pass
         return {
             "ok": True, "pane": pane_id, "gone": False,
-            "method": "last-window-skip",
-            "session": guard.get("session"),
+            "method": "last-window-skip", "session": guard.get("session"),
         }
 
     _send("C-c")

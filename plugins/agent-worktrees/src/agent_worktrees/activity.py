@@ -28,10 +28,17 @@ Events are intentionally high-level:
                             the only mark carrying the mux pane's real exit_code
   mux_attached              a tmux/psmux session was attached/joined (launcher);
                             fresh creation carries its attempt count
+  mux_session_assigned      the programmatic cutover path's mux pane creation
+                            succeeded (mux_new_session/mux_new_window) --
+                            stage 2's other emitter, alongside mux_attached
+  copilot_invoked           the Copilot binary was actually exec'd (the true
+                            final resolution point in the setup launcher)
   mux_failed                the requested tmux/psmux launch failed closed;
                             creation exhaustion carries attempt count and
                             recoverable=true when the worktree was preserved
   mux_detached              the attach returned -- user detached or session ended
+  status_reported           the first status-report (disposition) write in a
+                            session -- marks "Copilot did something here"
   changes_pushed            worktree content was pushed to the default branch
   worktree_finalized        finalize completed (content on upstream)
   finalize_skipped_removal  finalize left the worktree/branch/session in place
