@@ -308,6 +308,7 @@ if out=$(_uv_pip_install_resilient --python fake-python some-package --quiet); t
 else
     echo "EXIT:1"
 fi
+echo "OUT:$out"
 """
     result = _run_sh_harness(tmp_path, uv_stub, extra, delays_file)
     assert result.stdout.count("uv build hit a transient SRE module mismatch") == 3
