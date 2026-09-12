@@ -378,3 +378,33 @@ policy, version decision, and exception ledger live in
 - The workflow now warns that deployments may pin its Git blob SHA, and
   CODEOWNERS routes edits through the repository owner before consumers update
   their reviewed pins.
+
+### 2026-09-11/12 — External native-host reliance confirmed insufficient; reinforces this effort's direction
+
+- A parallel, independent investigation tried the alternative of depending on
+  a released native local host's own client-contributed-plugin/customization
+  surface directly, instead of agent-bridge exposing its own AHP host face.
+  That path hit two concrete, reproduced limits rather than a mere
+  implementation gap:
+  1. **Materialization-vs-activation gap.** The native host will read a
+     client-contributed plugin/customization tree in full (confirmed by
+     tracing its reverse resource-read calls end to end), but nothing wires
+     the received customizations into the agent runtime it actually spawns --
+     the runtime's own installed/enabled-plugin telemetry never reflects the
+     contributed set, for the lifetime of a session. Whether or when a
+     released native host closes this gap is outside this effort's control.
+  2. **No ACP path around a native host.** Confirmed architecturally (native
+     host's own documentation, plus the published AHP specification's own
+     host/agent layering guidance) that ACP cannot substitute as a
+     client-facing control surface for a native-host-owned session: ACP is
+     strictly the host-to-agent leg beneath an AHP host, never a
+     client-to-host alternative above it. A client that must drive (not just
+     observe) a session has to speak AHP itself.
+- **Net effect: this confirms, rather than changes, this effort's existing
+  direction.** agent-bridge owning its own AHP host face (this effort) does
+  not depend on an external native host closing its activation gap, and gives
+  full control over plugin/customization fidelity, which a native-host-proxy
+  strategy cannot guarantee today. No plan or phase change follows from this;
+  it is corroborating evidence for the architecture already chosen at
+  kickoff. Recorded here so a future contributor doesn't re-attempt the
+  external-host-reliance path without first checking this entry.
