@@ -59,6 +59,35 @@ class TestHandoffPrimitive:
     """The bridge-native in-place handoff of a hosted session."""
 
     @pytest.mark.asyncio
+    async def test_predecessor_retirement_failure_is_explicit_on_both_sessions(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp, monkeypatch,
+    ) -> None:
+        pred = await session_manager.start_session(
+            spawn_target, caller_id="example-worktree",
+        )
+        monkeypatch.setattr(
+            session_manager, "_drop_forward",
+            AsyncMock(side_effect=RuntimeError("transport teardown failed")),
+        )
+
+        with pytest.raises(RuntimeError, match="could not be stopped; cleanup required") as error:
+            await session_manager.handoff_session(
+                pred.session_id, seed=False, seed_text="Continue the example work",
+            )
+
+        assert str(error.value.__cause__) == "transport teardown failed"
+        successor_id = session_manager._db.get_session(pred.session_id)["successor_id"]
+        successor = session_manager.get_session(successor_id)
+        assert successor is not None
+        assert pred.status != SessionStatus.STOPPED
+        for session in (pred, successor):
+            failure = _events(session, "handoff_failed")[-1].data
+            assert failure["phase"] == "predecessor_retirement"
+            assert failure["predecessor_id"] == pred.session_id
+            assert failure["successor_id"] == successor_id
+            assert failure["cleanup_required"] is True
+
+    @pytest.mark.asyncio
     async def test_handoff_uses_external_seed_verbatim(
         self, session_manager, spawn_target, _patch_spawn, _patch_acp,
         mock_acp_client,
