@@ -1094,3 +1094,51 @@ implement #2323 against it; implement the agent-mcp multiplexer against it.
 None of these should land as one large diff — see the design doc's own
 "Sequencing" section.
 
+### 2026-09-12 (later) — #744 reusable helper: `libs/work-coalescing-singleton/`
+
+Landed the reusable helper named as the design doc's next Sequencing step:
+
+- New pure-stdlib `libs/work-coalescing-singleton/` (package
+  `agent-work-coalescing-singleton`, import `work_coalescing_singleton`), not
+  yet vendored into any consuming plugin (no second consumer exists yet;
+  `tools/check-vendored-libs-sync.py` only activates once a lib has ≥2
+  copies, so this canonical copy alone doesn't trip it — same shape as
+  `libs/single-instance-lease/` before its own first plugin adoption).
+- `server.CoalescingServer`: the daemon side. Coalesces identical
+  `(kind, key)` requests onto one in-flight execution (joiners share the
+  owner's result or its raised error, never recompute); explicit
+  subscribe/release ref-counting plus an implicit `touch` for
+  fire-and-forget callers; a bounded **linger** timer that only starts at
+  refcount zero and is cancelled by any new subscriber; a background
+  **liveness reaper** that drops a subscriber whose last-seen timestamp
+  exceeds its TTL (a crashed client can't pin the daemon alive forever).
+- `client`: pure functions over a resolved `(host, port, token)` endpoint —
+  `subscribe`/`release`/`request`, and `call_with_fallback` (the full
+  boot-wait → request → inline-fallback sequence in one call, never raising
+  past it). Rendezvous/discovery and daemon-boot stay each consumer's own
+  responsibility, same as today.
+- **14 tests, all passing**: unit tests drive `CoalescingServer` directly
+  (coalescing, distinct-key independence, error propagation to every
+  joiner, deadline-expiry without blocking the owner, linger/liveness-reap
+  timing) plus full-wire tests over a real loopback TCP socket (subscribe/
+  request/release round trip, concurrent coalescing across two real client
+  connections, a wrong-token request rejected without crashing the server,
+  and `call_with_fallback`'s three paths — no daemon, daemon answers, and
+  daemon exceeds the request deadline).
+- **Found and fixed a real bug during testing, not just added tests**: the
+  first test run hung indefinitely. `CoalescingServer.close()` unconditionally
+  called `socketserver`'s `shutdown()`, which blocks forever waiting for a
+  `serve_forever()` loop that a unit test exercising `handle_request`/
+  refcounting directly (without calling `.start()`) never started. Fixed
+  by tracking a `_started` flag and only awaiting the serve/reap threads
+  when they were actually started.
+- `ruff check` clean; `tools/check-vendored-libs-sync.py` and
+  `tools/check-docs-consistency.py` both green.
+- Updated the design doc's own "Sequencing" section to mark the helper
+  landed and point at the still-open consumers.
+
+Remaining under #744 (and thus #736): #2323 (agent-worktrees resident
+classify/list accelerator) and the agent-mcp multiplexer each still need to
+adopt this helper — each its own vendored copy, its own reviewed PR, per the
+design doc's Sequencing section. Neither has started.
+

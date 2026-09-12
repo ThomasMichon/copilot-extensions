@@ -205,10 +205,15 @@ already applies.
 
 ## Sequencing
 
-This document is the design-first step the effort's own convention requires
-before further plugin code change: the reusable helper (a new vendored
-`libs/work-coalescing-singleton/`, extracted from `hook_ipc.py` once a second
-consumer needs the general request-kind/refcount surface) lands next, then
-`#2323` and the agent-mcp multiplexer land independently on top of it — each
-its own reviewed PR, per the effort's standing practice of landing design,
-helper, and each consumer as separate, independently-revertible changes.
+This document was the design-first step the effort's own convention
+requires before further plugin code change. **Landed:** the reusable helper
+— [`libs/work-coalescing-singleton/`](../../libs/work-coalescing-singleton/README.md),
+a pure-stdlib library implementing this wire protocol, the coalescing map,
+and the ref-count/linger/liveness-reap algorithm described above (unit +
+wire tests covering coalescing, distinct-key independence, error
+propagation, linger cancel-on-resubscribe, and liveness reaping). It is not
+yet vendored into any consuming plugin. **Still open:** `#2323` (agent-
+worktrees resident classify/list accelerator) and the agent-mcp multiplexer
+each adopt it — vendoring their own copy per
+`tools/check-vendored-libs-sync.py` convention — as independent, separately
+reviewed follow-up PRs.
