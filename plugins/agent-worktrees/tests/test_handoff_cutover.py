@@ -1156,6 +1156,65 @@ class TestCmdHandoffCutover:
         assert captured["env"]["AGENT_WORKTREES_HANDOFF_TOKEN"] == "task-123"
         assert out["seed_method"] == "interactive-argv"
 
+    def test_spawn_success_emits_started_then_success_event(
+        self, monkeypatch, capfd, tmp_path,
+    ):
+        """#2457 Phase 1: the spawn-started event must fire before the mux
+        subprocess call, and the terminal success event follows it -- so a
+        killed spawn still leaves a started-but-no-terminal trace."""
+        monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", lambda: "wtZ")
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: True)
+        monkeypatch.setattr(sessions, "mux_active_pane", lambda w: "%2")
+        (tmp_path / "wtZ.yaml").write_text("x")
+        monkeypatch.setattr(m.cfg, "load_config", lambda: object())
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+
+        class _Rec:
+            worktree_path = str(tmp_path / "w")
+
+        monkeypatch.setattr(m.tracking, "load_record", lambda p: _Rec())
+        monkeypatch.setattr(
+            m, "_preflight_launch", lambda c, a, w: m.LaunchPreflight())
+        monkeypatch.setattr(m, "_build_launch_cmd",
+                            lambda c, a, wd, **k: ["copilot"])
+        monkeypatch.setattr(m, "_build_env", lambda p, s, work_dir=None: {})
+        monkeypatch.setattr(m, "_repo_session_env", lambda c, w: {})
+
+        recorded: list[str] = []
+
+        def _fake_new_window(wt, wd, cmd, env, **k):
+            # The started event must already be visible by the time the mux
+            # subprocess call itself runs.
+            assert recorded == ["handoff_successor_spawn_started"]
+            return {
+                "ok": True,
+                "new_pane": "%5",
+                "prompt_received": True,
+                "error": None,
+            }
+
+        def _record_log_event(event, **kwargs):
+            recorded.append(event)
+
+        monkeypatch.setattr(sessions, "mux_new_window", _fake_new_window)
+        monkeypatch.setattr(activity, "log_event", _record_log_event)
+        monkeypatch.setattr(
+            m,
+            "_wait_for_handoff_candidate",
+            lambda *a, **k: ("successor-session", "session-associated"),
+        )
+        rc = m.cmd_handoff_cutover(_ns(
+            seed="resume the multi word work",
+            old_pane="%2",
+            handoff_token="task-123",
+        ))
+        assert rc == 0
+        capfd.readouterr()
+        assert recorded == [
+            "handoff_successor_spawn_started",
+            "handoff_cutover_spawn",
+        ]
+
     def test_spawn_threads_verified_predecessor_executable(
         self, monkeypatch, capfd, tmp_path,
     ):
@@ -1436,3 +1495,104 @@ class TestCmdHandoffCutover:
             "failed to open successor window: "
             "successor exited during startup"
         )
+
+    def test_spawn_failure_emits_started_then_failed_event(
+        self, monkeypatch, capfd, tmp_path,
+    ):
+        """#2457 Phase 1: a spawn that fails to open the mux window still
+        emits the started event, followed by the terminal failure event --
+        never the success event `handoff_cutover_spawn`."""
+        monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", lambda: "wtZ")
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: True)
+        monkeypatch.setattr(sessions, "mux_active_pane", lambda w: "%2")
+        (tmp_path / "wtZ.yaml").write_text("x", encoding="utf-8")
+        monkeypatch.setattr(m.cfg, "load_config", lambda: object())
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+
+        class _Rec:
+            worktree_path = str(tmp_path / "w")
+
+        monkeypatch.setattr(m.tracking, "load_record", lambda p: _Rec())
+        monkeypatch.setattr(
+            m, "_preflight_launch", lambda c, a, w: m.LaunchPreflight(),
+        )
+        monkeypatch.setattr(
+            m, "_build_launch_cmd", lambda *a, **k: ["copilot"],
+        )
+        monkeypatch.setattr(m, "_build_env", lambda p, s, work_dir=None: {})
+        monkeypatch.setattr(m, "_repo_session_env", lambda c, w: {})
+        monkeypatch.setattr(
+            sessions,
+            "mux_new_window",
+            lambda *a, **k: {
+                "ok": False,
+                "new_pane": "%5",
+                "prompt_received": False,
+                "prompt_status": "failed:pane-exited",
+                "error": "successor exited during startup",
+            },
+        )
+
+        recorded: list[str] = []
+        monkeypatch.setattr(
+            activity,
+            "log_event",
+            lambda event, **kwargs: recorded.append(event),
+        )
+
+        rc = m.cmd_handoff_cutover(_ns(seed="continue"))
+
+        assert rc == 4
+        capfd.readouterr()
+        assert recorded == [
+            "handoff_successor_spawn_started",
+            "handoff_successor_spawn_failed",
+        ]
+
+    def test_spawn_exception_from_mux_still_emits_failed_event(
+        self, monkeypatch, tmp_path,
+    ):
+        """An exception `mux_new_window` doesn't itself guard against (it only
+        catches OSError/RuntimeError/TimeoutExpired) must not leave the trace
+        stuck at 'started' -- the failure event still fires, and the
+        exception still propagates to the caller unchanged."""
+        monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", lambda: "wtZ")
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: True)
+        monkeypatch.setattr(sessions, "mux_active_pane", lambda w: "%2")
+        (tmp_path / "wtZ.yaml").write_text("x", encoding="utf-8")
+        monkeypatch.setattr(m.cfg, "load_config", lambda: object())
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+
+        class _Rec:
+            worktree_path = str(tmp_path / "w")
+
+        monkeypatch.setattr(m.tracking, "load_record", lambda p: _Rec())
+        monkeypatch.setattr(
+            m, "_preflight_launch", lambda c, a, w: m.LaunchPreflight(),
+        )
+        monkeypatch.setattr(
+            m, "_build_launch_cmd", lambda *a, **k: ["copilot"],
+        )
+        monkeypatch.setattr(m, "_build_env", lambda p, s, work_dir=None: {})
+        monkeypatch.setattr(m, "_repo_session_env", lambda c, w: {})
+
+        def _raise(*a, **k):
+            raise ValueError("unexpected mux blowup")
+
+        monkeypatch.setattr(sessions, "mux_new_window", _raise)
+
+        recorded: list[tuple[str, object]] = []
+        monkeypatch.setattr(
+            activity,
+            "log_event",
+            lambda event, **kwargs: recorded.append((event, kwargs.get("error"))),
+        )
+
+        with pytest.raises(ValueError, match="unexpected mux blowup"):
+            m.cmd_handoff_cutover(_ns(seed="continue"))
+
+        assert [event for event, _ in recorded] == [
+            "handoff_successor_spawn_started",
+            "handoff_successor_spawn_failed",
+        ]
+        assert recorded[1][1] == "unexpected mux blowup"

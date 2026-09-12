@@ -38,7 +38,14 @@ Events are intentionally high-level:
                             (running inside it, or a live session was detected)
   worktree_reaped           cleanup removed a worktree's dir/branch/session
   handoff_cutover_claim     monitor atomically claimed a pending handoff token
-  handoff_cutover_spawn     live handoff spawned a successor pane
+  handoff_successor_spawn_started
+                            successor pane spawn is starting -- emitted before
+                            success/failure is known, so a killed spawn still
+                            leaves a trace
+  handoff_cutover_spawn     live handoff spawned a successor pane (terminal
+                            success for the spawn started above)
+  handoff_successor_spawn_failed
+                            the successor pane spawn (started above) failed
   handoff_predecessor_retire
                             a consumed handoff retired the predecessor pane
   handoff_retire_guard      a retire request was left in place by a safety guard
@@ -65,6 +72,7 @@ swallows its own exceptions.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import socket
 import sys
@@ -82,6 +90,29 @@ RETENTION_DAYS = 7
 _PRUNE_SIZE_BYTES = 512 * 1024
 
 _HOSTNAME = socket.gethostname()
+
+log = logging.getLogger("agent-worktrees")
+
+# Process-local count of log_event() calls that failed to write a record.
+# log_event() must never raise into its caller, so a dropped event is
+# otherwise invisible; this counter (plus the paired log.debug() call) makes
+# a swallowed failure detectable rather than merely theorized. Reset each
+# process start -- it is a liveness signal for the current run, not a
+# persisted metric.
+_log_event_failures = 0
+
+
+def log_event_failure_count() -> int:
+    """Number of ``log_event()`` calls in this process that failed to write.
+
+    ``log_event`` always swallows its own exceptions (a diagnostic log must
+    never break the operation it observes), so this counter -- incremented
+    alongside a ``log.debug`` call on every such failure -- is how a caller or
+    test can detect "an event was silently dropped" instead of only being
+    able to theorize it from a gap in the trace.
+    """
+    return _log_event_failures
+
 
 # Handoff cutover lifecycle stage vocabulary (the 13-stage model from
 # efforts/active/handoff-cutover-lifecycle-journal/README.md Phase 1). Maps
@@ -104,6 +135,7 @@ HANDOFF_STAGE_MAP: dict[str, tuple[int, str]] = {
     "handoff_host_acknowledged": (7, "handoff_host_acknowledged"),
     "handoff_cutover_spawn": (8, "handoff_successor_spawn_started"),
     "handoff_successor_spawn_started": (8, "handoff_successor_spawn_started"),
+    "handoff_successor_spawn_failed": (8, "handoff_successor_spawn_started"),
     "handoff_successor_session_start_bound": (
         9,
         "handoff_successor_session_start_bound",
@@ -155,6 +187,11 @@ def log_event(
 ) -> None:
     """Append a single high-level lifecycle event. Never raises.
 
+    Delivery is best-effort: a write failure (disk full, permissions, ...) is
+    swallowed and never propagates to the caller, but it is not swallowed
+    *invisibly* -- see ``log_event_failure_count()`` and the paired
+    ``log.debug`` call in the except clause below.
+
     Args:
         event: One of the documented event names (see module docstring).
         worktree_id: The worktree this event concerns.
@@ -204,10 +241,17 @@ def log_event(
         with open(path, "a", encoding="utf-8") as handle:
             handle.write(line + "\n")
         _maybe_prune(path)
-    except Exception:
+    except Exception as exc:
         # A diagnostic log must never interfere with the operation it
-        # observes -- fail silently.
-        pass
+        # observes -- delivery stays best-effort and this never raises into
+        # the caller. But "fail silently" must not mean "fail invisibly": bump
+        # a process-local counter and emit a debug-level log line so a missing
+        # event is itself detectable (via log_event_failure_count() or a
+        # DEBUG-level log stream) rather than only inferable from a gap in
+        # the trace.
+        global _log_event_failures
+        _log_event_failures += 1
+        log.debug("activity log_event(%r) failed to write: %s", event, exc)
 
 
 def _maybe_prune(path: Path) -> None:

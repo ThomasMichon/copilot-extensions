@@ -203,7 +203,7 @@ renumbering from the "acknowledges handoff" step onward.)
       `successor_session_id` are never initialized yet — that's Phase 3's
       cross-linking work. Leave this item open until Phase 3 populates the
       linkage fields; re-close it then rather than now.
-- [ ] Give the spawn stage (8) an explicit **start** event
+- [x] Give the spawn stage (8) an explicit **start** event
       (`handoff_successor_spawn_started`, emitted before success is known)
       *and* a terminal **result** event/field
       (`handoff_successor_spawn_result: succeeded|failed`, or reuse
@@ -211,10 +211,20 @@ renumbering from the "acknowledges handoff" step onward.)
       failure-path sibling) — a single one-shot event cannot distinguish "the
       spawn is still in flight" from "the spawn failed," which the Phase 3/4
       validation plan (stages 8+ absent on a killed spawn) depends on.
-- [ ] Make `activity.log_event()` (or a new sibling) **not** swallow errors
+      **Landed:** `handoff_successor_spawn_started` now fires in
+      `_handoff_cutover_spawn_result` immediately before
+      `sessions.mux_new_window()` is called; the existing
+      `handoff_cutover_spawn` remains the terminal success event, and a new
+      `handoff_successor_spawn_failed` sibling fires on the failure path.
+      Both new event names are mapped to stage 8 in `HANDOFF_STAGE_MAP`.
+- [x] Make `activity.log_event()` (or a new sibling) **not** swallow errors
       silently in a way that's invisible — keep best-effort delivery (never
       block the caller) but surface a debug-level warning/counter so a
       missing event is itself detectable, not just theorized.
+      **Landed:** `log_event()` still never raises, but a write failure now
+      increments a process-local `log_event_failure_count()` and emits a
+      `logging.getLogger("agent-worktrees").debug(...)` line, so a dropped
+      event is detectable rather than only inferable from a trace gap.
 
 ### Phase 2 — Instrument all 13 stages
 - [ ] Stage 1 (`worktree_created`) — confirm `cmd_create` already emits this
@@ -256,9 +266,14 @@ renumbering from the "acknowledges handoff" step onward.)
       agent-bridge's independent `handoff-request` route is documented in
       Context as a real alternate path but is explicitly out of scope for
       this effort's instrumentation; see the deferred follow-on note below.)
-- [ ] Stage 8 (`handoff_successor_spawn_started`) — emit at the start of
+- [x] Stage 8 (`handoff_successor_spawn_started`) — emit at the start of
       `_handoff_cutover_spawn_result` / `mux_new_window`, before success is
       known, so a spawn that later fails still leaves a trace.
+      **Landed as part of Phase 1's spawn-event split** (PR #2479):
+      `_handoff_cutover_spawn_result` emits `handoff_successor_spawn_started`
+      immediately before `sessions.mux_new_window()`, with
+      `handoff_successor_spawn_failed` on the failure path and the existing
+      `handoff_cutover_spawn` retained as the terminal success event.
 - [ ] Stage 9 (`handoff_successor_session_start_bound`) — emit from the
       successor's own `cmd_register_session` when it recognizes the
       `--handoff-candidate-token` and calls `associate_handoff_candidate`.
@@ -612,3 +627,31 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   per-worktree/per-project trace store with the per-platform atomic-append
   contract, successor backfill, `handoff-trace` CLI) and Phase 5 (docs) follow.
   Phase 4 stays deferred per the operator's explicit scope decision.
+- **Phase 1 fully closed.** Landed the two remaining checklist items in a
+  fresh worktree: `_handoff_cutover_spawn_result` now emits
+  `handoff_successor_spawn_started` immediately before
+  `sessions.mux_new_window()` (before success/failure is known), and a new
+  `handoff_successor_spawn_failed` sibling fires on the failure path — both
+  map to stage 8 in `HANDOFF_STAGE_MAP`, alongside the pre-existing terminal
+  success event `handoff_cutover_spawn`. Separately, `activity.log_event()`
+  no longer swallows a write failure invisibly: it still never raises into
+  the caller, but a failure now increments a new
+  `log_event_failure_count()` and logs a `logging.getLogger(
+  "agent-worktrees").debug(...)` line. Submitted as PR #2479; review caught
+  two real gaps beyond the initial landing, both fixed: (1) no command-level
+  test asserted the new events' emission/ordering — added
+  `test_spawn_success_emits_started_then_success_event` and
+  `test_spawn_failure_emits_started_then_failed_event`; (2) an exception
+  `sessions.mux_new_window()` doesn't itself catch (it only guards
+  `OSError`/`RuntimeError`/`TimeoutExpired`) would have left the trace stuck
+  at "started" forever with no terminal event — wrapped the call in
+  `try`/`except Exception`, log `handoff_successor_spawn_failed` with the
+  exception message, then re-raise unchanged (`test_spawn_exception_from_mux_still_emits_failed_event`
+  covers this). Also fixed a version-count error a review caught in this
+  same journal entry. Five new tests total (two in `test_activity.py`,
+  three in `test_handoff_cutover.py`); full plugin suite: 4158 passed /
+  20 skipped / 3 pre-existing unrelated installer/binstub failures (same
+  three noted against PR #2472). `agent-worktrees` bumped 1.5.5-dev69 →
+  dev72 across the fix rounds. Stage 8's Phase 2 checklist item is also now
+  done as a side effect (ticked off above). Phase 2 (instrumenting the
+  remaining 10 stages' actual emitter call sites) is next.
