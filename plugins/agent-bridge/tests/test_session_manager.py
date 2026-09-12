@@ -2090,6 +2090,7 @@ async def test_startup_reattach_resumes_session_stopped_while_starting(
     monkeypatch.setattr(manager, "_recover_remote_host_records", AsyncMock(return_value=0))
     monkeypatch.setattr(manager, "_prune_dead_hosts", lambda: None)
     monkeypatch.setattr(manager, "_live_host_records", lambda: [rec])
+    monkeypatch.setattr(manager._host_index, "get", lambda _sid: rec)
     monkeypatch.setattr(manager, "_rec_child_alive", lambda _rec: True)
     monkeypatch.setattr(manager, "_reattach_one", attach)
 
@@ -2122,6 +2123,7 @@ async def test_startup_reattach_leaves_prior_idle_session_idle(
     monkeypatch.setattr(manager, "_recover_remote_host_records", AsyncMock(return_value=0))
     monkeypatch.setattr(manager, "_prune_dead_hosts", lambda: None)
     monkeypatch.setattr(manager, "_live_host_records", lambda: [rec])
+    monkeypatch.setattr(manager._host_index, "get", lambda _sid: rec)
     monkeypatch.setattr(manager, "_rec_child_alive", lambda _rec: True)
     monkeypatch.setattr(manager, "_reattach_one", attach)
 
@@ -2163,6 +2165,7 @@ async def test_startup_reattach_skips_session_with_inflight_lifecycle_op(
     monkeypatch.setattr(manager, "_recover_remote_host_records", AsyncMock(return_value=0))
     monkeypatch.setattr(manager, "_prune_dead_hosts", lambda: None)
     monkeypatch.setattr(manager, "_live_host_records", lambda: [rec])
+    monkeypatch.setattr(manager._host_index, "get", lambda _sid: rec)
     monkeypatch.setattr(manager, "_rec_child_alive", lambda _rec: True)
     monkeypatch.setattr(manager, "_reattach_one", attach)
 
@@ -2619,14 +2622,14 @@ class TestEndSession:
         session = await session_manager.start_session(spawn_target)
         ending = asyncio.Event()
         release_end = asyncio.Event()
-        original_end = session_manager.end_session
+        original_quiesce = session_manager._quiesce_session
 
-        async def delayed_end(session_id: str, *, force: bool = False) -> None:
+        async def delayed_quiesce(session: Session, **kwargs) -> None:
             ending.set()
             await release_end.wait()
-            await original_end(session_id, force=force)
+            await original_quiesce(session, **kwargs)
 
-        session_manager.end_session = delayed_end
+        session_manager._quiesce_session = delayed_quiesce
         end_task = asyncio.create_task(
             session_manager.end_session_if_idle(session.session_id)
         )
@@ -2652,15 +2655,26 @@ class TestEndSession:
         self, session_manager, spawn_target, _patch_spawn, _patch_acp
     ) -> None:
         session = await session_manager.start_session(spawn_target)
-        await session._turn_start_lock.acquire()
+        ending = asyncio.Event()
+        release_end = asyncio.Event()
+        original_quiesce = session_manager._quiesce_session
+
+        async def delayed_quiesce(session: Session, **kwargs) -> None:
+            ending.set()
+            await release_end.wait()
+            await original_quiesce(session, **kwargs)
+
+        session_manager._quiesce_session = delayed_quiesce
+        first_end = asyncio.create_task(session_manager.end_session(session.session_id))
+        await ending.wait()
         end_task = asyncio.create_task(
             session_manager.end_session_if_idle(session.session_id)
         )
         await asyncio.sleep(0)
         assert not end_task.done()
 
-        await session_manager.end_session(session.session_id)
-        session._turn_start_lock.release()
+        release_end.set()
+        await first_end
 
         with pytest.raises(KeyError, match="not found"):
             await end_task
