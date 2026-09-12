@@ -1427,6 +1427,15 @@ function Register-ScheduledTask_ {
 `$root = '$($InstallDir -replace "'", "''")'
 `$launchPy = ''
 try { `$_ver = ([IO.File]::ReadAllText((Join-Path `$root 'current-version'))).Trim(); if (`$_ver) { `$launchPy = Join-Path `$root ('versions\' + `$_ver + '\Scripts\python.exe') } } catch {}
+if (-not (`$launchPy -and (Test-Path -LiteralPath `$launchPy))) {
+    # #742: marker missing/stale -> prefer last-known-good (the last version
+    # activate() published) over a raw newest-slot guess, which could bind a
+    # still-installing/never-activated slot mid-swap.
+    `$_lkg = ''
+    try { `$_lkg = ([IO.File]::ReadAllText((Join-Path `$root 'last-known-good'))).Trim() } catch {}
+    if (`$_lkg) { `$launchPy = Join-Path `$root ('versions\' + `$_lkg + '\Scripts\python.exe') }
+    if (-not (`$launchPy -and (Test-Path -LiteralPath `$launchPy))) { `$launchPy = '' }
+}
 if (-not (`$launchPy -and (Test-Path -LiteralPath `$launchPy))) { `$launchPy = Get-ChildItem (Join-Path `$root 'versions') -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { Join-Path `$_.FullName 'Scripts\python.exe' } | Where-Object { Test-Path -LiteralPath `$_ } | Select-Object -Last 1 }
 `$pidFile = '$($PidFile -replace "'", "''")'
 `$logFile = Join-Path (Split-Path `$pidFile) 'agent-bridge.log'
