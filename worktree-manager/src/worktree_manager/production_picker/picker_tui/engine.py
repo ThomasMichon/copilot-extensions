@@ -15,6 +15,7 @@ Keys:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import threading
@@ -47,6 +48,8 @@ from .. import profiles as profiles_mod
 from ..update_stage import indicator_state
 from . import derive
 from .selection import ListSelection
+
+log = logging.getLogger("agent-worktrees.picker")
 
 
 def _register_shift_enter_key() -> None:
@@ -5324,7 +5327,22 @@ class PickerScreen(Widget):
             try:
                 app.call_from_thread(_apply)
             except Exception:
-                pass
+                # The action's own outcome (ok/failed, and any status-line
+                # update) is normally surfaced by `_apply` above -- but if
+                # marshalling back onto the event loop itself fails (the app
+                # exited, the screen is gone, etc.), that outcome is otherwise
+                # lost with **no** operator-visible signal at all: a steer
+                # submission (or any other action) can genuinely succeed or
+                # fail off-thread while the operator sees nothing change and
+                # reasonably assumes it worked. Log it so this class of silent
+                # drop is at least diagnosable after the fact, even though the
+                # status line itself is unreachable at this point.
+                log.warning(
+                    "pivot action %r: could not marshal its outcome back to "
+                    "the UI (app.call_from_thread failed); the action itself "
+                    "may have already run to completion with err=%r",
+                    label, err, exc_info=True,
+                )
 
         threading.Thread(
             target=_worker, name=f"pivot-action:{label}", daemon=True
