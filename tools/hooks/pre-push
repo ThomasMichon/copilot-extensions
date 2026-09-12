@@ -54,4 +54,9 @@ fi
 # Require a version bump whenever a plugin's content -- or a vendored lib it
 # ships -- changes, so new code never serves under a stale version (the silent
 # stale-deploy gap, dotfiles #1025). Diffs the push against origin/main.
-exec "${PY[@]}" "$ROOT/tools/check-version-bump.py"
+"${PY[@]}" "$ROOT/tools/check-version-bump.py"
+# Every tracked, non-test source module must stay within its line-count cap
+# (or its shrink-only grandfathered ceiling, for pre-existing offenders) --
+# a componentization failure (queue.py's ~7,200 lines) had no automated guard
+# before this. See tools/check-module-size.py and CONTRIBUTING.md § Code Style.
+exec "${PY[@]}" "$ROOT/tools/check-module-size.py"

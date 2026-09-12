@@ -523,6 +523,24 @@ binstub in `~/.local/bin/`.
   so the committed `pre-commit` hook lints only **staged** files and only the
   high-signal `F` (pyflakes) + `E9` (syntax) rule groups — fix those as you go.
 - Docstrings for public functions
+- **Componentization: a 1,000-line hard cap per source module**
+  (`tools/check-module-size.py`). A single module growing without bound is a
+  real failure mode this repo hit in practice (`agent-dispatch`'s `queue.py`
+  reached ~7,200 lines with no guard catching it) — a 1,000-line file is
+  already a lot to hold in your head at once; split by responsibility (an
+  adapter, an evaluator, a policy table) well before that, not after. Dozens
+  of pre-existing files exceed the cap by a wide margin (some by an order of
+  magnitude), so a **shrink-only baseline**
+  (`tools/module-size-baseline.json`) grandfathers each one in at its current
+  size as a temporary ceiling — the guard still fails if a baselined file
+  grows even one line further, or if any non-baselined file newly crosses the
+  cap. Shrinking a file is always fine and never itself a failure. Widening a
+  baselined ceiling is a **manual, reviewed edit** to the JSON, never
+  something a refresh does silently — `--refresh-baseline` only lowers or
+  removes entries, it never raises one. Test files (`tests/`, `test_*.py`,
+  `conftest.py`) are exempt — `TESTING.md` already directs splitting those by
+  behavioral contract, not arbitrary line count, a different rule for a
+  different failure mode.
 
 ### Git Hooks
 
@@ -540,10 +558,12 @@ The repo ships git hooks under `tools/hooks/`:
   `tools/check-docs-consistency.py`, `tools/check-runbook-references.py`,
   `tools/check-version-consistency.py` (every plugin's version identical across
   `plugin.json` / `pyproject.toml` / its `marketplace.json` entry — a one-file
-  bump wedges the Picker's update indicator), and `tools/check-feed-neutrality.py`
+  bump wedges the Picker's update indicator), `tools/check-feed-neutrality.py`
   (no config/Dockerfile/install-script/CI-workflow file may hardcode a public
   package-feed URL as the only usable endpoint — this repo runs on machines
-  whose default feed is network-blocked and replaced with an internal mirror).
+  whose default feed is network-blocked and replaced with an internal mirror),
+  and `tools/check-module-size.py` (the 1,000-line-per-module cap and
+  shrink-only baseline described above).
 
 CI also runs `tools/check-marketplace-isolation.py` in report-only mode. It
 inventories legacy unqualified runtime roots, generic global plugin commands,
