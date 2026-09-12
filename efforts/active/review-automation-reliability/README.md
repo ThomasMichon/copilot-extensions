@@ -467,6 +467,68 @@ scenarios.
 
 ## Journal
 
+### 2026-09-12 - Componentize supervisor.py: extract spawn_factories.py
+
+- Split `plugins/agent-dispatch/src/agent_dispatch/supervisor.py` (4,169
+  lines, the largest non-generated offender on
+  `tools/module-size-baseline.json` after `queue.py`) by extracting the
+  entire pre-`class Supervisor` block of default liveness/verdict/nudge/
+  redrive/conclusion callables and the three embody-backend factories
+  (`make_embody_spawn`, `make_headless_spawn`, `make_label_routed_spawn`,
+  `make_redrive_sender`) into a new `spawn_factories.py`. Chosen as the
+  safe first cut per the operator's standing componentization
+  instruction: every function in that block is either a pure default
+  closing only over its own arguments, or a factory returning a closure
+  -- none of it touches `Supervisor` instance state (`self`), so nothing
+  needed to change about *how* the class consumes these names.
+  `supervisor.py` re-exports every moved name (types, constants,
+  functions), so all existing call sites (`__main__.py`'s lazy
+  `from .supervisor import make_embody_spawn, ...`) and every existing
+  test that monkeypatches `agent_dispatch.supervisor.<name>` (e.g.
+  `test_cli.py`'s `monkeypatch.setattr(sup_mod, "make_embody_spawn", ...)`)
+  are unaffected -- Python resolves a bare name against the *current*
+  module globals at call time, and monkeypatching a module attribute
+  works identically whether the underlying implementation lives in that
+  module or was imported into it.
+- Two things this split's tests caught that the embody.py split's
+  simpler case didn't have: (1) `test_supervisor.py` patches
+  `supervisor_module.Path.stat` directly on the `pathlib.Path` **class**
+  (not a module attribute) to simulate a stat failure inside
+  `_target_directory_missing` (which moved to `spawn_factories.py` and
+  imports its own `Path`) -- patching the class object affects every
+  importer of `pathlib.Path` identically, so this worked unmodified once
+  `Path` was re-imported into `supervisor.py` too (kept as a deliberate
+  re-export, `# noqa: F401`, since tests reference it by name); (2) two
+  type aliases (`LocalColdFn`, `FleetColdFn`) were miscounted during the
+  initial line-range extraction and briefly missing from
+  `spawn_factories.py` -- caught immediately by `ImportError` on the next
+  full-suite run, fixed by adding them.
+- `supervisor.py` is now 3,422 lines (still baselined -- nowhere near the
+  1,000-line cap yet, `queue.py` and the rest of `supervisor.py` itself
+  remain the next targets) but the baseline entry was refreshed downward
+  (4,169 -> 3,422) so it never silently re-widens.
+  `spawn_factories.py` is 605 lines, itself under the cap with no
+  baseline entry.
+- Added `plugins/agent-dispatch/tests/test_spawn_factories.py` (9 tests):
+  a lightweight import-guard suite mirroring `test_embody_prompts.py`'s
+  pattern -- confirms the new module's own public API (parse helpers,
+  the three spawn factories, `make_redrive_sender`,
+  `SpawnPreparationRetained`) is directly importable and behaves
+  correctly independent of the `supervisor` facade, since the underlying
+  behavior is already exhaustively covered through that facade in
+  `test_supervisor.py`/`test_cli.py`/`test_fleet.py`.
+- Full `agent-dispatch` suite (2,738 tests across the runner's 5
+  sub-suites) passes via `tools/run-plugin-tests.py agent-dispatch`;
+  zero regressions. Bumped agent-dispatch 0.1.2-dev83 -> dev84 across
+  `plugin.json`, `pyproject.toml`, and `marketplace.json`.
+- Phase 10 item 4's liveness-probe wiring (thread 2 of the last handoff)
+  is **not** done this leg -- `supervisor.py` still has substantial
+  further splitting ahead of it before its `local_body_verdict_fn`
+  call sites are a low-risk place to wire in
+  `bridge_liveness_probe.local_body_liveness_probe`. This leg's gate was
+  satisfied by the module-split thread alone, per the prior handoff's
+  explicit "either is a legitimate stopping point" allowance.
+
 ### 2026-09-11 - Phase 10 item 4: componentize embody.py to unblock call-site wiring
 
 - Split `plugins/agent-dispatch/src/agent_dispatch/embody.py` (1,205 lines,
