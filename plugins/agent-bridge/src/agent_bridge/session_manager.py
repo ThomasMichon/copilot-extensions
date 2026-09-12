@@ -951,6 +951,7 @@ class SessionManager:
         # starts un-drained). Teardown (stop/end) is *never* gated -- it is the
         # operation the drain is waiting for (#1755).
         self._draining = False
+        self._shutting_down = False
         # Drain observability + bounded lifetime (#1757). When the gate opens we
         # record when/why/by-whom and arm a watchdog that WARNs on an interval
         # and finally auto-releases the gate if no cutover ever retires this
@@ -2060,7 +2061,12 @@ class SessionManager:
     ) -> bool:
         """Revalidate a maintenance candidate under its lifecycle ownership."""
         return (
-            self._host_index is not None
+            not self._shutting_down
+            and not any(
+                not task.done()
+                for task in self._remote_reaps_by_session.get(record.session_id, ())
+            )
+            and self._host_index is not None
             and self._host_index.get(record.session_id) == record
             and self._sessions.get(record.session_id) is session
             and (
@@ -2307,6 +2313,8 @@ class SessionManager:
         """
         if self._host_index is None:
             return 0
+        if background and self._shutting_down:
+            return 0
         from .relay_state import get_live_relay_port
         from .session_host.codespace_transport import (
             build_codespace_spawner,
@@ -2490,6 +2498,8 @@ class SessionManager:
             for session, existing, status, record in results:
                 async with contextlib.AsyncExitStack() as locks:
                     if background:
+                        if self._shutting_down:
+                            continue
                         if session._turn_start_lock.locked() or session._lifecycle_lock.locked():
                             continue
                         await locks.enter_async_context(session._turn_start_lock)
@@ -3120,13 +3130,15 @@ class SessionManager:
         )
 
     async def close_frontend_transports(self) -> None:
-        """Release owned channels on exit, including disconnected sessions."""
+        """Fence new work and release owned channels under admission/lifecycle."""
+        self._shutting_down = True
         failed: list[str] = []
         for session_id in sorted(set(self._forwards) | set(self._relays)):
             session = self._sessions.get(session_id)
             try:
                 async with contextlib.AsyncExitStack() as locks:
                     if session is not None:
+                        await locks.enter_async_context(session._turn_start_lock)
                         await locks.enter_async_context(session._lifecycle_lock)
                     await self._drop_forward(
                         session_id, strict=True, preserve_ownership=True,
@@ -3354,6 +3366,13 @@ class SessionManager:
         """
         if self._host_index is None:
             return False
+        if any(
+            not task.done()
+            for task in self._remote_reaps_by_session.get(session.session_id, ())
+        ):
+            raise RemoteHostRecoveryPendingError(
+                f"Remote Session Host cleanup is pending for {session.session_id}"
+            )
         if not session.acp_session_id:
             return False
         rec = self._host_index.get(session.session_id)
@@ -3884,7 +3903,9 @@ class SessionManager:
 
         Kills the **child first** -- a POSIX SIGTERM to the host does not run its
         cleanup, so the child could otherwise orphan -- then the host, then
-        removes the record. Cross-platform via ``osutil.kill_pid`` (on Windows
+        removes the record after confirmed termination. Remote authority remains
+        indexed until its asynchronous reap succeeds. Cross-platform via
+        ``osutil.kill_pid`` (on Windows
         ``taskkill /T`` collects the process tree, and the host's kill-on-close
         job also takes the child). Used for both the explicit-terminate reap
         (#1786) and the version-mux stranded/forced reap.
@@ -3906,6 +3927,7 @@ class SessionManager:
                 release_container_lock=False,
             )
             self._schedule_remote_reap(rec, reason)
+            return
         self._forget_host_record(rec)
 
     @staticmethod
@@ -3974,7 +3996,13 @@ class SessionManager:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
-        task = loop.create_task(self._remote_reap(rec, endpoint))
+        from .session_teardown import reap_remote_record
+
+        session = self._sessions.get(rec.session_id)
+        task = loop.create_task(reap_remote_record(
+            self, copy.deepcopy(rec), session=session,
+            generation=session._lifecycle_generation if session is not None else None,
+        ))
         self._remote_reap_tasks.add(task)
         owned = self._remote_reaps_by_session.setdefault(rec.session_id, set())
         owned.add(task)
@@ -4256,7 +4284,7 @@ class SessionManager:
             env_overrides: Request-owned environment overrides already merged
                 into ``target.env`` by the route.
         """
-        if self._draining:
+        if self._draining or self._shutting_down:
             raise DaemonDrainingError("session")
         from .protocol import FAILED_ACP_HANDSHAKE_FAULT
 
@@ -4347,6 +4375,8 @@ class SessionManager:
                     agent_name,
                 )
                 await self.end_session(existing.session_id, force=True)
+                if self._shutting_down:
+                    raise DaemonDrainingError("session")
                 existing = self._find_active_session(ws_key)
             if (
                 existing is not None
@@ -5138,7 +5168,7 @@ class SessionManager:
 
     async def submit_prompt(self, session_id: str, prompt: str) -> int:
         """Atomically start a turn against conditional idle teardown."""
-        if self._draining:
+        if self._draining or self._shutting_down:
             raise DaemonDrainingError("turn")
         resolved = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(resolved)
@@ -5160,7 +5190,7 @@ class SessionManager:
         automatically re-spawned and the session resumed before
         delivering the prompt.
         """
-        if self._draining:
+        if self._draining or self._shutting_down:
             raise DaemonDrainingError("turn")
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
@@ -5342,7 +5372,7 @@ class SessionManager:
         queue_nonempty = self._db.count_pending_prompts(session_id) > 0
         # During a redeploy drain we must not start a new turn, but we can still
         # persist the follow-up -- it delivers after the restart resumes.
-        must_queue = turn_live or queue_nonempty or self._draining
+        must_queue = turn_live or queue_nonempty or self._draining or self._shutting_down
 
         if not must_queue:
             turn_index = await self._submit_prompt_locked(session_id, prompt)
@@ -5374,7 +5404,9 @@ class SessionManager:
         # mid-drain -- kick delivery now, resuming a recoverable STOPPED session
         # if needed. A live turn's settle tail (or the post-restart resume) will
         # drain otherwise.
-        kick_session = session if not turn_live and not self._draining else None
+        kick_session = (
+            session if not turn_live and not self._draining and not self._shutting_down else None
+        )
         return (
             {
                 "queued": True,
@@ -5402,6 +5434,7 @@ class SessionManager:
                     self._sessions.get(session.session_id) is not session
                     or session._lifecycle_generation != expected_generation
                     or self._draining
+                    or self._shutting_down
                 ):
                     return
                 if (session.status == SessionStatus.IDLE
@@ -5962,11 +5995,10 @@ class SessionManager:
 
     async def _end_session_locked(self, session: Session, *, force: bool = False) -> None:
         """Delegate to the typed session_teardown implementation."""
+        from .session_ownership import finish_owned
         from .session_teardown import end_session_locked
 
-        return await end_session_locked(
-            self, session, force=force,
-        )
+        return await finish_owned(end_session_locked(self, session, force=force))
 
     # -- Context-aware in-place handoff --------------------------------------
 
@@ -5978,7 +6010,7 @@ class SessionManager:
         predecessor and successor at once, so the spawn-then-retire cutover does
         not apply (their retire-before-spawn variant is deferred, mirroring the
         guard in ``handoff_session``)."""
-        if not self._auto_handoff.enabled:
+        if self._shutting_down or not self._auto_handoff.enabled:
             return False
         if _workspace_key(session.agent_name, session.target, session.caller_id):
             return False
@@ -6207,7 +6239,7 @@ class SessionManager:
         create any dependency on Copilot CLI extensions being active in the
         hosted child.
         """
-        if self._draining:
+        if self._draining or self._shutting_down:
             raise DaemonDrainingError("handoff")
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)

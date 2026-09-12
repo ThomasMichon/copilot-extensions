@@ -417,6 +417,12 @@ restart does not inherently close the child's pipes.
   Destructive authority results and stranded reaping take admission before
   lifecycle ownership; each newly admitted turn advances the generation so an
   older inspection cannot tear down its transport.
+  Frontend shutdown fences new admission, joins accepted launches even before
+  they install a client, and then closes remaining channels under admission and
+  lifecycle ownership. A fresh manager may resume the preserved restart intent.
+  Remote reap records are retained until termination is confirmed; failed
+  explicit or pending reaps fail the stop instead of acknowledging success, and
+  keep authority available for a deliberate retry.
   The manager remains the public facade; `session_resume.py`,
   `session_teardown.py`, and `session_ownership.py` own the bounded lifecycle
   implementations. Additive session migrations live in `db_migrations.py`.
