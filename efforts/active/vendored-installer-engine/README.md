@@ -148,6 +148,70 @@ as independent per-plugin PRs; see Coordination._
 - [ ] Write the findings into `## Proposal` below before starting Phase 1 —
       this determines the engine's real function surface and config schema.
 
+### Design decision — vendoring over git-fetch (resolved 2026-09-12)
+
+Before Phase 1 started, the operator raised a real alternative: instead of
+vendoring (byte-copying) the engine into every plugin, ship each plugin with a
+tiny bootstrap stub that fetches the canonical engine directly via
+`uv`'s git-VCS support (`uv pip install`/`uvx --from
+"git+https://github.com/ThomasMichon/copilot-extensions@<pinned-sha>#subdirectory=libs/installer-engine"
+...`), pinned to an exact commit. This is technically feasible — `uv` is
+pip-compatible for `git+URL@rev#subdirectory=path` sources and has its own git
+support — and, if the engine were also rewritten as a single cross-platform
+Python package, it would eliminate the PowerShell/bash **fork** duplication
+too (not just the per-plugin duplication byte-vendoring solves).
+
+**Decided: byte-vendoring, not git-fetch**, because git-fetch trades the
+current problem for a worse instance of the *same* problem this effort exists
+to prevent:
+
+- **New mandatory network dependency at install/update time.** Today, once
+  the marketplace payload is copied, install runs offline except for
+  precedented, narrow network touches (uv self-acquire, PyPI/governed-feed
+  installs). Git-fetch makes every install/update depend on GitHub
+  reachability — including the exact moment someone needs to repair a broken
+  install during an incident.
+- **A new shared cache reintroduces the #6785/#6852 hazard class.** The
+  fetched engine has to land in a local cache that concurrent installs share
+  — structurally the same "shared cache, concurrent writers, partial-write
+  corruption" shape as uv's managed-interpreter cache that caused both prior
+  bugs. Vendoring keeps each plugin's copy inside its own already-isolated
+  payload — no new shared-cache surface at all.
+- **It would reverse a deliberate, documented constraint**
+  (`docs/install-contract.md`: *"there is no shared install module resolved
+  at install or runtime... each plugin's install flow must be completely
+  self-contained"*) rather than extend it. Reversing that is a bigger,
+  separate decision than this effort's actual trigger (stop hand-porting
+  installer bugs) requires.
+- **The real duplication-elimination win (ps1/sh fork) needs a full rewrite
+  either way** — byte-vendoring doesn't get it, but neither does git-fetch
+  unless the engine becomes pure Python, which is a much larger, separable
+  rewrite (SAC-safe launchers, Task Scheduler vs. systemd wiring, etc., all
+  currently native shell) that can be evaluated on its own merits later,
+  independent of *how* the engine reaches each plugin.
+
+**Kept as a clean off-ramp, not closed off:** `libs/installer-engine/` gets a
+real `pyproject.toml` from Phase 1 on, so it is *also* a valid
+pip/uv git-fetch target later, if the cache-concurrency and
+offline-failure questions get real answers in a future effort. This phase
+does not have to bet on both problems (duplication *and* how it's delivered)
+at once.
+
+**Explicit non-goal this decision implies for Phase 1:** don't let the
+vendored corpus balloon back into what it's replacing. The whole point is
+fewer lines to fix N times, not the same line count moved one directory over.
+Concretely:
+- The canonical engine only carries the (a)/(b) functions from the Phase 0
+  audit — genuinely per-service logic (agent-bridge's sibling-plugin installs,
+  agent-dispatch's supervisor service, etc.) stays in each plugin's thin
+  config/wrapper, never gets pulled into the engine "for convenience."
+- Prefer **fewer, more configurable functions** over near-duplicate variants
+  parameterized by a flag — a config-driven `Invoke-AgentServiceInstall`
+  entry point, not a menu of twelve slightly-different `Invoke-XInstall`
+  functions living in the same file.
+- Track the vendored engine's own line count in the Validation Plan (below) —
+  growth there is exactly the failure mode to watch for.
+
 ### Phase 1 — Canonical engine + reference plugin + CI guard
 - [ ] Create `libs/installer-engine/installer-engine.ps1` and
       `installer-engine.sh` — the canonical (a) and (b) functions from Phase 0,
@@ -220,6 +284,14 @@ as independent per-plugin PRs; see Coordination._
 - [ ] `docs/install-contract.md` is updated to describe the new engine +
       config-schema pattern once Phase 1 lands, so it stays the accurate
       reference (not just this effort's private plan).
+- [ ] **Net corpus size actually shrinks.** After each phase, total installer
+      line count across converted plugins (their `install.ps1`/`.sh` +
+      whatever share of the vendored `installer-engine.*` they carry) must be
+      materially smaller than the pre-conversion baseline for those same
+      plugins — not just relocated. Record before/after line counts per
+      converted plugin in the Journal. A phase that leaves the corpus flat or
+      larger is a signal the engine is accreting per-service special-casing
+      and needs re-scoping, not a pass.
 
 ## Proposal
 
@@ -248,3 +320,26 @@ _Pending — Phase 0's audit findings land here before Phase 1 starts._
   giant cross-plugin PR.
 - Not yet started: Phase 0 audit. This effort's own plan has not yet cleared
   the automated review gate.
+
+### 2026-09-12 — Design decision: vendoring over git-fetch
+- Before Phase 1 started, evaluated an operator-proposed alternative: ship a
+  tiny per-plugin bootstrap stub that fetches the canonical engine directly
+  via `uv`'s pinned git+subdirectory VCS support instead of byte-vendoring it.
+  Confirmed technically feasible (`uv` is pip-compatible for
+  `git+URL@rev#subdirectory=path`, has its own git support).
+- Decided **against** git-fetch for now, in favor of byte-vendoring: git-fetch
+  adds a mandatory network dependency to every install/update (today's flow is
+  offline after the payload copy, save precedented uv/PyPI touches), and its
+  fetched-engine cache would reintroduce the exact "shared cache, concurrent
+  writers, partial-write corruption" hazard class that caused #6785/#6852 —
+  just relocated, not eliminated. It would also reverse
+  `docs/install-contract.md`'s documented self-containment constraint, which
+  is a bigger, separate decision than this effort's actual trigger requires.
+  Full reasoning recorded inline above Phase 1 (`### Design decision —
+  vendoring over git-fetch`).
+- Kept a clean off-ramp: `libs/installer-engine/` will carry a real
+  `pyproject.toml` from Phase 1 on, so it remains a valid git-fetch target
+  later if the cache/offline questions get solved in a future effort.
+- Added an explicit non-goal + Validation Plan item: the vendored corpus must
+  actually shrink per converted plugin, not just relocate the same line count
+  — tracking before/after line counts per plugin going forward.
