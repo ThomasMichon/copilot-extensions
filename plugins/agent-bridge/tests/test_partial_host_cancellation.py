@@ -145,3 +145,47 @@ async def test_cancelled_host_launch_aborts_or_retains_retry_authority(
         await manager.end_session(session.session_id, force=True)
         assert manager._host_index.get(session.session_id) is None
         assert manager._pending_host_launches == {}
+
+
+@pytest.mark.asyncio
+async def test_durable_container_marker_blocks_resume_without_host_index(
+    tmp_db, tmp_path, monkeypatch,
+):
+    session_id = "example-session"
+    target = SpawnTarget(
+        type="command",
+        container={"name": "example-container", "launch_pending_session_id": session_id},
+    )
+    tmp_db.create_session(
+        session_id, "example-agent", None, ".", "command", "stopped",
+        time.time(), target_json=target.to_json(),
+    )
+    tmp_db.update_session_acp_id(session_id, "example-acp")
+    manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path / "hosts"))
+    attach = AsyncMock(side_effect=AssertionError("pending host must not be resumed"))
+    monkeypatch.setattr(manager, "_try_reattach_live_host", attach)
+    with pytest.raises(RemoteSpawnCleanupPendingError, match="cleanup is pending"):
+        await manager.resume_session(session_id)
+    attach.assert_not_awaited()
+    assert manager._host_index.get(session_id) is None
+    assert manager.get_session(session_id).target.container["launch_pending_session_id"] == session_id
+
+
+def test_dead_host_pruning_retains_partial_launch_authority(tmp_db, tmp_path, monkeypatch):
+    from agent_bridge.session_host.host_index import HostRecord
+
+    session_id = "example-session"
+    tmp_db.create_session(
+        session_id, "example-agent", None, ".", "local", "starting", time.time(),
+    )
+    manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path / "hosts"))
+    record = HostRecord(
+        session_id=session_id, port=51000, host_pid=123, child_pid=456,
+        extra={"launch_cleanup_pending": True},
+    )
+    manager._host_index.register(record)
+    alive = Mock(return_value=False)
+    monkeypatch.setattr(manager, "_rec_host_alive", alive)
+    manager._prune_dead_hosts()
+    alive.assert_not_called()
+    assert manager._host_index.get(session_id) == record

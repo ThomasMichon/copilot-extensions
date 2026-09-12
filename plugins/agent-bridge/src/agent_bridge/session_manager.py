@@ -2057,6 +2057,8 @@ class SessionManager:
         if self._host_index is None:
             return
         for rec in self._host_index.all():
+            if (getattr(rec, "extra", None) or {}).get("launch_cleanup_pending"):
+                continue
             session = self._sessions.get(rec.session_id)
             if session is not None and (
                 session._lifecycle_lock.locked()
