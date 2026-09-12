@@ -1056,3 +1056,41 @@ there remains explicitly out of scope.
 Remaining #736-adjacent open work not picked up this session: #744
 (work-coalescing singleton tier design).
 
+### 2026-09-12 — #744 design doc: `docs/patterns/work-coalescing-singleton.md`
+
+Picked up #744 (the only remaining #736 sub-issue). Per the effort's own
+design-first sequencing convention, landed the **design doc** first, before
+any helper/consumer code:
+
+- New `docs/patterns/work-coalescing-singleton.md`, generalizing
+  `agent-worktrees`' existing `hook_ipc.py`/`list_cache.py` (the reference
+  implementation) into a reusable shape: the wire protocol (subscribe /
+  coalesced request / release), the two-phase timeout budget (boot-wait vs.
+  per-request deadline — a cold classify pass and a cold MCP server boot need
+  far more than the existing 1s hot-hook-decision timeout), the explicit
+  ref-count + bounded-linger idle-exit algorithm (liveness-reaped, not only
+  clean-disconnect, so a crashed subscriber can't pin the daemon up forever),
+  and the always-correct inline fallback invariant.
+- Named the two consumers against this shared shape: **#2323** (agent-
+  worktrees resident classify/list accelerator — still open, not yet
+  implemented; verified via `gh issue view 2323` rather than assumed done)
+  and the **agent-mcp multiplexer** (not started — a per-`(host, server)`
+  daemon strictly gated by identity/credential equivalence, with a direct-
+  bridge fallback).
+- Added new validation scenarios for the adversarial mock harness (extending
+  Phase 4b(ii)'s existing suite): cold-boot-and-wait-for-port, concurrent-
+  callers-during-cold-boot, ref-counted-exit-after-linger, fallback-to-
+  direct-computation-on-boot-timeout, and (agent-mcp-specific) credential-
+  mismatch-never-pools.
+- Added a row to `docs/patterns/README.md`'s index.
+- Deliberately **not** in this PR (per the effort's own guidance not to
+  treat #744 as a quick mechanical fix): the reusable `libs/work-coalescing-
+  singleton/` helper extraction, and both consumer implementations (#2323's
+  daemon extension, the agent-mcp multiplexer itself). Each is its own
+  follow-up PR on top of this design, landed independently.
+
+Remaining under #744 (and thus #736): extract the reusable helper library;
+implement #2323 against it; implement the agent-mcp multiplexer against it.
+None of these should land as one large diff — see the design doc's own
+"Sequencing" section.
+
