@@ -999,3 +999,32 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   `1.7.7-dev70` -> `dev71`). Full plugin suite: 4197 passed / 20 skipped / 3
   pre-existing unrelated installer-binstub failures (same three noted
   throughout this effort, confirmed unaffected).
+- **PR #2494 review response (stages 12/13, five rounds).** Copilot's review
+  caught a real progression of Stage 13 correctness issues, each fixed and
+  re-reviewed: (1) Stage 13's dedup was a `read_events()` check-then-act
+  across concurrent processes (the successor's sessionStart and the
+  resident monitor's retire) -- replaced with an atomic exclusive-create
+  claim file; (2) the claim key used the lossy
+  `_monitor_handoff_claim_segment()` sanitization, letting distinct tokens
+  (e.g. `task:1` / `task_1`) collide -- replaced with a sha256 digest of the
+  exact (worktree, token) pair; (3) a detected logger write failure left the
+  claim permanently consumed with no retry path -- added a
+  `log_event_failure_count()`-based rollback; (4) **HIGH severity**: the
+  rollback itself could race a losing caller's own `FileExistsError` check,
+  so a loser now waits briefly and retries the claim if it observes the
+  holder's rollback rather than just giving up; (5) the claim directory's
+  `mkdir()` wasn't inside the same `OSError` guard as the claim file itself.
+  Also fixed a missing `launch_id` on the Stage 13 event and a test variable
+  typo, and replaced a sequential "race" test that would have passed even
+  against the old broken implementation with a real
+  `threading.Barrier`-synchronized concurrent test. Every finding was
+  replied to individually (citing the fixing commit + new test), explicitly
+  resolved via GraphQL `resolveReviewThread`, and a fresh review requested
+  each round -- the fifth round returned zero new findings (all nine review
+  threads resolved). `agent-worktrees` version held at `1.5.5-dev77`
+  throughout (all five commits landed in the same still-open PR; only the
+  final shipped version needs to differ from the PR's base per the
+  version-bump policy). PR #2494 merged via `pr-merge --now`. **Phase 2 is
+  now fully complete: all 13 stages of the handoff lifecycle are
+  instrumented, tested, and merged.** Next: Phase 3 (durable per-project
+  trace store + cross-linking + `handoff-trace` CLI) and Phase 5 (docs).
