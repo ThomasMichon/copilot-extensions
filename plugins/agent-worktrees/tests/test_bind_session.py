@@ -128,6 +128,45 @@ class TestBindSession:
         assert closing[0]["session_id"] == "old"
         assert closing[0]["successor_session_id"] == "new"
 
+    def test_stage_10_and_11_carry_the_mux_pane_launch_id(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        """#2457 review finding: bind-session runs in the mux pane, whose
+        environment carries WORKTREE_LAUNCH_ID -- Stage 10/11 events must
+        carry it too, or they drop out of ``activity --launch-id`` and break
+        flow correlation."""
+        _save_record(tmp_tracking_dir, "wt-ack3", "/tmp/src/wt-ack3")
+        tracking.register_session("wt-ack3", "old")
+        rec = load_record(tmp_tracking_dir / "wt-ack3.yaml")
+        tracking.open_handoff(rec, "old", "task-launch")
+        captured: dict = {}
+        _neutralize(monkeypatch, captured)
+        monkeypatch.setenv("WORKTREE_LAUNCH_ID", "flow-launch-1")
+
+        recorded: list[tuple[str, dict]] = []
+        real_log_event = activity.log_event
+
+        def _capture(event, **kwargs):
+            recorded.append((event, kwargs))
+            return real_log_event(event, **kwargs)
+
+        monkeypatch.setattr(activity, "log_event", _capture)
+
+        rc = m.cmd_bind_session(_args(
+            worktree_dir="/tmp/src/wt-ack3",
+            session_id="new",
+            handoff_token="task-launch",
+        ))
+
+        assert rc == 0
+        claimed = [kw for ev, kw in recorded if ev == "handoff_successor_claimed"]
+        closing = [
+            kw for ev, kw in recorded
+            if ev == "handoff_pickup_confirmed_predecessor_closing"
+        ]
+        assert claimed[0]["launch_id"] == "flow-launch-1"
+        assert closing[0]["launch_id"] == "flow-launch-1"
+
     def test_binds_from_worktree_dir(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
     ):

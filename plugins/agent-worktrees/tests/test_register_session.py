@@ -213,6 +213,43 @@ class TestRegisterSessionStdin:
         assert "handoff_successor_claimed" not in recorded
         assert "handoff_pickup_confirmed_predecessor_closing" not in recorded
 
+    def test_claim_after_a_confirmed_predecessor_retire_only_emits_stage_10(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        """#2457 review finding: the resident monitor's own retire flow can
+        already have stamped Stage 11 (`handoff_predecessor_retire`,
+        outcome="gone") for this token BEFORE the successor's own
+        `--handoff-token` claim runs (retirement is gated on candidate
+        presence, not on this link). In that case this call site must emit
+        Stage 10 only -- a second Stage 11 record for the same handoff would
+        be a duplicate."""
+        _save_record(tmp_tracking_dir, "wt-already-retired", "/tmp/src/wt-ar")
+        tracking.register_session("wt-already-retired", "old")
+        rec = load_record(tmp_tracking_dir / "wt-already-retired.yaml")
+        tracking.open_handoff(rec, "old", "task-gone")
+        activity.log_event(
+            "handoff_predecessor_retire", worktree_id="wt-already-retired",
+            session_id="old", handoff_token="task-gone", outcome="gone",
+        )
+
+        recorded: list[str] = []
+        real_log_event = activity.log_event
+
+        def _capture(event, **kwargs):
+            recorded.append(event)
+            return real_log_event(event, **kwargs)
+
+        monkeypatch.setattr(activity, "log_event", _capture)
+
+        rc = m.cmd_register_session(_args(
+            worktree_id="wt-already-retired", session_id="new",
+            handoff_token="task-gone",
+        ))
+
+        assert rc == 0
+        assert recorded.count("handoff_successor_claimed") == 1
+        assert "handoff_pickup_confirmed_predecessor_closing" not in recorded
+
     def test_resolves_worktree_from_stdin_cwd(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
     ):

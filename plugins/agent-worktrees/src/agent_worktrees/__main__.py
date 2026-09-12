@@ -1408,9 +1408,7 @@ def cmd_execution_leg(args) -> int:
                             reservation_path.unlink()
                             reservation = None
                             if args.action in {"set", "clear", "release"}:
-                                _json_output(
-                                    _execution_leg_payload(worktree_id, current)
-                                )
+                                _json_output(_execution_leg_payload(worktree_id, current))
                                 return 0
                         elif (
                             int(reservation.get("reserved_revision") or -1)
@@ -1429,12 +1427,8 @@ def cmd_execution_leg(args) -> int:
                                 owner_live is None
                                 and not _reservation_expired(reservation, now=now)
                             ):
-                                owner = str(
-                                    reservation.get("owner") or "<unknown>"
-                                )
-                                expires_at = str(
-                                    reservation.get("expires_at") or "<unknown>"
-                                )
+                                owner = str(reservation.get("owner") or "<unknown>")
+                                expires_at = str(reservation.get("expires_at") or "<unknown>")
                                 raise ValueError(
                                     "execution-leg lifecycle operation is already "
                                     f"reserved by {owner} until {expires_at}"
@@ -1442,9 +1436,7 @@ def cmd_execution_leg(args) -> int:
                             previous = _binding_from_payload(
                                 reservation.get("previous_execution_leg")
                             )
-                            current_payload = (
-                                current.to_dict() if current is not None else None
-                            )
+                            current_payload = (current.to_dict() if current is not None else None)
                             previous_payload = (
                                 previous.to_dict() if previous is not None else None
                             )
@@ -1558,18 +1550,14 @@ def cmd_execution_leg(args) -> int:
 
                     if args.action == "renew":
                         if reservation is None:
-                            raise ValueError(
-                                "execution-leg lifecycle operation is not reserved"
-                            )
+                            raise ValueError("execution-leg lifecycle operation is not reserved")
                         if reservation.get("token") != args.reservation_token:
                             raise ValueError("execution-leg reservation token mismatch")
                         if (
                             int(reservation.get("reserved_revision") or -1)
                             != current_revision
                         ):
-                            raise ValueError(
-                                "execution-leg reservation revision changed"
-                            )
+                            raise ValueError("execution-leg reservation revision changed")
                         now = datetime.now(timezone.utc)
                         reservation["expires_at"] = (
                             now + timedelta(seconds=args.lease_seconds)
@@ -23469,13 +23457,17 @@ def _emit_register_session_result(args: argparse.Namespace, result: dict) -> Non
 def _emit_handoff_claim_stages(
     wt_id: str, session_id: str, linked_handoff, *, launch_id: str | None = None,
 ) -> None:
-    """Emit Stage 10 (claimed) + Stage 11 (predecessor closing) together.
+    """Emit Stage 10 (claimed) always; Stage 11 (predecessor closing) only if
+    the resident-monitor's own retire flow hasn't already recorded it.
 
     ``linked_handoff`` is ``tracking.register_session()``'s return: the
     ``SessionHandoff`` it *just* linked (head authoritatively transferred), or
-    ``None`` for no fresh transfer. Per the effort README, both stages fire at
-    this exact call site: today's monitor retires the predecessor right after
-    the head transfers, not after a separate later acknowledgement.
+    ``None`` for no fresh transfer. The monitor's `handoff_predecessor_retire`
+    (outcome="gone") is ALSO mapped to Stage 11 (Phase 1) and can fire before
+    this call site (retirement is gated on candidate presence, not on this
+    link) -- checking for it first prevents a double Stage-11 record for the
+    same token while still covering the common case where that outcome never
+    fires (observed "left-running", not "gone" -- Phase 4's open question).
     """
     if linked_handoff is None:
         return
@@ -23483,6 +23475,15 @@ def _emit_handoff_claim_stages(
         "handoff_successor_claimed", worktree_id=wt_id, session_id=session_id,
         handoff_token=linked_handoff.token,
         predecessor_session_id=linked_handoff.predecessor, launch_id=launch_id)
+    already_retired = any(
+        str(e.get("handoff_token") or "").strip() == linked_handoff.token
+        and e.get("outcome") == "gone"
+        for e in activity.read_events(
+            worktree_id=wt_id, event="handoff_predecessor_retire",
+        )
+    )
+    if already_retired:
+        return
     activity.log_event(
         "handoff_pickup_confirmed_predecessor_closing", worktree_id=wt_id,
         session_id=linked_handoff.predecessor, successor_session_id=session_id,
@@ -23910,7 +23911,10 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
         source="bind-session",
         pane=pane_id,
     )
-    _emit_handoff_claim_stages(wt_id, session_id, linked_handoff)
+    _emit_handoff_claim_stages(
+        wt_id, session_id, linked_handoff,
+        launch_id=os.environ.get("WORKTREE_LAUNCH_ID"),
+    )
 
     # Record the bind in the worktree's own memory: a session-tagged `bind`
     # entry, so the history shows WHEN a session declared ownership (and a

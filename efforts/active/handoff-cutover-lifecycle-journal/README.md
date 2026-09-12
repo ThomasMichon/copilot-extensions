@@ -918,3 +918,25 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   installer/binstub failures (confirmed still present against `origin/main`
   before this change). `agent-worktrees` bumped 1.5.5-dev75 -> dev76.
   Remaining Phase 2 stages: 12, 13.
+- **PR #2493 review response (stages 7/10/11).** Copilot's review caught two
+  real Medium findings and one Low nit. (1) The resident monitor's own retire
+  flow can stamp `handoff_predecessor_retire` (outcome="gone") as Stage 11
+  *before* a successor's later `--handoff-token` claim runs -- retirement is
+  gated on candidate presence, not on the link_handoff() call this PR
+  instruments -- so the new emitter could double-record Stage 11 for the same
+  handoff. Fixed by having `_emit_handoff_claim_stages()` check
+  `activity.read_events()` for an already-stamped `outcome="gone"` retire
+  event for the exact token before emitting its own Stage 11, so the terminal
+  retire signal (when it fires) wins and the new link-based signal only fills
+  the (common, per the Phase 1 case study) gap where it never does. (2)
+  `cmd_bind_session`'s call to the new helper omitted `launch_id`, dropping
+  Stage 10/11 out of `activity --launch-id` correlation for the normal mux
+  pane bind path (which carries `WORKTREE_LAUNCH_ID` in its environment, same
+  as `cmd_register_session` already threads through) -- fixed by passing
+  `os.environ.get("WORKTREE_LAUNCH_ID")` explicitly. New tests:
+  `test_claim_after_a_confirmed_predecessor_retire_only_emits_stage_10` and
+  `test_stage_10_and_11_carry_the_mux_pane_launch_id`. `__main__.py` needed
+  another compaction pass (six more clean single-line collapses) to stay at
+  its module-size ceiling after the added dedup-check code. Full plugin
+  suite unaffected outside the touched tests. `agent-worktrees` version
+  unchanged at `1.5.5-dev76` (same open PR, not yet merged).
