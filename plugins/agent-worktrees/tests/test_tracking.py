@@ -30,6 +30,7 @@ from agent_worktrees.tracking import (
     load_record,
     load_record_by_id,
     mark_resumed,
+    open_handoff,
     parse_claim_ref,
     register_session,
     release_all_resources,
@@ -857,6 +858,25 @@ completed_at: null
 class TestSessionRegistration:
     """Test hook-invoked session registration."""
 
+    @staticmethod
+    def _new_record(tracking_dir: Path, wt_id: str) -> None:
+        rec = WorktreeRecord(
+            worktree_id=wt_id,
+            branch=f"worktree/{wt_id}",
+            worktree_path=f"/tmp/{wt_id}",
+            repo="test-repo",
+            machine="test",
+            platform="wsl",
+            started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00",
+            resume_count=0,
+            title=None,
+            status="active",
+            completed_at=None,
+            sessions=[],
+        )
+        save_record(rec, tracking_dir / f"{wt_id}.yaml")
+
     def test_register_new_session(self, tmp_tracking_dir: Path, monkeypatch_config):
         rec = WorktreeRecord(
             worktree_id="reg-wt",
@@ -1069,6 +1089,68 @@ class TestSessionRegistration:
         loaded = load_record(tmp_tracking_dir / "noop-wt.yaml")
         assert len(loaded.sessions) == 1
         assert loaded.sessions[0].ended_at is None
+
+    def test_register_session_returns_fresh_handoff_for_new_entry(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        """#2457 Stage 10: a fresh session entry consuming a pending token via
+        ``handoff_token`` gets its head transferred, and the call reports the
+        just-linked SessionHandoff so callers can emit Stage 10/11 exactly
+        once."""
+        self._new_record(tmp_tracking_dir, "wt-fresh-link")
+        register_session("wt-fresh-link", "old")
+        rec = load_record(tmp_tracking_dir / "wt-fresh-link.yaml")
+        open_handoff(rec, "old", "token-a")
+
+        linked = register_session("wt-fresh-link", "new", handoff_token="token-a")
+
+        assert linked is not None
+        assert linked.token == "token-a"
+        assert linked.predecessor == "old"
+        assert linked.successor == "new"
+        rec = load_record(tmp_tracking_dir / "wt-fresh-link.yaml")
+        assert rec.resolved_head_session == "new"
+
+    def test_register_session_returns_fresh_handoff_for_existing_entry(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        """The same, but the successor session is already tracked (e.g. a
+        candidate registered earlier via associate_handoff_candidate)."""
+        self._new_record(tmp_tracking_dir, "wt-existing-link")
+        register_session("wt-existing-link", "old")
+        register_session("wt-existing-link", "new")
+        rec = load_record(tmp_tracking_dir / "wt-existing-link.yaml")
+        open_handoff(rec, "old", "token-b")
+
+        linked = register_session("wt-existing-link", "new", handoff_token="token-b")
+
+        assert linked is not None
+        assert linked.token == "token-b"
+        assert linked.predecessor == "old"
+        assert linked.successor == "new"
+
+    def test_register_session_reports_none_for_an_already_linked_token(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        """A second call for an already-linked token is idempotent at the
+        tracking layer (link_handoff no-ops) and must report no fresh link,
+        so callers don't re-emit Stage 10/11."""
+        self._new_record(tmp_tracking_dir, "wt-idempotent")
+        register_session("wt-idempotent", "old")
+        rec = load_record(tmp_tracking_dir / "wt-idempotent.yaml")
+        open_handoff(rec, "old", "token-c")
+        first = register_session("wt-idempotent", "new", handoff_token="token-c")
+        assert first is not None
+
+        second = register_session("wt-idempotent", "new", handoff_token="token-c")
+
+        assert second is None
+
+    def test_register_session_returns_none_without_a_handoff_token(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        self._new_record(tmp_tracking_dir, "wt-no-token")
+        assert register_session("wt-no-token", "solo") is None
 
 
 # ---------------------------------------------------------------------------

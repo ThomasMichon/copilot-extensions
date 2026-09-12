@@ -303,13 +303,23 @@ renumbering from the "acknowledges handoff" step onward.)
       wrapper over `log_event()`) — already covered by
       `test_log_event_stamps_known_handoff_stage`. Ticked off as a Phase 2
       confirmation, same pattern as stage 4.
-- [ ] Stage 7 (`handoff_host_acknowledged`) — new: emit when the resident
+- [x] Stage 7 (`handoff_host_acknowledged`) — new: emit when the resident
       status monitor's `_monitor_pending_handoff_request()` first observes and
       accepts the pending handoff, distinct from the later claim. (Per the
       scope decision above, this covers the resident-monitor runner only —
       agent-bridge's independent `handoff-request` route is documented in
       Context as a real alternate path but is explicitly out of scope for
       this effort's instrumentation; see the deferred follow-on note below.)
+      **Confirmed already landed (no code change):** `handoff_cutover_claim`
+      (emitted by `_monitor_claim_handoff_cutover`, called from
+      `_monitor_pending_handoff_request`) already fires with
+      `outcome="acquired"` for exactly the first monitor pass that accepts a
+      pending handoff, and Phase 1's `HANDOFF_STAGE_MAP` + `_HANDOFF_STAGE_GATE`
+      already stamp only that outcome as Stage 7 (`already-claimed`/`error`
+      outcomes are gated out) — covered by
+      `test_log_event_maps_existing_events_to_their_stage` and
+      `test_log_event_does_not_stamp_a_failed_or_duplicate_claim`. Ticked off
+      as a Phase 2 confirmation, same pattern as stages 4/6.
 - [x] Stage 8 (`handoff_successor_spawn_started`) — emit at the start of
       `_handoff_cutover_spawn_result` / `mux_new_window`, before success is
       known, so a spawn that later fails still leaves a trace.
@@ -326,7 +336,7 @@ renumbering from the "acknowledges handoff" step onward.)
       `tracking.associate_handoff_candidate()` succeeds (guarded by the same
       `candidate_token` check), carrying `worktree_id`/`session_id`/
       `handoff_token`.
-- [ ] Stage 10 (`handoff_successor_claimed`) — **must be emitted at the point
+- [x] Stage 10 (`handoff_successor_claimed`) — **must be emitted at the point
       the tracking record's head is authoritatively transferred**, not from
       `associate_handoff_candidate()` (which only records a candidate without
       takeover) and not from `consume_handoff` (which never calls
@@ -339,12 +349,25 @@ renumbering from the "acknowledges handoff" step onward.)
       claim/retire sequence) and instrument stage 10 there, not at candidate
       association. Log the successor's later `consume_handoff` call as a
       *separate* "baton delivery consumed" event, not conflated with stage 10.
-- [ ] Stage 11 (`handoff_pickup_confirmed_predecessor_closing`) — emit
+      **Landed:** the exact call site is `tracking.register_session()`'s
+      internal `link_handoff()` invocation (reached via the `--handoff-token`
+      CLI arg on both `register-session` and `bind-session` — NOT the separate
+      `--handoff-candidate-token` path that only feeds stage 9). `register_session()`
+      now returns the freshly-linked `SessionHandoff` (or `None` for no fresh
+      transfer, including an idempotent re-link of an already-linked token), and
+      `cmd_register_session`/`cmd_bind_session` emit `handoff_successor_claimed`
+      via a shared `_emit_handoff_claim_stages()` helper whenever a fresh link
+      is reported.
+- [x] Stage 11 (`handoff_pickup_confirmed_predecessor_closing`) — emit
       immediately after the same `tracking.link_handoff()` call site used for
       stage 10 (today's monitor retires the predecessor right after the head
       transfers, not after a separate later successor acknowledgement) — keep
       10 and 11 adjacent in the same code path until/unless a future change
       makes retirement wait for an explicit `consume_handoff` acknowledgement.
+      **Landed together with Stage 10** (same `_emit_handoff_claim_stages()`
+      call): `handoff_pickup_confirmed_predecessor_closing` is emitted keyed by
+      the *predecessor's* session id (`linked_handoff.predecessor`), with
+      `successor_session_id` carrying the new head.
 - [ ] Stage 12 (`session_end_bound`) — a `sessionEnd` hook and its
       `session_ended` deregistration event **already exist**; extend that
       existing path to also emit `session_end_bound` with the stage/linkage
@@ -851,3 +874,69 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   not in isolation). Fixed by explicitly popping the var in the three
   affected tests before building each subprocess's env. Full plugin suite:
   4184 passed / 20 skipped / same 3 pre-existing unrelated failures.
+- **Phase 2 continuation: stages 7, 10, 11 landed.** Stage 7
+  (`handoff_host_acknowledged`) needed **no code change** — the pre-existing
+  `handoff_cutover_claim` event (emitted by `_monitor_claim_handoff_cutover`,
+  called from `_monitor_pending_handoff_request`) already fires with
+  `outcome="acquired"` at exactly the resident monitor's first
+  observe-and-accept of a pending handoff, and Phase 1's `HANDOFF_STAGE_MAP`
+  already stamps only that outcome as Stage 7 — confirmed via
+  `test_log_event_maps_existing_events_to_their_stage` and
+  `test_log_event_does_not_stamp_a_failed_or_duplicate_claim`, ticked off as a
+  confirmation same as stages 4/6. Stages 10 (`handoff_successor_claimed`) and
+  11 (`handoff_pickup_confirmed_predecessor_closing`) needed a real new
+  emitter: located the exact head-transfer call site as
+  `tracking.register_session()`'s internal `link_handoff()` invocation
+  (reached via the `--handoff-token` CLI arg on both `register-session` and
+  `bind-session` -- distinct from the separate `--handoff-candidate-token`
+  path that only feeds Stage 9). `register_session()` now returns the
+  freshly-linked `SessionHandoff` (or `None` when no fresh transfer happened,
+  including an idempotent re-link of an already-linked token, so a resumed
+  session or duplicate hook call never double-emits), via a new
+  `_link_if_fresh()` closure that compares the handoff's state *before*
+  calling `link_handoff()` against its state after. `cmd_register_session` and
+  `cmd_bind_session` both emit Stage 10 + Stage 11 together through a shared
+  `_emit_handoff_claim_stages()` helper whenever a fresh link is reported --
+  Stage 11 is keyed by the *predecessor's* session id
+  (`linked_handoff.predecessor`) with `successor_session_id` carrying the new
+  head, matching the README's "keep 10 and 11 adjacent in the same code path"
+  guidance. Both `tracking.py` and `__main__.py` sit at their exact
+  module-size-baseline ceilings, so each addition was offset by an
+  equal-or-greater compaction elsewhere in the same file (collapsing
+  multi-line `raise`/dict-field/call-arg literals that already fit the
+  99-column limit onto one line) -- `tools/check-module-size.py` passes at
+  zero slack in both files, and `ruff check` shows no new findings (the
+  pre-existing `E501`/`I001`/`RUF003` findings in `__main__.py` are unrelated
+  and unchanged). New tests: `test_tracking.py` (`register_session()`'s
+  return-value contract across the existing-entry and new-entry code paths,
+  the already-linked idempotency case, and the no-token case),
+  `test_register_session.py` (Stage 10/11 emission via `--handoff-token`,
+  ordering vs. Stage 9, and idempotent non-re-emission on a second hook
+  call), `test_bind_session.py` (Stage 10/11 emission via `bind-session
+  --handoff-token`, reusing the existing candidate-acknowledgement fixture).
+  Full plugin suite: 4191 passed / 20 skipped / same 3 pre-existing unrelated
+  installer/binstub failures (confirmed still present against `origin/main`
+  before this change). `agent-worktrees` bumped 1.5.5-dev75 -> dev76.
+  Remaining Phase 2 stages: 12, 13.
+- **PR #2493 review response (stages 7/10/11).** Copilot's review caught two
+  real Medium findings and one Low nit. (1) The resident monitor's own retire
+  flow can stamp `handoff_predecessor_retire` (outcome="gone") as Stage 11
+  *before* a successor's later `--handoff-token` claim runs -- retirement is
+  gated on candidate presence, not on the link_handoff() call this PR
+  instruments -- so the new emitter could double-record Stage 11 for the same
+  handoff. Fixed by having `_emit_handoff_claim_stages()` check
+  `activity.read_events()` for an already-stamped `outcome="gone"` retire
+  event for the exact token before emitting its own Stage 11, so the terminal
+  retire signal (when it fires) wins and the new link-based signal only fills
+  the (common, per the Phase 1 case study) gap where it never does. (2)
+  `cmd_bind_session`'s call to the new helper omitted `launch_id`, dropping
+  Stage 10/11 out of `activity --launch-id` correlation for the normal mux
+  pane bind path (which carries `WORKTREE_LAUNCH_ID` in its environment, same
+  as `cmd_register_session` already threads through) -- fixed by passing
+  `os.environ.get("WORKTREE_LAUNCH_ID")` explicitly. New tests:
+  `test_claim_after_a_confirmed_predecessor_retire_only_emits_stage_10` and
+  `test_stage_10_and_11_carry_the_mux_pane_launch_id`. `__main__.py` needed
+  another compaction pass (six more clean single-line collapses) to stay at
+  its module-size ceiling after the added dedup-check code. Full plugin
+  suite unaffected outside the touched tests. `agent-worktrees` version
+  unchanged at `1.5.5-dev76` (same open PR, not yet merged).

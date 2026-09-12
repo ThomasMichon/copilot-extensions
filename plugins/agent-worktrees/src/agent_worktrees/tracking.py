@@ -111,9 +111,7 @@ def _bounded_nonnegative_int(value: object, *, field: str) -> int:
     ):
         raise ValueError(f"{field} must be a finite integer")
     if value < 0 or value > MAX_PERSISTED_COUNTER:
-        raise ValueError(
-            f"{field} must be between 0 and {MAX_PERSISTED_COUNTER}"
-        )
+        raise ValueError(f"{field} must be between 0 and {MAX_PERSISTED_COUNTER}")
     return int(value)
 
 
@@ -167,9 +165,7 @@ def _dispatch_attempt_from_mapping(value: object) -> DispatchAttempt | None:
             return None
         strings[key] = normalized
     try:
-        attempt = _bounded_nonnegative_int(
-            value.get("attempt"), field="dispatch_attempt.attempt"
-        )
+        attempt = _bounded_nonnegative_int(value.get("attempt"), field="dispatch_attempt.attempt")
     except (TypeError, ValueError, OverflowError):
         return None
     if attempt <= 0:
@@ -422,9 +418,7 @@ class ClaimRef:
 
     def canonical(self) -> str:
         """Render back to the canonical string form."""
-        return format_claim_ref(
-            self.machine, self.project, self.worktree_id, self.session
-        )
+        return format_claim_ref(self.machine, self.project, self.worktree_id, self.session)
 
 
 #: Reserved ``worktree_id`` sentinel naming a repo's **anchor** checkout (its
@@ -585,24 +579,16 @@ class WorktreeRecord:
     completed_at: str | None
     sessions: list[SessionEntry] | None = field(default=None)
     session_backend: SessionBackendBinding | None = None
-    session_backend_opaque: bool = field(
-        default=False, repr=False, compare=False
-    )
-    session_backend_raw: object = field(
-        default=None, repr=False, compare=False
-    )
+    session_backend_opaque: bool = field(default=False, repr=False, compare=False)
+    session_backend_raw: object = field(default=None, repr=False, compare=False)
     # Generic, provider-neutral successor to ``session_backend`` (see
     # ``ExecutionLegBinding``). Parsed only from an actual on-disk
     # ``execution_leg:`` key -- never derived from a legacy ``session_backend``
     # record here (that translation is a pure, on-demand read via
     # ``derive_execution_leg()`` so nothing here changes what gets written).
     execution_leg: ExecutionLegBinding | None = None
-    execution_leg_opaque: bool = field(
-        default=False, repr=False, compare=False
-    )
-    execution_leg_raw: object = field(
-        default=None, repr=False, compare=False
-    )
+    execution_leg_opaque: bool = field(default=False, repr=False, compare=False)
+    execution_leg_raw: object = field(default=None, repr=False, compare=False)
     # PR records (PR mode).  A worktree can track multiple PRs -- serially
     # (re-PR after a merge) or in parallel -- each self-describing (including
     # its target ``repo``).  Empty when the worktree has not entered the PR
@@ -1011,9 +997,7 @@ def _normalize_controller_ref(
 ) -> tuple[str, ClaimRef]:
     """Validate and canonicalize one controller ClaimRef."""
     if not controller_ref or controller_ref.count("#") > 1:
-        raise ControllerRelationError(
-            "controller_ref must be a worktree ClaimRef"
-        )
+        raise ControllerRelationError("controller_ref must be a worktree ClaimRef")
     body, _, ref_session = controller_ref.partition("#")
     parts = body.split("/")
     if len(parts) not in (1, 3) or any(not part for part in parts):
@@ -1023,9 +1007,7 @@ def _normalize_controller_ref(
         )
     parsed = parse_claim_ref(controller_ref)
     if parsed is None or not parsed.worktree_id:
-        raise ControllerRelationError(
-            "controller_ref must identify a worktree"
-        )
+        raise ControllerRelationError("controller_ref must identify a worktree")
     if any(token in parsed.worktree_id for token in ("/", "\\", "\x00")):
         raise ControllerRelationError(
             "controller_ref worktree_id must be one path-safe identifier"
@@ -1036,9 +1018,7 @@ def _normalize_controller_ref(
             "controller_ref session does not match controller_session_id"
         )
     if exact_session and not _valid_relation_session_id(exact_session):
-        raise ControllerRelationError(
-            f"invalid controller session id {exact_session!r}"
-        )
+        raise ControllerRelationError(f"invalid controller session id {exact_session!r}")
     normalized = format_claim_ref(
         parsed.machine,
         parsed.project,
@@ -2201,7 +2181,9 @@ def load_record(path: Path) -> WorktreeRecord:
                     raise ControllerRelationError(
                         "controller kind does not match its identity"
                     )
-                revision = _bounded_nonnegative_int(raw.get("relation_revision", 0), field="controller relation_revision")
+                revision = _bounded_nonnegative_int(
+                    raw.get("relation_revision", 0), field="controller relation_revision"
+                )
                 if revision <= 0 or raw.get("state", "active") not in ("active", "ended"):
                     raise ControllerRelationError("invalid controller relation state")
                 created = raw.get("created_at") or started_at_raw
@@ -5076,11 +5058,16 @@ def register_session(
     recorded_at: str | None = None,
     handoff_token: str | None = None,
     initial_projection: bool = False,
-) -> None:
-    """Register a Copilot session against a worktree (called from sessionStart hook)."""
+) -> SessionHandoff | None:
+    """Register a Copilot session against a worktree (called from sessionStart hook).
+
+    Returns the :class:`SessionHandoff` this call *newly* linked (the head
+    authoritatively transferred to ``session_id``), or ``None`` when no fresh
+    link happened -- callers use this to emit Stage 10/11 events exactly once.
+    """
     yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
     if not yaml_path.exists():
-        return
+        return None
 
     with _RecordLock(yaml_path):
         record = load_record(yaml_path)
@@ -5098,6 +5085,21 @@ def register_session(
         observed_at = recorded_at or _now_iso()
         _ensure_head_ledger(record)
 
+        def _link_if_fresh() -> SessionHandoff | None:
+            """Link, reporting a fresh transfer only (idempotent re-links -> None)."""
+            prior = next(
+                (h for h in record.handoffs if h.token == handoff_token), None,
+            )
+            already_linked = (
+                prior is not None and prior.state == "linked"
+                and prior.successor == session_id
+            )
+            linked = link_handoff(
+                record, handoff_token, session_id,
+                linked_at=event_at, save=False,
+            )
+            return None if already_linked else linked
+
         # Dedupe -- update existing entry instead of appending
         for entry in record.sessions:
             if entry.session_id == session_id:
@@ -5113,15 +5115,14 @@ def register_session(
                     entry.pane_id = pane_id
                 if handoff_token:
                     try:
-                        link_handoff(
-                            record, handoff_token, session_id,
-                            linked_at=event_at, save=False,
-                        )
+                        linked_handoff = _link_if_fresh()
                     except SessionLifecycleError:
                         if activation_added:
                             _next_lifecycle_revision(record, session_id)
                         save_record(record)
                         raise
+                    save_record(record)
+                    return linked_handoff
                 elif (
                     record.resolved_head_session is None
                     and entry.state == "active"
@@ -5171,12 +5172,10 @@ def register_session(
             record._session_projection_initial_registration = initial_sessions
         # A successor claims one exact, previously opened handoff token. Merely
         # starting another session never steals the head.
+        linked_handoff = None
         if handoff_token:
             try:
-                link_handoff(
-                    record, handoff_token, session_id,
-                    linked_at=event_at, save=False,
-                )
+                linked_handoff = _link_if_fresh()
             except SessionLifecycleError:
                 save_record(record)
                 raise
@@ -5191,6 +5190,7 @@ def register_session(
                 at=event_at,
             )
         save_record(record)
+        return linked_handoff
 
 
 def _record_has_open_session(record: WorktreeRecord) -> bool:

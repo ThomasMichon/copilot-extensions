@@ -613,9 +613,7 @@ def _classify_from_cache(
     out: dict[str, git_ops.WorktreeStateInfo] = {}
     for rec in records:
         try:
-            fresh = tracking.load_record(
-                cfg.tracking_dir() / f"{rec.worktree_id}.yaml"
-            )
+            fresh = tracking.load_record(cfg.tracking_dir() / f"{rec.worktree_id}.yaml")
         except Exception:
             fresh = rec
         cached = fresh.git_state
@@ -629,9 +627,7 @@ def _classify_from_cache(
         else:
             state = git_ops.WorktreeState.UNKNOWN
         if session_ctx is not None:
-            state = git_ops.refine_state_with_session(
-                state, fresh.session_turns or 0
-            )
+            state = git_ops.refine_state_with_session(state, fresh.session_turns or 0)
         out[rec.worktree_id] = git_ops.WorktreeStateInfo(state=state)
     return out
 
@@ -1323,9 +1319,7 @@ def cmd_execution_leg(args) -> int:
             with tracking._RecordLock(yaml_path):
                 record = tracking.load_record(yaml_path)
             if record.execution_leg_opaque or record.session_backend_opaque:
-                raise ValueError(
-                    "worktree uses an unsupported hosted-session schema"
-                )
+                raise ValueError("worktree uses an unsupported hosted-session schema")
             binding = tracking.derive_execution_leg(record)
             _json_output(
                 _execution_leg_payload(
@@ -1342,9 +1336,7 @@ def cmd_execution_leg(args) -> int:
             if not args.provider:
                 raise ValueError("execution-leg set requires --provider")
             if args.binding_revision is None or args.binding_revision <= 0:
-                raise ValueError(
-                    "execution-leg set requires a positive --binding-revision"
-                )
+                raise ValueError("execution-leg set requires a positive --binding-revision")
             if not args.blob_file:
                 raise ValueError("execution-leg set requires --blob-file")
         if args.action in {"reserve", "renew"}:
@@ -1362,19 +1354,13 @@ def cmd_execution_leg(args) -> int:
             if not args.provider:
                 raise ValueError("execution-leg reserve requires --provider")
             if getattr(args, "operation", None) not in {"ensure", "dispose"}:
-                raise ValueError(
-                    "execution-leg reserve requires --operation ensure|dispose"
-                )
+                raise ValueError("execution-leg reserve requires --operation ensure|dispose")
             if not getattr(args, "reservation_owner", None):
-                raise ValueError(
-                    "execution-leg reserve requires --reservation-owner"
-                )
+                raise ValueError("execution-leg reserve requires --reservation-owner")
         if args.action in {"renew", "release"} and not getattr(
             args, "reservation_token", None
         ):
-            raise ValueError(
-                f"execution-leg {args.action} requires --reservation-token"
-            )
+            raise ValueError(f"execution-leg {args.action} requires --reservation-token")
 
         mutation_lock = yaml_path.with_suffix(".execution-leg.yaml")
         reservation_path = _execution_leg_reservation_path(yaml_path)
@@ -1385,9 +1371,7 @@ def cmd_execution_leg(args) -> int:
         ):
             record = tracking.load_record(yaml_path)
             repo = _repo_for_record(config, record) or config.default_repo
-            lifecycle_lock = fin.FinalizeLock(
-                Path(repo.worktree_root) / ".finalize.lock"
-            )
+            lifecycle_lock = fin.FinalizeLock(Path(repo.worktree_root) / ".finalize.lock")
             lifecycle_lock.acquire()
             try:
                 if not yaml_path.exists():
@@ -1395,17 +1379,13 @@ def cmd_execution_leg(args) -> int:
                 with tracking._RecordLock(yaml_path):
                     latest = tracking.load_record(yaml_path)
                     if latest.execution_leg_opaque:
-                        raise ValueError(
-                            "worktree uses a newer unsupported execution_leg schema"
-                        )
+                        raise ValueError("worktree uses a newer unsupported execution_leg schema")
                     if latest.session_backend_opaque:
                         raise ValueError(
                             "worktree uses a newer unsupported session_backend schema"
                         )
                     current = tracking.derive_execution_leg(latest)
-                    current_revision = (
-                        current.binding_revision if current is not None else 0
-                    )
+                    current_revision = (current.binding_revision if current is not None else 0)
                     reservation = (
                         _read_execution_leg_reservation(reservation_path)
                         if reservation_path.exists()
@@ -1415,32 +1395,20 @@ def cmd_execution_leg(args) -> int:
                         "committing",
                         "releasing",
                     }:
-                        result = _binding_from_payload(
-                            reservation.get("result_execution_leg")
-                        )
-                        current_payload = (
-                            current.to_dict() if current is not None else None
-                        )
-                        result_payload = (
-                            result.to_dict() if result is not None else None
-                        )
+                        result = _binding_from_payload(reservation.get("result_execution_leg"))
+                        current_payload = (current.to_dict() if current is not None else None)
+                        result_payload = (result.to_dict() if result is not None else None)
                         if current_payload == result_payload:
-                            supplied_token = getattr(
-                                args, "reservation_token", None
-                            )
+                            supplied_token = getattr(args, "reservation_token", None)
                             if (
                                 args.action in {"set", "clear", "release"}
                                 and reservation.get("token") != supplied_token
                             ):
-                                raise ValueError(
-                                    "execution-leg reservation token mismatch"
-                                )
+                                raise ValueError("execution-leg reservation token mismatch")
                             reservation_path.unlink()
                             reservation = None
                             if args.action in {"set", "clear", "release"}:
-                                _json_output(
-                                    _execution_leg_payload(worktree_id, current)
-                                )
+                                _json_output(_execution_leg_payload(worktree_id, current))
                                 return 0
                         elif (
                             int(reservation.get("reserved_revision") or -1)
@@ -1459,12 +1427,8 @@ def cmd_execution_leg(args) -> int:
                                 owner_live is None
                                 and not _reservation_expired(reservation, now=now)
                             ):
-                                owner = str(
-                                    reservation.get("owner") or "<unknown>"
-                                )
-                                expires_at = str(
-                                    reservation.get("expires_at") or "<unknown>"
-                                )
+                                owner = str(reservation.get("owner") or "<unknown>")
+                                expires_at = str(reservation.get("expires_at") or "<unknown>")
                                 raise ValueError(
                                     "execution-leg lifecycle operation is already "
                                     f"reserved by {owner} until {expires_at}"
@@ -1472,9 +1436,7 @@ def cmd_execution_leg(args) -> int:
                             previous = _binding_from_payload(
                                 reservation.get("previous_execution_leg")
                             )
-                            current_payload = (
-                                current.to_dict() if current is not None else None
-                            )
+                            current_payload = (current.to_dict() if current is not None else None)
                             previous_payload = (
                                 previous.to_dict() if previous is not None else None
                             )
@@ -1588,18 +1550,14 @@ def cmd_execution_leg(args) -> int:
 
                     if args.action == "renew":
                         if reservation is None:
-                            raise ValueError(
-                                "execution-leg lifecycle operation is not reserved"
-                            )
+                            raise ValueError("execution-leg lifecycle operation is not reserved")
                         if reservation.get("token") != args.reservation_token:
                             raise ValueError("execution-leg reservation token mismatch")
                         if (
                             int(reservation.get("reserved_revision") or -1)
                             != current_revision
                         ):
-                            raise ValueError(
-                                "execution-leg reservation revision changed"
-                            )
+                            raise ValueError("execution-leg reservation revision changed")
                         now = datetime.now(timezone.utc)
                         reservation["expires_at"] = (
                             now + timedelta(seconds=args.lease_seconds)
@@ -23496,6 +23454,42 @@ def _emit_register_session_result(args: argparse.Namespace, result: dict) -> Non
         print(text)
 
 
+def _emit_handoff_claim_stages(
+    wt_id: str, session_id: str, linked_handoff, *, launch_id: str | None = None,
+) -> None:
+    """Emit Stage 10 (claimed) always; Stage 11 (predecessor closing) only if
+    the resident-monitor's own retire flow hasn't already recorded it.
+
+    ``linked_handoff`` is ``tracking.register_session()``'s return: the
+    ``SessionHandoff`` it *just* linked (head authoritatively transferred), or
+    ``None`` for no fresh transfer. The monitor's `handoff_predecessor_retire`
+    (outcome="gone") is ALSO mapped to Stage 11 (Phase 1) and can fire before
+    this call site (retirement is gated on candidate presence, not on this
+    link) -- checking for it first prevents a double Stage-11 record for the
+    same token while still covering the common case where that outcome never
+    fires (observed "left-running", not "gone" -- Phase 4's open question).
+    """
+    if linked_handoff is None:
+        return
+    activity.log_event(
+        "handoff_successor_claimed", worktree_id=wt_id, session_id=session_id,
+        handoff_token=linked_handoff.token,
+        predecessor_session_id=linked_handoff.predecessor, launch_id=launch_id)
+    already_retired = any(
+        str(e.get("handoff_token") or "").strip() == linked_handoff.token
+        and e.get("outcome") == "gone"
+        for e in activity.read_events(
+            worktree_id=wt_id, event="handoff_predecessor_retire",
+        )
+    )
+    if already_retired:
+        return
+    activity.log_event(
+        "handoff_pickup_confirmed_predecessor_closing", worktree_id=wt_id,
+        session_id=linked_handoff.predecessor, successor_session_id=session_id,
+        handoff_token=linked_handoff.token, launch_id=launch_id)
+
+
 def cmd_register_session(args: argparse.Namespace) -> int:
     """Register a Copilot session against a worktree (hook-invoked).
 
@@ -23612,8 +23606,9 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         None if resident_environment else os.environ.get(_SESSION_HANDOFF_TOKEN)
     ) or None
     candidate_associated = False
+    linked_handoff = None
     try:
-        tracking.register_session(
+        linked_handoff = tracking.register_session(
             wt_id,
             session_id,
             pid=pid,
@@ -23661,6 +23656,7 @@ def cmd_register_session(args: argparse.Namespace) -> int:
             "handoff_successor_session_start_bound", worktree_id=wt_id,
             session_id=session_id, handoff_token=candidate_token,
             launch_id=launch_id)
+    _emit_handoff_claim_stages(wt_id, session_id, linked_handoff, launch_id=launch_id)
     # Re-seed the status-bar updater for this session's mux (best-effort, no-op
     # off-mux).  The launcher spawns it at psmux create/join, but an attached
     # long-lived session is never re-run through the launcher -- so after a
@@ -23891,7 +23887,7 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
             candidate_before_ack = None
 
     try:
-        tracking.register_session(
+        linked_handoff = tracking.register_session(
             wt_id,
             session_id,
             pid=getattr(args, "pid", None),
@@ -23914,6 +23910,10 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
         session_id=session_id,
         source="bind-session",
         pane=pane_id,
+    )
+    _emit_handoff_claim_stages(
+        wt_id, session_id, linked_handoff,
+        launch_id=os.environ.get("WORKTREE_LAUNCH_ID"),
     )
 
     # Record the bind in the worktree's own memory: a session-tagged `bind`
