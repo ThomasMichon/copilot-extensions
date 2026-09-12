@@ -648,7 +648,8 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   `try`/`except Exception`, log `handoff_successor_spawn_failed` with the
   exception message, then re-raise unchanged (`test_spawn_exception_from_mux_still_emits_failed_event`
   covers this). Also fixed a version-count error a review caught in this
-  same journal entry. Four new tests total; full plugin suite: 4159 passed /
+  same journal entry. Five new tests total (two in `test_activity.py`,
+  three in `test_handoff_cutover.py`); full plugin suite: 4158 passed /
   20 skipped / 3 pre-existing unrelated installer/binstub failures (same
   three noted against PR #2472). `agent-worktrees` bumped 1.5.5-dev69 →
   dev72 across the fix rounds. Stage 8's Phase 2 checklist item is also now
