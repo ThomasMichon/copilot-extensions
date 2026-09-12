@@ -3005,7 +3005,10 @@ def _maybe_emit_stage_13(
         return
     digest = hashlib.sha256(f"{wt_id}\x00{handoff_token}".encode()).hexdigest()
     claim_path = _monitor_handoff_claim_root() / "stage13" / f"{digest}.json"
-    claim_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        claim_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return  # unwritable/malformed claim root -- fail open like the claim itself
     claimed = False
     for _attempt in range(_STAGE13_CLAIM_RETRIES):
         try:
