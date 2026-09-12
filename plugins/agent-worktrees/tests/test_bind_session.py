@@ -14,7 +14,7 @@ import argparse
 from pathlib import Path
 
 from agent_worktrees import __main__ as m
-from agent_worktrees import tracking
+from agent_worktrees import activity, tracking
 from agent_worktrees.tracking import WorktreeRecord, load_record, save_record
 
 
@@ -80,6 +80,92 @@ class TestBindSession:
         assert captured["candidate_before_ack"] == "new"
         assert captured["candidate_acknowledged"] is True
         assert captured["head_session"] == "new"
+
+    def test_acknowledges_session_start_candidate_emits_stage_10_and_11(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        """#2457 Stages 10/11: bind-session's ``--handoff-token`` acknowledgement
+        performs the actual link_handoff() head transfer, so it must emit
+        handoff_successor_claimed + handoff_pickup_confirmed_predecessor_closing
+        together, exactly once, at that call site."""
+        _save_record(tmp_tracking_dir, "wt-ack2", "/tmp/src/wt-ack2")
+        tracking.register_session("wt-ack2", "old")
+        rec = load_record(tmp_tracking_dir / "wt-ack2.yaml")
+        tracking.open_handoff(rec, "old", "task-999")
+        tracking.register_session("wt-ack2", "new")
+        rec = load_record(tmp_tracking_dir / "wt-ack2.yaml")
+        tracking.associate_handoff_candidate(rec, "task-999", "new")
+        captured: dict = {}
+        _neutralize(monkeypatch, captured)
+
+        recorded: list[tuple[str, dict]] = []
+        real_log_event = activity.log_event
+
+        def _capture(event, **kwargs):
+            recorded.append((event, kwargs))
+            return real_log_event(event, **kwargs)
+
+        monkeypatch.setattr(activity, "log_event", _capture)
+
+        rc = m.cmd_bind_session(_args(
+            worktree_dir="/tmp/src/wt-ack2",
+            session_id="new",
+            handoff_token="task-999",
+        ))
+
+        assert rc == 0
+        claimed = [kw for ev, kw in recorded if ev == "handoff_successor_claimed"]
+        closing = [
+            kw for ev, kw in recorded
+            if ev == "handoff_pickup_confirmed_predecessor_closing"
+        ]
+        assert len(claimed) == 1
+        assert claimed[0]["worktree_id"] == "wt-ack2"
+        assert claimed[0]["session_id"] == "new"
+        assert claimed[0]["handoff_token"] == "task-999"
+        assert claimed[0]["predecessor_session_id"] == "old"
+        assert len(closing) == 1
+        assert closing[0]["session_id"] == "old"
+        assert closing[0]["successor_session_id"] == "new"
+
+    def test_stage_10_and_11_carry_the_mux_pane_launch_id(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        """#2457 review finding: bind-session runs in the mux pane, whose
+        environment carries WORKTREE_LAUNCH_ID -- Stage 10/11 events must
+        carry it too, or they drop out of ``activity --launch-id`` and break
+        flow correlation."""
+        _save_record(tmp_tracking_dir, "wt-ack3", "/tmp/src/wt-ack3")
+        tracking.register_session("wt-ack3", "old")
+        rec = load_record(tmp_tracking_dir / "wt-ack3.yaml")
+        tracking.open_handoff(rec, "old", "task-launch")
+        captured: dict = {}
+        _neutralize(monkeypatch, captured)
+        monkeypatch.setenv("WORKTREE_LAUNCH_ID", "flow-launch-1")
+
+        recorded: list[tuple[str, dict]] = []
+        real_log_event = activity.log_event
+
+        def _capture(event, **kwargs):
+            recorded.append((event, kwargs))
+            return real_log_event(event, **kwargs)
+
+        monkeypatch.setattr(activity, "log_event", _capture)
+
+        rc = m.cmd_bind_session(_args(
+            worktree_dir="/tmp/src/wt-ack3",
+            session_id="new",
+            handoff_token="task-launch",
+        ))
+
+        assert rc == 0
+        claimed = [kw for ev, kw in recorded if ev == "handoff_successor_claimed"]
+        closing = [
+            kw for ev, kw in recorded
+            if ev == "handoff_pickup_confirmed_predecessor_closing"
+        ]
+        assert claimed[0]["launch_id"] == "flow-launch-1"
+        assert closing[0]["launch_id"] == "flow-launch-1"
 
     def test_binds_from_worktree_dir(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
