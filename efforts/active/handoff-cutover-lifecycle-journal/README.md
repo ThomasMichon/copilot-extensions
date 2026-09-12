@@ -368,13 +368,37 @@ renumbering from the "acknowledges handoff" step onward.)
       call): `handoff_pickup_confirmed_predecessor_closing` is emitted keyed by
       the *predecessor's* session id (`linked_handoff.predecessor`), with
       `successor_session_id` carrying the new head.
-- [ ] Stage 12 (`session_end_bound`) — a `sessionEnd` hook and its
+- [x] Stage 12 (`session_end_bound`) — a `sessionEnd` hook and its
       `session_ended` deregistration event **already exist**; extend that
       existing path to also emit `session_end_bound` with the stage/linkage
       fields rather than treating stage 12 as possibly missing or adding a
       second, duplicate hook path.
-- [ ] Stage 13 (`handoff_complete`) — emit once the runner has confirmed the
+      **Confirmed already landed (no code change):** `cmd_deregister_session`
+      already emits `session_ended` unconditionally on every sessionEnd hook
+      invocation, and Phase 1's `HANDOFF_STAGE_MAP` already maps it to Stage
+      12/`session_end_bound` with no gate. Confirmed end-to-end (not just the
+      map entry in isolation) via a new test,
+      `test_session_end_emits_stage_12_via_the_existing_session_ended_event`,
+      that drives the real `cmd_deregister_session` hook path and asserts the
+      logged event carries `stage=12`/`stage_name="session_end_bound"`. Ticked
+      off as a Phase 2 confirmation, same pattern as stages 4/6/7.
+- [x] Stage 13 (`handoff_complete`) — emit once the runner has confirmed the
       predecessor pane is gone and the successor is head.
+      **Landed:** a new `_maybe_emit_stage_13()` helper checks BOTH
+      confirmations (`handoff_predecessor_retire` with `outcome="gone"` for
+      the exact token, AND the tracking record's handoff `state == "linked"`,
+      not merely a candidate) and emits `handoff_complete` exactly once,
+      deduped via an **atomic exclusive-create claim file** keyed by a
+      collision-resistant digest of the exact (worktree, token) pair --
+      `read_events()` is used only for the retire-confirmation check above,
+      never as the dedup gate itself (a plain read-before-write check is a
+      real cross-process race here). The claim is rolled back on a detected
+      logger write failure (`activity.log_event_failure_count()`), so a
+      transient I/O error stays retryable. Called from both sides of the
+      ordering race the case study exposed: `_handoff_cutover_retire_result()`
+      (right after it logs the retire outcome) and
+      `_emit_handoff_claim_stages()` (right after Stage 10/11) -- whichever
+      confirmation completes second is the one that actually emits Stage 13.
 
 > **Deferred follow-on (explicitly out of scope here):** instrumenting
 > agent-bridge's `SessionManager.handoff_session()` spawn path to the same
@@ -940,3 +964,38 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   its module-size ceiling after the added dedup-check code. Full plugin
   suite unaffected outside the touched tests. `agent-worktrees` version
   unchanged at `1.5.5-dev76` (same open PR, not yet merged).
+- **Phase 2 complete: stages 12, 13 landed.** Stage 12 (`session_end_bound`)
+  needed **no code change** -- `cmd_deregister_session` already emits
+  `session_ended` unconditionally on every sessionEnd hook call, and Phase
+  1's `HANDOFF_STAGE_MAP` already maps it to Stage 12 with no gate; confirmed
+  end-to-end (not just the map entry) via
+  `test_session_end_emits_stage_12_via_the_existing_session_ended_event`,
+  which drives the real hook path. Stage 13 (`handoff_complete`) needed a
+  genuinely new emitter: a `_maybe_emit_stage_13()` helper checks BOTH
+  confirmations -- `handoff_predecessor_retire` stamped `outcome="gone"` for
+  the exact token, AND the tracking record's handoff `state == "linked"`
+  (authoritative head transfer, not merely a candidate) -- and emits
+  `handoff_complete` exactly once (deduped via `activity.read_events()`).
+  Called from BOTH sides of the ordering race the Stage 10/11 review already
+  surfaced (retire can complete before or after the claim):
+  `_handoff_cutover_retire_result()` right after it logs the retire outcome,
+  and `_emit_handoff_claim_stages()` right after Stage 10/11 -- whichever
+  confirmation completes second is the one that actually fires Stage 13.
+  **All 13 stages of the lifecycle vocabulary are now instrumented.** New
+  tests: `test_register_session.py` (Stage 12 end-to-end confirmation; Stage
+  13 firing on the claim side when retire already happened; Stage 13 NOT
+  firing when only a candidate, never linked; Stage 13 firing on the retire
+  side when the claim already happened, with double-call idempotency),
+  `test_handoff_cutover.py` (Stage 13 firing through the real
+  `_handoff_cutover_retire_result()` wiring, not just the standalone helper).
+  `__main__.py` needed another compaction pass (safe 3-line combines plus a
+  handful of comma-preserving/space-joined 4-line combines, each individually
+  verified to still parse) to absorb the new helper + two call sites at its
+  module-size ceiling -- an earlier attempt at a more aggressive generic
+  multi-line-span combiner concatenated adjacent tokens without a separating
+  space (e.g. `is not Noneelse`) and broke syntax; reverted via
+  `git checkout --` and redone with conservative, individually-verified
+  combines only. `agent-worktrees` bumped `1.5.5-dev76` -> `dev77` (catalog
+  `1.7.7-dev70` -> `dev71`). Full plugin suite: 4197 passed / 20 skipped / 3
+  pre-existing unrelated installer-binstub failures (same three noted
+  throughout this effort, confirmed unaffected).

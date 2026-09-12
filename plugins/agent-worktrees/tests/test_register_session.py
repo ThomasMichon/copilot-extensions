@@ -213,7 +213,7 @@ class TestRegisterSessionStdin:
         assert "handoff_successor_claimed" not in recorded
         assert "handoff_pickup_confirmed_predecessor_closing" not in recorded
 
-    def test_claim_after_a_confirmed_predecessor_retire_only_emits_stage_10(
+    def test_claim_after_a_confirmed_predecessor_retire_emits_stage_10_and_13(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
     ):
         """#2457 review finding: the resident monitor's own retire flow can
@@ -221,8 +221,9 @@ class TestRegisterSessionStdin:
         outcome="gone") for this token BEFORE the successor's own
         `--handoff-token` claim runs (retirement is gated on candidate
         presence, not on this link). In that case this call site must emit
-        Stage 10 only -- a second Stage 11 record for the same handoff would
-        be a duplicate."""
+        Stage 10 only (a second Stage 11 record for the same handoff would be
+        a duplicate) -- but since BOTH confirmations (pane gone + head
+        transferred) now exist, Stage 13 (`handoff_complete`) must fire."""
         _save_record(tmp_tracking_dir, "wt-already-retired", "/tmp/src/wt-ar")
         tracking.register_session("wt-already-retired", "old")
         rec = load_record(tmp_tracking_dir / "wt-already-retired.yaml")
@@ -232,23 +233,254 @@ class TestRegisterSessionStdin:
             session_id="old", handoff_token="task-gone", outcome="gone",
         )
 
-        recorded: list[str] = []
+        recorded: list[tuple[str, dict]] = []
         real_log_event = activity.log_event
 
         def _capture(event, **kwargs):
-            recorded.append(event)
+            recorded.append((event, kwargs))
             return real_log_event(event, **kwargs)
 
         monkeypatch.setattr(activity, "log_event", _capture)
 
         rc = m.cmd_register_session(_args(
             worktree_id="wt-already-retired", session_id="new",
-            handoff_token="task-gone",
+            handoff_token="task-gone", launch_id="flow-13",
         ))
 
         assert rc == 0
-        assert recorded.count("handoff_successor_claimed") == 1
-        assert "handoff_pickup_confirmed_predecessor_closing" not in recorded
+        events = [ev for ev, _ in recorded]
+        assert events.count("handoff_successor_claimed") == 1
+        assert "handoff_pickup_confirmed_predecessor_closing" not in events
+        complete = [kw for ev, kw in recorded if ev == "handoff_complete"]
+        assert len(complete) == 1
+        assert complete[0]["launch_id"] == "flow-13"
+        assert complete[0]["worktree_id"] == "wt-already-retired"
+        assert complete[0]["session_id"] == "old"
+        assert complete[0]["successor_session_id"] == "new"
+        assert complete[0]["handoff_token"] == "task-gone"
+
+    def test_stage_13_does_not_fire_when_only_the_pane_is_confirmed_gone(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        """A confirmed predecessor retire alone -- with the handoff still only
+        a candidate, never actually linked -- must NOT emit Stage 13; the
+        successor has to be authoritative head, not merely a candidate."""
+        _save_record(tmp_tracking_dir, "wt-candidate-only", "/tmp/src/wt-co")
+        tracking.register_session("wt-candidate-only", "old")
+        rec = load_record(tmp_tracking_dir / "wt-candidate-only.yaml")
+        tracking.open_handoff(rec, "old", "task-cand")
+        tracking.register_session("wt-candidate-only", "new")
+        rec = load_record(tmp_tracking_dir / "wt-candidate-only.yaml")
+        tracking.associate_handoff_candidate(rec, "task-cand", "new")
+        activity.log_event(
+            "handoff_predecessor_retire", worktree_id="wt-candidate-only",
+            session_id="old", handoff_token="task-cand", outcome="gone",
+        )
+
+        m._maybe_emit_stage_13("wt-candidate-only", "task-cand")
+
+        assert activity.read_events(
+            worktree_id="wt-candidate-only", event="handoff_complete",
+        ) == []
+
+    def test_stage_13_fires_on_the_retire_side_when_claim_already_happened(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        """The reverse ordering: the successor already claimed the head
+        (Stage 10/11 already recorded) before the predecessor's pane is
+        confirmed gone. Stage 13 must fire from the retire side in that
+        case, exactly once."""
+        _save_record(tmp_tracking_dir, "wt-claim-first", "/tmp/src/wt-cf")
+        tracking.register_session("wt-claim-first", "old")
+        rec = load_record(tmp_tracking_dir / "wt-claim-first.yaml")
+        tracking.open_handoff(rec, "old", "task-claim-first")
+        m.cmd_register_session(_args(
+            worktree_id="wt-claim-first", session_id="new",
+            handoff_token="task-claim-first",
+        ))
+        assert activity.read_events(
+            worktree_id="wt-claim-first", event="handoff_complete",
+        ) == []
+
+        activity.log_event(
+            "handoff_predecessor_retire", worktree_id="wt-claim-first",
+            session_id="old", handoff_token="task-claim-first", outcome="gone",
+        )
+        m._maybe_emit_stage_13("wt-claim-first", "task-claim-first")
+        m._maybe_emit_stage_13("wt-claim-first", "task-claim-first")
+
+        complete = activity.read_events(
+            worktree_id="wt-claim-first", event="handoff_complete",
+        )
+        assert len(complete) == 1
+        assert complete[0]["session_id"] == "old"
+        assert complete[0]["successor_session_id"] == "new"
+
+    def test_stage_13_claim_is_atomic_against_a_concurrent_double_call(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        """#2457 review finding: the successor's sessionStart process and the
+        resident monitor's retire process run concurrently and could both
+        pass a plain read_events() check before either logs, double-recording
+        Stage 13. The dedup must be an atomic exclusive-create claim file, not
+        a read-before-write check -- run real concurrent callers (synchronized
+        with a barrier so they race on the SAME instant, not sequentially) and
+        confirm only one wins. A sequential-call test would pass even against
+        the old read-before-write implementation and prove nothing about the
+        actual race."""
+        import threading
+
+        _save_record(tmp_tracking_dir, "wt-race", "/tmp/src/wt-race")
+        tracking.register_session("wt-race", "old")
+        rec = load_record(tmp_tracking_dir / "wt-race.yaml")
+        tracking.open_handoff(rec, "old", "task-race")
+        m.cmd_register_session(_args(
+            worktree_id="wt-race", session_id="new", handoff_token="task-race",
+        ))
+        activity.log_event(
+            "handoff_predecessor_retire", worktree_id="wt-race",
+            session_id="old", handoff_token="task-race", outcome="gone",
+        )
+
+        n_threads = 8
+        barrier = threading.Barrier(n_threads)
+
+        def _racer():
+            barrier.wait()
+            m._maybe_emit_stage_13("wt-race", "task-race")
+
+        threads = [threading.Thread(target=_racer) for _ in range(n_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5)
+
+        complete = activity.read_events(worktree_id="wt-race", event="handoff_complete")
+        assert len(complete) == 1
+
+    def test_stage_13_claim_keys_are_collision_resistant(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        """#2457 review finding: the claim key must not be derived from the
+        lossy character-sanitized `_monitor_handoff_claim_segment()` (which
+        maps distinct tokens like "task:1" and "task_1" onto the same on-disk
+        name) -- two DIFFERENT tokens that collide under that sanitization
+        must each still get their own Stage 13 record."""
+        _save_record(tmp_tracking_dir, "wt-collide", "/tmp/src/wt-collide")
+        tracking.register_session("wt-collide", "old-a")
+        tracking.register_session("wt-collide", "old-b")
+        rec = load_record(tmp_tracking_dir / "wt-collide.yaml")
+        tracking.open_handoff(rec, "old-a", "task:1")
+        rec = load_record(tmp_tracking_dir / "wt-collide.yaml")
+        tracking.open_handoff(rec, "old-b", "task_1")
+        m.cmd_register_session(_args(
+            worktree_id="wt-collide", session_id="new-a", handoff_token="task:1",
+        ))
+        m.cmd_register_session(_args(
+            worktree_id="wt-collide", session_id="new-b", handoff_token="task_1",
+        ))
+        for predecessor, token in (("old-a", "task:1"), ("old-b", "task_1")):
+            activity.log_event(
+                "handoff_predecessor_retire", worktree_id="wt-collide",
+                session_id=predecessor, handoff_token=token, outcome="gone",
+            )
+
+        m._maybe_emit_stage_13("wt-collide", "task:1")
+        m._maybe_emit_stage_13("wt-collide", "task_1")
+
+        complete = activity.read_events(worktree_id="wt-collide", event="handoff_complete")
+        assert {c["handoff_token"] for c in complete} == {"task:1", "task_1"}
+
+    def test_stage_13_claim_is_retryable_after_a_detected_log_failure(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        """#2457 review finding: `open(..., "x")` must not permanently consume
+        the claim before the event is known to be durable -- if
+        `activity.log_event_failure_count()` shows the write was dropped, the
+        claim must be rolled back so a later retry can still succeed."""
+        _save_record(tmp_tracking_dir, "wt-retryable", "/tmp/src/wt-retryable")
+        tracking.register_session("wt-retryable", "old")
+        rec = load_record(tmp_tracking_dir / "wt-retryable.yaml")
+        tracking.open_handoff(rec, "old", "task-retryable")
+        m.cmd_register_session(_args(
+            worktree_id="wt-retryable", session_id="new",
+            handoff_token="task-retryable",
+        ))
+        activity.log_event(
+            "handoff_predecessor_retire", worktree_id="wt-retryable",
+            session_id="old", handoff_token="task-retryable", outcome="gone",
+        )
+
+        real_log_event = activity.log_event
+        real_count = activity.log_event_failure_count()
+        count_holder = {"n": real_count}
+
+        def _dropping_log_event(event, **kwargs):
+            if event == "handoff_complete":
+                count_holder["n"] += 1  # simulate a swallowed logger I/O failure
+                return
+            return real_log_event(event, **kwargs)
+
+        monkeypatch.setattr(activity, "log_event", _dropping_log_event)
+        monkeypatch.setattr(activity, "log_event_failure_count", lambda: count_holder["n"])
+
+        m._maybe_emit_stage_13("wt-retryable", "task-retryable")
+        assert activity.read_events(
+            worktree_id="wt-retryable", event="handoff_complete",
+        ) == []
+
+        monkeypatch.setattr(activity, "log_event", real_log_event)
+        monkeypatch.setattr(activity, "log_event_failure_count", lambda: real_count)
+        m._maybe_emit_stage_13("wt-retryable", "task-retryable")
+
+        complete = activity.read_events(
+            worktree_id="wt-retryable", event="handoff_complete",
+        )
+        assert len(complete) == 1
+
+    def test_a_losing_claimant_retries_after_the_winners_rollback(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        """#2457 review finding (HIGH): a losing caller must not simply give
+        up on `FileExistsError` -- if the current holder's log write fails and
+        it rolls its claim back, that rollback can happen between the loser's
+        existence check and its own return, silently losing Stage 13 forever
+        unless the loser gets a chance to retry. Simulate the holder's claim
+        vanishing (the rollback) mid-window and confirm the losing caller
+        still succeeds."""
+        import threading
+
+        _save_record(tmp_tracking_dir, "wt-loser-retry", "/tmp/src/wt-lr")
+        tracking.register_session("wt-loser-retry", "old")
+        rec = load_record(tmp_tracking_dir / "wt-loser-retry.yaml")
+        tracking.open_handoff(rec, "old", "task-loser-retry")
+        m.cmd_register_session(_args(
+            worktree_id="wt-loser-retry", session_id="new",
+            handoff_token="task-loser-retry",
+        ))
+        activity.log_event(
+            "handoff_predecessor_retire", worktree_id="wt-loser-retry",
+            session_id="old", handoff_token="task-loser-retry", outcome="gone",
+        )
+
+        digest = m.hashlib.sha256(b"wt-loser-retry\x00task-loser-retry").hexdigest()
+        claim_path = m._monitor_handoff_claim_root() / "stage13" / f"{digest}.json"
+        claim_path.parent.mkdir(parents=True, exist_ok=True)
+        claim_path.touch()  # simulate another caller already holding the claim
+
+        def _drop_claim_after_a_beat():
+            import time as _time
+            _time.sleep(m._STAGE13_CLAIM_RETRY_DELAY_S * 0.3)
+            claim_path.unlink()  # simulate the holder's rollback
+
+        threading.Thread(target=_drop_claim_after_a_beat).start()
+
+        m._maybe_emit_stage_13("wt-loser-retry", "task-loser-retry")
+
+        complete = activity.read_events(
+            worktree_id="wt-loser-retry", event="handoff_complete",
+        )
+        assert len(complete) == 1
 
     def test_resolves_worktree_from_stdin_cwd(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
@@ -740,6 +972,49 @@ def test_deregister_session_worktree_is_optional_for_hook_inference():
 
 
 class TestDeregisterSessionStdin:
+    def test_session_end_emits_stage_12_via_the_existing_session_ended_event(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        """#2457 Stage 12: no new hook is needed -- the sessionEnd hook's
+        existing `session_ended` event is already mapped to Stage 12
+        (`session_end_bound`) by Phase 1's HANDOFF_STAGE_MAP, and
+        `cmd_deregister_session` already emits it unconditionally. Confirm the
+        real emission carries the stage stamp end-to-end (not just the map
+        entry in isolation)."""
+        _save_record(tmp_tracking_dir, "wt-stage12", "/tmp/src/wt-stage12")
+        m.tracking.register_session("wt-stage12", "session-12")
+
+        recorded: list[tuple[str, dict]] = []
+        real_log_event = activity.log_event
+
+        def _capture(event, **kwargs):
+            recorded.append((event, kwargs))
+            return real_log_event(event, **kwargs)
+
+        monkeypatch.setattr(activity, "log_event", _capture)
+
+        args = argparse.Namespace(
+            worktree_id="wt-stage12",
+            session_id="session-12",
+            cwd=None,
+            stdin=False,
+            launch_id="flow-12",
+        )
+
+        assert m.cmd_deregister_session(args) == 0
+
+        matches = [kw for ev, kw in recorded if ev == "session_ended"]
+        assert len(matches) == 1
+        assert matches[0]["worktree_id"] == "wt-stage12"
+        assert matches[0]["session_id"] == "session-12"
+        assert matches[0]["launch_id"] == "flow-12"
+        logged = [
+            r for r in activity.read_events(worktree_id="wt-stage12", event="session_ended")
+        ]
+        assert len(logged) == 1
+        assert logged[0]["stage"] == 12
+        assert logged[0]["stage_name"] == "session_end_bound"
+
     def test_session_end_payload_closes_activation_with_event_timestamp(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
     ):
