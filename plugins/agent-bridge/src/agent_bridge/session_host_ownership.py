@@ -35,7 +35,12 @@ class PendingHostLaunch:
 def require_no_pending_host_launch(manager: SessionManager, session_id: str) -> None:
     """Refuse another launch until partial-host cleanup is resolved."""
     record = manager._host_index.get(session_id) if manager._host_index is not None else None
-    if session_id in manager._pending_host_launches or (
+    session = manager._sessions.get(session_id)
+    container = session.target.container if session is not None else None
+    if (
+        isinstance(container, dict)
+        and container.get("launch_pending_session_id") == session_id
+    ) or session_id in manager._pending_host_launches or (
         record is not None and (record.extra or {}).get("launch_cleanup_pending")
     ):
         raise RemoteSpawnCleanupPendingError(
@@ -69,15 +74,16 @@ def _remember(
         manager._relays[session_id] = (
             list(relays) if isinstance(relays, (list, tuple, set)) else [relays]
         )
-    if manager._host_index is not None:
-        try:
+    try:
+        if manager._host_index is not None:
             manager._host_index.register(record)
-        except Exception as exc:
-            log.error("Could not persist spawned-host ownership for %s", session_id, exc_info=True)
-            raise RemoteSpawnCleanupPendingError(
-                f"Spawned-host ownership could not be persisted for {session_id}; "
-                "in-memory cleanup handle retained"
-            ) from exc
+        manager._set_container_launch_pending(session_id, True)
+    except Exception as exc:
+        log.error("Could not persist spawned-host ownership for %s", session_id, exc_info=True)
+        raise RemoteSpawnCleanupPendingError(
+            f"Spawned-host ownership could not be persisted for {session_id}; "
+            "in-memory cleanup handle retained"
+        ) from exc
     return pending
 
 
@@ -101,8 +107,11 @@ def complete_host_launch(manager: SessionManager, session_id: str) -> None:
     pending = manager._pending_host_launches[session_id]
     extra = dict(pending.record.extra)
     extra.pop("launch_cleanup_pending", None)
+    completed = replace(pending.record, extra=extra)
     if manager._host_index is not None:
-        manager._host_index.register(replace(pending.record, extra=extra))
+        manager._host_index.register(completed)
+    pending.record = completed
+    manager._set_container_launch_pending(session_id, False)
     manager._pending_host_launches.pop(session_id, None)
 
 
@@ -167,6 +176,7 @@ async def rollback_host_launch(
                 current = manager._host_index.get(session_id)
                 if current == pending.record:
                     manager._host_index.remove(session_id)
+            manager._set_container_launch_pending(session_id, False)
             manager._pending_host_launches.pop(session_id, None)
         manager._remote_recovery_inconclusive.discard(session_id)
     if result is not None:
