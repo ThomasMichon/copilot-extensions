@@ -294,6 +294,37 @@ class TestDecorateEvents:
         assert res.payload["merge"]["approval_stale_authorized"] is True
         assert res.payload["merge"]["consent_action"] == "apply"
 
+    def test_decorate_events_review_blocking_false_reports_comment_verdict(self):
+        """A repo whose bound reviewer can only COMMENT (e.g. Copilot code
+        review on an owner-authored PR) reports that comment as the
+        "COMMENTED" verdict when review_blocking is False."""
+        snap = _snap(pr_state="open", mergeable=True, head_sha="abc",
+                     reviews=(pc.Review(3, "COMMENT", "bob"),))
+        payload = prw.decorate_events(
+            [{"event": "commented"}], "o/r", 7, snap, review_blocking=False,
+        )
+        assert payload["merge"]["verdict"] == "COMMENTED"
+
+    def test_decorate_events_review_blocking_true_default_ignores_comment(self):
+        snap = _snap(pr_state="open", mergeable=True, head_sha="abc",
+                     reviews=(pc.Review(3, "COMMENT", "bob"),))
+        payload = prw.decorate_events([{"event": "commented"}], "o/r", 7, snap)
+        assert payload["merge"]["verdict"] == ""
+
+    def test_run_wait_forwards_review_blocking_into_payload(self):
+        snap = _snap(pr_state="open", mergeable=True, head_sha="abc",
+                     reviews=(pc.Review(3, "COMMENT", "bob"),))
+        clock = _Clock()
+        res = prw.run_wait(
+            repo="o/r", pr=1, until=["commented"],
+            baseline=pc.Baseline.from_cursor("r0"),
+            fetch=lambda: snap, timeout=100.0, interval=1.0,
+            review_blocking=False,
+            now=clock.now, sleep=lambda s: None,
+        )
+        assert res.matched
+        assert res.payload["merge"]["verdict"] == "COMMENTED"
+
 
 # ---------------------------------------------------------------------------
 # build_fetch -- config-driven provider/token resolution

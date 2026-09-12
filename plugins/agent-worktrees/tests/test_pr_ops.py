@@ -1619,7 +1619,7 @@ class TestMultiPR:
 # ---------------------------------------------------------------------------
 
 class TestPRStatusLive:
-    def _config_with_binding(self, base_config):
+    def _config_with_binding(self, base_config, **pr_kwargs):
         """Clone the fixture config with a merge-consent binding on its repo."""
         repo = base_config.default_repo
         pr = cfg.PRConfig(
@@ -1630,6 +1630,7 @@ class TestPRStatusLive:
             allow_stale_approval=True,
             hold_labels=("do-not-merge", "needs-rebase", "wip"),
             wip_title_prefixes=("wip:",),
+            **pr_kwargs,
         )
         new_repo = cfg.RepoConfig(
             anchor=repo.anchor, worktree_root=repo.worktree_root,
@@ -1673,6 +1674,25 @@ class TestPRStatusLive:
         assert res["live"]["merge_state"] == "clean"
         assert res["live"]["eligible"] is True
         assert res["live"]["reviews"] == 1
+
+    def test_live_verdict_reports_comment_when_review_blocking_false(
+        self, pr_repo, monkeypatch
+    ):
+        """A repo config'd review_blocking=False (e.g. Copilot code review on
+        a pr-self-merge repo, which can only COMMENT) reports that comment as
+        the "COMMENTED" verdict instead of no verdict at all."""
+        from agent_worktrees import pr_contract as pc
+        config, wid, _wt, _ = pr_repo
+        config = self._config_with_binding(config, review_blocking=False)
+        pr_ops.set_pr(wid, number=7, state="open", provider="gitea")
+        snap = pc.PRSnapshot(
+            pr_state="open", merged=False, head_sha="h", base_ref="master",
+            author="alice", mergeable=True, title="Feature",
+            reviews=(pc.Review(1, "COMMENT", "bob"),),
+        )
+        self._mock_provider(monkeypatch, snap)
+        res = pr_ops.pr_status(wid, config=config)
+        assert res["live"]["verdict"] == "COMMENTED"
 
     def test_cli_evidence_lookup_uses_configured_provider_for_manual_pr(
         self, pr_repo, monkeypatch

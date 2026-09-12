@@ -44,6 +44,7 @@ def decorate_events(
     allow_stale_approval: bool = False,
     stale_approval_head_sha: str = "",
     stale_approval_head_observed_at: str = "",
+    review_blocking: bool = True,
 ) -> dict:
     """Wrap the raw transition list into the final result payload.
 
@@ -56,7 +57,10 @@ def decorate_events(
     consent* (add the auto-merge label) rather than assuming the PR will merge on
     its own. The consent vocabulary is a multi-machine system binding passed in by the CLI
     (``automerge_label`` etc.); with none configured the block degrades to a
-    verdict/merge-state readout with no action.
+    verdict/merge-state readout with no action. ``review_blocking`` (default
+    ``True``) forwards to :func:`pr_contract.merge_readiness` -- ``False``
+    reports a bare comment as the ``"COMMENTED"`` verdict for a repo whose
+    reviewer cannot render a binding one.
     """
     payload = {
         "repo": repo,
@@ -80,6 +84,7 @@ def decorate_events(
         allow_stale_approval=allow_stale_approval,
         stale_approval_head_sha=stale_approval_head_sha,
         stale_approval_head_observed_at=stale_approval_head_observed_at,
+        review_blocking=review_blocking,
     )
     return payload
 
@@ -100,6 +105,7 @@ def run_wait(
     allow_stale_approval: bool = False,
     stale_approval_head_sha: str = "",
     stale_approval_head_observed_at: str = "",
+    review_blocking: bool = True,
     now: Callable[[], float] | None = None,
     sleep: Callable[[float], None] | None = None,
     on_poll: Callable[[pc.PRSnapshot], None] | None = None,
@@ -117,7 +123,7 @@ def run_wait(
 
     The consent binding (``automerge_label`` / ``hold_labels`` /
     ``wip_title_prefixes`` / ``approval_required`` /
-    ``allow_stale_approval``) is forwarded to
+    ``allow_stale_approval`` / ``review_blocking``) is forwarded to
     :func:`decorate_events` so the fired payload's ``merge`` block reports
     whether the caller must still grant merge consent.
     """
@@ -136,6 +142,7 @@ def run_wait(
             allow_stale_approval=allow_stale_approval,
             stale_approval_head_sha=stale_approval_head_sha,
             stale_approval_head_observed_at=stale_approval_head_observed_at,
+            review_blocking=review_blocking,
         )
 
     deadline = now() + timeout if timeout > 0 else None

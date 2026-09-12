@@ -1381,6 +1381,7 @@ def _live_pr_state(
         stale_approval_head_observed_at=(
             active.head_observed_at if evidence_matches_endpoint else ""
         ),
+        review_blocking=bool(getattr(prcfg, "review_blocking", False)),
     )
     return {
         "live": {
