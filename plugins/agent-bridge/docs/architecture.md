@@ -427,7 +427,9 @@ restart does not inherently close the child's pipes.
   Cancellation joins the spawn and aborts the recorded partial host; if abort
   cannot be confirmed, a durable cleanup-pending record and in-memory retry
   handle remain. Another launch/resume is refused until that ownership is
-  cleaned up, including after frontend restart.
+  cleaned up, including after frontend restart. The durable container launch
+  marker is honored even if the host index is absent, and dead-host pruning
+  never discards a cleanup-pending record.
   The manager remains the public facade; `session_resume.py`,
   `session_teardown.py`, and `session_ownership.py` own the bounded lifecycle
   implementations. Additive session migrations live in `db_migrations.py`.
