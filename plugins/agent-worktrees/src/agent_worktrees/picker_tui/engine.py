@@ -15,6 +15,7 @@ Keys:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import threading
@@ -47,6 +48,8 @@ from .. import profiles as profiles_mod
 from ..update_stage import indicator_state
 from . import derive
 from .selection import ListSelection
+
+log = logging.getLogger("agent-worktrees.picker")
 
 
 def _register_shift_enter_key() -> None:
@@ -5653,7 +5656,22 @@ class PickerScreen(Widget):
             try:
                 app.call_from_thread(_apply)
             except Exception:
-                pass
+                # The action's own outcome (ok/failed, and any status-line
+                # update) is normally surfaced by `_apply` above -- but if
+                # marshalling back onto the event loop itself fails (the app
+                # exited, the screen is gone, etc.), that outcome is otherwise
+                # lost with **no** operator-visible signal at all: a steer
+                # submission (or any other action) can genuinely succeed or
+                # fail off-thread while the operator sees nothing change and
+                # reasonably assumes it worked. Log it so this class of silent
+                # drop is at least diagnosable after the fact, even though the
+                # status line itself is unreachable at this point.
+                log.warning(
+                    "pivot action %r: could not marshal its outcome back to "
+                    "the UI (app.call_from_thread failed); the action itself "
+                    "may have already run to completion with err=%r",
+                    label, err, exc_info=True,
+                )
 
         threading.Thread(
             target=_worker, name=f"pivot-action:{label}", daemon=True
@@ -7561,19 +7579,41 @@ class SteerButtonRow(Widget):
         event.stop()
         self.focus()
         # Hit-test the click against each button's rendered span so a mouse
-        # press acts on the button under the cursor (not merely the focused one).
+        # press acts on the button under the cursor. Any exact-span miss (an
+        # off-by-one in the computed span vs. the actual rendered position,
+        # a click landing in the inter-button gap, or past the last button)
+        # falls back to the *nearest* button rather than silently doing
+        # nothing -- a click inside this row must always press exactly one
+        # button; a coordinate near-miss must never be indistinguishable
+        # from "nothing was clicked" (see the Picker steer Confirm/Save
+        # unreliability report).
         x = int(getattr(event, "x", 0))
+        spans: list[tuple[int, int]] = []
         pos = 0
         for i, (_key, label) in enumerate(self._buttons):
             if i:
                 pos += 2  # the "  " separator between buttons
             width = len(label) + 2  # the " label " span
-            if pos <= x < pos + width:
-                self._idx = i
-                self.refresh()
-                self._on_press(self._buttons[i][0])
-                return
+            spans.append((pos, pos + width))
             pos += width
+        chosen = 0
+        for i, (start, end) in enumerate(spans):
+            if start <= x < end:
+                chosen = i
+                break
+        else:
+            def _distance(span: tuple[int, int]) -> int:
+                start, end = span
+                if x < start:
+                    return start - x
+                if x >= end:
+                    return x - end + 1
+                return 0
+
+            chosen = min(range(len(spans)), key=lambda i: _distance(spans[i]))
+        self._idx = chosen
+        self.refresh()
+        self._on_press(self._buttons[chosen][0])
 
 
 class PivotFormScreen(ModalScreen[dict]):
