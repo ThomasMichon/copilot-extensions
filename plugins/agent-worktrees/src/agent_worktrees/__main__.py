@@ -20522,6 +20522,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
             base_repo=base_repo,
         )
         if json_out:
+            _acct_json = repos.resolve_account(reg)
             _json_output(
                 {
                     "name": resn.name,
@@ -20530,7 +20531,13 @@ def cmd_related_dispatch(argv: list[str]) -> int:
                     "available_here": resn.available_here,
                     "editing_model": resn.editing_model,
                     "base_repo": base_repo,
-                    "account": repos.resolve_account(reg),
+                    "account": _acct_json,
+                    "account_routing_reminder": (
+                        f"Route every gh/API operation for {resn.name} through "
+                        f"`agent-worktrees repos gh {resn.name} -- <gh args>` "
+                        f"-- never a bare `gh <cmd>` or `gh auth switch`."
+                        if _acct_json else None
+                    ),
                     "ownership": related.effective_ownership(entry),
                     "owner": entry.owner,
                     "delegate_via": resn.delegate_via,
@@ -20562,6 +20569,17 @@ def cmd_related_dispatch(argv: list[str]) -> int:
         if _acct:
             _asrc = "explicit" if (reg and reg.account) else "derived"
             print(f"  account:  {_acct} ({_asrc})")
+            output.warn(
+                f"This repo resolves to account '{_acct}', which may differ "
+                f"from the machine's ambient `gh auth` default. Route every "
+                f"`gh`/API operation for it through `agent-worktrees repos gh "
+                f"{resn.name} -- <gh args>` (or `repos gh -- <gh args>` from "
+                f"inside its checkout) -- never a bare `gh <cmd>` or "
+                f"`gh auth switch` (the active account is machine-global and "
+                f"racy). Treat a wrapper warning like `could not mint a gh "
+                f"token ... using ambient auth` as a failure to repair before "
+                f"composing or posting."
+            )
         if resn.delegate_via:
             print(f"  delegate: {resn.delegate_via}")
         print(f"  machine:  {current_machine or '(unknown)'}")
