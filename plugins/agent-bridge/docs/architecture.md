@@ -435,7 +435,11 @@ restart does not inherently close the child's pipes.
   marker is honored even if the host index is absent, and dead-host pruning
   never discards a cleanup-pending record. Cancellation before any host or
   durable launch marker exists releases the attempt's container claim rather
-  than retaining an unowned venue lock.
+  than retaining an unowned venue lock. Explicit reaping uses a partial
+  launch's abort handle before general record cleanup and releases its
+  container claim only after all host authority is gone. Failed initial
+  process-launch cleanup uses the same owned cancellation settlement as resume:
+  shutdown or kill cannot be interrupted with a STARTING row left behind.
   The manager remains the public facade; `session_resume.py`,
   `session_teardown.py`, and `session_ownership.py` own the bounded lifecycle
   implementations. Additive session migrations live in `db_migrations.py`.

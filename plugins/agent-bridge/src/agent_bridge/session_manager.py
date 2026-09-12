@@ -4409,17 +4409,10 @@ class SessionManager:
             """Reap a process-owned launch before recording terminal failure."""
             if agent_proc is None:
                 return
+            from .session_ownership import cleanup_failed_resume
+
             pid = agent_proc.pid
-            if client is not None:
-                with contextlib.suppress(Exception):
-                    await client.shutdown()
-            # AcpClient.shutdown owns this same process, but retain the
-            # AgentProcess whole-tree kill as a fallback if shutdown failed or
-            # returned before a wrapper/SSH descendant exited.
-            if agent_proc.alive:
-                with contextlib.suppress(Exception):
-                    await agent_proc.kill()
-            session.client = None
+            await cleanup_failed_resume(self, session, client)
             session.event_log.append("failed_launch_cleanup", {
                 "pid": pid,
                 "reaped": not agent_proc.alive,

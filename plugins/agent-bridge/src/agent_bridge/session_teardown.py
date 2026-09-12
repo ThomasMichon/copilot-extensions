@@ -149,6 +149,10 @@ async def complete_stop(
     await manager._drop_forward(session_id, strict=True, preserve_ownership=True)
     if not for_restart and manager._host_index is not None:
         manager._host_index.set_resume_flag(session_id, False)
+    if reap_host and session_id in manager._pending_host_launches:
+        from .session_host_ownership import abort_pending_host_launch
+
+        await abort_pending_host_launch(manager, session_id)
     if reap_host and manager._host_index is not None:
         record = manager._host_index.get(session_id)
         if record is not None:
@@ -156,16 +160,17 @@ async def complete_stop(
                 manager._reap_host_record(record, "idle reap (#1826)")
             else:
                 await reap_remote_checked(manager, session, record)
-    if reap_host and session_id in manager._pending_host_launches:
-        from .session_host_ownership import abort_pending_host_launch
-
-        await abort_pending_host_launch(manager, session_id)
     pending = list(manager._remote_reaps_by_session.get(session_id, ()))
     if pending:
         if not all(await asyncio.gather(*pending)):
             raise RemoteHostRecoveryPendingError(
                 f"Pending remote reap is inconclusive for {session_id}; ownership retained"
             )
+    if reap_host:
+        from .session_host_ownership import has_host_ownership
+
+        if not has_host_ownership(manager, session_id):
+            manager._release_container_lock(session_id)
     session.status = SessionStatus.STOPPED
     session.restart_status = restart_status
     manager.db.update_session_status(

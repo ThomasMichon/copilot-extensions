@@ -41,7 +41,7 @@ async def owned_context(tmp_db, tmp_path, monkeypatch):
         manager=manager, session=session, db=tmp_db, phase="load",
         entered=asyncio.Event(), release=asyncio.Event(), processes=[],
         block_cleanup=False, cleanup_entered=asyncio.Event(),
-        cleanup_release=asyncio.Event(),
+        cleanup_release=asyncio.Event(), start_error=None,
     )
 
     async def spawn(target, **_kwargs):
@@ -81,6 +81,8 @@ async def owned_context(tmp_db, tmp_path, monkeypatch):
 
         async def start(self, process):
             self.process = process
+            if state.start_error is not None:
+                raise state.start_error
             await stage("start")
 
         async def load_session(self, **_kwargs):
@@ -213,6 +215,52 @@ async def test_cancelled_initial_process_launch_retains_no_child(owned_context):
     assert ctx.processes[0].returncode is not None
     assert created._owned_process is None
     assert created.status == SessionStatus.STOPPED
+
+
+@pytest.mark.parametrize("structured_error", [False, True])
+@pytest.mark.parametrize("cleanup_phase", ["shutdown", "kill"])
+async def test_failed_start_cleanup_settles_repeated_cancellation(
+    owned_context, monkeypatch, structured_error, cleanup_phase,
+):
+    from agent_bridge.connect import ConnectError, ConnectStage
+
+    ctx = owned_context
+    ctx.start_error = (
+        ConnectError(ConnectStage.LAUNCH_ACP, "handshake failed", retryable=False)
+        if structured_error else RuntimeError("handshake failed")
+    )
+    ctx.phase = "success"
+    ctx.block_cleanup = cleanup_phase == "shutdown"
+    original_kill = AgentProcess.kill
+
+    async def kill(process):
+        ctx.cleanup_entered.set()
+        await ctx.cleanup_release.wait()
+        await original_kill(process)
+
+    if cleanup_phase == "kill":
+        monkeypatch.setattr(AgentProcess, "kill", kill)
+    task = asyncio.create_task(ctx.manager.start_session(
+        SpawnTarget(type="command", cwd=ctx.session.target.cwd, spawn_command=["example-agent"]),
+    ))
+    await asyncio.wait_for(ctx.cleanup_entered.wait(), 5)
+    created = next(s for s in ctx.manager.list_sessions() if s is not ctx.session)
+    task.cancel()
+    await asyncio.sleep(0)
+    task.cancel()
+    await asyncio.sleep(0)
+    assert not task.done()
+    assert created._lifecycle_lock.locked()
+    assert ctx.processes[0].returncode is None
+    ctx.cleanup_release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, 5)
+    assert ctx.processes[0].returncode is not None
+    assert created._owned_process is None
+    assert created.client is None
+    assert created.status == SessionStatus.STOPPED
+    assert ctx.db.get_session(created.session_id)["status"] == "stopped"
+    assert not created._lifecycle_lock.locked()
 
 
 @pytest.mark.parametrize("phase", ["quiesce", "process", "relay", "forward"])
