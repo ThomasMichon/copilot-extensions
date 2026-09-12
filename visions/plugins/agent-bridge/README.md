@@ -6,7 +6,7 @@
   machines, and venue providers.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-09-04
+- **Last revised:** 2026-09-12
 - **Reality docs:** [`plugins/agent-bridge/README.md`](../../../plugins/agent-bridge/README.md) ·
   [`plugins/agent-bridge/docs/architecture.md`](../../../plugins/agent-bridge/docs/architecture.md)
 
@@ -472,6 +472,25 @@ derive an **at-rest** verdict from the durable event tail, so a stale ACP
 "live/running" flag cannot hide a completed response from schedulers waiting on
 the turn boundary.
 
+### cache-is-a-hint-never-authority
+
+The bridge may cache liveness, status, or reachability for performance, but a
+cache is a **hint**, not a verdict. A cache miss, a stale entry, or any
+ambiguity between what the cache claims and what a decision actually needs
+requires a live probe of the real target before the bridge or a consumer acts
+on it; the fresh result then backfills the cache rather than being discarded.
+This governs the bridge's own internal state (e.g. a session's durable
+`status` after a daemon restart or redeploy) exactly as it governs an external
+reader deciding whether to resume a session the bridge reports on: neither may
+treat a cached or persisted value as ground truth for a consequential
+decision (resume, recovery, takeover) without a live check backing it up. A
+three-tier **hot/warm/cold** liveness read (always observed, never
+cache-gated) is the reference shape for that live check; see
+`plugins/agent-dispatch/src/agent_dispatch/bridge_state_machine.py` and
+`plugins/agent-dispatch/src/agent_dispatch/bridge_liveness_probe.py` for the
+first realization of this pattern, built against the bridge from the outside
+ahead of the bridge's own internal convergence.
+
 ### local-first-peer-mesh
 
 Every participating bridge can host local sessions and initiate outbound reach.
@@ -581,6 +600,16 @@ machine may deliberately gate outbound reach until policy allows it.
 
 ## Provenance
 
+- **2026-09-12** — Added `cache-is-a-hint-never-authority`: a cache miss or
+  ambiguity must trigger a live probe before a consequential decision, and the
+  live result backfills the cache. Formalizes on the bridge's own side a
+  hot/warm/cold liveness principle the `review-automation-reliability` effort's
+  Phase 9/10 slices already declared and built *against* the bridge from
+  `agent-dispatch` (`bridge_state_machine.py`, `bridge_liveness_probe.py`),
+  explicitly deferring to this vision for the authoritative verb vocabulary once
+  it existed. This closes that gap: the bridge does not merely tolerate an
+  external always-live-probing consumer, it holds itself to the same rule for
+  its own durable `status`/restart-recovery reads. Mined from operator guidance.
 - **2026-09-04** — Clarified agent-bridge as one execution-host provider and
   coordination surface within a plural hosting ecosystem. Bridge-owned ACP and
   headless sessions retain durable hosting and replay, while CLI/mux, SDK, App,
