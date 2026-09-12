@@ -434,7 +434,10 @@ restart does not inherently close the child's pipes.
   survive. Explicit resume adopts a surviving host or loads the persisted
   conversation into a fresh child; this fix does not change that idle-reap policy.
   Legacy STOPPED rows without restart provenance remain dormant rather than
-  guessing that an operator wanted recovery.
+  guessing that an operator wanted recovery. Their NULL provenance stays NULL;
+  created/failed rows do not manufacture a restart marker. Interrupt notification
+  delivery also owns admission before lifecycle, releasing both before waiting
+  for turn settlement.
   An explicit resume takes over recovery intent; a failed attempt leaves both
   in-memory and durable restart provenance cleared rather than silently
   restarting background probes. It also consumes any pending redeploy nudge so
