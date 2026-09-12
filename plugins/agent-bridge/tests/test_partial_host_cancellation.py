@@ -207,3 +207,56 @@ def test_dead_host_pruning_retains_partial_launch_authority(tmp_db, tmp_path, mo
     manager._prune_dead_hosts()
     alive.assert_not_called()
     assert manager._host_index.get(session_id) == record
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("indexed", [False, True])
+@pytest.mark.parametrize("confirmed", [False, True])
+async def test_partial_host_reaping_releases_only_confirmed_container_claim(
+    tmp_db, tmp_path, monkeypatch, indexed, confirmed,
+):
+    from agent_bridge.session_host_ownership import _remember
+
+    manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path / "hosts"))
+    session_id = "example-session"
+    target = SpawnTarget(type="command", container={"name": "example-container"})
+    session = Session(session_id, "example-agent", target)
+    session.status = SessionStatus.STOPPED
+    tmp_db.create_session(
+        session_id, session.name, None, ".", "command", "stopped",
+        time.time(), target_json=target.to_json(),
+    )
+    manager._sessions[session_id] = session
+    lock = Mock()
+    manager._container_locks["example-container"] = (lock, session_id)
+    manager._container_lock_sessions[session_id] = "example-container"
+    spawned = SpawnedHost(
+        local_port=51000, host_pid=123, child_pid=456,
+        protocol_version=PROTOCOL_VERSION, boundary="container",
+        nonce="example-nonce", state_file="/example/host.json",
+        endpoint={"kind": "container", "container": "example-container"},
+    )
+    spawner = SimpleNamespace(abort_spawned=AsyncMock(return_value=confirmed))
+    _remember(manager, session_id, spawner, spawned)
+    if not indexed:
+        manager._host_index.remove(session_id)
+    reap = AsyncMock(side_effect=AssertionError("partial launch must use its abort handle"))
+    monkeypatch.setattr(manager, "_remote_reap", reap)
+    if confirmed:
+        await manager.stop_session(session_id, reap_host=True)
+        lock.release.assert_called_once()
+        assert session_id not in manager._container_lock_sessions
+        assert manager._host_index.get(session_id) is None
+        assert session_id not in manager._pending_host_launches
+        assert "launch_pending_session_id" not in session.target.container
+        assert session.status == SessionStatus.STOPPED
+    else:
+        with pytest.raises(RemoteSpawnCleanupPendingError, match="cleanup is inconclusive"):
+            await manager.stop_session(session_id, reap_host=True)
+        lock.release.assert_not_called()
+        assert manager._container_lock_sessions[session_id] == "example-container"
+        assert session_id in manager._pending_host_launches
+        assert session.target.container["launch_pending_session_id"] == session_id
+        assert session.status == SessionStatus.FAILED
+    spawner.abort_spawned.assert_awaited_once()
+    reap.assert_not_awaited()
