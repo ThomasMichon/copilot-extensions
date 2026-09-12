@@ -1583,6 +1583,15 @@ if ((Split-Path -Leaf `$_root) -eq 'versions') { `$_root = Split-Path `$_root }
 try { `$_ver = ([IO.File]::ReadAllText((Join-Path `$_root 'current-version'))).Trim() } catch {}
 `$_slot = if (`$_ver) { Join-Path `$_root ('versions\' + `$_ver) } else { '' }
 `$_py = if (`$_slot) { Join-Path `$_slot 'Scripts\python.exe' } else { '' }
+if (-not (`$_py -and (Test-Path -LiteralPath `$_py))) {
+    # #742: marker missing/stale -> prefer last-known-good (the last version
+    # activate() published) over a raw newest-slot guess, which could bind a
+    # still-installing/never-activated slot mid-swap.
+    `$_lkg = ''
+    try { `$_lkg = ([IO.File]::ReadAllText((Join-Path `$_root 'last-known-good'))).Trim() } catch {}
+    if (`$_lkg) { `$_slot = Join-Path `$_root ('versions\' + `$_lkg); `$_py = Join-Path `$_slot 'Scripts\python.exe' }
+    if (-not (`$_py -and (Test-Path -LiteralPath `$_py))) { `$_py = ''; `$_slot = '' }
+}
 if (-not (`$_py -and (Test-Path -LiteralPath `$_py))) { `$_py = Get-ChildItem (Join-Path `$_root 'versions') -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { Join-Path `$_.FullName 'Scripts\python.exe' } | Where-Object { Test-Path -LiteralPath `$_ } | Select-Object -Last 1; `$_slot = if (`$_py) { Split-Path (Split-Path `$_py) } else { '' } }
 # A busy/locked log must NEVER block the coordinator launch. Prefer the canonical
 # serve-service.log; if it cannot be opened for append (a stale or concurrent
@@ -2245,6 +2254,15 @@ if ((Split-Path -Leaf `$_root) -eq 'versions') { `$_root = Split-Path `$_root }
 try { `$_ver = ([IO.File]::ReadAllText((Join-Path `$_root 'current-version'))).Trim() } catch {}
 `$_slot = if (`$_ver) { Join-Path `$_root ('versions\' + `$_ver) } else { '' }
 `$_py = if (`$_slot) { Join-Path `$_slot 'Scripts\python.exe' } else { '' }
+if (-not (`$_py -and (Test-Path -LiteralPath `$_py))) {
+    # #742: marker missing/stale -> prefer last-known-good (the last version
+    # activate() published) over a raw newest-slot guess, which could bind a
+    # still-installing/never-activated slot mid-swap.
+    `$_lkg = ''
+    try { `$_lkg = ([IO.File]::ReadAllText((Join-Path `$_root 'last-known-good'))).Trim() } catch {}
+    if (`$_lkg) { `$_slot = Join-Path `$_root ('versions\' + `$_lkg); `$_py = Join-Path `$_slot 'Scripts\python.exe' }
+    if (-not (`$_py -and (Test-Path -LiteralPath `$_py))) { `$_py = ''; `$_slot = '' }
+}
 if (-not (`$_py -and (Test-Path -LiteralPath `$_py))) { `$_py = Get-ChildItem (Join-Path `$_root 'versions') -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { Join-Path `$_.FullName 'Scripts\python.exe' } | Where-Object { Test-Path -LiteralPath `$_ } | Select-Object -Last 1; `$_slot = if (`$_py) { Split-Path (Split-Path `$_py) } else { '' } }
 # A busy/locked log must NEVER block the supervisor launch -- prefer the canonical
 # supervise-service.log, else a VERSION- and pid-aware fallback (see serve-service).

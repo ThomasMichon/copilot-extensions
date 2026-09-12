@@ -901,7 +901,83 @@ pre-existing unrelated failures. Bumped to `0.1.0-dev102`.
 **#1836 is now fully closed** -- both the launcher-resolution/register-once
 half and the start/session-start convergence half are landed.
 
-Remaining #736-adjacent open work not picked up this session: #742 (atomic
-`current-version` marker), #743 (agent-vault drain-safe cutover), #744
-(work-coalescing singleton tier design).
+### 2026-09-11 (later still) — Closed #742's remaining follow-up: per-plugin inlined binstubs
+
+The 2026-08-19 journal entry landed #742's read-side 3-tier fallback
+(marker -> last-known-good -> newest slot) into the canonical
+`libs/versioned-runtime/resolve-runtime.{sh,ps1}` resolver, but flagged
+"rolling the same fallback into the other plugins' inlined binstubs" as
+follow-up. Audited every plugin's Windows Scheduled Task / service launcher
+generator for an INLINED copy of this resolution (i.e. one that reads
+`current-version` directly rather than dot-sourcing the shared resolver) and
+found three that skipped straight from the marker to a raw newest-slot guess
+with no last-known-good tier:
+
+- **agent-bridge** `Register-ScheduledTask_`'s `$launcherBody` (the
+  `start-agent-bridge.ps1` it writes).
+- **agent-dispatch**'s coordinator (`serve-service.ps1`) AND embody-supervisor
+  (`supervise-service.ps1`) launcher generators -- byte-identical resolution
+  block duplicated in both.
+- **agent-index**'s `Get-ActiveSlotPython` (used by the sessionStart `ensure`
+  reconcile to find the currently-serving slot without dragging it backward).
+
+All three now insert the same last-known-good tier the shared resolver uses,
+between the marker read and the newest-slot guess. (agent-vault's equivalent
+launcher no longer has an inlined resolution at all after this session's
+earlier #1836 fix -- it now dot-sources the shared resolver directly, so it
+was never part of this gap.) The other plugins with a `bin/<name>` payload
+shim (agent-containers, agent-machines, agent-mcp, agent-vault, etc.) all
+route through `runtime-gate.{sh,ps1}`, which itself dot-sources the shared
+resolver -- confirmed already conformant, not part of this gap.
+
+**Caught and fixed a real authoring bug while verifying:** the inserted
+comment text `` `activate()` `` inside the two here-string-embedded copies
+(agent-bridge, agent-dispatch) triggered PowerShell's here-string backtick
+escaping -- `` `a `` is the alert-character escape, not a literal backtick+a
+-- silently corrupting the rendered comment to "ctivate()" with an embedded
+BEL byte. Caught by actually rendering the launcher (an isolated
+`-InstallDir` test install, not the production runtime) and reading the
+generated file rather than trusting the parser's happy "no syntax errors"
+verdict alone; fixed by dropping the backticks from that one word in the two
+heredoc copies (agent-index's copy isn't inside a here-string, so it was
+unaffected).
+
+**Verified functionally**, not just by parse-check: rendered agent-bridge's
+launcher via an isolated temp `-InstallDir` install (never touching this
+machine's real agent-bridge runtime) and simulated a marker-missing/
+last-known-good-present scenario against the rendered file directly --
+resolved to the last-known-good slot as expected. Did the same inline
+simulation for agent-dispatch's and agent-index's resolution blocks against
+synthetic version directories, all resolving correctly and never falling
+through to the newest-slot guess when last-known-good was available.
+Deliberately did NOT run the full install/service-registration flow for
+agent-bridge/agent-dispatch against their real installs on this machine
+(unlike agent-vault, these are actively relied on by this very session) --
+isolated `-InstallDir` installs and direct logic simulation were the
+lower-risk validation path.
+
+`tools/check-install-contract.py` and `tools/sync-versioned-runtime.py
+--check` both green (these inlined blocks are outside the byte-identical
+install-contract sections, so unaffected by either check, as expected -- this
+is exactly the gap those checks don't cover, which is why the fallback had to
+be rolled out by hand per occurrence). Added regression tests per plugin
+(`test_install_ps1_last_known_good.py` x2,
+`test_get_active_slot_python_last_known_good.py`). Full test suites: agent-
+dispatch's own `test_supervisor_install.py` + new test 44/44; agent-index 508
+passed / 11 failed -- all 11 pre-existing environment gaps (missing `numpy`/
+`mcp` optional deps in the installed venv, and an ambient `COPILOT_PLUGIN_ROOT`
+leaking from this very session's own environment into a subprocess test that
+doesn't scrub it), confirmed unrelated to the touched files; agent-bridge
+1870 passed / 576 failed, all in modules the diff never touches (transport,
+SSE stream, startup supersession, watchdog) -- consistent with the
+already-documented installed-venv/source version-skew pattern from this
+effort's #1837 entry, not a regression from this change. Bumped agent-bridge
+to `0.4.0-dev472`, agent-dispatch to `0.1.2-dev77`, agent-index to
+`0.1.0-dev164`.
+
+**#742 is now fully closed.**
+
+Remaining #736-adjacent open work not picked up this session: #743
+(agent-vault drain-safe cutover), #744 (work-coalescing singleton tier
+design).
 
