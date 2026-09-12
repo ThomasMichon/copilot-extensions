@@ -15,7 +15,7 @@ Every `agent-*` runtime plugin hand-maintains its own `scripts/install.ps1` /
 `scripts/install.sh` — full lifecycle managers (venv build, package install,
 binstub generation, versioned-slot management, scheduled-task/service wiring,
 deploy manifests, ZDD cutover, draining) that are supposed to all follow the
-same install contract (`docs/install-contract.md`) but are, in practice, ~11
+same install contract (`docs/install-contract.md`) but are, in practice, ~12
 independently-authored copies. When a bug is found in the shared *mechanics*
 (not the per-service specifics), it must be manually ported to every plugin by
 hand — exactly the failure mode that just recurred with the pyvenv.cfg
@@ -134,7 +134,7 @@ as independent per-plugin PRs; see Coordination._
 - [ ] Diff `New-SignedVenv` / `Ensure-Uv` / `Invoke-UvVenvResilient` /
       `Invoke-UvPipInstallResilient` / `Invoke-NativeCapture` /
       `Test-IsSreModuleMismatch` / `Test-IsVenvCorruption` / binstub-writing /
-      deploy-manifest-writing / scheduled-task functions across all ~11
+      deploy-manifest-writing / scheduled-task functions across all ~12
       runtime plugins' `install.ps1` (PowerShell first; `.sh` mirrors after
       the shape is settled).
 - [ ] Classify every duplicated function as: **(a) byte-identical or
@@ -237,7 +237,10 @@ _Pending — Phase 0's audit findings land here before Phase 1 starts._
   `sync-versioned-runtime.py` (the closed `uniform-runtime-resolution` effort)
   as the pattern to extend, and `check-vendored-libs-sync.py` as a related but
   distinct existing guard (Python packages, not installer scripts).
-- Confirmed scope via line-count audit: ~11 runtime plugins, ~20,000+ lines of
+- Confirmed scope via line-count audit: 12 `pyproject.toml`-bearing runtime
+  plugins per `tools/check-docs-consistency.py`'s definition (one,
+  `budget-guidance`, has no venv/uv engine logic and is out of this effort's
+  actual scope -- see Context), ~20,000+ lines of
   installer PowerShell alone, most of it mechanically duplicated engine logic.
 - Plan phased explicitly to mirror `uniform-runtime-resolution`'s landed
   discipline: audit first (Phase 0), canonical engine + one reference plugin
