@@ -467,6 +467,54 @@ scenarios.
 
 ## Journal
 
+### 2026-09-11 - Phase 10 item 3 complete: poll loop + webhook receiver (fifth slice)
+
+- Added `PRObservationStore.tracked_keys()`: every `(repo, number)` the
+  store currently holds, the poll-fallback loop's iteration set. A PR
+  starts being tracked the moment anything records its first observation;
+  there is no separate watch-list to seed.
+- Added `plugins/agent-dispatch/src/agent_dispatch/pr_review_poll_loop.py`:
+  `run_poll_cycle(store, observe, repository_tiers, now)` -- iterates
+  every tracked PR, refreshes whichever are due per
+  `pr_polling_policy.poll_due`, and persists via `record_observation`.
+  Never discovers new PRs on its own.
+- Added `plugins/agent-dispatch/src/agent_dispatch/producers/
+  github_pr_review_webhook.py`: a GitHub-specific FastAPI receiver
+  (deliberately separate from the existing forge-neutral
+  `producers/webhook.py`, which only handles PR-merge). Recognizes
+  `pull_request`/`pull_request_review`/`pull_request_review_thread`/
+  `check_suite`/`check_run` events via `extract_pr_ref`, verifies GitHub's
+  own `X-Hub-Signature-256` HMAC (distinct from the bearer-token
+  `inbound_token` the other webhook uses -- GitHub itself never sends a
+  bearer token), and on any recognized event re-fetches full state through
+  an injected `observe` callable rather than trying to reconstruct
+  `reviewDecision`/etc. from the webhook body -- those are GraphQL-only
+  aggregates the REST webhook payload does not carry. This also makes a
+  late/duplicate/out-of-order delivery harmless: every delivery just
+  triggers a fresh, idempotent re-observation.
+  - Hit and fixed a real FastAPI/annotations gotcha while wiring this:
+    with `from __future__ import annotations` in effect, a route handler's
+    `request: Request` parameter failed to resolve (FastAPI misclassified
+    it as an unknown query parameter, 422 on every request) because
+    `Request` was imported *locally* inside `build_app` -- `get_type_hints`
+    only sees the *module's* globals, not an enclosing function's locals.
+    Fixed by moving the `fastapi` import to module level (documented
+    in-line so the next slice doesn't reintroduce the same nested-import
+    pattern for a `Request`-typed handler).
+- Added `plugins/agent-dispatch/tests/test_pr_review_poll_loop.py` (5
+  tests) and `test_github_pr_review_webhook.py` (20 tests, incl. valid/
+  invalid/missing-signature and every recognized/unrecognized event shape).
+- Full `agent-dispatch` suite passes via `tools/run-plugin-tests.py
+  agent-dispatch`. `tools/check-module-size.py` passes (every new module
+  is small). Bumped agent-dispatch's version to 0.1.2-dev81.
+- **Item 3 is now complete end-to-end**: observe -> evaluate (staleness) ->
+  persist, triggered by webhook and backstopped by cadence-scoped polling.
+  What's left is deployment, not code: registering/running this webhook
+  receiver with a real secret and scheduling the poll-cycle tick against a
+  real repository -- both deployment-specific decisions left to whoever
+  operates a concrete instance. Item 4 (bridge liveness) remains blocked on
+  `agent-bridge-ahp-convergence` (status: Draft).
+
 ### 2026-09-11 - Phase 10 item 3: fourth slice, persistent observation store
 
 - Added `plugins/agent-dispatch/src/agent_dispatch/pr_observation_store.py`:
