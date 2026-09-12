@@ -244,7 +244,7 @@ class TestRegisterSessionStdin:
 
         rc = m.cmd_register_session(_args(
             worktree_id="wt-already-retired", session_id="new",
-            handoff_token="task-gone",
+            handoff_token="task-gone", launch_id="flow-13",
         ))
 
         assert rc == 0
@@ -253,6 +253,7 @@ class TestRegisterSessionStdin:
         assert "handoff_pickup_confirmed_predecessor_closing" not in events
         complete = [kw for ev, kw in recorded if ev == "handoff_complete"]
         assert len(complete) == 1
+        assert complete[0]["launch_id"] == "flow-13"
         assert complete[0]["worktree_id"] == "wt-already-retired"
         assert complete[0]["session_id"] == "old"
         assert complete[0]["successor_session_id"] == "new"
@@ -314,6 +315,37 @@ class TestRegisterSessionStdin:
         assert len(complete) == 1
         assert complete[0]["session_id"] == "old"
         assert complete[0]["successor_session_id"] == "new"
+
+    def test_stage_13_claim_is_atomic_against_a_concurrent_double_call(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        """#2457 review finding: the successor's sessionStart process and the
+        resident monitor's retire process run concurrently and could both
+        pass a plain read_events() check before either logs, double-recording
+        Stage 13. The dedup must be an atomic exclusive-create claim file, not
+        a read-before-write check -- simulate two callers racing to emit for
+        the exact same token and confirm only one wins."""
+        _save_record(tmp_tracking_dir, "wt-race", "/tmp/src/wt-race")
+        tracking.register_session("wt-race", "old")
+        rec = load_record(tmp_tracking_dir / "wt-race.yaml")
+        tracking.open_handoff(rec, "old", "task-race")
+        m.cmd_register_session(_args(
+            worktree_id="wt-race", session_id="new", handoff_token="task-race",
+        ))
+        activity.log_event(
+            "handoff_predecessor_retire", worktree_id="wt-race",
+            session_id="old", handoff_token="task-race", outcome="gone",
+        )
+        # Both the claim side and the retire side calling at "the same time"
+        # (modeled here as two sequential calls with no dedup memory between
+        # them beyond the on-disk claim file) must still yield exactly one
+        # handoff_complete record.
+        m._maybe_emit_stage_13("wt-race", "task-race")
+        m._maybe_emit_stage_13("wt-race", "task-race")
+        m._maybe_emit_stage_13("wt-race", "task-race")
+
+        complete = activity.read_events(worktree_id="wt-race", event="handoff_complete")
+        assert len(complete) == 1
 
     def test_resolves_worktree_from_stdin_cwd(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
@@ -841,12 +873,12 @@ class TestDeregisterSessionStdin:
         assert matches[0]["worktree_id"] == "wt-stage12"
         assert matches[0]["session_id"] == "session-12"
         assert matches[0]["launch_id"] == "flow-12"
-        loggged = [
+        logged = [
             r for r in activity.read_events(worktree_id="wt-stage12", event="session_ended")
         ]
-        assert len(loggged) == 1
-        assert loggged[0]["stage"] == 12
-        assert loggged[0]["stage_name"] == "session_end_bound"
+        assert len(logged) == 1
+        assert logged[0]["stage"] == 12
+        assert logged[0]["stage_name"] == "session_end_bound"
 
     def test_session_end_payload_closes_activation_with_event_timestamp(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch

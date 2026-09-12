@@ -2990,11 +2990,16 @@ def _handoff_cutover_spawn_result(
     return 0, response
 
 
-def _maybe_emit_stage_13(wt_id: str | None, handoff_token: str | None) -> None:
+def _maybe_emit_stage_13(
+    wt_id: str | None, handoff_token: str | None, *, launch_id: str | None = None,
+) -> None:
     """Emit Stage 13 (handoff_complete) once the predecessor pane is gone AND
     the successor is head (linked, not just candidate) -- called from both
-    the retire and claim sides since either can complete first; the dedup
-    check below makes it a no-op on whichever side runs first.
+    the retire and claim sides since either can complete first. Dedup is an
+    atomic exclusive-create claim file (not a read-before-write check): the
+    successor's sessionStart process and the resident monitor's retire
+    process run concurrently, so a plain read_events() check-then-act could
+    let both sides pass before either logs, double-recording Stage 13.
     """
     if not wt_id or not handoff_token:
         return
@@ -3005,12 +3010,6 @@ def _maybe_emit_stage_13(wt_id: str | None, handoff_token: str | None) -> None:
     }
     if handoff_token not in retired:
         return
-    already = any(
-        str(e.get("handoff_token") or "").strip() == handoff_token
-        for e in activity.read_events(worktree_id=wt_id, event="handoff_complete")
-    )
-    if already:
-        return
     try:
         record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")
     except Exception:
@@ -3018,9 +3017,20 @@ def _maybe_emit_stage_13(wt_id: str | None, handoff_token: str | None) -> None:
     handoff = next((h for h in record.handoffs if h.token == handoff_token), None)
     if handoff is None or handoff.state != "linked":
         return
+    claim_path = (
+        _monitor_handoff_claim_root() / _monitor_handoff_claim_segment(wt_id, "unknown-worktree")
+        / f"stage13-{_monitor_handoff_claim_segment(handoff_token, 'unknown-handoff')}.json"
+    )
+    try:
+        claim_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(claim_path, "x", encoding="utf-8"):
+            pass
+    except OSError:
+        return  # already claimed (FileExistsError) or unwritable -- either way, no-op
     activity.log_event(
         "handoff_complete", worktree_id=wt_id, session_id=handoff.predecessor,
-        successor_session_id=handoff.successor, handoff_token=handoff_token)
+        successor_session_id=handoff.successor, handoff_token=handoff_token,
+        launch_id=launch_id)
 
 
 def _handoff_cutover_retire_result(
@@ -3130,7 +3140,9 @@ def _handoff_cutover_retire_result(
         copilot_reaped=reap.get("reaped", 0),
         copilot_survivors=reap.get("survivors", 0),
     )
-    _maybe_emit_stage_13(wt_id, getattr(args, "handoff_token", None))
+    _maybe_emit_stage_13(
+        wt_id, getattr(args, "handoff_token", None),
+        launch_id=getattr(args, "launch_id", None) or os.environ.get("WORKTREE_LAUNCH_ID"))
     return (0 if overall_ok else 1), result
 
 
@@ -23475,7 +23487,7 @@ def _emit_handoff_claim_stages(
             "handoff_pickup_confirmed_predecessor_closing", worktree_id=wt_id,
             session_id=linked_handoff.predecessor, successor_session_id=session_id,
             handoff_token=linked_handoff.token, launch_id=launch_id)
-    _maybe_emit_stage_13(wt_id, linked_handoff.token)
+    _maybe_emit_stage_13(wt_id, linked_handoff.token, launch_id=launch_id)
 
 
 def cmd_register_session(args: argparse.Namespace) -> int:
