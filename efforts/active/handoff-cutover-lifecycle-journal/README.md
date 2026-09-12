@@ -229,6 +229,15 @@ renumbering from the "acknowledges handoff" step onward.)
 ### Phase 2 — Instrument all 13 stages
 - [ ] Stage 1 (`worktree_created`) — confirm `cmd_create` already emits this
       with no gaps; add `predecessor_session_id: null` framing.
+      **Partially landed (confirmation only):** `cmd_create` already emits
+      `worktree_created` unconditionally with `worktree_id`/`branch` — no gap
+      in the event itself. The `predecessor_session_id: null` framing is
+      *not yet* added: `log_event()`'s `**fields` silently drop a `None`
+      value (only the named `session_id`/`launch_id` params survive as
+      explicit nulls), so this needs `predecessor_session_id` promoted to a
+      first-class field the same way Phase 1's schema item already defers —
+      leave this item open until Phase 3's cross-linking work adds that
+      field generally, then re-close it here alongside that.
 - [ ] Stage 2 (`mux_session_assigned`) — **ordinary launches don't go through
       the Python `sessions.py` helpers at all**: `bin/launch-session.sh` /
       `.ps1` invoke `tmux`/`psmux new-session` directly and already emit
@@ -249,10 +258,14 @@ renumbering from the "acknowledges handoff" step onward.)
       *invocation attempt* (e.g. `copilot_invocation_attempted`) distinct from
       a confirmed `copilot_invoked`, so a setup failure before Copilot starts
       is visibly distinguishable in the trace.
-- [ ] Stage 4 (`session_start_bound`) — emit from `cmd_register_session` once
+- [x] Stage 4 (`session_start_bound`) — emit from `cmd_register_session` once
       a session id + worktree are actually resolved (already close to
       `session_started`; make sure the *binding* moment, not just tool entry,
       is what's logged).
+      **Confirmed landed:** `cmd_register_session` already emits
+      `session_started` immediately after `tracking.register_session()`
+      succeeds — the actual binding moment, not mere tool entry; no code
+      change needed, ticked off as a Phase 2 confirmation.
 - [ ] Stage 5 (`status_reported`) — emit from the `status`/status-report tool
       path when it first runs in a session (marks "Copilot did something in
       this worktree").
@@ -274,9 +287,14 @@ renumbering from the "acknowledges handoff" step onward.)
       immediately before `sessions.mux_new_window()`, with
       `handoff_successor_spawn_failed` on the failure path and the existing
       `handoff_cutover_spawn` retained as the terminal success event.
-- [ ] Stage 9 (`handoff_successor_session_start_bound`) — emit from the
+- [x] Stage 9 (`handoff_successor_session_start_bound`) — emit from the
       successor's own `cmd_register_session` when it recognizes the
       `--handoff-candidate-token` and calls `associate_handoff_candidate`.
+      **Landed:** `cmd_register_session` now emits
+      `handoff_successor_session_start_bound` immediately after
+      `tracking.associate_handoff_candidate()` succeeds (guarded by the same
+      `candidate_token` check), carrying `worktree_id`/`session_id`/
+      `handoff_token`.
 - [ ] Stage 10 (`handoff_successor_claimed`) — **must be emitted at the point
       the tracking record's head is authoritatively transferred**, not from
       `associate_handoff_candidate()` (which only records a candidate without
@@ -655,3 +673,29 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   dev72 across the fix rounds. Stage 8's Phase 2 checklist item is also now
   done as a side effect (ticked off above). Phase 2 (instrumenting the
   remaining 10 stages' actual emitter call sites) is next.
+- **Phase 2 started.** PR #2479 merged. Confirmed Stage 4 (`session_start_bound`)
+  already satisfies its acceptance criteria in existing code —
+  `cmd_register_session` already emits `session_started` right after
+  `tracking.register_session()` succeeds, the actual binding moment — no code
+  change needed, ticked off as a confirmation. Stage 1 (`worktree_created`)
+  is only *partially* confirmed: `cmd_create` already emits the event with no
+  gaps, but the `predecessor_session_id: null` framing the checklist also
+  asks for isn't landed yet (`log_event()`'s `**fields` silently drop a
+  `None` value; only the named `session_id`/`launch_id` params survive as
+  explicit nulls) — left open pending Phase 3's field promotion, per review
+  (PR #2488's "Do not mark Stage 1 complete without predecessor framing").
+  Landed Stage 9 (`handoff_successor_session_start_bound`):
+  `cmd_register_session` now emits it immediately after stage 4's
+  `session_started` (moved out of the `try` block that originally fired it
+  *before* stage 4 — review caught the backwards ordering), carrying the
+  same `launch_id` as `session_started` (review caught the missing
+  correlation field too), guarded by the same `candidate_token`/
+  `candidate_associated` check. Updated test
+  `test_session_start_emits_stage_9_on_candidate_association` in
+  `tests/test_register_session.py` now asserts the stage-4-then-stage-9
+  ordering and the `launch_id` field, in addition to the event's other
+  fields. `agent-worktrees` bumped 1.5.5-dev72 → dev73 in this PR (#2488) —
+  PR #2479's own merge ended at dev72. No further bump needed for the
+  review-response commit within this PR (module-size-only compaction, no
+  further plugin content growth). Remaining Phase 2 stages: 2, 3, 5, 6, 7,
+  10, 11, 12, 13.
