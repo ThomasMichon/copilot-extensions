@@ -456,6 +456,17 @@ renumbering from the "acknowledges handoff" step onward.)
       concurrent-writer race test (below) on **each** supported OS, not just
       a POSIX-side Node stand-in — or explicitly document a platform-specific
       fallback if true lock-free atomicity isn't achievable on one platform.
+      **Implementation landed in PR #2496** (`handoff_trace.py`): namespaced
+      per-project store, `fcntl`/`msvcrt` cross-process advisory lock,
+      `activity.log_event()` write-through wired for every stage-mapped
+      event, path-traversal validation on both `project`/`worktree_id`, a
+      `remove_trace()` reap hook wired into all three tracking-record
+      removal paths, and a subprocess-based (real separate OS processes, not
+      just threads) concurrent-append race test proving the lock actually
+      serializes independent processes on this machine's OS. **Left open:**
+      a real run of that same test on a Windows CI runner (the code path is
+      OS-selecting via `_append_lock`, but it has not yet been *observed*
+      passing on Windows), and the `handoff-trace` CLI itself.
 - [ ] Write/append the full per-stage trace into **both**:
       `~/.copilot/session-state/<predecessor-sid>/handoff-trace.jsonl` and
       `~/.copilot/session-state/<successor-sid>/handoff-trace.jsonl` — each
@@ -1035,3 +1046,36 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   stages" complete; corrected here after review caught the contradiction).
   Next: Phase 3 (durable per-project trace store + cross-linking +
   `handoff-trace` CLI) and Phase 5 (docs).
+- **PR #2496 (Phase 3 slice 1: durable per-project trace store), merged.**
+  Landed `handoff_trace.py` (namespaced per-project/per-worktree JSONL sink,
+  `fcntl`/`msvcrt` cross-process advisory lock, `activity.log_event()`
+  write-through for every stage-mapped event) plus two review rounds' worth
+  of fixes: (1) path-traversal validation on `project`/`worktree_id` before
+  either is used as a path component; (2) a real subprocess-based (separate
+  OS processes, not just threads) concurrent-append race test proving the
+  lock actually serializes independent processes; (3) Tier C documentation
+  in `docs/patterns/lifecycle-activity-logging.md` + `cli-reference.md` plus
+  the required "Documentation impact" PR-description statement; (4)
+  `remove_trace()`, wired into all three tracking-record removal call sites,
+  so a durable trace is reaped with its worktree instead of outliving it;
+  (5) `read_trace()` now decodes with `errors="replace"` so one invalid byte
+  can't abort the whole read. All five review threads replied-to
+  individually and resolved via GraphQL. **A genuine tooling/process gotcha
+  surfaced mid-review and is now documented in a related control-repo
+  note**: GitHub's Copilot
+  code-review app submits its review with API `state: "COMMENTED"` on this
+  repo's owner-authored PRs, never `APPROVED`/`CHANGES_REQUESTED` --
+  `agent-worktrees`' `pr-watch`/`pr-status` `verdict` classifier deliberately
+  excludes `COMMENTED` (correct plumbing, matches this repo's own
+  `contributing-to-copilot-extensions` skill: "Never wait for Copilot to
+  approve"), so waiting on a `pr-watch` verdict here structurally never
+  resolves. A prior leg of this same session spent ~10 consecutive
+  `pr-watch wait --timeout 600` calls (several hours) before this was
+  recognized; corrected by reading `gh pr view <n> --json reviews` directly,
+  assessing the advisory findings, and self-merging once addressed. Full
+  plugin suite (8 sub-suites) green throughout. **The durable-persistence
+  sub-item of Phase 3's checklist is now done.** Next: cross-linking/backfill
+  (stage 9 successor stamping + predecessor stamping), the `handoff-trace`
+  CLI, and the remaining Validation Plan items (spawn-kill partial-trace
+  test, live end-to-end reproduction, `find_orphaned_handoffs()` naming a
+  stalled stage).
