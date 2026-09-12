@@ -977,7 +977,82 @@ to `0.4.0-dev472`, agent-dispatch to `0.1.2-dev77`, agent-index to
 
 **#742 is now fully closed.**
 
-Remaining #736-adjacent open work not picked up this session: #743
-(agent-vault drain-safe cutover), #744 (work-coalescing singleton tier
-design).
+### 2026-09-11 (much later) — Landed #743: agent-vault drain-safe cutover (POSIX)
+
+Discovered `agent_vault.cutover` (the security-critical handoff mechanism --
+`build_handoff_payload`/`apply_handoff_payload`/`handoff_export_response`,
+gated to the owner-only AF_UNIX socket, `handoff-export` already wired into
+`service.handle_request`) already existed and was already exhaustively unit-
+tested, but nothing actually INVOKED it: no orchestration wired it into
+`install.sh update`, and there was no way for a not-yet-running new
+generation to receive/apply the payload at all.
+
+Closed the gap with two additions, both security-conscious about where the
+plaintext master password can go:
+
+1. **`service.py` CLI surface**: `--export-handoff` (client-side: ask the
+   currently-running daemon to export its unlocked state, print one line of
+   JSON to stdout, or nothing -- never raises, a safe silent degrade) and
+   `--handoff-stdin` (daemon-side: consume a pending payload -- via the
+   `AGENT_VAULT_HANDOFF_JSON` env var, or stdin as fallback -- and apply it
+   BEFORE any fork/daemonize, so it survives into the detached child via
+   copy-on-write memory). Extracted the env-var/stdin consumption into
+   `cutover.consume_pending_handoff()` for unit-testability.
+2. **`install.sh`'s `_install_service()`**: before touching the systemd unit,
+   if a generation is already active, capture its handoff payload (with the
+   env vars `config.py`/`send_command` need EXPLICITLY set for that one
+   subprocess call -- a real bug caught in testing, see below). Pass it to
+   the successor via `systemctl --user set-environment
+   AGENT_VAULT_HANDOFF_JSON=...` set immediately before `restart` and unset
+   immediately after (`restart` blocks until the start job completes, and
+   `--handoff-stdin` pops the var at the very start of `main()`) -- never
+   written to the unit file, never persisted to disk.
+
+Updated `cutover.py`'s module docstring to describe the two distinct legs
+(outgoing-daemon -> installer: AF_UNIX-only, unchanged; installer -> not-yet-
+running successor: env var or stdin, a same-user process-launch carrier, not
+an inter-daemon crossing) rather than overstating the original "never an env
+var" line now that a second, differently-scoped carrier exists.
+
+**Deliberately out of scope**: Windows. The named pipe is not proven owner-
+gated (per the existing code's own comment), so `request_handoff_from_running_
+daemon()` already safely returns `None` there and the update path degrades to
+the existing re-unlock, exactly per invariant #3 in
+`docs/patterns/graceful-daemon-cutover.md`. Hardening the pipe's DACL to make
+Windows eligible is a separate, larger, security-sensitive task, not folded
+into this change.
+
+**Verified for real, not just unit-tested** -- this machine has WSL Ubuntu
+with a real, already-running production agent-vault instance
+(`~/.agent-vault`, PID 483, untouched throughout), so every test ran against
+a fully isolated install (`--install-dir /tmp/av743` +
+`AGENT_VAULT_INSTALLATION_ID=test743`, its own systemd unit name/socket/TCP
+port -- confirmed the real instance's PID never changed):
+- Installed `keepassxc` fresh in WSL, created a real throwaway `.kdbx`,
+  unlocked it against the isolated daemon over the real IPC protocol.
+- Ran the actual `install.sh update` path twice. First attempt exposed a real
+  bug (env vars not exported for the `--export-handoff` subprocess call --
+  fixed) and a second pre-existing, unrelated bug this surfaced (`$RUN_DIR`/
+  `logs` were never `mkdir -p`'d before the daemon's first bind, so a fresh
+  POSIX install crash-loops on `sock.bind` -- fixed; tightly coupled to
+  testing this change, since it blocks daemon startup at all).
+- After the fix: `journalctl` showed "Drain-safe cutover: warmed 1 vault(s)
+  from predecessor handoff" on the successor PID, and a direct IPC `ping`
+  against the NEW pid confirmed `cli=unlocked` with the vault listed in
+  `unlocked_vaults` -- no re-unlock, a genuinely new process.
+- Cleaned up the isolated test unit/install dir afterward; confirmed the
+  real WSL production daemon (PID 483) was never touched.
+
+Added 13 new unit tests to `test_cutover.py` (client export mocking + env-
+var/stdin consumption); full suite 268 passed (same 2 pre-existing unrelated
+WSL-bash path failures). `check-install-contract.py` / `sync-versioned-
+runtime.py --check` / `check-version-consistency.py` all green; `bash -n`
+clean. Bumped to `0.1.0-dev103`.
+
+**#743 is now closed** for the transport where it is actually safe today
+(POSIX/systemd); the Windows named-pipe DACL hardening that would extend it
+there remains explicitly out of scope.
+
+Remaining #736-adjacent open work not picked up this session: #744
+(work-coalescing singleton tier design).
 

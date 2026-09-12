@@ -8,6 +8,7 @@ daemon action (the master password is never served over loopback TCP).
 
 from __future__ import annotations
 
+import io
 import time
 
 from agent_vault import cutover
@@ -116,3 +117,83 @@ def test_handle_request_gates_handoff_export(tmp_path):
     # Default transport (unknown) is refused -- fail closed.
     unknown = svc.handle_request({"action": "handoff-export"})
     assert unknown["ok"] is False and unknown.get("refused") is True
+
+
+# -- Client-side export (installer -> outgoing daemon) -----------------------
+
+def test_request_handoff_returns_none_when_daemon_unreachable(monkeypatch):
+    monkeypatch.setattr(
+        "agent_vault.service.send_command", lambda request: None
+    )
+    assert cutover.request_handoff_from_running_daemon() is None
+
+
+def test_request_handoff_returns_none_when_refused(monkeypatch):
+    monkeypatch.setattr(
+        "agent_vault.service.send_command",
+        lambda request: {"ok": False, "refused": True},
+    )
+    assert cutover.request_handoff_from_running_daemon() is None
+
+
+def test_request_handoff_returns_none_on_transport_exception(monkeypatch):
+    def _boom(request):
+        raise OSError("dial failed")
+
+    monkeypatch.setattr("agent_vault.service.send_command", _boom)
+    assert cutover.request_handoff_from_running_daemon() is None
+
+
+def test_request_handoff_returns_payload_on_success(monkeypatch):
+    handoff = {"master_passwords": {"/v.kdbx": "s3cret"}, "ttl_override": 0}
+    monkeypatch.setattr(
+        "agent_vault.service.send_command",
+        lambda request: {"ok": True, "handoff": handoff},
+    )
+    assert cutover.request_handoff_from_running_daemon() == handoff
+
+
+def test_request_handoff_sends_the_export_action(monkeypatch):
+    seen = {}
+
+    def _fake(request):
+        seen["request"] = request
+        return {"ok": True, "handoff": {}}
+
+    monkeypatch.setattr("agent_vault.service.send_command", _fake)
+    cutover.request_handoff_from_running_daemon()
+    assert seen["request"] == {"action": "handoff-export"}
+
+
+# -- Installer -> not-yet-running new generation (env var / stdin) -----------
+
+def test_consume_pending_handoff_prefers_env_var_and_pops_it():
+    payload = {"master_passwords": {"/v.kdbx": "pw"}}
+    environ = {"AGENT_VAULT_HANDOFF_JSON": '{"master_passwords": {"/v.kdbx": "pw"}}'}
+    result = cutover.consume_pending_handoff(environ=environ, stdin=io.StringIO(""))
+    assert result == payload
+    # Consumed -- never lingers in the environment a moment longer than needed.
+    assert "AGENT_VAULT_HANDOFF_JSON" not in environ
+
+
+def test_consume_pending_handoff_falls_back_to_stdin():
+    environ: dict = {}
+    stdin = io.StringIO('{"ttl_override": 0}')
+    result = cutover.consume_pending_handoff(environ=environ, stdin=stdin)
+    assert result == {"ttl_override": 0}
+
+
+def test_consume_pending_handoff_returns_none_when_nothing_pending():
+    assert cutover.consume_pending_handoff(environ={}, stdin=io.StringIO("")) is None
+
+
+def test_consume_pending_handoff_returns_none_on_malformed_json():
+    environ = {"AGENT_VAULT_HANDOFF_JSON": "not json"}
+    assert cutover.consume_pending_handoff(environ=environ, stdin=io.StringIO("")) is None
+    # Still consumed even though malformed -- never leaves a stale value behind.
+    assert "AGENT_VAULT_HANDOFF_JSON" not in environ
+
+
+def test_consume_pending_handoff_returns_none_for_non_dict_json():
+    environ = {"AGENT_VAULT_HANDOFF_JSON": "[1, 2, 3]"}
+    assert cutover.consume_pending_handoff(environ=environ, stdin=io.StringIO("")) is None
