@@ -185,9 +185,22 @@ across at least two periodic cycles.
 
 This repo is **PR-required** and uses the `pr-self-merge` profile. Work in an
 isolated worktree, publish with `copilot-extensions create-pr`, give the
-non-blocking Copilot review a chance to report, then merge with
-`copilot-extensions pr-merge <PR> --now` and finalize. Direct pushes to `main`
-are blocked by tooling and repository policy.
+non-blocking Copilot review a bounded window (order of minutes, not hours) to
+report, then merge with `copilot-extensions pr-merge <PR> --now` and finalize.
+Direct pushes to `main` are blocked by tooling and repository policy.
+
+**Copilot's review never gates the merge and never issues a final "verdict" or
+approval to wait for** -- the ruleset requires zero approving reviews, and
+Copilot's own review state is always a non-blocking comment, never an
+approval. Assess its findings as advisory: address genuinely valuable ones
+(don't block on stylistic nitpicks), explain or dismiss the rest, then
+self-merge -- with open low/medium-severity findings still on the PR if
+they're not worth a further round. Re-requesting a review after addressing
+feedback is fine, but do not loop indefinitely chasing a zero-finding pass;
+there is no clean-review requirement to satisfy, and one may never arrive
+since review tone/severity can vary run to run. A PR sitting untouched after
+a review lands, waiting for some further signal from Copilot, is a stuck PR --
+merge it or explicitly abandon it instead.
 
 ### Coordinating Across Control Repos
 
