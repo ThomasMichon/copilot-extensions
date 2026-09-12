@@ -689,6 +689,7 @@ class Session:
         self.caller_id = caller_id
         self.target = target
         self.client: AcpClient | None = None
+        self._owned_process: AgentProcess | None = None
         self.status = SessionStatus.CREATED
         # Status read from durable storage during daemon startup before
         # rehydrate converts an adoptable session to STOPPED. Persisted across
@@ -2478,6 +2479,9 @@ class SessionManager:
             for session, existing, status, record in results:
                 async with contextlib.AsyncExitStack() as locks:
                     if background:
+                        if session._turn_start_lock.locked() or session._lifecycle_lock.locked():
+                            continue
+                        await locks.enter_async_context(session._turn_start_lock)
                         await locks.enter_async_context(session._lifecycle_lock)
                         if not self._background_recovery_allowed(session):
                             continue
@@ -4057,6 +4061,7 @@ class SessionManager:
         """
         if self._host_index is None:
             return 0
+        from .session_ownership import finish_owned
         from .session_host.version_mux import HostDisposition, plan_host
 
         self._prune_dead_hosts()
@@ -4065,8 +4070,9 @@ class SessionManager:
         for rec, session, generation in self._host_candidates():
             async with contextlib.AsyncExitStack() as locks:
                 if session is not None:
-                    if session._lifecycle_lock.locked():
+                    if session._turn_start_lock.locked() or session._lifecycle_lock.locked():
                         continue
+                    await locks.enter_async_context(session._turn_start_lock)
                     await locks.enter_async_context(session._lifecycle_lock)
                 if not self._host_candidate_current(rec, session, generation):
                     continue
@@ -4079,16 +4085,11 @@ class SessionManager:
                 if plan.disposition in (HostDisposition.REAP_STOPPED,
                                         HostDisposition.FORCE_REAP):
                     if getattr(rec, "boundary", "local") == "local":
-                        teardown = asyncio.create_task(
-                            asyncio.to_thread(self._terminate_local_host_processes, rec)
-                        )
-                        try:
-                            await asyncio.shield(teardown)
-                        except asyncio.CancelledError:
-                            await teardown
+                        async def reap_local() -> None:
+                            await asyncio.to_thread(self._terminate_local_host_processes, rec)
                             self._forget_host_record(rec)
-                            raise
-                        self._forget_host_record(rec)
+
+                        await finish_owned(reap_local())
                     else:
                         self._reap_host_record(rec, plan.reason)
                     reaped += 1
@@ -4427,6 +4428,8 @@ class SessionManager:
         # No await separates publishing the STARTING row from taking this lock.
         # A stop must wait for initial launch just as it waits for reattachment.
         await session._lifecycle_lock.acquire()
+        from .session_ownership import finish_owned, settle_cancelled_resume, spawn_owned
+
         try:
             cs_target = None
             # Prefer the structured provider metadata (#177); fall back to
@@ -4770,12 +4773,12 @@ class SessionManager:
                 # ThomasMichon/copilot-extensions#566), so this is their only
                 # path. It is NOT reachable for a local target. Emits per-stage
                 # checkpoints (auth-env, ssh-connect, worktree) into the event log.
-                agent_proc = await spawn(
+                agent_proc = await spawn_owned(session, spawn(
                     target,
                     tracker=tracker,
                     connect_timeout=connect_timeout,
                     session_id=session_id,
-                )
+                ))
 
                 # Stage 7: launch + initialize Copilot in ACP mode. Should be
                 # fast; bound it so a hung launch fails fast.
@@ -4893,6 +4896,12 @@ class SessionManager:
                         target.worktree_id, acp_sid, pid=session.pid,
                         worktree_dir=target.cwd,
                     )
+        except asyncio.CancelledError:
+            await finish_owned(
+                settle_cancelled_resume(self, session, client, trigger="start_cancelled"),
+                propagate_cancel=False,
+            )
+            raise
         except ConnectError as exc:
             # Structured failure: we know exactly which stage failed and
             # whether a retry could help -- never an opaque "agent died".
@@ -5101,465 +5110,20 @@ class SessionManager:
         *,
         allow_recreate: bool = False,
     ) -> Session:
-        """Resume while the caller owns turn admission; acquire lifecycle once."""
-        session_id = session.session_id
-        async with session._lifecycle_lock:
-            if self._sessions.get(session_id) is not session:
-                raise KeyError(f"Session {session_id} not found")
-            if session.status != SessionStatus.STOPPED:
-                raise ValueError(
-                    f"Session {session_id} is {session.status.value}, not stopped"
-                )
-            # The caller now owns recovery; a failed explicit attempt must not
-            # leave stale restart intent rearming background provider probes.
-            session._lifecycle_generation += 1
-            session.restart_status = None
-            self._db.update_session_status(
-                session_id, SessionStatus.STOPPED.value, time.time(),
-            )
-            if self._host_index is not None:
-                self._host_index.set_resume_flag(session_id, False)
-            if not session.acp_session_id and not allow_recreate:
-                raise RuntimeError(
-                    f"Session {session_id} has no ACP session ID -- cannot resume"
-                )
+        """Delegate to the typed session_resume implementation."""
+        from .session_resume import resume_session_admitted
 
-            # Prefer reattaching to a surviving Session Host (adopt the running
-            # child + its in-flight turn) over a fresh child + load_session, so a
-            # resume after a transport drop (laptop sleep / tunnel flap / SSH
-            # sever) recovers the SAME work instead of abandoning a mid-turn tool
-            # call (#145). Falls through to the fresh-child path below when no
-            # live host survives (a genuinely dead child).
-            #
-            # The provider target refresh is deferred until AFTER this reattach
-            # attempt. `_try_reattach_live_host` (and the `_recover_remote_host_
-            # records` it drives) inspects and dials the far side using the
-            # target already persisted on this session, so it needs no
-            # refreshed provider data -- refreshing here provides no benefit to
-            # reattach. Refreshing eagerly used to abort resume outright (and so
-            # permanently block reattach) whenever the resolver could not yet
-            # resolve the agent -- e.g. immediately after a daemon restart before
-            # providers finish loading, or for a legacy session that predates
-            # request-override provenance -- even though a perfectly
-            # reattachable Session Host was waiting on the other end.
-            if await self._try_reattach_live_host(session):
-                log.info(
-                    "Session %s (%s) resumed by reattaching to its live "
-                    "Session Host (no respawn)", session_id, session.name,
-                )
-                session.touch()
-                return session
-
-            await self._refresh_provider_target(session)
-
-            session.status = SessionStatus.STARTING
-            self._db.update_session_status(
-                session_id, SessionStatus.STARTING.value, time.time()
-            )
-
-            def on_acp_event(event_type: str, data: dict[str, Any]) -> None:
-                if session.event_log:
-                    session.event_log.append(event_type, data)
-                self._capture_progress(session, event_type, data)
-                if event_type == "usage_update":
-                    self._handle_usage_update(session, data)
-
-            client: AcpClient | None = None
-            from .session_host.spawner import RemoteSpawnCleanupPendingError
-
-            for attempt in range(1, _MAX_RESUME_ROUNDS + 1):
-                client = None
-                try:
-                    load_existing = bool(session.acp_session_id)
-                    host_result = await self._resume_via_new_remote_host(
-                        session,
-                        on_acp_event=on_acp_event,
-                        permission_callback=permission_callback,
-                        load_existing=load_existing,
-                    )
-                    resumed_acp_id = (
-                        host_result[1] if host_result is not None else None
-                    )
-                    client = host_result[0] if host_result is not None else None
-                    if client is None:
-                        agent_proc = await spawn(session.target)
-                        client = AcpClient(
-                            on_event=on_acp_event,
-                            on_permission=permission_callback,
-                            model_override=session.model_override,
-                            effort_override=session.effort_override,
-                        )
-                        if permission_callback:
-                            client.auto_approve = False
-                        # Bound each round so a stalled Copilot ACP launch (the
-                        # "Resuming…"/extension-reload race, #1468) fails fast and
-                        # we re-roll, rather than hanging in STARTING.
-                        await asyncio.wait_for(
-                            client.start(agent_proc.proc),
-                            timeout=self._timeouts.session_start,
-                        )
-                        if session.acp_session_id:
-                            await asyncio.wait_for(
-                                client.load_session(
-                                    cwd=(
-                                        session.target.cwd
-                                        or _default_cwd(session.target)
-                                    ),
-                                    session_id=session.acp_session_id,
-                                ),
-                                timeout=self._timeouts.session_new,
-                            )
-                            resumed_acp_id = session.acp_session_id
-                        else:
-                            resumed_acp_id = await asyncio.wait_for(
-                                client.new_session(
-                                    cwd=(
-                                        session.target.cwd
-                                        or _default_cwd(session.target)
-                                    ),
-                                    mcp_servers=session.mcp_servers,
-                                ),
-                                timeout=self._timeouts.session_new,
-                            )
-
-                    if resumed_acp_id and (
-                        resumed_acp_id != session.acp_session_id
-                    ):
-                        session.acp_session_id = resumed_acp_id
-                        self._db.update_session_acp_id(
-                            session_id,
-                            resumed_acp_id,
-                        )
-
-                    session.client = client
-                    session.status = SessionStatus.IDLE
-                    self._db.update_session_status(
-                        session_id, SessionStatus.IDLE.value, time.time(),
-                        pid=session.pid,
-                    )
-                    if session.event_log:
-                        session.event_log.append("session_state_changed", {
-                            "status": SessionStatus.IDLE.value,
-                            "resumed": True,
-                            "acp_session_id": session.acp_session_id,
-                            "resume_attempt": attempt,
-                        })
-                    log.info(
-                        "Session %s (%s) resumed, pid=%s (attempt %d/%d)",
-                        session_id, session.name, session.pid,
-                        attempt, _MAX_RESUME_ROUNDS,
-                    )
-                    break  # success -- leave the ladder
-                except Exception as exc:
-                    if isinstance(exc, RemoteSpawnCleanupPendingError):
-                        session.status = SessionStatus.STOPPED
-                        self._db.update_session_status(
-                            session_id,
-                            SessionStatus.STOPPED.value,
-                            time.time(),
-                        )
-                        if session.event_log:
-                            session.event_log.append(
-                                "remote_launch_cleanup_pending",
-                                {"message": str(exc)},
-                            )
-                        raise
-                    # Capture the child's startup stderr tail BEFORE tearing the
-                    # client down, so the retry marker records why it stalled.
-                    stderr_tail = client.stderr_tail() if client else ""
-                    # Many stall exceptions (notably ``asyncio.TimeoutError()``)
-                    # have an empty ``str()`` -- keep the type so markers/logs are
-                    # interpretable.
-                    exc_desc = f"{type(exc).__name__}: {exc}".rstrip(": ")
-                    # Stop the wedged child before the next round (the "stop" in
-                    # stop->resume); re-rolls the launch against the SAME ACP
-                    # session, preserving prior-turn context.
-                    if client:
-                        with contextlib.suppress(Exception):
-                            await client.shutdown()
-                    session.client = None
-                    if session.event_log:
-                        session.event_log.append("acp_resume_retry", {
-                            "attempt": attempt,
-                            "of": _MAX_RESUME_ROUNDS,
-                            "error": exc_desc,
-                            "stderr_tail": stderr_tail,
-                            "will_retry": attempt < _MAX_RESUME_ROUNDS,
-                        })
-                    if attempt < _MAX_RESUME_ROUNDS:
-                        log.warning(
-                            "Resume attempt %d/%d for session %s failed (%s); "
-                            "stopping the wedged child and re-rolling",
-                            attempt, _MAX_RESUME_ROUNDS, session_id, exc_desc,
-                        )
-                        continue
-                    # Ladder exhausted.
-                    if not allow_recreate:
-                        # No fresh-session fallback (e.g. an explicit `resume`):
-                        # surface the failure rather than silently drop context.
-                        session.status = SessionStatus.STOPPED
-                        self._db.update_session_status(
-                            session_id, SessionStatus.STOPPED.value, time.time()
-                        )
-                        if session.event_log:
-                            session.event_log.append("error", {
-                                "message": f"Resume failed after "
-                                           f"{_MAX_RESUME_ROUNDS} attempts: "
-                                           f"{exc_desc}",
-                            })
-                        log.error(
-                            "Failed to resume session %s after %d attempts: %s",
-                            session_id, _MAX_RESUME_ROUNDS, exc_desc,
-                        )
-                        raise
-                    # allow_recreate: fall through to the in-place end+create
-                    # (fresh ACP session, prior-turn context dropped) below.
-                    log.warning(
-                        "Resume ladder exhausted for session %s after %d "
-                        "attempts (%s); falling back to a fresh ACP session "
-                        "(end+create, prior-turn context dropped)",
-                        session_id, _MAX_RESUME_ROUNDS, exc_desc,
-                    )
-                    break
-
-            # End+create last resort (opt-in, ladder exhausted). The stop->resume
-            # rounds above all failed to reattach the persisted ACP session; as a
-            # final recovery, end it and create a FRESH ACP session in place --
-            # SAME bridge session id (delivery cursor / affinity intact), new
-            # (empty) ACP session -- so a wedged CodeSpace resume still yields a
-            # working session, trading prior-turn context for availability
-            # (#1468). Only reached when allow_recreate and no round succeeded.
-            if session.status != SessionStatus.IDLE:
-                recreate_client: AcpClient | None = None
-                try:
-                    host_result = await self._resume_via_new_remote_host(
-                        session,
-                        on_acp_event=on_acp_event,
-                        permission_callback=permission_callback,
-                        load_existing=False,
-                    )
-                    if host_result is not None:
-                        recreate_client, new_acp = host_result
-                    else:
-                        agent_proc = await spawn(session.target)
-                        recreate_client = AcpClient(
-                            on_event=on_acp_event,
-                            on_permission=permission_callback,
-                            model_override=session.model_override,
-                            effort_override=session.effort_override,
-                        )
-                        if permission_callback:
-                            recreate_client.auto_approve = False
-                        await asyncio.wait_for(
-                            recreate_client.start(agent_proc.proc),
-                            timeout=self._timeouts.session_start,
-                        )
-                        new_acp = await asyncio.wait_for(
-                            recreate_client.new_session(
-                                cwd=(
-                                    _venue_workspace_cwd(session.target)
-                                    or session.target.cwd
-                                    or _default_cwd(session.target)
-                                ),
-                                mcp_servers=session.mcp_servers,
-                            ),
-                            timeout=self._timeouts.session_new,
-                        )
-                    old_acp = session.acp_session_id
-                    session.client = recreate_client
-                    session.acp_session_id = new_acp
-                    session.status = SessionStatus.IDLE
-                    if session.event_log:
-                        session.event_log.set_telemetry_identity(
-                            acp_session_id=new_acp,
-                            worktree_id=session.target.worktree_id,
-                        )
-                    # The fresh ACP session starts EMPTY -- reset context-usage /
-                    # handoff state so stale "critical" usage or a pending
-                    # context-pressure handoff from the dropped session can't
-                    # misfire against the new (empty) session (review on #1468).
-                    session.context_size = None
-                    session.context_used = None
-                    session._crossed_thresholds = set()
-                    session._handoff_pending = False
-                    self._db.update_session_acp_id(session_id, new_acp)
-                    self._db.update_session_status(
-                        session_id, SessionStatus.IDLE.value, time.time(),
-                        pid=session.pid,
-                    )
-                    if session.event_log:
-                        # Durable lifecycle transition for SSE/telemetry consumers
-                        # (the recreate is still a resume-to-IDLE, just onto a
-                        # fresh ACP session).
-                        session.event_log.append("session_state_changed", {
-                            "status": SessionStatus.IDLE.value,
-                            "resumed": True,
-                            "recreated": True,
-                            "acp_session_id": new_acp,
-                        })
-                        session.event_log.append("acp_resume_recreated", {
-                            "old_acp_session_id": old_acp,
-                            "new_acp_session_id": new_acp,
-                            "context_dropped": True,
-                        })
-                    log.warning(
-                        "Session %s (%s) recreated with a fresh ACP session %s "
-                        "(was %s) after the resume ladder was exhausted -- "
-                        "prior-turn context dropped",
-                        session_id, session.name, new_acp, old_acp,
-                    )
-                except Exception as exc:
-                    if recreate_client:
-                        with contextlib.suppress(Exception):
-                            await recreate_client.shutdown()
-                    session.client = None
-                    session.status = SessionStatus.STOPPED
-                    self._db.update_session_status(
-                        session_id, SessionStatus.STOPPED.value, time.time()
-                    )
-                    exc_desc = f"{type(exc).__name__}: {exc}".rstrip(": ")
-                    if session.event_log:
-                        session.event_log.append("error", {
-                            "message": f"Resume + recreate failed: {exc_desc}",
-                        })
-                    log.error(
-                        "Resume + recreate failed for session %s: %s",
-                        session_id, exc_desc,
-                    )
-                    raise
-
-        session.touch()
-        return session
+        return await resume_session_admitted(
+            self, session, permission_callback, allow_recreate=allow_recreate,
+        )
 
     async def resync_session(self, session_id: str, *, background: bool = False) -> int:
-        """Rebuild a session's event log from the agent's authoritative replay.
+        """Delegate to the typed session_resume implementation."""
+        from .session_resume import resync_session
 
-        Reattaches to the persisted ACP session and captures the full
-        conversation history the agent streams back during load (per the ACP
-        spec), then replaces the event log with it. This heals logs that were
-        truncated by a mid-session disconnect (e.g. an oversized ACP frame
-        that crashed the read loop): the agent always holds the complete
-        history, so its replay is the source of truth.
-
-        Idempotent: resyncing an already-complete session rebuilds the same
-        log. Leaves the session IDLE with a live client, ready for prompts.
-        Returns the number of events in the rebuilt log.
-
-        A ``RUNNING`` status only blocks resync while a turn is *actually* live
-        in this daemon. A **wedged** session -- status left at ``RUNNING`` with
-        no live prompt task (a turn whose runner already exited without a
-        terminal event, or a session rehydrated after a daemon restart) -- is
-        exactly what needs healing, so it is allowed through; only a genuinely
-        live turn is refused (issue #22 / #2385).
-        """
-        session_id = self._resolve_ref(session_id) or session_id
-        session = self._sessions.get(session_id)
-        if not session:
-            raise KeyError(f"Session {session_id} not found")
-        if not session.acp_session_id:
-            raise RuntimeError(
-                f"Session {session_id} has no ACP session ID -- cannot resync"
-            )
-
-        async with session._turn_start_lock, session._lifecycle_lock:
-            if self._sessions.get(session_id) is not session:
-                raise KeyError(f"Session {session_id} not found")
-            if background and session.status != SessionStatus.RUNNING:
-                raise ValueError(
-                    f"Session {session_id} is no longer running; skipping background resync"
-                )
-            if session.status == SessionStatus.RUNNING:
-                turn_live = (
-                    session._prompt_task is not None
-                    and not session._prompt_task.done()
-                )
-                if turn_live:
-                    raise ValueError(
-                        f"Session {session_id} is running a live turn "
-                        "-- cannot resync"
-                    )
-                # Wedged RUNNING: no live turn to protect. Cancel any lingering
-                # (already-finished) task handle and heal the stuck state.
-                log.warning(
-                    "Resyncing wedged RUNNING session %s (no live turn)",
-                    session_id,
-                )
-                if session._prompt_task is not None:
-                    with contextlib.suppress(Exception):
-                        session._prompt_task.cancel()
-
-            session._lifecycle_generation += 1
-            session.restart_status = None
-            if self._host_index is not None:
-                self._host_index.set_resume_flag(session_id, False)
-
-            # Tear down any live client so we can reattach cleanly.
-            if session.client:
-                with contextlib.suppress(Exception):
-                    await session.client.shutdown()
-                session.client = None
-
-            session.status = SessionStatus.STARTING
-            self._db.update_session_status(
-                session_id, SessionStatus.STARTING.value, time.time()
-            )
-
-            captured: list[tuple[str, dict[str, Any]]] = []
-
-            def on_capture(event_type: str, data: dict[str, Any]) -> None:
-                captured.append((event_type, data))
-                if event_type == "usage_update":
-                    self._handle_usage_update(session, data)
-
-            client: AcpClient | None = None
-            try:
-                agent_proc = await spawn(session.target)
-                client = AcpClient(
-                    on_event=on_capture,
-                    model_override=session.model_override,
-                    effort_override=session.effort_override,
-                )
-                await client.start(agent_proc.proc)
-                # suppress_replay=False -> the replayed history is captured.
-                await client.load_session(
-                    cwd=session.target.cwd or _default_cwd(session.target),
-                    session_id=session.acp_session_id,
-                    suppress_replay=False,
-                )
-
-                count = 0
-                if session.event_log:
-                    count = session.event_log.rebuild(captured)
-                    session.event_log.append("session_state_changed", {
-                        "status": SessionStatus.IDLE.value,
-                        "resynced": True,
-                        "acp_session_id": session.acp_session_id,
-                    })
-
-                session.client = client
-                session.status = SessionStatus.IDLE
-                self._db.update_session_status(
-                    session_id, SessionStatus.IDLE.value, time.time(),
-                    pid=session.pid,
-                )
-                log.info(
-                    "Session %s (%s) resynced: rebuilt %d events",
-                    session_id, session.name, count,
-                )
-            except Exception as exc:
-                if client:
-                    with contextlib.suppress(Exception):
-                        await client.shutdown()
-                session.client = None
-                session.status = SessionStatus.STOPPED
-                self._db.update_session_status(
-                    session_id, SessionStatus.STOPPED.value, time.time()
-                )
-                log.error("Failed to resync session %s: %s", session_id, exc)
-                raise
-
-        session.touch()
-        return count
+        return await resync_session(
+            self, session_id, background=background,
+        )
 
     async def submit_prompt(self, session_id: str, prompt: str) -> int:
         """Atomically start a turn against conditional idle teardown."""
@@ -5617,6 +5181,7 @@ class SessionManager:
             await self._resume_session_admitted(session, allow_recreate=True)
             # resume_session sets status to IDLE and attaches a new client
 
+        session._lifecycle_generation += 1
         turn_index = session.turn_count
         session.turn_count += 1
         now = time.time()
@@ -6179,6 +5744,9 @@ class SessionManager:
                     session.session_id, exc_info=True,
                 )
             session.client = None
+        from .session_ownership import cleanup_owned_process
+
+        await cleanup_owned_process(session)
         # Clean up unused worktrees (0-turn sessions from crash-loops)
         try:
             await _cleanup_worktree(session.target, session.turn_count)
@@ -6323,61 +5891,12 @@ class SessionManager:
         self, session: Session, *, force: bool = False, reap_host: bool = False,
         cancel_turn: bool = True, for_restart: bool = False,
     ) -> None:
-        """Stop while the caller already owns this session's turn admission."""
-        session_id = session.session_id
-        async with session._lifecycle_lock:
-            if self._sessions.get(session_id) is not session:
-                raise KeyError(f"Session {session_id} not found")
-            if not force and session.has_active_background_tasks:
-                raise SessionBusyError(session_id, session.active_background_tasks)
+        """Delegate to the typed session_teardown implementation."""
+        from .session_teardown import stop_session_admitted
 
-            session._lifecycle_generation += 1
-            restart_status = None
-            if for_restart:
-                restart_status = (
-                    session.restart_status
-                    if session.status == SessionStatus.STOPPED
-                    else session.status.value
-                )
-            await self._quiesce_session(session, cancel_turn=cancel_turn)
-
-            # Relay monitors reconnect independently of the heartbeat. Release
-            # frontend-owned processes even on restart; the successor rebuilds
-            # channels from descriptors, rather than adopting detached processes.
-            await self._drop_forward(
-                session_id, strict=True, preserve_ownership=True,
-            )
-            if not for_restart and self._host_index is not None:
-                self._host_index.set_resume_flag(session_id, False)
-            # Idle-reaper only: free the child; a plain stop stays resumable.
-            if reap_host and self._host_index is not None:
-                rec = self._host_index.get(session_id)
-                if rec is not None:
-                    self._reap_host_record(rec, "idle reap (#1826)")
-
-            pending_reaps = list(self._remote_reaps_by_session.get(session_id, ()))
-            if pending_reaps:
-                cleanup = asyncio.gather(*pending_reaps)
-                try:
-                    await asyncio.shield(cleanup)
-                except asyncio.CancelledError:
-                    await cleanup
-                    raise
-
-            session.status = SessionStatus.STOPPED
-            session.restart_status = restart_status
-            now = time.time()
-            self._db.update_session_status(
-                session_id, SessionStatus.STOPPED.value, now,
-                restart_status=restart_status,
-            )
-            self._db.release_worktree_ownership(session_id=session_id)
-            if session.event_log:
-                session.event_log.append("session_state_changed", {
-                    "status": SessionStatus.STOPPED.value,
-                })
-            session.touch()
-            log.info("Session %s (%s) stopped", session_id, session.name)
+        return await stop_session_admitted(
+            self, session, force=force, reap_host=reap_host, cancel_turn=cancel_turn, for_restart=for_restart,
+        )
 
     async def end_session_if_idle(
         self,
@@ -6431,148 +5950,12 @@ class SessionManager:
             await self._end_session_locked(session, force=force)
 
     async def _end_session_locked(self, session: Session, *, force: bool = False) -> None:
-        """End under admission/lifecycle ownership, including authority recovery."""
-        session_id = session.session_id
-        if self._sessions.get(session_id) is not session:
-            raise KeyError(f"Session {session_id} not found")
-        if not force and session.has_active_background_tasks:
-            raise SessionBusyError(session_id, session.active_background_tasks)
+        """Delegate to the typed session_teardown implementation."""
+        from .session_teardown import end_session_locked
 
-        session._lifecycle_generation += 1
-        container = (
-            session.target.container
-            if isinstance(session.target.container, dict)
-            else {}
+        return await end_session_locked(
+            self, session, force=force,
         )
-        explicit_absence = (
-            container.get("authoritative_identity_removed") is True
-            or container.get("recreate_failed_without_host") is True
-        )
-        cleanup_pending = (
-            session_id in self._container_lock_sessions
-            or container.get("launch_pending_session_id") == session_id
-        )
-        recovery_inconclusive = session_id in self._remote_recovery_inconclusive
-        if (
-            (cleanup_pending or recovery_inconclusive)
-            and self._host_index is not None
-            and self._host_index.get(session_id) is None
-            and not explicit_absence
-        ):
-            self._remote_recovery_inconclusive.discard(session_id)
-            try:
-                await self._recover_remote_host_records(
-                    allow_wake=True,
-                    session_ids={session_id},
-                )
-            except Exception as exc:
-                self._remote_recovery_inconclusive.add(session_id)
-                raise RemoteHostRecoveryPendingError(
-                    "Remote Session Host cleanup could not inspect authority "
-                    f"for {session_id}; retained session and remote ownership"
-                ) from exc
-            if (
-                self._host_index.get(session_id) is None
-                and session_id in self._remote_recovery_inconclusive
-            ):
-                raise RemoteHostRecoveryPendingError(
-                    "Remote Session Host cleanup is inconclusive; retained "
-                    f"session {session_id} and remote ownership"
-                )
-            if (
-                self._host_index.get(session_id) is None
-                and session_id not in self._remote_recovery_inconclusive
-            ):
-                self._set_container_launch_pending(session_id, False)
-                container = (
-                    session.target.container
-                    if isinstance(session.target.container, dict)
-                    else {}
-                )
-
-        await self._quiesce_session(session)
-
-        # Session-Host mode: an explicit end is a *sanctioned terminate*, so it
-        # must REAP the child -- unlike stop, whose host-mode shutdown only
-        # detaches to keep the child reattachable. Without this the host + child
-        # survive with a dangling index record and are never collected (#1786;
-        # goal 1: termination is intentional, not inadvertent).
-        rec = None
-        if self._host_index is not None:
-            rec = self._host_index.get(session_id)
-            if rec is not None:
-                container = (
-                    session.target.container
-                    if isinstance(session.target.container, dict)
-                    else {}
-                )
-                if (
-                    rec.boundary == "container"
-                    and container.get("authoritative_identity_removed") is True
-                ):
-                    self._kill_forward_sync(session_id)
-                    with contextlib.suppress(Exception):
-                        self._host_index.remove(session_id)
-                elif rec.boundary == "container":
-                    self._kill_forward_sync(
-                        session_id,
-                        release_container_lock=False,
-                    )
-                    confirmed_dead = await self._remote_reap(
-                        rec,
-                        getattr(rec, "endpoint", None) or {},
-                    )
-                    if not confirmed_dead:
-                        self._mark_session_failed(
-                            session, trigger="remote_reap_inconclusive"
-                        )
-                        raise RemoteHostRecoveryPendingError(
-                            "Container Session Host reap is inconclusive; "
-                            f"retained session {session_id} and target ownership"
-                        )
-                    with contextlib.suppress(Exception):
-                        self._host_index.remove(session_id)
-                    with contextlib.suppress(Exception):
-                        from . import bridge_lock
-                        bridge_lock.remove_sync(session_id)
-                    self._set_container_launch_pending(session_id, False)
-                else:
-                    self._reap_host_record(rec, "session ended")
-
-        if (
-            container
-            and container.get("launch_pending_session_id") != session_id
-            and (
-                (self._host_index is not None and rec is None)
-                or
-                container.get("authoritative_identity_removed") is True
-                or container.get("recreate_failed_without_host") is True
-            )
-        ):
-            self._release_container_lock(session_id)
-
-        session.status = SessionStatus.ENDED
-        with contextlib.suppress(Exception):
-            self._clear_pending_queue(session, reason="ended")
-        # #897: release the exclusive CodeSpace claim this session held, so the
-        # box is immediately re-dispatchable by another worktree instead of
-        # waiting for the liveness/TTL sweep. Best-effort and idempotent (the
-        # CLI only releases a claim this owner actually holds). Keyed off the
-        # persisted target, so it is correct even after a daemon restart.
-        with contextlib.suppress(Exception):
-            claim_key = _codespace_claim_key(session.target)
-            if claim_key is not None:
-                _release_codespace_claim(*claim_key)
-        with contextlib.suppress(Exception):
-            self._db.update_session_status(
-                session_id, SessionStatus.ENDED.value, time.time()
-            )
-        with contextlib.suppress(Exception):
-            self._db.release_worktree_ownership(session_id=session_id)
-        with contextlib.suppress(Exception):
-            self._db.delete_session(session_id)
-        self._sessions.pop(session_id, None)
-        log.info("Session %s (%s) ended and cleaned up", session_id, session.name)
 
     # -- Context-aware in-place handoff --------------------------------------
 
@@ -6741,6 +6124,7 @@ class SessionManager:
         the duration and restored to IDLE afterward so watchdogs and the
         concurrency guard see a coherent state.
         """
+        session._lifecycle_generation += 1
         turn_index = session.turn_count
         session.turn_count += 1
         now = time.time()

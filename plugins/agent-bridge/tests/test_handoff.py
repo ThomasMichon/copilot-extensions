@@ -20,6 +20,13 @@ def _mock_agent_proc():
     proc.proc.stdout = MagicMock()
     proc.proc.stderr = MagicMock()
     proc.proc.stderr.readline = AsyncMock(return_value=b"")
+    proc.alive = True
+
+    async def kill():
+        proc.alive = False
+        proc.proc.returncode = -15
+
+    proc.kill = AsyncMock(side_effect=kill)
     return proc
 
 

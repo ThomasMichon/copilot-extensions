@@ -507,27 +507,10 @@ class Database:
             conn.commit()
 
     def _ensure_columns(self, conn: sqlite3.Connection) -> None:
-        """Idempotently add any missing post-base ``sessions`` columns.
+        """Ensure canonical nullable session columns independently of schema stamps."""
+        from .db_migrations import ensure_session_columns
 
-        Independent of ``schema_version`` (that is the whole point): the
-        version-gated migrations below only run when the DB is *below* their
-        target version, so a table already stamped at/after that version but
-        missing the column would never receive it. This ensures the canonical
-        nullable column set on every init.
-        """
-        existing = {r[1] for r in conn.execute("PRAGMA table_info(sessions)")}
-        added: list[str] = []
-        for col, col_type in _SESSIONS_ENSURE_COLUMNS:
-            if col not in existing:
-                conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} {col_type}")
-                added.append(col)
-        if added:
-            conn.commit()
-            log.warning(
-                "Ensured missing sessions column(s) via safety net: %s "
-                "(schema was stamped past their migration gate; see #815)",
-                ", ".join(added),
-            )
+        ensure_session_columns(conn, _SESSIONS_ENSURE_COLUMNS)
 
     def _migrate(self, conn: sqlite3.Connection, from_version: int) -> None:
         """Run schema migrations from from_version to SCHEMA_VERSION."""
@@ -862,13 +845,9 @@ class Database:
                 "Schema migrated to version 17: delivery cursor invalidations"
             )
 
-        if from_version < 18:
-            cols = {r[1] for r in conn.execute("PRAGMA table_info(sessions)")}
-            if "restart_status" not in cols:
-                conn.execute("ALTER TABLE sessions ADD COLUMN restart_status TEXT")
-            conn.execute("UPDATE schema_version SET version=?", (18,))
-            conn.commit()
-            log.info("Schema migrated to version 18: restart recovery provenance")
+        from .db_migrations import migrate_restart_status
+
+        migrate_restart_status(conn, from_version)
 
     def execute_write(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
         """Execute a write query under the write lock."""
