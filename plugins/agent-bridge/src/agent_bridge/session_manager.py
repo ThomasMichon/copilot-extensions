@@ -2032,6 +2032,34 @@ class SessionManager:
             return []
         return [r for r in self._host_index.all() if self._rec_host_alive(r)]
 
+    def _host_candidates(self) -> list[tuple[Any, Session | None, int | None]]:
+        """Snapshot records and lifecycle identity before maintenance can yield."""
+        candidates = []
+        for record in self._live_host_records():
+            session = self._sessions.get(record.session_id)
+            candidates.append((
+                copy.deepcopy(record), session,
+                session._lifecycle_generation if session is not None else None,
+            ))
+        return candidates
+
+    def _host_candidate_current(
+        self, record: Any, session: Session | None, generation: int | None,
+    ) -> bool:
+        """Revalidate a maintenance candidate under its lifecycle ownership."""
+        return (
+            self._host_index is not None
+            and self._host_index.get(record.session_id) == record
+            and self._sessions.get(record.session_id) is session
+            and (
+                session is None
+                or (
+                    session._lifecycle_generation == generation
+                    and self._background_recovery_allowed(session)
+                )
+            )
+        )
+
     def _live_remote_host_sessions(self) -> set[str]:
         """Session ids backed by a live **remote** (ssh/codespace) Session Host.
 
@@ -2135,12 +2163,7 @@ class SessionManager:
         self._prune_dead_hosts()
         reattached = 0
         now = time.time()
-        startup_generations = {
-            sid: (session, session._lifecycle_generation)
-            for sid, session in self._sessions.items()
-        }
-        for rec in copy.deepcopy(self._live_host_records()):
-            session, generation = startup_generations.get(rec.session_id, (None, None))
+        for rec, session, generation in self._host_candidates():
             if (
                 session is not None
                 and not self._background_recovery_allowed(session)
@@ -2182,17 +2205,9 @@ class SessionManager:
                         continue
                     await locks.enter_async_context(session._turn_start_lock)
                     await locks.enter_async_context(session._lifecycle_lock)
-                    if not self._background_recovery_allowed(session):
+                    if session.client is not None and session.client.is_running:
                         continue
-                    if (
-                        session._lifecycle_generation != generation
-                        or (session.client is not None and session.client.is_running)
-                    ):
-                        continue
-                if (
-                    self._sessions.get(rec.session_id) is not session
-                    or self._host_index.get(rec.session_id) != rec
-                ):
+                if not self._host_candidate_current(rec, session, generation):
                     log.info("Skipping replaced startup host candidate %s", rec.session_id)
                     continue
                 plan = plan_host(
@@ -3635,8 +3650,7 @@ class SessionManager:
         recovered = 0
         codespace_availability: dict[str, bool] = {}
         now = time.time()
-        for rec in list(self._live_host_records()):
-            session = self._sessions.get(rec.session_id)
+        for rec, session, generation in self._host_candidates():
             if session is None or not session.acp_session_id:
                 continue
             if not self._background_recovery_allowed(session):
@@ -3645,7 +3659,7 @@ class SessionManager:
             if session._turn_start_lock.locked() or session._lifecycle_lock.locked():
                 continue
             async with session._turn_start_lock, session._lifecycle_lock:
-                if not self._background_recovery_allowed(session):
+                if not self._host_candidate_current(rec, session, generation):
                     continue
                 client = session.client
                 if (
@@ -4048,15 +4062,14 @@ class SessionManager:
         self._prune_dead_hosts()
         now = time.time()
         reaped = 0
-        for rec in self._live_host_records():
-            session = self._sessions.get(rec.session_id)
+        for rec, session, generation in self._host_candidates():
             async with contextlib.AsyncExitStack() as locks:
                 if session is not None:
                     if session._lifecycle_lock.locked():
                         continue
                     await locks.enter_async_context(session._lifecycle_lock)
-                    if not self._background_recovery_allowed(session):
-                        continue
+                if not self._host_candidate_current(rec, session, generation):
+                    continue
                 plan = plan_host(
                     protocol_version=rec.protocol_version,
                     child_alive=self._rec_child_alive(rec),
@@ -5074,6 +5087,8 @@ class SessionManager:
             raise KeyError(f"Session {session_id} not found")
 
         async with session._lifecycle_lock:
+            if self._sessions.get(session_id) is not session:
+                raise KeyError(f"Session {session_id} not found")
             if session.status != SessionStatus.STOPPED:
                 raise ValueError(
                     f"Session {session_id} is {session.status.value}, not stopped"

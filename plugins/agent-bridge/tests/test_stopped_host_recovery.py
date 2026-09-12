@@ -998,7 +998,8 @@ async def test_remote_authority_results_cannot_overwrite_newer_lifecycle(
 
 
 @pytest.mark.parametrize("change", ["replace", "remove", "resume", "healthy"])
-async def test_startup_iterator_rechecks_later_candidates(context, monkeypatch, change):
+@pytest.mark.parametrize("driver", ["startup", "heartbeat"])
+async def test_host_iterator_rechecks_later_candidates(context, monkeypatch, change, driver):
     from dataclasses import replace
 
     ctx = context
@@ -1014,12 +1015,12 @@ async def test_startup_iterator_rechecks_later_candidates(context, monkeypatch, 
     record = replace(ctx.record, session_id=other.session_id)
     ctx.manager._host_index.register(record)
     if change == "healthy":
-        other.client = SimpleNamespace(is_running=True)
+        other.client = SimpleNamespace(is_running=True, host_child_exit_code=None)
     calls = []
 
     async def resume(session):
         session.status = SessionStatus.IDLE
-        session.client = SimpleNamespace(is_running=True)
+        session.client = SimpleNamespace(is_running=False, host_child_exit_code=None)
         return True
 
     async def attach(candidate, _session, **_kwargs):
@@ -1037,7 +1038,11 @@ async def test_startup_iterator_rechecks_later_candidates(context, monkeypatch, 
     monkeypatch.setattr(ctx.manager, "_try_reattach_live_host", resume)
     monkeypatch.setattr(ctx.manager, "_recover_remote_host_records", AsyncMock(return_value=0))
     monkeypatch.setattr(ctx.manager, "_reattach_one", attach)
-    assert await ctx.manager.reattach_session_hosts() == 1
+    recover = (
+        ctx.manager.reattach_session_hosts if driver == "startup"
+        else ctx.manager.recover_disconnected_hosts
+    )
+    assert await recover() == 1
     assert calls == [ctx.session.session_id]
 
 
