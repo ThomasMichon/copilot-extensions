@@ -58,6 +58,15 @@ DEFAULT_UNTIL = (
     "checks_failed", "approval_dismissed", "merged", "closed",
 )
 
+#: Non-blocking-review variant: for a reviewer authorized only to ``COMMENT``
+#: (e.g. GitHub's Copilot code review on an owner-authored PR -- it cannot
+#: render ``APPROVED``/``CHANGES_REQUESTED`` there), waiting on those never
+#: resolves. Swap them for ``commented``. See :func:`default_until`.
+NONBLOCKING_DEFAULT_UNTIL = (
+    "commented", "conflict", "mergeable",
+    "checks_failed", "approval_dismissed", "merged", "closed",
+)
+
 #: Provider-neutral review state (uppercased) -> transition name.  A provider
 #: normalizes its own review vocabulary onto these three canonical states.
 _REVIEW_STATE_EVENT = {
@@ -69,9 +78,21 @@ _REVIEW_STATE_EVENT = {
     # A pending/draft review is not submitted, so it is never a transition.
 }
 
-#: Review states that carry a merge-relevant verdict.  A comment is not a
-#: verdict; a pending draft is not submitted.
+#: Verdict states under a **blocking** review policy: a comment is not a
+#: verdict; a pending draft is not submitted. See
+#: :data:`NONBLOCKING_VERDICT_STATES` for the non-blocking case.
 VERDICT_STATES = frozenset({"APPROVED", "CHANGES_REQUESTED"})
+
+#: Verdict states under a **non-blocking** review policy: adds ``COMMENT`` --
+#: a reviewer unauthorized to render a binding verdict (e.g. Copilot code
+#: review on an owner-authored PR) has its comment treated as the verdict.
+NONBLOCKING_VERDICT_STATES = VERDICT_STATES | {"COMMENT", "COMMENTED"}
+
+
+def default_until(review_blocking: bool) -> tuple[str, ...]:
+    """``pr-watch``'s default ``--until`` set for a review policy."""
+    return DEFAULT_UNTIL if review_blocking else NONBLOCKING_DEFAULT_UNTIL
+
 
 
 # ---------------------------------------------------------------------------
@@ -353,11 +374,12 @@ def effective_verdict(
     allow_stale_approval: bool = False,
     stale_approval_head_sha: str = "",
     stale_approval_head_observed_at: str = "",
+    review_blocking: bool = True,
 ) -> str:
     """Reduce a PR's reviews to one effective verdict at ``head_sha``.
 
-    Considers only *submitted*, non-comment, non-dismissed reviews that are not
-    the PR author's own.  The latest such review (by id) wins.  An ``APPROVED``
+    Considers only *submitted*, non-dismissed reviews that are not the PR
+    author's own.  The latest such review (by id) wins.  An ``APPROVED``
     review normally counts only if it was submitted against the current head.
     When ``allow_stale_approval`` is true, a stale approval remains effective
     only when provider-clock evidence proves the exact live head was observed
@@ -365,9 +387,16 @@ def effective_verdict(
     reacquires that evidence, so a later mediated push cannot inherit an older
     approval. Callers still expose staleness through :class:`PRState`.
 
-    Returns ``"APPROVED"``, ``"CHANGES_REQUESTED"``, or ``""`` (no verdict).
+    ``review_blocking`` (default ``True``, unchanged behavior) selects
+    :data:`VERDICT_STATES`; ``False`` selects
+    :data:`NONBLOCKING_VERDICT_STATES`, so a bare comment from a reviewer
+    unauthorized to render a binding verdict (e.g. Copilot code review on an
+    owner-authored PR) reports as the terminal ``"COMMENTED"`` verdict.
+
+    Returns ``"APPROVED"``, ``"CHANGES_REQUESTED"``, ``"COMMENTED"`` (only
+    when ``review_blocking`` is False), or ``""`` (no verdict).
     """
-    latest = _latest_verdict(reviews, author)
+    latest = _latest_verdict(reviews, author, review_blocking=review_blocking)
     verdict = latest.state if latest is not None else ""
     latest_commit = latest.commit_id if latest is not None else ""
     if (
@@ -387,15 +416,24 @@ def effective_verdict(
     return verdict
 
 
-def _latest_verdict(reviews: Iterable[Review], author: str) -> Review | None:
-    """Return the latest actionable review."""
+def _latest_verdict(
+    reviews: Iterable[Review], author: str, *, review_blocking: bool = True,
+) -> Review | None:
+    """Return the latest actionable review.
+
+    ``review_blocking`` selects :data:`VERDICT_STATES` (default) or
+    :data:`NONBLOCKING_VERDICT_STATES` -- see :func:`effective_verdict`.
+    """
+    states = VERDICT_STATES if review_blocking else NONBLOCKING_VERDICT_STATES
     latest_id = -1
     latest: Review | None = None
     for r in reviews:
         state = r.state.upper()
         if state == "REQUEST_CHANGES":
             state = "CHANGES_REQUESTED"
-        if state not in VERDICT_STATES:
+        elif state == "COMMENT":
+            state = "COMMENTED"
+        if state not in states:
             continue
         if r.dismissed:
             continue
@@ -551,7 +589,7 @@ class PRState:
     and the decision ``pr-merge`` acts on (``consent_action``).
     """
 
-    verdict: str          # "APPROVED" | "CHANGES_REQUESTED" | ""
+    verdict: str          # "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED" | ""
     approval_stale: bool  # latest approval targets an older head
     approval_stale_authorized: bool  # live head predates stale approval
     merge_state: str      # merged | closed | conflict | clean | unknown
@@ -578,6 +616,7 @@ def classify_state(
     allow_stale_approval: bool = False,
     stale_approval_head_sha: str = "",
     stale_approval_head_observed_at: str = "",
+    review_blocking: bool = True,
 ) -> PRState:
     """Map a provider snapshot onto the unified :class:`PRState`.
 
@@ -591,6 +630,9 @@ def classify_state(
     ``automerge_label`` is the concrete label that expresses it (multi-machine system value:
     ``auto-merge``; think ADO's "auto-complete").
 
+    ``review_blocking`` (default ``True``) forwards to
+    :func:`effective_verdict`; it never changes ``consent_action``.
+
     ``consent_action`` mirrors the multi-machine system ``pr-consent`` eligibility rules:
 
     - ``already`` -- the auto-merge label is already present (nothing to do).
@@ -602,7 +644,7 @@ def classify_state(
     hold_set = {h.strip().lower() for h in hold_labels if h.strip()}
     held = tuple(sorted(label_set & hold_set))
     wip = snap.draft or title_is_wip(snap.title, wip_title_prefixes)
-    latest = _latest_verdict(snap.reviews, snap.author)
+    latest = _latest_verdict(snap.reviews, snap.author, review_blocking=review_blocking)
     latest_verdict = latest.state if latest is not None else ""
     latest_commit = latest.commit_id if latest is not None else ""
     approval_stale = bool(
@@ -628,6 +670,7 @@ def classify_state(
         allow_stale_approval=allow_stale_approval,
         stale_approval_head_sha=stale_approval_head_sha,
         stale_approval_head_observed_at=stale_approval_head_observed_at,
+        review_blocking=review_blocking,
     )
     ms = merge_state(snap)
     consent_present = bool(automerge_label) and automerge_label.lower() in label_set
@@ -709,6 +752,7 @@ def merge_readiness(
     allow_stale_approval: bool = False,
     stale_approval_head_sha: str = "",
     stale_approval_head_observed_at: str = "",
+    review_blocking: bool = True,
 ) -> dict:
     """A caller-facing "what stands between this PR and merge" summary.
 
@@ -726,6 +770,9 @@ def merge_readiness(
       merge: consent is already present, or a single consent action away
       (``consent_action`` in ``{"apply", "already"}``).
 
+    ``review_blocking`` (default ``True``) forwards to :func:`classify_state`
+    (see :func:`effective_verdict`).
+
     Binding-absent (no ``automerge_label`` configured) degrades cleanly:
     ``needs_consent`` / ``clear_to_merge`` are False and ``reason`` says so --
     a repo whose merges are human-driven simply reports the verdict + merge
@@ -740,6 +787,7 @@ def merge_readiness(
         allow_stale_approval=allow_stale_approval,
         stale_approval_head_sha=stale_approval_head_sha,
         stale_approval_head_observed_at=stale_approval_head_observed_at,
+        review_blocking=review_blocking,
     )
     return {
         "verdict": st.verdict,
@@ -763,8 +811,11 @@ def merge_readiness(
 __all__ = [
     "ALL_TRANSITIONS",
     "DEFAULT_UNTIL",
+    "NONBLOCKING_DEFAULT_UNTIL",
     "DEFAULT_WIP_PREFIX",
     "VERDICT_STATES",
+    "NONBLOCKING_VERDICT_STATES",
+    "default_until",
     "Baseline",
     "Comment",
     "CommentThread",
@@ -899,41 +950,27 @@ def classify_pr_flow(
     mediated direct merge once required checks/reviews permit it).
     """
     _matrix = dict(
-        reviewer=reviewer,
-        review_blocking=review_blocking,
-        review_latency_hint=review_latency_hint,
-        self_approve=self_approve,
-        conflict_retriggers_review=conflict_retriggers_review,
-        rebase_owner="submitter",
-        branch_update_strategy=branch_update_strategy,
-        merge_strategy=merge_strategy,
+        reviewer=reviewer, review_blocking=review_blocking,
+        review_latency_hint=review_latency_hint, self_approve=self_approve,
+        conflict_retriggers_review=conflict_retriggers_review, rebase_owner="submitter",
+        branch_update_strategy=branch_update_strategy, merge_strategy=merge_strategy,
         prefer_auto_merge=prefer_auto_merge,
     )
     if not enabled:
         return PRFlowProfile(
-            profile=PROFILE_DIRECT,
-            requires_pr=False,
-            merge_mode="direct",
-            provider="",
-            automerge_label="",
-            applicable_verbs=(),
+            profile=PROFILE_DIRECT, requires_pr=False, merge_mode="direct",
+            provider="", automerge_label="", applicable_verbs=(),
             summary=("Direct-push repo -- no PR flow; finalize lands the "
                      "worktree to the default branch."),
-            reviewer="",
-            review_blocking=False,
-            review_latency_hint=review_latency_hint,
-            self_approve=False,
-            conflict_retriggers_review=False,
-            rebase_owner="",
+            reviewer="", review_blocking=False,
+            review_latency_hint=review_latency_hint, self_approve=False,
+            conflict_retriggers_review=False, rebase_owner="",
         )
     if automerge_label:
         return PRFlowProfile(
-            profile=PROFILE_PR_AGENT_MERGE,
-            requires_pr=required,
-            merge_mode="agent-consent",
-            provider=provider,
-            automerge_label=automerge_label,
-            applicable_verbs=_ALL_PR_VERBS,
+            profile=PROFILE_PR_AGENT_MERGE, requires_pr=required,
+            merge_mode="agent-consent", provider=provider,
+            automerge_label=automerge_label, applicable_verbs=_ALL_PR_VERBS,
             summary=(
                 f"PR-gated ({provider or 'provider'}); the author signals merge "
                 f"consent (label '{automerge_label}') after approval and the "
@@ -943,11 +980,8 @@ def classify_pr_flow(
         )
     if self_approve or merge_actor == "submitter-direct":
         return PRFlowProfile(
-            profile=PROFILE_PR_SELF_MERGE,
-            requires_pr=required,
-            merge_mode="self-direct",
-            provider=provider,
-            automerge_label="",
+            profile=PROFILE_PR_SELF_MERGE, requires_pr=required,
+            merge_mode="self-direct", provider=provider, automerge_label="",
             applicable_verbs=_ALL_PR_VERBS,
             summary=(
                 f"PR-gated ({provider or 'provider'}); the submitter "
@@ -957,11 +991,8 @@ def classify_pr_flow(
             **_matrix,
         )
     return PRFlowProfile(
-        profile=PROFILE_PR_HUMAN_MERGE,
-        requires_pr=required,
-        merge_mode="human",
-        provider=provider,
-        automerge_label="",
+        profile=PROFILE_PR_HUMAN_MERGE, requires_pr=required, merge_mode="human",
+        provider=provider, automerge_label="",
         applicable_verbs=tuple(v for v in _ALL_PR_VERBS if v != "pr-merge"),
         summary=(
             f"PR-gated ({provider or 'provider'}); a human approves and merges "
