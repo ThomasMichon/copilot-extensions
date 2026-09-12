@@ -52,7 +52,15 @@ if (-not $usesDefaultSetup) {
     # default-setup.ps1 emits for its own path).
     try {
         $awPy = $null
-        $resolver = Join-Path $env:USERPROFILE '.agent-worktrees\bin\resolve-runtime.ps1'
+        # Honor a contextual/cell launch's validated runtime root before the
+        # legacy per-user fallback (same precedence as default-setup.ps1 /
+        # launch-session.ps1).
+        $runtimeRoot = if ($env:AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT) {
+            $env:AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT
+        } else {
+            Join-Path $env:USERPROFILE '.agent-worktrees'
+        }
+        $resolver = Join-Path $runtimeRoot 'bin\resolve-runtime.ps1'
         if (Test-Path -LiteralPath $resolver) { . $resolver; $awPy = $AwPy }
         if ($awPy -and (Test-Path -LiteralPath $awPy)) {
             $wtId = & $awPy -I -m agent_worktrees get worktree-id 2>$null

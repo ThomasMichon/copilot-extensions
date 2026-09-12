@@ -774,6 +774,7 @@ def test_default_setup_ps1_stage_3_no_runtime_path_still_launches(tmp_path):
     home = tmp_path / "home"  # no .agent-worktrees/bin/resolve-runtime.ps1 here
     home.mkdir()
     env = os.environ.copy()
+    env.pop("AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT", None)
     env["HOSTNAME"] = "test-host"
     env["HOME"] = str(home)
     env["USERPROFILE"] = str(home)

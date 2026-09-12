@@ -478,6 +478,11 @@ def test_posix_launch_wrapper_emits_stage_3_for_non_default_setup_target(
     target.chmod(0o755)
 
     env = os.environ.copy()
+    # A prior test in the same process may have left this set on the real
+    # os.environ (cmd_launch sets it for a real cell/contextual launch and
+    # relies on the child process's own lifetime to bound it) -- clear it so
+    # this test deterministically exercises the legacy $HOME fallback.
+    env.pop("AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT", None)
     env["HOME"] = str(home)
     env["PATH"] = f"{tmp_path / 'bin'}{os.pathsep}{env['PATH']}"
     result = subprocess.run(
@@ -489,7 +494,7 @@ def test_posix_launch_wrapper_emits_stage_3_for_non_default_setup_target(
     )
 
     assert result.returncode == 0, result.stderr
-    deadline = time.monotonic() + 5.0
+    deadline = time.monotonic() + 10.0
     while not activity_marker.exists() and time.monotonic() < deadline:
         time.sleep(0.05)
     logged = activity_marker.read_text(encoding="utf-8").strip()
@@ -518,6 +523,7 @@ def test_posix_launch_wrapper_skips_stage_3_for_default_setup_target(
     default_setup.chmod(0o755)
 
     env = os.environ.copy()
+    env.pop("AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT", None)
     env["HOME"] = str(home)
     env["PATH"] = f"{tmp_path / 'bin'}{os.pathsep}{env['PATH']}"
     # Match _build_launch_cmd's real shape for the normalized path: arg1 is

@@ -49,7 +49,12 @@ done
 say() { if $STDIO; then echo "$@" >&2; else echo "$@"; fi; }
 
 # -- Runtime --------------------------------------------------------------
-_awresolve="$HOME/.agent-worktrees/bin/resolve-runtime.sh"
+# Contextual/cell launches validate and export their runtime root as
+# AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT (bin/launch-session.sh); honor it before
+# the legacy $HOME/.agent-worktrees fallback so a contextual install's own
+# resolve-runtime.sh (and RUNTIME_PYTHON derived from it) is used, not a
+# possibly-nonexistent legacy path.
+_awresolve="${AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT:-$HOME/.agent-worktrees}/bin/resolve-runtime.sh"
 [ -f "$_awresolve" ] && . "$_awresolve"
 _AW_PY="${RUNTIME_PYTHON:-${AW_PY:-}}"
 

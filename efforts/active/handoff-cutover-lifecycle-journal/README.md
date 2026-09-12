@@ -824,3 +824,30 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   Verified via `git show HEAD:<file>` that both are still fixed as landed.
   Full plugin suite: 4184 passed / 20 skipped / same 3 pre-existing
   unrelated failures.
+- **PR #2491, review round 4 (a real bug + reply/resolve hygiene).**
+  Replied to and explicitly resolved the three still-open review threads
+  (the stale config/legacy-launch-path thread, the Windows-coverage thread,
+  and the PR-description-version thread) via the GraphQL
+  `resolveReviewThread` mutation, updated the PR description to `dev75` with
+  an `Additional fixes` section, and requested a fresh review. That review
+  caught one genuinely new, real bug: `_log_copilot_invoked` (both
+  `default-setup.{sh,ps1}`) and the `launch-command.{sh,ps1}` wrapper's
+  Stage 3 emitter only ever resolved the runtime from the legacy
+  `$HOME/.agent-worktrees` (or `%USERPROFILE%`) path -- but a
+  contextual/cell launch validates and exports its own runtime root as
+  `AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT` (`bin/launch-session.{sh,ps1}`),
+  which may have no install at the legacy path at all, silently dropping
+  Stage 3 for exactly those launches. Fixed all four emitters (plus
+  `default-setup.ps1`'s pre-existing identical gap in its own setup-hook
+  config-root guard resolution, since it's the same one-line fix in the
+  same file) to prefer `AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT` before the
+  legacy fallback, matching `bin/launch-session.{sh,ps1}`'s own precedence.
+  This also surfaced a pre-existing test-isolation gap: `cmd_launch`
+  (production code, not test scaffolding) sets
+  `AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT` directly on the real `os.environ`
+  (not via `monkeypatch`), so it leaks across tests in the same pytest
+  process -- an earlier test's stale value made two of my own new
+  `launch-command.sh` tests flaky (only visible running the full suite,
+  not in isolation). Fixed by explicitly popping the var in the three
+  affected tests before building each subprocess's env. Full plugin suite:
+  4184 passed / 20 skipped / same 3 pre-existing unrelated failures.

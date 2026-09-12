@@ -219,7 +219,15 @@ Write-Host ''
 function Invoke-CopilotInvokedLog {
     $awPy = $RuntimePython
     if (-not $awPy) {
-        $resolver = Join-Path $env:USERPROFILE '.agent-worktrees\bin\resolve-runtime.ps1'
+        # Honor a contextual/cell launch's validated runtime root (same
+        # precedence as launch-session.ps1) before the legacy per-user
+        # fallback, which may not exist for a cell-based install.
+        $runtimeRoot = if ($env:AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT) {
+            $env:AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT
+        } else {
+            Join-Path $env:USERPROFILE '.agent-worktrees'
+        }
+        $resolver = Join-Path $runtimeRoot 'bin\resolve-runtime.ps1'
         if (Test-Path -LiteralPath $resolver) { . $resolver; $awPy = $AwPy }
     }
     if (-not ($awPy -and (Test-Path -LiteralPath $awPy))) { return }

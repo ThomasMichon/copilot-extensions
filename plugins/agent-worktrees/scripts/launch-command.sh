@@ -33,8 +33,10 @@ if [[ -z "$_aw_uses_default_setup" ]]; then
     # exec-point emitter, so this wrapper -- the one seam EVERY resolved
     # command passes through -- emits a coarser "attempted" mark for them
     # instead (best-effort/detached; distinct from the confirmed event
-    # default-setup.sh emits for its own path).
-    _aw_resolve="$HOME/.agent-worktrees/bin/resolve-runtime.sh"
+    # default-setup.sh emits for its own path). Honor a contextual/cell
+    # launch's validated runtime root before the legacy $HOME fallback (same
+    # precedence as default-setup.sh and launch-session.sh itself).
+    _aw_resolve="${AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT:-$HOME/.agent-worktrees}/bin/resolve-runtime.sh"
     if [[ -f "$_aw_resolve" ]]; then
         # shellcheck disable=SC1090
         . "$_aw_resolve"
