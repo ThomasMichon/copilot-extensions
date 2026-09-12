@@ -548,8 +548,8 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   namespacing the durable trace store by project (worktree ids are only
   project-scoped). PR #2458 merged 2026-09-11.
 - **Second live corroboration**, in real time, on a different worktree
-  (`ef44` alias in this operator's environment — identifier not recorded
-  here per public-safe policy): the operator reported "handoff triggered, no
+  (a different worktree; identifier omitted per public-safe policy): the
+  operator reported "handoff triggered, no
   replacement mux pane" while this PR was still in review. Traced via
   `activity.jsonl`: an earlier handoff cycle completed a full
   claim→spawn→retire sequence hours prior; a fresh `trigger_handoff` then
@@ -562,7 +562,7 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   effort's Phase 1-3/5 scope.
 - **Phase 1 executed**: landed `HANDOFF_STAGE_MAP` + `log_event()`
   auto-stamping in `activity.py` (PR #2472, plugins/agent-worktrees test
-  suite green: 4149 passed / 20 skipped / 3 pre-existing unrelated failures
+  suite: 4149 passed / 20 skipped / 3 pre-existing unrelated failures
   noted in the PR description). Next slice: Phase 1's remaining schema items
   (spawn start/result event split as dedicated wire events) and Phase 2's
   per-stage instrumentation across `sessions.py`, `__main__.py`, the launcher
