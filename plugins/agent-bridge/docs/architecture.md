@@ -423,9 +423,15 @@ restart does not inherently close the child's pipes.
   Remote reap records are retained until termination is confirmed; failed
   explicit or pending reaps fail the stop instead of acknowledging success, and
   keep authority available for a deliberate retry.
+  Session Host launch ownership is recorded before connect/attach/ACP work.
+  Cancellation joins the spawn and aborts the recorded partial host; if abort
+  cannot be confirmed, a durable cleanup-pending record and in-memory retry
+  handle remain. Another launch/resume is refused until that ownership is
+  cleaned up, including after frontend restart.
   The manager remains the public facade; `session_resume.py`,
   `session_teardown.py`, and `session_ownership.py` own the bounded lifecycle
   implementations. Additive session migrations live in `db_migrations.py`.
+  `session_host_ownership.py` owns the pre-client Session Host handoff.
   These extractions preserve factory injection seams and avoid widening the
   repository's shrink-only module-size baseline.
   Ordinary stop also stops per-session credential-relay supervisors and cancels
