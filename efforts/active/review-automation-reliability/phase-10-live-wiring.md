@@ -235,6 +235,24 @@ here but not blocking the start of 1/2/5.
   `producers/webhook.py` only handles PR-merge events), and the
   persistent per-(repo, PR) state store both the evaluator and the
   poll-fallback timer need.
+  **Third slice landed:** `pr_revision_evaluator.py`, the `STALE`
+  decision. `evaluate_observation(previous, current)` reuses the declared
+  `APPROVAL_TRANSITIONS` table directly (looks up
+  `revision_invalidates_approval` by name and checks `current`'s status
+  against its `from_states`) rather than re-deciding the staleness rule
+  inline -- same "the declared table is the actual governing data"
+  discipline items 1/2 established. A first-ever observation (no
+  `previous`) is returned unchanged: staleness needs two observations, not
+  one. Never applies `revalidate_stale` itself -- that recovery is simply
+  whatever the provider's own `reviewDecision` reports on the next
+  observation, since this evaluator always recomputes from the provider's
+  current raw status rather than a locally cached flag.
+  Remaining slices for item 3: the persistent per-(repo, PR) state store
+  (a new `queue.py` table, by the plugin's existing one-table-per-declared-
+  machine convention) both this evaluator and the poll-fallback timer need
+  to actually hold `previous` across calls, and a real webhook receiver
+  for review/check-status events (today's `producers/webhook.py` only
+  handles PR-merge).
 - [ ] Wire the bridge machine's `resolve_liveness`/`resolve_resume` against
   a real agent-bridge liveness read (item 4 above), coordinated with
   agent-bridge's own verb-vocabulary convergence.
