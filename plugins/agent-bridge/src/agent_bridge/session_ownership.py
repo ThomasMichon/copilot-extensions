@@ -103,10 +103,13 @@ async def settle_cancelled_resume(
     *, trigger: str = "resume_cancelled",
 ) -> None:
     """Complete cancellation cleanup before publishing a resumable stopped row."""
+    from .session_host_ownership import has_host_ownership
+
     try:
         await cleanup_resume_attempt(manager, session, client)
         await manager._drop_forward(
-            session.session_id, strict=True, preserve_ownership=True,
+            session.session_id, strict=True,
+            preserve_ownership=has_host_ownership(manager, session.session_id),
         )
     except Exception:
         manager._mark_session_failed(session, trigger="resume_cleanup_failed")

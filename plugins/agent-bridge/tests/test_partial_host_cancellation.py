@@ -19,10 +19,14 @@ from agent_bridge.transport import SpawnTarget
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("phase", ["spawn", "connect", "attach", "streams", "initialize", "load"])
+@pytest.mark.parametrize("phase,fault", [
+    ("spawn", "cancel"), ("connect", "cancel"), ("attach", "cancel"),
+    ("streams", "cancel"), ("initialize", "cancel"), ("load", "cancel"),
+    ("connect", "error"), ("attach", "error"), ("streams", "error"),
+])
 @pytest.mark.parametrize("abort_confirmed", [False, True])
 async def test_cancelled_host_launch_aborts_or_retains_retry_authority(
-    tmp_db, tmp_path, monkeypatch, phase, abort_confirmed,
+    tmp_db, tmp_path, monkeypatch, phase, fault, abort_confirmed,
 ):
     state_dir = str(tmp_path / "hosts")
     manager = SessionManager(tmp_db, session_host_state_dir=state_dir)
@@ -52,6 +56,8 @@ async def test_cancelled_host_launch_aborts_or_retains_retry_authority(
         if phase == name:
             entered.set()
             await release.wait()
+            if fault == "error":
+                raise OSError("handshake failure")
 
     async def spawn(*_args, **_kwargs):
         await stage("spawn")
@@ -98,6 +104,7 @@ async def test_cancelled_host_launch_aborts_or_retains_retry_authority(
     monkeypatch.setattr("agent_bridge.session_manager.AcpClient", lambda **_kwargs: client)
     monkeypatch.setattr(manager, "_try_reattach_live_host", AsyncMock(return_value=False))
     monkeypatch.setattr(manager, "_refresh_provider_target", AsyncMock())
+    monkeypatch.setattr("agent_bridge.session_manager._MAX_RESUME_ROUNDS", 1)
     monkeypatch.setattr("agent_bridge.session_manager._cleanup_worktree", AsyncMock())
 
     async def host_resume(current, *, on_acp_event, permission_callback, load_existing):
@@ -116,15 +123,23 @@ async def test_cancelled_host_launch_aborts_or_retains_retry_authority(
     if phase != "spawn":
         assert manager._host_index.get(session.session_id) is not None
         assert session.session_id in manager._pending_host_launches
-    task.cancel()
-    if phase == "spawn":
-        await asyncio.sleep(0)
-        assert not task.done()
+    if fault == "cancel":
+        task.cancel()
+        if phase == "spawn":
+            await asyncio.sleep(0)
+            assert not task.done()
+            release.set()
+    else:
         release.set()
-    error = asyncio.CancelledError if abort_confirmed else RemoteSpawnCleanupPendingError
+    error = (
+        (asyncio.CancelledError if fault == "cancel" else Exception)
+        if abort_confirmed else RemoteSpawnCleanupPendingError
+    )
     with pytest.raises(error):
         await asyncio.wait_for(task, 3)
-    spawner.abort_spawned.assert_awaited_once()
+    # Inconclusive handshake rollback is retried by the outer resume cleanup.
+    expected_aborts = 2 if not abort_confirmed and phase != "spawn" else 1
+    assert spawner.abort_spawned.await_count == expected_aborts
     assert manager._forwards == {}
     assert manager._relays == {}
     if abort_confirmed:
@@ -135,7 +150,8 @@ async def test_cancelled_host_launch_aborts_or_retains_retry_authority(
         record = manager._host_index.get(session.session_id)
         assert record.extra["launch_cleanup_pending"] is True
         assert session.session_id in manager._pending_host_launches
-        assert session.status == SessionStatus.FAILED
+        assert session.status in (SessionStatus.FAILED, SessionStatus.STOPPED)
+        assert not manager._background_recovery_allowed(session)
         await manager.stop_session(session.session_id)
         restarted = SessionManager(tmp_db, session_host_state_dir=state_dir)
         with pytest.raises(RemoteSpawnCleanupPendingError, match="cleanup is pending"):
@@ -166,6 +182,8 @@ async def test_durable_container_marker_blocks_resume_without_host_index(
     monkeypatch.setattr(manager, "_try_reattach_live_host", attach)
     with pytest.raises(RemoteSpawnCleanupPendingError, match="cleanup is pending"):
         await manager.resume_session(session_id)
+    with pytest.raises(RemoteSpawnCleanupPendingError, match="cleanup is pending"):
+        await manager.resync_session(session_id)
     attach.assert_not_awaited()
     assert manager._host_index.get(session_id) is None
     assert manager.get_session(session_id).target.container["launch_pending_session_id"] == session_id

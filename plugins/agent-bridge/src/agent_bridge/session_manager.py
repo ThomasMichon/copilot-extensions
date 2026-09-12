@@ -1735,8 +1735,10 @@ class SessionManager:
         ``AcpClient.shutdown``), never reaping the child inadvertently -- goal 1.
         """
         from .session_host_ownership import (
-            complete_host_launch, require_no_pending_host_launch, spawn_host_owned,
+            abort_pending_host_launch, complete_host_launch,
+            require_no_pending_host_launch, spawn_host_owned,
         )
+        from .session_ownership import finish_owned
         from .session_host.acp_adapter import open_acp_streams
         from .session_host.client import SessionHostClient
         from .session_host.spawner import LocalSpawner
@@ -1790,39 +1792,37 @@ class SessionManager:
             )
             spawned = pending.spawned
             timing.add("host_spawn", time.monotonic() - step_started)
-            step_started = time.monotonic()
-            sock = await SessionHostClient.connect(port=spawned.local_port)
-            pending.sock = sock
-            timing.add("host_connect", time.monotonic() - step_started)
-            step_started = time.monotonic()
-            await sock.attach(0, nonce=spawned.nonce.encode())
-            timing.add("host_attach", time.monotonic() - step_started)
-            step_started = time.monotonic()
-            streams = await open_acp_streams(sock)
-            pending.streams = streams
-            timing.add("host_streams", time.monotonic() - step_started)
-
-            async def _closer() -> None:
-                await streams.aclose()
-                await sock.close()
-
-            client = AcpClient(
-                on_event=on_acp_event,
-                on_permission=permission_callback,
-                model_override=model,
-                effort_override=effort,
-            )
-            pending.client = client
-            # Surface a mid-session transport drop (loopback socket down, host +
-            # child alive) as ``disconnected`` so the reattach driver fires (P1).
-            streams.on_transport_lost = client.mark_transport_lost
-            streams.on_child_exit = client.mark_host_child_exited
-            # Retain the host control channel so the manager can push STATUS
-            # (reapable) / DETACH (graceful) for host self-reap (#51).
-            client.session_host_client = sock
-            if permission_callback:
-                client.auto_approve = False
+            sock = None
+            streams = None
             try:
+                step_started = time.monotonic()
+                sock = await SessionHostClient.connect(port=spawned.local_port)
+                pending.sock = sock
+                timing.add("host_connect", time.monotonic() - step_started)
+                step_started = time.monotonic()
+                await sock.attach(0, nonce=spawned.nonce.encode())
+                timing.add("host_attach", time.monotonic() - step_started)
+                step_started = time.monotonic()
+                streams = await open_acp_streams(sock)
+                pending.streams = streams
+                timing.add("host_streams", time.monotonic() - step_started)
+
+                async def _closer() -> None:
+                    await streams.aclose()
+                    await sock.close()
+
+                client = AcpClient(
+                    on_event=on_acp_event,
+                    on_permission=permission_callback,
+                    model_override=model,
+                    effort_override=effort,
+                )
+                pending.client = client
+                streams.on_transport_lost = client.mark_transport_lost
+                streams.on_child_exit = client.mark_host_child_exited
+                client.session_host_client = sock
+                if permission_callback:
+                    client.auto_approve = False
                 step_started = time.monotonic()
                 await asyncio.wait_for(
                     client.start_streams(
@@ -1863,6 +1863,11 @@ class SessionManager:
                     )
                     timing.add("session_new_total", time.monotonic() - step_started)
                 log.info("ACP launch timing: result=ok %s", timing.summary())
+            except asyncio.CancelledError:
+                await finish_owned(
+                    abort_pending_host_launch(self, session_id), propagate_cancel=False,
+                )
+                raise
             except (TimeoutError, asyncio.TimeoutError) as exc:
                 # Leave a queryable marker so a stalled session-host resume/launch
                 # is not a silent [starting]->[stopped] (#1468). The child's

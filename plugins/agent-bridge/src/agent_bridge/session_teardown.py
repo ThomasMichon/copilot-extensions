@@ -53,7 +53,14 @@ async def reap_remote_record(
     session: Session | None = None, generation: int | None = None,
 ) -> bool:
     """Keep authority until termination is confirmed; never forget a replacement."""
-    confirmed = await manager._remote_reap(record, getattr(record, "endpoint", None) or {})
+    from .session_manager import log
+
+    endpoint = getattr(record, "endpoint", None) or {}
+    if endpoint:
+        confirmed = await manager._remote_reap(record, endpoint)
+    else:
+        log.warning("Cannot confirm remote reap without endpoint for %s", record.session_id)
+        confirmed = False
     current = manager._host_index.get(record.session_id) if manager._host_index else None
     if confirmed:
         if current == record:
