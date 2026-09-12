@@ -694,7 +694,8 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   `test_session_start_emits_stage_9_on_candidate_association` in
   `tests/test_register_session.py` now asserts the stage-4-then-stage-9
   ordering and the `launch_id` field, in addition to the event's other
-  fields. `agent-worktrees` bumped 1.5.5-dev72 → dev73 (PR #2479's merge) —
-  no further bump needed for the review-response commit (module-size-only
-  compaction, no plugin content growth). Remaining Phase 2 stages: 2, 3, 5,
-  6, 7, 10, 11, 12, 13.
+  fields. `agent-worktrees` bumped 1.5.5-dev72 → dev73 in this PR (#2488) —
+  PR #2479's own merge ended at dev72. No further bump needed for the
+  review-response commit within this PR (module-size-only compaction, no
+  further plugin content growth). Remaining Phase 2 stages: 2, 3, 5, 6, 7,
+  10, 11, 12, 13.
