@@ -561,8 +561,7 @@ def _classify_records_live(
     return {
         rec.worktree_id: _classify_one_record(
             rec, repo=repo, active_paths=active_paths, session_ctx=session_ctx
-        )
-        for rec in records
+        ) for rec in records
     }
 
 
@@ -1206,8 +1205,7 @@ def _execution_leg_payload(
 ) -> dict[str, object]:
     return {
         "worktree_id": worktree_id,
-        "execution_leg": binding.to_dict() if binding is not None else None,
-        "legacy": legacy,
+        "execution_leg": binding.to_dict() if binding is not None else None, "legacy": legacy,
     }
 
 
@@ -1864,9 +1862,7 @@ def _carve_paired_knowledge(
             file=sys.stderr,
         )
         return {
-            "pair_id": pair_id,
-            "pair_role": "harness",
-            "pair_ref": anchor_ref,
+            "pair_id": pair_id, "pair_role": "harness", "pair_ref": anchor_ref,
             "pair_kind": "anchor",
         }
 
@@ -1914,9 +1910,7 @@ def _carve_paired_knowledge(
         branch=knowledge_branch,
     )
     return {
-        "pair_id": pair_id,
-        "pair_role": "harness",
-        "pair_ref": knowledge_ref,
+        "pair_id": pair_id, "pair_role": "harness", "pair_ref": knowledge_ref,
         "pair_kind": "worktree",
     }
 
@@ -7182,20 +7176,16 @@ def _cmd_status_write(
             save=False,
         )
         tracking.save_record(record)
-        # Stage 5 (status_reported): once per session_id, not every summary
-        # edit. Held under the same RecordLock as the write above so two
-        # concurrent status processes sharing a session_id can't both observe
-        # "no prior event" and double-emit -- the lock serializes them per
-        # worktree, which is exactly the scope this check needs.
+        # Stage 5 (status_reported): once per session_id (held under the
+        # same RecordLock as the write above so two concurrent writers can't
+        # both observe "no prior event" and double-emit).
         if session_id and not any(
             e.get("session_id") == session_id
             for e in activity.read_events(
                 worktree_id=worktree_id, event="status_reported", limit=500,
             )
         ):
-            activity.log_event(
-                "status_reported", worktree_id=worktree_id, session_id=session_id,
-            )
+            activity.log_event("status_reported", worktree_id=worktree_id, session_id=session_id)
     flag = "follow-ups pending" if record.follow_up else "resolved"
     msg = f"[OK] Worktree {worktree_id[-4:]} disposition: {flag}"
     if title is not None and record.title:
@@ -7303,10 +7293,7 @@ def _session_role(record, session_id):
     else:
         role = "head-elect"
     return {
-        "role": role,
-        "head_session": head,
-        "head_state": head_state,
-        "is_head": is_head,
+        "role": role, "head_session": head, "head_state": head_state, "is_head": is_head,
         "registered": registered,
         "pending_handoff_predecessor": (pending.session_id if pending else None),
     }
@@ -7467,13 +7454,12 @@ def _effort_focus_output(
     record: tracking.WorktreeRecord,
     inspection: effort_focus.EffortInspection | None,
 ) -> dict[str, object]:
+    active = inspection is not None and inspection.active
     return {
         "worktree_id": record.worktree_id,
         "active_effort": inspection.to_dict() if inspection is not None else None,
         "follow_up": record.follow_up or bool(inspection and inspection.active),
-        "summary": (
-            inspection.summary if inspection is not None and inspection.active else record.summary
-        ),
+        "summary": inspection.summary if active else record.summary,
     }
 
 
@@ -8375,8 +8361,7 @@ _BACKGROUND_AUTH_ENV_KEYS = {
 def _background_environment() -> dict[str, str]:
     """Environment for resident helpers, excluding session credentials."""
     return {
-        key: value
-        for key, value in os.environ.items()
+        key: value for key, value in os.environ.items()
         if key.upper() not in _BACKGROUND_AUTH_ENV_KEYS
     }
 
@@ -8755,10 +8740,7 @@ def _monitor_claim_handoff_cutover(
             error=str(exc),
         )
         return {
-            "ok": False,
-            "claimed": False,
-            "path": str(path),
-            "error": str(exc),
+            "ok": False, "claimed": False, "path": str(path), "error": str(exc),
         }
     activity.log_event(
         "handoff_cutover_claim",
@@ -13220,10 +13202,7 @@ def reap_orphan_launcher_shells(
             errors.append({"pid": pid, "reason": "kill failed"})
     candidates = [{"pid": int(p["pid"]), "cmdline": p.get("cmdline") or ""} for p in reap]
     return {
-        "available": True,
-        "reaped": reaped,
-        "candidates": candidates,
-        "skipped": skipped,
+        "available": True, "reaped": reaped, "candidates": candidates, "skipped": skipped,
         "errors": errors,
     }
 
@@ -14050,13 +14029,8 @@ def _perform_remux(
 
     def _fail(reason: str, **extra) -> dict:
         return {
-            "ok": False,
-            "reason": reason,
-            "worktree_id": worktree_id,
-            "session_id": session_id,
-            "action": "failed",
-            "requires_resume": False,
-            **extra,
+            "ok": False, "reason": reason, "worktree_id": worktree_id, "session_id": session_id,
+            "action": "failed", "requires_resume": False, **extra,
         }
 
     if not worktree_id:
@@ -14317,12 +14291,8 @@ def reclaim_one(
     except Exception:
         pass
     return {
-        "ok": ok,
-        "worktree_id": worktree_id,
-        "targets": len(targets),
-        "reaped": reaped,
-        "locks_cleared": cleared,
-        "bridge_locks_cleared": bridge_cleared,
+        "ok": ok, "worktree_id": worktree_id, "targets": len(targets), "reaped": reaped,
+        "locks_cleared": cleared, "bridge_locks_cleared": bridge_cleared,
         "mux_servers_torn_down": mux_torn_down,
     }
 
@@ -14817,9 +14787,7 @@ def _sync_one_record(
     info = _apply_tracking_override(rec, info)
     if info.state == git_ops.WorktreeState.ACTIVE:
         return {
-            "worktree_id": rec.worktree_id,
-            "updated": False,
-            "reason": "active",
+            "worktree_id": rec.worktree_id, "updated": False, "reason": "active",
             "behind": info.behind,
         }
     ff = git_ops.fast_forward_worktree(
@@ -14829,9 +14797,7 @@ def _sync_one_record(
         do_fetch=False,
     )
     return {
-        "worktree_id": rec.worktree_id,
-        "updated": ff.updated,
-        "reason": ff.reason,
+        "worktree_id": rec.worktree_id, "updated": ff.updated, "reason": ff.reason,
         "behind": ff.behind,
     }
 
@@ -14880,9 +14846,7 @@ def finalize_one(wt_id: str) -> dict:
         config = cfg.load_config()
     except Exception as e:
         return {
-            "worktree_id": wt_id,
-            "success": False,
-            "ok": False,
+            "worktree_id": wt_id, "success": False, "ok": False,
             "reason": str(e) or "config load failed",
         }
     wt_id = _resolve_worktree_id(wt_id)
@@ -14892,9 +14856,7 @@ def finalize_one(wt_id: str) -> dict:
             success = fin.validate_and_finalize(wt_id, config)
     except Exception as e:
         return {
-            "worktree_id": wt_id,
-            "success": False,
-            "ok": False,
+            "worktree_id": wt_id, "success": False, "ok": False,
             "reason": (str(e) or type(e).__name__),
         }
     status = "finalized"
@@ -24415,10 +24377,9 @@ def _run_reciprocal_backfill(
     )
     return {
         "legacy_controllers": {
-            "candidates": len(controller_items),
+            "candidates": len(controller_items), "items": controller_items,
             "repaired": sum(bool(item["repaired"]) for item in controller_items),
             "blocked": sum(item["status"] == "blocked" for item in controller_items),
-            "items": controller_items,
         },
         "projections": projections,
     }
@@ -24476,11 +24437,8 @@ def _run_backfill(
         projection_budget=projection_budget,
     )
     return {
-        "scanned": len(need_backfill),
-        "sessions": sum(len(v) for v in discovered.values()),
-        "worktrees": len(discovered),
-        "registry": sess_updated,
-        "titles": titled,
+        "scanned": len(need_backfill), "sessions": sum(len(v) for v in discovered.values()),
+        "worktrees": len(discovered), "registry": sess_updated, "titles": titled,
         "reciprocal_metadata": reciprocal,
     }
 

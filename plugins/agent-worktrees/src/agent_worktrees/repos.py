@@ -140,9 +140,7 @@ def _current_platform() -> str:
 
 def _repos_yaml_path() -> Path:
     """Path to the repos registry file."""
-    return registry_paths.registry_path(
-        "repos.yaml", legacy_root=Path.home() / ".agent-worktrees"
-    )
+    return registry_paths.registry_path("repos.yaml", legacy_root=Path.home() / ".agent-worktrees")
 
 
 # ---------------------------------------------------------------------------
