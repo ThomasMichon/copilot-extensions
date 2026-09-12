@@ -51,9 +51,9 @@ def test_first_use_installer_captures_python_probes_and_bootstraps_uv():
     assert "$client.DownloadFile($url, $archive)" in ensure_uv
     assert "'uv.exe'" in ensure_uv
     assert "'uvx.exe'" in ensure_uv
-    assert "Invoke-NativeCapture {" in signed_venv
-    assert "& uv venv $VenvDir --python 3.10 --allow-existing" in signed_venv
-    assert "& uv venv $VenvDir --allow-existing" in signed_venv
+    assert "Invoke-UvVenvResilient" in signed_venv
+    assert "-Arguments @('--python', '3.10', '--allow-existing')" in signed_venv
+    assert "-Arguments @('--allow-existing')" in signed_venv
     assert "if (-not (Ensure-Uv)) { exit 1 }" in update
 
 
