@@ -467,6 +467,91 @@ scenarios.
 
 ## Journal
 
+### 2026-09-12 - Componentize __main__.py: extract loop_commands.py + spawn_attempt_projection.py
+
+- Continuing the operator's standing componentization instruction (split
+  oversized modules; keep state-machine-adjacent code well unit-tested).
+  Picked `__main__.py` (6,506 lines, the largest non-baselined-forever CLI
+  entry point) since `supervisor.py`'s remaining bulk is now its own
+  stateful `Supervisor` methods -- genuinely higher risk than the CLI's
+  mostly-independent `_cmd_*` argparse handlers.
+- Extracted the entire reviewer-loop and repository-issue-loop command
+  cluster (`_reviewer_loop_declarations/_registrations/_setup/_status`,
+  `_cmd_reviewer_loop`, the equivalent `_repository_issue_loop_*` set, and
+  `_cmd_repository_issue_loop` -- ~1,020 contiguous lines) into a new
+  `loop_commands.py`. Verified first, by AST-walking the block's free
+  names, that it was self-contained except for five genuinely CLI-wide
+  helpers (`_client`, `_emit`, `_registration_scope`,
+  `_reject_worktree_checkout_as_repo_root`,
+  `_read_supervisor_runtime_status`) that dozens of *other* `__main__.py`
+  commands also use and that `tests/test_cli.py` /
+  `tests/test_repository_issue_loop_cli.py` monkeypatch by their
+  `agent_dispatch.__main__.<name>` attribute path. A static import of
+  those five into `loop_commands.py` would have silently stopped picking
+  up a monkeypatched replacement (the new module would bind its own
+  private copy of the pre-patch function at import time), so instead each
+  is a thin `_proxy("<name>")` wrapper that looks the real one up on the
+  live `agent_dispatch.__main__` module object at call time -- the same
+  live-module-reference trick the test suite itself already uses
+  (`from agent_dispatch import __main__ as cli;
+  monkeypatch.setattr(cli, "_client", ...)`).
+- `loop_commands.py` also imports `__main__`-defined names to build
+  itself, but only lazily inside those five proxy functions' bodies, never
+  at module load time -- so `__main__.py` can import `loop_commands.py` at
+  its own top level (for `build_parser()`'s `set_defaults(func=...)`
+  wiring) with no circular-import hazard: `loop_commands.py` never touches
+  `agent_dispatch.__main__` until a proxy is actually called, by which
+  point both modules are fully initialized.
+- The block's own `_spawn_attempt_projection` (a small pure dead-letter/
+  rearm-eligibility projection shared by both loop kinds' `status`
+  commands) was further extracted into its own `spawn_attempt_projection.py`
+  module -- both because it has zero `__main__` dependency and because a
+  small, pure, state-adjacent decision function is exactly the kind of
+  code the operator wants directly unit-tested rather than only exercised
+  indirectly through a much larger CLI-output assertion. `loop_commands.py`
+  keeps `_spawn_attempt_projection` as an alias for backward compatibility.
+  This extraction also brought `loop_commands.py` itself back under the
+  1,000-line hard cap (it landed at 1,023 lines with just the CLI-command
+  cluster; 981 after the projection function moved out).
+- Added `tests/test_spawn_attempt_projection.py` (6 direct behavioral
+  tests: default-cap threshold, the atomic-rearm 3-failure floor, the
+  manual-recovery fallback below that floor, label-cap precedence over the
+  default, a zero-cap never-dead-letters guard, and the owned/non-queued
+  exclusion) and `tests/test_loop_commands.py` (import-guard tests mirroring
+  `test_spawn_factories.py`'s pattern, plus two tests proving the `_client`/
+  `_emit` proxies actually pick up a live `agent_dispatch.__main__`
+  monkeypatch).
+- `__main__.py` re-exports every moved name (`# noqa: F401 -- re-exported
+  for existing call sites/tests`, matching the `spawn_factories.py`
+  precedent) so `build_parser()`'s `set_defaults(func=_cmd_reviewer_loop)`
+  / `set_defaults(func=_cmd_repository_issue_loop)` call sites are
+  unaffected.
+- **Copilot's PR review caught one real, valid finding** (fixed before
+  merge): `python -m agent_dispatch` -- the real production invocation
+  (`scripts/install.sh`'s stub, the `serve` systemd unit) -- loads
+  `__main__.py` as `sys.modules["__main__"]`, never as
+  `sys.modules["agent_dispatch.__main__"]`. The initial proxy
+  implementation's `from . import __main__ as _cli` would therefore import
+  and execute a second, independent copy of the entire module under `-m`,
+  silently diverging from whatever state the actually-running copy held.
+  Fixed with a `_resolve_cli_module()` helper: `runpy` still sets the
+  running module's `__spec__.name` to its real dotted name even though its
+  `sys.modules` key is `"__main__"`, so checking
+  `sys.modules["__main__"].__spec__.name == "agent_dispatch.__main__"`
+  recognizes the live `-m` copy; falling back to
+  `sys.modules.get("agent_dispatch.__main__")` covers the normal-import
+  case (tests, any other importer), and a fresh dotted import is the last
+  resort. Added two regression tests
+  (`test_resolve_cli_module_prefers_the_live_python_dash_m_module`,
+  `..._falls_back_to_dotted_import_for_a_normal_importer`) that fabricate
+  both `sys.modules["__main__"]` shapes directly, since this environment
+  doesn't have a clean way to assert on an actual subprocess's internal
+  module identity.
+- Full `agent-dispatch` suite (`tools/run-plugin-tests.py agent-dispatch`)
+  passed before and after; `__main__.py` dropped from 6,506 to 5,568 lines;
+  `tools/module-size-baseline.json` refreshed (shrink-only) accordingly.
+- Bumped agent-dispatch 0.1.2-dev84 -> dev85.
+
 ### 2026-09-12 - Componentize supervisor.py: extract spawn_factories.py
 
 - Split `plugins/agent-dispatch/src/agent_dispatch/supervisor.py` (4,169

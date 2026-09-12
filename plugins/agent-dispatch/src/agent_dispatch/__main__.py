@@ -18,7 +18,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
@@ -38,6 +38,26 @@ from .config import (
 )
 from .config import (
     producer_capability as producer_capability_value,
+)
+
+# Re-exported for backward compatibility: these reviewer-loop and
+# repository-issue-loop command implementations live in loop_commands.py now
+# (see that module's docstring), but build_parser's set_defaults() and
+# tests below still reference them by their agent_dispatch.__main__
+# attribute path.
+from .loop_commands import (  # noqa: F401 -- re-exported for existing call sites/tests
+    _cmd_repository_issue_loop,
+    _cmd_reviewer_loop,
+    _repository_issue_loop_declarations,
+    _repository_issue_loop_health_path,
+    _repository_issue_loop_registrations,
+    _repository_issue_loop_setup,
+    _repository_issue_loop_status,
+    _reviewer_loop_declarations,
+    _reviewer_loop_registrations,
+    _reviewer_loop_setup,
+    _reviewer_loop_status,
+    _spawn_attempt_projection,
 )
 from .registrations import RegistrationKind
 
@@ -82,9 +102,7 @@ def _cmd_federation_run(args: argparse.Namespace) -> int:
         )
         return 2
     rv = _federation_rendezvous(args)
-    runner = FederationRunner(
-        rv, instance, role=role, machine=instance, lease_ttl=args.lease_ttl
-    )
+    runner = FederationRunner(rv, instance, role=role, machine=instance, lease_ttl=args.lease_ttl)
     if args.once:
         return _emit(runner.tick())
     interval = args.interval if args.interval is not None else _config.federation_interval()
@@ -99,9 +117,7 @@ def _cmd_federation_run(args: argparse.Namespace) -> int:
 
 def _cmd_federation_status(args: argparse.Namespace) -> int:
     rv = _federation_rendezvous(args)
-    return _emit(
-        {"coordinator": rv.discover_coordinator(), "peers": rv.discover_peers()}
-    )
+    return _emit({"coordinator": rv.discover_coordinator(), "peers": rv.discover_peers()})
 
 
 def _cmd_installer_readiness(args: argparse.Namespace) -> int:
@@ -214,16 +230,12 @@ def _client(args: argparse.Namespace, *, ensure: bool = True) -> DispatchClient:
         return DispatchClient(
             tunnel.base_url,
             token=None,
-            control_token=(
-                getattr(args, "control_token", None) or client_control_token()
-            ),
+            control_token=(getattr(args, "control_token", None) or client_control_token()),
             tunnel=tunnel,
         )
     url, token = _resolve_client_target(args)
     use_shared_control = bool(getattr(args, "shared", False)) or (
-        not getattr(args, "url", None)
-        and shared_url() is not None
-        and url == shared_url()
+        not getattr(args, "url", None) and shared_url() is not None and url == shared_url()
     )
     if use_shared_control:
         control = getattr(args, "control_token", None) or shared_control_token()
@@ -295,7 +307,11 @@ def _spawn_coordinator_process() -> None:
         log = subprocess.DEVNULL
 
     kwargs: dict[str, Any] = dict(
-        stdin=subprocess.DEVNULL, stdout=log, stderr=log, close_fds=True, env=env,
+        stdin=subprocess.DEVNULL,
+        stdout=log,
+        stderr=log,
+        close_fds=True,
+        env=env,
         # Launch the detached coordinator from the runtime root, never the CWD we
         # inherited (a session-start hook's CWD is often the plugin payload dir,
         # which on Windows would lock it against `copilot plugin update`). The
@@ -505,17 +521,29 @@ def _add_cutover_flags(p: argparse.ArgumentParser) -> None:
     place means there is exactly one shape for a cutover invocation to drift
     out of sync.
     """
-    p.add_argument("--health-timeout", type=float, default=60.0,
-                    help="seconds to wait for the new coordinator's /health to "
-                         "report ready before rolling back")
-    p.add_argument("--drain-timeout", type=float, default=300.0,
-                    help="seconds to wait for the old coordinator's in-flight "
-                         "claim to settle before giving up on a graceful drain")
-    p.add_argument("--force", action="store_true",
-                    help="flip and retire even if the drain timeout elapses")
-    p.add_argument("--recover", action="store_true",
-                    help="only heal a prior aborted cutover left in a drained "
-                         "state, then exit (does not start a new cutover)")
+    p.add_argument(
+        "--health-timeout",
+        type=float,
+        default=60.0,
+        help="seconds to wait for the new coordinator's /health to "
+        "report ready before rolling back",
+    )
+    p.add_argument(
+        "--drain-timeout",
+        type=float,
+        default=300.0,
+        help="seconds to wait for the old coordinator's in-flight "
+        "claim to settle before giving up on a graceful drain",
+    )
+    p.add_argument(
+        "--force", action="store_true", help="flip and retire even if the drain timeout elapses"
+    )
+    p.add_argument(
+        "--recover",
+        action="store_true",
+        help="only heal a prior aborted cutover left in a drained "
+        "state, then exit (does not start a new cutover)",
+    )
     p.add_argument("--json", action="store_true", help="emit JSON.")
 
 
@@ -566,8 +594,15 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
 
         python = _sys.executable
         cmd = [
-            windowless_python(python), "-m", "agent_dispatch", "serve",
-            "--host", cfg.host, "--port", str(port), "--passive",
+            windowless_python(python),
+            "-m",
+            "agent_dispatch",
+            "serve",
+            "--host",
+            cfg.host,
+            "--port",
+            str(port),
+            "--passive",
         ]
         # The coordinator binds AGENT_DISPATCH_PORT (Stage C: else an ephemeral
         # port); ``serve --port`` alone is only the client fallback. Pin the
@@ -716,6 +751,7 @@ def _resolve_bind_host_resilient(
     if sleep is None:
         sleep = time.sleep
     if log is None:
+
         def log(msg: str) -> None:
             print(msg, file=sys.stderr, flush=True)
 
@@ -777,9 +813,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
             )
             return 2
         try:
-            envelope = json.loads(
-                _read_payload_file(args.remote_create_envelope)
-            )
+            envelope = json.loads(_read_payload_file(args.remote_create_envelope))
         except (OSError, ValueError) as exc:
             print(
                 f"agent-dispatch create: invalid remote create envelope: {exc}",
@@ -789,10 +823,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
         if (
             not isinstance(envelope, dict)
             or set(envelope) != {"payload", "producer_capability"}
-            or (
-                envelope["payload"] is not None
-                and not isinstance(envelope["payload"], str)
-            )
+            or (envelope["payload"] is not None and not isinstance(envelope["payload"], str))
             or not isinstance(envelope["producer_capability"], str)
             or not envelope["producer_capability"]
         ):
@@ -861,9 +892,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
             evaluator_ref=args.evaluator_ref,
             dedup_key=args.dedup_key,
             producer_scope=(
-                {"repo": repo, "source": args.source}
-                if producer_fence_requested
-                else None
+                {"repo": repo, "source": args.source} if producer_fence_requested else None
             ),
             producer_id=args.producer_id,
             producer_generation=args.producer_generation,
@@ -1018,11 +1047,7 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
     from . import embody, remote_dispatch
 
     try:
-        interface = (
-            "cli"
-            if getattr(args, "spawn_backend", "bridge") == "embody"
-            else "acp"
-        )
+        interface = "cli" if getattr(args, "spawn_backend", "bridge") == "embody" else "acp"
         prepared = embody.prepare_reusable_worktree(
             task,
             reservation,
@@ -1042,9 +1067,7 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
                     worktree,
                     ownership=ownership,
                     creating_host=(
-                        remote_dispatch.local_machine()
-                        if ownership == "created"
-                        else None
+                        remote_dispatch.local_machine() if ownership == "created" else None
                     ),
                     driver="agent-dispatch",
                 )
@@ -1054,9 +1077,7 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
             "spawn_worktree_path": prepared["path"],
             "spawn_worktree_ownership": ownership,
             "spawn_session_handle": (
-                None
-                if prepared.get("replaced")
-                else reservation.get("session_handle")
+                None if prepared.get("replaced") else reservation.get("session_handle")
             ),
         }
     except (DispatchError, embody.EmbodyUnavailable) as exc:
@@ -1247,10 +1268,7 @@ def _do_spawn(args: argparse.Namespace, task: dict, *, route: str = ""):
                     task["id"],
                     worker_id=worker_id,
                     route=route,
-                    worktree_id=(
-                        task.get("target_worktree")
-                        or task.get("spawn_worktree")
-                    ),
+                    worktree_id=(task.get("target_worktree") or task.get("spawn_worktree")),
                     verify_timeout=getattr(args, "verify_timeout", 0) or 0,
                 )
             except embody.EmbodyUnavailable as exc:
@@ -1269,8 +1287,7 @@ def _do_spawn(args: argparse.Namespace, task: dict, *, route: str = ""):
             file=sys.stderr,
         )
 
-    from . import bridge
-    from . import embody
+    from . import bridge, embody
 
     worker_id = f"spawn-{uuid.uuid4().hex[:8]}"
     prompt = bridge.worker_prompt(
@@ -1280,9 +1297,7 @@ def _do_spawn(args: argparse.Namespace, task: dict, *, route: str = ""):
     )
     prior_session = None
     session_handle = task.get("spawn_session_handle")
-    if isinstance(session_handle, str) and session_handle.startswith(
-        "local-body:"
-    ):
+    if isinstance(session_handle, str) and session_handle.startswith("local-body:"):
         prior_session = session_handle.removeprefix("local-body:") or None
     try:
         result = bridge.spawn_or_resume_worker(
@@ -1306,15 +1321,15 @@ def _do_spawn(args: argparse.Namespace, task: dict, *, route: str = ""):
         return None
     _report_spawn_result(result, task["id"], "agent-bridge")
     session = embody.parse_fleet_body_session(result)
-    handle = (
-        f"local-body:{session}"
-        if session and task.get("spawn_worktree")
-        else worker_id
+    handle = f"local-body:{session}" if session and task.get("spawn_worktree") else worker_id
+    return (
+        result,
+        "agent-bridge",
+        {
+            "session": handle,
+            "worktree": task.get("spawn_worktree"),
+        },
     )
-    return result, "agent-bridge", {
-        "session": handle,
-        "worktree": task.get("spawn_worktree"),
-    }
 
 
 def _report_spawn_result(result, task_id: str, via: str) -> None:
@@ -1363,6 +1378,7 @@ def _enrich(result: Any, *, resolve_repo_names: bool = True) -> Any:
     for the canonical ``repo`` remote, when the registry knows it), and parse the
     stored ``latest_progress`` JSON string into an object for clean at-a-glance
     output."""
+
     def repo_display_name(repo: object) -> str | None:
         value = str(repo or "").rstrip("/")
         if not value:
@@ -1393,10 +1409,7 @@ def _enrich(result: Any, *, resolve_repo_names: bool = True) -> Any:
         return [one(x) for x in result]
     if isinstance(result, dict) and any(k in result for k in ("assigned", "owned")):
         return {
-            k: (
-                _enrich(v, resolve_repo_names=resolve_repo_names)
-                if isinstance(v, list) else v
-            )
+            k: (_enrich(v, resolve_repo_names=resolve_repo_names) if isinstance(v, list) else v)
             for k, v in result.items()
         }
     return one(result)
@@ -1499,9 +1512,7 @@ def _cmd_claimant(args: argparse.Namespace) -> int:
         task = c.get(args.task_id)
     status = task.get("status")
     owner = task.get("owner")
-    claimed = bool(owner) and status in (
-        "claimed", "started", "suspended", "completed"
-    )
+    claimed = bool(owner) and status in ("claimed", "started", "suspended", "completed")
     if claimed:
         machine, worktree = _split_owner(owner)
         source = "owner"
@@ -1599,9 +1610,7 @@ def _cmd_suspend(args: argparse.Namespace) -> int:
     if worker_id is None:
         return 2
     with _client(args) as c:
-        return _emit(
-            c.suspend(args.task_id, worker_id, reason=args.reason)
-        )
+        return _emit(c.suspend(args.task_id, worker_id, reason=args.reason))
 
 
 def _cmd_resume(args: argparse.Namespace) -> int:
@@ -1624,9 +1633,7 @@ def _cmd_release(args: argparse.Namespace) -> int:
     if worker_id is None:
         return 2
     with _client(args) as c:
-        return _emit(
-            c.release(args.task_id, worker_id, reason=args.reason)
-        )
+        return _emit(c.release(args.task_id, worker_id, reason=args.reason))
 
 
 def _cmd_progress(args: argparse.Namespace) -> int:
@@ -1714,9 +1721,7 @@ def _cmd_steer(args: argparse.Namespace) -> int:
         wake_status = result.pop("steer_wake_status", None)
         if args.wake and wake_status is None:
             wake_status = "unsupported"
-    return _emit(
-        {"task": result, "woken": woken, "wake_status": wake_status}
-    )
+    return _emit({"task": result, "woken": woken, "wake_status": wake_status})
 
 
 def _cmd_steer_take(args: argparse.Namespace) -> int:
@@ -1770,10 +1775,10 @@ def _cmd_focus(args: argparse.Namespace) -> int:
 
     if not args.focus_text:
         # Show this worktree's current focus (its status-core summary).
-        mine = [w for w in aw_list_records(machine=machine)
-                if w.get("id") == worktree]
-        return _emit(_focus_row(mine[0]) if mine and (mine[0].get("summary") or "").strip()
-                     else {})
+        mine = [w for w in aw_list_records(machine=machine) if w.get("id") == worktree]
+        return _emit(
+            _focus_row(mine[0]) if mine and (mine[0].get("summary") or "").strip() else {}
+        )
 
     # Write-through to the status core (never a parallel store). The write
     # always targets the CWD worktree via the `agent-worktrees status` verb.
@@ -1784,10 +1789,13 @@ def _cmd_focus(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
-    return _emit({
-        "machine": machine, "worktree": worktree,
-        "focus": args.focus_text.strip(),
-    })
+    return _emit(
+        {
+            "machine": machine,
+            "worktree": worktree,
+            "focus": args.focus_text.strip(),
+        }
+    )
 
 
 def _cmd_complete(args: argparse.Namespace) -> int:
@@ -1888,8 +1896,7 @@ def _browse_peer(args: argparse.Namespace, subcommand: str, *, repo: str | None 
         result = remote_dispatch.browse_remote(args.machine, argv)
     except remote_dispatch.RemoteDispatchUnavailable as exc:
         print(
-            f"agent-dispatch: peer-queue browse of {args.machine!r} unavailable "
-            f"({exc})",
+            f"agent-dispatch: peer-queue browse of {args.machine!r} unavailable ({exc})",
             file=sys.stderr,
         )
         return 2
@@ -2058,10 +2065,7 @@ def _cmd_inbox(args: argparse.Namespace) -> int:
 
         from .queue import machine_matches
 
-        status = (
-            "proposed,queued,claimed,started,suspended,"
-            "completed,abandoned,dead_letter"
-        )
+        status = "proposed,queued,claimed,started,suspended,completed,abandoned,dead_letter"
         with _client(args) as c:
             tasks = c.list(repo=None, status=status, label=args.label, limit=args.limit)
         inbox = [t for t in tasks if machine_matches(t.get("target_machine"), machine)]
@@ -2095,10 +2099,7 @@ def _cmd_inbox(args: argparse.Namespace) -> int:
 
     inbox = [t for t in tasks if machine_matches(t.get("target_machine"), machine)]
     if steer_only:
-        inbox = [
-            t for t in inbox
-            if t.get("status") == "proposed" or t.get("awaiting_steer")
-        ]
+        inbox = [t for t in inbox if t.get("status") == "proposed" or t.get("awaiting_steer")]
     return _emit(_enrich(inbox))
 
 
@@ -2168,8 +2169,7 @@ def _consume_already_spent(task_id: str, task: dict) -> int:
         f"If this is unexpected, inspect with: agent-dispatch show {task_id}"
     )
     print(
-        f"agent-dispatch: handoff {task_id} already consumed (completed); "
-        f"not replayed",
+        f"agent-dispatch: handoff {task_id} already consumed (completed); not replayed",
         file=sys.stderr,
     )
     return 3
@@ -2276,28 +2276,21 @@ def _cmd_consume(args: argparse.Namespace) -> int:
                                 owner,
                                 wake=False,
                                 adopt_session=True,
-                                expected_owner_session_id=task.get(
-                                    "owner_session_id"
-                                ),
+                                expected_owner_session_id=task.get("owner_session_id"),
                                 expected_generation=task.get("generation"),
                             )
                         except DispatchError as exc:
                             print(f"agent-dispatch: {exc}", file=sys.stderr)
                             return 1
                     else:
-                        result_ref = (
-                            args.result_ref
-                            or f"consumed:{worktree or 'successor'}"
-                        )
+                        result_ref = args.result_ref or f"consumed:{worktree or 'successor'}"
                         try:
                             c.complete(
                                 task_id,
                                 owner,
                                 result_ref=result_ref,
                                 expected_status="suspended",
-                                expected_owner_session_id=task.get(
-                                    "owner_session_id"
-                                ),
+                                expected_owner_session_id=task.get("owner_session_id"),
                                 expected_generation=task.get("generation"),
                             )
                         except DispatchError as exc:
@@ -2311,10 +2304,7 @@ def _cmd_consume(args: argparse.Namespace) -> int:
                     # Deferred pickup stops at 'started': the successor completes
                     # explicitly when the work is done. Baton mode completes now.
                     if not defer:
-                        result_ref = (
-                            args.result_ref
-                            or f"consumed:{worktree or 'successor'}"
-                        )
+                        result_ref = args.result_ref or f"consumed:{worktree or 'successor'}"
                         try:
                             c.complete(task_id, owner, result_ref=result_ref)
                         except DispatchError:
@@ -2375,10 +2365,12 @@ def _cmd_schedule(args: argparse.Namespace) -> int:
                 if not args.spec:
                     raise SystemExit("schedule tick: pass a SPEC path or --registry")
                 result = schedule.run_tick(c, schedule.load_spec(args.spec))
-        return _emit({
-            "created": [_enrich(t) for t in result["created"]],
-            "errors": result["errors"],
-        })
+        return _emit(
+            {
+                "created": [_enrich(t) for t in result["created"]],
+                "errors": result["errors"],
+            }
+        )
 
     if cmd == "register":
         with _client(args) as c:
@@ -2430,9 +2422,7 @@ def _cmd_schedule(args: argparse.Namespace) -> int:
 
     if cmd == "lease-release":
         with _client(args) as c:
-            return _emit(
-                c.release_schedule_lease(args.scope, args.holder, force=args.force)
-            )
+            return _emit(c.release_schedule_lease(args.scope, args.holder, force=args.force))
 
     raise SystemExit(f"unknown schedule command: {cmd!r}")
 
@@ -2525,1026 +2515,6 @@ def _reject_worktree_checkout_as_repo_root(repo_root: Path) -> None:
         )
 
 
-def _reviewer_loop_declarations(
-    args: argparse.Namespace,
-) -> tuple[Path, tuple[ProfileDeclaration, ...], str]:
-    from .registrar_discovery import (
-        load_pointers,
-        read_declaration_file_set,
-    )
-    from . import repo_config as dispatch_repo_config
-
-    path = Path(args.declaration).expanduser().resolve()
-    declarations = read_declaration_file_set(path)
-    expected = {"emitter", "evaluator", "supervised-lane"}
-    if len(declarations) != 3 or {declaration.kind for declaration in declarations} != expected:
-        raise ValueError(
-            f"{path}: expected one reviewer-loop declaration expanding to "
-            "emitter, evaluator, and supervised-lane units"
-        )
-    owner = getattr(args, "owner", None)
-    declared_owners = {declaration.owner for declaration in declarations}
-    if owner is None and len(declared_owners) == 1:
-        owner = next(iter(declared_owners))
-    repo_root = dispatch_repo_config.repo_root_from_surface_path(path, "registrar")
-    if repo_root is not None:
-        # Guard unconditionally, even when `owner` is already explicit: the
-        # pointer this flow persists (see _reviewer_loop_setup) records
-        # repo_root itself as its `location`, and a worktree checkout path is
-        # never a valid thing to persist there regardless of what owner
-        # string ends up attached to it.
-        _reject_worktree_checkout_as_repo_root(repo_root)
-    selected_dir = (
-        dispatch_repo_config.selected_repo_surface_dir(repo_root, "registrar").resolve()
-        if repo_root is not None
-        else None
-    )
-    if owner is None:
-        matching = [
-            pointer.effective_owner()
-            for pointer in load_pointers()
-            if pointer.resolved_location().resolve() == (selected_dir or path.parent)
-        ]
-        if len(matching) == 1:
-            owner = matching[0]
-    if owner is None and repo_root is not None:
-        owner = f"repo:{repo_root.name}"
-    if owner is None:
-        raise ValueError(
-            f"{path}: declaration owner is ambiguous; register its containing "
-            "directory or pass --owner"
-        )
-    declarations = tuple(declaration.with_owner(owner) for declaration in declarations)
-    return path, declarations, owner
-
-
-def _reviewer_loop_registrations(args: argparse.Namespace) -> list[dict]:
-    from .registrar_reconcile import declaration_to_registration
-
-    _path, declarations, _owner = _reviewer_loop_declarations(args)
-    machine, env = _registration_scope(args)
-    return [
-        declaration_to_registration(declaration, machine=machine, env=env)
-        for declaration in declarations
-    ]
-
-
-def _reviewer_loop_setup(args: argparse.Namespace) -> int:
-    from . import registrar_discovery as rd
-    from . import repo_config as dispatch_repo_config
-
-    path = Path(args.declaration).expanduser().resolve()
-    repo_root = dispatch_repo_config.repo_root_from_surface_path(path, "registrar")
-    if repo_root is None:
-        raise ValueError(
-            f"{path}: setup requires a declaration under "
-            "<repo>/.copilot-extensions/agent-dispatch/registrar/ "
-            "(legacy <repo>/.agent-dispatch/registrar/ also accepted)"
-        )
-    _path, declarations, owner = _reviewer_loop_declarations(args)
-    name = args.name or repo_root.name
-    existing = next((item for item in rd.load_pointers() if item.name == name), None)
-    selected_dir = dispatch_repo_config.selected_repo_surface_dir(repo_root, "registrar")
-    if (
-        existing is not None
-        and existing.resolved_location().resolve() != selected_dir.resolve()
-    ):
-        raise ValueError(
-            f"registrar pointer {name!r} already targets "
-            f"{existing.resolved_location()}; pass a unique --name"
-        )
-    pointer = rd.add_pointer(
-        name,
-        repo_root,
-        kind="repo",
-        owner=args.owner or (
-            owner if any(declaration.owner for declaration in declarations) else None
-        ),
-    )
-    return _emit(
-        {
-            "declaration": str(path),
-            "repo_root": str(repo_root),
-            "pointer": pointer.to_dict(),
-            "changed": existing != pointer,
-        }
-    )
-
-
-def _reviewer_loop_status(
-    args: argparse.Namespace,
-    registrations: list[dict],
-    logical_aliases: dict[str, set[str]],
-) -> tuple[dict, bool]:
-    from . import registrar_discovery as rd
-    from .config import overrides_path, run_dir
-    from .overrides import load_overrides
-    from .single_instance import is_locked, lock_path_for
-    from .supervisor_daemon import supervisor_lease_scope
-
-    path, declarations, owner = _reviewer_loop_declarations(args)
-    machine, env = _registration_scope(args)
-    scope = supervisor_lease_scope(machine, env)
-    pool = next(
-        declaration
-        for declaration in declarations
-        if declaration.kind == RegistrationKind.SUPERVISED_LANE
-    )
-    from .identity import canonicalize_remote
-
-    pool_repo = None if pool.repos == "all" else canonicalize_remote(pool.repos)
-    path_pointers = [
-        pointer
-        for pointer in rd.load_pointers()
-        if pointer.resolved_location().resolve() == path.parent
-    ]
-    pointers = [
-        pointer.to_dict()
-        for pointer in path_pointers
-        if pointer.effective_owner() == owner
-    ]
-    overrides = load_overrides(overrides_path())
-    coordinator_error = None
-    direct: list[dict] = []
-    tasks: list[dict] = []
-    task_scan_truncated = False
-    failed_counts: dict[str, int] = {}
-    try:
-        with _client(args, ensure=False) as client:
-            direct = client.list_registrations(
-                machine=machine,
-                env=env,
-                include_paused=True,
-            )
-            evaluator_ref = next(
-                registration["spec"]["evaluator_ref"]
-                for registration in registrations
-                if registration["kind"] == RegistrationKind.EMITTER
-            )
-            tasks = client.list(
-                repo=pool_repo,
-                evaluator_ref=evaluator_ref,
-                status="queued,claimed,started,suspended",
-                limit=args.limit + 1,
-            )
-            task_scan_truncated = len(tasks) > args.limit
-            tasks = tasks[: args.limit]
-            for task in tasks:
-                if task.get("status") != "queued" or task.get("owner"):
-                    continue
-                failed_counts[task["id"]] = len(
-                    client.list_reservations(
-                        task_id=task["id"],
-                        state="failed",
-                        limit=10000,
-                    )
-                )
-    except (DispatchError, httpx.TransportError) as exc:
-        coordinator_error = str(exc)
-
-    from .supervisor_daemon import merge_registration_sources
-
-    replacements = merge_registration_sources(direct, registrations).replacements
-    aliases = {
-        registration["id"]: {
-            direct_id
-            for direct_id, declared_id in replacements.items()
-            if declared_id == registration["id"]
-        }
-        | logical_aliases[registration["id"]]
-        for registration in registrations
-    }
-    from .registrar_reconcile import runs_on_machine
-
-    running = is_locked(lock_path_for(run_dir(), scope))
-    runtime_status, runtime_status_error = _read_supervisor_runtime_status(scope)
-    runtime_fresh = bool(
-        runtime_status
-        and isinstance(runtime_status.get("updated_at"), (int, float))
-        and runtime_status["updated_at"] >= time.time() - 120
-    )
-    runtime_running = set(runtime_status.get("running") or []) if runtime_fresh else set()
-    runtime_backing_off = (
-        set(runtime_status.get("backing_off") or []) if runtime_fresh else set()
-    )
-    runtime_dead = set(runtime_status.get("dead") or []) if runtime_fresh else set()
-    direct_ids = {registration["id"] for registration in direct}
-    units = []
-    for registration, declaration in zip(registrations, declarations, strict=True):
-        ids = {registration["id"], *aliases[registration["id"]]}
-        served_ids = sorted(ids & direct_ids)
-        override_ids = sorted(
-            override_id
-            for override_id in ids
-            if (overrides.get(override_id) or {}).get("disabled")
-        )
-        active_by_filter = runs_on_machine(declaration, machine)
-        runtime_state = (
-            "running"
-            if registration["id"] in runtime_running
-            else "backing-off"
-            if registration["id"] in runtime_backing_off
-            else "dead"
-            if registration["id"] in runtime_dead
-            else "not-running"
-        )
-        served = running and runtime_state == "running"
-        units.append(
-            {
-                **registration,
-                "active_by_filter": active_by_filter,
-                "served": served,
-                "runtime_state": runtime_state,
-                "served_ids": served_ids,
-                "overridden_off": bool(override_ids),
-                "override_ids": override_ids,
-            }
-        )
-
-    task_items = []
-    for task in tasks:
-        spawn = _spawn_attempt_projection(
-            task,
-            failures=failed_counts.get(task["id"], 0),
-            default_max_attempts=pool.max_attempts,
-            label_max_attempts=pool.label_max_attempts,
-        )
-        blocked = bool(task.get("awaiting_steer"))
-        matches_repo = pool_repo is None or task.get("repo") == pool_repo
-        matches_labels = not pool.labels or bool(
-            set(pool.labels) & set(task.get("labels") or [])
-        )
-        inactive_by_filter = not (matches_repo and matches_labels)
-        item = {
-            "id": task["id"],
-            "status": task.get("status"),
-            "owner": task.get("owner"),
-            "awaiting_steer": blocked,
-            "inactive_by_filter": inactive_by_filter,
-            **spawn,
-        }
-        task_items.append(item)
-
-    diagnoses = []
-    actions = []
-    if not pointers:
-        diagnoses.append("missing-pointer")
-        actions.append(
-            f"agent-dispatch reviewer-loop setup {path}"
-        )
-    if any(
-        unit["active_by_filter"] and not unit["served"]
-        for unit in units
-    ):
-        diagnoses.append("declared-but-unserved")
-    if coordinator_error:
-        diagnoses.append("coordinator-unavailable")
-    if any(unit["overridden_off"] for unit in units):
-        diagnoses.append("overridden-off")
-        actions.append(f"agent-dispatch reviewer-loop enable {path}")
-    if any(not unit["active_by_filter"] for unit in units) or any(
-        item["inactive_by_filter"] for item in task_items
-    ):
-        diagnoses.append("inactive-by-filter")
-    if any(item["awaiting_steer"] for item in task_items):
-        diagnoses.append("blocked")
-    dead_lettered = [item for item in task_items if item["dead_lettered"]]
-    if dead_lettered:
-        diagnoses.append("dead-lettered")
-        actions.extend(item["rearm"] for item in dead_lettered if "rearm" in item)
-    if task_scan_truncated:
-        diagnoses.append("task-scan-truncated")
-    healthy = not diagnoses
-    if healthy:
-        diagnoses.append("healthy")
-
-    payload = {
-        "declaration": str(path),
-        "owner": owner,
-        "pointer": {
-            "registered": bool(pointers),
-            "matches": pointers,
-            "owner_mismatches": [
-                pointer.to_dict()
-                for pointer in path_pointers
-                if pointer.effective_owner() != owner
-            ],
-        },
-        "service": {
-            "scope": scope,
-            "machine": machine,
-            "env": env,
-            "running": running,
-            "coordinator_error": coordinator_error,
-            "runtime_status": runtime_status,
-            "runtime_status_error": runtime_status_error,
-            "runtime_status_fresh": runtime_fresh,
-        },
-        "units": units,
-        "tasks": {
-            "count": len(task_items),
-            "truncated": task_scan_truncated,
-            "items": task_items,
-        },
-        "diagnoses": diagnoses,
-        "healthy": healthy,
-        "actions": actions,
-    }
-    return payload, healthy
-
-
-def _cmd_reviewer_loop(args: argparse.Namespace) -> int:
-    from .config import overrides_path
-    from .overrides import (
-        load_overrides,
-        mutate_overrides,
-    )
-    from .producers import emitter
-    from .supervisor_daemon import (
-        merge_registration_sources,
-        registration_override_ids,
-    )
-
-    try:
-        if args.reviewer_loop_command == "setup":
-            return _reviewer_loop_setup(args)
-        registrations = _reviewer_loop_registrations(args)
-        machine, env = _registration_scope(args)
-        command = args.reviewer_loop_command
-        logical_aliases = {
-            registration["id"]: registration_override_ids(registration)
-            - {registration["id"]}
-            for registration in registrations
-        }
-        if command in {"status", "doctor"}:
-            payload, healthy = _reviewer_loop_status(
-                args,
-                registrations,
-                logical_aliases,
-            )
-            _emit(payload)
-            return 0 if command == "status" or healthy else 1
-        if command == "disable":
-            now = time.time()
-
-            def disable(current: dict[str, dict]) -> list[str]:
-                changed = []
-                for registration in registrations:
-                    for override_id in {
-                        registration["id"],
-                        *logical_aliases[registration["id"]],
-                    }:
-                        current[override_id] = {
-                            "disabled": True,
-                            "reason": args.reason,
-                            "at": now,
-                        }
-                        changed.append(override_id)
-                return changed
-
-            changed = mutate_overrides(overrides_path(), disable)
-            return _emit(
-                {
-                    "enabled": False,
-                    "changed": changed,
-                    "units": [registration["id"] for registration in registrations],
-                }
-            )
-
-        with _client(args) as client:
-            direct = client.list_registrations(
-                machine=machine,
-                env=env,
-                include_paused=True,
-            )
-        replacements = merge_registration_sources(direct, registrations).replacements
-        aliases = {
-            registration["id"]: {
-                direct_id
-                for direct_id, declared_id in replacements.items()
-                if declared_id == registration["id"]
-            }
-            | logical_aliases[registration["id"]]
-            for registration in registrations
-        }
-        if command == "inspect":
-            overrides = load_overrides(overrides_path())
-            return _emit(
-                {
-                    "declaration": str(Path(args.declaration).expanduser().resolve()),
-                    "units": [
-                        {
-                            **registration,
-                            "override_ids": sorted(
-                                {registration["id"], *aliases[registration["id"]]}
-                            ),
-                            "overridden_off": any(
-                                (overrides.get(override_id) or {}).get("disabled")
-                                for override_id in {
-                                    registration["id"],
-                                    *aliases[registration["id"]],
-                                }
-                            ),
-                        }
-                        for registration in registrations
-                    ],
-                }
-            )
-        if command == "enable":
-            def mutate(current: dict[str, dict]) -> list[str]:
-                changed = []
-                for registration in registrations:
-                    registration_id = registration["id"]
-                    override_ids = {
-                        registration_id,
-                        *aliases[registration_id],
-                    }
-                    for override_id in override_ids:
-                        if override_id in current:
-                            del current[override_id]
-                            changed.append(override_id)
-                return changed
-
-            changed = mutate_overrides(overrides_path(), mutate)
-            return _emit(
-                {
-                    "enabled": True,
-                    "changed": changed,
-                    "units": [registration["id"] for registration in registrations],
-                }
-            )
-        source = next(
-            registration
-            for registration in registrations
-            if registration["kind"] == RegistrationKind.EMITTER
-        )
-        source_override_ids = {source["id"], *aliases[source["id"]]}
-        current = load_overrides(overrides_path())
-        if any(
-            (current.get(override_id) or {}).get("disabled")
-            for override_id in source_override_ids
-        ):
-            raise ValueError(
-                f"reviewer loop is disabled by override on {source['id']!r}"
-            )
-        from .registrar_reconcile import runs_on_machine
-
-        _path, declarations, _owner = _reviewer_loop_declarations(args)
-        source_declaration = next(
-            declaration
-            for declaration in declarations
-            if declaration.kind == RegistrationKind.EMITTER
-        )
-        if not runs_on_machine(source_declaration, machine):
-            raise ValueError(
-                f"reviewer loop source is inactive on machine {machine!r}"
-            )
-        with _client(args) as side_load_client:
-            return _emit(
-                emitter.run_side_load(
-                    side_load_client,
-                    source,
-                    args.change_ref,
-                    current_machine=machine,
-                    current_env=env,
-                )
-            )
-    except (DispatchError, OSError, ValueError, emitter.EmitterError) as exc:
-        print(f"agent-dispatch reviewer-loop: {exc}", file=sys.stderr)
-        return 2
-
-
-def _repository_issue_loop_declarations(
-    args: argparse.Namespace,
-) -> tuple[Path, tuple[ProfileDeclaration, ...], str]:
-    from .registrar_discovery import load_pointers, read_declaration_file_set
-    from . import repo_config as dispatch_repo_config
-
-    path = Path(args.declaration).expanduser().resolve()
-    declarations = read_declaration_file_set(path)
-    if len(declarations) != 2 or {
-        declaration.kind for declaration in declarations
-    } != {"emitter", "supervised-lane"}:
-        raise ValueError(
-            f"{path}: expected one repository-issue-loop declaration expanding "
-            "to emitter and supervised-lane units"
-        )
-    owner = getattr(args, "owner", None)
-    declared_owners = {declaration.owner for declaration in declarations}
-    if owner is None and len(declared_owners) == 1:
-        owner = next(iter(declared_owners))
-    repo_root = dispatch_repo_config.repo_root_from_surface_path(path, "registrar")
-    if repo_root is not None:
-        # See the identical guard + rationale in _reviewer_loop_declarations.
-        _reject_worktree_checkout_as_repo_root(repo_root)
-    selected_dir = (
-        dispatch_repo_config.selected_repo_surface_dir(repo_root, "registrar").resolve()
-        if repo_root is not None
-        else None
-    )
-    if owner is None:
-        matching = [
-            pointer.effective_owner()
-            for pointer in load_pointers()
-            if pointer.resolved_location().resolve() == (selected_dir or path.parent)
-        ]
-        if len(matching) == 1:
-            owner = matching[0]
-    if owner is None and repo_root is not None:
-        owner = f"repo:{repo_root.name}"
-    if owner is None:
-        raise ValueError(
-            f"{path}: declaration owner is ambiguous; register its containing "
-            "directory or pass --owner"
-        )
-    return (
-        path,
-        tuple(declaration.with_owner(owner) for declaration in declarations),
-        owner,
-    )
-
-
-def _repository_issue_loop_registrations(args: argparse.Namespace) -> list[dict]:
-    from .registrar_reconcile import declaration_to_registration
-
-    _path, declarations, _owner = _repository_issue_loop_declarations(args)
-    machine, env = _registration_scope(args)
-    return [
-        declaration_to_registration(declaration, machine=machine, env=env)
-        for declaration in declarations
-    ]
-
-
-def _repository_issue_loop_setup(args: argparse.Namespace) -> int:
-    from . import registrar_discovery as rd
-    from . import repo_config as dispatch_repo_config
-
-    path = Path(args.declaration).expanduser().resolve()
-    repo_root = dispatch_repo_config.repo_root_from_surface_path(path, "registrar")
-    if repo_root is None:
-        raise ValueError(
-            f"{path}: setup requires a declaration under "
-            "<repo>/.copilot-extensions/agent-dispatch/registrar/ "
-            "(legacy <repo>/.agent-dispatch/registrar/ also accepted)"
-        )
-    _path, declarations, owner = _repository_issue_loop_declarations(args)
-    name = args.name or repo_root.name
-    existing = next((item for item in rd.load_pointers() if item.name == name), None)
-    selected_dir = dispatch_repo_config.selected_repo_surface_dir(repo_root, "registrar")
-    if (
-        existing is not None
-        and existing.resolved_location().resolve() != selected_dir.resolve()
-    ):
-        raise ValueError(
-            f"registrar pointer {name!r} already targets "
-            f"{existing.resolved_location()}; pass a unique --name"
-        )
-    pointer = rd.add_pointer(
-        name,
-        repo_root,
-        kind="repo",
-        owner=args.owner
-        or (owner if any(declaration.owner for declaration in declarations) else None),
-    )
-    return _emit(
-        {
-            "declaration": str(path),
-            "repo_root": str(repo_root),
-            "pointer": pointer.to_dict(),
-            "changed": existing != pointer,
-        }
-    )
-
-
-def _repository_issue_loop_health_path(
-    registration_id: str, machine: str | None, env: str
-) -> Path:
-    from .config import run_dir
-    from .supervisor_daemon import supervisor_lease_scope
-
-    scope = supervisor_lease_scope(machine, env).replace(":", "-")
-    safe = "".join(
-        c if c.isalnum() or c in "._-" else "-" for c in registration_id
-    )
-    return (
-        Path(run_dir())
-        / "supervisor"
-        / scope
-        / f"{safe}.emitter.health.json"
-    )
-
-
-def _spawn_attempt_projection(
-    task: dict,
-    *,
-    failures: int,
-    default_max_attempts: int,
-    label_max_attempts: Mapping[str, int],
-) -> dict:
-    label_caps = [
-        int(label_max_attempts[label])
-        for label in (task.get("labels") or [])
-        if label in label_max_attempts
-    ]
-    max_attempts = (
-        max(label_caps) if label_caps else int(default_max_attempts)
-    )
-    dead_lettered = bool(
-        task.get("status") == "queued"
-        and not task.get("owner")
-        and max_attempts
-        and failures >= max_attempts
-    )
-    result = {
-        "failed_spawns": failures,
-        "max_attempts": max_attempts,
-        "dead_lettered": dead_lettered,
-    }
-    if dead_lettered and failures >= 3:
-        result["rearm"] = (
-            f"agent-dispatch reservations rearm {task['id']} --permit "
-            "--reason <reason>"
-        )
-    elif dead_lettered:
-        result["recovery"] = (
-            "the atomic rearm command requires at least 3 failed spawns; "
-            "raise this loop's attempt bound or resolve the task explicitly"
-        )
-    return result
-
-
-def _repository_issue_loop_status(
-    args: argparse.Namespace, registrations: list[dict]
-) -> tuple[dict, bool]:
-    from . import registrar_discovery as rd
-    from .config import overrides_path, run_dir
-    from .overrides import load_overrides
-    from .queue import Status
-    from .registrar_reconcile import runs_on_machine
-    from .single_instance import is_locked, lock_path_for
-    from .supervisor_daemon import (
-        registration_override_ids,
-        supervisor_lease_scope,
-    )
-
-    path, declarations, owner = _repository_issue_loop_declarations(args)
-    machine, env = _registration_scope(args)
-    scope = supervisor_lease_scope(machine, env)
-    source = next(
-        registration
-        for registration in registrations
-        if registration["kind"] == RegistrationKind.EMITTER
-    )
-    worker = next(
-        registration
-        for registration in registrations
-        if registration["kind"] == RegistrationKind.SUPERVISED_LANE
-    )
-    source_config = source["spec"]["repository_issue_loop"]
-    worker_config = worker["spec"]
-    exclusive_key = f"repository-issue-loop:{source_config['name']}"
-    path_pointers = [
-        pointer
-        for pointer in rd.load_pointers()
-        if pointer.resolved_location().resolve() == path.parent
-    ]
-    pointers = [
-        pointer.to_dict()
-        for pointer in path_pointers
-        if pointer.effective_owner() == owner
-    ]
-    overrides = load_overrides(overrides_path())
-    running = is_locked(lock_path_for(run_dir(), scope))
-    runtime_status, runtime_status_error = _read_supervisor_runtime_status(scope)
-    runtime_fresh = bool(
-        runtime_status
-        and isinstance(runtime_status.get("updated_at"), (int, float))
-        and runtime_status["updated_at"] >= time.time() - 120
-    )
-    runtime_running = (
-        set(runtime_status.get("running") or []) if runtime_fresh else set()
-    )
-    units = []
-    for registration, declaration in zip(
-        registrations, declarations, strict=True
-    ):
-        override_ids = registration_override_ids(registration)
-        active_by_filter = runs_on_machine(declaration, machine)
-        units.append(
-            {
-                **registration,
-                "active_by_filter": active_by_filter,
-                "served": bool(
-                    running
-                    and active_by_filter
-                    and registration["id"] in runtime_running
-                ),
-                "overridden_off": any(
-                    (overrides.get(override_id) or {}).get("disabled")
-                    for override_id in override_ids
-                ),
-                "override_ids": sorted(override_ids),
-            }
-        )
-
-    coordinator_error = None
-    tasks = []
-    failed_spawn_counts: dict[str, int] = {}
-    try:
-        with _client(args, ensure=False) as client:
-            tasks = [
-                task
-                for task in client.list(
-                    repo=source_config["repo"],
-                    status=(
-                        "proposed,queued,claimed,started,suspended,"
-                        "completed,abandoned,dead_letter"
-                    ),
-                    exclusive_key=exclusive_key,
-                    limit=args.limit,
-                )
-            ]
-            for task in tasks:
-                if task.get("status") == Status.QUEUED and not task.get("owner"):
-                    failed_spawn_counts[str(task["id"])] = len(
-                        client.list_reservations(
-                            task_id=str(task["id"]),
-                            state="failed",
-                            limit=10000,
-                        )
-                    )
-    except (DispatchError, httpx.TransportError) as exc:
-        coordinator_error = str(exc)
-
-    forge_error = None
-    reservations = []
-    try:
-        from .repository_issue_loops import GitHubProvider, _latest_reservations
-
-        for issue in GitHubProvider(
-            source_config["forge"]["producer_login"]
-        ).list_open_issues(source_config["repo"]):
-            for reservation in _latest_reservations(issue).values():
-                if reservation.get("state") in {"reserved", "claimed"}:
-                    reservations.append(
-                        {
-                            "issue": issue.number,
-                            "url": issue.url,
-                            **reservation,
-                        }
-                    )
-    except Exception as exc:
-        forge_error = str(exc)
-
-    health_path = _repository_issue_loop_health_path(
-        source["id"], machine, env
-    )
-    emitter_health = None
-    emitter_health_error = None
-    try:
-        if health_path.exists():
-            emitter_health = json.loads(health_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        emitter_health_error = str(exc)
-    stale_after = (
-        float(source_config["cadence_seconds"])
-        + 2 * float(source_config.get("tick_interval_seconds") or 60)
-    )
-    emitter_stale = bool(
-        emitter_health
-        and isinstance(emitter_health.get("updated_at"), (int, float))
-        and time.time() - emitter_health["updated_at"] > stale_after
-    )
-    active = [
-        task for task in tasks if task.get("status") not in Status.TERMINAL
-    ]
-    default_spawn_attempts = int(worker_config.get("max_attempts", 3))
-    label_spawn_attempts = {
-        str(label): int(value)
-        for label, value in (
-            worker_config.get("label_max_attempts") or {}
-        ).items()
-    }
-    spawn_projections = {
-        str(task["id"]): _spawn_attempt_projection(
-            task,
-            failures=failed_spawn_counts.get(str(task["id"]), 0),
-            default_max_attempts=default_spawn_attempts,
-            label_max_attempts=label_spawn_attempts,
-        )
-        for task in active
-    }
-    spawn_dead_letters = {
-        task_id: projection
-        for task_id, projection in spawn_projections.items()
-        if projection["dead_lettered"]
-    }
-    diagnoses = []
-    actions = []
-    if not pointers:
-        diagnoses.append("missing-pointer")
-        actions.append(f"agent-dispatch repository-issue-loop setup {path}")
-    if any(unit["active_by_filter"] and not unit["served"] for unit in units):
-        diagnoses.append("declared-but-unserved")
-    if any(unit["overridden_off"] for unit in units):
-        diagnoses.append("overridden-off")
-        actions.append(f"agent-dispatch repository-issue-loop enable {path}")
-    if coordinator_error:
-        diagnoses.append("coordinator-unavailable")
-    if forge_error:
-        diagnoses.append("forge-unavailable")
-    if emitter_health and not emitter_health.get("ok", False):
-        diagnoses.append("emitter-failure")
-    if emitter_health_error:
-        diagnoses.append("emitter-health-unreadable")
-    if (
-        emitter_health is None
-        and not emitter_health_error
-        and any(
-            unit["served"]
-            for unit in units
-            if unit["kind"] == RegistrationKind.EMITTER
-        )
-    ):
-        diagnoses.append("emitter-never-ran")
-    if emitter_stale:
-        diagnoses.append("emitter-stale")
-    if any(task.get("awaiting_steer") for task in active):
-        diagnoses.append("blocked")
-    if spawn_dead_letters:
-        diagnoses.append("spawn-dead-lettered")
-        actions.extend(
-            spawn_dead_letters[task_id]["rearm"]
-            for task_id in sorted(spawn_dead_letters)
-            if "rearm" in spawn_dead_letters[task_id]
-        )
-    healthy = not diagnoses
-    if healthy:
-        diagnoses.append("healthy")
-    return (
-        {
-            "declaration": str(path),
-            "owner": owner,
-            "pointer": {
-                "registered": bool(pointers),
-                "matches": pointers,
-            },
-            "service": {
-                "scope": scope,
-                "machine": machine,
-                "env": env,
-                "running": running,
-                "runtime_status": runtime_status,
-                "runtime_status_error": runtime_status_error,
-                "runtime_status_fresh": runtime_fresh,
-                "coordinator_error": coordinator_error,
-            },
-            "units": units,
-            "emitter": {
-                "health_path": str(health_path),
-                "last": emitter_health,
-                "read_error": emitter_health_error,
-                "stale": emitter_stale,
-            },
-            "active_occurrence": (
-                {
-                    "task_id": active[0].get("id"),
-                    "origin_ref": active[0].get("origin_ref"),
-                    "status": active[0].get("status"),
-                    "awaiting_steer": active[0].get("awaiting_steer"),
-                    "spawn_failures": spawn_projections[
-                        str(active[0]["id"])
-                    ]["failed_spawns"],
-                    "spawn_attempt_limit": spawn_projections[
-                        str(active[0]["id"])
-                    ]["max_attempts"],
-                    "spawn_dead_lettered": spawn_projections[
-                        str(active[0]["id"])
-                    ]["dead_lettered"],
-                    "spawn_recovery": spawn_projections[
-                        str(active[0]["id"])
-                    ].get("recovery"),
-                }
-                if active
-                else None
-            ),
-            "reservations": reservations,
-            "pool": {
-                "concurrency": 1,
-                "active_tasks": len(active),
-                "served": next(
-                    unit["served"]
-                    for unit in units
-                    if unit["kind"] == RegistrationKind.SUPERVISED_LANE
-                ),
-            },
-            "kill_switch": {
-                "disabled": any(unit["overridden_off"] for unit in units),
-            },
-            "forge_error": forge_error,
-            "diagnoses": diagnoses,
-            "healthy": healthy,
-            "actions": actions,
-        },
-        healthy,
-    )
-
-
-def _cmd_repository_issue_loop(args: argparse.Namespace) -> int:
-    from .config import overrides_path
-    from .overrides import load_overrides, mutate_overrides
-    from .repository_issue_loops import GitHubProvider, run_tick
-    from .supervisor_daemon import registration_override_ids
-
-    try:
-        if args.repository_issue_loop_command == "setup":
-            return _repository_issue_loop_setup(args)
-        registrations = _repository_issue_loop_registrations(args)
-        command = args.repository_issue_loop_command
-        if command in {"status", "doctor"}:
-            payload, healthy = _repository_issue_loop_status(args, registrations)
-            _emit(payload)
-            return 0 if command == "status" or healthy else 1
-        all_ids = {
-            override_id
-            for registration in registrations
-            for override_id in registration_override_ids(registration)
-        }
-        if command == "disable":
-            now = time.time()
-
-            def disable(current: dict[str, dict]) -> list[str]:
-                for override_id in all_ids:
-                    current[override_id] = {
-                        "disabled": True,
-                        "reason": args.reason,
-                        "at": now,
-                    }
-                return sorted(all_ids)
-
-            changed = mutate_overrides(overrides_path(), disable)
-            return _emit({"enabled": False, "changed": changed})
-        if command == "enable":
-            def enable(current: dict[str, dict]) -> list[str]:
-                changed = sorted(all_ids & set(current))
-                for override_id in changed:
-                    del current[override_id]
-                return changed
-
-            changed = mutate_overrides(overrides_path(), enable)
-            return _emit({"enabled": True, "changed": changed})
-        overrides = load_overrides(overrides_path())
-        if command == "inspect":
-            return _emit(
-                {
-                    "declaration": str(
-                        Path(args.declaration).expanduser().resolve()
-                    ),
-                    "units": [
-                        {
-                            **registration,
-                            "override_ids": sorted(
-                                registration_override_ids(registration)
-                            ),
-                            "overridden_off": any(
-                                (overrides.get(override_id) or {}).get("disabled")
-                                for override_id in registration_override_ids(
-                                    registration
-                                )
-                            ),
-                        }
-                        for registration in registrations
-                    ],
-                }
-            )
-        source = next(
-            registration
-            for registration in registrations
-            if registration["kind"] == RegistrationKind.EMITTER
-        )
-        if any(
-            (overrides.get(override_id) or {}).get("disabled")
-            for override_id in registration_override_ids(source)
-        ):
-            raise ValueError("repository issue loop is disabled")
-        with _client(args) as client:
-            return _emit(
-                run_tick(
-                    client,
-                    source["spec"]["repository_issue_loop"],
-                    provider=GitHubProvider(
-                        source["spec"]["repository_issue_loop"]["forge"][
-                            "producer_login"
-                        ]
-                    ),
-                    dry_run=True,
-                )
-            )
-    except (DispatchError, OSError, ValueError) as exc:
-        print(f"agent-dispatch repository-issue-loop: {exc}", file=sys.stderr)
-        return 2
-
-
 def _cmd_webhook(args: argparse.Namespace) -> int:
     from .producers import webhook
 
@@ -3568,15 +2538,11 @@ def _parse_label_max_attempts(items: list[str] | None) -> dict[str, int]:
         label, sep, num = str(raw).partition("=")
         label = label.strip()
         if not sep or not label:
-            raise SystemExit(
-                f"--label-max-attempts expects LABEL=N, got {raw!r}"
-            )
+            raise SystemExit(f"--label-max-attempts expects LABEL=N, got {raw!r}")
         try:
             out[label] = max(0, int(num.strip()))
         except ValueError:
-            raise SystemExit(
-                f"--label-max-attempts: N must be an integer, got {num!r}"
-            )
+            raise SystemExit(f"--label-max-attempts: N must be an integer, got {num!r}")
     return out
 
 
@@ -3592,11 +2558,7 @@ def _registration_scope(args: argparse.Namespace) -> tuple[str | None, str]:
     from . import remote_dispatch
 
     machine = getattr(args, "machine", None) or remote_dispatch.local_machine()
-    env = (
-        getattr(args, "env", None)
-        or os.environ.get("AGENT_DISPATCH_ENV")
-        or "default"
-    )
+    env = getattr(args, "env", None) or os.environ.get("AGENT_DISPATCH_ENV") or "default"
     return machine, env
 
 
@@ -3650,8 +2612,7 @@ def _build_registration_spec(args: argparse.Namespace) -> dict:
                 text = Path(raw[1:]).expanduser().read_text(encoding="utf-8")
             except OSError as exc:
                 raise SystemExit(
-                    f"supervise register: could not read --spec file "
-                    f"{raw[1:]!r}: {exc}"
+                    f"supervise register: could not read --spec file {raw[1:]!r}: {exc}"
                 ) from exc
         try:
             spec = json.loads(text)
@@ -3663,9 +2624,7 @@ def _build_registration_spec(args: argparse.Namespace) -> dict:
 
     kind = getattr(args, "kind", None) or "supervised-lane"
     if kind not in ("supervised-lane", "evaluator"):
-        raise SystemExit(
-            f"supervise register: --spec is required for kind {kind!r}"
-        )
+        raise SystemExit(f"supervise register: --spec is required for kind {kind!r}")
 
     all_repos = bool(getattr(args, "all_repos", False))
     spec: dict = {}
@@ -3675,8 +2634,7 @@ def _build_registration_spec(args: argparse.Namespace) -> dict:
         repo = _scope_repo(args)
         if not repo:
             raise SystemExit(
-                "supervise register: could not resolve a lane; pass --repo or "
-                "--all-repos"
+                "supervise register: could not resolve a lane; pass --repo or --all-repos"
             )
         spec["repo"] = repo
     labels = [label for label in (getattr(args, "label", None) or []) if label]
@@ -3692,18 +2650,14 @@ def _build_registration_spec(args: argparse.Namespace) -> dict:
     backend = getattr(args, "embody_backend", None) or "headless"
     if backend != "headless":
         spec["embody_backend"] = backend
-    headless = [
-        label for label in (getattr(args, "headless_label", None) or []) if label
-    ]
+    headless = [label for label in (getattr(args, "headless_label", None) or []) if label]
     if headless:
         spec["headless_labels"] = headless
     cli = [label for label in (getattr(args, "cli_label", None) or []) if label]
     if cli:
         spec["cli_labels"] = cli
     disposable_cli = [
-        label
-        for label in (getattr(args, "disposable_cli_label", None) or [])
-        if label
+        label for label in (getattr(args, "disposable_cli_label", None) or []) if label
     ]
     if disposable_cli:
         spec["disposable_cli_labels"] = disposable_cli
@@ -3719,8 +2673,7 @@ def _build_registration_spec(args: argparse.Namespace) -> dict:
     if getattr(args, "evaluator_ref", None):
         if kind != "evaluator":
             raise SystemExit(
-                "supervise register: --evaluator-ref is only valid with "
-                "--kind evaluator"
+                "supervise register: --evaluator-ref is only valid with --kind evaluator"
             )
         spec["evaluator_ref"] = args.evaluator_ref
     spec["interval"] = getattr(args, "interval", 30.0)
@@ -3895,7 +2848,10 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
 
     with _client(args) as c:
         daemon = SupervisorDaemon(
-            c, machine, env, poll_interval=getattr(args, "interval", 5.0),
+            c,
+            machine,
+            env,
+            poll_interval=getattr(args, "interval", 5.0),
             declared_source=declared_source,
             # Rebuild the client by re-resolving the coordinator endpoint after a
             # connection failure -- the coordinator's ephemeral port moves on
@@ -3917,10 +2873,7 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
                 supervisor_lease_scope(machine, env),
                 summary,
             )
-            changed = (
-                summary.started or summary.stopped or summary.restarted
-                or summary.revived
-            )
+            changed = summary.started or summary.stopped or summary.restarted or summary.revived
             if changed:
                 print(
                     f"supervise serve: started={summary.started} "
@@ -3996,9 +2949,7 @@ def _cmd_supervise_override(args: argparse.Namespace) -> int:
     action = getattr(args, "override_command", None)
     path = overrides_path()
     if action == "disable":
-        record = set_override(
-            path, args.id, disabled=True, reason=getattr(args, "reason", None)
-        )
+        record = set_override(path, args.id, disabled=True, reason=getattr(args, "reason", None))
         return _emit({"id": args.id, "overridden_off": True, **record})
     if action == "enable":
         cleared = clear_override(path, args.id)
@@ -4065,16 +3016,10 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
     # way (`--cli-label` forces CLI when the default is headless; `--headless-label`
     # forces headless when the default is cli).
     backend = getattr(args, "embody_backend", None) or "headless"
-    headless_labels = [
-        label for label in (getattr(args, "headless_label", None) or []) if label
-    ]
-    cli_labels = [
-        label for label in (getattr(args, "cli_label", None) or []) if label
-    ]
+    headless_labels = [label for label in (getattr(args, "headless_label", None) or []) if label]
+    cli_labels = [label for label in (getattr(args, "cli_label", None) or []) if label]
     disposable_cli_labels = [
-        label
-        for label in (getattr(args, "disposable_cli_label", None) or [])
-        if label
+        label for label in (getattr(args, "disposable_cli_label", None) or []) if label
     ]
     capacity_gate = None
     redrive_fn = None
@@ -4127,8 +3072,7 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
         # Preflight only a headless fleet lane: a CLI-embodied fleet body is a
         # worktree autopilot, not an agent-bridge agent.
         _preflight_agent = (
-            (getattr(args, "headless_agent", None) or "task-worker")
-            if fleet_headless else None
+            (getattr(args, "headless_agent", None) or "task-worker") if fleet_headless else None
         )
         _preflight_pool = list(fleet.pool)
     else:
@@ -4159,33 +3103,37 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
             return 2
         if backend == "cli":
             # CLI-default lane: headless is the per-label opt-in.
-            default_spawn, overrides = embody_spawn, {
-                label: headless_spawn for label in headless_labels
-            }
+            default_spawn, overrides = (
+                embody_spawn,
+                {label: headless_spawn for label in headless_labels},
+            )
             routed_note = (
                 f"CLI embody; headless-ACP for label(s): {', '.join(headless_labels)}"
-                if headless_labels else "CLI embody (all watched labels)"
+                if headless_labels
+                else "CLI embody (all watched labels)"
             )
         else:
             # Headless-default lane (the default): CLI is the per-label opt-out.
-            default_spawn, overrides = headless_spawn, {
-                label: embody_spawn for label in cli_labels
-            }
+            default_spawn, overrides = (
+                headless_spawn,
+                {label: embody_spawn for label in cli_labels},
+            )
             routed_note = (
                 f"headless-ACP embody; CLI for label(s): {', '.join(cli_labels)}"
-                if cli_labels else "headless-ACP embody (all watched labels)"
+                if cli_labels
+                else "headless-ACP embody (all watched labels)"
             )
         spawn_fn = (
             make_label_routed_spawn(default_spawn, overrides=overrides)
-            if overrides else default_spawn
+            if overrides
+            else default_spawn
         )
         print(f"agent-dispatch supervise: {routed_note}", file=sys.stderr)
         # A local lane is headless when the default backend is headless, or when a
         # CLI-default lane routes a subset of labels to a headless body.
         _headless_active = backend != "cli" or bool(headless_labels)
         _preflight_agent = (
-            (getattr(args, "headless_agent", None) or "task-worker")
-            if _headless_active else None
+            (getattr(args, "headless_agent", None) or "task-worker") if _headless_active else None
         )
         _preflight_pool = None
     # Best-effort, fail-loud preflight: warn (never block) when the headless
@@ -4196,9 +3144,7 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
     if not args.once and _preflight_agent:
         from . import bridge
 
-        for _warning in bridge.preflight_headless_agent(
-            _preflight_agent, pool=_preflight_pool
-        ):
+        for _warning in bridge.preflight_headless_agent(_preflight_agent, pool=_preflight_pool):
             print(_warning, file=sys.stderr)
     from .client import ResolvingDispatchClient
 
@@ -4231,10 +3177,7 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
             ),
             heartbeat=not args.no_heartbeat,
             publish_activity=True,
-            reactive=(
-                not bool(getattr(args, "no_reactive", False))
-                and not bool(args.once)
-            ),
+            reactive=(not bool(getattr(args, "no_reactive", False)) and not bool(args.once)),
             reactive_interval=getattr(args, "reactive_interval", 2.0) or 2.0,
             supervisor_id=getattr(args, "supervisor_id", None),
             disposable_cli_labels=disposable_cli_labels,
@@ -4266,9 +3209,7 @@ def _cmd_reservations(args: argparse.Namespace) -> int:
     """Operator visibility + manual control over spawn reservations."""
     with _client(args) as c:
         if args.reservations_command == "list":
-            rows = c.list_reservations(
-                task_id=args.task, state=args.state, limit=args.limit
-            )
+            rows = c.list_reservations(task_id=args.task, state=args.state, limit=args.limit)
             return _emit(rows)
         if args.reservations_command == "fail":
             return _emit(c.fail_spawn(args.key, detail=args.detail))
@@ -4588,9 +3529,7 @@ def _recipe_dedup_key(rendered: Any) -> str:
     return dedup_key_for(rendered)
 
 
-def _recipe_create_namespace(
-    args: argparse.Namespace, rendered: Any
-) -> argparse.Namespace:
+def _recipe_create_namespace(args: argparse.Namespace, rendered: Any) -> argparse.Namespace:
     """Build a ``create``-shaped namespace from a rendered recipe so ``kick`` can
     reuse ``_cmd_create`` verbatim (dedup, spawn, lane resolution)."""
     return argparse.Namespace(
@@ -4671,7 +3610,11 @@ def _cmd_recipes_drive(args: argparse.Namespace) -> int:
         return 2
 
     action = decide(recipe, args.signal)
-    report: dict[str, Any] = {"recipe": recipe.name, "signal": args.signal, "action": action.to_dict()}
+    report: dict[str, Any] = {
+        "recipe": recipe.name,
+        "signal": args.signal,
+        "action": action.to_dict(),
+    }
 
     if not args.execute:
         return _emit(report)
@@ -4744,7 +3687,7 @@ class _DashDashParser(argparse.ArgumentParser):
         args = list(sys.argv[1:] if args is None else args)
         if "--" in args:
             idx = args.index("--")
-            head, tail = args[:idx], args[idx + 1:]
+            head, tail = args[:idx], args[idx + 1 :]
             # Resolve the ACTUAL subcommand from the head (peek parse) rather than
             # a token-membership test -- a positional VALUE equal to 'run'/'drive'
             # (e.g. `create run -- ...`) must not trigger interception (#383).
@@ -4752,9 +3695,7 @@ class _DashDashParser(argparse.ArgumentParser):
                 peek, _ = super().parse_known_args(head, None)
             except SystemExit:
                 peek = None
-            if peek is not None and getattr(peek, "func", None) in (
-                _cmd_run, _cmd_recipes_drive
-            ):
+            if peek is not None and getattr(peek, "func", None) in (_cmd_run, _cmd_recipes_drive):
                 ns, extras = super().parse_known_args(head, namespace)
                 ns._dashdash_tail = tail
                 return ns, extras
@@ -4801,10 +3742,7 @@ def _cmd_registrar(args: argparse.Namespace) -> int:
             ]
             plugin_retention_possible = (
                 combined.plugins.snapshot.authority.value == "indeterminate"
-                or any(
-                    finding.status == "indeterminate"
-                    for finding in combined.findings
-                )
+                or any(finding.status == "indeterminate" for finding in combined.findings)
             )
             payload = {
                 "trusted": {
@@ -4814,8 +3752,7 @@ def _cmd_registrar(args: argparse.Namespace) -> int:
                     "error": report.trusted_error,
                     "retention_possible": report.trusted_error is not None,
                     "declarations": [
-                        _declaration_summary(declaration)
-                        for declaration in combined.trusted
+                        _declaration_summary(declaration) for declaration in combined.trusted
                     ],
                 },
                 "dropins": {
@@ -4831,16 +3768,13 @@ def _cmd_registrar(args: argparse.Namespace) -> int:
                         }
                         for contributed in accepted_plugins
                     ],
-                    "findings": [
-                        finding.to_dict() for finding in combined.findings
-                    ],
+                    "findings": [finding.to_dict() for finding in combined.findings],
                     "fix_available": False,
                     "active_basis": "current-evidence-only",
                     "retention_possible": plugin_retention_possible,
                 },
                 "active": [
-                    _declaration_summary(declaration)
-                    for declaration in combined.declarations
+                    _declaration_summary(declaration) for declaration in combined.declarations
                 ],
                 "active_basis": "current-evidence-only",
             }
@@ -4848,9 +3782,7 @@ def _cmd_registrar(args: argparse.Namespace) -> int:
             if args.json:
                 _emit(payload)
             else:
-                trusted_label = (
-                    "[WARN]" if report.trusted_error else "[OK]"
-                )
+                trusted_label = "[WARN]" if report.trusted_error else "[OK]"
                 print(
                     f"{trusted_label} pointers.json is "
                     f"{report.trusted_authority.value}; "
@@ -4859,10 +3791,7 @@ def _cmd_registrar(args: argparse.Namespace) -> int:
                 )
                 if report.trusted_error:
                     print(f"  {report.trusted_error}")
-                    print(
-                        "  A running supervisor may retain its last-known trusted "
-                        "declarations."
-                    )
+                    print("  A running supervisor may retain its last-known trusted declarations.")
                 dropin_label = "[WARN]" if combined.findings else "[OK]"
                 print(
                     f"{dropin_label} registrar.d is "
@@ -4885,9 +3814,7 @@ def _cmd_registrar(args: argparse.Namespace) -> int:
                 print("  Cleanup is report-only; no --fix operation is available.")
             return 1 if failed else 0
         if args.registrar_command == "add-pointer":
-            pointer = rd.add_pointer(
-                args.name, args.location, kind=args.kind, owner=args.owner
-            )
+            pointer = rd.add_pointer(args.name, args.location, kind=args.kind, owner=args.owner)
             return _emit(pointer.to_dict())
         if args.registrar_command == "list":
             return _emit([p.to_dict() for p in rd.load_pointers()])
@@ -4915,34 +3842,37 @@ def _create_args_parent() -> argparse.ArgumentParser:
     cp = argparse.ArgumentParser(add_help=False)
     cp.add_argument("title", help="short, specific, self-contained summary of the work")
     cp.add_argument(
-        "--prompt", default="",
+        "--prompt",
+        default="",
         help="the task instruction -- describe the work fully enough to dedup "
-             "against and to execute without extra context",
+        "against and to execute without extra context",
     )
     cp.add_argument(
         "--repo",
         help="lane (repo) this task belongs to: a local repo name or a remote "
-             "URL. Default: the calling repo resolved from the CWD. Tasks stay "
-             "in their producing repo's lane -- for a cross-repo *code* target "
-             "use --target-repo and let the lane agent do it via working-cross-repo.",
+        "URL. Default: the calling repo resolved from the CWD. Tasks stay "
+        "in their producing repo's lane -- for a cross-repo *code* target "
+        "use --target-repo and let the lane agent do it via working-cross-repo.",
     )
     cp.add_argument("--proposed", action="store_true", help="create as an unclaimable draft")
     cp.add_argument(
-        "--claim", action="store_true",
+        "--claim",
+        action="store_true",
         help="atomically create-AND-claim as this worktree (no queued gap). With "
-             "--dedup-key <subject>, this is the lazy open-ended-pickup primitive: "
-             "either mint the subject as mine, or (on a dedup collision) get back "
-             "the row someone else already took -- see 'claimed_by_me' in the "
-             "output to tell which.",
+        "--dedup-key <subject>, this is the lazy open-ended-pickup primitive: "
+        "either mint the subject as mine, or (on a dedup collision) get back "
+        "the row someone else already took -- see 'claimed_by_me' in the "
+        "output to tell which.",
     )
     cp.add_argument(
         "--require", action="append", help="hard capability/identity token (repeatable)"
     )
     cp.add_argument(
-        "--exclude", action="append",
+        "--exclude",
+        action="append",
         help="hard EXCLUSION token -- a worker whose capabilities/identity match "
-             "any exclude is ineligible (anti-affinity; repeatable). E.g. "
-             "'machine:host-a', 'worktree:foo', 'agent:reviewer'.",
+        "any exclude is ineligible (anti-affinity; repeatable). E.g. "
+        "'machine:host-a', 'worktree:foo', 'agent:reviewer'.",
     )
     cp.add_argument("--affinity", action="append", help="soft preference key=value (repeatable)")
     cp.add_argument("--label", action="append", help="free-form label (repeatable)")
@@ -4951,7 +3881,7 @@ def _create_args_parent() -> argparse.ArgumentParser:
     cp.add_argument(
         "--payload-file",
         help="read the payload from a file (large payloads spill to a blob "
-             "automatically); '-' reads from stdin",
+        "automatically); '-' reads from stdin",
     )
     cp.add_argument(
         "--remote-create-envelope",
@@ -4960,8 +3890,8 @@ def _create_args_parent() -> argparse.ArgumentParser:
     cp.add_argument(
         "--target-machine",
         help="route the task to this machine. With `--spawn --spawn-backend "
-             "embody` for another machine, dispatch runs there over the SSH "
-             "mesh (Phase 8: create+embody land on the target's coordinator).",
+        "embody` for another machine, dispatch runs there over the SSH "
+        "mesh (Phase 8: create+embody land on the target's coordinator).",
     )
     cp.add_argument("--target-worktree")
     cp.add_argument("--target-repo")
@@ -4973,7 +3903,7 @@ def _create_args_parent() -> argparse.ArgumentParser:
         "--supersede-exclusive-key",
         action="store_true",
         help="when creating a task with --exclusive-key, abandon older queued/"
-             "proposed tasks carrying the same key",
+        "proposed tasks carrying the same key",
     )
     cp.add_argument("--source")
     cp.add_argument("--origin-ref")
@@ -4990,8 +3920,7 @@ def _create_args_parent() -> argparse.ArgumentParser:
     )
     cp.add_argument(
         "--producer-capability",
-        help="opaque current-generation capability "
-        "(default: AGENT_DISPATCH_PRODUCER_CAPABILITY)",
+        help="opaque current-generation capability (default: AGENT_DISPATCH_PRODUCER_CAPABILITY)",
     )
     cp.add_argument(
         "--producer-request-id",
@@ -5000,47 +3929,53 @@ def _create_args_parent() -> argparse.ArgumentParser:
     cp.add_argument(
         "--goal",
         help="durable objective the worker loops toward across turns/embodiments "
-             "(the resumable-goal feature); a worker resumes it from recorded "
-             "progress rather than restarting. Omit for a plain one-shot task.",
+        "(the resumable-goal feature); a worker resumes it from recorded "
+        "progress rather than restarting. Omit for a plain one-shot task.",
     )
     cp.add_argument(
         "--done-criteria",
         help="explicit criteria for when --goal is met; the worker completes only "
-             "once it judges these satisfied (deferred completion).",
+        "once it judges these satisfied (deferred completion).",
     )
     cp.add_argument("--not-before", type=float, default=0.0)
     cp.add_argument(
-        "--spawn", action="store_true",
+        "--spawn",
+        action="store_true",
         help="after creating, spawn a worker to execute it (best effort)",
     )
     cp.add_argument(
-        "--spawn-backend", choices=["bridge", "embody"], default="bridge",
+        "--spawn-backend",
+        choices=["bridge", "embody"],
+        default="bridge",
         help="how to embody the spawned worker: 'embody' = a CLI-backed "
-             "autopilot session in a fresh parallel worktree (agent-worktrees "
-             "embody -- the 'dispatch an agent to do X' path); 'bridge' "
-             "(default) = a headless agent-bridge ACP worker",
+        "autopilot session in a fresh parallel worktree (agent-worktrees "
+        "embody -- the 'dispatch an agent to do X' path); 'bridge' "
+        "(default) = a headless agent-bridge ACP worker",
     )
     cp.add_argument(
-        "--spawn-agent", default="task-worker",
+        "--spawn-agent",
+        default="task-worker",
         help="agent-bridge agent name to spawn (bridge backend only; "  # marketplace-isolation: allow agent-bridge-management
-             "default: task-worker)",
+        "default: task-worker)",
     )
     cp.add_argument(
-        "--verify-timeout", type=int, default=0,
+        "--verify-timeout",
+        type=int,
+        default=0,
         help="embody backend: wait up to N seconds for the spawned mux session "
-             "to come up before returning (default 0: don't wait)",
+        "to come up before returning (default 0: don't wait)",
     )
     cp.add_argument(
-        "--async", dest="run_async", action="store_true",
+        "--async",
+        dest="run_async",
+        action="store_true",
         help="with --spawn, don't wait for the worker (fire-and-forget)",
     )
     return cp
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = _DashDashParser(
-        prog="agent-dispatch", description="Agent task queue + coordinator"
-    )
+    parser = _DashDashParser(prog="agent-dispatch", description="Agent task queue + coordinator")
     parser.add_argument("--version", action="version", version=f"agent-dispatch {__version__}")
     parser.add_argument(
         "--url", help="coordinator base URL (default: AGENT_DISPATCH_URL or config)"
@@ -5048,14 +3983,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--token", help="bearer token (default: AGENT_DISPATCH_TOKEN)")
     parser.add_argument(
         "--control-token",
-        help="separate managed-producer control bearer "
-        "(default: AGENT_DISPATCH_CONTROL_TOKEN)",
+        help="separate managed-producer control bearer (default: AGENT_DISPATCH_CONTROL_TOKEN)",
     )
     parser.add_argument(
-        "--shared", action="store_true",
+        "--shared",
+        action="store_true",
         help="target the SHARED/elected coordinator (AGENT_DISPATCH_SHARED_URL; "
-             "the hosted coordinator) for cross-machine dispatch, instead of this "
-             "host's local coordinator. Authenticated with AGENT_DISPATCH_SHARED_TOKEN.",
+        "the hosted coordinator) for cross-machine dispatch, instead of this "
+        "host's local coordinator. Authenticated with AGENT_DISPATCH_SHARED_TOKEN.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -5106,7 +4041,7 @@ def build_parser() -> argparse.ArgumentParser:
         "create",
         parents=[create_parent],
         help="enqueue a task (write a self-contained title + --prompt so a "
-             "producer sweeping existing tasks can judge duplication)",
+        "producer sweeping existing tasks can judge duplication)",
     )
     p.set_defaults(func=_cmd_create)
 
@@ -5114,8 +4049,8 @@ def build_parser() -> argparse.ArgumentParser:
         "propose",
         parents=[create_parent],
         help="draft an unclaimable 'proposed' task (the propose -> queue "
-             "lifecycle): like create but always proposed, never claimed or "
-             "spawned; run 'queue <id>' to make it claimable",
+        "lifecycle): like create but always proposed, never claimed or "
+        "spawned; run 'queue <id>' to make it claimable",
     )
     p.set_defaults(func=_cmd_propose)
 
@@ -5128,8 +4063,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "registrar",
         help="declarative-supervision registrar: manage discovery pointers and read "
-             "the declared profile set (declarations are the one source of truth; "
-             "the CLI is a thin writer/reader over them)",
+        "the declared profile set (declarations are the one source of truth; "
+        "the CLI is a thin writer/reader over them)",
     )
     reg_sub = p.add_subparsers(dest="registrar_command", required=True)
     rp = reg_sub.add_parser(
@@ -5140,14 +4075,16 @@ def build_parser() -> argparse.ArgumentParser:
     rp.add_argument(
         "location",
         help="directory of declaration docs, or (with --kind repo) a repo root "
-             "whose .copilot-extensions/agent-dispatch/registrar/ "
-             "(legacy .agent-dispatch/registrar/) is read",
+        "whose .copilot-extensions/agent-dispatch/registrar/ "
+        "(legacy .agent-dispatch/registrar/) is read",
     )
     rp.add_argument(
-        "--kind", choices=["dir", "repo"], default="dir",
+        "--kind",
+        choices=["dir", "repo"],
+        default="dir",
         help="'dir' (default) reads the location directly; 'repo' reads its "
-             ".copilot-extensions/agent-dispatch/registrar/ subdir "
-             "(legacy .agent-dispatch/registrar/ fallback)",
+        ".copilot-extensions/agent-dispatch/registrar/ subdir "
+        "(legacy .agent-dispatch/registrar/ fallback)",
     )
     rp.add_argument("--owner", help="provenance stamped on declarations read here")
     rp.set_defaults(func=_cmd_registrar)
@@ -5169,14 +4106,14 @@ def build_parser() -> argparse.ArgumentParser:
     rp = reg_sub.add_parser(
         "discover",
         help="read + aggregate the declared profile set across all pointers "
-             "(rejects duplicate profile names across sources)",
+        "(rejects duplicate profile names across sources)",
     )
     rp.set_defaults(func=_cmd_registrar)
     rp = reg_sub.add_parser(
         "discover-repo",
         help="read a single synced repo's in-repo "
-             ".copilot-extensions/agent-dispatch/registrar/ declarations "
-             "(legacy .agent-dispatch/registrar/ fallback; repo-sync discovery unit)",
+        ".copilot-extensions/agent-dispatch/registrar/ declarations "
+        "(legacy .agent-dispatch/registrar/ fallback; repo-sync discovery unit)",
     )
     rp.add_argument("repo_root", help="path to the repo root to read declarations from")
     rp.add_argument("--owner", help="provenance override (default: repo:<name>)")
@@ -5186,27 +4123,31 @@ def build_parser() -> argparse.ArgumentParser:
         "claim", help="atomically lease one eligible task (identity auto-resolved from CWD)"
     )
     p.add_argument(
-        "task_id", nargs="?",
+        "task_id",
+        nargs="?",
         help="claim THIS specific task id (optional; default: any eligible task). "
-             "First-positional task id, consistent with start/complete/yield/abandon.",
+        "First-positional task id, consistent with start/complete/yield/abandon.",
     )
     p.add_argument("--machine", help="override the resolved machine (targeting identity)")
     p.add_argument("--worktree", help="override the resolved worktree id (targeting identity)")
     p.add_argument(
-        "--worker", "--as", dest="worker_id",
+        "--worker",
+        "--as",
+        dest="worker_id",
         help="explicit owner/worker id to claim as (rarely needed; default: "
-             "composed from machine/worktree). Was the bare positional, now a flag "
-             "so it can't be confused with the task id.",
+        "composed from machine/worktree). Was the bare positional, now a flag "
+        "so it can't be confused with the task id.",
     )
     p.add_argument("--capability", action="append", help="advertised capability (repeatable)")
     p.add_argument(
-        "--task", help="alias for the positional task id (back-compat)",
+        "--task",
+        help="alias for the positional task id (back-compat)",
     )
     claim_scope = p.add_mutually_exclusive_group()
     claim_scope.add_argument(
         "--repo",
         help="lane to claim from (local name or remote URL). Default: the calling "
-             "repo. A worker only claims tasks in its own repo's lane.",
+        "repo. A worker only claims tasks in its own repo's lane.",
     )
     claim_scope.add_argument(
         "--all-repos",
@@ -5215,11 +4156,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--lease-seconds", type=int)
     p.add_argument(
-        "--evaluation", action="store_true",
+        "--evaluation",
+        action="store_true",
         help="claim under the tight EVALUATION lease (a quick accept/reject "
-             "window): a stuck evaluator auto-releases fast, and 'start' then "
-             "extends to the full work lease on commit. Decline with "
-             "'yield --exclude-self' or 'abandon --duplicate-of'.",
+        "window): a stuck evaluator auto-releases fast, and 'start' then "
+        "extends to the full work lease on commit. Decline with "
+        "'yield --exclude-self' or 'abandon --duplicate-of'.",
     )
     p.set_defaults(func=_cmd_claim)
 
@@ -5252,11 +4194,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("task_id")
     p.add_argument(
-        "worker_id", nargs="?",
+        "worker_id",
+        nargs="?",
         help="owner id (default: composed from machine/worktree)",
     )
     p.add_argument(
-        "--reason", required=True,
+        "--reason",
+        required=True,
         help="required meaningful reason recorded in the task audit trail",
     )
     p.add_argument("--machine", help="override the resolved machine identity")
@@ -5269,12 +4213,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("task_id")
     p.add_argument(
-        "worker_id", nargs="?",
+        "worker_id",
+        nargs="?",
         help="owner id (default: composed from machine/worktree)",
     )
     p.add_argument("--message", help="override the wake nudge text")
     p.add_argument(
-        "--no-wake", dest="wake", action="store_false",
+        "--no-wake",
+        dest="wake",
+        action="store_false",
         help="resume the lifecycle without sending an agent-bridge wake nudge",
     )
     p.add_argument("--machine", help="override the resolved machine identity")
@@ -5287,7 +4234,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("task_id")
     p.add_argument(
-        "worker_id", nargs="?",
+        "worker_id",
+        nargs="?",
         help="owner id (default: composed from machine/worktree)",
     )
     p.add_argument("--reason", help="optional release note for the audit trail")
@@ -5305,16 +4253,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--note")
     p.add_argument(
-        "--exclude-self", "--not-me", choices=("worktree", "machine"), dest="exclude_self",
+        "--exclude-self",
+        "--not-me",
+        choices=("worktree", "machine"),
+        dest="exclude_self",
         help="append a scoped self-EXCLUSION when yielding, so this same "
-             "candidate isn't re-offered the task: 'worktree' (narrowest -- this "
-             "worktree only) or 'machine' (this whole machine). Prefer the "
-             "narrowest scope that is true. (`--not-me` is a deprecated alias.)",
+        "candidate isn't re-offered the task: 'worktree' (narrowest -- this "
+        "worktree only) or 'machine' (this whole machine). Prefer the "
+        "narrowest scope that is true. (`--not-me` is a deprecated alias.)",
     )
     p.add_argument(
         "--exclude",
         help="append an explicit exclusion token when yielding (e.g. "
-             "'agent:reviewer'); overrides --exclude-self.",
+        "'agent:reviewer'); overrides --exclude-self.",
     )
     p.add_argument("--machine", help="override the resolved machine (targeting identity)")
     p.add_argument("--worktree", help="override the resolved worktree id (targeting identity)")
@@ -5326,9 +4277,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("task_id")
     p.add_argument(
-        "worker_id", nargs="?",
+        "worker_id",
+        nargs="?",
         help="owner id (default: the machine/worktree resolved from CWD, so a "
-             "worker can `complete <id>` without typing its own owner)",
+        "worker can `complete <id>` without typing its own owner)",
     )
     p.add_argument("--machine", help="override the resolved machine identity")
     p.add_argument("--worktree", help="override the resolved worktree identity")
@@ -5354,20 +4306,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--permit", action="store_true", help="assert abandonment is permitted")
     p.add_argument("--reason")
     p.add_argument(
-        "--duplicate-of", dest="duplicate_of", metavar="REF",
+        "--duplicate-of",
+        dest="duplicate_of",
+        metavar="REF",
         help="retire the task as a DUPLICATE of REF (an existing task id, PR, or "
-             "issue). Self-justifying: implies --permit and records the dedup "
-             "reference in the reason, so the decision is never a silent drop.",
+        "issue). Self-justifying: implies --permit and records the dedup "
+        "reference in the reason, so the decision is never a silent drop.",
     )
     p.add_argument(
-        "--resolve", action="store_true",
+        "--resolve",
+        action="store_true",
         help="also emit the drive-the-worktree-to-resolution plan (the unwind the "
-             "worker must run on its own worktree). Advisory -- runs nothing.",
+        "worker must run on its own worktree). Advisory -- runs nothing.",
     )
     p.add_argument(
-        "--base", metavar="BRANCH",
+        "--base",
+        metavar="BRANCH",
         help="with --resolve, the base branch the worktree unwinds onto "
-             "(default: the branch's tracked upstream)",
+        "(default: the branch's tracked upstream)",
     )
     p.set_defaults(func=_cmd_abandon)
 
@@ -5379,20 +4335,21 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "progress",
         help="record a brief progress beat toward the goal (also heartbeats the "
-             "lease; identity auto-resolved from CWD)",
+        "lease; identity auto-resolved from CWD)",
     )
     p.add_argument("task_id")
     p.add_argument(
         "worker_id", nargs="?", help="owner id (default: composed from machine/worktree)"
     )
     p.add_argument(
-        "--phase", default="",
+        "--phase",
+        default="",
         help="short phase label (e.g. 'planning', 'implementing', 'PR open')",
     )
     p.add_argument(
-        "--summary", required=True,
-        help="one-line status toward the goal (hard-capped; keep it a line, not a "
-             "transcript)",
+        "--summary",
+        required=True,
+        help="one-line status toward the goal (hard-capped; keep it a line, not a transcript)",
     )
     p.add_argument("--blocker", help="a real blocker holding progress, if any")
     p.add_argument("--pr", help="the PR/ref this beat corresponds to, if any")
@@ -5403,10 +4360,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "focus",
         help="set/show this worktree's current focus (its status-core summary "
-             "on the worktree record); identity auto-resolved from CWD",
+        "on the worktree record); identity auto-resolved from CWD",
     )
     p.add_argument(
-        "focus_text", nargs="?",
+        "focus_text",
+        nargs="?",
         help="one-line focus for this worktree; omit to show the current focus",
     )
     p.add_argument("--list", action="store_true", help="list every worktree's focus")
@@ -5422,17 +4380,18 @@ def build_parser() -> argparse.ArgumentParser:
     cp = sub.add_parser(
         "card",
         help="attach/show a task's card -- the glanceable brief a worker posts "
-             "when it needs operator input",
+        "when it needs operator input",
     )
     csub = cp.add_subparsers(dest="card_cmd", required=True)
     cs = csub.add_parser(
         "set",
         help="attach a card to a held task you own (a form via --request-input "
-             "marks it awaiting-steer); identity auto-resolved from CWD",
+        "marks it awaiting-steer); identity auto-resolved from CWD",
     )
     cs.add_argument("task_id")
     cs.add_argument(
-        "worker_id", nargs="?",
+        "worker_id",
+        nargs="?",
         help="owner id (default: composed from machine/worktree)",
     )
     cs.add_argument("--title", help="short card title")
@@ -5443,10 +4402,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="the scrollable card body (markdown); '@path' reads a file",
     )
     cs.add_argument(
-        "--request-input", dest="request_input",
+        "--request-input",
+        dest="request_input",
         help="form spec the operator should fill, e.g. "
-             "'decision:choice[Proceed,Revise],"
-             "notes:textarea?decision=Revise'",
+        "'decision:choice[Proceed,Revise],"
+        "notes:textarea?decision=Revise'",
     )
     cs.add_argument("--machine", help="override the resolved machine")
     cs.add_argument("--worktree", help="override the resolved worktree id")
@@ -5458,7 +4418,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser(
         "steer",
         help="submit an operator's answer to a task's card, or (steer take) "
-             "consume the next answer as the worker",
+        "consume the next answer as the worker",
     )
     ssub = sp.add_subparsers(dest="steer_cmd", required=True)
     ssm = ssub.add_parser(
@@ -5467,24 +4427,29 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ssm.add_argument("task_id")
     ssm.add_argument(
-        "--field", action="append", metavar="KEY=VALUE",
+        "--field",
+        action="append",
+        metavar="KEY=VALUE",
         help="one answer field (repeatable), e.g. --field decision=post-approved",
     )
     ssm.add_argument("--sender", help="who is answering (default: resolved identity)")
     ssm.add_argument("--message", help="override the wake nudge text")
     ssm.add_argument(
-        "--no-wake", dest="wake", action="store_false",
+        "--no-wake",
+        dest="wake",
+        action="store_false",
         help="do not send an agent-bridge wake nudge to the owning worktree",
     )
     ssm.set_defaults(func=_cmd_steer, wake=True)
     stk = ssub.add_parser(
         "take",
         help="consume the next pending steer for a task you own (the wake-side "
-             "read); identity auto-resolved from CWD",
+        "read); identity auto-resolved from CWD",
     )
     stk.add_argument("task_id")
     stk.add_argument(
-        "worker_id", nargs="?",
+        "worker_id",
+        nargs="?",
         help="owner id (default: composed from machine/worktree)",
     )
     stk.add_argument("--machine", help="override the resolved machine")
@@ -5511,47 +4476,53 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--machine",
         help="read another machine's queue over the SSH mesh (peer browse); "
-             "default: this machine's local coordinator",
+        "default: this machine's local coordinator",
     )
     p.set_defaults(func=_cmd_list)
 
     p = sub.add_parser(
         "inbox",
         help="machine-scoped, cross-lane pickable tasks (default: proposed) -- "
-             "what this machine can start, across every repo lane",
+        "what this machine can start, across every repo lane",
     )
     p.add_argument(
         "--machine",
         help="machine to scope to; a *remote* machine reads that peer's queue "
-             "over the SSH mesh (default: this machine, resolved via agent-worktrees)",
+        "over the SSH mesh (default: this machine, resolved via agent-worktrees)",
     )
     p.add_argument(
         "--status",
         default="proposed",
         help="status filter; comma-separate for several (default: proposed). "
-             "Ignored when --awaiting-steer is set.",
+        "Ignored when --awaiting-steer is set.",
     )
     p.add_argument(
-        "--awaiting-steer", dest="awaiting_steer", action="store_true",
+        "--awaiting-steer",
+        dest="awaiting_steer",
+        action="store_true",
         help="show the picker steer surface: pickable (proposed) tasks PLUS any "
-             "task blocked on operator steering (a posted card's request_input, "
-             "in claimed/started/suspended), and nothing else of the owned queue. "
-             "Overrides "
-             "--status.",
+        "task blocked on operator steering (a posted card's request_input, "
+        "in claimed/started/suspended), and nothing else of the owned queue. "
+        "Overrides "
+        "--status.",
     )
     p.add_argument(
-        "--board", action="store_true",
+        "--board",
+        action="store_true",
         help="status-grouped board for the picker Tasks pivot: tasks across "
-             "proposed/queued/claimed/started/suspended PLUS recently "
-             "completed/abandoned, each tagged with a display `group` "
-             "(Blocked/Proposed/Queued/Started/Suspended/Completed/Abandoned) "
-             "and ordered by that priority. Overrides "
-             "--status and --awaiting-steer.",
+        "proposed/queued/claimed/started/suspended PLUS recently "
+        "completed/abandoned, each tagged with a display `group` "
+        "(Blocked/Proposed/Queued/Started/Suspended/Completed/Abandoned) "
+        "and ordered by that priority. Overrides "
+        "--status and --awaiting-steer.",
     )
     p.add_argument(
-        "--recent-mins", dest="recent_mins", type=int, default=120,
+        "--recent-mins",
+        dest="recent_mins",
+        type=int,
+        default=120,
         help="with --board: include completed/abandoned tasks whose terminal time "
-             "is within this many minutes (default: 120).",
+        "is within this many minutes (default: 120).",
     )
     p.add_argument("--label")
     p.add_argument("--limit", type=int, default=200)
@@ -5570,8 +4541,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "sweep",
         help="the dedup corpus for the calling repo: every non-abandoned task, "
-             "newest first -- read these before creating a task to verify the "
-             "work doesn't already exist",
+        "newest first -- read these before creating a task to verify the "
+        "work doesn't already exist",
     )
     p.add_argument(
         "--repo", help="lane to sweep (local name or remote URL); default: calling repo"
@@ -5586,8 +4557,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "claimant",
         help="task -> claiming worktree: which worktree owns a task (the inbound "
-             "reverse of worktree-status). Reports the actual owner once claimed, "
-             "else the pinned target worktree.",
+        "reverse of worktree-status). Reports the actual owner once claimed, "
+        "else the pinned target worktree.",
     )
     p.add_argument("task_id")
     p.set_defaults(func=_cmd_claimant)
@@ -5596,17 +4567,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("task_id")
     p.set_defaults(func=_simple("events", "task_id"))
 
-    p = sub.add_parser(
-        "wakes", help="show a task's durable wake outbox operations"
-    )
+    p = sub.add_parser("wakes", help="show a task's durable wake outbox operations")
     p.add_argument("task_id")
     p.set_defaults(func=_simple("wakes", "task_id"))
 
     p = sub.add_parser("payload", help="show a task's resolved payload (inline or blob)")
     p.add_argument("task_id")
-    p.add_argument(
-        "--raw", action="store_true", help="print the payload content only (not JSON)"
-    )
+    p.add_argument("--raw", action="store_true", help="print the payload content only (not JSON)")
     p.set_defaults(func=_cmd_payload)
 
     p = sub.add_parser("result", help="show a task's structured completion result")
@@ -5624,7 +4591,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("task_id")
     p.add_argument(
-        "--worker-id", dest="worker_id",
+        "--worker-id",
+        dest="worker_id",
         help="owner id (default: from machine/worktree)",
     )
     p.add_argument("--machine", help="override the resolved machine identity")
@@ -5635,10 +4603,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--result-ref", help="result ref recorded on completion")
     p.add_argument(
-        "--defer-complete", action="store_true",
+        "--defer-complete",
+        action="store_true",
         help="takeover pickup: approve->claim->start + print the brief, but do "
-             "NOT complete -- the successor completes explicitly when the goal "
-             "is reached (deferred completion)",
+        "NOT complete -- the successor completes explicitly when the goal "
+        "is reached (deferred completion)",
     )
     p.set_defaults(func=_cmd_consume)
 
@@ -5648,30 +4617,30 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("watch", help="stream task events (SSE) as JSON lines")
     p.set_defaults(func=_cmd_watch)
 
-    p = sub.add_parser(
-        "mcp", help="run the local stdio MCP server (per-agent interaction layer)"
-    )
+    p = sub.add_parser("mcp", help="run the local stdio MCP server (per-agent interaction layer)")
     p.set_defaults(func=_cmd_mcp)
 
     p = sub.add_parser(
         "schedule",
         help="scheduler/timer producer: turn a JSON schedule spec into deferred "
-             "tasks (idempotent per occurrence via not_before + dedup_key), and "
-             "manage a persisted registry of recurring jobs + single-producer leases",
+        "tasks (idempotent per occurrence via not_before + dedup_key), and "
+        "manage a persisted registry of recurring jobs + single-producer leases",
     )
     sched_sub = p.add_subparsers(dest="schedule_command", required=True)
     sp = sched_sub.add_parser(
         "tick",
         help="create every currently-due occurrence once, then exit (drive from "
-             "cron / a systemd timer / manage_schedule)",
+        "cron / a systemd timer / manage_schedule)",
     )
     sp.add_argument(
-        "spec", nargs="?",
+        "spec",
+        nargs="?",
         help="path to the JSON schedule spec (omit with --registry to tick the "
-             "coordinator's registered schedules)",
+        "coordinator's registered schedules)",
     )
     sp.add_argument(
-        "--registry", action="store_true",
+        "--registry",
+        action="store_true",
         help="tick the coordinator's registered schedules instead of a spec file",
     )
     sp.set_defaults(func=_cmd_schedule)
@@ -5679,40 +4648,37 @@ def build_parser() -> argparse.ArgumentParser:
         "serve", help="built-in timer: reload the spec and tick every --interval seconds"
     )
     sp.add_argument(
-        "spec", nargs="?",
+        "spec",
+        nargs="?",
         help="path to the JSON schedule spec (omit with --registry)",
     )
     sp.add_argument(
         "--interval", type=float, default=60.0, help="seconds between ticks (default: 60)"
     )
     sp.add_argument(
-        "--registry", action="store_true",
+        "--registry",
+        action="store_true",
         help="lease-gated registry mode: tick the coordinator's registered "
-             "schedules only while this host holds the job-lease",
+        "schedules only while this host holds the job-lease",
     )
-    sp.add_argument(
-        "--lease-scope", help="job-lease scope to hold in --registry mode (required)"
-    )
-    sp.add_argument(
-        "--holder", help="this producer's identity (the machine) in --registry mode"
-    )
+    sp.add_argument("--lease-scope", help="job-lease scope to hold in --registry mode (required)")
+    sp.add_argument("--holder", help="this producer's identity (the machine) in --registry mode")
     sp.add_argument("--holder-session", help="optional live-session handle of the holder")
     sp.add_argument(
-        "--lease-ttl", type=float,
+        "--lease-ttl",
+        type=float,
         help="observability-only lease expiry seconds (never auto-steals)",
     )
     sp.set_defaults(func=_cmd_schedule)
     sp = sched_sub.add_parser(
         "register",
         help="register (upsert) every schedule in a spec file into the "
-             "coordinator's persisted registry",
+        "coordinator's persisted registry",
     )
     sp.add_argument("spec", help="path to the JSON schedule spec to register")
     sp.set_defaults(func=_cmd_schedule)
     sp = sched_sub.add_parser("list", help="list registered schedules")
-    sp.add_argument(
-        "--active", action="store_true", help="only non-paused schedules"
-    )
+    sp.add_argument("--active", action="store_true", help="only non-paused schedules")
     sp.set_defaults(func=_cmd_schedule)
     sp = sched_sub.add_parser(
         "inspect", help="show one registered schedule + its next occurrences + lease"
@@ -5736,7 +4702,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sched_sub.add_parser(
         "lease-acquire",
         help="acquire/renew a job-lease (pin-not-failover: never steals a lease "
-             "held by another holder)",
+        "held by another holder)",
     )
     sp.add_argument("scope", help="the lease scope")
     sp.add_argument("--holder", required=True, help="this holder's identity (the machine)")
@@ -5748,9 +4714,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sp.add_argument("scope", help="the lease scope")
     sp.add_argument("--holder", required=True, help="the releasing holder's identity")
-    sp.add_argument(
-        "--force", action="store_true", help="reassign a lease held by another holder"
-    )
+    sp.add_argument("--force", action="store_true", help="reassign a lease held by another holder")
     sp.set_defaults(func=_cmd_schedule)
 
     p = sub.add_parser(
@@ -5762,9 +4726,7 @@ def build_parser() -> argparse.ArgumentParser:
     ep.add_argument("spec", help="path to the JSON command-emitter spec")
     ep.add_argument("--holder", required=True, help="this producer's machine identity")
     ep.set_defaults(func=_cmd_emitter)
-    ep = emitter_sub.add_parser(
-        "serve", help="run a command emitter on its declared interval"
-    )
+    ep = emitter_sub.add_parser("serve", help="run a command emitter on its declared interval")
     ep.add_argument("spec", help="path to the JSON command-emitter spec")
     ep.add_argument("--holder", required=True, help="this producer's machine identity")
     ep.set_defaults(func=_cmd_emitter)
@@ -5831,16 +4793,12 @@ def build_parser() -> argparse.ArgumentParser:
         "repository-issue-loop",
         help="inspect and operate a declarative repository issue backlog loop",
     )
-    issue_loop_sub = p.add_subparsers(
-        dest="repository_issue_loop_command", required=True
-    )
+    issue_loop_sub = p.add_subparsers(dest="repository_issue_loop_command", required=True)
     lp = issue_loop_sub.add_parser(
         "setup",
         help="register the declaration's repository with the existing registrar",
     )
-    lp.add_argument(
-        "declaration", help="path to the repository-issue-loop JSON/YAML file"
-    )
+    lp.add_argument("declaration", help="path to the repository-issue-loop JSON/YAML file")
     lp.add_argument("--name", help="pointer name")
     lp.add_argument("--owner", help="declaration owner override")
     lp.set_defaults(func=_cmd_repository_issue_loop)
@@ -5860,12 +4818,8 @@ def build_parser() -> argparse.ArgumentParser:
         if command in {"status", "doctor"}:
             lp.add_argument("--limit", type=int, default=200)
         lp.set_defaults(func=_cmd_repository_issue_loop)
-    lp = issue_loop_sub.add_parser(
-        "disable", help="locally override the whole loop off"
-    )
-    lp.add_argument(
-        "declaration", help="path to the repository-issue-loop JSON/YAML file"
-    )
+    lp = issue_loop_sub.add_parser("disable", help="locally override the whole loop off")
+    lp.add_argument("declaration", help="path to the repository-issue-loop JSON/YAML file")
     lp.add_argument("--reason", help="why the loop is disabled")
     lp.add_argument("--owner", help="declaration owner override")
     lp.set_defaults(func=_cmd_repository_issue_loop)
@@ -5873,7 +4827,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "webhook",
         help="reactive producer: serve an HTTP app mapping git-forge PR-merge "
-             "and telemetry events onto tasks",
+        "and telemetry events onto tasks",
     )
     p.add_argument("--config", help="path to the JSON webhook config (optional)")
     p.add_argument("--host", default="127.0.0.1", help="bind host (default: 127.0.0.1)")
@@ -5883,124 +4837,145 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "supervise",
         help="embody spawn supervisor: turn queued (label-gated) tasks into host "
-             "embody autopilots, exactly once each, via atomic spawn reservations",
+        "embody autopilots, exactly once each, via atomic spawn reservations",
     )
     supervise_scope = p.add_mutually_exclusive_group()
-    supervise_scope.add_argument(
-        "--repo", help="lane to supervise (default: the calling repo)"
-    )
+    supervise_scope.add_argument("--repo", help="lane to supervise (default: the calling repo)")
     supervise_scope.add_argument(
         "--all-repos", action="store_true", help="supervise every lane (no repo scope)"
     )
     p.add_argument(
-        "--label", action="append",
+        "--label",
+        action="append",
         help="only spawn queued tasks carrying this label (repeatable; opt-in gate)",
     )
     p.add_argument(
-        "--max-concurrent", "--max-active-processes",
-        dest="max_concurrent", type=int, default=1,
+        "--max-concurrent",
+        "--max-active-processes",
+        dest="max_concurrent",
+        type=int,
+        default=1,
         help="pool-local cap on live/launching worker processes (default: 1)",
     )
     p.add_argument(
-        "--max-attempts", type=int, default=3,
+        "--max-attempts",
+        type=int,
+        default=3,
         help="dead-letter a task after this many failed spawn attempts "
-             "(default: 3; 0 = retry forever)",
+        "(default: 3; 0 = retry forever)",
     )
     p.add_argument(
-        "--label-max-attempts", action="append", metavar="LABEL=N",
+        "--label-max-attempts",
+        action="append",
+        metavar="LABEL=N",
         help="per-label override of --max-attempts (repeatable), e.g. "
-             "--label-max-attempts code-review=3 so raising one "
-             "label's bound doesn't revive another label's stale tasks "
-             "(N=0 = retry forever for that label)",
+        "--label-max-attempts code-review=3 so raising one "
+        "label's bound doesn't revive another label's stale tasks "
+        "(N=0 = retry forever for that label)",
     )
     p.add_argument(
-        "--no-heartbeat", action="store_true",
+        "--no-heartbeat",
+        action="store_true",
         help="don't hold the lease of confirmed-alive embodied workers "
-             "(default: heartbeat live workers so a quiet-but-alive session's "
-             "lease doesn't expire)",
+        "(default: heartbeat live workers so a quiet-but-alive session's "
+        "lease doesn't expire)",
     )
     p.add_argument(
-        "--embody-backend", choices=["headless", "cli"], default="headless",
+        "--embody-backend",
+        choices=["headless", "cli"],
+        default="headless",
         help="how the supervisor embodies a claimed task by default: 'headless' "
-             "(default) -- a headless agent-bridge ACP session (no mux, no "
-             "CLI-start-prompt), the right body for self-contained autonomous "
-             "sweeps; 'cli' -- a CLI-backed autopilot worktree session (mux, "
-             "attachable). Per-label overrides: --cli-label (force CLI when the "
-             "default is headless) / --headless-label (force headless when the "
-             "default is cli).",
+        "(default) -- a headless agent-bridge ACP session (no mux, no "
+        "CLI-start-prompt), the right body for self-contained autonomous "
+        "sweeps; 'cli' -- a CLI-backed autopilot worktree session (mux, "
+        "attachable). Per-label overrides: --cli-label (force CLI when the "
+        "default is headless) / --headless-label (force headless when the "
+        "default is cli).",
     )
     p.add_argument(
-        "--headless-label", action="append", metavar="LABEL",
+        "--headless-label",
+        action="append",
+        metavar="LABEL",
         help="force queued tasks carrying this label to a HEADLESS agent-bridge "
-             "ACP session (repeatable). Only meaningful with --embody-backend cli "
-             "(headless is already the default); local (non-pool) mode only.",
+        "ACP session (repeatable). Only meaningful with --embody-backend cli "
+        "(headless is already the default); local (non-pool) mode only.",
     )
     p.add_argument(
-        "--cli-label", action="append", metavar="LABEL",
+        "--cli-label",
+        action="append",
+        metavar="LABEL",
         help="force queued tasks carrying this label to a CLI-backed autopilot "
-             "(mux, attachable) instead of the default headless body (repeatable). "
-             "The opt-out for a lane that is headless-by-default; local "
-             "(non-pool) mode only.",
+        "(mux, attachable) instead of the default headless body (repeatable). "
+        "The opt-out for a lane that is headless-by-default; local "
+        "(non-pool) mode only.",
     )
     p.add_argument(
         "--disposable-cli-label",
         action="append",
         metavar="LABEL",
         help="on terminal settlement, conclude the exact recorded CLI session "
-             "for this label and prime its clean worktree for conservative "
-             "managed GC (repeatable; label-scoped opt-in only)",
+        "for this label and prime its clean worktree for conservative "
+        "managed GC (repeatable; label-scoped opt-in only)",
     )
     p.add_argument(
-        "--headless-agent", default="task-worker", metavar="AGENT",
-        help="agent-bridge agent name used for headless embody bodies "
-             "(default: task-worker)",
+        "--headless-agent",
+        default="task-worker",
+        metavar="AGENT",
+        help="agent-bridge agent name used for headless embody bodies (default: task-worker)",
     )
     p.add_argument(
-        "--verify-timeout", type=int, default=0,
+        "--verify-timeout",
+        type=int,
+        default=0,
         help="embody: wait up to N seconds for the spawned session (0 = don't wait)",
     )
     p.add_argument(
-        "--interval", type=float, default=30.0,
+        "--interval",
+        type=float,
+        default=30.0,
         help="serve loop poll interval in seconds (default: 30)",
     )
     p.add_argument(
-        "--no-reactive", action="store_true",
+        "--no-reactive",
+        action="store_true",
         help="disable push-driven Agent Bridge lifecycle wakes and use only "
-             "the configured --interval",
+        "the configured --interval",
     )
     p.add_argument(
-        "--reactive-interval", type=float, default=2.0,
+        "--reactive-interval",
+        type=float,
+        default=2.0,
         help="deprecated compatibility value; push wakes never poll",
     )
     p.add_argument("--supervisor-id", help=argparse.SUPPRESS)
-    p.add_argument(
-        "--once", action="store_true", help="run a single supervision cycle and exit"
-    )
+    p.add_argument("--once", action="store_true", help="run a single supervision cycle and exit")
     p.add_argument(
         "--pool",
         help="fleet mode: comma-separated host aliases to dispatch embody bodies "
-             "to (first live host wins). Omit for local spawn on this machine.",
+        "to (first live host wins). Omit for local spawn on this machine.",
     )
     p.add_argument(
         "--origin",
         help="fleet mode: this coordinator's own SSH alias, which dispatched "
-             "bodies report their lease back to (default: the resolved local "
-             "machine). Required when the local machine can't be resolved.",
+        "bodies report their lease back to (default: the resolved local "
+        "machine). Required when the local machine can't be resolved.",
     )
     p.add_argument(
-        "--headless", action="store_true",
+        "--headless",
+        action="store_true",
         help="fleet (--pool) mode: embody fleet bodies as HEADLESS agent-bridge "
-             "ACP sessions on the pool host (via --headless-agent) instead of "
-             "CLI/mux embody -- sidesteps the CLI startup-seed 'Loading...' hang, "
-             "so bounded sweeps embody reliably on a remote pool host with no "
-             "human attach. Ignored outside --pool mode.",
+        "ACP sessions on the pool host (via --headless-agent) instead of "
+        "CLI/mux embody -- sidesteps the CLI startup-seed 'Loading...' hang, "
+        "so bounded sweeps embody reliably on a remote pool host with no "
+        "human attach. Ignored outside --pool mode.",
     )
     p.add_argument(
-        "--evaluator", metavar="SPEC",
+        "--evaluator",
+        metavar="SPEC",
         help="path to an evaluator spec (JSON). When set, each cycle feeds every "
-             "newly-terminal task's lifecycle event to the evaluator and applies "
-             "its decisions (emit a follow-up task) -- the service-driven loop-"
-             "advancement pass (emitters-and-evaluators). See 'evaluate'.",
+        "newly-terminal task's lifecycle event to the evaluator and applies "
+        "its decisions (emit a follow-up task) -- the service-driven loop-"
+        "advancement pass (emitters-and-evaluators). See 'evaluate'.",
     )
     p.add_argument(
         "--evaluator-ref",
@@ -6016,83 +4991,128 @@ def build_parser() -> argparse.ArgumentParser:
     rp = sup_sub.add_parser(
         "register",
         help="add a durable supervision registration and RETURN its handle "
-             "(does not run the loop; the singleton supervisor runs it)",
+        "(does not run the loop; the singleton supervisor runs it)",
     )
     rp.add_argument(
-        "--kind", choices=sorted(RegistrationKind.DIRECT), default="supervised-lane",
+        "--kind",
+        choices=sorted(RegistrationKind.DIRECT),
+        default="supervised-lane",
         help="the unit kind to register (default: supervised-lane)",
     )
     rp.add_argument(
-        "--id", help="explicit registration id (default: derived deterministically "
-                     "from kind+scope+spec, so re-registering upserts)",
+        "--id",
+        help="explicit registration id (default: derived deterministically "
+        "from kind+scope+spec, so re-registering upserts)",
     )
     rp.add_argument(
-        "--spec", metavar="JSON|@FILE",
+        "--spec",
+        metavar="JSON|@FILE",
         help="the unit's spec as inline JSON or @path; required for non-lane "
-             "kinds. For supervised-lane, omit it to build the spec from the lane "
-             "convenience flags below.",
+        "kinds. For supervised-lane, omit it to build the spec from the lane "
+        "convenience flags below.",
     )
-    rp.add_argument("--machine", help="scope the registration to this machine "
-                    "(default: this host's resolved alias)")
-    rp.add_argument("--env", help="scope the registration to this environment "
-                    "(default: $AGENT_DISPATCH_ENV or 'default')")
+    rp.add_argument(
+        "--machine",
+        help="scope the registration to this machine (default: this host's resolved alias)",
+    )
+    rp.add_argument(
+        "--env",
+        help="scope the registration to this environment "
+        "(default: $AGENT_DISPATCH_ENV or 'default')",
+    )
     # supervised-lane convenience flags (used when --spec is omitted)
     rp.add_argument("--repo", help="lane to supervise (default: the calling repo)")
-    rp.add_argument("--all-repos", action="store_true",
-                    help="supervise every lane (no repo scope)")
-    rp.add_argument("--label", action="append",
-                    help="only spawn queued tasks carrying this label (repeatable)")
     rp.add_argument(
-        "--max-concurrent", "--max-active-processes",
-        dest="max_concurrent", type=int, default=1,
+        "--all-repos", action="store_true", help="supervise every lane (no repo scope)"
+    )
+    rp.add_argument(
+        "--label", action="append", help="only spawn queued tasks carrying this label (repeatable)"
+    )
+    rp.add_argument(
+        "--max-concurrent",
+        "--max-active-processes",
+        dest="max_concurrent",
+        type=int,
+        default=1,
         help="pool-local cap on live/launching worker processes (default: 1)",
     )
-    rp.add_argument("--max-attempts", type=int, default=3,
-                    help="dead-letter a task after this many failed spawn attempts "
-                         "(default: 3; 0 = retry forever)")
-    rp.add_argument("--label-max-attempts", action="append", metavar="LABEL=N",
-                    help="per-label override of --max-attempts (repeatable)")
-    rp.add_argument("--embody-backend", choices=["headless", "cli"], default="headless",
-                    help="default embody body for the lane: 'headless' (default) "
-                         "agent-bridge ACP, or 'cli' autopilot worktree session")
-    rp.add_argument("--headless-label", action="append", metavar="LABEL",
-                    help="force tasks carrying this label to a headless agent-bridge "
-                         "ACP session (repeatable; use when --embody-backend cli)")
-    rp.add_argument("--cli-label", action="append", metavar="LABEL",
-                    help="force tasks carrying this label to a CLI autopilot instead "
-                         "of the default headless body (repeatable)")
+    rp.add_argument(
+        "--max-attempts",
+        type=int,
+        default=3,
+        help="dead-letter a task after this many failed spawn attempts "
+        "(default: 3; 0 = retry forever)",
+    )
+    rp.add_argument(
+        "--label-max-attempts",
+        action="append",
+        metavar="LABEL=N",
+        help="per-label override of --max-attempts (repeatable)",
+    )
+    rp.add_argument(
+        "--embody-backend",
+        choices=["headless", "cli"],
+        default="headless",
+        help="default embody body for the lane: 'headless' (default) "
+        "agent-bridge ACP, or 'cli' autopilot worktree session",
+    )
+    rp.add_argument(
+        "--headless-label",
+        action="append",
+        metavar="LABEL",
+        help="force tasks carrying this label to a headless agent-bridge "
+        "ACP session (repeatable; use when --embody-backend cli)",
+    )
+    rp.add_argument(
+        "--cli-label",
+        action="append",
+        metavar="LABEL",
+        help="force tasks carrying this label to a CLI autopilot instead "
+        "of the default headless body (repeatable)",
+    )
     rp.add_argument(
         "--disposable-cli-label",
         action="append",
         metavar="LABEL",
         help="on terminal settlement, conclude this label's exact CLI session "
-             "and prime its clean worktree for managed GC (repeatable)",
+        "and prime its clean worktree for managed GC (repeatable)",
     )
-    rp.add_argument("--headless-agent", metavar="AGENT",
-                    help="agent-bridge agent name for headless embody bodies")
-    rp.add_argument("--evaluator", metavar="SPEC",
-                    help="path to an evaluator spec (JSON) folded into the lane spec")
+    rp.add_argument(
+        "--headless-agent",
+        metavar="AGENT",
+        help="agent-bridge agent name for headless embody bodies",
+    )
+    rp.add_argument(
+        "--evaluator",
+        metavar="SPEC",
+        help="path to an evaluator spec (JSON) folded into the lane spec",
+    )
     rp.add_argument(
         "--evaluator-ref",
         help="producer-owned evaluator identity; consume only tasks stamped with it",
     )
-    rp.add_argument("--interval", type=float, default=30.0,
-                    help="serve loop poll interval in seconds (default: 30)")
-    rp.add_argument("--ensure", action="store_true",
-                    help="after registering, ensure the singleton supervisor daemon "
-                         "is running for this (machine, env) -- start it detached if "
-                         "not (best-effort; a running daemon is a no-op)")
+    rp.add_argument(
+        "--interval",
+        type=float,
+        default=30.0,
+        help="serve loop poll interval in seconds (default: 30)",
+    )
+    rp.add_argument(
+        "--ensure",
+        action="store_true",
+        help="after registering, ensure the singleton supervisor daemon "
+        "is running for this (machine, env) -- start it detached if "
+        "not (best-effort; a running daemon is a no-op)",
+    )
     rp.set_defaults(func=_cmd_supervise)
     rp = sup_sub.add_parser("status", help="query a registration by its handle")
     rp.add_argument("id", help="registration id")
     rp.set_defaults(func=_cmd_supervise)
     rp = sup_sub.add_parser("list", help="list registrations")
-    rp.add_argument("--kind", choices=sorted(RegistrationKind.ALL),
-                    help="filter by kind")
+    rp.add_argument("--kind", choices=sorted(RegistrationKind.ALL), help="filter by kind")
     rp.add_argument("--machine", help="filter by machine")
     rp.add_argument("--env", help="filter by environment")
-    rp.add_argument("--active", action="store_true",
-                    help="only active (non-paused) registrations")
+    rp.add_argument("--active", action="store_true", help="only active (non-paused) registrations")
     rp.set_defaults(func=_cmd_supervise)
     rp = sup_sub.add_parser("remove", help="remove a registration by its handle")
     rp.add_argument("id", help="registration id")
@@ -6100,53 +5120,72 @@ def build_parser() -> argparse.ArgumentParser:
     rp = sup_sub.add_parser(
         "serve",
         help="run the singleton supervisor daemon (foreground): reconcile the "
-             "registration registry into per-unit subprocesses, one master per "
-             "(machine, env), single-instance-guarded",
+        "registration registry into per-unit subprocesses, one master per "
+        "(machine, env), single-instance-guarded",
     )
     rp.add_argument("--machine", help="scope: this machine (default: resolved alias)")
-    rp.add_argument("--env", help="scope: this environment "
-                    "(default: $AGENT_DISPATCH_ENV or 'default')")
-    rp.add_argument("--interval", type=float, default=5.0,
-                    help="reconcile poll interval in seconds (default: 5)")
-    rp.add_argument("--once", action="store_true",
-                    help="reconcile a single time and exit (still lease-guarded)")
-    rp.add_argument("--no-single-instance", action="store_true",
-                    help="skip the singleton election (deliberately unguarded; "
-                         "for tests / diagnostics only)")
-    rp.add_argument("--no-declared", action="store_true",
-                    help="do not supervise the registrar's DECLARED profile set "
-                         "(discovered pointers); run only store-backed registrations")
-    rp.add_argument("--legacy-env", action="store_true",
-                    help="ALSO supervise legacy AGENT_DISPATCH_SUPERVISE_* env "
-                         "profiles (supervisor.env + supervisors/*.env) as declarations "
-                         "-- the Phase 4 migration back-compat bridge, so switching a "
-                         "host's supervisor unit to `serve` keeps its existing profiles "
-                         "running until each is migrated to a first-class declaration. A "
-                         "declaration of the same name wins over a legacy profile.")
+    rp.add_argument(
+        "--env", help="scope: this environment (default: $AGENT_DISPATCH_ENV or 'default')"
+    )
+    rp.add_argument(
+        "--interval",
+        type=float,
+        default=5.0,
+        help="reconcile poll interval in seconds (default: 5)",
+    )
+    rp.add_argument(
+        "--once",
+        action="store_true",
+        help="reconcile a single time and exit (still lease-guarded)",
+    )
+    rp.add_argument(
+        "--no-single-instance",
+        action="store_true",
+        help="skip the singleton election (deliberately unguarded; for tests / diagnostics only)",
+    )
+    rp.add_argument(
+        "--no-declared",
+        action="store_true",
+        help="do not supervise the registrar's DECLARED profile set "
+        "(discovered pointers); run only store-backed registrations",
+    )
+    rp.add_argument(
+        "--legacy-env",
+        action="store_true",
+        help="ALSO supervise legacy AGENT_DISPATCH_SUPERVISE_* env "
+        "profiles (supervisor.env + supervisors/*.env) as declarations "
+        "-- the Phase 4 migration back-compat bridge, so switching a "
+        "host's supervisor unit to `serve` keeps its existing profiles "
+        "running until each is migrated to a first-class declaration. A "
+        "declaration of the same name wins over a legacy profile.",
+    )
     rp.set_defaults(func=_cmd_supervise)
     rp = sup_sub.add_parser(
         "daemon-status",
         help="show whether a supervisor daemon holds this (machine, env) scope "
-             "and the registrations it would run",
+        "and the registrations it would run",
     )
     rp.add_argument("--machine", help="scope: this machine (default: resolved alias)")
-    rp.add_argument("--env", help="scope: this environment "
-                    "(default: $AGENT_DISPATCH_ENV or 'default')")
+    rp.add_argument(
+        "--env", help="scope: this environment (default: $AGENT_DISPATCH_ENV or 'default')"
+    )
     rp.set_defaults(func=_cmd_supervise)
     op = sup_sub.add_parser(
         "override",
         help="operator kill-switch: locally disable/enable one supervised unit "
-             "(by registration id), out of band and taking precedence over its "
-             "declaration + the discovery layer (a re-sync does not undo it)",
+        "(by registration id), out of band and taking precedence over its "
+        "declaration + the discovery layer (a re-sync does not undo it)",
     )
     op_sub = op.add_subparsers(dest="override_command")
     od = op_sub.add_parser(
         "disable",
         help="disable a supervised unit now: the daemon winds it down on the next "
-             "reconcile and keeps it down until re-enabled",
+        "reconcile and keeps it down until re-enabled",
     )
-    od.add_argument("id", help="registration id of the unit to disable "
-                              "(see `supervise daemon-status` / `list`)")
+    od.add_argument(
+        "id",
+        help="registration id of the unit to disable (see `supervise daemon-status` / `list`)",
+    )
     od.add_argument("--reason", help="why it is disabled (recorded for legibility)")
     od.set_defaults(func=_cmd_supervise)
     oe = op_sub.add_parser(
@@ -6158,9 +5197,7 @@ def build_parser() -> argparse.ArgumentParser:
     ol = op_sub.add_parser("list", help="list the current operator overrides")
     ol.set_defaults(func=_cmd_supervise)
     op.set_defaults(func=_cmd_supervise)
-    p = sub.add_parser(
-        "reservations", help="inspect / manually control spawn reservations"
-    )
+    p = sub.add_parser("reservations", help="inspect / manually control spawn reservations")
     res_sub = p.add_subparsers(dest="reservations_command", required=True)
     rp = res_sub.add_parser("list", help="list spawn reservations")
     rp.add_argument("--task", help="filter by task id")
@@ -6212,9 +5249,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="inspect or atomically hand off generation-managed task creation",
     )
     fence_sub = p.add_subparsers(dest="producer_fence_command", required=True)
-    fp = fence_sub.add_parser(
-        "status", help="inspect one exact repo+source producer scope"
-    )
+    fp = fence_sub.add_parser("status", help="inspect one exact repo+source producer scope")
     fp.add_argument(
         "--repo",
         help="canonical repo lane (default: the calling repo)",
@@ -6241,7 +5276,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "federation",
         help="federation runtime: register presence + drive the fenced-epoch "
-             "coordinator lease over the rendezvous directory (hosted backend)",
+        "coordinator lease over the rendezvous directory (hosted backend)",
     )
     fed_sub = p.add_subparsers(dest="federation_command", required=True)
     sp = fed_sub.add_parser(
@@ -6249,35 +5284,38 @@ def build_parser() -> argparse.ArgumentParser:
         help="run the federation loop (presence + lease) until stopped",
     )
     sp.add_argument(
-        "--role", choices=sorted(_config.FEDERATION_ROLES),
+        "--role",
+        choices=sorted(_config.FEDERATION_ROLES),
         help="this node's role (default: AGENT_DISPATCH_FEDERATION_ROLE or peer)",
     )
     sp.add_argument(
         "--instance",
-        help="stable directory id (default: AGENT_DISPATCH_FEDERATION_INSTANCE or "
-             "the machine id)",
+        help="stable directory id (default: AGENT_DISPATCH_FEDERATION_INSTANCE or the machine id)",
     )
     sp.add_argument(
-        "--url", help="rendezvous coordinator URL (default: the hosted coordinator / "
-                      "AGENT_DISPATCH_SHARED_URL)",
+        "--url",
+        help="rendezvous coordinator URL (default: the hosted coordinator / "
+        "AGENT_DISPATCH_SHARED_URL)",
     )
     sp.add_argument("--token", help="bearer token for --url")
     sp.add_argument(
-        "--interval", type=float,
+        "--interval",
+        type=float,
         help="seconds between ticks (default: AGENT_DISPATCH_FEDERATION_INTERVAL)",
     )
     sp.add_argument(
-        "--lease-ttl", type=float, dest="lease_ttl",
+        "--lease-ttl",
+        type=float,
+        dest="lease_ttl",
         help="staleness threshold before a standby fails over (lease-eligible roles)",
     )
     sp.add_argument(
-        "--once", action="store_true",
+        "--once",
+        action="store_true",
         help="run a single tick and exit (print the resulting state)",
     )
     sp.set_defaults(func=_cmd_federation_run)
-    sp = fed_sub.add_parser(
-        "status", help="print the discovered coordinator + live peers"
-    )
+    sp = fed_sub.add_parser("status", help="print the discovered coordinator + live peers")
     sp.add_argument("--url", help="rendezvous coordinator URL (default: the hosted coordinator)")
     sp.add_argument("--token", help="bearer token for --url")
     sp.set_defaults(func=_cmd_federation_status)
@@ -6293,8 +5331,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     pe = sub.add_parser(
         "print-endpoint",
-        help="print this machine's local coordinator base URL (for SSH-failover "
-             "peer discovery)",
+        help="print this machine's local coordinator base URL (for SSH-failover peer discovery)",
     )
     pe.set_defaults(func=_cmd_print_endpoint)
 
@@ -6302,7 +5339,7 @@ def build_parser() -> argparse.ArgumentParser:
     cp = sub.add_parser(
         "charter",
         help="the shared 'how to behave as an agent-dispatch worker' policy "
-             "prose, pulled on demand instead of always inlined in a seed",
+        "prose, pulled on demand instead of always inlined in a seed",
     )
     csub = cp.add_subparsers(dest="charter_command", required=True)
     csp = csub.add_parser("show", help="print a named charter's full text")
@@ -6313,7 +5350,7 @@ def build_parser() -> argparse.ArgumentParser:
     rp = sub.add_parser(
         "recipes",
         help="loop recipes -- the packaged shapes of long-running agentic work "
-             "(reviewer / conflict-resolution / goal-driven), kickable ad-hoc",
+        "(reviewer / conflict-resolution / goal-driven), kickable ad-hoc",
     )
     rsub = rp.add_subparsers(dest="recipes_command", required=True)
 
@@ -6330,7 +5367,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     rr.add_argument("name")
     rr.add_argument(
-        "--param", action="append", metavar="KEY=VALUE",
+        "--param",
+        action="append",
+        metavar="KEY=VALUE",
         help="a recipe parameter (repeatable), e.g. --param repo=owner/name --param pr=42",
     )
     rr.set_defaults(func=_cmd_recipes_render)
@@ -6338,43 +5377,53 @@ def build_parser() -> argparse.ArgumentParser:
     kp = rsub.add_parser(
         "kick",
         help="carve an ad-hoc task from a recipe (optionally spawn a worker to "
-             "drive it) -- the no-wrapper-service path",
+        "drive it) -- the no-wrapper-service path",
     )
     kp.add_argument("name")
     kp.add_argument(
-        "--param", action="append", metavar="KEY=VALUE",
+        "--param",
+        action="append",
+        metavar="KEY=VALUE",
         help="a recipe parameter (repeatable)",
     )
     kp.add_argument(
         "--repo",
         help="lane (repo) for the task: a local repo name or remote URL "
-             "(default: the calling repo)",
+        "(default: the calling repo)",
     )
     kp.add_argument("--dedup-key", help="override the derived reserved-work dedup key")
     kp.add_argument(
-        "--label", action="append", metavar="LABEL",
+        "--label",
+        action="append",
+        metavar="LABEL",
         help="extra label(s) to stamp on the kicked task (repeatable), merged "
-             "with the recipe's own labels -- e.g. route the task onto a "
-             "supervisor pool with '--label general'",
+        "with the recipe's own labels -- e.g. route the task onto a "
+        "supervisor pool with '--label general'",
     )
     kp.add_argument(
-        "--spawn", action="store_true",
+        "--spawn",
+        action="store_true",
         help="after creating, spawn a worker to drive the loop (best effort)",
     )
     kp.add_argument(
-        "--spawn-backend", choices=["bridge", "embody"], default="embody",
+        "--spawn-backend",
+        choices=["bridge", "embody"],
+        default="embody",
         help="how to embody the worker: 'embody' (default) = a CLI autopilot in a "
-             "fresh worktree with a full checkout (the right body for a recipe); "
-             "'bridge' = a headless ACP worker",
+        "fresh worktree with a full checkout (the right body for a recipe); "
+        "'bridge' = a headless ACP worker",
     )
     kp.add_argument("--spawn-agent", default="task-worker")
     kp.add_argument(
-        "--async", dest="run_async", action="store_true",
+        "--async",
+        dest="run_async",
+        action="store_true",
         help="with --spawn, don't wait for the worker (fire-and-forget)",
     )
     kp.add_argument("--verify-timeout", type=int, default=0)
     kp.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="print the create call the kick would make, without enqueuing it",
     )
     kp.set_defaults(func=_cmd_recipes_kick)
@@ -6383,27 +5432,32 @@ def build_parser() -> argparse.ArgumentParser:
     rvp = sub.add_parser(
         "resolve",
         help="drive THIS worktree to a clean, resolved final state after a loop "
-             "(landed -> verify clean; abandoned -> unwind to base + reconcile source)",
+        "(landed -> verify clean; abandoned -> unwind to base + reconcile source)",
     )
     rvp.add_argument(
-        "--outcome", required=True, choices=["landed", "abandoned"],
+        "--outcome",
+        required=True,
+        choices=["landed", "abandoned"],
         help="how the work ended: 'landed' (merged) or 'abandoned' (unwind to base)",
     )
     rvp.add_argument(
-        "--base", metavar="BRANCH",
+        "--base",
+        metavar="BRANCH",
         help="base branch to unwind onto for --outcome abandoned "
-             "(default: the branch's tracked upstream)",
+        "(default: the branch's tracked upstream)",
     )
     rvp.add_argument(
-        "--source", metavar="REF",
+        "--source",
+        metavar="REF",
         help="the change/issue this worker was driving, folded into the "
-             "source-reconcile instruction",
+        "source-reconcile instruction",
     )
     rvp.add_argument("--reason", help="abandonment reason (recorded on the plan)")
     rvp.add_argument(
-        "--execute", action="store_true",
+        "--execute",
+        action="store_true",
         help="perform the plan (destructive steps discard working-tree state); "
-             "without it, the plan is printed and nothing runs",
+        "without it, the plan is printed and nothing runs",
     )
     rvp.set_defaults(func=_cmd_resolve)
 
@@ -6411,23 +5465,26 @@ def build_parser() -> argparse.ArgumentParser:
     rnp = sub.add_parser(
         "run",
         help="hand a blocking wait to the layer (hibernate-the-wait): run "
-             "'-- <cmd>' to completion, then resume the worktree-affinitied "
-             "worker via agent-bridge",
+        "'-- <cmd>' to completion, then resume the worktree-affinitied "
+        "worker via agent-bridge",
     )
     rnp.add_argument(
-        "--resume", metavar="WORKTREE",
+        "--resume",
+        metavar="WORKTREE",
         help="the worker (worktree handle) to resume when the wait resolves "
-             "(agent-bridge routes to whichever session is live then)",
+        "(agent-bridge routes to whichever session is live then)",
     )
     rnp.add_argument("--task", metavar="ID", help="task id, folded into the resume nudge")
     rnp.add_argument("--message", help="override the resume nudge text")
     rnp.add_argument(
-        "--detach", action="store_true",
+        "--detach",
+        action="store_true",
         help="run the wait in a detached process that outlives this one, so the "
-             "kicking worker can be torn down while it waits (true hibernation)",
+        "kicking worker can be torn down while it waits (true hibernation)",
     )
     rnp.add_argument(
-        "command", nargs=argparse.REMAINDER,
+        "command",
+        nargs=argparse.REMAINDER,
         help="the blocking wait command, after '--' (e.g. -- agent-worktrees pr-watch 42)",
     )
     rnp.set_defaults(func=_cmd_run)
@@ -6436,18 +5493,20 @@ def build_parser() -> argparse.ArgumentParser:
     evp = sub.add_parser(
         "evaluate",
         help="feed one task lifecycle event through a declarative evaluator and "
-             "apply its decisions (emit a follow-up task, or nothing)",
+        "apply its decisions (emit a follow-up task, or nothing)",
     )
     evp.add_argument("--spec", required=True, metavar="FILE", help="evaluator spec (JSON)")
     evp.add_argument(
-        "--event-file", metavar="FILE",
+        "--event-file",
+        metavar="FILE",
         help="lifecycle event JSON (default: read from stdin)",
     )
     evp.add_argument(
         "--repo", help="lane for any emitted follow-up task (a local name or remote URL)"
     )
     evp.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="print the decisions without creating any follow-up task",
     )
     evp.set_defaults(func=_cmd_evaluate)
@@ -6455,26 +5514,29 @@ def build_parser() -> argparse.ArgumentParser:
     dr = rsub.add_parser(
         "drive",
         help="decide the next loop step for a recipe given a --signal (the "
-             "executable work/suspend/resolve rhythm); --execute performs the "
-             "suspend + resolve legs",
+        "executable work/suspend/resolve rhythm); --execute performs the "
+        "suspend + resolve legs",
     )
     dr.add_argument("name")
     dr.add_argument(
-        "--signal", required=True,
+        "--signal",
+        required=True,
         help="what just happened: 'start', a suspend-on event (e.g. change-updated), "
-             "'work-done'/'idle', or a terminal signal (merged/landed/abandoned/closed)",
+        "'work-done'/'idle', or a terminal signal (merged/landed/abandoned/closed)",
     )
     dr.add_argument("--resume", metavar="WORKTREE", help="worker to resume on a SUSPEND leg")
     dr.add_argument("--task", metavar="ID", help="task id, folded into a SUSPEND resume")
     dr.add_argument("--base", metavar="BRANCH", help="base branch for a RESOLVE unwind")
     dr.add_argument("--source", metavar="REF", help="change/issue for a RESOLVE reconcile")
     dr.add_argument(
-        "--execute", action="store_true",
+        "--execute",
+        action="store_true",
         help="perform the prescribed action (SUSPEND: spawn the detached waiter; "
-             "RESOLVE: run the unwind). Needs --resume and a '--' wait command for SUSPEND.",
+        "RESOLVE: run the unwind). Needs --resume and a '--' wait command for SUSPEND.",
     )
     dr.add_argument(
-        "wait_cmd", nargs="*",
+        "wait_cmd",
+        nargs="*",
         help="for --execute on a SUSPEND, the blocking wait command after '--'",
     )
     dr.set_defaults(func=_cmd_recipes_drive)
