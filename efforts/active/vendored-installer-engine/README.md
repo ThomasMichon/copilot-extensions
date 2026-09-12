@@ -5,44 +5,55 @@
 - **Branch(es):** independent per-phase PRs (see Coordination)
 - **Created:** 2026-09-12
 - **Status:** Draft <!-- Draft | Active | Blocked | Done -->
-- **Vision:** extends the install-contract's existing vendoring precedent (see Context)
+- **Vision:** extends `visions/plugin-services` §Behaviors/`self-contained-runtime`
+  + §Behaviors/`immutable-versioned-runtime` (see Context)
 - **Umbrella issue:** _TBD — file once this effort's plan clears review_
 - **Sub-issues:** _TBD_
 
 ## Guiding Intent
 
-Every `agent-*` runtime plugin hand-maintains its own `scripts/install.ps1` /
-`scripts/install.sh` — full lifecycle managers (venv build, package install,
+Every `agent-*` runtime plugin hand-maintains its own canonical installer
+entrypoint — `scripts/install.ps1`/`scripts/install.sh` where present, else
+`scripts/init.ps1`/`scripts/init.sh` (the repo's fallback canonical entrypoint
+when `install.*` is absent, e.g. `agent-containers`, `agent-mcp`,
+`agent-machines`) — full lifecycle managers (venv build, package install,
 binstub generation, versioned-slot management, scheduled-task/service wiring,
 deploy manifests, ZDD cutover, draining) that are supposed to all follow the
 same install contract (`docs/install-contract.md`) but are, in practice, ~12
 independently-authored copies. When a bug is found in the shared *mechanics*
 (not the per-service specifics), it must be manually ported to every plugin by
-hand — exactly the failure mode that just recurred with the pyvenv.cfg
-corruption fix (aperture-labs#6852): the same `New-SignedVenv`/`uv venv` defect
-existed in agent-bridge, agent-logger, agent-vault, agent-index,
-agent-codespaces, agent-dispatch, agent-ssh, agent-containers, agent-mcp, and
-agent-machines, and only the first two got fixed before the human operator
-had to say "we shouldn't have to keep fixing per-app installers."
+hand — exactly the failure mode that just recurred with a venv-corruption fix
+(a shared uv-managed-interpreter race producing a stale/broken venv slot,
+tracked in a downstream consumer repo and fixed here via
+copilot-extensions#2482): the same `New-SignedVenv`/`uv venv` defect existed
+in agent-bridge, agent-logger, agent-vault, agent-index, agent-codespaces,
+agent-dispatch, agent-ssh, agent-containers, agent-mcp, and agent-machines,
+and only the first two got fixed before the human operator had to say "we
+shouldn't have to keep fixing per-app installers."
 
 This effort's goal: collapse the **shared engine** (the parts of the installer
 that don't vary by service — uv acquisition, venv build + health/retry,
 package install, binstub generation, versioned-slot lifecycle, deploy
 manifest, scheduled-task management, ZDD cutover, draining) into ONE canonical
 vendored source, fanned out byte-identically to every plugin (the same pattern
-already proven for `versioned_runtime.py`), with each plugin's own
-`install.ps1`/`install.sh` shrinking to a thin per-service **config** (package
-dir(s), launch command, sibling installs, and a small capability flag set:
-supports scheduled tasks, supports ZDD cutover, supports draining, etc.) plus a
-single call into the shared engine's entry point. A bug fixed once in the
-canonical engine is fixed everywhere on the next sync + version bump — no more
-hand-porting.
+already proven for `versioned_runtime.py`), with each plugin's own installer
+entrypoint shrinking to a thin per-service **config** (package dir(s), launch
+command, sibling installs, and a small capability flag set: supports
+scheduled tasks, supports ZDD cutover, supports draining, etc.) plus a single
+call into the shared engine's entry point. A bug fixed once in the canonical
+engine is fixed everywhere on the next sync + version bump — no more
+hand-porting. This does not change what `self-contained-runtime` and
+`immutable-versioned-runtime` promise (every plugin still owns a complete,
+standalone runtime that its own installer deploys, with nothing borrowed at
+*runtime* from a sibling or a git checkout); it changes how the installer's
+own *authoring-time* mechanics stay in sync without N independently-drifting
+copies.
 
 ## Participants
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| lambda-core (this session's lineage) | Drives Phase 0 (audit) and Phase 1 (canonical engine + reference plugin) | `copilot-extensions.worktrees/lambda-core-win-20260912-150643-b17b` |
+| Effort owner (rotates per phase) | Drives the active phase; see the effort's Journal for current owner and phase | This repo's normal worktree/PR flow — no fixed venue |
 
 _Later phases (per-plugin rollout) may be split across further worktrees/sessions
 as independent per-plugin PRs; see Coordination._
@@ -66,6 +77,27 @@ as independent per-plugin PRs; see Coordination._
 
 ## Context
 
+- **`visions/plugin-services` §Behaviors/`self-contained-runtime`**: *"Every
+  runtime plugin owns a complete, standalone runtime (venv + binstub +
+  service) that its own installer deploys and updates. Nothing a service
+  needs to run is borrowed from a sibling plugin or from a git checkout of
+  this repo."* This is the governing behavior this effort extends (not
+  changes): it directly rules out fetching the shared engine from a git
+  checkout at install/runtime, which is why byte-vendoring (not a git-fetch
+  bootstrap) is this effort's chosen mechanism (see the design-decision note
+  before Phase 1).
+- **`visions/plugin-services` §Behaviors/`immutable-versioned-runtime`**: the
+  vendored engine lives *inside* each plugin's existing immutable versioned
+  install; this effort does not change that model, only what authoring-time
+  duplication looks like beneath it.
+- **`docs/patterns/runtime-agent-plugin.md`** — the governing pattern for "add
+  an `agent-*` plugin," including the cross-platform install contract shape
+  this effort's canonical engine must keep satisfying.
+- **`docs/patterns/graceful-daemon-cutover.md`** and
+  **`docs/patterns/durable-vs-versioned-runtime.md`** — the existing patterns
+  for ZDD cutover and durable-vs-versioned-runtime split; the engine's
+  `SupportsZddCutover`/draining config flags must compose with these, not
+  reimplement them.
 - **`docs/install-contract.md`** is the existing, extensively-detailed
   contract every plugin's installer must already follow. It explicitly states
   the architectural constraint this effort must respect: *"Because the
@@ -97,27 +129,38 @@ as independent per-plugin PRs; see Coordination._
     effort that did this exact collapse for `versioned_runtime.py` in phased
     PRs. Read its Journal for the phasing discipline and pitfalls before
     planning Phase 1+ here.
-- **Immediate trigger:** aperture-labs#6852 (pyvenv.cfg/uv-exit-106 venv
-  corruption) was fixed in `agent-bridge` and mirrored by hand into
-  `agent-logger` (PR copilot-extensions#2482). The same `New-SignedVenv`
-  pattern (and the earlier #6785 `SRE module mismatch` retry fix it built on)
-  is duplicated, unfixed, in at least: `agent-vault`, `agent-index`,
+- **Immediate trigger:** a venv-corruption defect (a shared uv-managed
+  interpreter cache leaving a slot with the python binary present but
+  `pyvenv.cfg` missing/incomplete after a concurrent `uv venv` race) was fixed
+  in `agent-bridge` and mirrored by hand into `agent-logger`
+  (copilot-extensions#2482). The same `New-SignedVenv`/`uv venv` pattern (and
+  an earlier, related shared-interpreter-race retry fix it built on) is
+  duplicated, unfixed, in at least: `agent-vault`, `agent-index`,
   `agent-codespaces`, `agent-dispatch`, `agent-ssh`, `agent-containers`,
   `agent-mcp`, `agent-machines`. This effort exists so that class of bug gets
   fixed once, not N times.
-- **Scale (current per-plugin installer line counts, PowerShell side only):**
+- **Scale (current per-plugin canonical installer entrypoint line counts,
+  PowerShell side only — `install.ps1` where it exists, else `init.ps1`):**
   agent-worktrees 3638, agent-dispatch 2940, agent-bridge 2806, agent-machines
   2141 (`init.ps1`), agent-index 2228, agent-codespaces 1360, agent-logger
   1339, agent-vault 1178, agent-containers 897 (`init.ps1`), budget-guidance
-  886 (not a runtime plugin — no venv/uv logic, excluded from scope),
-  agent-mcp 826 (`init.ps1`), agent-ssh 789. The `.sh` counterparts are
+  886, agent-mcp 826 (`init.ps1`), agent-ssh 789. The `.sh` counterparts are
   similar in size. This is ~20,000+ lines of independently-authored installer
   logic across the fleet, most of it mechanically identical.
+  - **`budget-guidance` is in scope for the audit** (it is a `pyproject.toml`
+    runtime plugin per `tools/check-docs-consistency.py`'s definition, with an
+    `install.ps1` that builds a venv via `uv venv` like the others) but is
+    **excluded from this effort's rollout scope** because it is not an
+    `agent-*` persistent-service plugin — it's a skill-delivery plugin with an
+    incidental Python component, not a long-running daemon needing scheduled
+    tasks/ZDD cutover/draining. Re-evaluate only if its installer independently
+    picks up the same shared-engine bugs this effort is fixing.
 - **`agent-bridge`'s installer is repeatedly cited elsewhere in this repo as
-  "the reference implementation"** (e.g. aperture-labs issue #930) — it should
-  likely be the source the canonical engine is extracted *from*, and the
-  first plugin re-pointed *at* the canonical engine (dogfooding before asking
-  any other plugin to adopt it).
+  "the reference implementation"** (e.g. a downstream consumer's tracked issue
+  requiring `agent-logger` to mirror it) — it should likely be the source the
+  canonical engine is extracted *from*, and the first plugin re-pointed *at*
+  the canonical engine (dogfooding before asking any other plugin to adopt
+  it).
 
 ## Request
 
@@ -135,8 +178,10 @@ as independent per-plugin PRs; see Coordination._
       `Invoke-UvPipInstallResilient` / `Invoke-NativeCapture` /
       `Test-IsSreModuleMismatch` / `Test-IsVenvCorruption` / binstub-writing /
       deploy-manifest-writing / scheduled-task functions across all ~12
-      runtime plugins' `install.ps1` (PowerShell first; `.sh` mirrors after
-      the shape is settled).
+      runtime plugins' canonical installer entrypoint — `install.ps1` where it
+      exists, else `init.ps1` (`agent-containers`, `agent-mcp`,
+      `agent-machines`) — PowerShell first; `.sh` mirrors (`install.sh`/
+      `init.sh`) after the shape is settled.
 - [ ] Classify every duplicated function as: **(a) byte-identical or
       near-identical already** (pure engine — safe to collapse verbatim),
       **(b) same shape, different constants** (needs a config parameter, e.g.
@@ -171,12 +216,14 @@ to prevent:
   installs). Git-fetch makes every install/update depend on GitHub
   reachability — including the exact moment someone needs to repair a broken
   install during an incident.
-- **A new shared cache reintroduces the #6785/#6852 hazard class.** The
-  fetched engine has to land in a local cache that concurrent installs share
-  — structurally the same "shared cache, concurrent writers, partial-write
-  corruption" shape as uv's managed-interpreter cache that caused both prior
-  bugs. Vendoring keeps each plugin's copy inside its own already-isolated
-  payload — no new shared-cache surface at all.
+- **A new shared cache reintroduces the same hazard class already fixed
+  once.** The fetched engine has to land in a local cache that concurrent
+  installs share — structurally the same "shared cache, concurrent writers,
+  partial-write corruption" shape as uv's managed-interpreter cache that
+  caused the shared-interpreter-race bugs fixed via copilot-extensions#2482
+  (and its earlier SRE-mismatch precursor). Vendoring keeps each plugin's
+  copy inside its own already-isolated payload — no new shared-cache surface
+  at all.
 - **It would reverse a deliberate, documented constraint**
   (`docs/install-contract.md`: *"there is no shared install module resolved
   at install or runtime... each plugin's install flow must be completely
@@ -251,14 +298,23 @@ Concretely:
       logic beyond the engine — sibling package installs / separate engine
       venv — prove the config schema handles these before doing the rest).
 - [ ] `agent-dispatch`, `agent-containers`, `agent-mcp`, `agent-machines`.
-- [ ] `agent-worktrees` is the control-plane plugin and largest/most bespoke
-      installer (3638 lines) — evaluate last whether it should adopt the
-      engine at all, or remain intentionally bespoke (it already opts out of
-      the shared `resolve-runtime.*` fan-out for the same reason — see
-      `tools/sync-versioned-runtime.py`'s `RESOLVER_BESPOKE` set).
-- [ ] Retire the opt-in gate once every intended plugin has adopted the engine
-      (mirroring how a fully-adopted primitive eventually becomes mandatory
-      in `check-install-contract.py`).
+- [ ] **`agent-worktrees` is a decided permanent exception, not a deferred
+      evaluation.** It is the control-plane plugin and by far the largest,
+      most bespoke installer (3638 lines), and it already opts out of the
+      related `resolve-runtime.*` fan-out for the same specialization reason
+      (see `tools/sync-versioned-runtime.py`'s `RESOLVER_BESPOKE` set). It
+      does **not** adopt the shared engine in this effort's scope, now or
+      later — its exclusion is intentional and permanent, not a TODO. State
+      this in `tools/sync-installer-engine.py`'s adopter set and any
+      completion-criteria/guard scope alongside it, so a future "is this
+      effort done" check does not treat agent-worktrees' non-adoption as
+      unfinished work.
+- [ ] Retire the opt-in gate once every plugin in this effort's **permanent**
+      adopter set (every runtime plugin except the `agent-worktrees`
+      exception above) has adopted the engine — mirroring how a fully-adopted
+      primitive eventually becomes mandatory in `check-install-contract.py`.
+      "Done" for this effort means *that* set is fully adopted, not "every
+      plugin in the repo, no exceptions."
 
 ## Validation Plan
 
@@ -269,14 +325,15 @@ Concretely:
       that has adopted the engine, and fails (with a clear diagnostic) when a
       vendored copy is hand-edited or drifts from canonical.
 - [ ] Each converted plugin's full existing test suite still passes
-      (`test-supervisor`-wrapped `pytest`), plus any install-contract guard
-      (`tools/check-install-contract.py`).
-- [ ] Each converted plugin is deployed to at least one real machine
-      (lambda-core) and its daemon/service verified healthy post-conversion —
-      a behavior-preserving refactor that silently breaks a live service is
-      the one failure mode this effort must not introduce.
+      (`pytest`, run through this repo's normal bounded test runner), plus
+      any install-contract guard (`tools/check-install-contract.py`).
+- [ ] Each converted plugin is deployed to at least one real machine and its
+      daemon/service verified healthy post-conversion — a behavior-preserving
+      refactor that silently breaks a live service is the one failure mode
+      this effort must not introduce.
 - [ ] After Phase 1, deliberately reproduce a class of bug already fixed once
-      in the canonical engine (e.g. the #6852 pyvenv.cfg signature) against a
+      in the canonical engine (e.g. the pyvenv.cfg/uv-exit-106 venv-corruption
+      signature fixed via copilot-extensions#2482) against a
       **not-yet-migrated** plugin, confirm it's still present there, migrate
       that plugin, and confirm the same reproduction now passes — proving the
       "fix once, fixed everywhere on adopt" property this effort exists to
@@ -301,9 +358,10 @@ _Pending — Phase 0's audit findings land here before Phase 1 starts._
 
 ### 2026-09-12 — Kickoff
 - Effort created directly off the operator's request, immediately following
-  aperture-labs#6852 (pyvenv.cfg venv-corruption fix, PR copilot-extensions#2482)
-  — the session that surfaced this exact pain point (fixed agent-bridge, then
-  had to hand-port the identical fix into agent-logger).
+  a venv-corruption fix (pyvenv.cfg missing after a shared uv-managed
+  interpreter race, PR copilot-extensions#2482) — the session that surfaced
+  this exact pain point (fixed agent-bridge, then had to hand-port the
+  identical fix into agent-logger).
 - Grounded in existing precedent: `docs/install-contract.md`'s explicit
   vendoring-not-runtime-sharing constraint, `versioned_runtime.py` +
   `sync-versioned-runtime.py` (the closed `uniform-runtime-resolution` effort)
@@ -331,8 +389,8 @@ _Pending — Phase 0's audit findings land here before Phase 1 starts._
   adds a mandatory network dependency to every install/update (today's flow is
   offline after the payload copy, save precedented uv/PyPI touches), and its
   fetched-engine cache would reintroduce the exact "shared cache, concurrent
-  writers, partial-write corruption" hazard class that caused #6785/#6852 —
-  just relocated, not eliminated. It would also reverse
+  writers, partial-write corruption" hazard class already fixed once via
+  copilot-extensions#2482 — just relocated, not eliminated. It would also reverse
   `docs/install-contract.md`'s documented self-containment constraint, which
   is a bigger, separate decision than this effort's actual trigger requires.
   Full reasoning recorded inline above Phase 1 (`### Design decision —
