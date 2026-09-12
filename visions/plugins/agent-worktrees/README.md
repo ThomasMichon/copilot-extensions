@@ -206,6 +206,20 @@ A worktree may complete only when its source-control content is safe and every
 durable obligation is settled or transferred. Interactive process exit is
 neither necessary nor sufficient evidence of completion.
 
+### finalization-is-reversible-under-live-resume
+
+A worktree's completed/finalized state is not a one-way trap for a session
+still actively resumed inside it. Finalization freezing the worktree's capacity
+to originate new claims, obligations, or child worktrees — while continuing to
+let the same live session read, write, and resume inside it — is an
+inconsistent middle state, not a safety boundary: nothing protected by refusing
+a new obligation is also protected by allowing the resumed session to keep
+acting otherwise. The owning live session can reactivate a finalized worktree,
+lifting exactly that frozen-ownership restriction, without discarding its
+existing durable record, lineage, claims, or history. A worktree that is
+genuinely done accepting new work is retired from active resumption entirely,
+not left resumable-but-silently-crippled.
+
 ### provider-replacement-preserves-agency
 
 Changing the preferred session host affects future execution legs, not the
@@ -257,6 +271,15 @@ manager, or session-host implementation.
 
 ## Provenance
 
+- **2026-09-11** — Added *finalization-is-reversible-under-live-resume* after
+  a live-reproduced defect: an actively resumed worktree (session count 2,
+  resume count 6, still hosting the current session) was marked finalized —
+  apparently by a stale or premature completion signal, not by any deliberate
+  operator action — and this then blocked the same live session from creating
+  a new child worktree ("creator ownership is frozen"), with no supported
+  reversal short of abandoning the worktree entirely. The finalized state was
+  otherwise transparent: reads, writes, and resumption all still worked. Filed
+  as [#2467](https://github.com/ThomasMichon/copilot-extensions/issues/2467).
 - **2026-09-09** — Strengthened "Derived status" from an optional accelerator
   to an explicit thin-client/ref-counted-subscriber expectation: an ordinary
   reader (CLI invocation or Picker), not only a session-lifecycle hook, should
