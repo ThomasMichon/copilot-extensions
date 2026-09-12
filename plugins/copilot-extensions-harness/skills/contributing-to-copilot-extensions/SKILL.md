@@ -133,7 +133,13 @@ installer. Know which kind you are changing.
    The submitting agent remains responsible until the PR is merged and its
    worktree is finalized:
    - Assess Copilot comments as advisory findings; address valid ones and
-     explain or dismiss invalid ones. Never wait for Copilot to approve.
+     explain or dismiss invalid ones. Never wait for Copilot to approve --
+     its review is always a non-blocking comment, never a required approval,
+     no matter how many rounds you go through or how it's worded (a "changes
+     recommended" banner is not a gate). Merge once you've given it a bounded
+     window (order of minutes) and addressed what's genuinely worth
+     addressing; do not loop indefinitely re-requesting a review chasing a
+     zero-finding pass that may never come.
    - Keep the branch current and mergeable. If `main` moves or conflicts appear,
      reconcile with the supported worktree PR verbs, re-run the required gates,
      and update the PR with `push-changes`.

@@ -43,8 +43,10 @@ copilot-extensions create            # isolated worktree (no mux/session)
 #   Complete the documentation-impact review below.
 copilot-extensions create-pr         # squashes the worktree, pushes pr/<slug>,
                                      # and (auto_open) opens the GitHub PR
-#   → Copilot posts its review on the PR (non-blocking)
+#   → Copilot posts its review on the PR (non-blocking; never a merge gate)
 #   …address anything worth addressing, re-run push-changes to update the PR…
+#   → merge regardless of remaining low/medium findings -- there is no
+#     approval or "clean" verdict to wait for; see the note below.
 copilot-extensions pr-merge ThomasMichon/copilot-extensions <#> --now   # MANUAL squash-merge (you own the merge)
 copilot-extensions finalize          # clean up the worktree
 ```
@@ -53,11 +55,19 @@ copilot-extensions finalize          # clean up the worktree
   `pr/<slug>` head; it will NOT land on `main`).
 - **Merge is deliberately manual.** No auto-merge label is bound (the repo's
   `pr-self-merge` profile authorizes the submitter to merge directly): open the
-  PR, give Copilot's review a chance to land, then squash-merge it yourself with
-  `pr-merge <#> --now` (equivalent to a plain `gh pr merge <#> --squash
-  --delete-branch`, but it resolves the right account and squashes uniformly). (0
-  approvals are required by policy — a solo owner can't approve their own PR, and
-  Copilot's review is advisory.)
+  PR, give Copilot's review a bounded window (order of minutes, not hours) to
+  land, then squash-merge it yourself with `pr-merge <#> --now` (equivalent to
+  a plain `gh pr merge <#> --squash --delete-branch`, but it resolves the
+  right account and squashes uniformly). (0 approvals are required by policy —
+  a solo owner can't approve their own PR, and Copilot's review is advisory.)
+- **There is no verdict to wait for.** Copilot's review is always a
+  non-blocking comment, never a required approval, no matter how many
+  findings it reports or how many rounds you go through. Address genuinely
+  valuable findings, explain or dismiss the rest, and merge -- do not leave a
+  PR sitting untouched after a review lands "waiting" for a subsequent
+  approval or a zero-finding pass that may never come. If a PR has had a
+  review and nothing has happened since, that is a stuck PR: merge it or
+  explicitly abandon it, don't leave it idle.
 - **Never** `git push origin main` or `push-changes` direct-to-`main`; both the
   tooling and the branch policy reject it. Break-glass (a genuine recovery)
   means temporarily relaxing the ruleset — not routing around it.
