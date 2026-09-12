@@ -485,11 +485,7 @@ reader deciding whether to resume a session the bridge reports on: neither may
 treat a cached or persisted value as ground truth for a consequential
 decision (resume, recovery, takeover) without a live check backing it up. A
 three-tier **hot/warm/cold** liveness read (always observed, never
-cache-gated) is the reference shape for that live check; see
-`plugins/agent-dispatch/src/agent_dispatch/bridge_state_machine.py` and
-`plugins/agent-dispatch/src/agent_dispatch/bridge_liveness_probe.py` for the
-first realization of this pattern, built against the bridge from the outside
-ahead of the bridge's own internal convergence.
+cache-gated) is the reference shape for that live check.
 
 ### local-first-peer-mesh
 
