@@ -1198,3 +1198,53 @@ async def test_direct_resume_serializes_with_followup_prompt(
     await asyncio.wait_for(ctx.session._prompt_task, 1)
     attach_mock.assert_awaited_once()
     mock_acp_client.send_prompt.assert_awaited_once_with("follow-up")
+
+
+@pytest.mark.parametrize("status", ["created", "failed", "stopped"])
+async def test_rehydrate_does_not_invent_restart_provenance(context, status):
+    ctx = context
+    ctx.db.update_session_status(ctx.session.session_id, status, time.time())
+    restarted = SessionManager(ctx.db, session_host_state_dir=ctx.state_dir)
+    session = restarted.get_session(ctx.session.session_id)
+    assert session.restart_status is None
+    assert ctx.db.get_session(session.session_id)["restart_status"] is None
+
+
+@pytest.mark.parametrize("status", ["created", "failed", "stopped"])
+async def test_restart_detach_does_not_record_non_restart_states(context, status):
+    ctx = context
+    ctx.session.status = SessionStatus(status)
+    ctx.session.restart_status = status
+    await ctx.manager.stop_session(ctx.session.session_id, for_restart=True)
+    assert ctx.session.restart_status is None
+    assert ctx.db.get_session(ctx.session.session_id)["restart_status"] is None
+
+
+async def test_interrupt_excludes_new_prompt_until_cancel_is_sent(
+    context, monkeypatch, mock_acp_client,
+):
+    ctx = context
+    ctx.session.client = mock_acp_client
+    mock_acp_client.session_host_client = None
+    finish_turn = asyncio.Event()
+    old_task = asyncio.create_task(finish_turn.wait())
+    ctx.session._prompt_task = old_task
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def cancel():
+        ctx.session.status = SessionStatus.IDLE
+        entered.set()
+        await release.wait()
+        finish_turn.set()
+
+    mock_acp_client.cancel_prompt.side_effect = cancel
+    interrupt = asyncio.create_task(ctx.manager.interrupt_turn(ctx.session.session_id))
+    await asyncio.wait_for(entered.wait(), 1)
+    submit = asyncio.create_task(ctx.manager.submit_prompt(ctx.session.session_id, "next turn"))
+    await asyncio.sleep(0)
+    assert not submit.done()
+    release.set()
+    await asyncio.wait_for(interrupt, 1)
+    await asyncio.wait_for(submit, 1)
+    await asyncio.wait_for(ctx.session._prompt_task, 1)
+    mock_acp_client.send_prompt.assert_awaited_once_with("next turn")
