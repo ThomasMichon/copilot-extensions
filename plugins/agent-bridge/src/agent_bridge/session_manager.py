@@ -5086,6 +5086,23 @@ class SessionManager:
         if not session:
             raise KeyError(f"Session {session_id} not found")
 
+        async with session._turn_start_lock:
+            resumed = await self._resume_session_admitted(
+                session, permission_callback, allow_recreate=allow_recreate,
+            )
+            if drain and resumed.status == SessionStatus.IDLE:
+                await self._drain_pending_prompts_locked(resumed)
+            return resumed
+
+    async def _resume_session_admitted(
+        self,
+        session: Session,
+        permission_callback: Any | None = None,
+        *,
+        allow_recreate: bool = False,
+    ) -> Session:
+        """Resume while the caller owns turn admission; acquire lifecycle once."""
+        session_id = session.session_id
         async with session._lifecycle_lock:
             if self._sessions.get(session_id) is not session:
                 raise KeyError(f"Session {session_id} not found")
@@ -5412,11 +5429,6 @@ class SessionManager:
                     raise
 
         session.touch()
-        # Queue outlived the restart? Deliver it now that the session is IDLE.
-        # Outside the lifecycle lock (drain submits a fresh turn). Skipped by the
-        # auto-resume-from-submit path (drain=False) to avoid a double turn.
-        if drain and session.status == SessionStatus.IDLE:
-            await self._drain_pending_prompts(session)
         return session
 
     async def resync_session(self, session_id: str, *, background: bool = False) -> int:
@@ -5602,9 +5614,7 @@ class SessionManager:
             # end+create last resort: if the stop->resume ladder is exhausted,
             # recreate a fresh ACP session in place rather than failing the send
             # (#1468).
-            await self.resume_session(
-                session_id, drain=False, allow_recreate=True
-            )
+            await self._resume_session_admitted(session, allow_recreate=True)
             # resume_session sets status to IDLE and attaches a new client
 
         turn_index = session.turn_count
@@ -5823,7 +5833,7 @@ class SessionManager:
                     await self._drain_pending_prompts_locked(session)
                 elif (session.status == SessionStatus.STOPPED
                         and session.acp_session_id):
-                    await self.resume_session(session.session_id, drain=False)
+                    await self._resume_session_admitted(session)
                     await self._drain_pending_prompts_locked(session)
         except Exception as exc:
             log.warning(
@@ -6610,23 +6620,39 @@ class SessionManager:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
-        task = loop.create_task(self._run_auto_handoff(session.session_id))
+        task = loop.create_task(self._run_auto_handoff(
+            session, expected_generation=session._lifecycle_generation,
+        ))
         self._auto_handoff_tasks.add(task)
         task.add_done_callback(self._auto_handoff_tasks.discard)
 
-    async def _run_auto_handoff(self, session_id: str) -> None:
+    async def _run_auto_handoff(
+        self, session: Session, *, expected_generation: int,
+    ) -> None:
         """Perform a policy-driven handoff and migrate any durably-queued
         follow-ups onto the successor, so no prompt is stranded on the retired
-        predecessor. Best-effort: a failed handoff logs and leaves the
-        predecessor current (``handoff_session`` never orphans the worktree)."""
+        predecessor. Failures are logged; incomplete predecessor retirement is
+        also recorded on both session event streams."""
+        session_id = session.session_id
         try:
-            pending = self._db.list_pending_prompts(session_id)
-        except Exception:
-            pending = []
-        try:
-            successor = await self.handoff_session(
-                session_id, reason="context-pressure"
-            )
+            async with session._turn_start_lock:
+                if (
+                    self._sessions.get(session_id) is not session
+                    or session._lifecycle_generation != expected_generation
+                    or not self._auto_handoff_eligible(session)
+                ):
+                    return
+                if (
+                    session.status != SessionStatus.IDLE
+                    or (self._auto_handoff.unwatched_only and session.subscriber_count > 0)
+                ):
+                    if session.status in (SessionStatus.IDLE, SessionStatus.RUNNING):
+                        session._handoff_pending = True
+                    return
+                pending = self._db.list_pending_prompts(session_id)
+                successor = await self.handoff_session(
+                    session_id, reason="context-pressure", _turn_admission_owned=True,
+                )
         except Exception as exc:
             log.warning("Auto-handoff of %s failed: %s", session_id, exc)
             return
@@ -6774,7 +6800,9 @@ class SessionManager:
 
         Ordering is spawn-then-retire so a failed successor spawn leaves the
         predecessor untouched and current -- a handoff never orphans the
-        worktree. Returns the successor session.
+        worktree. Returns the successor session only after predecessor retirement
+        succeeds. Retirement failures propagate and emit ``handoff_failed`` on
+        both streams; identities and succession links remain for explicit cleanup.
 
         The self-authored-brief path is the normal and currently only
         self-contained route for agent-bridge's own ACP-hosted sessions,
@@ -6790,6 +6818,14 @@ class SessionManager:
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
+        if not _turn_admission_owned:
+            async with session._turn_start_lock:
+                if self._sessions.get(session_id) is not session:
+                    raise KeyError(f"Session {session_id} not found")
+                return await self.handoff_session(
+                    session_id, reason=reason, seed=seed, seed_text=seed_text,
+                    handoff_token=handoff_token, _turn_admission_owned=True,
+                )
 
         # Single-checkout (CodeSpace/command) agents cannot host predecessor and
         # successor at once, so the spawn-then-retire ordering below does not
@@ -6814,7 +6850,7 @@ class SessionManager:
                     "cannot hand off"
                 )
             session.status = SessionStatus.STOPPED
-            await self.resume_session(session_id, drain=False)
+            await self._resume_session_admitted(session)
 
         # 1. Resolve the successor's opening turn. External requestors may
         #    provide the exact prompt text; otherwise the predecessor authors a
@@ -6952,11 +6988,28 @@ class SessionManager:
 
         # 6. Retire the predecessor: STOPPED keeps it resumable and preserves its
         #    transcript + succession link (end_session would delete both).
-        with contextlib.suppress(Exception):
-            if _turn_admission_owned:
-                await self._stop_session_admitted(session, force=True)
-            else:
-                await self.stop_session(session_id, force=True)
+        try:
+            await self._stop_session_admitted(session, force=True)
+        except Exception as exc:
+            failure = {
+                "phase": "predecessor_retirement",
+                "predecessor_id": session_id,
+                "successor_id": successor.session_id,
+                "reason": reason,
+                "message": str(exc),
+                "cleanup_required": True,
+            }
+            log.error(
+                "Handoff predecessor retirement failed for %s (successor %s); cleanup required",
+                session_id, successor.session_id, exc_info=True,
+            )
+            for participant in (session, successor):
+                if participant.event_log:
+                    participant.event_log.append("handoff_failed", failure)
+            raise RuntimeError(
+                f"Handoff successor {successor.session_id} started, but predecessor "
+                f"{session_id} could not be stopped; cleanup required"
+            ) from exc
 
         log.info(
             "Handoff: session %s -> %s (worktree %s)",

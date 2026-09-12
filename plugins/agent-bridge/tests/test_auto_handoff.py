@@ -108,6 +108,30 @@ class TestProactiveHandoff:
     """The usage-driven trigger fires an in-place cutover when idle."""
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("resume_after_stop", [False, True])
+    async def test_scheduled_handoff_is_invalidated_by_stop(
+        self, tmp_db, spawn_target, _patch_spawn, _patch_acp,
+        monkeypatch, resume_after_stop,
+    ) -> None:
+        sm = _sm(tmp_db, enabled=True)
+        pred = await sm.start_session(spawn_target, caller_id="example-worktree")
+        handoff = AsyncMock(side_effect=AssertionError("stale auto-handoff"))
+        monkeypatch.setattr(sm, "handoff_session", handoff)
+
+        _cross_critical(sm, pred)
+        assert sm._auto_handoff_tasks
+        await sm.stop_session(pred.session_id)
+        if resume_after_stop:
+            await sm.resume_session(pred.session_id, drain=False)
+        await _drain_auto_tasks(sm)
+
+        handoff.assert_not_awaited()
+        assert pred.status == (
+            SessionStatus.IDLE if resume_after_stop else SessionStatus.STOPPED
+        )
+        assert sm._db.get_session(pred.session_id)["successor_id"] is None
+
+    @pytest.mark.asyncio
     async def test_fires_with_existing_self_authored_brief_path(
         self, tmp_db, spawn_target, _patch_spawn, _patch_acp, mock_acp_client
     ) -> None:

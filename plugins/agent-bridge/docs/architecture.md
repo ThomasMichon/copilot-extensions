@@ -399,6 +399,12 @@ restart does not inherently close the child's pipes.
   Direct resync also owns turn admission while replacing its client. A queued
   drain kick carries the generation of its admitted request and rechecks it
   under admission, preserving queued rows rather than reviving a later stop.
+  Public resume owns admission too; send, drain, and handoff use the shared
+  admission-owned resume helper without reentering the lock. Scheduled automatic
+  handoffs recheck session identity, generation, idle state, and policy under
+  admission before doing any work. Handoff retirement failures propagate and
+  emit a cleanup-required ``handoff_failed`` event on both sessions, retaining
+  their identities/links rather than silently reporting a completed handoff.
   Ordinary stop also stops per-session credential-relay supervisors and cancels
   live forwards before acknowledgement; transport teardown failures are surfaced
   rather than reported as containment. Host descriptors and venue ownership are
