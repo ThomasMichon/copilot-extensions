@@ -385,7 +385,9 @@ restart does not inherently close the child's pipes.
   stopped-state write.
   Remote authority results are applied only if the snapshotted host record and
   lifecycle generation still match; a stop/resume cycle cannot revive a stale
-  probe result. Other existing synchronous local-reap entry points remain
+  probe result. Startup candidates are rechecked under ownership and already
+  attached sessions are skipped. Explicit end/cleanup owns the same admission
+  and lifecycle locks before inspecting authority. Other synchronous local-reap entry points remain
   unchanged; their offloading is tracked separately in #2465.
   Stop also awaits any previously scheduled remote reap for that session before
   acknowledging, shielding that cleanup from request cancellation. When both
