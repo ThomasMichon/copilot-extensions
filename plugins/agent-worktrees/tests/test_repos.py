@@ -242,10 +242,27 @@ def test_migrate_no_legacy_file(home: Path):
     ("ssh://git@github.com/example-org/proj.git", "example-org"),
     ("https://gitlab.com/example-org/proj.git", None),   # non-github
     ("https://host.example.com/gitea/u/r.git", None),    # non-github
+    ("https://notgithub.com/example-org/proj.git", None),  # lookalike host
+    ("https://evilgithub.com/example-org/proj.git", None),  # lookalike host
+    ("git@evilgithub.com:example-org/proj.git", None),   # lookalike host, ssh
     ("", None),
 ])
 def test_github_owner(remote, owner):
     assert repos.github_owner(remote) == owner
+
+
+@pytest.mark.parametrize("remote,slug", [
+    ("https://github.com/example-org/proj.git", "example-org/proj"),
+    ("https://github.com/example-org/proj", "example-org/proj"),
+    ("git@github.com:example-org/proj.git", "example-org/proj"),
+    ("ssh://git@github.com/example-org/proj.git", "example-org/proj"),
+    ("https://gitlab.com/example-org/proj.git", None),
+    ("https://notgithub.com/example-org/proj.git", None),  # lookalike host
+    ("git@evilgithub.com:example-org/proj.git", None),   # lookalike host, ssh
+    ("", None),
+])
+def test_github_slug(remote, slug):
+    assert repos.github_slug(remote) == slug
 
 
 def test_resolve_account_explicit_wins():

@@ -335,16 +335,47 @@ def github_owner(remote: str) -> str | None:
     """Extract the owner from a github.com remote URL (https or ssh form).
 
     Returns None for non-GitHub remotes (so ADO/gitea derive no account).
+    Host matching is boundary-aware: the host must actually *be*
+    ``github.com`` (optionally ``www.``, optionally with userinfo on HTTPS),
+    not merely contain that substring -- a remote on ``notgithub.com`` or
+    ``evilgithub.com`` must not be mistaken for GitHub.
     """
     if not remote:
         return None
     url = remote.strip()
-    m = re.match(r"https?://[^/]*github\.com/([^/]+)/", url)
+    m = re.match(r"https?://(?:[^@/]+@)?(?:www\.)?github\.com/([^/]+)/", url)
     if m:
         return m.group(1)
-    m = re.match(r"(?:ssh://)?git@[^:/]*github\.com[:/]([^/]+)/", url)
+    m = re.match(r"(?:ssh://)?git@github\.com[:/]([^/]+)/", url)
     if m:
         return m.group(1)
+    return None
+
+
+def github_slug(remote: str) -> str | None:
+    """Extract the ``owner/name`` slug from a github.com remote URL.
+
+    Unlike the registry key used to name a repo entry (which can be an
+    arbitrary alias, e.g. ``ce`` for ``github.com/example-org/proj``), this is
+    the canonical slug `gh`/the GitHub API actually expect as a repo target
+    (e.g. for ``repos gh <target> -- ...``). Returns None for a non-GitHub or
+    unparseable remote. Same host-boundary-aware matching as
+    :func:`github_owner` -- see its docstring.
+    """
+    if not remote:
+        return None
+    url = remote.strip()
+    m = re.match(
+        r"https?://(?:[^@/]+@)?(?:www\.)?github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$",
+        url,
+    )
+    if m:
+        return f"{m.group(1)}/{m.group(2)}"
+    m = re.match(
+        r"(?:ssh://)?git@github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?/?$", url
+    )
+    if m:
+        return f"{m.group(1)}/{m.group(2)}"
     return None
 
 
