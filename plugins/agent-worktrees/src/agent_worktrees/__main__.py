@@ -1867,10 +1867,7 @@ def _journal_owner_reciprocal_claim(
     if not owner_ref:
         return False
     try:
-        owner_path, _owner_wt, _err = _resolve_owner_ref_record_path(
-            owner_ref,
-            config,
-        )
+        owner_path, _owner_wt, _err = _resolve_owner_ref_record_path(owner_ref, config,)
         if owner_path is None or not owner_path.exists():
             return False
         child_ref = tracking.format_claim_ref(
@@ -1898,10 +1895,7 @@ def _journal_owner_reciprocal_claim(
         else:
             with tracking._RecordLock(owner_path, require_sidecar=True):
                 _write_claim()
-        print(
-            f"Journaled this worktree as an obligation on {owner_ref}.",
-            file=sys.stderr,
-        )
+        print(f"Journaled this worktree as an obligation on {owner_ref}.", file=sys.stderr,)
         return True
     except Exception as exc:  # never let journaling break the carve
         print(f"owner-claim journaling failed (non-fatal): {exc}", file=sys.stderr)
@@ -2793,10 +2787,7 @@ def _handoff_cutover_spawn_result(
     predecessor_binding = None
     if session_id:
         predecessor_binding = (
-            sessions.mux_binding_for_session(
-                session_id,
-                expected_session_name=mux_session,
-            )
+            sessions.mux_binding_for_session(session_id, expected_session_name=mux_session,)
             if anchor_mode and mux_session
             else sessions.mux_binding_for_session(session_id)
         )
@@ -2967,6 +2958,13 @@ def _handoff_cutover_spawn_result(
     return 0, response
 
 
+# A losing Stage-13 claimant's brief retry window (see _maybe_emit_stage_13):
+# short enough to add negligible latency to a hook/monitor call, long enough
+# for the winner's own log_event() + failure-detection + rollback to settle.
+_STAGE13_CLAIM_RETRIES = 3
+_STAGE13_CLAIM_RETRY_DELAY_S = 0.05
+
+
 def _maybe_emit_stage_13(
     wt_id: str | None, handoff_token: str | None, *, launch_id: str | None = None,
 ) -> None:
@@ -2979,12 +2977,15 @@ def _maybe_emit_stage_13(
     "task:1" and "task_1" onto the same on-disk name): the successor's
     sessionStart process and the resident monitor's retire process run
     concurrently, so a plain read_events() check-then-act could let both
-    sides pass before either logs, double-recording Stage 13. The claim is
-    rolled back if the log write is detected to have failed (via
-    ``activity.log_event_failure_count()``), so a transient logger I/O error
-    remains retryable rather than silently losing Stage 13 forever; a hard
-    process crash between the claim and the log write is a narrower residual
-    gap left to Phase 3's durable trace store.
+    sides pass before either logs, double-recording Stage 13. If the log
+    write is detected to have failed (via
+    ``activity.log_event_failure_count()``), the winner rolls its claim back
+    so the failure stays retryable -- but that rollback can race a losing
+    caller's own FileExistsError check, so a loser doesn't just give up: it
+    waits briefly, and if the claim vanished (a rollback), retries the claim
+    itself instead of silently losing Stage 13 forever. A hard process crash
+    between the claim and the log write is a narrower residual gap left to
+    Phase 3's durable trace store.
     """
     if not wt_id or not handoff_token:
         return
@@ -3004,12 +3005,29 @@ def _maybe_emit_stage_13(
         return
     digest = hashlib.sha256(f"{wt_id}\x00{handoff_token}".encode()).hexdigest()
     claim_path = _monitor_handoff_claim_root() / "stage13" / f"{digest}.json"
-    try:
-        claim_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(claim_path, "x", encoding="utf-8"):
-            pass
-    except OSError:
-        return  # already claimed (FileExistsError) or unwritable -- either way, no-op
+    claim_path.parent.mkdir(parents=True, exist_ok=True)
+    claimed = False
+    for _attempt in range(_STAGE13_CLAIM_RETRIES):
+        try:
+            with open(claim_path, "x", encoding="utf-8"):
+                pass
+        except FileExistsError:
+            # A losing caller must not just give up: if the current holder's
+            # log write fails and rolls back the claim (below), that rollback
+            # can happen between our check and its own return, and no other
+            # caller may ever retry -- silently losing Stage 13 forever. Give
+            # the holder a brief window to either finish or roll back, then
+            # retry the claim ourselves if it did.
+            time.sleep(_STAGE13_CLAIM_RETRY_DELAY_S)
+            if claim_path.exists():
+                return  # still held -- its owner is genuinely in flight
+            continue
+        except OSError:
+            return  # unwritable claim dir -- no-op
+        claimed = True
+        break
+    if not claimed:
+        return
     failures_before = activity.log_event_failure_count()
     activity.log_event(
         "handoff_complete", worktree_id=wt_id, session_id=handoff.predecessor,
@@ -3355,20 +3373,14 @@ def cmd_embody(args: argparse.Namespace) -> int:
     try:
         lifecycle_lock.acquire()
     except TimeoutError:
-        return _json_error(
-            "worktree lifecycle remained busy for five minutes",
-            exit_code=3,
-        )
+        return _json_error("worktree lifecycle remained busy for five minutes", exit_code=3,)
     try:
         # A managed-GC pass may have completed while launch preflight ran.
         # Re-check under the shared lifecycle fence before creating a process.
         try:
             launch_record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")
         except FileNotFoundError:
-            return _json_error(
-                f"Worktree record disappeared before launch: {wt_id}",
-                exit_code=3,
-            )
+            return _json_error(f"Worktree record disappeared before launch: {wt_id}", exit_code=3,)
         if getattr(launch_record, "kind", None) in tracking.MANAGED_KINDS and getattr(
             launch_record, "status", None
         ) in {"complete", "completed", "finalized"}:
@@ -3388,10 +3400,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
                 and getattr(launch_record, "repo", None) != getattr(record, "repo", None)
             )
         ):
-            return _json_error(
-                f"Worktree record changed before launch: {wt_id}",
-                exit_code=3,
-            )
+            return _json_error(f"Worktree record changed before launch: {wt_id}", exit_code=3,)
         if sessions.has_mux_session(wt_id):
             _json_output(
                 {
@@ -3480,10 +3489,7 @@ def _restore_before_resume(record: tracking.WorktreeRecord) -> bool:
         if result.get("verified"):
             return True
         output.err(
-            result.get(
-                "reason",
-                "the live process was not confirmed inside the mux pane",
-            )
+            result.get("reason", "the live process was not confirmed inside the mux pane",)
         )
         return False
     if result.get("ok"):
@@ -4050,10 +4056,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             # Build picker menu
             menu_items: list[MenuItem] = []
             reciprocal_relations = {
-                rec.worktree_id: reciprocal_presentation.derive(
-                    rec,
-                    _controller_findings(rec),
-                )
+                rec.worktree_id: reciprocal_presentation.derive(rec, _controller_findings(rec),)
                 for rec, _info in classified
             }
 

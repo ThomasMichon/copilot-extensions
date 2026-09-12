@@ -438,6 +438,50 @@ class TestRegisterSessionStdin:
         )
         assert len(complete) == 1
 
+    def test_a_losing_claimant_retries_after_the_winners_rollback(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        """#2457 review finding (HIGH): a losing caller must not simply give
+        up on `FileExistsError` -- if the current holder's log write fails and
+        it rolls its claim back, that rollback can happen between the loser's
+        existence check and its own return, silently losing Stage 13 forever
+        unless the loser gets a chance to retry. Simulate the holder's claim
+        vanishing (the rollback) mid-window and confirm the losing caller
+        still succeeds."""
+        import threading
+
+        _save_record(tmp_tracking_dir, "wt-loser-retry", "/tmp/src/wt-lr")
+        tracking.register_session("wt-loser-retry", "old")
+        rec = load_record(tmp_tracking_dir / "wt-loser-retry.yaml")
+        tracking.open_handoff(rec, "old", "task-loser-retry")
+        m.cmd_register_session(_args(
+            worktree_id="wt-loser-retry", session_id="new",
+            handoff_token="task-loser-retry",
+        ))
+        activity.log_event(
+            "handoff_predecessor_retire", worktree_id="wt-loser-retry",
+            session_id="old", handoff_token="task-loser-retry", outcome="gone",
+        )
+
+        digest = m.hashlib.sha256(b"wt-loser-retry\x00task-loser-retry").hexdigest()
+        claim_path = m._monitor_handoff_claim_root() / "stage13" / f"{digest}.json"
+        claim_path.parent.mkdir(parents=True, exist_ok=True)
+        claim_path.touch()  # simulate another caller already holding the claim
+
+        def _drop_claim_after_a_beat():
+            import time as _time
+            _time.sleep(m._STAGE13_CLAIM_RETRY_DELAY_S * 0.3)
+            claim_path.unlink()  # simulate the holder's rollback
+
+        threading.Thread(target=_drop_claim_after_a_beat).start()
+
+        m._maybe_emit_stage_13("wt-loser-retry", "task-loser-retry")
+
+        complete = activity.read_events(
+            worktree_id="wt-loser-retry", event="handoff_complete",
+        )
+        assert len(complete) == 1
+
     def test_resolves_worktree_from_stdin_cwd(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
     ):
