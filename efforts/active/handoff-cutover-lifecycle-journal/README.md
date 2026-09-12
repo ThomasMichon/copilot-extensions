@@ -266,9 +266,14 @@ renumbering from the "acknowledges handoff" step onward.)
       agent-bridge's independent `handoff-request` route is documented in
       Context as a real alternate path but is explicitly out of scope for
       this effort's instrumentation; see the deferred follow-on note below.)
-- [ ] Stage 8 (`handoff_successor_spawn_started`) — emit at the start of
+- [x] Stage 8 (`handoff_successor_spawn_started`) — emit at the start of
       `_handoff_cutover_spawn_result` / `mux_new_window`, before success is
       known, so a spawn that later fails still leaves a trace.
+      **Landed as part of Phase 1's spawn-event split** (PR #2479):
+      `_handoff_cutover_spawn_result` emits `handoff_successor_spawn_started`
+      immediately before `sessions.mux_new_window()`, with
+      `handoff_successor_spawn_failed` on the failure path and the existing
+      `handoff_cutover_spawn` retained as the terminal success event.
 - [ ] Stage 9 (`handoff_successor_session_start_bound`) — emit from the
       successor's own `cmd_register_session` when it recognizes the
       `--handoff-candidate-token` and calls `associate_handoff_candidate`.
@@ -637,5 +642,6 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   `test_log_event_never_raises_and_counts_failures`); full plugin suite:
   4155 passed / 20 skipped / 3 pre-existing unrelated installer/binstub
   failures (same three noted against PR #2472). `agent-worktrees` bumped
-  1.5.5-dev69 → dev70. Phase 2 (instrumenting the remaining 11 stages'
-  actual emitter call sites) is next.
+  1.5.5-dev69 → dev70. Stage 8's Phase 2 checklist item is also now done as
+  a side effect (ticked off above). Phase 2 (instrumenting the remaining 10
+  stages' actual emitter call sites) is next.

@@ -3024,58 +3024,37 @@ def _handoff_cutover_spawn_result(
             dry_result["profile_assignment"] = profile_assignment.metadata(selection.assignment)
         return 0, dry_result
 
-    activity.log_event(
-        "handoff_successor_spawn_started",
-        worktree_id=wt_id,
-        session_id=session_id,
-        source="python",
-        handoff_token=handoff_token,
-        old_pane=old_pane,
-        expected_mux_session=expected_mux_session,
-        method="mux_new_window_interactive_argv",
-    )
+    spawn_event_ctx = {
+        "worktree_id": wt_id, "session_id": session_id, "source": "python",
+        "handoff_token": handoff_token, "old_pane": old_pane,
+        "expected_mux_session": expected_mux_session,
+        "method": "mux_new_window_interactive_argv",
+    }
+    activity.log_event("handoff_successor_spawn_started", **spawn_event_ctx)
     result = sessions.mux_new_window(
-        wt_id,
-        work_dir,
-        launch_cmd,
-        env,
-        initial_prompt=seed,
-        session_name=mux_session,
+        wt_id, work_dir, launch_cmd, env,
+        initial_prompt=seed, session_name=mux_session,
     )
     if not result.get("ok"):
         failure = dict(result)
         failure["ok"] = False
         failure["error"] = f"failed to open successor window: {result.get('error')}"
         activity.log_event(
-            "handoff_successor_spawn_failed",
-            worktree_id=wt_id,
-            session_id=session_id,
-            source="python",
-            handoff_token=handoff_token,
-            old_pane=old_pane,
-            expected_mux_session=expected_mux_session,
-            method="mux_new_window_interactive_argv",
-            error=result.get("error"),
+            "handoff_successor_spawn_failed", error=result.get("error"),
+            **spawn_event_ctx,
         )
         return 4, failure
 
     new_pane = result.get("new_pane")
     activity.log_event(
-        "handoff_cutover_spawn",
-        worktree_id=wt_id,
-        session_id=session_id,
-        source="python",
-        handoff_token=handoff_token,
-        old_pane=old_pane,
-        new_pane=new_pane,
+        "handoff_cutover_spawn", new_pane=new_pane,
         seeded=bool(result.get("prompt_received")),
         seed_ready=bool(result.get("prompt_received")),
         candidate_session=None,
         candidate_status="awaiting-session-association",
         predecessor_copilot_pid=predecessor_pid,
         predecessor_copilot_start_time=predecessor_start,
-        expected_mux_session=expected_mux_session,
-        method="mux_new_window_interactive_argv",
+        **spawn_event_ctx,
     )
     candidate_session = None
     if handoff_token and record_path is not None:
