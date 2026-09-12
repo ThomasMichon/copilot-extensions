@@ -51,6 +51,7 @@ def test_log_event_maps_existing_events_to_their_stage(patch_install_dir: Path):
     activity.log_event(
         "handoff_cutover_claim", worktree_id="wt-1", outcome="acquired"
     )
+    activity.log_event("handoff_successor_spawn_started", worktree_id="wt-1")
     activity.log_event("handoff_cutover_spawn", worktree_id="wt-1")
     activity.log_event(
         "handoff_predecessor_retire", worktree_id="wt-1", outcome="gone"
@@ -59,6 +60,7 @@ def test_log_event_maps_existing_events_to_their_stage(patch_install_dir: Path):
     stages = [(e["event"], e["stage"], e["stage_name"]) for e in events]
     assert stages == [
         ("handoff_cutover_claim", 7, "handoff_host_acknowledged"),
+        ("handoff_successor_spawn_started", 8, "handoff_successor_spawn_started"),
         ("handoff_cutover_spawn", 8, "handoff_successor_spawn_started"),
         (
             "handoff_predecessor_retire",
@@ -66,6 +68,23 @@ def test_log_event_maps_existing_events_to_their_stage(patch_install_dir: Path):
             "handoff_pickup_confirmed_predecessor_closing",
         ),
     ]
+
+
+def test_log_event_stamps_spawn_failure_as_stage_8(patch_install_dir: Path):
+    """A failed spawn still lands stage 8 -- distinguishable from a killed
+    spawn (no stage-8 event at all) by the terminal `_failed` event name."""
+    activity.log_event("handoff_successor_spawn_started", worktree_id="wt-1")
+    activity.log_event(
+        "handoff_successor_spawn_failed", worktree_id="wt-1", error="boom"
+    )
+    events = activity.read_events()
+    assert [e["event"] for e in events] == [
+        "handoff_successor_spawn_started",
+        "handoff_successor_spawn_failed",
+    ]
+    for rec in events:
+        assert rec["stage"] == 8
+        assert rec["stage_name"] == "handoff_successor_spawn_started"
 
 
 def test_log_event_does_not_stamp_a_failed_or_duplicate_claim(
@@ -284,3 +303,22 @@ def test_cmd_activity_invalid_since(patch_install_dir: Path, capsys):
 
     rc = activity.cmd_activity(Args())
     assert rc == 1
+
+
+def test_log_event_never_raises_and_counts_failures(
+    patch_install_dir: Path, monkeypatch, caplog
+):
+    """A write failure is swallowed (never raised to the caller) but must be
+    detectable: log_event_failure_count() increments and a debug log fires --
+    Phase 1's "not silently invisible" requirement."""
+    before = activity.log_event_failure_count()
+
+    def _boom(*_args, **_kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("builtins.open", _boom)
+    with caplog.at_level("DEBUG", logger="agent-worktrees"):
+        activity.log_event("worktree_created", worktree_id="wt-1")  # must not raise
+
+    assert activity.log_event_failure_count() == before + 1
+    assert any("log_event" in r.message for r in caplog.records)
