@@ -84,6 +84,7 @@ from . import (
     disposition_history,
     effort_focus,
     git_ops,
+    handoff_trace,
     list_cache,
     locks,
     obligations,
@@ -12417,6 +12418,7 @@ def _reap_worktree(
     if not rec.checkout_managed:
         tracking.retire_record(rec, tracking_path)
         disposition_history.remove(rec.worktree_id)
+        handoff_trace.remove_trace(cfg.active_project(), rec.worktree_id)
         activity.log_event(
             "external_worktree_tracking_retired",
             worktree_id=rec.worktree_id,
@@ -12473,6 +12475,7 @@ def _reap_worktree(
     # Remove tracking YAML (or tombstone it, when paired -- #957/#220)
     tracking.retire_record(rec, tracking_path)
     disposition_history.remove(rec.worktree_id)
+    handoff_trace.remove_trace(cfg.active_project(), rec.worktree_id)
 
     activity.log_event(
         "worktree_reaped",
@@ -13356,6 +13359,7 @@ def _remove_managed_worktree(
     except OSError as exc:
         return False, [f"tracking record remove failed: {exc}"]
     disposition_history.remove(rec.worktree_id)
+    handoff_trace.remove_trace(cfg.active_project(), rec.worktree_id)
     return True, warns
 
 
