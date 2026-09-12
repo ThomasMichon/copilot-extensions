@@ -328,6 +328,18 @@ _is_sre_module_mismatch() {
     grep -q 'SRE module mismatch' <<<"$1"
 }
 
+# Detects the pyvenv.cfg variant of the shared uv-managed-interpreter race
+# first seen above (_is_sre_module_mismatch): a concurrent `uv venv` from
+# another installer landing on the same slot can leave python present but
+# pyvenv.cfg missing/incomplete, so `uv venv --allow-existing` (or any later
+# uv Python-interpreter probe against that slot) fails immediately with uv
+# exit code 106 / "failed to locate pyvenv.cfg" (#6852). The slot self-heals
+# once the other install finishes writing it, so a short-delay retry
+# recovers cleanly.
+_is_venv_corruption() {
+    grep -qE 'failed to locate pyvenv\.cfg|exit code:? ?106' <<<"$1"
+}
+
 # Runs `uv pip install "$@"`, capturing combined output. On the transient SRE
 # module mismatch signature (see _is_sre_module_mismatch), retries with
 # backoff (up to 3 extra attempts: 3s/6s/10s); any other failure, or a
@@ -353,6 +365,47 @@ _uv_pip_install_resilient() {
             return 0
         fi
     done
+    printf '%s\n' "$out" >&2
+    return 1
+}
+
+# A venv is only healthy when BOTH its python binary and pyvenv.cfg exist --
+# checking the binary alone treats a #6852-corrupted slot (python present,
+# pyvenv.cfg missing) as already healthy and never rebuilds it.
+_venv_healthy() {
+    [[ -x "$1/bin/python" && -f "$1/pyvenv.cfg" ]]
+}
+
+# Runs `uv venv "$venv_dir" "$@"`, retrying with backoff (3s/6s/10s) on the
+# transient SRE-module-mismatch (#6785) or pyvenv.cfg-corruption (#6852)
+# races. Also treats a zero-exit run that didn't actually leave a pyvenv.cfg
+# behind at "$venv_dir/pyvenv.cfg" as a failure worth retrying -- uv can exit
+# 0 while still racing another concurrent writer touching the same slot.
+_uv_venv_resilient() {
+    local venv_dir="$1"; shift
+    local out rc delay
+    out="$(uv venv "$venv_dir" "$@" 2>&1)"; rc=$?
+    for delay in 3 6 10; do
+        if [[ $rc -eq 0 && -f "$venv_dir/pyvenv.cfg" ]]; then
+            printf '%s\n' "$out"
+            return 0
+        fi
+        if [[ $rc -eq 0 ]]; then
+            _warn "uv venv reported success but pyvenv.cfg is missing at $venv_dir/pyvenv.cfg (shared interpreter race, #6852) -- retrying in ${delay}s"
+        elif _is_sre_module_mismatch "$out"; then
+            _warn "uv venv hit a transient SRE module mismatch (shared Python cache race, #6785) -- retrying in ${delay}s"
+        elif _is_venv_corruption "$out"; then
+            _warn "uv venv hit a transient pyvenv.cfg corruption (shared Python cache race, #6852) -- retrying in ${delay}s"
+        else
+            break
+        fi
+        sleep "$delay"
+        out="$(uv venv "$venv_dir" "$@" 2>&1)"; rc=$?
+    done
+    if [[ $rc -eq 0 && -f "$venv_dir/pyvenv.cfg" ]]; then
+        printf '%s\n' "$out"
+        return 0
+    fi
     printf '%s\n' "$out" >&2
     return 1
 }
@@ -1141,10 +1194,14 @@ do_install() {
     _versioned_slot_clean
 
     # Create venv via uv
-    if [[ ! -x "$VENV_DIR/bin/python" ]]; then
+    if ! _venv_healthy "$VENV_DIR"; then
+        if [[ -x "$VENV_DIR/bin/python" ]]; then
+            _warn "Existing venv python present but pyvenv.cfg is missing at $VENV_DIR/pyvenv.cfg (shared interpreter race, #6852) -- rebuilding"
+            rm -rf "$VENV_DIR"
+        fi
         _step "Creating venv via uv..."
-        if ! uv venv "$VENV_DIR" --python 3.10 --allow-existing; then
-            if ! uv venv "$VENV_DIR" --allow-existing; then
+        if ! _uv_venv_resilient "$VENV_DIR" --python 3.10 --allow-existing; then
+            if ! _uv_venv_resilient "$VENV_DIR" --allow-existing; then
                 _fail "Failed to create venv at $VENV_DIR"
                 exit 1
             fi
@@ -1658,23 +1715,27 @@ _update_core() {
     # slot (never the running daemon's), so an absent slot is normal -- always
     # build it. Legacy layout: repair the single venv in place if python is gone.
     if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
-        if [[ ! -x "$VENV_DIR/bin/python" ]]; then
+        if [[ -x "$VENV_DIR/bin/python" && ! -f "$VENV_DIR/pyvenv.cfg" ]]; then
+            _warn "Runtime slot python present but pyvenv.cfg is missing at $VENV_DIR/pyvenv.cfg (shared interpreter race, #6852) -- rebuilding"
+            rm -rf "$VENV_DIR"
+        fi
+        if ! _venv_healthy "$VENV_DIR"; then
             _step "Building runtime slot versions/$SRC_VERSION..."
             _versioned_slot_clean
-            if ! uv venv "$VENV_DIR" --python 3.10 --allow-existing; then
-                uv venv "$VENV_DIR" --allow-existing || { _fail "Venv build failed (versions/$SRC_VERSION)"; return 1; }
+            if ! _uv_venv_resilient "$VENV_DIR" --python 3.10 --allow-existing; then
+                _uv_venv_resilient "$VENV_DIR" --allow-existing || { _fail "Venv build failed (versions/$SRC_VERSION)"; return 1; }
             fi
             _ok "Built runtime slot versions/$SRC_VERSION"
         fi
-    elif [[ ! -x "$VENV_DIR/bin/python" ]]; then
+    elif ! _venv_healthy "$VENV_DIR"; then
         if [[ -d "$VENV_DIR" ]]; then
-            _step "Repairing venv (python binary missing)..."
+            _step "Repairing venv (python binary or pyvenv.cfg missing)..."
         else
             _fail "agent-bridge not installed. Run: install.sh install"
             return 1
         fi
-        if ! uv venv "$VENV_DIR" --python 3.10 --allow-existing; then
-            uv venv "$VENV_DIR" --allow-existing || { _fail "Venv repair failed"; return 1; }
+        if ! _uv_venv_resilient "$VENV_DIR" --python 3.10 --allow-existing; then
+            _uv_venv_resilient "$VENV_DIR" --allow-existing || { _fail "Venv repair failed"; return 1; }
         fi
         _ok "Venv repaired"
     fi

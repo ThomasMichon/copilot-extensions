@@ -18,7 +18,7 @@
     {
       "name": "agent-bridge",
       "description": "Live cross-boundary inter-agent communication service - conversation transport, session management, SSE event streaming, agent subprocess spawning, and ACP-over-WebSocket support for external clients",
-      "version": "0.4.0-dev474",
+      "version": "0.4.0-dev475",
       "source": "plugins/agent-bridge"
     },
     {
@@ -48,7 +48,7 @@
     {
       "name": "agent-logger",
       "description": "Reusable Copilot CLI session logging - segment sessions into digestible chunks, write Markdown session logs, sync local or validated provider-rescued sessions to a configurable target, and optionally run a scheduled orchestrator that crunches a backlog into committed logs",
-      "version": "0.1.2-dev15",
+      "version": "0.1.2-dev16",
       "source": "plugins/agent-logger"
     },
     {
