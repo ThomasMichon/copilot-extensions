@@ -313,6 +313,30 @@ class TestEffectiveVerdict:
         reviews = (_rev(1, "REQUEST_CHANGES"),)
         assert pc.effective_verdict(reviews, "head", "author") == "CHANGES_REQUESTED"
 
+    def test_comment_becomes_verdict_when_review_blocking_false(self):
+        reviews = (_rev(1, "COMMENT"),)
+        assert pc.effective_verdict(
+            reviews, "head", "author", review_blocking=False,
+        ) == "COMMENTED"
+
+    def test_comment_still_not_a_verdict_when_review_blocking_true(self):
+        reviews = (_rev(1, "COMMENT"),)
+        assert pc.effective_verdict(
+            reviews, "head", "author", review_blocking=True,
+        ) == ""
+
+    def test_approved_still_wins_over_comment_when_review_blocking_false(self):
+        reviews = (_rev(1, "COMMENT"), _rev(2, "APPROVED", commit_id="head"))
+        assert pc.effective_verdict(
+            reviews, "head", "author", review_blocking=False,
+        ) == "APPROVED"
+
+    def test_author_own_comment_ignored_when_review_blocking_false(self):
+        reviews = (_rev(1, "COMMENT", user="alice"),)
+        assert pc.effective_verdict(
+            reviews, "head", "alice", review_blocking=False,
+        ) == ""
+
 
 # ---------------------------------------------------------------------------
 # title_is_wip / merge_state
@@ -464,6 +488,19 @@ class TestClassifyState:
         assert st.held == ()
         assert st.wip is False
 
+    def test_review_blocking_false_reports_comment_as_verdict(self):
+        snap = _approved(reviews=(_rev(1, "COMMENT"),))
+        st = pc.classify_state(snap, review_blocking=False, **_BINDING)
+        assert st.verdict == "COMMENTED"
+        # Still not an approval -- consent stays gated by approval_required.
+        assert st.consent_action == "skip"
+        assert st.reason == "not yet approved"
+
+    def test_review_blocking_true_default_ignores_comment(self):
+        snap = _approved(reviews=(_rev(1, "COMMENT"),))
+        st = pc.classify_state(snap, **_BINDING)
+        assert st.verdict == ""
+
 
 # ---------------------------------------------------------------------------
 # merge_readiness -- the caller-facing "what to do next" summary
@@ -499,6 +536,27 @@ class TestMergeReadiness:
         assert m["clear_to_merge"] is False
         assert m["consent_label"] == ""
         assert "no auto-merge label" in m["reason"]
+
+    def test_review_blocking_false_reports_comment_verdict(self):
+        snap = _approved(reviews=(_rev(1, "COMMENT"),))
+        m = pc.merge_readiness(snap, review_blocking=False, **_BINDING)
+        assert m["verdict"] == "COMMENTED"
+
+
+class TestDefaultUntil:
+    def test_blocking_true_is_default_until(self):
+        assert pc.default_until(True) == pc.DEFAULT_UNTIL
+
+    def test_blocking_false_swaps_verdict_events_for_commented(self):
+        until = pc.default_until(False)
+        assert until == pc.NONBLOCKING_DEFAULT_UNTIL
+        assert "commented" in until
+        assert "approved" not in until
+        assert "changes_requested" not in until
+        # Everything else (merge-state/lifecycle) is preserved unchanged.
+        for name in ("conflict", "mergeable", "checks_failed",
+                     "approval_dismissed", "merged", "closed"):
+            assert name in until
 
 
 # ---------------------------------------------------------------------------

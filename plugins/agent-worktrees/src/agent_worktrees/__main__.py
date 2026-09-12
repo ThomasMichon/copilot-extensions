@@ -27220,10 +27220,8 @@ def _pr_watch_usage() -> None:
     print("config.yaml: provider / api_base / token_command).", file=out)
     print(file=out)
     print("  wait <repo> <pr>    Block until a transition or timeout.", file=out)
-    print("    --until LIST      Comma-list of transitions or 'any'", file=out)
-    print("                      (default: changes_requested,approved,conflict,", file=out)
-    print("                       mergeable,checks_failed,approval_dismissed,", file=out)
-    print("                       merged,closed)", file=out)
+    print("    --until LIST      Comma-list of transitions or 'any' (default:", file=out)
+    print("                      role/policy-aware -- see default_until())", file=out)
     print("    --since CURSOR     Baseline cursor (race-proof); omit to auto-baseline", file=out)
     print("    --timeout SECS     Max seconds to block (0 = no limit; default 3600)", file=out)
     print("    --interval SECS    Poll interval (> 0; default 20)", file=out)
@@ -27331,6 +27329,33 @@ def _classify_pr_operands(operands: list[str]) -> tuple[str | None, int | None]:
     return repo, pr
 
 
+def _pr_watch_review_blocking(config, prcfg, args) -> bool:
+    """Effective review-blocking posture for a ``pr-watch wait``.
+
+    A ``pr-self-merge`` repo whose review is marked non-blocking (e.g. GitHub
+    Copilot code review, which cannot render APPROVED/CHANGES_REQUESTED on an
+    owner-authored PR) only skips waiting for a real verdict for an actor who
+    actually holds merge authority -- a contributor without it still needs a
+    human maintainer's APPROVED/CHANGES_REQUESTED. Mirrors
+    ``_pr_merge_now``'s live-authority check; fails open on an unknown/failed
+    permission read, same as that command.
+    """
+    review_blocking = bool(getattr(prcfg, "review_blocking", False))
+    flow = _pr_flow_profile(config.default_repo)
+    from . import pr_contract as pc
+    if review_blocking or flow.profile != pc.PROFILE_PR_SELF_MERGE:
+        return review_blocking
+    from .providers import account_token_for_slug, actor_viewer_permission, get_provider
+    try:
+        provider = get_provider(getattr(prcfg, "provider", "gitea") or "gitea")
+        base = (args.host or getattr(prcfg, "api_base", "") or "").strip()
+        tok = args.token if args.token is not None else account_token_for_slug(args.repo, prcfg)
+        live_permission = actor_viewer_permission(provider, args.repo, api_base=base, token=tok)
+    except Exception:
+        return False
+    return pc.actor_merge_authority(live_permission) is False
+
+
 def cmd_pr_watch_dispatch(argv: list[str]) -> int:
     """Route `pr-watch` verbs (wait / cursor) -- the provider-generic watcher.
 
@@ -27373,8 +27398,8 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
     if verb == "wait":
         p.add_argument(
             "--until",
-            default=",".join(pc.DEFAULT_UNTIL),
-            help="comma-list of transitions or 'any'",
+            default=None,
+            help="comma-list of transitions or 'any' (default: role/policy-aware)",
         )
         p.add_argument("--since", default=None, help="baseline cursor (omit to auto-baseline)")
         p.add_argument(
@@ -27387,20 +27412,7 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
     except SystemExit as exc:
         return int(exc.code or 0)
 
-    # Parse/validate --until.
     if verb == "wait":
-        raw = args.until.strip().lower()
-        if raw == "any":
-            until = ["any"]
-        else:
-            until = [v.strip() for v in args.until.split(",") if v.strip()]
-            bad = [v for v in until if v not in pc.ALL_TRANSITIONS]
-            if bad:
-                output.err(
-                    f"unknown transition(s) {bad}; choose from "
-                    f"{', '.join(pc.ALL_TRANSITIONS)} or 'any'"
-                )
-                return 2
         if args.timeout < 0:
             output.err("--timeout must be >= 0 (0 = no limit)")
             return 2
@@ -27419,6 +27431,24 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
                     "project; pass an explicit repo slug"
                 )
                 return 2
+        review_blocking = _pr_watch_review_blocking(config, prcfg, args) if verb == "wait" else True
+
+        # Parse/validate --until now that its role/policy-aware default is known.
+        if verb == "wait":
+            raw = (args.until if args.until is not None
+                   else ",".join(pc.default_until(review_blocking))).strip().lower()
+            if raw == "any":
+                until = ["any"]
+            else:
+                until = [v.strip() for v in raw.split(",") if v.strip()]
+                bad = [v for v in until if v not in pc.ALL_TRANSITIONS]
+                if bad:
+                    output.err(
+                        f"unknown transition(s) {bad}; choose from "
+                        f"{', '.join(pc.ALL_TRANSITIONS)} or 'any'"
+                    )
+                    return 2
+
         fetch = prw.build_fetch(prcfg, args.repo, args.pr, api_base=args.host, token=args.token)
         if verb == "cursor":
             snap = fetch()
@@ -27455,6 +27485,7 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
             allow_stale_approval=bool(getattr(prcfg, "allow_stale_approval", False)),
             stale_approval_head_sha=tracked_head_sha,
             stale_approval_head_observed_at=head_observed_at,
+            review_blocking=review_blocking,
             on_error=lambda e: print(f"pr-watch: poll error (will retry): {e}", file=sys.stderr),
         )
         if not result.matched:
