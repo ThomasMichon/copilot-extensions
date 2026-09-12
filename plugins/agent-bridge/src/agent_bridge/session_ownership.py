@@ -78,6 +78,8 @@ async def cleanup_resume_attempt(
     manager: SessionManager, session: Session, client: AcpClient | None,
 ) -> None:
     """Close an unsuccessful client and reclaim its retained local process."""
+    from .session_host_ownership import abort_pending_host_launch
+
     if client is not None:
         try:
             await client.shutdown()
@@ -88,6 +90,7 @@ async def cleanup_resume_attempt(
             )
     try:
         await cleanup_owned_process(session)
+        await abort_pending_host_launch(manager, session.session_id)
     except Exception:
         manager._mark_session_failed(session, trigger="resume_cleanup_failed")
         log.error("Resume process cleanup failed for %s", session.session_id, exc_info=True)
