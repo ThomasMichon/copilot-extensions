@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -58,6 +59,8 @@ from ..worktree_head import resolve_head
 
 if TYPE_CHECKING:
     from ..session_manager import Session, SessionManager
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/sessions", tags=["sessions"])
 
@@ -499,7 +502,7 @@ def _find_reusable_session(mgr, agent_name, caller_id):
     return None
 
 
-def _enforce_worktree_head_guard(worktree_id: str) -> None:
+def _enforce_worktree_head_guard(worktree_id: str, mgr=None) -> None:
     """Refuse a create into a worktree with an active head or pending handoff.
 
     Derives the head from agent-worktrees (see :mod:`..worktree_head`). When the
@@ -508,12 +511,37 @@ def _enforce_worktree_head_guard(worktree_id: str) -> None:
     (reuse / handoff / sunset) plus the ``reclaim`` break-glass. Fails **open**:
     an untracked worktree or an unreadable ground layer yields ``occupied=False``
     and this returns without raising, so create proceeds exactly as before.
+
+    An asserted ``active`` head naming a specific session id is additionally
+    cross-checked, when ``mgr`` is supplied, against agent-bridge's own live
+    session store (``mgr.list_sessions()``). agent-bridge does not keep a rival
+    copy of the ground-layer head pointer (``derive-dont-duplicate``), but that
+    pointer can go stale relative to reality: a worktree's session can end (or
+    never have existed in this store at all -- e.g. after a GC/compaction pass)
+    without the ground layer ever being told to conclude it, leaving a phantom
+    "active" head that blocks every future create indefinitely with no
+    self-repair path. When the named session id is absent from agent-bridge's
+    own store entirely, the ground layer's assertion is unverifiable/stale, not
+    a live conflict to guard against, so this treats it as not occupied rather
+    than blocking forever. A session id agent-bridge *does* know about (in any
+    status, including ended/stopped) still fully blocks -- only "we have never
+    heard of this session at all" downgrades the guard.
     """
     from ..worktree_head import resolve_head
 
     head = resolve_head(worktree_id)
     if not head.occupied:
         return
+    if head.active and head.head_session and mgr is not None:
+        known_ids = {session.session_id for session in mgr.list_sessions()}
+        if head.head_session not in known_ids:
+            log.warning(
+                "worktree %s head guard: asserted head session %s is absent "
+                "from agent-bridge's own session store; treating as stale "
+                "and permitting the create",
+                worktree_id, head.head_session,
+            )
+            return
     pending = head.occupied and not head.active
     raise HTTPException(
         status_code=409,
@@ -662,7 +690,7 @@ async def start_session(req: StartSessionRequest, request: Request):
     # worktree an *asserted* head owns. Together they are one story -- a worktree
     # has one current session, and taking it over is an explicit act.
     if req.worktree_id and not req.reclaim:
-        _enforce_worktree_head_guard(req.worktree_id)
+        _enforce_worktree_head_guard(req.worktree_id, mgr)
 
     if agent_name:
         # Resolve agent via registry

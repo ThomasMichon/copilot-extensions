@@ -6238,6 +6238,49 @@ def test_steer_submit_is_offloaded_off_the_render_flow(tmp_path, monkeypatch):
     asyncio.run(run())
 
 
+def test_run_bg_logs_when_marshalling_the_outcome_back_to_the_ui_fails(caplog):
+    """`_run_bg` must never let a worker's outcome vanish with zero signal.
+
+    Normally `_apply` (marshalled via `app.call_from_thread`) is the only place
+    that surfaces ok/failed on the status line -- but if that marshal itself
+    raises (app already exited, screen gone, ...), the action's real result
+    (which may have genuinely succeeded, e.g. a steer submission that reached
+    the coordinator) is otherwise dropped with the operator seeing nothing
+    change and no error at all. This proves the failure is at least logged so
+    it is diagnosable, since the status line itself is unreachable at that
+    point.
+    """
+    import logging as _logging
+    import time as _time
+
+    from worktree_manager.production_picker.picker_tui import engine as engine_mod
+
+    class _FakeApp:
+        def call_from_thread(self, fn):
+            raise RuntimeError("app already exited")
+
+    class _Screen:
+        pass
+
+    screen = _Screen()
+    screen.app = _FakeApp()
+    screen._busy_label = None
+
+    with caplog.at_level(_logging.WARNING, logger="agent-worktrees.picker"):
+        engine_mod.PickerScreen._run_bg(
+            screen, "steer", lambda: (True, "ok"),
+        )
+        for _ in range(100):
+            if caplog.records:
+                break
+            _time.sleep(0.02)
+
+    assert any(
+        "could not marshal its outcome back to the UI" in r.message
+        for r in caplog.records
+    )
+
+
 def test_actions_menu_liveness_verify_is_offloaded(tmp_path, monkeypatch):
     """The worktree Actions menu opens IMMEDIATELY from cached liveness (never
     frozen), shows a footer spinner while it re-verifies mux/session liveness (a
