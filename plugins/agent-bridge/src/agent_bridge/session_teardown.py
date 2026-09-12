@@ -23,6 +23,7 @@ async def detach_for_restart(manager: SessionManager) -> None:
             or session._turn_start_lock.locked()
             or session._lifecycle_lock.locked()
             or manager._remote_reaps_by_session.get(session.session_id)
+            or session.session_id in manager._pending_host_launches
         ):
             try:
                 log.info("Detaching session %s on shutdown", session.session_id)
@@ -148,6 +149,10 @@ async def complete_stop(
                 manager._reap_host_record(record, "idle reap (#1826)")
             else:
                 await reap_remote_checked(manager, session, record)
+    if reap_host and session_id in manager._pending_host_launches:
+        from .session_host_ownership import abort_pending_host_launch
+
+        await abort_pending_host_launch(manager, session_id)
     pending = list(manager._remote_reaps_by_session.get(session_id, ()))
     if pending:
         if not all(await asyncio.gather(*pending)):
@@ -190,6 +195,10 @@ async def end_session_locked(self: SessionManager, session: Session, *, force: b
         raise SessionBusyError(session_id, session.active_background_tasks)
 
     session._lifecycle_generation += 1
+    if session_id in self._pending_host_launches:
+        from .session_host_ownership import abort_pending_host_launch
+
+        await abort_pending_host_launch(self, session_id)
     container = (
         session.target.container
         if isinstance(session.target.container, dict)

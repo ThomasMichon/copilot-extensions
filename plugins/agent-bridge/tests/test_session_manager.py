@@ -944,8 +944,10 @@ async def test_failed_handshake_rollback_removes_remote_holders(
             return True
 
     manager = SessionManager(tmp_db)
-    manager._forwards["session-1"] = object()
-    manager._relays["session-1"] = [object()]
+    forward = SimpleNamespace(cancel=AsyncMock())
+    relay = SimpleNamespace(stop=AsyncMock())
+    manager._forwards["session-1"] = forward
+    manager._relays["session-1"] = [relay]
     result = {}
 
     confirmed = await manager._rollback_failed_host_launch(
@@ -958,6 +960,8 @@ async def test_failed_handshake_rollback_removes_remote_holders(
     )
 
     assert confirmed is True
+    forward.cancel.assert_awaited_once()
+    relay.stop.assert_awaited_once()
     assert calls == [
         "terminate",
         "streams-close",

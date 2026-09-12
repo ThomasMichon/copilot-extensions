@@ -47,6 +47,9 @@ async def resume_session_admitted(
             raise ValueError(
                 f"Session {session_id} is {session.status.value}, not stopped"
             )
+        from .session_host_ownership import require_no_pending_host_launch
+
+        require_no_pending_host_launch(self, session_id)
         # The caller now owns recovery; a failed explicit attempt must not
         # leave stale restart intent rearming background provider probes.
         session._lifecycle_generation += 1

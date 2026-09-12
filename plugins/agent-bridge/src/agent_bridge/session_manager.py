@@ -918,6 +918,7 @@ class SessionManager:
         # GC'd mid-flight); each removes itself on completion.
         self._remote_reap_tasks: set[Any] = set()
         self._remote_reaps_by_session: dict[str, set[asyncio.Task[bool]]] = {}
+        self._pending_host_launches: dict[str, Any] = {}
         from pathlib import Path as _Path
 
         from .session_host.host_index import HostIndex
@@ -1733,13 +1734,15 @@ class SessionManager:
         can re-forward and reattach. Teardown DETACHES (host-mode
         ``AcpClient.shutdown``), never reaping the child inadvertently -- goal 1.
         """
-        from . import __version__
+        from .session_host_ownership import (
+            complete_host_launch, require_no_pending_host_launch, spawn_host_owned,
+        )
         from .session_host.acp_adapter import open_acp_streams
         from .session_host.client import SessionHostClient
-        from .session_host.host_index import HostRecord
         from .session_host.spawner import LocalSpawner
         from .transport import resolve_local_launch
 
+        require_no_pending_host_launch(self, session_id)
         if spawner is None:
             spawner = LocalSpawner(
                 unexpected_reap_seconds=self._session_host_unexpected_reap_seconds,
@@ -1781,29 +1784,22 @@ class SessionManager:
             # 127.0.0.1:<local_port>. spawn() blocks briefly on host readiness,
             # so it is already off-loop.
             step_started = time.monotonic()
-            spawned = await spawner.spawn(
-                args, cwd=work_dir, env=child_env, session_id=session_id,
+            pending = await spawn_host_owned(
+                self, session_id, spawner,
+                spawner.spawn(args, cwd=work_dir, env=child_env, session_id=session_id),
             )
+            spawned = pending.spawned
             timing.add("host_spawn", time.monotonic() - step_started)
-            # Retain a remote-boundary forward so reattach can refresh it and
-            # teardown can cancel it.
-            if getattr(spawned, "forward", None) is not None:
-                self._forwards[session_id] = spawned.forward
-            relays = getattr(spawned, "relay", None)
-            if relays is not None:
-                if not isinstance(relays, (list, tuple, set)):
-                    relays = [relays]
-                relays = list(relays)
-                if relays:
-                    self._relays[session_id] = relays
             step_started = time.monotonic()
             sock = await SessionHostClient.connect(port=spawned.local_port)
+            pending.sock = sock
             timing.add("host_connect", time.monotonic() - step_started)
             step_started = time.monotonic()
             await sock.attach(0, nonce=spawned.nonce.encode())
             timing.add("host_attach", time.monotonic() - step_started)
             step_started = time.monotonic()
             streams = await open_acp_streams(sock)
+            pending.streams = streams
             timing.add("host_streams", time.monotonic() - step_started)
 
             async def _closer() -> None:
@@ -1816,6 +1812,7 @@ class SessionManager:
                 model_override=model,
                 effort_override=effort,
             )
+            pending.client = client
             # Surface a mid-session transport drop (loopback socket down, host +
             # child alive) as ``disconnected`` so the reattach driver fires (P1).
             streams.on_transport_lost = client.mark_transport_lost
@@ -1935,23 +1932,6 @@ class SessionManager:
                     ) from exc
                 raise
 
-        if self._host_index is not None:
-            self._host_index.register(HostRecord(
-                session_id=session_id,
-                port=spawned.local_port,
-                host_pid=spawned.host_pid,
-                child_pid=spawned.child_pid,
-                host_version=__version__,
-                protocol_version=spawned.protocol_version,
-                state_file=spawned.state_file,
-                created_at=time.time(),
-                nonce=spawned.nonce,
-                boundary=spawned.boundary,
-                endpoint=getattr(spawned, "endpoint", {}) or {},
-                extra={
-                    "remote_authority_v2": spawned.boundary != "local",
-                },
-            ))
         # #4272 bridge-lock: mark this bridge-owned session's liveness as a
         # lattice file the picker reads cheaply, so a bare/bridge Copilot
         # (cwd=home) still shows ACTIVE (#1416). LOCAL boundary only -- a remote
@@ -1962,6 +1942,7 @@ class SessionManager:
             with contextlib.suppress(Exception):
                 await bridge_lock.write(
                     session_id, target.worktree_id, spawned.child_pid)
+        complete_host_launch(self, session_id)
         return client, acp_sid
 
     async def _rollback_failed_host_launch(
@@ -1973,36 +1954,13 @@ class SessionManager:
         session_id: str,
         result: dict[str, Any] | None,
     ) -> bool:
-        """Reap a failed Host launch and remove every local holder."""
-        with contextlib.suppress(Exception):
-            await sock.terminate()
-        with contextlib.suppress(Exception):
-            await streams.aclose()
-        with contextlib.suppress(Exception):
-            await sock.close()
+        """Join failed-host cleanup without abandoning ownership on cancellation."""
+        from .session_host_ownership import rollback_host_launch
+        from .session_ownership import finish_owned
 
-        remote = getattr(spawned, "boundary", "local") != "local"
-        confirmed = not remote
-        if remote:
-            abort = getattr(spawner, "abort_spawned", None)
-            if callable(abort):
-                try:
-                    confirmed = bool(await abort(spawned, session_id))
-                except Exception:
-                    confirmed = False
-        with contextlib.suppress(Exception):
-            await spawned.aclose()
-        self._forwards.pop(session_id, None)
-        self._relays.pop(session_id, None)
-        if result is not None:
-            result.update({
-                "host_process_removed": confirmed,
-                "child_process_removed": confirmed,
-                "remote_authority_removed": confirmed,
-                "forward_removed": session_id not in self._forwards,
-                "relay_removed": session_id not in self._relays,
-            })
-        return confirmed
+        return await finish_owned(
+            rollback_host_launch(self, spawner, spawned, sock, streams, session_id, result)
+        )
 
     # -- boundary-aware Session Host liveness ---------------------------------
     def _rec_host_alive(self, rec: Any) -> bool:
@@ -2052,6 +2010,7 @@ class SessionManager:
         """Revalidate a maintenance candidate under its lifecycle ownership."""
         return (
             not self._shutting_down
+            and not (getattr(record, "extra", None) or {}).get("launch_cleanup_pending")
             and not any(
                 not task.done()
                 for task in self._remote_reaps_by_session.get(record.session_id, ())
@@ -2328,6 +2287,10 @@ class SessionManager:
             if not session.acp_session_id and not has_container_target:
                 continue
             existing = copy.deepcopy(self._host_index.get(session.session_id))
+            if background and existing is not None and (
+                getattr(existing, "extra", None) or {}
+            ).get("launch_cleanup_pending"):
+                continue
             if (
                 existing is not None
                 and not (getattr(existing, "extra", {}) or {}).get(
@@ -3932,6 +3895,7 @@ class SessionManager:
 
     def _forget_host_record(self, rec: Any) -> None:
         """Remove reaped host metadata on the lifecycle event loop."""
+        self._pending_host_launches.pop(rec.session_id, None)
         with contextlib.suppress(Exception):
             self._host_index.remove(rec.session_id)
         # #4272 bridge-lock: best-effort clear the lattice lock at teardown.
