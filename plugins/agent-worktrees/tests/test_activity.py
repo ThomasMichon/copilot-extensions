@@ -92,6 +92,22 @@ def test_log_event_reserves_stage_fields_against_caller_override(
     assert rec["stage_name"] == "handoff_triggered"
 
 
+def test_log_event_preserves_caller_stage_fields_on_unmapped_events(
+    patch_install_dir: Path,
+):
+    """A custom/unmapped event is untouched -- only a *mapped* event's stamp
+    is reserved/gated (#3994401488)."""
+    activity.log_event(
+        "some_custom_event",
+        worktree_id="wt-1",
+        stage="custom-stage-value",
+        stage_name="custom-stage-name",
+    )
+    rec = activity.read_events()[0]
+    assert rec["stage"] == "custom-stage-value"
+    assert rec["stage_name"] == "custom-stage-name"
+
+
 def test_log_event_omits_stage_fields_for_unmapped_events(patch_install_dir: Path):
     activity.log_event("mux_failed", worktree_id="wt-1")
     rec = activity.read_events()[0]

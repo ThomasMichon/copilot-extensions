@@ -179,16 +179,21 @@ def log_event(
         for key, value in fields.items():
             if value is not None:
                 record[key] = value
-        gate = _HANDOFF_STAGE_GATE.get(event)
-        gated_out = gate is not None and record.get(gate[0]) != gate[1]
         stage_info = HANDOFF_STAGE_MAP.get(event)
-        if stage_info is not None and not gated_out:
-            # Stamped last so no caller-supplied field (including a
-            # same-named one from **fields) can override the canonical value.
-            record["stage"], record["stage_name"] = stage_info
-        else:
-            record.pop("stage", None)
-            record.pop("stage_name", None)
+        if stage_info is not None:
+            gate = _HANDOFF_STAGE_GATE.get(event)
+            gated_out = gate is not None and record.get(gate[0]) != gate[1]
+            if gated_out:
+                record.pop("stage", None)
+                record.pop("stage_name", None)
+            else:
+                # Stamped last so no caller-supplied field (including a
+                # same-named one from **fields) can override the canonical
+                # value.
+                record["stage"], record["stage_name"] = stage_info
+        # An unmapped/custom event's own stage/stage_name fields (if any)
+        # are left exactly as the caller supplied them -- only a *mapped*
+        # event's stamp is reserved/gated.
         line = json.dumps(record, ensure_ascii=True)
         with open(path, "a", encoding="utf-8") as handle:
             handle.write(line + "\n")
