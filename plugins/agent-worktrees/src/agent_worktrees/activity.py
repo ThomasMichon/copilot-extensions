@@ -49,6 +49,15 @@ launcher entry and threaded through the whole flow (launcher -> mux env ->
 session hooks -> post-exit), so ``agent-worktrees activity --launch-id <id>``
 returns one launch flow deterministically rather than by timestamp guesswork.
 
+Events recognized in ``HANDOFF_STAGE_MAP`` (see below) additionally carry
+``stage`` (1-13, the ordinal position in the handoff cutover lifecycle) and
+``stage_name`` (its canonical name), stamped automatically by ``log_event`` --
+see efforts/active/handoff-cutover-lifecycle-journal/README.md Phase 1 for the
+full 13-stage model this lays the foundation for. This is purely additive:
+no existing event name is renamed, so existing readers (health.py's
+``find_orphaned_handoffs``, the status monitor's pending-handoff scan) are
+unaffected.
+
 Logging must never break the worktree lifecycle: every public function
 swallows its own exceptions.
 """
@@ -73,6 +82,45 @@ RETENTION_DAYS = 7
 _PRUNE_SIZE_BYTES = 512 * 1024
 
 _HOSTNAME = socket.gethostname()
+
+# Handoff cutover lifecycle stage vocabulary (the 13-stage model from
+# efforts/active/handoff-cutover-lifecycle-journal/README.md Phase 1). Maps
+# each existing wire event name that corresponds to a stage onto that stage's
+# (ordinal, canonical_name). Layered on top of existing event names -- never
+# renames or replaces them, so existing consumers (health.py, the status
+# monitor's pending-handoff scan) keep working unmodified. New stages with no
+# pre-existing event (5, 7-as-a-distinct-signal, etc.) are added here as their
+# dedicated emitters land in later phases; until then they simply have no
+# entry and are omitted from a rendered trace rather than guessed at.
+HANDOFF_STAGE_MAP: dict[str, tuple[int, str]] = {
+    "worktree_created": (1, "worktree_created"),
+    "mux_attached": (2, "mux_session_assigned"),
+    "mux_session_assigned": (2, "mux_session_assigned"),
+    "copilot_invoked": (3, "copilot_invoked"),
+    "session_started": (4, "session_start_bound"),
+    "status_reported": (5, "status_reported"),
+    "handoff_requested": (6, "handoff_triggered"),
+    "handoff_cutover_claim": (7, "handoff_host_acknowledged"),
+    "handoff_host_acknowledged": (7, "handoff_host_acknowledged"),
+    "handoff_cutover_spawn": (8, "handoff_successor_spawn_started"),
+    "handoff_successor_spawn_started": (8, "handoff_successor_spawn_started"),
+    "handoff_successor_session_start_bound": (
+        9,
+        "handoff_successor_session_start_bound",
+    ),
+    "handoff_successor_claimed": (10, "handoff_successor_claimed"),
+    "handoff_predecessor_retire": (
+        11,
+        "handoff_pickup_confirmed_predecessor_closing",
+    ),
+    "handoff_pickup_confirmed_predecessor_closing": (
+        11,
+        "handoff_pickup_confirmed_predecessor_closing",
+    ),
+    "session_ended": (12, "session_end_bound"),
+    "session_end_bound": (12, "session_end_bound"),
+    "handoff_complete": (13, "handoff_complete"),
+}
 
 
 def log_path() -> Path:
@@ -115,6 +163,9 @@ def log_event(
             "host": _HOSTNAME,
             "source": source,
         }
+        stage_info = HANDOFF_STAGE_MAP.get(event)
+        if stage_info is not None:
+            record["stage"], record["stage_name"] = stage_info
         for key, value in fields.items():
             if value is not None:
                 record[key] = value
