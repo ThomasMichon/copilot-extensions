@@ -3024,6 +3024,16 @@ def _handoff_cutover_spawn_result(
             dry_result["profile_assignment"] = profile_assignment.metadata(selection.assignment)
         return 0, dry_result
 
+    activity.log_event(
+        "handoff_successor_spawn_started",
+        worktree_id=wt_id,
+        session_id=session_id,
+        source="python",
+        handoff_token=handoff_token,
+        old_pane=old_pane,
+        expected_mux_session=expected_mux_session,
+        method="mux_new_window_interactive_argv",
+    )
     result = sessions.mux_new_window(
         wt_id,
         work_dir,
@@ -3036,6 +3046,17 @@ def _handoff_cutover_spawn_result(
         failure = dict(result)
         failure["ok"] = False
         failure["error"] = f"failed to open successor window: {result.get('error')}"
+        activity.log_event(
+            "handoff_successor_spawn_failed",
+            worktree_id=wt_id,
+            session_id=session_id,
+            source="python",
+            handoff_token=handoff_token,
+            old_pane=old_pane,
+            expected_mux_session=expected_mux_session,
+            method="mux_new_window_interactive_argv",
+            error=result.get("error"),
+        )
         return 4, failure
 
     new_pane = result.get("new_pane")
