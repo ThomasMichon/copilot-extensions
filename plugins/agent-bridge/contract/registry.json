@@ -120,7 +120,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/representative-error.json",
-          "sha256": "a562d8a9d3da9d2986316a5659f47fbb28cc06a21d73415d5d0a85a79b39d8b0",
+          "sha256": "38d49a8762f4732216fbda79ad150438d6a7e101249d5d496fae07325111d92a",
           "role": "current representative FastAPI error",
           "generation": 14
         },
@@ -197,7 +197,7 @@
           "capture_method": "Invoke the pre-resolution initialization refusal and preserve its FastAPI error response."
         },
         {
-          "commit": "968e25fbf448818cfe1ba6c03d089b51ffd29036",
+          "commit": "e02fbee7594e07e2a6b074efee643926679a3b4a",
           "plugin_version": "0.4.0-dev473",
           "generation": 14,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
