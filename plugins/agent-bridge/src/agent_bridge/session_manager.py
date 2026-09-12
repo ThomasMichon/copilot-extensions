@@ -2135,8 +2135,12 @@ class SessionManager:
         self._prune_dead_hosts()
         reattached = 0
         now = time.time()
-        for rec in self._live_host_records():
-            session = self._sessions.get(rec.session_id)
+        startup_generations = {
+            sid: (session, session._lifecycle_generation)
+            for sid, session in self._sessions.items()
+        }
+        for rec in copy.deepcopy(self._live_host_records()):
+            session, generation = startup_generations.get(rec.session_id, (None, None))
             if (
                 session is not None
                 and not self._background_recovery_allowed(session)
@@ -2180,6 +2184,17 @@ class SessionManager:
                     await locks.enter_async_context(session._lifecycle_lock)
                     if not self._background_recovery_allowed(session):
                         continue
+                    if (
+                        session._lifecycle_generation != generation
+                        or (session.client is not None and session.client.is_running)
+                    ):
+                        continue
+                if (
+                    self._sessions.get(rec.session_id) is not session
+                    or self._host_index.get(rec.session_id) != rec
+                ):
+                    log.info("Skipping replaced startup host candidate %s", rec.session_id)
+                    continue
                 plan = plan_host(
                     protocol_version=rec.protocol_version,
                     child_alive=self._rec_child_alive(rec),
@@ -5420,6 +5435,8 @@ class SessionManager:
             )
 
         async with session._lifecycle_lock:
+            if self._sessions.get(session_id) is not session:
+                raise KeyError(f"Session {session_id} not found")
             if background and session.status != SessionStatus.RUNNING:
                 raise ValueError(
                     f"Session {session_id} is no longer running; skipping background resync"
@@ -6271,6 +6288,8 @@ class SessionManager:
         """Stop while the caller already owns this session's turn admission."""
         session_id = session.session_id
         async with session._lifecycle_lock:
+            if self._sessions.get(session_id) is not session:
+                raise KeyError(f"Session {session_id} not found")
             if not force and session.has_active_background_tasks:
                 raise SessionBusyError(session_id, session.active_background_tasks)
 
@@ -6333,7 +6352,7 @@ class SessionManager:
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
-        async with session._turn_start_lock:
+        async with session._turn_start_lock, session._lifecycle_lock:
             if self._sessions.get(session_id) is not session:
                 raise KeyError(f"Session {session_id} not found")
             if (
@@ -6343,7 +6362,7 @@ class SessionManager:
                 raise ValueError(f"Session {session_id} is not idle")
             if self._db.count_pending_prompts(session_id) > 0:
                 raise ValueError(f"Session {session_id} has queued prompts")
-            await self.end_session(session_id, force=force)
+            await self._end_session_locked(session, force=force)
 
     async def end_session(self, session_id: str, *, force: bool = False) -> None:
         """End a session -- shut down client and clean up all state.
@@ -6370,9 +6389,18 @@ class SessionManager:
         if not session:
             raise KeyError(f"Session {session_id} not found")
 
+        async with session._turn_start_lock, session._lifecycle_lock:
+            await self._end_session_locked(session, force=force)
+
+    async def _end_session_locked(self, session: Session, *, force: bool = False) -> None:
+        """End under admission/lifecycle ownership, including authority recovery."""
+        session_id = session.session_id
+        if self._sessions.get(session_id) is not session:
+            raise KeyError(f"Session {session_id} not found")
         if not force and session.has_active_background_tasks:
             raise SessionBusyError(session_id, session.active_background_tasks)
 
+        session._lifecycle_generation += 1
         container = (
             session.target.container
             if isinstance(session.target.container, dict)

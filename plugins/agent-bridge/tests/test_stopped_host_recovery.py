@@ -995,3 +995,75 @@ async def test_remote_authority_results_cannot_overwrite_newer_lifecycle(
     if change == "stop_resume":
         assert ctx.session.status == SessionStatus.IDLE
     ctx.spawner.recover_record.assert_awaited_once()
+
+
+@pytest.mark.parametrize("change", ["replace", "remove", "resume", "healthy"])
+async def test_startup_iterator_rechecks_later_candidates(context, monkeypatch, change):
+    from dataclasses import replace
+
+    ctx = context
+    other = Session("second-session", "second-agent", ctx.session.target)
+    other.status = SessionStatus.RUNNING
+    other.acp_session_id = "second-acp"
+    ctx.manager._sessions[other.session_id] = other
+    ctx.db.create_session(
+        other.session_id, other.name, None, ".", "command", "running", time.time(),
+        target_json=other.target.to_json(),
+    )
+    ctx.db.update_session_acp_id(other.session_id, other.acp_session_id)
+    record = replace(ctx.record, session_id=other.session_id)
+    ctx.manager._host_index.register(record)
+    if change == "healthy":
+        other.client = SimpleNamespace(is_running=True)
+    calls = []
+
+    async def resume(session):
+        session.status = SessionStatus.IDLE
+        session.client = SimpleNamespace(is_running=True)
+        return True
+
+    async def attach(candidate, _session, **_kwargs):
+        calls.append(candidate.session_id)
+        if candidate.session_id == ctx.session.session_id:
+            if change == "replace":
+                ctx.manager._host_index.register(replace(record, nonce="replacement"))
+            elif change == "remove":
+                ctx.manager._host_index.remove(other.session_id)
+            elif change == "resume":
+                await ctx.manager.stop_session(other.session_id)
+                await ctx.manager.resume_session(other.session_id)
+        return True
+
+    monkeypatch.setattr(ctx.manager, "_try_reattach_live_host", resume)
+    monkeypatch.setattr(ctx.manager, "_recover_remote_host_records", AsyncMock(return_value=0))
+    monkeypatch.setattr(ctx.manager, "_reattach_one", attach)
+    assert await ctx.manager.reattach_session_hosts() == 1
+    assert calls == [ctx.session.session_id]
+
+
+async def test_explicit_end_owns_authority_recovery_before_stop(context, monkeypatch):
+    from agent_bridge.session_manager import RemoteHostRecoveryPendingError
+
+    ctx = context
+    ctx.manager._host_index.remove(ctx.session.session_id)
+    ctx.manager._remote_recovery_inconclusive.add(ctx.session.session_id)
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def recover(**_kwargs):
+        assert ctx.session._turn_start_lock.locked()
+        assert ctx.session._lifecycle_lock.locked()
+        entered.set()
+        await release.wait()
+        raise RuntimeError("authority unavailable")
+
+    monkeypatch.setattr(ctx.manager, "_recover_remote_host_records", recover)
+    end = asyncio.create_task(ctx.manager.end_session(ctx.session.session_id))
+    await asyncio.wait_for(entered.wait(), 1)
+    stop = asyncio.create_task(ctx.manager.stop_session(ctx.session.session_id))
+    await asyncio.sleep(0)
+    assert not stop.done()
+    release.set()
+    with pytest.raises(RemoteHostRecoveryPendingError):
+        await asyncio.wait_for(end, 1)
+    await asyncio.wait_for(stop, 1)
+    assert ctx.session.status == SessionStatus.STOPPED
