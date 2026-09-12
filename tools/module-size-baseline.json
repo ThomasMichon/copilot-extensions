@@ -83,7 +83,7 @@
   "plugins/agent-worktrees/src/agent_worktrees/git_ops.py": 1443,
   "plugins/agent-worktrees/src/agent_worktrees/installer.py": 1727,
   "plugins/agent-worktrees/src/agent_worktrees/picker_tui/data_ssh.py": 2155,
-  "plugins/agent-worktrees/src/agent_worktrees/picker_tui/engine.py": 9230,
+  "plugins/agent-worktrees/src/agent_worktrees/picker_tui/engine.py": 9338,
   "plugins/agent-worktrees/src/agent_worktrees/picker_tui/pivots.py": 2169,
   "plugins/agent-worktrees/src/agent_worktrees/pr_contract.py": 1463,
   "plugins/agent-worktrees/src/agent_worktrees/pr_ops.py": 1944,
@@ -104,6 +104,6 @@
   "worktree-manager/src/worktree_manager/__main__.py": 1383,
   "worktree-manager/src/worktree_manager/engine_client.py": 1026,
   "worktree-manager/src/worktree_manager/production_picker/picker_tui/data_ssh.py": 2033,
-  "worktree-manager/src/worktree_manager/production_picker/picker_tui/engine.py": 8925,
+  "worktree-manager/src/worktree_manager/production_picker/picker_tui/engine.py": 9055,
   "worktree-manager/src/worktree_manager/production_picker/picker_tui/pivots.py": 2159
 }
