@@ -3,7 +3,7 @@
 Covers the read-only ``PivotCardScreen`` and the redesigned ``PivotFormScreen``
 -- the docked card + tabbed-elicitation surface: card prose on top, a docked
 question section (single/multi-select with an "Other…" reveal, free-form
-auto-expanding boxes), single-line Confirm/Save/Cancel buttons, and resumable
+auto-expanding boxes), single-line Confirm/Save/Reset buttons, and resumable
 Save drafts. The screen only gathers the operator's answer (returned via
 ``dismiss``); it never runs a command and never carries a verdict.
 """
@@ -325,7 +325,11 @@ def test_form_save_writes_draft_and_restores(monkeypatch, tmp_path):
     asyncio.run(run2())
 
 
-def test_form_confirm_clears_draft(monkeypatch, tmp_path):
+def test_form_confirm_writes_draft_and_leaves_it_for_the_caller(monkeypatch, tmp_path):
+    # Confirm dismisses immediately, but the actual submission runs
+    # asynchronously afterward -- so the draft must survive Confirm itself.
+    # Only the caller (once it confirms the submission genuinely succeeded)
+    # deletes it -- see _run_pivot_form_submit's success path.
     _drafts(monkeypatch, tmp_path)
     scr = PivotFormScreen(_card(), [{"name": "feedback", "type": "textarea"}],
                           "Steer", task_id="t-clear")
@@ -334,35 +338,41 @@ def test_form_confirm_clears_draft(monkeypatch, tmp_path):
     async def run():
         async with app.run_test(size=(120, 45)) as pilot:
             await pilot.pause()
-            scr._write_draft()  # persist a draft without closing
+            scr.query_one("#q-0", _AutoExpandTextArea).text = "ship it"
             await pilot.pause()
-            assert _steer_draft_path("t-clear").exists()
             scr._confirm()
             await pilot.pause()
 
     asyncio.run(run())
-    assert isinstance(app.result, dict)
-    assert not _steer_draft_path("t-clear").exists()
+    assert app.result == {"feedback": "ship it"}
+    assert _steer_draft_path("t-clear").exists()
 
 
-def test_form_cancel_discards_draft(monkeypatch, tmp_path):
+def test_form_reset_confirmed_discards_draft_without_closing(monkeypatch, tmp_path):
     _drafts(monkeypatch, tmp_path)
     scr = PivotFormScreen(_card(), [{"name": "feedback", "type": "textarea"}],
-                          "Steer", task_id="t-cancel")
+                          "Steer", task_id="t-reset")
     app = _Host(scr)
+    remaining_text = None
 
     async def run():
+        nonlocal remaining_text
         async with app.run_test(size=(120, 45)) as pilot:
+            await pilot.pause()
+            scr.query_one("#q-0", _AutoExpandTextArea).text = "discard me"
             await pilot.pause()
             scr._write_draft()  # persist a draft without closing
             await pilot.pause()
-            assert _steer_draft_path("t-cancel").exists()
-            scr._cancel()
+            assert _steer_draft_path("t-reset").exists()
+            scr._perform_reset()
             await pilot.pause()
+            remaining_text = scr.query_one("#q-0", _AutoExpandTextArea).text
 
     asyncio.run(run())
-    assert app.result is None
-    assert not _steer_draft_path("t-cancel").exists()
+    # Reset never closes the dialog.
+    assert app.result == "UNSET"
+    assert not _steer_draft_path("t-reset").exists()
+    assert remaining_text == ""
 
 
 def test_form_escape_preserves_draft(monkeypatch, tmp_path):
