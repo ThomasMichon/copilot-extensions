@@ -396,6 +396,9 @@ restart does not inherently close the child's pipes.
   before stop is quiesced, while a later explicit send may resume normally.
   Background wedged-session resync and interrupt recheck under lifecycle
   ownership rather than acting on a pre-stop snapshot.
+  Direct resync also owns turn admission while replacing its client. A queued
+  drain kick carries the generation of its admitted request and rechecks it
+  under admission, preserving queued rows rather than reviving a later stop.
   Ordinary stop also stops per-session credential-relay supervisors and cancels
   live forwards before acknowledgement; transport teardown failures are surfaced
   rather than reported as containment. Host descriptors and venue ownership are
