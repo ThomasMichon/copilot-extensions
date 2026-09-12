@@ -23627,14 +23627,14 @@ def cmd_register_session(args: argparse.Namespace) -> int:
             with tracking._RecordLock(yaml_path):
                 candidate_record = tracking.load_record(yaml_path)
                 tracking.associate_handoff_candidate(
-                    candidate_record,
-                    candidate_token,
-                    session_id,
-                    associated_at=event_at,
-                    save=False,
+                    candidate_record, candidate_token, session_id,
+                    associated_at=event_at, save=False,
                 )
                 tracking.save_record(candidate_record, yaml_path)
             candidate_associated = True
+            activity.log_event(
+                "handoff_successor_session_start_bound", worktree_id=wt_id,
+                session_id=session_id, handoff_token=candidate_token)
     except Exception as e:
         output.err(f"Failed to register session: {e}")
         return 1
