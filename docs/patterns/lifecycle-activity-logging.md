@@ -31,6 +31,7 @@ writing to.
 |------|------|--------|-------|-----------|-----------------|
 | **A — activity log** | `~/.agent-worktrees/logs/activity.jsonl` (`cfg.install_dir()/logs/`) | one JSON object per line | machine-global, all worktrees | age-based, 7-day rolling window | **yes** |
 | **B — setup log** | `<tmp>/worktree-setup-logs/setup-<pid>.log` | line-oriented text | one launcher process | count-based, newest 10 kept; also cleared on reboot | no |
+| **C — handoff trace** | `~/.agent-worktrees/logs/handoff-traces/<project>/<worktree-id>.jsonl` (`handoff_trace.py`) | one JSON object per line | per-project, per-worktree | **unrotated** — kept until the worktree is reaped | **yes** |
 
 - **Tier A is the durable record of record.** It carries **high-level** lifecycle
   events only (a worktree was created, a mux session attached, Copilot exited).
@@ -39,6 +40,14 @@ writing to.
   step-by-step detail of a single launcher run (mux resolution, update-stage
   join, attach/detach reasons). It is intentionally ephemeral scratch, not a
   record of record.
+- **Tier C is a narrow, unrotated fork of Tier A** for exactly one purpose: the
+  13-stage handoff-cutover lifecycle (`efforts/active/handoff-cutover-lifecycle-journal/`).
+  Tier A's 7-day rolling retention can rotate a stage-1 event out before a
+  slow-to-audit handoff is ever re-traced, so every stage-mapped
+  `activity.log_event()` call **also** best-effort writes to this per-worktree
+  sink via `handoff_trace.append_event()`. It is not a general-purpose log —
+  only handoff-lifecycle stages land here — and it is namespaced by project
+  because a worktree id is only unique within one project.
 
 Do not put verbose step spam in Tier A, and do not rely on Tier B for anything
 after ~10 subsequent launches or a reboot.

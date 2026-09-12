@@ -580,6 +580,22 @@ agent-worktrees activity --lines 50 --json     # last 50 events as JSONL
 `activity-log` (append one event) is an internal hook used by the
 launcher and is not intended for direct use.
 
+### Handoff trace (Tier C)
+
+The 13-stage handoff-cutover lifecycle
+(`efforts/active/handoff-cutover-lifecycle-journal/`) additionally writes
+every stage-mapped event to a **durable, unrotated, per-project/per-worktree**
+JSONL sink at `~/.agent-worktrees/logs/handoff-traces/<project>/<worktree-id>.jsonl`
+(`handoff_trace.py`), so a full handoff history survives past Tier A's 7-day
+rolling retention. Writes take a cross-process advisory lock
+(`fcntl.flock` on POSIX, `msvcrt.locking` on Windows) so the CLI, the launcher
+hook client, the resident status monitor, and context-handoff's Node process
+can append concurrently without corrupting the file. See
+`docs/patterns/lifecycle-activity-logging.md` § Tier C for the full contract.
+A dedicated `agent-worktrees handoff-trace` read command is planned (Phase 3,
+not yet shipped) -- for now, read the JSONL file directly or via
+`handoff_trace.read_trace(project, worktree_id)`.
+
 ---
 
 ## Installer Actions

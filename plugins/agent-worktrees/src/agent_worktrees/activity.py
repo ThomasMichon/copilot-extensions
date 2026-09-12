@@ -76,7 +76,10 @@ see efforts/active/handoff-cutover-lifecycle-journal/README.md Phase 1 for the
 full 13-stage model this lays the foundation for. This is purely additive:
 no existing event name is renamed, so existing readers (health.py's
 ``find_orphaned_handoffs``, the status monitor's pending-handoff scan) are
-unaffected.
+unaffected. Every stage-mapped event is also, best-effort, appended to
+``handoff_trace``'s durable per-project/per-worktree trace store (Phase 3),
+since this rolling log's retention window is too short to "re-trace a
+handoff at any time".
 
 Logging must never break the worktree lifecycle: every public function
 swallows its own exceptions.
@@ -93,6 +96,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from . import config as cfg
+from . import handoff_trace
 
 # Rolling retention window. Lines older than this are dropped on prune.
 RETENTION_DAYS = 7
@@ -255,6 +259,14 @@ def log_event(
         with open(path, "a", encoding="utf-8") as handle:
             handle.write(line + "\n")
         _maybe_prune(path)
+        if stage_info is not None and "stage" in record and worktree_id:
+            # Also land stage-mapped events in the durable, unrotated
+            # per-project trace store (Phase 3) so a handoff's full history
+            # survives past activity.jsonl's rolling retention window.
+            # Best-effort and project-scoped: a caller with no resolved
+            # active project (a rare ambient context) still gets the
+            # activity.jsonl record above, just not this durable copy.
+            handoff_trace.append_event(cfg.active_project(), worktree_id, record)
     except Exception as exc:
         # A diagnostic log must never interfere with the operation it
         # observes -- delivery stays best-effort and this never raises into

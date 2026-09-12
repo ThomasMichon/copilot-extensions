@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_worktrees import activity
+from agent_worktrees import activity, handoff_trace
 
 
 @pytest.fixture
@@ -17,6 +17,12 @@ def patch_install_dir(monkeypatch, tmp_path: Path) -> Path:
         "agent_worktrees.config.install_dir", lambda: tmp_path / ".agent-worktrees"
     )
     return tmp_path / ".agent-worktrees"
+
+
+@pytest.fixture
+def patch_active_project(monkeypatch):
+    """Resolve an in-process active project for the durable trace store."""
+    monkeypatch.setattr("agent_worktrees.config.active_project", lambda: "proj-a")
 
 
 def test_log_event_writes_jsonl(patch_install_dir: Path):
@@ -322,3 +328,51 @@ def test_log_event_never_raises_and_counts_failures(
 
     assert activity.log_event_failure_count() == before + 1
     assert any("log_event" in r.message for r in caplog.records)
+
+
+def test_log_event_writes_stage_mapped_events_into_durable_trace_store(
+    patch_install_dir: Path, patch_active_project,
+):
+    """A stage-mapped event also lands in handoff_trace's durable store,
+    namespaced by the in-process active project, alongside activity.jsonl."""
+    activity.log_event("handoff_requested", worktree_id="wt-1", session_id="s1")
+    durable = handoff_trace.read_trace("proj-a", "wt-1")
+    assert len(durable) == 1
+    assert durable[0]["event"] == "handoff_requested"
+    assert durable[0]["stage"] == 6
+    assert durable[0]["stage_name"] == "handoff_triggered"
+    # Still present in the rolling machine-global log too -- purely additive.
+    assert activity.read_events()[0]["event"] == "handoff_requested"
+
+
+def test_log_event_does_not_write_unmapped_events_into_durable_trace_store(
+    patch_install_dir: Path, patch_active_project,
+):
+    """An event with no stage mapping (e.g. worktree_reaped) is not a handoff
+    lifecycle stage and must not clutter the durable per-worktree trace."""
+    activity.log_event("worktree_reaped", worktree_id="wt-1")
+    assert handoff_trace.read_trace("proj-a", "wt-1") == []
+
+
+def test_log_event_skips_durable_trace_without_a_resolved_active_project(
+    patch_install_dir: Path, monkeypatch,
+):
+    """No active project resolved (a rare ambient context) -- the event still
+    lands in activity.jsonl, just not the durable per-project store, since
+    the store cannot be namespaced without a project name."""
+    monkeypatch.setattr("agent_worktrees.config.active_project", lambda: None)
+    activity.log_event("handoff_requested", worktree_id="wt-1")
+    assert activity.read_events()[0]["event"] == "handoff_requested"
+    # No project -- nothing to read, and no exception raised getting there.
+    assert handoff_trace.read_trace("wt-1", "wt-1") == []
+
+
+def test_log_event_does_not_write_gated_out_events_into_durable_trace_store(
+    patch_install_dir: Path, patch_active_project,
+):
+    """A gated-out event (e.g. a duplicate claim) carries no stage, so it
+    must not be recorded in the durable per-stage trace either."""
+    activity.log_event(
+        "handoff_cutover_claim", worktree_id="wt-1", outcome="already-claimed"
+    )
+    assert handoff_trace.read_trace("proj-a", "wt-1") == []
