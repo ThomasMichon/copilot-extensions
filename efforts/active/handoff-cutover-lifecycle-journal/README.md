@@ -1079,3 +1079,29 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   CLI, and the remaining Validation Plan items (spawn-kill partial-trace
   test, live end-to-end reproduction, `find_orphaned_handoffs()` naming a
   stalled stage).
+- **PR #2507 (tooling fix: role/policy-aware `COMMENTED` verdict), merged.**
+  A direct follow-up to the PR #2496 gotcha above -- rather than leaving it as
+  a "remember to check manually" note, closed the actual tooling gap:
+  `pr_contract.py` gains `NONBLOCKING_VERDICT_STATES` /
+  `NONBLOCKING_DEFAULT_UNTIL` / `default_until(review_blocking)`;
+  `effective_verdict()` / `classify_state()` / `merge_readiness()` gain a
+  `review_blocking` parameter (default `True`, unchanged behavior) that
+  reports a bare comment as the terminal `"COMMENTED"` verdict instead of no
+  verdict at all. `__main__.py`'s new `_pr_watch_review_blocking()` makes
+  `pr-watch wait`'s default `--until` **role-aware**: a `pr-self-merge` repo's
+  non-blocking posture only applies to an actor who actually holds live merge
+  authority there (mirrors `_pr_merge_now`'s identical
+  `actor_viewer_permission` check, fails open on an unknown/failed read) -- a
+  contributor without authority still waits for a real human
+  `APPROVED`/`CHANGES_REQUESTED`, even on the same repo. `pr-status` also
+  reports `COMMENTED` now via the same `review_blocking` threading in
+  `pr_ops.py`. New tests (including a dedicated
+  `test_pr_watch_review_blocking.py`) caught a real missing `pr_contract`
+  import bug in the new helper before it shipped. `pr_contract.py`,
+  `__main__.py`, and `pr_ops.py` needed a small, deliberate module-size
+  baseline widening (after a compaction pass saved ~30 lines in
+  `pr_contract.py`) -- documented in the commit/PR per
+  `tools/check-module-size.py`'s own sanctioned alternative to splitting a
+  module. Copilot's own review on this PR landed as `COMMENTED` (fittingly)
+  with zero inline findings; merged without further changes. `agent-worktrees`
+  bumped `1.5.5-dev78` -> `dev79` (catalog `dev72` -> `dev73`).
