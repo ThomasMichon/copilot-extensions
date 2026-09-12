@@ -467,6 +467,52 @@ scenarios.
 
 ## Journal
 
+### 2026-09-11 - Phase 10 item 4: corrected the AHP misconception + first slice (liveness probe)
+
+- **Correction:** item 4's earlier text said it was "coordinated with"
+  agent-bridge's own verb-vocabulary convergence -- conflating it with the
+  `agent-bridge-ahp-convergence` effort (Status: Draft), which is actually
+  about exposing an *external* Agent Host Protocol surface, an unrelated
+  concern. Verified directly: `embody.local_body_verdict`/
+  `fleet_body_verdict` (`agent-bridge --json status <session>`) are
+  already a real, in-production liveness read -- the exact same read item
+  5's spawn-consistency sweep already calls. Item 4 was never actually
+  blocked; the doc's framing was simply wrong. Corrected in
+  `phase-10-live-wiring.md`.
+- Added `plugins/agent-dispatch/src/agent_dispatch/bridge_liveness_probe.py`:
+  `local_body_liveness_probe(session_id)`, a real HOT/WARM/COLD read via
+  `agent-bridge --json status <session_id>` (this machine's own daemon).
+  Maps agent-bridge's own `SessionStatus` values
+  (`plugins/agent-bridge/src/agent_bridge/models.py`) directly, since that
+  distinction already exists in agent-bridge's real session model and is
+  finer than the tri-state `local_body_verdict`/`fleet_body_verdict`
+  collapse to: `running` -> HOT (a turn is actively executing --
+  attaching a second controller now would race it), `idle`/`created`/
+  `starting` -> WARM (alive, no turn in flight, safe to reattach),
+  `stopping`/`stopped`/`failed`/`ended` -> COLD. Every ambiguous case
+  (not-found, transport failure, unparseable output, an unrecognized
+  status value) resolves to HOT rather than being guessed as WARM or COLD
+  -- refusing an unnecessary resume is always safe; wrongly resolving WARM
+  or COLD risks a double-attached controller or an orphaned duplicate
+  spawn. Never raises.
+- Deliberately does **not** wire this probe into a real resume/
+  reconciliation call site: every plausible call site (`supervisor.py`,
+  `embody.py`) is already at its grandfathered module-size ceiling. Adding
+  a call there means splitting one of those modules first or a deliberate,
+  reviewed widening -- left as a named follow-up, not smuggled into this
+  slice.
+- Added `plugins/agent-dispatch/tests/test_bridge_liveness_probe.py` (21
+  tests): every declared status value's mapping, every failure/ambiguity
+  path (not-found exit, other non-zero exit, empty/unparseable/non-dict
+  output, timeout, `OSError`, no resolvable launch prefix, empty session
+  id) resolving to HOT, and a case-insensitivity/whitespace check on the
+  status string.
+- Full `agent-dispatch` suite passes via `tools/run-plugin-tests.py
+  agent-dispatch`. `tools/check-module-size.py` passes.
+- Item 4 remains open (call-site wiring + the fleet/SSH variant are
+  follow-up slices), but is now unblocked and has a real, tested
+  component, same shape as item 3's slices.
+
 ### 2026-09-11 - Phase 10 item 3 complete: poll loop + webhook receiver (fifth slice)
 
 - Added `PRObservationStore.tracked_keys()`: every `(repo, number)` the
