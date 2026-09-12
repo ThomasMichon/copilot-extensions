@@ -204,6 +204,42 @@ ok()   { log "OK" "$1"; }
 chg()  { log "->" "$1"; }
 warn() { log "WARN" "$1"; }
 
+# Detects `AssertionError: SRE module mismatch` -- a transient race on a
+# shared uv-managed Python interpreter that surfaces when several installers
+# hit it in quick succession during one big `agent-worktrees update --force`
+# sweep (#6785, mirrored from agent-bridge's install.sh). The interpreter
+# reliably heals within seconds once the sweep's other uv invocations finish
+# touching it, so a short-delay retry recovers cleanly.
+_is_sre_module_mismatch() {
+    grep -q 'SRE module mismatch' <<<"$1"
+}
+
+# Runs `uv pip install "$@"`, capturing combined output. On the transient SRE
+# module mismatch signature (see _is_sre_module_mismatch), retries with
+# backoff (up to 3 extra attempts: 3s/6s/10s); any other failure, or a
+# mismatch persisting after all retries, is returned as-is for the caller to
+# handle/fail on as before.
+_uv_pip_install_resilient() {
+    local out delay
+    if out="$(uv pip install "$@" 2>&1)"; then
+        printf '%s\n' "$out"
+        return 0
+    fi
+    for delay in 3 6 10; do
+        if ! _is_sre_module_mismatch "$out"; then
+            break
+        fi
+        warn "uv build hit a transient SRE module mismatch (shared Python cache race, #6785) -- retrying in ${delay}s"
+        sleep "$delay"
+        if out="$(uv pip install "$@" 2>&1)"; then
+            printf '%s\n' "$out"
+            return 0
+        fi
+    done
+    printf '%s\n' "$out" >&2
+    return 1
+}
+
 # === install-contract:v3 versioned-venv (agent-logger: .venv-as-symlink) ===
 # Immutable per-version runtime (#581): build the venv into versions/<version> and
 # make the `.venv` path a symlink into it, so the binstub symlinks, the systemd
@@ -747,7 +783,7 @@ install_package() {
     fi
     chg "created venv at ${VENV}"
   fi
-  uv pip install --python "${VENV}/bin/python" 'setuptools>=83.0.0' --quiet
+  _uv_pip_install_resilient --python "${VENV}/bin/python" 'setuptools>=83.0.0' --quiet
   # Install vendored first-party dependencies from their local paths before the
   # main package, then install agent-logger itself with --no-deps so deep
   # staged payload paths do not force uv to rebuild the same path dependency
@@ -757,16 +793,16 @@ install_package() {
     cfg_migrate_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/config-migrate"
   fi
   if [ -f "${cfg_migrate_dir}/pyproject.toml" ]; then
-    uv pip install --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-config-migrate "${cfg_migrate_dir}" --quiet
+    _uv_pip_install_resilient --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-config-migrate "${cfg_migrate_dir}" --quiet
   fi
   local procutil_dir="${PLUGIN_DIR}/libs/agent-procutil"
   if [ ! -f "${procutil_dir}/pyproject.toml" ]; then
     procutil_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/agent-procutil"
   fi
   if [ -f "${procutil_dir}/pyproject.toml" ]; then
-    uv pip install --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-procutil "${procutil_dir}" --quiet
+    _uv_pip_install_resilient --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-procutil "${procutil_dir}" --quiet
   fi
-  uv pip install --python "${VENV}/bin/python" --no-build-isolation --no-deps "${PLUGIN_DIR}" --quiet
+  _uv_pip_install_resilient --python "${VENV}/bin/python" --no-build-isolation --no-deps "${PLUGIN_DIR}" --quiet
   ok "installed agent-logger package"
 
   deploy_runtime_helpers

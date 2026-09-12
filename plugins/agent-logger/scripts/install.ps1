@@ -319,6 +319,39 @@ function Write-Step    { param([string]$m) Write-Host "  ...    $m" }
 function Write-Warn    { param([string]$m) Write-Host "  [WARN] $m" -ForegroundColor Yellow }
 function Write-Fail    { param([string]$m) Write-Host "  [FAIL] $m" -ForegroundColor Red }
 
+function Test-IsSreModuleMismatch {
+    <# Detects `AssertionError: SRE module mismatch` -- a transient race on a
+       shared uv-managed Python interpreter (cpython-3.11-windows-x86_64-none)
+       that surfaces when several installers hit it in quick succession during
+       one big `agent-worktrees update --force` sweep (#6785, mirrored from
+       agent-bridge's install.ps1/install.sh). The interpreter reliably heals
+       within seconds once the sweep's other uv invocations finish touching
+       it, so a short-delay retry recovers cleanly. #>
+    param([string]$Output)
+    return $Output -match 'SRE module mismatch'
+}
+
+function Invoke-UvPipInstallResilient {
+    <# Runs `uv pip install` with the given arguments, capturing combined
+       output and exit code. On the transient SRE-module-mismatch signature
+       (see Test-IsSreModuleMismatch), retries with backoff (up to 3 extra
+       attempts: 3s/6s/10s); any other failure, or a mismatch persisting after
+       all retries, is returned as-is for the caller to handle/fail on as
+       before. #>
+    param([Parameter(Mandatory)][string[]]$Arguments)
+    $delays = @(3, 6, 10)
+    $out = & uv pip install @Arguments 2>&1
+    $exit = $LASTEXITCODE
+    foreach ($delay in $delays) {
+        if ($exit -eq 0 -or -not (Test-IsSreModuleMismatch ($out | Out-String))) { break }
+        Write-Warn "uv build hit a transient SRE module mismatch (shared Python cache race, #6785) -- retrying in ${delay}s"
+        Start-Sleep -Seconds $delay
+        $out = & uv pip install @Arguments 2>&1
+        $exit = $LASTEXITCODE
+    }
+    return [pscustomobject]@{ Output = $out; ExitCode = $exit }
+}
+
 function Test-UvConfiguredIndex {
     $configPaths = if ($env:UV_CONFIG_FILE) {
         @($env:UV_CONFIG_FILE)
@@ -900,9 +933,9 @@ function Install-Package {
 
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    $setuptoolsOut = & uv pip install --python $VenvPython "setuptools>=83.0.0" --quiet 2>&1
-    $setuptoolsResult = $LASTEXITCODE
-    if ($setuptoolsResult -ne 0) {
+    $setuptoolsResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, 'setuptools>=83.0.0', '--quiet')
+    $setuptoolsOut = $setuptoolsResult.Output
+    if ($setuptoolsResult.ExitCode -ne 0) {
         $ErrorActionPreference = $prevEAP
         Write-Fail "setuptools install failed"
         if ($setuptoolsOut) { Write-Host ($setuptoolsOut | Out-String) }
@@ -925,17 +958,18 @@ function Install-Package {
         }
     )) {
         if (-not (Test-Path (Join-Path $lib.Path 'pyproject.toml'))) { continue }
-        $libOut = & uv pip install --python $VenvPython --no-build-isolation --reinstall-package $lib.Package $lib.Path --quiet 2>&1
-        $libResult = $LASTEXITCODE
-        if ($libResult -ne 0) {
+        $libResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--no-build-isolation', '--reinstall-package', $lib.Package, $lib.Path, '--quiet')
+        $libOut = $libResult.Output
+        if ($libResult.ExitCode -ne 0) {
             $ErrorActionPreference = $prevEAP
             Write-Fail "$($lib.Name) library install failed"
             if ($libOut) { Write-Host ($libOut | Out-String) }
             exit 1
         }
     }
-    $out = & uv pip install --python $VenvPython --no-build-isolation --no-deps "$PluginDir" --quiet 2>&1
-    $result = $LASTEXITCODE
+    $installResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--no-build-isolation', '--no-deps', "$PluginDir", '--quiet')
+    $out = $installResult.Output
+    $result = $installResult.ExitCode
     $ErrorActionPreference = $prevEAP
     if ($result -ne 0) {
         Write-Fail "Package install failed (exit $result)"
