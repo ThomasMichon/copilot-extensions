@@ -1142,3 +1142,80 @@ classify/list accelerator) and the agent-mcp multiplexer each still need to
 adopt this helper — each its own vendored copy, its own reviewed PR, per the
 design doc's Sequencing section. Neither has started.
 
+### 2026-09-12 (later still) — #2323: agent-worktrees adopts the helper (wire layer only)
+
+Investigated #2323 (agent-worktrees resident classify/list accelerator)
+before writing any code: read `hook_ipc.py` (the existing resident-monitor
+IPC listener), `list_cache.py` (the existing file-based, TTL + demand-
+registered coalescing-like cache already in production), and
+`cmd_status_monitor`/`_classify_records` in `__main__.py` (the ~25k-line
+monolith this session's own worktree tooling runs live). Two load-bearing
+findings shaped the scope kept for this PR:
+
+- `hook_client.py` (the standalone script every session-lifecycle hook
+  invokes) hard-requires a `capabilities` field naming
+  `"session-lifecycle-v1"` in the response envelope — the generalized
+  `work_coalescing_singleton` wire shape doesn't carry that field. Refactoring
+  `hook_ipc.py` into a thin adapter (as this effort did for
+  `single_instance_lease` in agent-bridge) would mean also touching
+  `hook_client.py`, on the exact hot path every concurrent session's startup/
+  shutdown hook depends on **right now**, including this session's own. Not
+  worth the risk without dedicated, isolated testing.
+- `list_cache.py` + the resident sweep's `_warm_list_cache_for_active_project`
+  already implement a working, tested, **file-based** coalescing-like tier
+  (demand registration + short TTL + resident-refreshed extended freshness) —
+  not the live-IPC push #2323 envisions, but real, shipped mitigation of the
+  same underlying problem. The remaining gap is narrower than the original
+  issue framing suggested: an IPC upgrade is a latency/freshness improvement
+  over polling, not a missing correctness property.
+
+Given both, landed only the **wire-adoption layer**, not the live-monolith
+wiring, in this PR:
+
+- Vendored `libs/work-coalescing-singleton/` into
+  `plugins/agent-worktrees/libs/work-coalescing-singleton/` (byte-identical
+  copy; `tools/check-vendored-libs-sync.py` green) and added it to
+  `pyproject.toml` (`agent-work-coalescing-singleton`, `[tool.uv.sources]`
+  pinned to the local path, matching the `single-instance-lease` convention
+  exactly).
+- New `agent_worktrees/classify_daemon.py`: `start_server`/`rendezvous_fields`
+  (the daemon side, namespaced `classify_*` lock-file fields so they can't
+  collide with `HookIpcServer`'s existing fields) and `classify_via_daemon`
+  (the client side — try a live daemon if `lock_data` already names one,
+  else run the caller's `fallback` immediately; **never boots a daemon
+  itself**, since a resident monitor's launch/idle-exit lifecycle stays its
+  existing owner's responsibility). Explicitly documented in the module's
+  own docstring as not yet wired into any command.
+- 6 new tests (`tests/test_classify_daemon.py`): rendezvous fields round-trip,
+  malformed/absent rendezvous rejected without raising, fallback used with no
+  daemon, live daemon used when reachable, fallback on deadline exceeded, and
+  two concurrent callers for the same project coalescing into one execution.
+  All pass. Also re-ran the closely related existing suites
+  (`test_classify_lease.py`, `test_hook_ipc.py`, `test_status_monitor.py`,
+  `test_list_cache.py` — 173 tests) to confirm the vendoring + `pyproject.toml`
+  change caused zero regression. `ruff check` clean;
+  `check-vendored-libs-sync.py`, `check-docs-consistency.py`,
+  `check-version-consistency.py` all green.
+- Updated the design doc's Sequencing section to reflect this "helper
+  vendored + wire wrappers landed, live wiring still open" state precisely.
+
+**Deliberately not done** (the actual remaining #2323 scope): starting this
+daemon inside `cmd_status_monitor` and publishing its rendezvous alongside
+`HookIpcServer`'s; trying it from `_classify_records` before the existing
+`single_instance_lease` path. The concrete plan for that follow-up: the
+daemon's `compute(kind, payload)` callback resolves a project's records
+itself via `tracking.list_records(...)` (never serializing whole records
+over the wire — the request payload only needs to name the project), builds
+whatever `session_ctx` the existing classify pass needs, and calls
+`_classify_records_live` directly; `_classify_records` reads the resident
+monitor's lock file first, and calls `classify_daemon.classify_via_daemon`
+with `fallback=` the existing (renamed, otherwise unchanged)
+lease-guarded body. That change touches the live monolith this session's
+own tooling depends on and deserves its own dedicated pass with a spawned,
+non-production test monitor exercising the full round trip before landing
+— not bundled into this PR.
+
+Remaining under #744 (and thus #736): the `_classify_records`/
+`cmd_status_monitor` wiring described above, and the agent-mcp multiplexer
+(still fully unstarted).
+
