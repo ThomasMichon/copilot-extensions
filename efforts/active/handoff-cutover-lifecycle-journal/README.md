@@ -227,12 +227,17 @@ renumbering from the "acknowledges handoff" step onward.)
       event is detectable rather than only inferable from a trace gap.
 
 ### Phase 2 — Instrument all 13 stages
-- [x] Stage 1 (`worktree_created`) — confirm `cmd_create` already emits this
+- [ ] Stage 1 (`worktree_created`) — confirm `cmd_create` already emits this
       with no gaps; add `predecessor_session_id: null` framing.
-      **Confirmed landed:** `cmd_create` already emits `worktree_created`
-      unconditionally with `worktree_id`/`branch` (no `session_id`, which is
-      implicitly null — no session exists yet at this stage); no code change
-      needed, ticked off as a Phase 2 confirmation.
+      **Partially landed (confirmation only):** `cmd_create` already emits
+      `worktree_created` unconditionally with `worktree_id`/`branch` — no gap
+      in the event itself. The `predecessor_session_id: null` framing is
+      *not yet* added: `log_event()`'s `**fields` silently drop a `None`
+      value (only the named `session_id`/`launch_id` params survive as
+      explicit nulls), so this needs `predecessor_session_id` promoted to a
+      first-class field the same way Phase 1's schema item already defers —
+      leave this item open until Phase 3's cross-linking work adds that
+      field generally, then re-close it here alongside that.
 - [ ] Stage 2 (`mux_session_assigned`) — **ordinary launches don't go through
       the Python `sessions.py` helpers at all**: `bin/launch-session.sh` /
       `.ps1` invoke `tmux`/`psmux new-session` directly and already emit
@@ -668,16 +673,28 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   dev72 across the fix rounds. Stage 8's Phase 2 checklist item is also now
   done as a side effect (ticked off above). Phase 2 (instrumenting the
   remaining 10 stages' actual emitter call sites) is next.
-- **Phase 2 started.** PR #2479 merged. Confirmed Stages 1 (`worktree_created`)
-  and 4 (`session_start_bound`) already satisfy their acceptance criteria in
-  existing code — `cmd_create` and `cmd_register_session` already emit the
-  right events at the right moments — no code change needed, ticked off as
-  confirmations. Landed Stage 9 (`handoff_successor_session_start_bound`):
-  `cmd_register_session` now emits it immediately after
-  `tracking.associate_handoff_candidate()` succeeds, guarded by the same
-  `candidate_token` check. New test
+- **Phase 2 started.** PR #2479 merged. Confirmed Stage 4 (`session_start_bound`)
+  already satisfies its acceptance criteria in existing code —
+  `cmd_register_session` already emits `session_started` right after
+  `tracking.register_session()` succeeds, the actual binding moment — no code
+  change needed, ticked off as a confirmation. Stage 1 (`worktree_created`)
+  is only *partially* confirmed: `cmd_create` already emits the event with no
+  gaps, but the `predecessor_session_id: null` framing the checklist also
+  asks for isn't landed yet (`log_event()`'s `**fields` silently drop a
+  `None` value; only the named `session_id`/`launch_id` params survive as
+  explicit nulls) — left open pending Phase 3's field promotion, per review
+  (PR #2488's "Do not mark Stage 1 complete without predecessor framing").
+  Landed Stage 9 (`handoff_successor_session_start_bound`):
+  `cmd_register_session` now emits it immediately after stage 4's
+  `session_started` (moved out of the `try` block that originally fired it
+  *before* stage 4 — review caught the backwards ordering), carrying the
+  same `launch_id` as `session_started` (review caught the missing
+  correlation field too), guarded by the same `candidate_token`/
+  `candidate_associated` check. Updated test
   `test_session_start_emits_stage_9_on_candidate_association` in
-  `tests/test_register_session.py` captures the real `activity.log_event`
-  calls and asserts the event fires with the right `worktree_id`/
-  `session_id`/`handoff_token`. Remaining Phase 2 stages: 2, 3, 5, 6, 7, 10,
-  11, 12, 13.
+  `tests/test_register_session.py` now asserts the stage-4-then-stage-9
+  ordering and the `launch_id` field, in addition to the event's other
+  fields. `agent-worktrees` bumped 1.5.5-dev72 → dev73 (PR #2479's merge) —
+  no further bump needed for the review-response commit (module-size-only
+  compaction, no plugin content growth). Remaining Phase 2 stages: 2, 3, 5,
+  6, 7, 10, 11, 12, 13.

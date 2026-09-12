@@ -23605,11 +23605,9 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         pane_id = pane_id or mux_binding.get("pane_id")
         pid = pid or mux_binding.get("copilot_pid")
 
-    candidate_token = (
-        getattr(args, "handoff_candidate_token", None)
-        or (None if resident_environment else os.environ.get(_SESSION_HANDOFF_TOKEN))
-        or None
-    )
+    candidate_token = getattr(args, "handoff_candidate_token", None) or (
+        None if resident_environment else os.environ.get(_SESSION_HANDOFF_TOKEN)
+    ) or None
     candidate_associated = False
     try:
         tracking.register_session(
@@ -23632,9 +23630,6 @@ def cmd_register_session(args: argparse.Namespace) -> int:
                 )
                 tracking.save_record(candidate_record, yaml_path)
             candidate_associated = True
-            activity.log_event(
-                "handoff_successor_session_start_bound", worktree_id=wt_id,
-                session_id=session_id, handoff_token=candidate_token)
     except Exception as e:
         output.err(f"Failed to register session: {e}")
         return 1
@@ -23649,15 +23644,20 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         wt_id,
     )
     profile_assignment.maintain()
-    activity.log_event(
-        "session_started",
-        worktree_id=wt_id,
-        session_id=session_id,
-        launch_id=(
-            getattr(args, "launch_id", None)
-            or (None if resident_environment else os.environ.get("WORKTREE_LAUNCH_ID"))
-        ),
+    launch_id = (
+        getattr(args, "launch_id", None)
+        or (None if resident_environment else os.environ.get("WORKTREE_LAUNCH_ID"))
     )
+    activity.log_event(
+        "session_started", worktree_id=wt_id, session_id=session_id,
+        launch_id=launch_id)
+    if candidate_associated:
+        # Emitted after stage-4's session_started so the trace never
+        # appears to move backwards.
+        activity.log_event(
+            "handoff_successor_session_start_bound", worktree_id=wt_id,
+            session_id=session_id, handoff_token=candidate_token,
+            launch_id=launch_id)
     # Re-seed the status-bar updater for this session's mux (best-effort, no-op
     # off-mux).  The launcher spawns it at psmux create/join, but an attached
     # long-lived session is never re-run through the launcher -- so after a
