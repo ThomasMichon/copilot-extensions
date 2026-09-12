@@ -575,3 +575,71 @@ async def test_authority_recovery_never_applies_while_remote_reap_is_pending(
     finally:
         release.set()
         await asyncio.gather(*tasks)
+
+
+@pytest.mark.parametrize("phase", ["ready", "prepare"])
+@pytest.mark.parametrize("has_authority", [False, True])
+async def test_early_container_resume_cancellation_releases_only_unowned_claims(
+    owned_context, monkeypatch, phase, has_authority,
+):
+    ctx = owned_context
+    ctx.session.target = SpawnTarget(type="command", container={"name": "example-container"})
+    releases = []
+
+    def acquire(session_id, name):
+        ctx.manager._container_lock_sessions[session_id] = name
+
+    def release(session_id):
+        releases.append(session_id)
+        ctx.manager._container_lock_sessions.pop(session_id, None)
+
+    entered = asyncio.Event()
+
+    async def ready(*_args, **_kwargs):
+        if phase == "ready":
+            entered.set()
+            await asyncio.Event().wait()
+
+    async def prepare(*_args, **_kwargs):
+        entered.set()
+        await asyncio.Event().wait()
+
+    if has_authority:
+        ctx.manager._host_index.register(HostRecord(
+            session_id=ctx.session.session_id, port=51000, host_pid=123, child_pid=456,
+            boundary="container",
+        ))
+    monkeypatch.setattr(ctx.manager, "_acquire_container_lock", acquire)
+    monkeypatch.setattr(ctx.manager, "_release_container_lock", release)
+    monkeypatch.setattr(
+        ctx.manager, "_resume_via_new_remote_host",
+        SessionManager._resume_via_new_remote_host.__get__(ctx.manager),
+    )
+    monkeypatch.setattr("agent_bridge.session_host.container_transport.ensure_container_ready", ready)
+    monkeypatch.setattr("agent_bridge.session_host.container_transport.prepare_container_session_host", prepare)
+    monkeypatch.setattr("agent_bridge.relay_state.get_live_relay_port", lambda: None)
+    task = asyncio.create_task(ctx.manager.resume_session(ctx.session.session_id, drain=False))
+    await asyncio.wait_for(entered.wait(), 2)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, 3)
+    assert ctx.session.status == SessionStatus.STOPPED
+    assert (ctx.session.session_id in ctx.manager._container_lock_sessions) is has_authority
+    assert releases == ([] if has_authority else [ctx.session.session_id])
+    assert ctx.processes == []
+
+
+async def test_remote_reap_without_endpoint_cannot_acknowledge_success(owned_context, monkeypatch):
+    from agent_bridge.session_manager import RemoteHostRecoveryPendingError
+
+    ctx = owned_context
+    record = _remote_record(ctx)
+    record.endpoint = {}
+    ctx.manager._host_index.register(record)
+    reap = AsyncMock(side_effect=AssertionError("missing endpoint must not be probed"))
+    monkeypatch.setattr(ctx.manager, "_remote_reap", reap)
+    with pytest.raises(RemoteHostRecoveryPendingError, match="authority and ownership retained"):
+        await ctx.manager.stop_session(ctx.session.session_id, reap_host=True)
+    reap.assert_not_awaited()
+    assert ctx.manager._host_index.get(ctx.session.session_id) == record
+    assert ctx.session.status == SessionStatus.FAILED

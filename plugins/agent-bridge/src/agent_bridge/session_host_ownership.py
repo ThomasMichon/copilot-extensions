@@ -49,6 +49,20 @@ def require_no_pending_host_launch(manager: SessionManager, session_id: str) -> 
         )
 
 
+def has_host_ownership(manager: SessionManager, session_id: str) -> bool:
+    """Whether a host or durable partial-launch marker still owns the venue."""
+    if session_id in manager._pending_host_launches:
+        return True
+    if manager._host_index is not None and manager._host_index.get(session_id) is not None:
+        return True
+    session = manager._sessions.get(session_id)
+    container = session.target.container if session is not None else None
+    return (
+        isinstance(container, dict)
+        and container.get("launch_pending_session_id") == session_id
+    )
+
+
 def _remember(
     manager: SessionManager, session_id: str, spawner: Any, spawned: SpawnedHost,
 ) -> PendingHostLaunch:
