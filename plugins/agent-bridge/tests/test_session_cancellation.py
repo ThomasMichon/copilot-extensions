@@ -420,3 +420,108 @@ async def test_authority_result_is_stale_after_completed_prompt_admission(
     await ctx.session._prompt_task
     cleanup.assert_not_awaited()
     assert ctx.manager._host_index.get(ctx.session.session_id) == record
+
+
+async def test_shutdown_joins_launch_without_client_and_rejects_new_work(owned_context):
+    from agent_bridge.session_manager import DaemonDrainingError
+    from agent_bridge.session_teardown import detach_for_restart
+
+    ctx = owned_context
+    ctx.phase = "start"
+    launch = asyncio.create_task(ctx.manager.start_session(
+        SpawnTarget(type="command", cwd=ctx.session.target.cwd, spawn_command=["example-agent"]),
+    ))
+    await asyncio.wait_for(ctx.entered.wait(), 5)
+    starting = next(s for s in ctx.manager.list_sessions() if s is not ctx.session)
+    assert starting.client is None
+    shutdown = asyncio.create_task(detach_for_restart(ctx.manager))
+    await asyncio.sleep(0)
+    assert not shutdown.done()
+    assert ctx.manager._shutting_down
+    ctx.release.set()
+    await asyncio.wait_for(launch, 3)
+    await asyncio.wait_for(shutdown, 5)
+    assert ctx.processes[0].returncode is not None
+    assert starting._owned_process is None
+    assert starting.status == SessionStatus.STOPPED
+    assert ctx.db.get_session(starting.session_id)["restart_status"] == "idle"
+    for operation in (
+        ctx.manager.start_session(ctx.session.target),
+        ctx.manager.resume_session(starting.session_id),
+        ctx.manager.resync_session(starting.session_id),
+        ctx.manager.submit_prompt(starting.session_id, "too late"),
+    ):
+        with pytest.raises(DaemonDrainingError):
+            await operation
+    result = await ctx.manager.submit_or_queue_prompt(starting.session_id, "preserve for later")
+    assert result["queued"] is True
+    assert len(ctx.processes) == 1
+
+
+async def test_channel_close_fences_an_already_admitted_resume(owned_context):
+    from agent_bridge.session_manager import DaemonDrainingError
+
+    ctx = owned_context
+    forward = SimpleNamespace(cancel=AsyncMock())
+    ctx.manager._forwards[ctx.session.session_id] = forward
+    await ctx.session._lifecycle_lock.acquire()
+    send = asyncio.create_task(ctx.manager.submit_prompt(ctx.session.session_id, "late work"))
+    await asyncio.sleep(0)
+    assert ctx.session._turn_start_lock.locked()
+    close = asyncio.create_task(ctx.manager.close_frontend_transports())
+    await asyncio.sleep(0)
+    assert ctx.manager._shutting_down
+    ctx.session._lifecycle_lock.release()
+    with pytest.raises(DaemonDrainingError):
+        await asyncio.wait_for(send, 3)
+    await asyncio.wait_for(close, 3)
+    forward.cancel.assert_awaited_once()
+    assert ctx.processes == []
+    assert ctx.manager._forwards == {}
+
+
+async def test_failed_explicit_remote_reap_keeps_authority_for_retry(owned_context, monkeypatch):
+    from agent_bridge.session_manager import RemoteHostRecoveryPendingError
+
+    ctx = owned_context
+    record = _remote_record(ctx)
+    reap = AsyncMock(return_value=False)
+    monkeypatch.setattr(ctx.manager, "_remote_reap", reap)
+    monkeypatch.setattr(
+        ctx.manager, "_forget_host_record",
+        lambda rec: ctx.manager._host_index.remove(rec.session_id),
+    )
+    with pytest.raises(RemoteHostRecoveryPendingError, match="authority and ownership retained"):
+        await ctx.manager.stop_session(ctx.session.session_id, reap_host=True)
+    assert ctx.session.status == SessionStatus.FAILED
+    assert ctx.manager._host_index.get(ctx.session.session_id) == record
+    assert not ctx.manager._background_recovery_allowed(ctx.session)
+    reap.return_value = True
+    await ctx.manager.stop_session(ctx.session.session_id, reap_host=True)
+    assert ctx.session.status == SessionStatus.STOPPED
+    assert ctx.manager._host_index.get(ctx.session.session_id) is None
+
+
+async def test_failed_pending_remote_reap_cannot_acknowledge_stop(owned_context, monkeypatch):
+    from agent_bridge.session_manager import RemoteHostRecoveryPendingError
+
+    ctx = owned_context
+    record = _remote_record(ctx)
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def reap(*_args):
+        entered.set()
+        await release.wait()
+        return False
+
+    monkeypatch.setattr(ctx.manager, "_remote_reap", reap)
+    ctx.manager._reap_host_record(record, "prior cleanup")
+    assert ctx.manager._host_index.get(ctx.session.session_id) == record
+    await asyncio.wait_for(entered.wait(), 3)
+    stop = asyncio.create_task(ctx.manager.stop_session(ctx.session.session_id))
+    await asyncio.sleep(0)
+    release.set()
+    with pytest.raises(RemoteHostRecoveryPendingError, match="inconclusive"):
+        await asyncio.wait_for(stop, 3)
+    assert ctx.session.status == SessionStatus.FAILED
+    assert ctx.manager._host_index.get(ctx.session.session_id) == record

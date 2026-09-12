@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .session_ownership import cleanup_owned_process, finish_owned
 
@@ -14,12 +14,21 @@ async def detach_for_restart(manager: SessionManager) -> None:
     """Detach active sessions and close owned channels at frontend shutdown."""
     from .session_manager import log
 
+    manager._shutting_down = True
     for session in manager.list_sessions():
-        if session.client and session.client.is_running:
+        if (
+            manager._background_recovery_allowed(session)
+            or session.client is not None
+            or session._owned_process is not None
+            or session._turn_start_lock.locked()
+            or session._lifecycle_lock.locked()
+            or manager._remote_reaps_by_session.get(session.session_id)
+        ):
             try:
                 log.info("Detaching session %s on shutdown", session.session_id)
                 await manager.stop_session(
                     session.session_id,
+                    force=True,
                     cancel_turn=manager.cancel_turns_on_redeploy,
                     for_restart=True,
                 )
@@ -32,6 +41,43 @@ async def detach_for_restart(manager: SessionManager) -> None:
         await manager.close_frontend_transports()
     except Exception:
         log.warning("Failed to close frontend transports on shutdown", exc_info=True)
+    if manager._remote_reap_tasks:
+        from .session_manager import asyncio
+
+        await finish_owned(asyncio.gather(*list(manager._remote_reap_tasks)))
+
+
+async def reap_remote_record(
+    manager: SessionManager, record: Any, *,
+    session: Session | None = None, generation: int | None = None,
+) -> bool:
+    """Keep authority until termination is confirmed; never forget a replacement."""
+    confirmed = await manager._remote_reap(record, getattr(record, "endpoint", None) or {})
+    current = manager._host_index.get(record.session_id) if manager._host_index else None
+    if confirmed:
+        if current == record:
+            manager._forget_host_record(record)
+    elif (
+        session is not None
+        and manager._sessions.get(record.session_id) is session
+        and session._lifecycle_generation == generation
+        and current == record
+    ):
+        manager._mark_session_failed(session, trigger="remote_reap_inconclusive")
+    return confirmed
+
+
+async def reap_remote_checked(manager: SessionManager, session: Session, record: Any) -> None:
+    """Surface unconfirmed remote termination with its authority record retained."""
+    from .session_manager import RemoteHostRecoveryPendingError
+
+    if not await reap_remote_record(
+        manager, record, session=session, generation=session._lifecycle_generation,
+    ):
+        raise RemoteHostRecoveryPendingError(
+            f"Remote Session Host reap is inconclusive for {session.session_id}; "
+            "authority and ownership retained"
+        )
 
 
 async def stop_session_admitted(
@@ -87,7 +133,7 @@ async def complete_stop(
     reap_host: bool, cancel_turn: bool, for_restart: bool,
 ) -> None:
     """Finish every teardown stage and durable transition under retained ownership."""
-    from .session_manager import SessionStatus, asyncio, log, time
+    from .session_manager import RemoteHostRecoveryPendingError, SessionStatus, asyncio, log, time
 
     session_id = session.session_id
     await manager._quiesce_session(session, cancel_turn=cancel_turn)
@@ -98,10 +144,16 @@ async def complete_stop(
     if reap_host and manager._host_index is not None:
         record = manager._host_index.get(session_id)
         if record is not None:
-            manager._reap_host_record(record, "idle reap (#1826)")
+            if getattr(record, "boundary", "local") == "local":
+                manager._reap_host_record(record, "idle reap (#1826)")
+            else:
+                await reap_remote_checked(manager, session, record)
     pending = list(manager._remote_reaps_by_session.get(session_id, ()))
     if pending:
-        await asyncio.gather(*pending)
+        if not all(await asyncio.gather(*pending)):
+            raise RemoteHostRecoveryPendingError(
+                f"Pending remote reap is inconclusive for {session_id}; ownership retained"
+            )
     session.status = SessionStatus.STOPPED
     session.restart_status = restart_status
     manager.db.update_session_status(
@@ -213,28 +265,12 @@ async def end_session_locked(self: SessionManager, session: Session, *, force: b
                 self._kill_forward_sync(session_id)
                 with contextlib.suppress(Exception):
                     self._host_index.remove(session_id)
-            elif rec.boundary == "container":
+            elif rec.boundary != "local":
                 self._kill_forward_sync(
                     session_id,
                     release_container_lock=False,
                 )
-                confirmed_dead = await self._remote_reap(
-                    rec,
-                    getattr(rec, "endpoint", None) or {},
-                )
-                if not confirmed_dead:
-                    self._mark_session_failed(
-                        session, trigger="remote_reap_inconclusive"
-                    )
-                    raise RemoteHostRecoveryPendingError(
-                        "Container Session Host reap is inconclusive; "
-                        f"retained session {session_id} and target ownership"
-                    )
-                with contextlib.suppress(Exception):
-                    self._host_index.remove(session_id)
-                with contextlib.suppress(Exception):
-                    from . import bridge_lock
-                    bridge_lock.remove_sync(session_id)
+                await reap_remote_checked(self, session, rec)
                 self._set_container_launch_pending(session_id, False)
             else:
                 self._reap_host_record(rec, "session ended")

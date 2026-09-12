@@ -26,6 +26,7 @@ async def resume_session_admitted(
 
     from .session_manager import (
         AcpClient,
+        DaemonDrainingError,
         SessionStatus,
         _MAX_RESUME_ROUNDS,
         _default_cwd,
@@ -38,6 +39,8 @@ async def resume_session_admitted(
 
     session_id = session.session_id
     async with session._lifecycle_lock:
+        if self._shutting_down:
+            raise DaemonDrainingError("resume")
         if self._sessions.get(session_id) is not session:
             raise KeyError(f"Session {session_id} not found")
         if session.status != SessionStatus.STOPPED:
@@ -396,6 +399,7 @@ async def resync_session(self: SessionManager, session_id: str, *, background: b
 
     from .session_manager import (
         AcpClient,
+        DaemonDrainingError,
         SessionStatus,
         _default_cwd,
         asyncio,
@@ -415,6 +419,8 @@ async def resync_session(self: SessionManager, session_id: str, *, background: b
         )
 
     async with session._turn_start_lock, session._lifecycle_lock:
+        if self._shutting_down:
+            raise DaemonDrainingError("resync")
         if self._sessions.get(session_id) is not session:
             raise KeyError(f"Session {session_id} not found")
         if background and session.status != SessionStatus.RUNNING:
