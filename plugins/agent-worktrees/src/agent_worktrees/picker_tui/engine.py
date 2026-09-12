@@ -5859,6 +5859,19 @@ class PickerScreen(Widget):
                 self.sel = self.default_sel()
             short = (msg or "").splitlines()[0][:80] if msg else ""
             if ok:
+                # The steer form's Confirm always saves a draft before this
+                # subprocess even runs (so a failed submission never loses the
+                # operator's answer). Once the submission has genuinely
+                # succeeded, that draft has served its purpose -- clear it so a
+                # future card for this task doesn't restore stale content.
+                task_id = ctx.get("task_id")
+                if task_id:
+                    path = _steer_draft_path(str(task_id))
+                    try:
+                        if path and path.exists():
+                            path.unlink()
+                    except OSError:
+                        pass
                 # ``_work`` already invalidated the cached list; kick an immediate
                 # re-fetch of the current scope and repaint so the row reflects
                 # the new state at once, instead of waiting on the idle ~2fps tick
@@ -7616,6 +7629,55 @@ class SteerButtonRow(Widget):
         self._on_press(self._buttons[chosen][0])
 
 
+class ResetConfirmScreen(ModalScreen[bool]):
+    """Are-you-sure gate for the steer form's Reset button.
+
+    Mirrors :class:`QuitConfirmScreen`'s FocusGroup pattern: returns its
+    verdict via ``dismiss(bool)`` (``True`` reset, ``False`` stays), with
+    *Stay* as the initial choice so a reflexive Enter never wipes the form.
+    """
+
+    CSS = """
+    ResetConfirmScreen { align: center middle; background: $background 55%; }
+    ResetConfirmScreen > #reset-frame {
+        width: 52; height: auto; border: round #ffaf00;
+        background: $surface; padding: 1 2;
+    }
+    ResetConfirmScreen #reset-prompt { height: auto; padding: 0 0 1 0; }
+    ResetConfirmScreen FocusGroup { height: auto; }
+    ResetConfirmScreen #reset-hint { color: grey; height: auto; padding: 1 0 0 0; }
+    """
+    BINDINGS = [
+        Binding("y", "reset", show=False),
+        Binding("n", "stay", show=False),
+        Binding("escape", "stay", show=False),
+    ]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="reset-frame"):
+            yield Static(
+                Text(" Clear every field on this steer form?", style=C_HEADER),
+                id="reset-prompt",
+            )
+            yield FocusGroup([("reset", "Reset"), ("stay", "Stay")], initial=1,
+                             id="reset-buttons")
+            yield Static("y reset · n/Esc stay · ←/→ choose", id="reset-hint")
+
+    def on_mount(self) -> None:
+        self.query_one("#reset-frame", Vertical).border_title = "Reset the form?"
+        self.call_after_refresh(
+            lambda: self.query_one("#reset-buttons", FocusGroup).focus())
+
+    def on_focus_group_activated(self, event: "FocusGroup.Activated") -> None:
+        self.dismiss(event.value == "reset")
+
+    def action_reset(self) -> None:
+        self.dismiss(True)
+
+    def action_stay(self) -> None:
+        self.dismiss(False)
+
+
 class PivotFormScreen(ModalScreen[dict]):
     """Docked card + tabbed elicitation modal (the DISPATCH-pivot 'Steer' surface).
 
@@ -7627,14 +7689,24 @@ class PivotFormScreen(ModalScreen[dict]):
     auto-expanding text box (up to 10 lines). A choice/multichoice that declares
     ``allow_other`` gains an **"Other…"** entry that reveals a free-text box.
     Beneath sits a single-line Picker-style button row: **Confirm** (submit),
-    **Save** (persist a draft and close -- resume later, survives a kill/Escape),
-    **Cancel** (discard).
+    **Save** (persist a draft and close -- resume later), **Reset** (after an
+    are-you-sure, clears every field in place -- never closes the dialog).
+
+    Every path that *closes* this screen (Confirm, Save, Esc) saves the
+    collected answer to the on-disk draft first, before anything else happens
+    -- so if the actual submission (which runs asynchronously, after this
+    screen has already dismissed) fails for any reason, the operator's answer
+    is never silently lost; it is exactly what reopening this card's next
+    steer prompt restores. Confirm's draft is only deleted once the caller
+    confirms the submission actually succeeded (see ``_run_pivot_form_submit``
+    in the engine module); Save's draft is deliberately left in place, since
+    Save never submits at all.
 
     On **Confirm** the collected ``{name: value}`` answer is returned via
     ``dismiss(dict)`` (a multichoice value is a list); ``dismiss(None)`` on
-    Save/Cancel/Escape. The caller substitutes those values into the action's
-    ``run`` template (the steer transport) -- this screen never runs a command
-    and never carries a verdict; it only gathers the operator's answer.
+    Save/Esc. The caller substitutes those values into the action's ``run``
+    template (the steer transport) -- this screen never runs a command and
+    never carries a verdict; it only gathers the operator's answer.
 
     Esc saves a draft and closes (nothing is lost); Ctrl+S saves explicitly."""
 
@@ -7693,7 +7765,7 @@ class PivotFormScreen(ModalScreen[dict]):
                 yield from self._compose_questions()
                 yield Static(self._foot(), id="steer-foot")
                 yield SteerButtonRow(
-                    [("confirm", "Confirm"), ("save", "Save"), ("cancel", "Cancel")],
+                    [("confirm", "Confirm"), ("save", "Save"), ("reset", "Reset")],
                     self._on_button, id="steer-buttons",
                 )
 
@@ -7776,7 +7848,8 @@ class PivotFormScreen(ModalScreen[dict]):
     def _foot(self) -> str:
         return ("Enter accept+next · Shift+Enter newline · Space toggle · "
                 "Ctrl+←/→ tabs · Ctrl+S save · Esc save+close  ·  "
-                "Confirm sends this response to the agent")
+                "Confirm sends this response to the agent · "
+                "Reset clears the fields (asks first)")
 
     # ---- lifecycle ----------------------------------------------------------
     def on_mount(self) -> None:
@@ -8064,16 +8137,51 @@ class PivotFormScreen(ModalScreen[dict]):
         elif key == "save":
             self.action_save()
         else:
-            self._cancel()
+            self._on_reset_pressed()
 
     def _confirm(self) -> None:
+        # Save first: the caller submits asynchronously *after* this screen has
+        # already dismissed, so if that submission fails for any reason, the
+        # collected answer must still be recoverable rather than lost the
+        # moment this dialog closes. The caller deletes this draft itself once
+        # it confirms the submission actually succeeded.
+        self._write_draft()
         values = self._collect()
-        self._delete_draft()
         self.dismiss(values)
 
-    def _cancel(self) -> None:
+    def _on_reset_pressed(self) -> None:
+        def _after(confirmed: bool | None) -> None:
+            if confirmed:
+                self._perform_reset()
+
+        self.app.push_screen(ResetConfirmScreen(), _after)
+
+    def _perform_reset(self) -> None:
+        """Clear every field back to its blank/default state, in place --
+        never closes this dialog. Also clears the on-disk draft, since a
+        reset answer has nothing left worth recovering."""
+        for rec in self._q:
+            ftype = rec["type"]
+            prim, other = rec["primary"], rec["other"]
+            if ftype == "text":
+                prim.value = ""
+            elif ftype == "textarea":
+                prim.text = ""
+                prim.autosize()
+            elif ftype == "choice":
+                for b in prim.query(RadioButton):
+                    b.value = False
+            elif ftype == "multichoice":
+                prim.deselect_all()
+            if other is not None:
+                other.text = ""
+                other.display = False
+        self._sync_conditional_fields()
         self._delete_draft()
-        self.dismiss(None)
+        try:
+            self.query_one("#steer-buttons", SteerButtonRow).focus()
+        except Exception:
+            pass
 
     def action_save(self) -> None:
         self._write_draft()
