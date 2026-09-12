@@ -964,7 +964,8 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   its module-size ceiling after the added dedup-check code. Full plugin
   suite unaffected outside the touched tests. `agent-worktrees` version
   unchanged at `1.5.5-dev76` (same open PR, not yet merged).
-- **Phase 2 complete: stages 12, 13 landed.** Stage 12 (`session_end_bound`)
+- **Phase 2: stages 12, 13 landed (all stages except Stage 1's deferred
+  sub-item).** Stage 12 (`session_end_bound`)
   needed **no code change** -- `cmd_deregister_session` already emits
   `session_ended` unconditionally on every sessionEnd hook call, and Phase
   1's `HANDOFF_STAGE_MAP` already maps it to Stage 12 with no gate; confirmed
@@ -981,7 +982,9 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   `_handoff_cutover_retire_result()` right after it logs the retire outcome,
   and `_emit_handoff_claim_stages()` right after Stage 10/11 -- whichever
   confirmation completes second is the one that actually fires Stage 13.
-  **All 13 stages of the lifecycle vocabulary are now instrumented.** New
+  **Stages 2-13 of the lifecycle vocabulary are now instrumented; Stage 1's
+  `predecessor_session_id: null` framing remains its own explicitly-deferred
+  sub-item (see the Plan checklist), left open for Phase 3.** New
   tests: `test_register_session.py` (Stage 12 end-to-end confirmation; Stage
   13 firing on the claim side when retire already happened; Stage 13 NOT
   firing when only a candidate, never linked; Stage 13 firing on the retire
@@ -1024,7 +1027,11 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   threads resolved). `agent-worktrees` version held at `1.5.5-dev77`
   throughout (all five commits landed in the same still-open PR; only the
   final shipped version needs to differ from the PR's base per the
-  version-bump policy). PR #2494 merged via `pr-merge --now`. **Phase 2 is
-  now fully complete: all 13 stages of the handoff lifecycle are
-  instrumented, tested, and merged.** Next: Phase 3 (durable per-project
-  trace store + cross-linking + `handoff-trace` CLI) and Phase 5 (docs).
+  version-bump policy). PR #2494 merged via `pr-merge --now`. **Stages 2-13
+  of the handoff lifecycle are now instrumented, tested, and merged. Stage 1
+  remains its own explicitly-deferred sub-item** (the
+  `predecessor_session_id: null` framing, left open for Phase 3 per the Plan
+  checklist -- a subsequent completion-marker PR incorrectly claimed "all 13
+  stages" complete; corrected here after review caught the contradiction).
+  Next: Phase 3 (durable per-project trace store + cross-linking +
+  `handoff-trace` CLI) and Phase 5 (docs).
