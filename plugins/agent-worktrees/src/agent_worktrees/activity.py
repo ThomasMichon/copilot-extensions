@@ -128,8 +128,14 @@ HANDOFF_STAGE_MAP: dict[str, tuple[int, str]] = {
 # acknowledgement), but also for "already-claimed" and "error" (a duplicate or
 # failed claim attempt), which must NOT be stamped as a Stage 7 success or the
 # audit trace would show a false acknowledgement for every collision.
+# handoff_predecessor_retire similarly fires for outcome="identity-mismatch"
+# (a safety guard skipped the pane) and outcome="left-running" (the pane/
+# process survived retirement), neither of which is a confirmed Stage 11
+# pickup/closure -- only outcome="gone" (retire_pane confirmed gone AND
+# process reaping clean) is.
 _HANDOFF_STAGE_GATE: dict[str, tuple[str, object]] = {
     "handoff_cutover_claim": ("outcome", "acquired"),
+    "handoff_predecessor_retire": ("outcome", "gone"),
 }
 
 

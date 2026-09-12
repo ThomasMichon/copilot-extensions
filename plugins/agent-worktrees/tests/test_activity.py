@@ -52,7 +52,9 @@ def test_log_event_maps_existing_events_to_their_stage(patch_install_dir: Path):
         "handoff_cutover_claim", worktree_id="wt-1", outcome="acquired"
     )
     activity.log_event("handoff_cutover_spawn", worktree_id="wt-1")
-    activity.log_event("handoff_predecessor_retire", worktree_id="wt-1")
+    activity.log_event(
+        "handoff_predecessor_retire", worktree_id="wt-1", outcome="gone"
+    )
     events = activity.read_events()
     stages = [(e["event"], e["stage"], e["stage_name"]) for e in events]
     assert stages == [
@@ -76,6 +78,19 @@ def test_log_event_does_not_stamp_a_failed_or_duplicate_claim(
     for rec in activity.read_events():
         assert "stage" not in rec
         assert "stage_name" not in rec
+
+
+def test_log_event_does_not_stamp_an_unretired_predecessor(patch_install_dir: Path):
+    activity.log_event(
+        "handoff_predecessor_retire", worktree_id="wt-1", outcome="left-running"
+    )
+    activity.log_event(
+        "handoff_predecessor_retire", worktree_id="wt-1", outcome="identity-mismatch"
+    )
+    for rec in activity.read_events():
+        assert "stage" not in rec
+        assert "stage_name" not in rec
+
 
 
 def test_log_event_reserves_stage_fields_against_caller_override(
