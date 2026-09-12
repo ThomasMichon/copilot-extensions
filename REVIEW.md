@@ -24,10 +24,10 @@ specifically when reviewing a pull request, not a replacement for them.
   `AGENTS.md`'s and `CONTRIBUTING.md`'s standards over stylistic nitpicks.
 - **Lead with the highest-signal miss: the version-bump triplet.** For any
   changed plugin *payload*, verify all three version locations moved
-  together (`plugins/<name>/plugin.json`, `plugins/<name>/pyproject.toml`,
-  and that plugin's entry in `.github/plugin/marketplace.json`) — a
-  partial/missing bump silently breaks machine updates. This is the single
-  most valuable thing to catch.
+  together (`plugins/<name>/plugin.json`, `plugins/<name>/pyproject.toml` --
+  runtime plugins only -- and that plugin's entry in
+  `.github/plugin/marketplace.json`) — a partial/missing bump silently
+  breaks machine updates. This is the single most valuable thing to catch.
 - **Tests for runtime logic.** Flag PRs that change a runtime plugin's logic
   without adding or updating that plugin's `tests/`.
 - **Test portfolio growth.** Flag new exhaustive matrices, repeated process
