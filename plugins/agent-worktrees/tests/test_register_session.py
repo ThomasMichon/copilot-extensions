@@ -131,6 +131,88 @@ class TestRegisterSessionStdin:
         assert matches[0]["handoff_token"] == "task-123"
         assert matches[0]["launch_id"] == "flow-9"
 
+    def test_session_start_emits_stage_10_and_11_on_handoff_claim(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        """#2457 Stages 10/11: the sessionStart hook's ``--handoff-token``
+        path (the real head-transfer, distinct from stage 9's candidate
+        association) must emit handoff_successor_claimed and
+        handoff_pickup_confirmed_predecessor_closing together, exactly once,
+        at tracking.register_session()'s link_handoff() call site."""
+        _save_record(tmp_tracking_dir, "wt-claim", "/tmp/src/wt-claim")
+        tracking.register_session("wt-claim", "old")
+        rec = load_record(tmp_tracking_dir / "wt-claim.yaml")
+        tracking.open_handoff(rec, "old", "task-456")
+
+        recorded: list[tuple[str, dict]] = []
+        real_log_event = activity.log_event
+
+        def _capture(event, **kwargs):
+            recorded.append((event, kwargs))
+            return real_log_event(event, **kwargs)
+
+        monkeypatch.setattr(activity, "log_event", _capture)
+
+        rc = m.cmd_register_session(_args(
+            worktree_id="wt-claim", session_id="new",
+            handoff_token="task-456", launch_id="flow-10",
+        ))
+
+        assert rc == 0
+        rec = load_record(tmp_tracking_dir / "wt-claim.yaml")
+        assert rec.resolved_head_session == "new"
+        assert rec.handoffs[0].state == "linked"
+
+        claimed = [kw for ev, kw in recorded if ev == "handoff_successor_claimed"]
+        closing = [
+            kw for ev, kw in recorded
+            if ev == "handoff_pickup_confirmed_predecessor_closing"
+        ]
+        assert len(claimed) == 1
+        assert claimed[0]["worktree_id"] == "wt-claim"
+        assert claimed[0]["session_id"] == "new"
+        assert claimed[0]["handoff_token"] == "task-456"
+        assert claimed[0]["predecessor_session_id"] == "old"
+        assert claimed[0]["launch_id"] == "flow-10"
+        assert len(closing) == 1
+        assert closing[0]["worktree_id"] == "wt-claim"
+        assert closing[0]["session_id"] == "old"
+        assert closing[0]["successor_session_id"] == "new"
+        assert closing[0]["handoff_token"] == "task-456"
+        assert closing[0]["launch_id"] == "flow-10"
+
+    def test_re_registering_a_linked_handoff_does_not_re_emit_stage_10_11(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        """A second sessionStart hook call for the same already-linked
+        successor (e.g. a resumed session) must not re-emit Stage 10/11 --
+        link_handoff() is idempotent and so must the derived trace be."""
+        _save_record(tmp_tracking_dir, "wt-dup", "/tmp/src/wt-dup")
+        tracking.register_session("wt-dup", "old")
+        rec = load_record(tmp_tracking_dir / "wt-dup.yaml")
+        tracking.open_handoff(rec, "old", "task-789")
+        rc = m.cmd_register_session(_args(
+            worktree_id="wt-dup", session_id="new", handoff_token="task-789",
+        ))
+        assert rc == 0
+
+        recorded: list[str] = []
+        real_log_event = activity.log_event
+
+        def _capture(event, **kwargs):
+            recorded.append(event)
+            return real_log_event(event, **kwargs)
+
+        monkeypatch.setattr(activity, "log_event", _capture)
+
+        rc = m.cmd_register_session(_args(
+            worktree_id="wt-dup", session_id="new", handoff_token="task-789",
+        ))
+
+        assert rc == 0
+        assert "handoff_successor_claimed" not in recorded
+        assert "handoff_pickup_confirmed_predecessor_closing" not in recorded
+
     def test_resolves_worktree_from_stdin_cwd(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
     ):
