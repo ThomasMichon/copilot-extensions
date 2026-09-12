@@ -48,7 +48,9 @@ def test_log_event_stamps_known_handoff_stage(patch_install_dir: Path):
 
 
 def test_log_event_maps_existing_events_to_their_stage(patch_install_dir: Path):
-    activity.log_event("handoff_cutover_claim", worktree_id="wt-1")
+    activity.log_event(
+        "handoff_cutover_claim", worktree_id="wt-1", outcome="acquired"
+    )
     activity.log_event("handoff_cutover_spawn", worktree_id="wt-1")
     activity.log_event("handoff_predecessor_retire", worktree_id="wt-1")
     events = activity.read_events()
@@ -62,6 +64,32 @@ def test_log_event_maps_existing_events_to_their_stage(patch_install_dir: Path):
             "handoff_pickup_confirmed_predecessor_closing",
         ),
     ]
+
+
+def test_log_event_does_not_stamp_a_failed_or_duplicate_claim(
+    patch_install_dir: Path,
+):
+    activity.log_event(
+        "handoff_cutover_claim", worktree_id="wt-1", outcome="already-claimed"
+    )
+    activity.log_event("handoff_cutover_claim", worktree_id="wt-1", outcome="error")
+    for rec in activity.read_events():
+        assert "stage" not in rec
+        assert "stage_name" not in rec
+
+
+def test_log_event_reserves_stage_fields_against_caller_override(
+    patch_install_dir: Path,
+):
+    activity.log_event(
+        "handoff_requested",
+        worktree_id="wt-1",
+        stage=999,
+        stage_name="not-a-real-stage",
+    )
+    rec = activity.read_events()[0]
+    assert rec["stage"] == 6
+    assert rec["stage_name"] == "handoff_triggered"
 
 
 def test_log_event_omits_stage_fields_for_unmapped_events(patch_install_dir: Path):

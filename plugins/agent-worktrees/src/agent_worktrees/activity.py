@@ -123,6 +123,16 @@ HANDOFF_STAGE_MAP: dict[str, tuple[int, str]] = {
 }
 
 
+# Events whose stage-map entry is only valid for a specific field value --
+# e.g. handoff_cutover_claim fires for outcome="acquired" (the real
+# acknowledgement), but also for "already-claimed" and "error" (a duplicate or
+# failed claim attempt), which must NOT be stamped as a Stage 7 success or the
+# audit trace would show a false acknowledgement for every collision.
+_HANDOFF_STAGE_GATE: dict[str, tuple[str, object]] = {
+    "handoff_cutover_claim": ("outcome", "acquired"),
+}
+
+
 def log_path() -> Path:
     """Path to the machine-global activity log."""
     return cfg.install_dir() / "logs" / "activity.jsonl"
@@ -148,7 +158,10 @@ def log_event(
             launch shares it (``agent-worktrees activity --launch-id``).
         source: Originating component ("python" or "launcher").
         **fields: Extra context (branch, reason, exit_code, ...). ``None``
-            values are dropped.
+            values are dropped. ``stage``/``stage_name`` are reserved: a
+            caller-supplied value is dropped in favor of the canonical
+            ``HANDOFF_STAGE_MAP`` stamp so the schema can't be corrupted by an
+            arbitrary ``--field stage=...`` from the CLI.
     """
     try:
         path = log_path()
@@ -163,12 +176,19 @@ def log_event(
             "host": _HOSTNAME,
             "source": source,
         }
-        stage_info = HANDOFF_STAGE_MAP.get(event)
-        if stage_info is not None:
-            record["stage"], record["stage_name"] = stage_info
         for key, value in fields.items():
             if value is not None:
                 record[key] = value
+        gate = _HANDOFF_STAGE_GATE.get(event)
+        gated_out = gate is not None and record.get(gate[0]) != gate[1]
+        stage_info = HANDOFF_STAGE_MAP.get(event)
+        if stage_info is not None and not gated_out:
+            # Stamped last so no caller-supplied field (including a
+            # same-named one from **fields) can override the canonical value.
+            record["stage"], record["stage_name"] = stage_info
+        else:
+            record.pop("stage", None)
+            record.pop("stage_name", None)
         line = json.dumps(record, ensure_ascii=True)
         with open(path, "a", encoding="utf-8") as handle:
             handle.write(line + "\n")
