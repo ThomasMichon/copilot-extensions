@@ -323,8 +323,13 @@ class TestRegisterSessionStdin:
         resident monitor's retire process run concurrently and could both
         pass a plain read_events() check before either logs, double-recording
         Stage 13. The dedup must be an atomic exclusive-create claim file, not
-        a read-before-write check -- simulate two callers racing to emit for
-        the exact same token and confirm only one wins."""
+        a read-before-write check -- run real concurrent callers (synchronized
+        with a barrier so they race on the SAME instant, not sequentially) and
+        confirm only one wins. A sequential-call test would pass even against
+        the old read-before-write implementation and prove nothing about the
+        actual race."""
+        import threading
+
         _save_record(tmp_tracking_dir, "wt-race", "/tmp/src/wt-race")
         tracking.register_session("wt-race", "old")
         rec = load_record(tmp_tracking_dir / "wt-race.yaml")
@@ -336,15 +341,101 @@ class TestRegisterSessionStdin:
             "handoff_predecessor_retire", worktree_id="wt-race",
             session_id="old", handoff_token="task-race", outcome="gone",
         )
-        # Both the claim side and the retire side calling at "the same time"
-        # (modeled here as two sequential calls with no dedup memory between
-        # them beyond the on-disk claim file) must still yield exactly one
-        # handoff_complete record.
-        m._maybe_emit_stage_13("wt-race", "task-race")
-        m._maybe_emit_stage_13("wt-race", "task-race")
-        m._maybe_emit_stage_13("wt-race", "task-race")
+
+        n_threads = 8
+        barrier = threading.Barrier(n_threads)
+
+        def _racer():
+            barrier.wait()
+            m._maybe_emit_stage_13("wt-race", "task-race")
+
+        threads = [threading.Thread(target=_racer) for _ in range(n_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5)
 
         complete = activity.read_events(worktree_id="wt-race", event="handoff_complete")
+        assert len(complete) == 1
+
+    def test_stage_13_claim_keys_are_collision_resistant(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        """#2457 review finding: the claim key must not be derived from the
+        lossy character-sanitized `_monitor_handoff_claim_segment()` (which
+        maps distinct tokens like "task:1" and "task_1" onto the same on-disk
+        name) -- two DIFFERENT tokens that collide under that sanitization
+        must each still get their own Stage 13 record."""
+        _save_record(tmp_tracking_dir, "wt-collide", "/tmp/src/wt-collide")
+        tracking.register_session("wt-collide", "old-a")
+        tracking.register_session("wt-collide", "old-b")
+        rec = load_record(tmp_tracking_dir / "wt-collide.yaml")
+        tracking.open_handoff(rec, "old-a", "task:1")
+        rec = load_record(tmp_tracking_dir / "wt-collide.yaml")
+        tracking.open_handoff(rec, "old-b", "task_1")
+        m.cmd_register_session(_args(
+            worktree_id="wt-collide", session_id="new-a", handoff_token="task:1",
+        ))
+        m.cmd_register_session(_args(
+            worktree_id="wt-collide", session_id="new-b", handoff_token="task_1",
+        ))
+        for predecessor, token in (("old-a", "task:1"), ("old-b", "task_1")):
+            activity.log_event(
+                "handoff_predecessor_retire", worktree_id="wt-collide",
+                session_id=predecessor, handoff_token=token, outcome="gone",
+            )
+
+        m._maybe_emit_stage_13("wt-collide", "task:1")
+        m._maybe_emit_stage_13("wt-collide", "task_1")
+
+        complete = activity.read_events(worktree_id="wt-collide", event="handoff_complete")
+        assert {c["handoff_token"] for c in complete} == {"task:1", "task_1"}
+
+    def test_stage_13_claim_is_retryable_after_a_detected_log_failure(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        """#2457 review finding: `open(..., "x")` must not permanently consume
+        the claim before the event is known to be durable -- if
+        `activity.log_event_failure_count()` shows the write was dropped, the
+        claim must be rolled back so a later retry can still succeed."""
+        _save_record(tmp_tracking_dir, "wt-retryable", "/tmp/src/wt-retryable")
+        tracking.register_session("wt-retryable", "old")
+        rec = load_record(tmp_tracking_dir / "wt-retryable.yaml")
+        tracking.open_handoff(rec, "old", "task-retryable")
+        m.cmd_register_session(_args(
+            worktree_id="wt-retryable", session_id="new",
+            handoff_token="task-retryable",
+        ))
+        activity.log_event(
+            "handoff_predecessor_retire", worktree_id="wt-retryable",
+            session_id="old", handoff_token="task-retryable", outcome="gone",
+        )
+
+        real_log_event = activity.log_event
+        real_count = activity.log_event_failure_count()
+        count_holder = {"n": real_count}
+
+        def _dropping_log_event(event, **kwargs):
+            if event == "handoff_complete":
+                count_holder["n"] += 1  # simulate a swallowed logger I/O failure
+                return
+            return real_log_event(event, **kwargs)
+
+        monkeypatch.setattr(activity, "log_event", _dropping_log_event)
+        monkeypatch.setattr(activity, "log_event_failure_count", lambda: count_holder["n"])
+
+        m._maybe_emit_stage_13("wt-retryable", "task-retryable")
+        assert activity.read_events(
+            worktree_id="wt-retryable", event="handoff_complete",
+        ) == []
+
+        monkeypatch.setattr(activity, "log_event", real_log_event)
+        monkeypatch.setattr(activity, "log_event_failure_count", lambda: real_count)
+        m._maybe_emit_stage_13("wt-retryable", "task-retryable")
+
+        complete = activity.read_events(
+            worktree_id="wt-retryable", event="handoff_complete",
+        )
         assert len(complete) == 1
 
     def test_resolves_worktree_from_stdin_cwd(

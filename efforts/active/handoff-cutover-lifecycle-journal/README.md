@@ -387,12 +387,18 @@ renumbering from the "acknowledges handoff" step onward.)
       **Landed:** a new `_maybe_emit_stage_13()` helper checks BOTH
       confirmations (`handoff_predecessor_retire` with `outcome="gone"` for
       the exact token, AND the tracking record's handoff `state == "linked"`,
-      not merely a candidate) and emits `handoff_complete` exactly once, deduped
-      via `activity.read_events()`. Called from both sides of the ordering race
-      the case study exposed: `_handoff_cutover_retire_result()` (right after
-      it logs the retire outcome) and `_emit_handoff_claim_stages()` (right
-      after Stage 10/11) -- whichever confirmation completes second is the one
-      that actually emits Stage 13.
+      not merely a candidate) and emits `handoff_complete` exactly once,
+      deduped via an **atomic exclusive-create claim file** keyed by a
+      collision-resistant digest of the exact (worktree, token) pair --
+      `read_events()` is used only for the retire-confirmation check above,
+      never as the dedup gate itself (a plain read-before-write check is a
+      real cross-process race here). The claim is rolled back on a detected
+      logger write failure (`activity.log_event_failure_count()`), so a
+      transient I/O error stays retryable. Called from both sides of the
+      ordering race the case study exposed: `_handoff_cutover_retire_result()`
+      (right after it logs the retire outcome) and
+      `_emit_handoff_claim_stages()` (right after Stage 10/11) -- whichever
+      confirmation completes second is the one that actually emits Stage 13.
 
 > **Deferred follow-on (explicitly out of scope here):** instrumenting
 > agent-bridge's `SessionManager.handoff_session()` spawn path to the same

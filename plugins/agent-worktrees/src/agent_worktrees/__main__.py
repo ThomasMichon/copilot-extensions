@@ -53,6 +53,7 @@ import argparse
 import contextlib
 import dataclasses
 import enum
+import hashlib
 import json
 import os
 import platform
@@ -1509,10 +1510,7 @@ def cmd_execution_leg(args) -> int:
                             preserve_handoff_reservations=False,
                         )
                         reservation_value["phase"] = "reserved"
-                        _write_execution_leg_reservation(
-                            reservation_path,
-                            reservation_value,
-                        )
+                        _write_execution_leg_reservation(reservation_path, reservation_value,)
                         _json_output({
                             **_execution_leg_payload(worktree_id, binding),
                             "reservation_token": token,
@@ -1529,19 +1527,13 @@ def cmd_execution_leg(args) -> int:
                             raise ValueError("execution-leg lifecycle operation is not reserved")
                         if reservation.get("token") != args.reservation_token:
                             raise ValueError("execution-leg reservation token mismatch")
-                        if (
-                            int(reservation.get("reserved_revision") or -1)
-                            != current_revision
-                        ):
+                        if (int(reservation.get("reserved_revision") or -1) != current_revision):
                             raise ValueError("execution-leg reservation revision changed")
                         now = datetime.now(timezone.utc)
                         reservation["expires_at"] = (
                             now + timedelta(seconds=args.lease_seconds)
                         ).isoformat(timespec="seconds")
-                        _write_execution_leg_reservation(
-                            reservation_path,
-                            reservation,
-                        )
+                        _write_execution_leg_reservation(reservation_path, reservation,)
                         _json_output({
                             **_execution_leg_payload(worktree_id, current),
                             "reservation_token": args.reservation_token,
@@ -1556,10 +1548,7 @@ def cmd_execution_leg(args) -> int:
                             args, "reservation_token", None
                         ):
                             raise ValueError("execution-leg reservation token mismatch")
-                        if (
-                            int(reservation.get("reserved_revision") or -1)
-                            != current_revision
-                        ):
+                        if (int(reservation.get("reserved_revision") or -1) != current_revision):
                             raise ValueError("execution-leg reservation revision changed")
                         binding = _binding_from_payload(reservation.get("previous_execution_leg"))
                         if binding is not None:
@@ -1574,10 +1563,7 @@ def cmd_execution_leg(args) -> int:
                         reservation["result_execution_leg"] = (
                             binding.to_dict() if binding is not None else None
                         )
-                        _write_execution_leg_reservation(
-                            reservation_path,
-                            reservation,
-                        )
+                        _write_execution_leg_reservation(reservation_path, reservation,)
                         tracking._save_record_unlocked(
                             latest,
                             yaml_path,
@@ -1593,10 +1579,7 @@ def cmd_execution_leg(args) -> int:
                             if supplied_token:
                                 raise ValueError("execution-leg reservation token mismatch")
                             raise ValueError("execution-leg lifecycle operation is reserved")
-                        if (
-                            int(reservation.get("reserved_revision") or -1)
-                            != current_revision
-                        ):
+                        if (int(reservation.get("reserved_revision") or -1) != current_revision):
                             raise ValueError("execution-leg reservation revision changed")
                     elif getattr(args, "reservation_token", None):
                         raise ValueError("execution-leg lifecycle operation is not reserved")
@@ -1668,10 +1651,7 @@ def cmd_execution_leg(args) -> int:
                         reservation["result_execution_leg"] = (
                             binding.to_dict() if binding is not None else None
                         )
-                        _write_execution_leg_reservation(
-                            reservation_path,
-                            reservation,
-                        )
+                        _write_execution_leg_reservation(reservation_path, reservation,)
                     tracking._save_record_unlocked(
                         latest,
                         yaml_path,
@@ -1791,10 +1771,7 @@ def _carve_paired_knowledge(
     knowledge_wt_path = str(Path(knowledge_wt_root) / knowledge_id)
 
     Path(knowledge_wt_root).mkdir(parents=True, exist_ok=True)
-    print(
-        f"Creating paired knowledge worktree on branch {knowledge_branch}...",
-        file=sys.stderr,
-    )
+    print(f"Creating paired knowledge worktree on branch {knowledge_branch}...", file=sys.stderr,)
     git_ops.create_worktree(
         knowledge_anchor,
         knowledge_wt_path,
@@ -2996,10 +2973,18 @@ def _maybe_emit_stage_13(
     """Emit Stage 13 (handoff_complete) once the predecessor pane is gone AND
     the successor is head (linked, not just candidate) -- called from both
     the retire and claim sides since either can complete first. Dedup is an
-    atomic exclusive-create claim file (not a read-before-write check): the
-    successor's sessionStart process and the resident monitor's retire
-    process run concurrently, so a plain read_events() check-then-act could
-    let both sides pass before either logs, double-recording Stage 13.
+    atomic exclusive-create claim file keyed by a collision-resistant digest
+    of the exact (worktree, token) pair (NOT the lossy character-sanitized
+    ``_monitor_handoff_claim_segment()``, which can map distinct tokens like
+    "task:1" and "task_1" onto the same on-disk name): the successor's
+    sessionStart process and the resident monitor's retire process run
+    concurrently, so a plain read_events() check-then-act could let both
+    sides pass before either logs, double-recording Stage 13. The claim is
+    rolled back if the log write is detected to have failed (via
+    ``activity.log_event_failure_count()``), so a transient logger I/O error
+    remains retryable rather than silently losing Stage 13 forever; a hard
+    process crash between the claim and the log write is a narrower residual
+    gap left to Phase 3's durable trace store.
     """
     if not wt_id or not handoff_token:
         return
@@ -3017,20 +3002,22 @@ def _maybe_emit_stage_13(
     handoff = next((h for h in record.handoffs if h.token == handoff_token), None)
     if handoff is None or handoff.state != "linked":
         return
-    claim_path = (
-        _monitor_handoff_claim_root() / _monitor_handoff_claim_segment(wt_id, "unknown-worktree")
-        / f"stage13-{_monitor_handoff_claim_segment(handoff_token, 'unknown-handoff')}.json"
-    )
+    digest = hashlib.sha256(f"{wt_id}\x00{handoff_token}".encode()).hexdigest()
+    claim_path = _monitor_handoff_claim_root() / "stage13" / f"{digest}.json"
     try:
         claim_path.parent.mkdir(parents=True, exist_ok=True)
         with open(claim_path, "x", encoding="utf-8"):
             pass
     except OSError:
         return  # already claimed (FileExistsError) or unwritable -- either way, no-op
+    failures_before = activity.log_event_failure_count()
     activity.log_event(
         "handoff_complete", worktree_id=wt_id, session_id=handoff.predecessor,
         successor_session_id=handoff.successor, handoff_token=handoff_token,
         launch_id=launch_id)
+    if activity.log_event_failure_count() > failures_before:
+        with contextlib.suppress(OSError):
+            claim_path.unlink()
 
 
 def _handoff_cutover_retire_result(
