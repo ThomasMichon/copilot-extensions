@@ -426,6 +426,9 @@ async def resync_session(self: SessionManager, session_id: str, *, background: b
             raise DaemonDrainingError("resync")
         if self._sessions.get(session_id) is not session:
             raise KeyError(f"Session {session_id} not found")
+        from .session_host_ownership import require_no_pending_host_launch
+
+        require_no_pending_host_launch(self, session_id)
         if background and session.status != SessionStatus.RUNNING:
             raise ValueError(
                 f"Session {session_id} is no longer running; skipping background resync"
