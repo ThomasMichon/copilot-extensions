@@ -150,6 +150,68 @@ def test_related_resolve_grafted_entry(split, capfd):
     assert out["name"] == "example-web"
 
 
+def test_related_resolve_reminder_uses_remote_slug_not_alias(
+    split, capfd, monkeypatch
+):
+    """The account-routing reminder must use the real gh owner/name slug
+    parsed from the remote, not the registry alias -- a registry name (e.g.
+    'example-web') can differ from the repo it actually points at."""
+    from agent_worktrees import repos
+    from agent_worktrees.__main__ import cmd_related_dispatch as run
+    harness, _ = split
+    monkeypatch.setattr(
+        repos, "find_repo",
+        lambda name: repos.RepoEntry(
+            name=name, remote="https://github.com/example-org/proj.git",
+        ) if name == "example-web" else None,
+    )
+    assert run(["resolve", "example-web", "--repo", str(harness), "--json"]) == 0
+    out = json.loads(capfd.readouterr().out)
+    assert out["account"] == "example-org"
+    assert "example-org/proj" in out["account_routing_reminder"]
+    assert "example-web" not in out["account_routing_reminder"]
+
+
+def test_related_resolve_reminder_human_output_uses_remote_slug(
+    split, capfd, monkeypatch
+):
+    from agent_worktrees import repos
+    from agent_worktrees.__main__ import cmd_related_dispatch as run
+    harness, _ = split
+    monkeypatch.setattr(
+        repos, "find_repo",
+        lambda name: repos.RepoEntry(
+            name=name, remote="https://github.com/example-org/proj.git",
+        ) if name == "example-web" else None,
+    )
+    assert run(["resolve", "example-web", "--repo", str(harness)]) == 0
+    out = capfd.readouterr().out
+    assert "repos gh example-org/proj --" in out
+    assert "repos gh example-web --" not in out
+
+
+def test_related_resolve_reminder_falls_back_without_parseable_remote(
+    split, capfd, monkeypatch
+):
+    """When no gh owner/name slug can be derived (e.g. no remote, or a
+    non-GitHub remote) but an account is still resolved (explicit override),
+    the reminder must not guess the registry alias as the slug -- it should
+    degrade to generic wording that says so."""
+    from agent_worktrees import repos
+    from agent_worktrees.__main__ import cmd_related_dispatch as run
+    harness, _ = split
+    monkeypatch.setattr(
+        repos, "find_repo",
+        lambda name: repos.RepoEntry(name=name, account="someone", remote="")
+        if name == "example-web" else None,
+    )
+    assert run(["resolve", "example-web", "--repo", str(harness), "--json"]) == 0
+    out = json.loads(capfd.readouterr().out)
+    assert out["account"] == "someone"
+    assert "owner/name" in out["account_routing_reminder"]
+    assert "'example-web' may not match it" in out["account_routing_reminder"]
+
+
 def test_related_conduct_merges_configured_and_related_corpora(
     split, monkeypatch, capfd
 ):
