@@ -15,7 +15,7 @@ from pathlib import Path
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import config as cfg
-from agent_worktrees import git_ops, session_projection, tracking
+from agent_worktrees import activity, git_ops, session_projection, tracking
 from agent_worktrees.tracking import WorktreeRecord, load_record, save_record
 
 
@@ -92,6 +92,44 @@ class TestRegisterSessionStdin:
         assert rec.resolved_head_session == "old"
         assert rec.handoffs[0].candidate == "new"
         assert rec.handoffs[0].state == "pending"
+
+    def test_session_start_emits_stage_9_on_candidate_association(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        """#2457 Stage 9: recognizing a handoff-candidate token in the
+        sessionStart hook must emit handoff_successor_session_start_bound
+        AFTER stage 4's session_started, carrying the same launch_id, so the
+        ordered cutover trace never appears to move backwards."""
+        _save_record(tmp_tracking_dir, "wt-cutover", "/tmp/src/wt-cutover")
+        tracking.register_session("wt-cutover", "old")
+        rec = load_record(tmp_tracking_dir / "wt-cutover.yaml")
+        tracking.open_handoff(rec, "old", "task-123")
+        monkeypatch.setenv("AGENT_WORKTREES_HANDOFF_TOKEN", "task-123")
+
+        recorded: list[tuple[str, dict]] = []
+        real_log_event = activity.log_event
+
+        def _capture(event, **kwargs):
+            recorded.append((event, kwargs))
+            return real_log_event(event, **kwargs)
+
+        monkeypatch.setattr(activity, "log_event", _capture)
+
+        rc = m.cmd_register_session(_args(
+            worktree_id="wt-cutover", session_id="new", launch_id="flow-9",
+        ))
+
+        assert rc == 0
+        events = [ev for ev, _ in recorded]
+        assert events.index("session_started") < events.index(
+            "handoff_successor_session_start_bound"
+        )
+        matches = [kw for ev, kw in recorded if ev == "handoff_successor_session_start_bound"]
+        assert len(matches) == 1
+        assert matches[0]["worktree_id"] == "wt-cutover"
+        assert matches[0]["session_id"] == "new"
+        assert matches[0]["handoff_token"] == "task-123"
+        assert matches[0]["launch_id"] == "flow-9"
 
     def test_resolves_worktree_from_stdin_cwd(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
