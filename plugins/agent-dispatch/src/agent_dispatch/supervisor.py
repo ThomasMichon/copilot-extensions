@@ -44,6 +44,7 @@ from .client import DispatchClient, DispatchError
 from .loop_governance import LoopGovernance
 from .queue import SpawnState, Status
 from .spawn_factories import (  # noqa: F401 -- re-exported for existing call sites/tests
+    _FLEET_BODY_PREFIX,
     _LOCAL_BODY_PREFIX,
     AttemptConclusionFn,
     ConclusionFn,
