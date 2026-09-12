@@ -411,6 +411,28 @@ def test_get_worktree_dir_empty_at_anchor(adopted_repo, active_myproj, monkeypat
     assert out == ""
 
 
+def test_get_worktree_id_is_current_worktree(adopted_repo, active_myproj, monkeypatch, capsys):
+    """`get worktree-id` from inside a worktree yields THAT worktree's id --
+    resolvable by the setup launcher (Stage 3, copilot_invoked) without a
+    session/worktree-id argument."""
+    _anchor, _wt_root, wt_path, wt_id, _conf = adopted_repo
+    monkeypatch.chdir(wt_path)
+    rc = m.cmd_get(types.SimpleNamespace(key="worktree-id"))
+    out = capsys.readouterr().out.strip()
+    assert rc == 0
+    assert out == wt_id
+
+
+def test_get_worktree_id_empty_at_anchor(adopted_repo, active_myproj, monkeypatch, capsys):
+    """At the anchor (not inside a worktree) `get worktree-id` is empty."""
+    anchor, _wt_root, _wt_path, _wt_id, _conf = adopted_repo
+    monkeypatch.chdir(anchor)
+    rc = m.cmd_get(types.SimpleNamespace(key="worktree-id"))
+    out = capsys.readouterr().out.strip()
+    assert rc == 0
+    assert out == ""
+
+
 def test_get_worktree_state_dir_uses_machine_local_anchor_scope(
     adopted_repo, active_myproj, monkeypatch, tmp_path, capsys,
 ):

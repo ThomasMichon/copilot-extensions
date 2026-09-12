@@ -49,7 +49,12 @@ done
 say() { if $STDIO; then echo "$@" >&2; else echo "$@"; fi; }
 
 # -- Runtime --------------------------------------------------------------
-_awresolve="$HOME/.agent-worktrees/bin/resolve-runtime.sh"
+# Contextual/cell launches validate and export their runtime root as
+# AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT (bin/launch-session.sh); honor it before
+# the legacy $HOME/.agent-worktrees fallback so a contextual install's own
+# resolve-runtime.sh (and RUNTIME_PYTHON derived from it) is used, not a
+# possibly-nonexistent legacy path.
+_awresolve="${AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT:-$HOME/.agent-worktrees}/bin/resolve-runtime.sh"
 [ -f "$_awresolve" ] && . "$_awresolve"
 _AW_PY="${RUNTIME_PYTHON:-${AW_PY:-}}"
 
@@ -167,17 +172,33 @@ say "  Machine:  $MACHINE"
 say "  Path:     $PWD"
 say ""
 
+# Stage 3 (copilot_invoked): this is the true final resolution/exec point --
+# fired right before each `exec` below so a setup failure earlier never
+# reports a false "Copilot invoked". Best-effort and detached, like the
+# launcher's own activity_log helper.
+_log_copilot_invoked() {
+    [[ -x "$_AW_PY" ]] || return 0
+    local wt
+    wt="$(PYTHONPATH="" "$_AW_PY" -I -m agent_worktrees get worktree-id 2>/dev/null || true)"
+    [[ -n "$wt" ]] || return 0
+    ( PYTHONPATH="" "$_AW_PY" -I -m agent_worktrees activity-log copilot_invoked \
+        --worktree-id "$wt" --source launcher >/dev/null 2>&1 & ) || true
+}
+
 # -- Launch Copilot -------------------------------------------------------
 if [[ -n "$COPILOT_PATH_OVERRIDE" ]]; then
     if command -v "$COPILOT_PATH_OVERRIDE" &>/dev/null; then
+        _log_copilot_invoked
         exec "$COPILOT_PATH_OVERRIDE" "${COPILOT_ARGS[@]}"
     else
         echo "ERROR: Configured Copilot executable not found: $COPILOT_PATH_OVERRIDE" >&2
         exit 1
     fi
 elif command -v copilot &>/dev/null; then
+    _log_copilot_invoked
     exec copilot "${COPILOT_ARGS[@]}"
 elif command -v gh &>/dev/null; then
+    _log_copilot_invoked
     exec gh copilot "${COPILOT_ARGS[@]}"
 else
     echo "ERROR: Neither copilot nor gh found on PATH." >&2
