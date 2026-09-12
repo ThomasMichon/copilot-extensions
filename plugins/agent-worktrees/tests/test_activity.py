@@ -40,6 +40,96 @@ def test_log_event_drops_none_fields(patch_install_dir: Path):
     assert "reason" not in rec
 
 
+def test_log_event_stamps_known_handoff_stage(patch_install_dir: Path):
+    activity.log_event("handoff_requested", worktree_id="wt-1", session_id="s1")
+    rec = activity.read_events()[0]
+    assert rec["stage"] == 6
+    assert rec["stage_name"] == "handoff_triggered"
+
+
+def test_log_event_maps_existing_events_to_their_stage(patch_install_dir: Path):
+    activity.log_event(
+        "handoff_cutover_claim", worktree_id="wt-1", outcome="acquired"
+    )
+    activity.log_event("handoff_cutover_spawn", worktree_id="wt-1")
+    activity.log_event(
+        "handoff_predecessor_retire", worktree_id="wt-1", outcome="gone"
+    )
+    events = activity.read_events()
+    stages = [(e["event"], e["stage"], e["stage_name"]) for e in events]
+    assert stages == [
+        ("handoff_cutover_claim", 7, "handoff_host_acknowledged"),
+        ("handoff_cutover_spawn", 8, "handoff_successor_spawn_started"),
+        (
+            "handoff_predecessor_retire",
+            11,
+            "handoff_pickup_confirmed_predecessor_closing",
+        ),
+    ]
+
+
+def test_log_event_does_not_stamp_a_failed_or_duplicate_claim(
+    patch_install_dir: Path,
+):
+    activity.log_event(
+        "handoff_cutover_claim", worktree_id="wt-1", outcome="already-claimed"
+    )
+    activity.log_event("handoff_cutover_claim", worktree_id="wt-1", outcome="error")
+    for rec in activity.read_events():
+        assert "stage" not in rec
+        assert "stage_name" not in rec
+
+
+def test_log_event_does_not_stamp_an_unretired_predecessor(patch_install_dir: Path):
+    activity.log_event(
+        "handoff_predecessor_retire", worktree_id="wt-1", outcome="left-running"
+    )
+    activity.log_event(
+        "handoff_predecessor_retire", worktree_id="wt-1", outcome="identity-mismatch"
+    )
+    for rec in activity.read_events():
+        assert "stage" not in rec
+        assert "stage_name" not in rec
+
+
+
+def test_log_event_reserves_stage_fields_against_caller_override(
+    patch_install_dir: Path,
+):
+    activity.log_event(
+        "handoff_requested",
+        worktree_id="wt-1",
+        stage=999,
+        stage_name="not-a-real-stage",
+    )
+    rec = activity.read_events()[0]
+    assert rec["stage"] == 6
+    assert rec["stage_name"] == "handoff_triggered"
+
+
+def test_log_event_preserves_caller_stage_fields_on_unmapped_events(
+    patch_install_dir: Path,
+):
+    """A custom/unmapped event is untouched -- only a *mapped* event's stamp
+    is reserved/gated (#3994401488)."""
+    activity.log_event(
+        "some_custom_event",
+        worktree_id="wt-1",
+        stage="custom-stage-value",
+        stage_name="custom-stage-name",
+    )
+    rec = activity.read_events()[0]
+    assert rec["stage"] == "custom-stage-value"
+    assert rec["stage_name"] == "custom-stage-name"
+
+
+def test_log_event_omits_stage_fields_for_unmapped_events(patch_install_dir: Path):
+    activity.log_event("mux_failed", worktree_id="wt-1")
+    rec = activity.read_events()[0]
+    assert "stage" not in rec
+    assert "stage_name" not in rec
+
+
 def test_read_events_filters(patch_install_dir: Path):
     activity.log_event("worktree_created", worktree_id="wt-1")
     activity.log_event("session_started", worktree_id="wt-1", session_id="s1")
