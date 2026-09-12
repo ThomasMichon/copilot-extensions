@@ -193,6 +193,16 @@ renumbering from the "acknowledges handoff" step onward.)
       applicable), `predecessor_session_id` / `successor_session_id` (the
       linked-list pointers — null until known), `ts`, `source` (which
       component emitted it: agent-worktrees / context-handoff / hook).
+      **Partially landed (schema supports this, population is not yet
+      complete):** all base fields already existed as `log_event()` params/
+      `**fields`; `stage`/`stage_name` are auto-stamped for a *mapped,
+      ungated* event (PR #2472) — a gated claim/retire outcome (e.g.
+      `outcome="already-claimed"`) correctly omits `stage`/`stage_name`
+      rather than carrying them, so "every event carries `stage`" is not
+      literally true by design. `predecessor_session_id`/
+      `successor_session_id` are never initialized yet — that's Phase 3's
+      cross-linking work. Leave this item open until Phase 3 populates the
+      linkage fields; re-close it then rather than now.
 - [ ] Give the spawn stage (8) an explicit **start** event
       (`handoff_successor_spawn_started`, emitted before success is known)
       *and* a terminal **result** event/field
@@ -567,3 +577,38 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   (spawn start/result event split as dedicated wire events) and Phase 2's
   per-stage instrumentation across `sessions.py`, `__main__.py`, the launcher
   scripts, and context-handoff's `handoff-core.mjs`.
+- **Phase 1's first slice merged** (PR #2472, six review rounds; Phase 1
+  itself still has open items — see the Plan checklist). Beyond the schema
+  landing itself, review caught two real correctness bugs the auto-stamping
+  design hadn't accounted for, both now fixed and tested: (1)
+  `handoff_cutover_claim` fires for `outcome="already-claimed"` and
+  `outcome="error"` as well as `"acquired"` — only `"acquired"` is stamped as
+  a Stage 7 success now (`_HANDOFF_STAGE_GATE`); (2) `handoff_predecessor_retire`
+  fires for `outcome="identity-mismatch"` and `outcome="left-running"` as well
+  as `"gone"` — only `"gone"` (the actual case study's every observed
+  retirement was `"left-running"`, never `"gone"` — this independently
+  confirms the Proposal § Case study's flagged-but-unconfirmed observation was
+  onto something real, though whether it's a bug or an intentional guard per
+  `handoff_retire_guard` is still Phase 4's open question) is stamped as a
+  Stage 11 success. A caller-supplied `stage=`/`stage_name=` on a *mapped*
+  event is now reserved (can't override the canonical stamp); an *unmapped*
+  custom event's own fields pass through untouched (an earlier fix attempt
+  over-corrected and accidentally stripped those too — caught in the same
+  review). `agent-worktrees` bumped 1.5.5-dev65 → dev69 across the fix
+  rounds.
+- **Next slice for a fresh session:** Phase 1's still-open item (split Stage
+  8's spawn event into an explicit start + a terminal success/failure result —
+  currently only `handoff_cutover_spawn`'s single success-only shape exists;
+  make `log_event`/`activity.log_event` non-silently-swallowing per Phase 1's
+  last checklist item), then Phase 2's remaining per-stage instrumentation
+  (stages 2-13's actual emitter call sites: `sessions.py`'s `mux_new_session`/
+  `mux_new_window`, the `bin/launch-session.sh`/`.ps1` launchers' existing
+  `mux_attached` boundary, `default-setup.sh`/`.ps1`'s real Copilot exec point
+  for Stage 3, `cmd_register_session` for stages 4/9, the status-report tool
+  path for stage 5, locating the actual `tracking.link_handoff()` call site
+  for stage 10 per the effort's own corrected basis, and extending the
+  existing `sessionEnd`/`session_ended` path for stage 12), landing each as
+  its own small reviewed PR the same way Phase 1 did. Phase 3 (durable
+  per-worktree/per-project trace store with the per-platform atomic-append
+  contract, successor backfill, `handoff-trace` CLI) and Phase 5 (docs) follow.
+  Phase 4 stays deferred per the operator's explicit scope decision.
