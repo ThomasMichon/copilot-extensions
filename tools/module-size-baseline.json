@@ -74,7 +74,7 @@
   "plugins/agent-vault/scripts/installation-context/installation_context.py": 9169,
   "plugins/agent-vault/scripts/versioned_runtime.py": 1245,
   "plugins/agent-vault/src/agent_vault/cli.py": 1865,
-  "plugins/agent-vault/src/agent_vault/service.py": 1349,
+  "plugins/agent-vault/src/agent_vault/service.py": 1399,
   "plugins/agent-worktrees/libs/plugin-activation/src/plugin_activation/resolver.py": 1270,
   "plugins/agent-worktrees/scripts/installation-context/installation_context.py": 9169,
   "plugins/agent-worktrees/scripts/versioned_runtime.py": 1245,

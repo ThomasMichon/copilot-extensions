@@ -697,7 +697,35 @@ _install_service() {
         _skip "systemd not available -- the CLI can cold-start the daemon on demand"
         return 0
     fi
-    mkdir -p "$UNIT_DIR"
+    # $RUN_DIR/logs must exist before the daemon's first bind (the unix socket
+    # bind fails outright with a bare FileNotFoundError if $RUN_DIR is
+    # missing, and the log file open warns-and-continues without $INSTALL_DIR/
+    # logs) -- neither was created here before.
+    mkdir -p "$UNIT_DIR" "$RUN_DIR" "$INSTALL_DIR/logs"
+
+    # Drain-safe cutover (#743): if a generation is already active, capture its
+    # unlocked state BEFORE we touch the unit -- `--export-handoff` dials the
+    # OUTGOING daemon over its owner-gated AF_UNIX control socket and prints
+    # one line of JSON (or nothing, if there is nothing unlocked, or the
+    # transport isn't owner-gated). Held only in this shell variable, never
+    # written to a file.
+    local handoff_json=""
+    if systemctl --user is-active "$SYSTEMD_UNIT" >/dev/null 2>&1; then
+        # config.SOCKET_PATH/run_dir() etc. resolve from these env vars at
+        # import time, so they must be set for THIS invocation explicitly --
+        # unlike the systemd-managed daemon (which gets them from the unit's
+        # own `Environment=` lines), a plain subprocess call here inherits
+        # only this script's shell variables, not an environment the child
+        # process can see.
+        handoff_json="$(
+            AGENT_VAULT_HOME="$INSTALL_DIR" \
+            AGENT_VAULT_RUN_DIR="$RUN_DIR" \
+            AGENT_VAULT_SOCKET="$SOCKET_PATH" \
+            AGENT_VAULT_INSTALLATION_ID="$INSTALLATION_ID" \
+            "$LINK_PYTHON" -m agent_vault.service --export-handoff 2>/dev/null
+        )" || handoff_json=""
+    fi
+
     cat > "$UNIT_DIR/$SYSTEMD_UNIT" << EOF
 [Unit]
 Description=agent-vault -- local KeePassXC-backed secret store
@@ -718,7 +746,7 @@ Environment=AGENT_VAULT_SYSTEMD_UNIT=$SYSTEMD_UNIT
 Environment=AGENT_VAULT_TASK_NAME=AgentVault${SERVICE_SUFFIX:+-$SERVICE_SUFFIX}
 Environment=AGENT_VAULT_INSTALLATION_ID=$INSTALLATION_ID
 $PORT_ENV_LINE
-ExecStart=$LINK_PYTHON -m agent_vault.service --foreground --persistent
+ExecStart=$LINK_PYTHON -m agent_vault.service --foreground --persistent --handoff-stdin
 Restart=on-failure
 RestartSec=5
 WorkingDirectory=$INSTALL_DIR
@@ -728,9 +756,26 @@ WantedBy=default.target
 EOF
     systemctl --user daemon-reload 2>/dev/null || true
     systemctl --user enable "$SYSTEMD_UNIT" 2>/dev/null || true
+    # Drain-safe cutover (#743), continued: hand the captured payload to the
+    # NEW generation via systemd's own per-manager environment -- set right
+    # before the restart spawns it, unset right after (`restart` blocks until
+    # the start job completes, and `--handoff-stdin` consumes/pops the var at
+    # the very start of `main()`, before serving) -- so the plaintext secret
+    # sits in the systemd --user manager's environment for the shortest
+    # practical window, never in the unit file, never on disk.
+    if [[ -n "$handoff_json" ]]; then
+        systemctl --user set-environment "AGENT_VAULT_HANDOFF_JSON=$handoff_json" 2>/dev/null || true
+    fi
     systemctl --user restart "$SYSTEMD_UNIT" 2>/dev/null || true
+    if [[ -n "$handoff_json" ]]; then
+        systemctl --user unset-environment AGENT_VAULT_HANDOFF_JSON 2>/dev/null || true
+    fi
     if systemctl --user is-active "$SYSTEMD_UNIT" >/dev/null 2>&1; then
-        _ok "agent-vault service installed + started ($SYSTEMD_UNIT)"
+        if [[ -n "$handoff_json" ]]; then
+            _ok "agent-vault service installed + started ($SYSTEMD_UNIT, drain-safe cutover: no re-unlock)"
+        else
+            _ok "agent-vault service installed + started ($SYSTEMD_UNIT)"
+        fi
     else
         _warn "agent-vault service installed but not active -- check: systemctl --user status $SYSTEMD_UNIT"
     fi

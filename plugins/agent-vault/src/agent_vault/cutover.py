@@ -9,17 +9,28 @@ re-unlock.
 
 This module is the *mechanism*: it builds and applies the minimal handoff payload.
 The payload carries the unlocked master password(s) in plaintext, so it is
-**security-critical** and bound by the invariants in ``docs/architecture.md``:
+**security-critical** and bound by the invariants in ``docs/architecture.md``.
+The handoff crosses TWO distinct legs, each gated differently:
 
-* it crosses generations ONLY over a transport we can prove is access-gated to the
-  owner -- today the vault's AF_UNIX control socket (``0o600``) -- and **never**
-  plain loopback TCP, the network, disk, an env var, or a log line. The
-  ``handoff-export`` daemon action enforces that transport gate (see
-  ``service.handle_request``); the Windows named pipe is excluded until it carries
-  a hardened owner-only ACL, and a host without a qualifying transport (Windows
-  today, or a TCP-only WSL layout) safely degrades to the existing re-unlock path;
-* the secret is transferred, applied, and dropped -- this module never persists it
-  and never logs its value.
+1. **Outgoing daemon -> installer** (`request_handoff_from_running_daemon` /
+   the `handoff-export` daemon action): ONLY over a transport we can prove is
+   access-gated to the owner -- today the vault's AF_UNIX control socket
+   (``0o600``) -- and **never** plain loopback TCP or the network. The
+   Windows named pipe is excluded until it carries a hardened owner-only ACL,
+   and a host without a qualifying transport (Windows today, or a TCP-only
+   WSL layout) safely degrades to the existing re-unlock path.
+2. **Installer -> not-yet-running new generation** (`--handoff-stdin`, in
+   `service.main`): this is not an inter-daemon crossing (nothing is
+   listening yet) -- it is how a parent process hands data to the child it is
+   about to launch, so it uses whichever same-user, non-persistent OS carrier
+   the launch mechanism supports: stdin for a direct invocation, or the
+   ``AGENT_VAULT_HANDOFF_JSON`` env var for a systemd-managed restart
+   (`systemctl --user set-environment` immediately before, unset immediately
+   after -- never written to the unit file, never persisted past that one
+   restart). Neither carrier is a file and neither crosses the network.
+
+In both legs the secret is transferred, applied, and dropped -- this module
+never persists it and never logs its value.
 
 Only what is needed to avoid a re-unlock is carried: the unlocked master
 password(s) + their TTL bookkeeping. The credential-*value* cache is intentionally
@@ -28,6 +39,7 @@ left to re-warm lazily on the new generation, keeping the secret surface minimal
 
 from __future__ import annotations
 
+import json
 import time
 from typing import TYPE_CHECKING
 
@@ -123,3 +135,56 @@ def handoff_export_response(service: VaultService, *, transport: str) -> dict:
             ),
         }
     return {"ok": True, "handoff": build_handoff_payload(service)}
+
+
+def request_handoff_from_running_daemon() -> dict | None:
+    """Ask a currently-running daemon (if any) to export its unlocked state.
+
+    Client-side half of the drain-safe cutover, invoked by the installer's
+    update path BEFORE it stops the outgoing generation. Returns the handoff
+    payload dict on success, or ``None`` when there is nothing to hand off:
+    no daemon running, the daemon refused (e.g. the reachable transport is not
+    owner-gated -- Windows named pipe today, or plain TCP), or any transport
+    failure. ``None`` is always a safe, silent degrade to the existing
+    re-unlock path (invariant #3) -- never raises.
+
+    Deliberately does not decide by platform here: it dials whatever
+    transport :func:`send_command`'s rendezvous discovery actually reaches,
+    so a POSIX host degrades the same way a Windows host does if, say, only a
+    TCP endpoint is currently advertised.
+    """
+    from .service import send_command  # local import: avoid a service<->cutover cycle
+
+    try:
+        resp = send_command({"action": "handoff-export"})
+    except Exception:
+        return None
+    if not (isinstance(resp, dict) and resp.get("ok")):
+        return None
+    handoff = resp.get("handoff")
+    return handoff if isinstance(handoff, dict) else None
+
+
+def consume_pending_handoff(*, environ, stdin) -> dict | None:
+    """Read (and consume) a pending handoff payload for `--handoff-stdin`.
+
+    Checks the ``AGENT_VAULT_HANDOFF_JSON`` env var first (the systemd-managed
+    restart carrier) -- popping it so the secret does not linger in this
+    process's own environ block a moment longer than necessary -- then falls
+    back to reading ``stdin`` whole (the direct-invocation carrier). Returns
+    ``None`` (never raises) when neither carrier has anything, or its content
+    is not valid JSON. Call this BEFORE any fork/daemonize.
+    """
+    raw = environ.pop("AGENT_VAULT_HANDOFF_JSON", "")
+    if not raw:
+        try:
+            raw = stdin.read()
+        except Exception:
+            raw = ""
+    if not raw:
+        return None
+    try:
+        payload = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    return payload if isinstance(payload, dict) else None
