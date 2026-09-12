@@ -1091,7 +1091,7 @@ async def test_queued_drain_kick_cannot_resume_after_later_stop(
 
     monkeypatch.setattr(ctx.manager, "_kick_pending_drain", delayed_kick)
     resume = AsyncMock(side_effect=AssertionError("stale kick resumed stopped session"))
-    monkeypatch.setattr(ctx.manager, "resume_session", resume)
+    monkeypatch.setattr(ctx.manager, "_resume_session_admitted", resume)
     submit = asyncio.create_task(
         ctx.manager.submit_or_queue_prompt(ctx.session.session_id, "later")
     )
@@ -1149,3 +1149,42 @@ async def test_resync_excludes_prompt_admission_until_client_replacement(
     replacement.send_prompt.assert_awaited_once_with("new work")
     await ctx.manager.stop_session(ctx.session.session_id)
     assert ctx.session.status == SessionStatus.STOPPED
+
+
+@pytest.mark.parametrize("queued_api", [False, True])
+async def test_direct_resume_serializes_with_followup_prompt(
+    context, monkeypatch, mock_acp_client, queued_api,
+):
+    ctx = context
+    ctx.session.status = SessionStatus.STOPPED
+    entered, release = asyncio.Event(), asyncio.Event()
+    mock_acp_client.session_host_client = None
+
+    async def attach(session):
+        entered.set()
+        await release.wait()
+        session.client = mock_acp_client
+        session.status = SessionStatus.IDLE
+        ctx.db.update_session_status(session.session_id, "idle", time.time())
+        return True
+
+    attach_mock = AsyncMock(side_effect=attach)
+    monkeypatch.setattr(ctx.manager, "_try_reattach_live_host", attach_mock)
+    resume = asyncio.create_task(ctx.manager.resume_session(ctx.session.session_id, drain=False))
+    await asyncio.wait_for(entered.wait(), 1)
+    submit = (
+        ctx.manager.submit_or_queue_prompt if queued_api else ctx.manager.submit_prompt
+    )
+    send = asyncio.create_task(submit(ctx.session.session_id, "follow-up"))
+    await asyncio.sleep(0)
+    assert not send.done()
+    release.set()
+    await asyncio.wait_for(resume, 1)
+    result = await asyncio.wait_for(send, 1)
+    if queued_api:
+        assert result["queued"] is False
+    else:
+        assert result == 0
+    await asyncio.wait_for(ctx.session._prompt_task, 1)
+    attach_mock.assert_awaited_once()
+    mock_acp_client.send_prompt.assert_awaited_once_with("follow-up")
