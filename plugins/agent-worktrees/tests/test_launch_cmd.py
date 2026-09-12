@@ -774,19 +774,30 @@ def test_default_setup_ps1_stage_3_no_runtime_path_still_launches(tmp_path):
     home = tmp_path / "home"  # no .agent-worktrees/bin/resolve-runtime.ps1 here
     home.mkdir()
     env = os.environ.copy()
-    env["PATH"] = "/usr/bin:/bin"
     env["HOSTNAME"] = "test-host"
     env["HOME"] = str(home)
     env["USERPROFILE"] = str(home)
     env["COPILOT_LAUNCH_MARKER"] = str(marker)
     scripts = Path(__file__).resolve().parents[1] / "scripts"
 
-    copilot = tmp_path / "copilot-test"
-    copilot.write_text(
-        "#!/bin/sh\nprintf launched > \"$COPILOT_LAUNCH_MARKER\"\n",
-        encoding="utf-8",
-    )
-    copilot.chmod(0o755)
+    if os.name == "nt":
+        env["PATH"] = ""
+        copilot = tmp_path / "copilot-test.cmd"
+        copilot.write_text(
+            "@echo off\r\n> \"%COPILOT_LAUNCH_MARKER%\" echo launched\r\n",
+            encoding="utf-8",
+        )
+    else:
+        # PowerShell Core's snap wrapper needs `mkdir` on PATH to bootstrap
+        # (unrelated to anything under test); the real Windows path below
+        # never goes through that wrapper, so PATH stays untouched there.
+        env["PATH"] = "/usr/bin:/bin"
+        copilot = tmp_path / "copilot-test"
+        copilot.write_text(
+            "#!/bin/sh\nprintf launched > \"$COPILOT_LAUNCH_MARKER\"\n",
+            encoding="utf-8",
+        )
+        copilot.chmod(0o755)
 
     proc = subprocess.run(
         [

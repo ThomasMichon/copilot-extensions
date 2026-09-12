@@ -791,3 +791,36 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   failures. No version bump needed for this same-PR review-response commit
   (still dev74; only the final shipped version needs to differ from the
   PR's base per convention).
+- **PR #2491, unrelated-merge collision + a second review round.** Rebasing
+  onto `origin/main` (to satisfy CI's version-bump check, which diffs
+  against the PR's live base, not its fork point) pulled in two already-
+  merged, unrelated PRs: one added +43 lines to `__main__.py` without its
+  own compaction (using up module-size headroom another PR had opened),
+  and another independently bumped `agent-worktrees` to the same
+  `1.5.5-dev74` this PR had already claimed -- a version-number collision.
+  Fixed by compacting `__main__.py` (~45 more lines, same multi-line-
+  literal technique) and `repos.py` (1 line, an unrelated pre-existing
+  1-over-cap violation surfaced by the rebase, not caused by this PR) back
+  under their ceilings, and bumping to `1.5.5-dev75`. The next review round
+  caught one more real bug plus two process gaps: (1) the stage-5 dedup
+  query's `limit=500` was applied *after* filtering by `read_events`, so a
+  worktree with 500+ newer `status_reported` events could silently drop an
+  older matching one and re-emit -- removed the limit for this specific
+  query (the log is already retention-pruned, so unbounded is cheap and
+  correct). (2) The new Windows no-runtime-path test used a POSIX `#!/bin/sh`
+  fixture unconditionally, which a real Windows `pwsh` runner cannot execute
+  -- fixed to branch on `os.name == "nt"` for a `.cmd` fixture, matching the
+  adjacent test's own pattern (this repo's CI runs both an `ubuntu-latest`
+  and a `windows-latest` runner, so the mismatch would have failed there
+  even though it passed locally on Linux). (3) The marketplace catalog's
+  top-level `metadata.version` was left stale at `1.7.7-dev68` while the
+  `agent-worktrees` plugin entry advanced to `dev75` -- bumped the catalog
+  version to `1.7.7-dev69` too, per `CONTRIBUTING.md`'s two-version
+  requirement. The remaining flagged items (config/legacy launch-path stage
+  3 coverage, and the RecordLock-based dedup race) are the SAME threads from
+  the prior round, already fixed there -- the bot's diff view doesn't always
+  re-evaluate a carried-over thread against a fix landed in an earlier
+  commit of the same PR, a known quirk from prior PRs in this effort.
+  Verified via `git show HEAD:<file>` that both are still fixed as landed.
+  Full plugin suite: 4184 passed / 20 skipped / same 3 pre-existing
+  unrelated failures.

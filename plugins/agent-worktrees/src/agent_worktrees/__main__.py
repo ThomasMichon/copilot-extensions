@@ -7178,12 +7178,13 @@ def _cmd_status_write(
         tracking.save_record(record)
         # Stage 5 (status_reported): once per session_id (held under the
         # same RecordLock as the write above so two concurrent writers can't
-        # both observe "no prior event" and double-emit).
+        # both observe "no prior event" and double-emit). No `limit` here --
+        # the log is already retention-pruned, and a `limit` would silently
+        # drop an older matching event once a worktree accumulates enough
+        # newer ones, defeating the once-per-session guarantee.
         if session_id and not any(
             e.get("session_id") == session_id
-            for e in activity.read_events(
-                worktree_id=worktree_id, event="status_reported", limit=500,
-            )
+            for e in activity.read_events(worktree_id=worktree_id, event="status_reported")
         ):
             activity.log_event("status_reported", worktree_id=worktree_id, session_id=session_id)
     flag = "follow-ups pending" if record.follow_up else "resolved"
