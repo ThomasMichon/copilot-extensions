@@ -483,10 +483,7 @@ def _apply_tracking_override(
     FINAL). Liveness wins over the durable finalize status.
     """
     if rec.status in ("finalized", "complete", "completed"):
-        if info.state not in (
-            git_ops.WorktreeState.GONE,
-            git_ops.WorktreeState.ACTIVE,
-        ):
+        if info.state not in (git_ops.WorktreeState.GONE, git_ops.WorktreeState.ACTIVE,):
             return dataclasses.replace(info, state=git_ops.WorktreeState.COMPLETED)
     return info
 
@@ -662,10 +659,7 @@ def _classify_one_record(
     # Layer the session-derived CONVO refinement so this data contract
     # reports the same display state the tmux status bar does.
     if session_ctx is not None:
-        turns = session_ctx.turn_count.get(
-            _normalize_path(rec.worktree_path),
-            0,
-        )
+        turns = session_ctx.turn_count.get(_normalize_path(rec.worktree_path), 0,)
         if turns:
             info = dataclasses.replace(
                 info,
@@ -892,10 +886,7 @@ def _worktree_to_dict(
         d["controllers"] = _controller_metadata(rec)
         controller_findings = _controller_findings(rec)
         d["controller_findings"] = controller_findings
-    d["reciprocal_relation"] = reciprocal_presentation.derive(
-        rec,
-        controller_findings,
-    )
+    d["reciprocal_relation"] = reciprocal_presentation.derive(rec, controller_findings,)
     # resource-claims: expose the backward owner link + forward outbound claim
     # list so the ledger view (and consumers like `run`) can read a worktree's
     # full claim set. Emitted only when present, keeping the envelope lean.
@@ -1134,16 +1125,10 @@ def cmd_session_backend(args) -> int:
                             "or finalized worktree"
                         )
                     if args.action == "ensure":
-                        binding = ahp_backend.ensure_worktree_session(
-                            config,
-                            record,
-                        )
+                        binding = ahp_backend.ensure_worktree_session(config, record,)
                         event_name = "ahp_session_bound"
                     else:
-                        changed = ahp_backend.dispose_worktree_session(
-                            config,
-                            record,
-                        )
+                        changed = ahp_backend.dispose_worktree_session(config, record,)
                         binding = record.session_backend
                         event_name = "ahp_session_disposed" if changed else ""
 
@@ -1274,10 +1259,7 @@ def _write_execution_leg_reservation(
 ) -> None:
     temp_path = path.with_name(f"{path.name}.{secrets.token_hex(8)}.tmp")
     try:
-        temp_path.write_text(
-            json.dumps(value, separators=(",", ":")),
-            encoding="utf-8",
-        )
+        temp_path.write_text(json.dumps(value, separators=(",", ":")), encoding="utf-8",)
         os.replace(temp_path, path)
     finally:
         try:
@@ -1410,10 +1392,7 @@ def cmd_execution_leg(args) -> int:
                             if args.action in {"set", "clear", "release"}:
                                 _json_output(_execution_leg_payload(worktree_id, current))
                                 return 0
-                        elif (
-                            int(reservation.get("reserved_revision") or -1)
-                            != current_revision
-                        ):
+                        elif (int(reservation.get("reserved_revision") or -1) != current_revision):
                             raise ValueError(
                                 "execution-leg reservation transition cannot be "
                                 "reconciled"
@@ -1517,10 +1496,7 @@ def cmd_execution_leg(args) -> int:
                             "reserved_revision": binding.binding_revision,
                             "previous_execution_leg": previous,
                         }
-                        _write_execution_leg_reservation(
-                            reservation_path,
-                            reservation_value,
-                        )
+                        _write_execution_leg_reservation(reservation_path, reservation_value,)
                         latest.execution_leg = binding
                         latest.execution_leg_opaque = False
                         latest.execution_leg_raw = None
@@ -1575,9 +1551,7 @@ def cmd_execution_leg(args) -> int:
 
                     if args.action == "release":
                         if reservation is None:
-                            raise ValueError(
-                                "execution-leg lifecycle operation is not reserved"
-                            )
+                            raise ValueError("execution-leg lifecycle operation is not reserved")
                         if reservation.get("token") != getattr(
                             args, "reservation_token", None
                         ):
@@ -1586,12 +1560,8 @@ def cmd_execution_leg(args) -> int:
                             int(reservation.get("reserved_revision") or -1)
                             != current_revision
                         ):
-                            raise ValueError(
-                                "execution-leg reservation revision changed"
-                            )
-                        binding = _binding_from_payload(
-                            reservation.get("previous_execution_leg")
-                        )
+                            raise ValueError("execution-leg reservation revision changed")
+                        binding = _binding_from_payload(reservation.get("previous_execution_leg"))
                         if binding is not None:
                             binding.binding_revision = current_revision + 1
                         latest.execution_leg = binding
@@ -1618,28 +1588,18 @@ def cmd_execution_leg(args) -> int:
                         return 0
 
                     if reservation is not None:
-                        supplied_token = getattr(
-                            args, "reservation_token", None
-                        )
+                        supplied_token = getattr(args, "reservation_token", None)
                         if reservation.get("token") != supplied_token:
                             if supplied_token:
-                                raise ValueError(
-                                    "execution-leg reservation token mismatch"
-                                )
-                            raise ValueError(
-                                "execution-leg lifecycle operation is reserved"
-                            )
+                                raise ValueError("execution-leg reservation token mismatch")
+                            raise ValueError("execution-leg lifecycle operation is reserved")
                         if (
                             int(reservation.get("reserved_revision") or -1)
                             != current_revision
                         ):
-                            raise ValueError(
-                                "execution-leg reservation revision changed"
-                            )
+                            raise ValueError("execution-leg reservation revision changed")
                     elif getattr(args, "reservation_token", None):
-                        raise ValueError(
-                            "execution-leg lifecycle operation is not reserved"
-                        )
+                        raise ValueError("execution-leg lifecycle operation is not reserved")
                     expected = args.if_match_revision
                     if expected is not None and expected != current_revision:
                         raise ValueError(
@@ -3030,6 +2990,39 @@ def _handoff_cutover_spawn_result(
     return 0, response
 
 
+def _maybe_emit_stage_13(wt_id: str | None, handoff_token: str | None) -> None:
+    """Emit Stage 13 (handoff_complete) once the predecessor pane is gone AND
+    the successor is head (linked, not just candidate) -- called from both
+    the retire and claim sides since either can complete first; the dedup
+    check below makes it a no-op on whichever side runs first.
+    """
+    if not wt_id or not handoff_token:
+        return
+    retired = {
+        str(e.get("handoff_token") or "").strip()
+        for e in activity.read_events(worktree_id=wt_id, event="handoff_predecessor_retire")
+        if e.get("outcome") == "gone"
+    }
+    if handoff_token not in retired:
+        return
+    already = any(
+        str(e.get("handoff_token") or "").strip() == handoff_token
+        for e in activity.read_events(worktree_id=wt_id, event="handoff_complete")
+    )
+    if already:
+        return
+    try:
+        record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")
+    except Exception:
+        return
+    handoff = next((h for h in record.handoffs if h.token == handoff_token), None)
+    if handoff is None or handoff.state != "linked":
+        return
+    activity.log_event(
+        "handoff_complete", worktree_id=wt_id, session_id=handoff.predecessor,
+        successor_session_id=handoff.successor, handoff_token=handoff_token)
+
+
 def _handoff_cutover_retire_result(
     args: argparse.Namespace,
 ) -> tuple[int, dict[str, object]]:
@@ -3137,6 +3130,7 @@ def _handoff_cutover_retire_result(
         copilot_reaped=reap.get("reaped", 0),
         copilot_survivors=reap.get("survivors", 0),
     )
+    _maybe_emit_stage_13(wt_id, getattr(args, "handoff_token", None))
     return (0 if overall_ok else 1), result
 
 
@@ -9221,9 +9215,7 @@ def _monitor_trigger_handoff_cutover(
             binding_start = str(binding.get("copilot_start_time") or "").strip() or None
             if (
                 predecessor_pid in (None, binding.get("copilot_pid"))
-                and (
-                    predecessor_start is None or binding_start == str(predecessor_start)
-                )
+                and (predecessor_start is None or binding_start == str(predecessor_start))
             ):
                 old_pane = binding.get("pane_id")
                 mux_session = binding.get("session_name")
@@ -20721,9 +20713,7 @@ def plan_pre_launch() -> dict:
                 (_manifest_data or {}).get("source") or {}
             ).get("kind")
             if _source_kind == "marketplace" and aw_plugin_dir is not None:
-                staleness = svc.check_marketplace_staleness(
-                    wm_manifest, aw_plugin_dir
-                )
+                staleness = svc.check_marketplace_staleness(wm_manifest, aw_plugin_dir)
             else:
                 staleness = svc.check_staleness(wm_manifest, repo_dir)
         if staleness != "current":
@@ -23478,16 +23468,14 @@ def _emit_handoff_claim_stages(
     already_retired = any(
         str(e.get("handoff_token") or "").strip() == linked_handoff.token
         and e.get("outcome") == "gone"
-        for e in activity.read_events(
-            worktree_id=wt_id, event="handoff_predecessor_retire",
-        )
+        for e in activity.read_events(worktree_id=wt_id, event="handoff_predecessor_retire",)
     )
-    if already_retired:
-        return
-    activity.log_event(
-        "handoff_pickup_confirmed_predecessor_closing", worktree_id=wt_id,
-        session_id=linked_handoff.predecessor, successor_session_id=session_id,
-        handoff_token=linked_handoff.token, launch_id=launch_id)
+    if not already_retired:
+        activity.log_event(
+            "handoff_pickup_confirmed_predecessor_closing", worktree_id=wt_id,
+            session_id=linked_handoff.predecessor, successor_session_id=session_id,
+            handoff_token=linked_handoff.token, launch_id=launch_id)
+    _maybe_emit_stage_13(wt_id, linked_handoff.token)
 
 
 def cmd_register_session(args: argparse.Namespace) -> int:
@@ -26855,9 +26843,7 @@ def _run_direct_launch_fallback(project: str | None, passthrough: list[str]) -> 
                 update_args.append("update")
                 result = subprocess.run(update_args, env=_launch_probe_env())
                 if result.returncode != 0:
-                    output.warn(
-                        "Full update returned non-zero -- continuing to relaunch"
-                    )
+                    output.warn("Full update returned non-zero -- continuing to relaunch")
             continue
         if action == "remote":
             ssh_alias = plan.get("ssh_alias")
@@ -27671,9 +27657,7 @@ def _pr_merge_now(args, prcfg, flow, *, apply: bool) -> int:
     # read-only/no-access verdict (False) refuses. A maintainer is never
     # blocked by a permission-read hiccup; a contributor is never told to
     # self-merge a PR they cannot actually merge.
-    live_permission = actor_viewer_permission(
-        provider, args.repo, api_base=base, token=tok,
-    )
+    live_permission = actor_viewer_permission(provider, args.repo, api_base=base, token=tok,)
     authority = pc.actor_merge_authority(live_permission)
     if authority is False:
         reason = (
