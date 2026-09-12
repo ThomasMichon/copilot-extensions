@@ -20,11 +20,11 @@
       "plugin": "copilot-extensions-harness@copilot-extensions",
       "pluginVersion": "0.1.0-dev39",
       "renderedBytes": 1019,
-      "renderedSha256": "25642786cee1f8cf5fb3c9f28343fff071382387da828d23dabbaacb1a310536",
+      "renderedSha256": "e0e60e33b33990b11de797cb01441c531675481505b3ab943961d1350337f356",
       "sourceId": "contribution-boundary",
       "template": "instructions/contribution-boundary.instructions.md",
       "templateBytes": 439,
-      "templateSha256": "88b65373a8ca0daf6d1f03f68b7460969741ee4216de6d5fde3439dbbd356e73"
+      "templateSha256": "f482a287e533f53d982fc06cf4f6ba74bdd4f2665f9bcb66a77583a306a445dd"
     },
     {
       "applyTo": "**",
