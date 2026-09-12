@@ -525,3 +525,53 @@ async def test_failed_pending_remote_reap_cannot_acknowledge_stop(owned_context,
         await asyncio.wait_for(stop, 3)
     assert ctx.session.status == SessionStatus.FAILED
     assert ctx.manager._host_index.get(ctx.session.session_id) == record
+
+
+@pytest.mark.parametrize("scheduled_during_inspection", [False, True])
+async def test_authority_recovery_never_applies_while_remote_reap_is_pending(
+    owned_context, monkeypatch, scheduled_during_inspection,
+):
+    from dataclasses import replace
+
+    ctx = owned_context
+    record = _remote_record(ctx)
+    release = asyncio.Event()
+    tasks = []
+
+    async def reap(*_args):
+        await release.wait()
+        return True
+
+    def schedule():
+        ctx.manager._schedule_remote_reap(record, "existing cleanup")
+        tasks.extend(ctx.manager._remote_reaps_by_session[record.session_id])
+
+    async def recover(_session_id):
+        if scheduled_during_inspection:
+            schedule()
+        return replace(record, nonce="stale-result")
+
+    spawner = SimpleNamespace(
+        can_inspect_without_wake=AsyncMock(return_value=True),
+        recover_record=AsyncMock(side_effect=recover),
+    )
+    factory = Mock(return_value=spawner)
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.build_codespace_spawner", factory,
+    )
+    monkeypatch.setattr("agent_bridge.relay_state.get_live_relay_port", lambda: None)
+    monkeypatch.setattr(ctx.manager, "_remote_reap", reap)
+    monkeypatch.setattr(
+        ctx.manager, "_forget_host_record",
+        lambda rec: ctx.manager._host_index.remove(rec.session_id),
+    )
+    if not scheduled_during_inspection:
+        schedule()
+    try:
+        assert await ctx.manager._recover_remote_host_records(background=True) == 0
+        assert ctx.manager._host_index.get(record.session_id) == record
+        if not scheduled_during_inspection:
+            factory.assert_not_called()
+    finally:
+        release.set()
+        await asyncio.gather(*tasks)
