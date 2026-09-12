@@ -247,12 +247,27 @@ here but not blocking the start of 1/2/5.
   whatever the provider's own `reviewDecision` reports on the next
   observation, since this evaluator always recomputes from the provider's
   current raw status rather than a locally cached flag.
-  Remaining slices for item 3: the persistent per-(repo, PR) state store
-  (a new `queue.py` table, by the plugin's existing one-table-per-declared-
-  machine convention) both this evaluator and the poll-fallback timer need
-  to actually hold `previous` across calls, and a real webhook receiver
-  for review/check-status events (today's `producers/webhook.py` only
-  handles PR-merge).
+  **Fourth slice landed:** `pr_observation_store.py` -- the persistent
+  per-(repo, PR) state the evaluator and the poll-fallback timer both need
+  to hold `previous`/`last_observed_at` across calls. Deliberately **not**
+  a new `queue.py` table: this repo now enforces a 1,000-line module-size
+  cap (`tools/check-module-size.py`), and `queue.py` is already
+  grandfathered at its current size -- growing it for an unrelated concern
+  (no owner/generation/claim semantics in common with task/spawn-
+  reservation/routing-assignment rows) is exactly the unbounded-growth
+  failure that guard exists to catch. Its own small SQLite file instead, a
+  self-contained `PRObservationStore` (get/put/last_observed_at, a plain
+  upsert -- no CAS/generation fencing, since exactly one writer touches a
+  given PR in every deployment this targets today). `record_observation()`
+  is the actual glue: reads the stored previous observation, evaluates via
+  `pr_revision_evaluator.evaluate_observation`, persists the result and the
+  observation timestamp, and returns it -- the one call site a future
+  polling/webhook loop needs.
+  Remaining for item 3: the real webhook receiver for review/check-status
+  events (today's `producers/webhook.py` only handles PR-merge) and the
+  loop itself (poll on `pr_polling_policy.poll_due`, call
+  `record_observation` on each observation) that actually invokes this
+  machinery on a schedule.
 - [ ] Wire the bridge machine's `resolve_liveness`/`resolve_resume` against
   a real agent-bridge liveness read (item 4 above), coordinated with
   agent-bridge's own verb-vocabulary convergence.
