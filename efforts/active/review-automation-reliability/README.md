@@ -526,6 +526,27 @@ scenarios.
   precedent) so `build_parser()`'s `set_defaults(func=_cmd_reviewer_loop)`
   / `set_defaults(func=_cmd_repository_issue_loop)` call sites are
   unaffected.
+- **Copilot's PR review caught one real, valid finding** (fixed before
+  merge): `python -m agent_dispatch` -- the real production invocation
+  (`scripts/install.sh`'s stub, the `serve` systemd unit) -- loads
+  `__main__.py` as `sys.modules["__main__"]`, never as
+  `sys.modules["agent_dispatch.__main__"]`. The initial proxy
+  implementation's `from . import __main__ as _cli` would therefore import
+  and execute a second, independent copy of the entire module under `-m`,
+  silently diverging from whatever state the actually-running copy held.
+  Fixed with a `_resolve_cli_module()` helper: `runpy` still sets the
+  running module's `__spec__.name` to its real dotted name even though its
+  `sys.modules` key is `"__main__"`, so checking
+  `sys.modules["__main__"].__spec__.name == "agent_dispatch.__main__"`
+  recognizes the live `-m` copy; falling back to
+  `sys.modules.get("agent_dispatch.__main__")` covers the normal-import
+  case (tests, any other importer), and a fresh dotted import is the last
+  resort. Added two regression tests
+  (`test_resolve_cli_module_prefers_the_live_python_dash_m_module`,
+  `..._falls_back_to_dotted_import_for_a_normal_importer`) that fabricate
+  both `sys.modules["__main__"]` shapes directly, since this environment
+  doesn't have a clean way to assert on an actual subprocess's internal
+  module identity.
 - Full `agent-dispatch` suite (`tools/run-plugin-tests.py agent-dispatch`)
   passed before and after; `__main__.py` dropped from 6,506 to 5,568 lines;
   `tools/module-size-baseline.json` refreshed (shrink-only) accordingly.

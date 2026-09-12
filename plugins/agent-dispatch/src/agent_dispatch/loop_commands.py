@@ -2,16 +2,16 @@
 
 Split out of ``__main__.py`` (which re-exports every name here for backward
 compatibility). Both loop kinds share a status/health-projection shape
-(``_spawn_attempt_projection``) and identical declarations/setup/status/
-command flows, hence one module rather than two.
+(``_spawn_attempt_projection``) and identical command flows, hence one
+module rather than two.
 
 ``_client``, ``_emit``, ``_registration_scope``,
 ``_reject_worktree_checkout_as_repo_root``, and
 ``_read_supervisor_runtime_status`` genuinely belong to ``__main__.py`` --
-they're CLI-wide helpers dozens of other commands there use, and existing
-tests monkeypatch them by their ``agent_dispatch.__main__`` attribute path.
-The proxies below look each one up on the live ``__main__`` module at call
-time so a monkeypatched replacement still takes effect here.
+CLI-wide helpers other commands there use too, monkeypatched by tests via
+their ``agent_dispatch.__main__`` attribute path. The proxies below resolve
+the actually-running ``__main__`` module at call time (see
+``_resolve_cli_module``) so a monkeypatched replacement still applies here.
 """
 
 from __future__ import annotations
@@ -33,18 +33,36 @@ if TYPE_CHECKING:
     from .registrar import ProfileDeclaration
 
 
-def _proxy(name: str):
-    """Return a wrapper delegating to ``agent_dispatch.__main__.<name>``.
+def _resolve_cli_module():
+    """Return the actually-running ``agent_dispatch.__main__`` module.
 
-    Looked up lazily on the live module object (not imported once at module
-    load) so a test's ``monkeypatch.setattr("agent_dispatch.__main__.<name>",
-    ...)`` still takes effect for callers here.
+    ``python -m agent_dispatch`` loads ``__main__.py`` as
+    ``sys.modules["__main__"]``, never as
+    ``sys.modules["agent_dispatch.__main__"]``. A naive ``from . import
+    __main__`` would import and execute an independent second copy rather
+    than the one actually running, silently diverging any patched state.
+    ``runpy`` still sets the running module's ``__spec__.name`` to its real
+    dotted name, so that recognizes the live copy; fall back to a normal
+    dotted import (tests, or any other importer) only when neither is
+    already loaded.
     """
+    live = sys.modules.get("__main__")
+    live_spec = getattr(live, "__spec__", None)
+    if live_spec is not None and live_spec.name == "agent_dispatch.__main__":
+        return live
+    dotted = sys.modules.get("agent_dispatch.__main__")
+    if dotted is not None:
+        return dotted
+    from . import __main__ as cli
+
+    return cli
+
+
+def _proxy(name: str):
+    """Delegate to ``agent_dispatch.__main__.<name>`` via ``_resolve_cli_module``."""
 
     def _fn(*args, **kwargs):
-        from . import __main__ as _cli
-
-        return getattr(_cli, name)(*args, **kwargs)
+        return getattr(_resolve_cli_module(), name)(*args, **kwargs)
 
     return _fn
 
