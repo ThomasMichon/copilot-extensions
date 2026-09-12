@@ -1072,3 +1072,80 @@ async def test_explicit_end_owns_authority_recovery_before_stop(context, monkeyp
         await asyncio.wait_for(end, 1)
     await asyncio.wait_for(stop, 1)
     assert ctx.session.status == SessionStatus.STOPPED
+
+
+async def test_queued_drain_kick_cannot_resume_after_later_stop(
+    context, monkeypatch, mock_acp_client,
+):
+    ctx = context
+    ctx.session.status = SessionStatus.IDLE
+    ctx.session.client = mock_acp_client
+    ctx.db.enqueue_prompt(ctx.session.session_id, "earlier", time.time())
+    entered, release = asyncio.Event(), asyncio.Event()
+    original_kick = ctx.manager._kick_pending_drain
+
+    async def delayed_kick(session, *, expected_generation):
+        entered.set()
+        await release.wait()
+        await original_kick(session, expected_generation=expected_generation)
+
+    monkeypatch.setattr(ctx.manager, "_kick_pending_drain", delayed_kick)
+    resume = AsyncMock(side_effect=AssertionError("stale kick resumed stopped session"))
+    monkeypatch.setattr(ctx.manager, "resume_session", resume)
+    submit = asyncio.create_task(
+        ctx.manager.submit_or_queue_prompt(ctx.session.session_id, "later")
+    )
+    await asyncio.wait_for(entered.wait(), 1)
+    await ctx.manager.stop_session(ctx.session.session_id)
+    release.set()
+    assert (await asyncio.wait_for(submit, 1))["queued"] is True
+    resume.assert_not_awaited()
+    assert ctx.db.count_pending_prompts(ctx.session.session_id) == 2
+    assert ctx.session.status == SessionStatus.STOPPED
+
+
+async def test_resync_excludes_prompt_admission_until_client_replacement(
+    context, monkeypatch, mock_acp_client,
+):
+    ctx = context
+    ctx.session.status = SessionStatus.IDLE
+    ctx.session.client = mock_acp_client
+    entered, release, delivered = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    async def shutdown():
+        entered.set()
+        await release.wait()
+
+    async def prompt(_text):
+        delivered.set()
+        await asyncio.Event().wait()
+
+    mock_acp_client.shutdown.side_effect = shutdown
+    replacement = SimpleNamespace(
+        start=AsyncMock(), load_session=AsyncMock(), shutdown=AsyncMock(),
+        send_prompt=AsyncMock(side_effect=prompt), cancel_prompt=AsyncMock(),
+        is_running=True, pid=456, has_active_background_tasks=False,
+        active_background_tasks=[], session_host_client=None,
+    )
+    monkeypatch.setattr("agent_bridge.session_manager.AcpClient", lambda **_kwargs: replacement)
+    monkeypatch.setattr(
+        "agent_bridge.session_manager.spawn",
+        AsyncMock(return_value=SimpleNamespace(proc=Mock())),
+    )
+    monkeypatch.setattr("agent_bridge.session_manager._cleanup_worktree", AsyncMock())
+    monkeypatch.setattr(
+        ctx.manager, "_quiesce_session", SessionManager._quiesce_session.__get__(ctx.manager),
+    )
+    resync = asyncio.create_task(ctx.manager.resync_session(ctx.session.session_id))
+    await asyncio.wait_for(entered.wait(), 1)
+    submit = asyncio.create_task(ctx.manager.submit_prompt(ctx.session.session_id, "new work"))
+    await asyncio.sleep(0)
+    assert not submit.done()
+    release.set()
+    await asyncio.wait_for(resync, 1)
+    assert await asyncio.wait_for(submit, 1) == 0
+    await asyncio.wait_for(delivered.wait(), 1)
+    mock_acp_client.send_prompt.assert_not_awaited()
+    replacement.send_prompt.assert_awaited_once_with("new work")
+    await ctx.manager.stop_session(ctx.session.session_id)
+    assert ctx.session.status == SessionStatus.STOPPED
