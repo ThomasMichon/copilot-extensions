@@ -56,11 +56,16 @@ async def stop_session_admitted(
         session._lifecycle_generation += 1
         restart_status = None
         if for_restart:
-            restart_status = (
+            prior = (
                 session.restart_status
                 if session.status == SessionStatus.STOPPED
                 else session.status.value
             )
+            if prior in (
+                SessionStatus.RUNNING.value, SessionStatus.IDLE.value,
+                SessionStatus.STARTING.value,
+            ):
+                restart_status = prior
         async def teardown() -> None:
             try:
                 await complete_stop(

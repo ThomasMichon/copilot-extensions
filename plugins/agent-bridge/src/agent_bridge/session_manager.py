@@ -1523,9 +1523,9 @@ class SessionManager:
             session.updated_at = row["updated_at"]
             session.acp_session_id = row.get("acp_session_id")
             session.restart_status = (
-                row.get("restart_status") or status
+                row.get("restart_status")
                 if status == SessionStatus.STOPPED.value
-                else status
+                else None
             )
 
             # Mark formerly-active sessions as stopped
@@ -1535,6 +1535,7 @@ class SessionManager:
                 SessionStatus.IDLE.value,
                 SessionStatus.STARTING.value,
             ):
+                session.restart_status = status
                 session.status = SessionStatus.STOPPED
                 self._db.update_session_status(
                     sid, SessionStatus.STOPPED.value, now,
@@ -5787,7 +5788,7 @@ class SessionManager:
         if not session:
             raise KeyError(f"Session {session_id} not found")
 
-        async with session._lifecycle_lock:
+        async with session._turn_start_lock, session._lifecycle_lock:
             task = session._prompt_task
             if (
                 session.status != SessionStatus.RUNNING
