@@ -372,7 +372,7 @@ async def test_stop_surfaces_transport_teardown_failure_and_retains_retry_handle
     failing.side_effect = RuntimeError("teardown failed")
     with pytest.raises(RuntimeError, match="teardown failed"):
         await ctx.manager.stop_session(ctx.session.session_id)
-    assert ctx.db.get_session(ctx.session.session_id)["status"] == "running"
+    assert ctx.db.get_session(ctx.session.session_id)["status"] == "failed"
     assert ctx.manager._forwards[ctx.session.session_id] is forward
     if failure == "relay":
         assert ctx.manager._relays[ctx.session.session_id] == [relay]
@@ -654,6 +654,7 @@ async def test_host_sweeps_preserve_stopped_or_lifecycle_owned_records(
 
     def assert_off_loop(*_args):
         assert threading.get_ident() != loop_thread
+        assert ctx.session._turn_start_lock.locked()
         assert ctx.session._lifecycle_lock.locked()
 
     reap = Mock(side_effect=assert_off_loop)
@@ -780,6 +781,9 @@ async def test_cancelled_local_sweep_keeps_lock_until_worker_settles(context, mo
         stop = asyncio.create_task(ctx.manager.stop_session(ctx.session.session_id))
         await asyncio.sleep(0)
         assert not stop.done()
+        assert not sweep.done()
+        sweep.cancel()
+        await asyncio.sleep(0)
         assert not sweep.done()
     finally:
         release.set()
@@ -1128,9 +1132,15 @@ async def test_resync_excludes_prompt_admission_until_client_replacement(
         active_background_tasks=[], session_host_client=None,
     )
     monkeypatch.setattr("agent_bridge.session_manager.AcpClient", lambda **_kwargs: replacement)
+    process = SimpleNamespace(proc=Mock(), alive=True, pid=456)
+
+    async def kill():
+        process.alive = False
+
+    process.kill = AsyncMock(side_effect=kill)
     monkeypatch.setattr(
         "agent_bridge.session_manager.spawn",
-        AsyncMock(return_value=SimpleNamespace(proc=Mock())),
+        AsyncMock(return_value=process),
     )
     monkeypatch.setattr("agent_bridge.session_manager._cleanup_worktree", AsyncMock())
     monkeypatch.setattr(

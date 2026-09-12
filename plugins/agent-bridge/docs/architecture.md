@@ -405,6 +405,23 @@ restart does not inherently close the child's pipes.
   admission before doing any work. Handoff retirement failures propagate and
   emit a cleanup-required ``handoff_failed`` event on both sessions, retaining
   their identities/links rather than silently reporting a completed handoff.
+  Accepted stop teardown is an owned transaction: repeated request cancellation
+  does not interrupt quiesce, process cleanup, relay/forward shutdown, or the
+  final durable state write. Cancellation propagates only after that work
+  settles. A real cleanup failure is reported as FAILED with retry handles
+  retained, never as a successful stop.
+  Process-owned launch, resume/recreation, and resync retain their process handle
+  as soon as spawn ownership is delivered. Cancelled spawn is joined; cancelled
+  handshake/load/recreation reaps and verifies the child before recording
+  STOPPED. Failed process cleanup retains ownership and blocks automatic recovery.
+  Destructive authority results and stranded reaping take admission before
+  lifecycle ownership; each newly admitted turn advances the generation so an
+  older inspection cannot tear down its transport.
+  The manager remains the public facade; `session_resume.py`,
+  `session_teardown.py`, and `session_ownership.py` own the bounded lifecycle
+  implementations. Additive session migrations live in `db_migrations.py`.
+  These extractions preserve factory injection seams and avoid widening the
+  repository's shrink-only module-size baseline.
   Ordinary stop also stops per-session credential-relay supervisors and cancels
   live forwards before acknowledgement; transport teardown failures are surfaced
   rather than reported as containment. Host descriptors and venue ownership are

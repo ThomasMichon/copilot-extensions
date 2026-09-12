@@ -11,12 +11,19 @@ from agent_bridge.models import SessionStatus
 from agent_bridge.session_manager import _MAX_RESUME_ROUNDS, SessionManager
 
 
-def _mock_agent_proc():
+def _mock_agent_proc(*_args, **_kwargs):
     proc = MagicMock()
     proc.proc = MagicMock()
     proc.proc.pid = 12345
     proc.proc.returncode = None
     proc.proc.stderr.readline = AsyncMock(return_value=b"")
+    proc.alive = True
+
+    async def kill():
+        proc.alive = False
+        proc.proc.returncode = -15
+
+    proc.kill = AsyncMock(side_effect=kill)
     return proc
 
 
@@ -50,7 +57,7 @@ async def _make_stopped_session(sm, spawn_target, mock_acp_client):
 async def test_resume_retries_then_succeeds(tmp_db, spawn_target, mock_acp_client):
     """A stalled first launch is re-rolled; the second attempt lands IDLE, and the
     stalled round is recorded as an acp_resume_retry event (with the stderr tail)."""
-    with patch("agent_bridge.session_manager.spawn", return_value=_mock_agent_proc()), \
+    with patch("agent_bridge.session_manager.spawn", side_effect=_mock_agent_proc), \
          patch("agent_bridge.session_manager.AcpClient", return_value=mock_acp_client):
         sm = SessionManager(tmp_db)
         session = await _make_stopped_session(sm, spawn_target, mock_acp_client)
@@ -74,7 +81,7 @@ async def test_resume_retries_then_succeeds(tmp_db, spawn_target, mock_acp_clien
 async def test_resume_exhausts_ladder_then_raises(tmp_db, spawn_target, mock_acp_client):
     """Every round stalls -> after _MAX_RESUME_ROUNDS the resume raises and the
     session is left STOPPED, with one retry marker per round (last: will_retry False)."""
-    with patch("agent_bridge.session_manager.spawn", return_value=_mock_agent_proc()), \
+    with patch("agent_bridge.session_manager.spawn", side_effect=_mock_agent_proc), \
          patch("agent_bridge.session_manager.AcpClient", return_value=mock_acp_client):
         sm = SessionManager(tmp_db)
         session = await _make_stopped_session(sm, spawn_target, mock_acp_client)
@@ -99,7 +106,7 @@ async def test_resume_recreates_when_allowed(tmp_db, spawn_target, mock_acp_clie
     """allow_recreate: after the stop->resume ladder is exhausted, a FRESH ACP
     session (new_session) is created in place -- same bridge id, new acp id,
     context dropped -- recorded as acp_resume_recreated (#1468)."""
-    with patch("agent_bridge.session_manager.spawn", return_value=_mock_agent_proc()), \
+    with patch("agent_bridge.session_manager.spawn", side_effect=_mock_agent_proc), \
          patch("agent_bridge.session_manager.AcpClient", return_value=mock_acp_client):
         sm = SessionManager(tmp_db)
         session = await _make_stopped_session(sm, spawn_target, mock_acp_client)
@@ -146,7 +153,7 @@ async def test_resume_recreates_when_allowed(tmp_db, spawn_target, mock_acp_clie
 async def test_resume_recreate_failure_raises(tmp_db, spawn_target, mock_acp_client):
     """If even the fresh new_session recreate fails, the session is left STOPPED
     and the error surfaces (no silent wedged session)."""
-    with patch("agent_bridge.session_manager.spawn", return_value=_mock_agent_proc()), \
+    with patch("agent_bridge.session_manager.spawn", side_effect=_mock_agent_proc), \
          patch("agent_bridge.session_manager.AcpClient", return_value=mock_acp_client):
         sm = SessionManager(tmp_db)
         session = await _make_stopped_session(sm, spawn_target, mock_acp_client)
