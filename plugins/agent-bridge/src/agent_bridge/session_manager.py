@@ -2011,10 +2011,7 @@ class SessionManager:
         return (
             not self._shutting_down
             and not (getattr(record, "extra", None) or {}).get("launch_cleanup_pending")
-            and not any(
-                not task.done()
-                for task in self._remote_reaps_by_session.get(record.session_id, ())
-            )
+            and not self._remote_reap_pending(record.session_id)
             and self._host_index is not None
             and self._host_index.get(record.session_id) == record
             and self._sessions.get(record.session_id) is session
@@ -2025,6 +2022,12 @@ class SessionManager:
                     and self._background_recovery_allowed(session)
                 )
             )
+        )
+
+    def _remote_reap_pending(self, session_id: str) -> bool:
+        """Whether an existing cleanup operation still owns this host's fate."""
+        return any(
+            not task.done() for task in self._remote_reaps_by_session.get(session_id, ())
         )
 
     def _live_remote_host_sessions(self) -> set[str]:
@@ -2277,7 +2280,10 @@ class SessionManager:
         groups: dict[str, tuple[Any, list[tuple[Session, Any]]]] = {}
         candidate_generations: dict[str, int] = {}
         for session in self._sessions.values():
-            if background and not self._background_recovery_allowed(session):
+            if background and (
+                not self._background_recovery_allowed(session)
+                or self._remote_reap_pending(session.session_id)
+            ):
                 continue
             if session_ids is not None and session.session_id not in session_ids:
                 continue
@@ -2358,6 +2364,7 @@ class SessionManager:
                         await locks.enter_async_context(session._lifecycle_lock)
                         if (
                             self._background_recovery_allowed(session)
+                            and not self._remote_reap_pending(session.session_id)
                             and self._host_index.get(session.session_id) == existing
                             and candidate_generations[session.session_id]
                             == session._lifecycle_generation
@@ -2453,7 +2460,7 @@ class SessionManager:
             for session, existing, status, record in results:
                 async with contextlib.AsyncExitStack() as locks:
                     if background:
-                        if self._shutting_down:
+                        if self._shutting_down or self._remote_reap_pending(session.session_id):
                             continue
                         if session._turn_start_lock.locked() or session._lifecycle_lock.locked():
                             continue
@@ -3321,10 +3328,7 @@ class SessionManager:
         """
         if self._host_index is None:
             return False
-        if any(
-            not task.done()
-            for task in self._remote_reaps_by_session.get(session.session_id, ())
-        ):
+        if self._remote_reap_pending(session.session_id):
             raise RemoteHostRecoveryPendingError(
                 f"Remote Session Host cleanup is pending for {session.session_id}"
             )
