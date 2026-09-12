@@ -22,6 +22,7 @@ dependencies = [
     "agent-dropin-registry",
     "agent-plugin-activation",
     "agent-single-instance-lease",
+    "agent-work-coalescing-singleton",
 ]
 
 [tool.uv.sources]
@@ -49,6 +50,10 @@ agent-plugin-activation = { path = "libs/plugin-activation" }
 # session-render cache instead of racing it or falling back to a wrong
 # heuristic.
 agent-single-instance-lease = { path = "libs/single-instance-lease" }
+# Work-coalescing-singleton daemon shape (module ``work_coalescing_singleton``):
+# coalesce/refcount/idle-exit wire protocol + client (plugin-process-hygiene
+# #744/#2323). Vendored per plugin; byte-identical src across copies.
+agent-work-coalescing-singleton = { path = "libs/work-coalescing-singleton" }
 
 [project.scripts]
 agent-worktrees = "agent_worktrees.__main__:main"

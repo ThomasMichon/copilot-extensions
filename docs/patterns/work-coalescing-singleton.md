@@ -211,9 +211,24 @@ requires before further plugin code change. **Landed:** the reusable helper
 a pure-stdlib library implementing this wire protocol, the coalescing map,
 and the ref-count/linger/liveness-reap algorithm described above (unit +
 wire tests covering coalescing, distinct-key independence, error
-propagation, linger cancel-on-resubscribe, and liveness reaping). It is not
-yet vendored into any consuming plugin. **Still open:** `#2323` (agent-
-worktrees resident classify/list accelerator) and the agent-mcp multiplexer
-each adopt it — vendoring their own copy per
-`tools/check-vendored-libs-sync.py` convention — as independent, separately
-reviewed follow-up PRs.
+propagation, linger cancel-on-resubscribe, and liveness reaping).
+
+**In progress — `#2323` (agent-worktrees resident classify/list
+accelerator):** the helper is now vendored into
+`plugins/agent-worktrees/libs/work-coalescing-singleton/`, and
+`agent_worktrees.classify_daemon` provides the request-kind-specific wire
+wrappers (`start_server`, `rendezvous_fields`, `classify_via_daemon`), with
+its own tests. **Deliberately not yet wired into any command** —
+`cmd_status_monitor` does not start this daemon or publish its rendezvous,
+and `_classify_records` does not try it before its existing
+`single_instance_lease`-guarded path. Wiring those in is real behavior
+change to a live, widely-depended-on resident process and stays its own
+follow-up, done with the same test discipline once ready (see the effort
+journal for the concrete plan: the daemon's `compute` callback resolves a
+project's records itself via `tracking.list_records`, so a request payload
+only needs to name the project — never serialize whole records over the
+wire).
+
+**Still fully open:** the agent-mcp multiplexer — vendoring its own copy per
+`tools/check-vendored-libs-sync.py` convention, as an independent, separately
+reviewed follow-up.
