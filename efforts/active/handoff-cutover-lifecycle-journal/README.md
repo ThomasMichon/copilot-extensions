@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions (plugins/agent-worktrees, plugins/context-handoff)
 - **Branch(es):** `worktree/<local-agent-worktree-branch>` (private branch name; not public-safe to record verbatim)
 - **Created:** 2026-09-11
-- **Status:** Draft
+- **Status:** Active
 - **Umbrella issue:** [#2457](https://github.com/ThomasMichon/copilot-extensions/issues/2457)
 - **Sub-issues:** TBD
 
@@ -160,7 +160,7 @@ renumbering from the "acknowledges handoff" step onward.)
 ## Plan
 
 ### Phase 1 — Unified event schema + shared emitter
-- [ ] Define one canonical stage vocabulary covering all 13 stages, layered
+- [x] Define one canonical stage vocabulary covering all 13 stages, layered
       **on top of** existing wire event names rather than replacing them —
       `handoff_requested` (the resident monitor's pending scan reads this
       exact event name; renaming it without an atomic producer+consumer
@@ -177,6 +177,10 @@ renumbering from the "acknowledges handoff" step onward.)
       existing event relied on elsewhere without an audit of readers
       (`health.py`, `disposition_history.py`, any docs) and an atomic
       producer+consumer update.
+      **Landed:** `activity.py`'s `HANDOFF_STAGE_MAP` + auto-stamping in
+      `log_event()` (PR #2472) — covers the 8 existing wire events; the
+      not-yet-existing stage names are pre-declared in the map's docstring so
+      Phase 2's new emitters slot in without a second schema change.
 - [ ] Every event carries: `worktree_id`, `stage` (ordinal + name),
       `session_id` — **nullable**, since Stage 1 (`worktree_created`) fires
       before any Copilot session exists (the existing event already has no
@@ -521,3 +525,45 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   step is now done against real data; the plan's fix items were rewritten to
   target these two specific causes instead of the original generic
   hypothesis.
+- Operator explicitly scoped this effort to logging/observability only —
+  no remediation of any live stuck worktree; Phase 4's fixes stay as
+  forward-looking evidence, not this pass's execution.
+- Submitted the plan as PR #2458 and drove it through **six review rounds**
+  (Copilot's Lite-tier reviewer) before merge: public-safe identity redaction
+  (PR body *and* file), preserving `handoff_requested` as the wire-compatible
+  name instead of renaming, nullable `session_id` + required `launch_id`
+  correlation, splitting the spawn stage into start+result, reusing the
+  existing `sessionEnd`/`session_ended` path instead of implying a new hook,
+  an explicit successor-side backfill step, a durable per-worktree trace
+  store exempt from `activity.jsonl`'s rolling retention (with a
+  **per-platform** atomic-append contract after the reviewer caught that
+  `O_APPEND` is POSIX-only and this repo also ships Windows), scoping the
+  13-stage model to the mux/CLI resident-monitor path with agent-bridge's
+  independent `SessionManager.handoff_session()` spawn path explicitly
+  named and deferred, correcting Stage 10's basis away from
+  `associate_handoff_candidate()` (which the reviewer showed doesn't move the
+  tracking head) toward the actual `tracking.link_handoff()` call site,
+  moving Stage 3 off the pane wrapper (which only forwards an
+  already-resolved command) onto the real Copilot resolution/exec point, and
+  namespacing the durable trace store by project (worktree ids are only
+  project-scoped). PR #2458 merged 2026-09-11.
+- **Second live corroboration**, in real time, on a different worktree
+  (`ef44` alias in this operator's environment — identifier not recorded
+  here per public-safe policy): the operator reported "handoff triggered, no
+  replacement mux pane" while this PR was still in review. Traced via
+  `activity.jsonl`: an earlier handoff cycle completed a full
+  claim→spawn→retire sequence hours prior; a fresh `trigger_handoff` then
+  reused that exact same `handoff_id` (its session id had been reattached
+  across an intervening mux resume, same mechanism as the first case study),
+  and no claim/spawn/log followed — the request was silently swallowed
+  again. No remediation performed, per standing instruction. This is the
+  same already-documented root cause recurring independently, not a new
+  bug class — it further substantiates Phase 4's bug 1 without changing this
+  effort's Phase 1-3/5 scope.
+- **Phase 1 executed**: landed `HANDOFF_STAGE_MAP` + `log_event()`
+  auto-stamping in `activity.py` (PR #2472, plugins/agent-worktrees test
+  suite green: 4149 passed / 20 skipped / 3 pre-existing unrelated failures
+  noted in the PR description). Next slice: Phase 1's remaining schema items
+  (spawn start/result event split as dedicated wire events) and Phase 2's
+  per-stage instrumentation across `sessions.py`, `__main__.py`, the launcher
+  scripts, and context-handoff's `handoff-core.mjs`.
