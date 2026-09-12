@@ -44,6 +44,26 @@ if ($executableName -in @('pwsh', 'powershell')) {
 }
 if (-not $usesDefaultSetup) {
     Remove-Item Env:AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED -ErrorAction SilentlyContinue
+    # Stage 3 (copilot_invoked): the config-driven launch-template and legacy
+    # tools/setup/setup.ps1 paths never reach default-setup.ps1's own precise
+    # exec-point emitter, so this wrapper -- the one seam EVERY resolved
+    # command passes through -- emits a coarser "attempted" mark for them
+    # instead (best-effort/detached; distinct from the confirmed event
+    # default-setup.ps1 emits for its own path).
+    try {
+        $awPy = $null
+        $resolver = Join-Path $env:USERPROFILE '.agent-worktrees\bin\resolve-runtime.ps1'
+        if (Test-Path -LiteralPath $resolver) { . $resolver; $awPy = $AwPy }
+        if ($awPy -and (Test-Path -LiteralPath $awPy)) {
+            $wtId = & $awPy -I -m agent_worktrees get worktree-id 2>$null
+            if ($wtId) {
+                Start-Process -FilePath 'conhost.exe' -ArgumentList (@('--headless', "`"$awPy`"",
+                    '-I', '-m', 'agent_worktrees', 'activity-log', 'copilot_invocation_attempted',
+                    '--worktree-id', $wtId, '--source', 'launcher')) `
+                    -WindowStyle Hidden -ErrorAction Stop | Out-Null
+            }
+        }
+    } catch { }
 }
 
 & $executable @remainingArgs

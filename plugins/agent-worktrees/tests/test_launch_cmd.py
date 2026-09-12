@@ -760,6 +760,49 @@ def test_default_setup_skips_windowsapps_shadow_candidate(tmp_path):
     assert not shadow_marker.exists()
 
 
+def test_default_setup_ps1_stage_3_no_runtime_path_still_launches(tmp_path):
+    """Stage 3 (copilot_invoked): when no RuntimePython/resolver is available,
+    Invoke-CopilotInvokedLog's no-runtime early-return must not affect the
+    real launch -- Copilot still starts. Runs under PowerShell Core (pwsh),
+    which is cross-platform, so this exercises the actual .ps1 code path
+    without requiring native Windows."""
+    shell = shutil.which("pwsh")
+    if not shell:
+        pytest.skip("pwsh is unavailable")
+
+    marker = tmp_path / "launched"
+    home = tmp_path / "home"  # no .agent-worktrees/bin/resolve-runtime.ps1 here
+    home.mkdir()
+    env = os.environ.copy()
+    env["PATH"] = "/usr/bin:/bin"
+    env["HOSTNAME"] = "test-host"
+    env["HOME"] = str(home)
+    env["USERPROFILE"] = str(home)
+    env["COPILOT_LAUNCH_MARKER"] = str(marker)
+    scripts = Path(__file__).resolve().parents[1] / "scripts"
+
+    copilot = tmp_path / "copilot-test"
+    copilot.write_text(
+        "#!/bin/sh\nprintf launched > \"$COPILOT_LAUNCH_MARKER\"\n",
+        encoding="utf-8",
+    )
+    copilot.chmod(0o755)
+
+    proc = subprocess.run(
+        [
+            shell, "-NoProfile", "-NoLogo", "-File", str(scripts / "default-setup.ps1"),
+            "-Machine", "test", "-CopilotPath", str(copilot),
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert marker.read_text(encoding="utf-8").strip() == "launched"
+
+
 def test_default_setup_launches_absolute_copilot_with_empty_path(
     tmp_path,
 ):

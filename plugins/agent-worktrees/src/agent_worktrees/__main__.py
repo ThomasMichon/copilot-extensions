@@ -2613,12 +2613,7 @@ def _build_launch_cmd(
                     resolved_hook,
                 ]
                 if config_root_path:
-                    cmd += [
-                        "-ConfigRoot",
-                        config_root_path,
-                        "-RuntimePython",
-                        sys.executable,
-                    ]
+                    cmd += ["-ConfigRoot", config_root_path, "-RuntimePython", sys.executable]
                 if session_path_arg:
                     cmd += ["-SessionPath", session_path_arg]
                 if resolved_env_script:
@@ -2638,12 +2633,7 @@ def _build_launch_cmd(
                     resolved_hook,
                 ]
                 if config_root_path:
-                    cmd += [
-                        "--config-root",
-                        config_root_path,
-                        "--runtime-python",
-                        sys.executable,
-                    ]
+                    cmd += ["--config-root", config_root_path, "--runtime-python", sys.executable]
                 if session_path_arg:
                     cmd += ["--session-path", session_path_arg]
                 if resolved_env_script:
@@ -7192,12 +7182,20 @@ def _cmd_status_write(
             save=False,
         )
         tracking.save_record(record)
-    # Stage 5 (status_reported): once per session_id, not every summary edit.
-    if session_id and not any(
-        e.get("session_id") == session_id
-        for e in activity.read_events(worktree_id=worktree_id, event="status_reported", limit=500)
-    ):
-        activity.log_event("status_reported", worktree_id=worktree_id, session_id=session_id)
+        # Stage 5 (status_reported): once per session_id, not every summary
+        # edit. Held under the same RecordLock as the write above so two
+        # concurrent status processes sharing a session_id can't both observe
+        # "no prior event" and double-emit -- the lock serializes them per
+        # worktree, which is exactly the scope this check needs.
+        if session_id and not any(
+            e.get("session_id") == session_id
+            for e in activity.read_events(
+                worktree_id=worktree_id, event="status_reported", limit=500,
+            )
+        ):
+            activity.log_event(
+                "status_reported", worktree_id=worktree_id, session_id=session_id,
+            )
     flag = "follow-ups pending" if record.follow_up else "resolved"
     msg = f"[OK] Worktree {worktree_id[-4:]} disposition: {flag}"
     if title is not None and record.title:

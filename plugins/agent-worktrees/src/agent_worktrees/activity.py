@@ -33,6 +33,12 @@ Events are intentionally high-level:
                             stage 2's other emitter, alongside mux_attached
   copilot_invoked           the Copilot binary was actually exec'd (the true
                             final resolution point in the setup launcher)
+  copilot_invocation_attempted
+                            launch-command's wrapper handed off to a
+                            config-driven launch template or legacy
+                            tools/setup/setup.{sh,ps1} -- a coarser mark for
+                            paths that never reach default-setup's own
+                            precise copilot_invoked emitter
   mux_failed                the requested tmux/psmux launch failed closed;
                             creation exhaustion carries attempt count and
                             recoverable=true when the worktree was preserved
@@ -135,6 +141,7 @@ HANDOFF_STAGE_MAP: dict[str, tuple[int, str]] = {
     "mux_attached": (2, "mux_session_assigned"),
     "mux_session_assigned": (2, "mux_session_assigned"),
     "copilot_invoked": (3, "copilot_invoked"),
+    "copilot_invocation_attempted": (3, "copilot_invoked"),
     "session_started": (4, "session_start_bound"),
     "status_reported": (5, "status_reported"),
     "handoff_requested": (6, "handoff_triggered"),

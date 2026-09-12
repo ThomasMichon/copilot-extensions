@@ -270,7 +270,13 @@ renumbering from the "acknowledges handoff" step onward.)
       `copilot_invoked` (best-effort, detached) right before each of their
       `exec`/launch branches (override path, ambient `copilot`, `gh copilot`
       fallback). Added a new `get worktree-id` CLI key so the launcher can
-      resolve the worktree id from CWD without a session id in hand.
+      resolve the worktree id from CWD without a session id in hand. The
+      config-driven launch-template and legacy `tools/setup/setup.{sh,ps1}`
+      paths (which never reach default-setup's own emitter) are covered too:
+      `launch-command.{sh,ps1}` -- the one wrapper seam every resolved
+      command passes through -- emits the coarser `copilot_invocation_attempted`
+      event for them, gated on the wrapper's existing default-setup
+      detection so the two paths don't double-emit.
 - [x] Stage 4 (`session_start_bound`) — emit from `cmd_register_session` once
       a session id + worktree are actually resolved (already close to
       `session_started`; make sure the *binding* moment, not just tool entry,
@@ -754,3 +760,34 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   against PR #2472/#2479 — confirmed still present on `origin/main` before
   this change, unaffected by it). `agent-worktrees` bumped 1.5.5-dev73 →
   dev74. Remaining Phase 2 stages: 7, 10, 11, 12, 13.
+- **PR #2491 review response (same slice).** Copilot's review caught three
+  real gaps. (1) Stage 3 coverage was incomplete: `_build_launch_cmd` also
+  supports config-driven `launch`/`launch_recovery` templates and legacy
+  `tools/setup/setup.{sh,ps1}` paths that never reach default-setup's own
+  emitter. Fixed by instrumenting `launch-command.{sh,ps1}` -- the one
+  wrapper seam every resolved launch command passes through -- with a new,
+  coarser `copilot_invocation_attempted` event (mapped to stage 3 in
+  `HANDOFF_STAGE_MAP` alongside `copilot_invoked`, same convention as stage
+  8's started/failed pair), gated on the wrapper's own existing
+  default-setup detection so the two normalized paths don't double-emit.
+  (2) The stage-5 status dedup (once-per-session-id) was racy: the
+  check-then-append happened *after* releasing the tracking record's
+  cross-process lock, so two concurrent `status` processes sharing a
+  session id could both observe "no prior event". Fixed by moving the
+  check+emit inside the same `tracking._RecordLock` critical section as the
+  disposition write, so it's serialized per worktree. (3) The Windows
+  `default-setup.ps1` emitter had no test coverage. Added a cross-platform
+  integration test that runs the actual `.ps1` under PowerShell Core (pwsh
+  is cross-platform, so this doesn't need a native Windows box) covering
+  the no-runtime-available early-return path; full event-content coverage
+  (via the `conhost.exe`-spawned writer) remains untested here, matching the
+  existing, accepted gap for `launch-session.ps1`'s own `Write-ActivityLog`
+  helper -- neither has direct test coverage of the actual Windows-only
+  spawn, both share the same `-WindowStyle Hidden`/`conhost.exe` mechanism.
+  New/updated tests: `test_machine_settings_reconcile.py` (two new tests for
+  the wrapper's stage-3 emission and its default-setup skip),
+  `test_launch_cmd.py` (one new pwsh-based no-runtime-path test). Full
+  plugin suite: 4170 passed / 20 skipped / same 3 pre-existing unrelated
+  failures. No version bump needed for this same-PR review-response commit
+  (still dev74; only the final shipped version needs to differ from the
+  PR's base per convention).
