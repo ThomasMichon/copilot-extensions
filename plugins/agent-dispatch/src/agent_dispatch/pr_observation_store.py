@@ -113,6 +113,18 @@ class PRObservationStore:
             ).fetchone()
         return float(row["last_observed_at"]) if row is not None else None
 
+    def tracked_keys(self) -> list[tuple[str, int]]:
+        """Every ``(repo, number)`` this store currently holds an
+        observation for -- the poll-fallback loop's iteration set. A PR
+        starts being tracked the first time anything (webhook or an
+        explicit initial fetch) records an observation for it; there is no
+        separate "watch list" to seed."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT repo, number FROM pr_observations ORDER BY repo, number"
+            ).fetchall()
+        return [(row["repo"], int(row["number"])) for row in rows]
+
     def put(
         self,
         repo: str,

@@ -195,7 +195,7 @@ here but not blocking the start of 1/2/5.
   for every enabled method, a wrong-owner or wrong-state replay still
   raises, and the adoption-resume path never no-ops even on an
   otherwise-matching replay.
-- [ ] Build the first live provider adapter (GitHub) driving
+- [x] Build the first live provider adapter (GitHub) driving
   `provider_state_machine`'s declared dimensions from real PR state (item
   3 above). Expect this to be split into its own sequence of slices as
   scope becomes clearer once adapter work starts. **First slice landed:**
@@ -263,11 +263,34 @@ here but not blocking the start of 1/2/5.
   `pr_revision_evaluator.evaluate_observation`, persists the result and the
   observation timestamp, and returns it -- the one call site a future
   polling/webhook loop needs.
-  Remaining for item 3: the real webhook receiver for review/check-status
-  events (today's `producers/webhook.py` only handles PR-merge) and the
-  loop itself (poll on `pr_polling_policy.poll_due`, call
-  `record_observation` on each observation) that actually invokes this
-  machinery on a schedule.
+  **Fifth slice landed (item 3 complete):**
+  `pr_review_poll_loop.run_poll_cycle` -- the poll-fallback tick: iterates
+  every `(repo, number)` the store already tracks
+  (`PRObservationStore.tracked_keys()`, added this slice), refreshes
+  whichever are due per `pr_polling_policy.poll_due`, and persists via
+  `record_observation`. Never discovers new PRs itself -- a PR starts being
+  tracked the moment anything records its first observation.
+  `producers/github_pr_review_webhook.py` -- the reactive trigger: a
+  GitHub-specific FastAPI receiver (`extract_pr_ref`) for
+  `pull_request`/`pull_request_review`/`pull_request_review_thread`/
+  `check_suite`/`check_run` events, HMAC-signature-verified
+  (`X-Hub-Signature-256`, GitHub's own webhook-authenticity mechanism --
+  distinct from the forge-neutral `producers/webhook.py`'s bearer-token
+  `inbound_token`, since GitHub itself never sends a bearer token). A
+  webhook delivery is used only as a **trigger**: the fields
+  `observe_pr_state` needs (`reviewDecision` above all) are GraphQL-only
+  aggregates the REST webhook payload does not carry, so the receiver
+  re-fetches full state through the injected `observe` callable rather than
+  trying to reconstruct it from the webhook body -- which also makes a
+  late/duplicate/out-of-order delivery harmless (each just triggers a
+  fresh, idempotent re-observation).
+  Item 3's full pipeline is now built end-to-end: observe -> evaluate
+  (staleness) -> persist -> triggered by webhook, backstopped by cadence-
+  scoped polling. Not yet done: actually deploying/registering this
+  webhook receiver and scheduling the poll-cycle tick against a real
+  repository -- left to whoever operates a concrete deployment, since that
+  requires real webhook-secret provisioning and a real schedule, both
+  deployment-specific.
 - [ ] Wire the bridge machine's `resolve_liveness`/`resolve_resume` against
   a real agent-bridge liveness read (item 4 above), coordinated with
   agent-bridge's own verb-vocabulary convergence.
