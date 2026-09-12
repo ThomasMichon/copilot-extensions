@@ -754,6 +754,58 @@ class TestCmdHandoffCutover:
         out = json.loads(capfd.readouterr().out)
         assert out["pane"] == "%9" and out["gone"] is True
 
+    def test_retire_mode_emits_stage_13_when_head_is_already_linked(
+        self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
+    ):
+        """#2457 Stage 13: a successful retire (outcome="gone") for a token
+        whose handoff is ALREADY linked (the successor claimed head before
+        this retire ran) must emit `handoff_complete` -- exercising the real
+        `_handoff_cutover_retire_result` wiring, not just the standalone
+        `_maybe_emit_stage_13` unit."""
+        from agent_worktrees import tracking as _tracking
+
+        rec = _tracking.WorktreeRecord(
+            worktree_id="wt-retire-13", branch="worktree/wt-retire-13",
+            worktree_path="/tmp/src/wt-retire-13", repo="test-repo",
+            machine="test", platform="wsl", started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00", resume_count=0, title=None,
+            status="active", completed_at=None, sessions=[],
+        )
+        _tracking.save_record(rec, tmp_tracking_dir / "wt-retire-13.yaml")
+        _tracking.register_session("wt-retire-13", "old-sess")
+        _tracking.register_session("wt-retire-13", "new-sess")
+        loaded = _tracking.load_record(tmp_tracking_dir / "wt-retire-13.yaml")
+        _tracking.open_handoff(loaded, "old-sess", "task-retire-13")
+        _tracking.link_handoff(loaded, "task-retire-13", "new-sess")
+
+        monkeypatch.setattr(
+            sessions, "mux_retire_pane",
+            lambda p, **k: {"ok": True, "pane": p, "gone": True, "method": "graceful"},
+        )
+        monkeypatch.setattr(
+            reclaim, "ensure_session_copilot_reaped",
+            lambda sid, **kwargs: {
+                "checked": True, "identity_verified": True, "found": 0,
+                "reaped": 0, "survivors": 0, "pids": [],
+            },
+        )
+
+        rc = m.cmd_handoff_cutover(_ns(
+            worktree_id="wt-retire-13",
+            retire_pane="%9",
+            session_id="old-sess",
+            handoff_token="task-retire-13",
+        ))
+
+        assert rc == 0
+        complete = activity.read_events(
+            worktree_id="wt-retire-13", event="handoff_complete",
+        )
+        assert len(complete) == 1
+        assert complete[0]["session_id"] == "old-sess"
+        assert complete[0]["successor_session_id"] == "new-sess"
+        assert complete[0]["handoff_token"] == "task-retire-13"
+
     def test_retire_reaps_old_copilot_before_success(self, monkeypatch, capfd):
         # A hard pane-kill left the pane gone; the OLD Copilot process is then
         # reaped, and only then is success declared.
