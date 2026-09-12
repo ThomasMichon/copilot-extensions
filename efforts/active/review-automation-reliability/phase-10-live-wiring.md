@@ -317,6 +317,17 @@ here but not blocking the start of 1/2/5.
   A fleet (SSH) variant, following the same status-value mapping against
   `fleet_body_verdict`'s underlying probe, is left for a follow-up slice --
   also not blocked on anything.
+  **Second slice landed:** operator chose splitting over widening.
+  Extracted `embody.py`'s two large, pure autopilot seed-prompt builders
+  (`autopilot_worker_prompt`/`fleet_autopilot_worker_prompt`, ~250 lines)
+  into a new `embody_prompts.py` -- the safest possible cut (no shared
+  state, no I/O, nothing any test mocks). `embody.py` re-exports both
+  names, so every existing call site and test is unaffected; `embody.py`
+  is now 989 lines, **graduated off the baseline entirely** (not merely
+  re-grandfathered at a smaller size). This reopens headroom in `embody.py`
+  for the actual call-site wiring, a further slice. `supervisor.py`
+  (4,169 lines) remains a separate, much larger componentization target,
+  not attempted here.
 - [x] Call `spawn_reservation_machine.violating_assignment_groups` and
   `classify_consistency` from the supervisor's real reconciliation loop
   (item 5 above), with a live-behavior test proving an actual anomaly

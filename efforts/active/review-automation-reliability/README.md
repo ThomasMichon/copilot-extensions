@@ -467,6 +467,40 @@ scenarios.
 
 ## Journal
 
+### 2026-09-11 - Phase 10 item 4: componentize embody.py to unblock call-site wiring
+
+- Split `plugins/agent-dispatch/src/agent_dispatch/embody.py` (1,205 lines,
+  over the repo's module-size cap) by extracting the two large, pure
+  autopilot seed-prompt builders (`autopilot_worker_prompt`,
+  `fleet_autopilot_worker_prompt`, ~250 lines together) into a new
+  `embody_prompts.py`. Chosen as the safest possible first cut: both
+  functions are pure string builders with no shared state, no subprocess/
+  network I/O, and nothing any test mocks -- verified directly (existing
+  tests monkeypatch `embody.autopilot_worker_prompt` itself, which still
+  works after the move since the re-exported name is a normal binding in
+  `embody.py`'s own module globals, and `embody.py`'s own callers resolve
+  it via bare-name lookup against those same globals at call time).
+  `embody.py` re-exports both names, so all 9 existing call sites and
+  every existing test are unaffected -- zero test changes required.
+- `embody.py` is now 989 lines (**below the cap without a baseline
+  entry at all** -- graduated via `--refresh-baseline`, not merely
+  grandfathered). `embody_prompts.py` is 263 lines.
+- Added `plugins/agent-dispatch/tests/test_embody_prompts.py` (2 tests):
+  a lightweight import guard confirming the new module's own public API
+  is directly importable, independent of the facade (the functions'
+  actual behavior is already thoroughly covered through
+  `embody.autopilot_worker_prompt`/`fleet_autopilot_worker_prompt` in
+  `test_embody.py`/`test_fleet.py`).
+- Full `agent-dispatch` suite (769 tests) passes via
+  `tools/run-plugin-tests.py agent-dispatch`; zero regressions. Bumped
+  agent-dispatch's version to 0.1.2-dev83.
+- This unblocks item 4's next slice: `embody.py` has headroom again for
+  the call-site wiring (`bridge_liveness_probe.local_body_liveness_probe`
+  into a real resume/reconciliation path) that a prior slice deferred
+  specifically because `embody.py` had none. `supervisor.py` (4,169 lines)
+  is a separate, much larger componentization target -- not attempted in
+  this slice.
+
 ### 2026-09-11 - Phase 10 item 4: corrected the AHP misconception + first slice (liveness probe)
 
 - **Correction:** item 4's earlier text said it was "coordinated with"
