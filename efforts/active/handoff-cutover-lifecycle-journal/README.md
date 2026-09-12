@@ -181,7 +181,7 @@ renumbering from the "acknowledges handoff" step onward.)
       `log_event()` (PR #2472) — covers the 8 existing wire events; the
       not-yet-existing stage names are pre-declared in the map's docstring so
       Phase 2's new emitters slot in without a second schema change.
-- [x] Every event carries: `worktree_id`, `stage` (ordinal + name),
+- [ ] Every event carries: `worktree_id`, `stage` (ordinal + name),
       `session_id` — **nullable**, since Stage 1 (`worktree_created`) fires
       before any Copilot session exists (the existing event already has no
       session id; pre-session correlation uses `worktree_id` + `launch_id`
@@ -193,8 +193,16 @@ renumbering from the "acknowledges handoff" step onward.)
       applicable), `predecessor_session_id` / `successor_session_id` (the
       linked-list pointers — null until known), `ts`, `source` (which
       component emitted it: agent-worktrees / context-handoff / hook).
-      **Landed:** all base fields already existed as `log_event()` params/
-      `**fields`; `stage`/`stage_name` land via PR #2472's auto-stamping.
+      **Partially landed (schema supports this, population is not yet
+      complete):** all base fields already existed as `log_event()` params/
+      `**fields`; `stage`/`stage_name` are auto-stamped for a *mapped,
+      ungated* event (PR #2472) — a gated claim/retire outcome (e.g.
+      `outcome="already-claimed"`) correctly omits `stage`/`stage_name`
+      rather than carrying them, so "every event carries `stage`" is not
+      literally true by design. `predecessor_session_id`/
+      `successor_session_id` are never initialized yet — that's Phase 3's
+      cross-linking work. Leave this item open until Phase 3 populates the
+      linkage fields; re-close it then rather than now.
       `predecessor_session_id`/`successor_session_id` are Phase 3's job (the
       cross-linking work), not stamped yet.
 - [ ] Give the spawn stage (8) an explicit **start** event
@@ -571,7 +579,8 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   (spawn start/result event split as dedicated wire events) and Phase 2's
   per-stage instrumentation across `sessions.py`, `__main__.py`, the launcher
   scripts, and context-handoff's `handoff-core.mjs`.
-- **Phase 1 fully merged** (PR #2472, six review rounds). Beyond the schema
+- **Phase 1's first slice merged** (PR #2472, six review rounds; Phase 1
+  itself still has open items — see the Plan checklist). Beyond the schema
   landing itself, review caught two real correctness bugs the auto-stamping
   design hadn't accounted for, both now fixed and tested: (1)
   `handoff_cutover_claim` fires for `outcome="already-claimed"` and
