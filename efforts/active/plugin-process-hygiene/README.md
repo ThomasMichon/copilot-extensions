@@ -1219,3 +1219,80 @@ Remaining under #744 (and thus #736): the `_classify_records`/
 `cmd_status_monitor` wiring described above, and the agent-mcp multiplexer
 (still fully unstarted).
 
+### 2026-09-12 (much later) — Correction: the agent-mcp multiplexer was ALREADY DONE; landed its last follow-up (#866)
+
+Before starting agent-mcp work, `gh issue view 744`'s own **comments** (not
+just its body) revealed a load-bearing mistake in this journal and in the
+design doc: the agent-mcp multiplexer is **not** unstarted. It shipped in
+five already-merged slices, entirely before this session picked up #744
+today:
+
+- Slice 1 — `BridgeSession` extraction + resident `serve` session-host
+  foundation (#763).
+- Slice 2 — thin `agent-mcp forward` stdio<->socket child + lazy CLI
+  imports (#861).
+- Slice 3 — `serve`-host single-instance lease + idle-evict + forwarder
+  ensure-serve (#863).
+- Slice 4 — made the forwarder genuinely thin (asyncio-free `sockio`,
+  lazy `__version__`) and proved the RAM win: ~20%/~54 MiB saved on 7
+  sessions (#864).
+- Default-on flip — `agent-mcp bridge` now routes through the thin
+  forwarder by default, opt-out via `AGENT_MCP_NO_MULTIPLEX` (#865).
+
+Per the issue's own last comment: "#744 status — the multiplexer is
+functionally complete", with only one item left: **#866**, a clean-room
+process-topology scenario (the RAM win was proven by an ad hoc
+`examples/multiplexer_ab.py` A/B script, but the effort's validation plan
+also calls for a deterministic clean-room assertion of the process
+topology itself). **Correcting the record**: earlier today's PR #2498
+(design doc) and this journal's own entries describing the agent-mcp
+multiplexer as "not started"/"fully unstarted" were wrong — I should have
+read the issue's comments, not just its body, before writing that. The
+design doc has been corrected in this same change.
+
+**Landed #866**: `tools/clean-room/scenarios/agent-mcp-multiplexer/` (Tier-P
+F1, modeled on `agent-bridge-cutover`'s probe-script pattern):
+
+- `fixtures/multiplexer_topology_probe.py` — a portable, stdlib-only,
+  Linux-`/proc`-based probe (reusing `examples/multiplexer_ab.py`'s
+  echo-upstream/spawn/drive/census techniques) with three checks, each
+  emitting `PROBE: <name> PASS|FAIL <detail>`:
+  - `topology-collapse` — N (4) `agent-mcp forward` sessions against one
+    shared upstream config collapse onto **exactly one** resident `serve`
+    host + N thin forwarders (never N heavy bridges), each session still
+    answering `initialize`/`tools/list` correctly through it.
+  - `direct-fallback` — `AGENT_MCP_NO_MULTIPLEX=1` runs N independent direct
+    bridges with **zero** resident hosts spawned.
+  - `idle-self-eviction` — a `serve` host started with a short
+    `--idle-timeout` evicts itself once its last attached forwarder detaches.
+- `manifest.json` + `scenario.sh` (install ONLY agent-mcp, provision, run the
+  probe), following the exact `agent-bridge-cutover` shape (phases,
+  `_resolve_slot_python`, `jam`/`pass`/`fail` conventions).
+- **Verified for real, not just written**: this machine's WSL Ubuntu has a
+  real installed agent-mcp runtime (`~/.agent-mcp`, version `0.2.0-dev81`,
+  no live `serve` daemon running beforehand). Ran the probe directly against
+  that real slot python (never inside the actual clean-room Docker rig,
+  which this session didn't drive end-to-end) — all three checks passed, 3
+  full-sequence reruns in a row (9/9), and confirmed afterward that the real
+  install's `current-version` was untouched and zero `agent_mcp` processes
+  were left running. One early ad hoc run (outside the final probe code)
+  intermittently reported a stray process under back-to-back manual testing
+  on this shared dev box; added a bounded settle/retry to the stray census
+  (tolerating brief teardown lag) as a defensive hardening, then reconfirmed
+  0/0 strays across repeated runs.
+- `ruff` flagged one intentional blind `except Exception` in `main()`'s
+  per-check dispatch (a probe crash must FAIL that check, not crash the
+  whole run) — the identical, pre-existing pattern in
+  `agent-bridge-cutover/fixtures/cutover_probe.py`; left as-is, matching
+  established precedent. `python -m py_compile` clean; `manifest.json` is
+  valid JSON; `scenario.sh` passes `bash -n` and already carries a `.gitattributes`
+  `eol=lf` rule for this path (normalized before commit).
+
+**#744 is now fully addressed** (design doc + reusable helper landed earlier
+today; the pre-existing multiplexer's last follow-up, #866, landed just
+now). What remains under the #736 umbrella is only agent-worktrees'
+`_classify_records`/`cmd_status_monitor` wiring documented in the entry
+above (tracked, not yet started) — the umbrella issue's own closing
+decision (close now vs. keep open pointing at that specific remaining
+follow-up) is for the next step of this session.
+

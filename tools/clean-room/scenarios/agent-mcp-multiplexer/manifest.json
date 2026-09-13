@@ -1,0 +1,32 @@
+{
+  "name": "agent-mcp-multiplexer",
+  "description": "Tier-P F1 process-topology scenario: install ONLY agent-mcp on a fresh box, provision the runtime, then drive N `agent-mcp forward` sessions against a stdio-echo upstream and assert the #744 multiplexer's process TOPOLOGY deterministically -- exactly one resident `serve` host plus N thin forwarders (never N heavy bridges), each session still answering `initialize`/`tools/list` correctly through it. Also asserts the always-optional direct-bridge fallback (`AGENT_MCP_NO_MULTIPLEX=1` spawns zero resident hosts) and the host's idle self-eviction (a short-`--idle-timeout` host exits once its last attached session detaches). FIDELITY: the RAM footprint delta is already proven by `plugins/agent-mcp/examples/multiplexer_ab.py` (a Linux /proc A/B); this scenario proves the discrete TOPOLOGY invariant (one host, not N) the RAM win depends on, plus the fallback and eviction properties. The heavy assertions live in a portable, stdlib-only probe (`fixtures/multiplexer_topology_probe.py`, Linux/proc-based like the A/B script) so it is verifiable off-Docker too. Follow-up from the plugin-process-hygiene effort's #744 multiplexer slices (#866). Name-free / public.",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "validates": [
+    "work-coalescing-singleton",
+    "graceful-composition",
+    "a-la-carte independence"
+  ],
+  "prereqs": { "present": ["git", "python3", "node", "uv"], "provisioned_by_flow": [] },
+  "auth": { "copilot": "required", "gh": "optional", "ado": "none" },
+  "base": "without-agent-bridge",
+  "config": {
+    "CR_MARKETPLACE_REPO": "ThomasMichon/copilot-extensions",
+    "CR_MARKETPLACE_NAME": "copilot-extensions",
+    "CR_UV_INDEX": "(opt-in uv-index fixture)",
+    "CR_MULTIPLEXER_CHECKS": "comma-separated subset of: topology-collapse,direct-fallback,idle-self-eviction"
+  },
+  "expected_artifacts": [
+    "~/.copilot/installed-plugins/<marketplace>/agent-mcp",
+    "~/.agent-mcp/versions/<ver>/bin/python (built slot)",
+    "~/.local/bin/agent-mcp (self-provisioning binstub)"
+  ],
+  "stages": [
+    { "n": 0, "title": "environment (fresh machine)" },
+    { "n": 1, "title": "install ONLY agent-mcp" },
+    { "n": 2, "title": "runtime provisions on first session" },
+    { "n": 3, "title": "multiplexer process-topology battery" }
+  ]
+}
