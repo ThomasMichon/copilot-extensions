@@ -1622,11 +1622,10 @@ pointing at #2554/#2556.
 
 ### 2026-09-12 (new pickup) — Closed #2301: read-only process-count audit found no unambiguous bug
 
-Resumed via handoff task `e391a38af8fe4d6096fea0004ab9eb2a` with #1841 already
-closed; #2323 and #2301 the only remaining scope. Followed this README's own
-prior sequencing note (read-only/lower-risk before the high-blast-radius live
-wiring) rather than the handoff summary's numbered order, and picked up #2301
-first.
+Resumed via a stored context handoff with #1841 already closed; #2323 and
+#2301 the only remaining scope. Followed this README's own prior sequencing
+note (read-only/lower-risk before the high-blast-radius live wiring) rather
+than the handoff summary's numbered order, and picked up #2301 first.
 
 Ran the read-only diagnostics #2301 itself calls for, on this live host
 (`tmichon-cloud1`, ~10 concurrent worktree sessions): `agent-dispatch health`
