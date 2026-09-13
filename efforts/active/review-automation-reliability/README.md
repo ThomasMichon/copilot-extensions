@@ -467,6 +467,91 @@ scenarios.
 
 ## Journal
 
+### 2026-09-12 - Componentize queue.py: extract queue_schedule_registry.py
+
+- Continuing the operator's standing componentization instruction. Picked
+  `queue.py` (7,217 lines, the largest agent-dispatch module and the
+  central SQLite coordinator store) since the prior legs already picked
+  the safer cuts from `__main__.py` and `supervisor.py`. Rather than
+  attempt a risky cut into the single 6,000+-line `TaskQueue` class's
+  concurrency-sensitive task/spawn/routing machinery, found a genuinely
+  self-contained tail cluster: the module's own trailing "schedule
+  registry" / "supervisor registrations" / "schedule job-leases" /
+  "external producer resource reservations" section (the last ~496
+  contiguous lines of the file) -- four concerns that only touch
+  `self._connect()` / `self._now()` and their own dedicated SQLite tables,
+  never the task/spawn/routing state the rest of the class manages.
+- Extracted that whole cluster (`register_schedule`, `list_schedules`,
+  `get_schedule`, `remove_schedule`, `set_schedule_paused`,
+  `_registration_from_row`, `register_registration`, `list_registrations`,
+  `get_registration`, `remove_registration`, `set_registration_status`,
+  `acquire_schedule_lease`, `release_schedule_lease`, `get_schedule_lease`,
+  `list_schedule_leases`, `acquire_resource_reservation`,
+  `bind_resource_reservation`, `release_resource_reservation`,
+  `list_resource_reservations`) into a new `ScheduleRegistrationMixin` in
+  `queue_schedule_registry.py`, composed into `TaskQueue` via
+  `class TaskQueue(ScheduleRegistrationMixin):` -- a plain mixin, not a
+  proxy-forwarding split like `loop_commands.py`'s CLI helpers, since
+  nothing in the test suite monkeypatches any of these eighteen methods
+  by name (verified by grep across `tests/` before moving).
+- The remaining circularity risk was the four small record dataclasses
+  (`ScheduleRecord`, `ScheduleLease`, `ResourceReservation`) and
+  `TaskError`, all defined earlier in `queue.py` itself and needed by the
+  moved methods at *call* time. Rather than a static top-level import (which
+  would create a real load-time cycle, since `queue.py` must import the new
+  module's mixin class before `TaskQueue` can inherit from it), each moved
+  method does a lazy, function-local `from .queue import ...` -- safe
+  because by the time any of these methods actually runs, both modules have
+  finished importing (the same pattern `_task_transition_spec`'s own
+  docstring in `queue.py` already documents for its `task_state_machine`
+  import). A `TYPE_CHECKING`-guarded import at the new module's top
+  satisfies `ruff`'s static analysis without re-introducing a real runtime
+  cycle. The five still-needed `.registrations` imports (`RegistrationError`,
+  `RegistrationKind`, `RegistrationRecord`, `RegistrationStatus`,
+  `derive_registration_id`, `validate_registration`) moved as plain
+  top-level imports since `registrations.py` has no dependency on
+  `queue.py` -- no cycle there.
+- Added `tests/test_queue_schedule_registry.py`: import-guard tests
+  confirming `ScheduleRegistrationMixin` is actually in `TaskQueue.__mro__`
+  and that all eighteen methods are directly importable, plus one
+  end-to-end test exercising one method from each of the four
+  sub-clusters against a real `TaskQueue` instance -- proving the lazy
+  `from .queue import ...` calls actually resolve their record
+  dataclasses at runtime, not just that the names exist. Full behavioral
+  coverage for every method already exists through the composed
+  `TaskQueue` (`test_schedule_registry.py`, `test_registrations.py`,
+  resource-reservation coverage in `test_producers_emitter.py` /
+  `test_coordinator.py`) and needed no changes.
+- `queue.py` dropped from 7,217 to 6,481 lines (more than the raw
+  496-line block removed, since `ruff format` also reformatted the now
+  five-line-shorter `.registrations` import block and collapsed several
+  long lines elsewhere in the file); `queue_schedule_registry.py` landed
+  at 541 lines, comfortably under the 1,000-line cap.
+  `tools/module-size-baseline.json` refreshed (shrink-only) for `queue.py`.
+- Full `agent-dispatch` suite (`tools/run-plugin-tests.py agent-dispatch`,
+  2,655 tests across 5 sub-suites) passed before and after; zero
+  regressions.
+- Ran `ruff check --select F,E9` (CI's actual repo-wide gate) clean on both
+  changed files plus the new test file, and `ruff format`. A broader
+  `ruff check` (the stricter local `pyproject.toml` config, `S`/`B`/`A`/
+  `RUF` included) still reports the same ~30 pre-existing `S608`/`S101`/
+  `B007` findings the *original* monolithic `queue.py` already had
+  (confirmed by running the same check against the pre-split file) --
+  none of them introduced by this split, so left untouched rather than
+  drive-by "fixed" outside this slice's scope.
+- Bumped agent-dispatch 0.1.2-dev85 -> dev86, then immediately ran
+  `manage-instruction-projections.py sync .` per the gotcha the prior leg
+  recorded (skipping this cost a review round-trip last time).
+- **Standing note carried from the prior leg's handoff**: that leg's PR
+  #2506 review included one declined false-positive finding (Copilot
+  claimed `tools/module-size-baseline.json`'s prior `__main__.py` entry,
+  5,568, was one line below the file's "actual" 5,569-line count). Verified
+  directly at the time (recomputed the line count with the exact method
+  `tools/check-module-size.py` itself uses, and cross-checked the PR's own
+  passing "guards + lint" CI job) that the file was genuinely 5,568 lines
+  and the claim was wrong; correctly declined the edit. Recorded here since
+  the handoff flagged it as not yet captured in a journal entry.
+
 ### 2026-09-12 - Componentize __main__.py: extract loop_commands.py + spawn_attempt_projection.py
 
 - Continuing the operator's standing componentization instruction (split

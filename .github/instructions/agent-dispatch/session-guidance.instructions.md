@@ -1,7 +1,7 @@
 ---
 applyTo: "**"
 ---
-<!-- copilot-extension-instruction-projection {"applyTo":"**","customizationKind":"instructions","destination":".github/instructions/agent-dispatch/session-guidance.instructions.md","plugin":"agent-dispatch@copilot-extensions","pluginVersion":"0.1.2-dev85","renderedBytes":984,"schema":"copilot-extensions.instruction-projection","sourceId":"session-guidance","template":"instructions/session-guidance.instructions.md","templateBytes":444,"templateSha256":"6335aaf6994816c3bcab1ddc48a16208106e491fc33022317e377e9f40dd6696","version":1} -->
+<!-- copilot-extension-instruction-projection {"applyTo":"**","customizationKind":"instructions","destination":".github/instructions/agent-dispatch/session-guidance.instructions.md","plugin":"agent-dispatch@copilot-extensions","pluginVersion":"0.1.2-dev86","renderedBytes":984,"schema":"copilot-extensions.instruction-projection","sourceId":"session-guidance","template":"instructions/session-guidance.instructions.md","templateBytes":444,"templateSha256":"6335aaf6994816c3bcab1ddc48a16208106e491fc33022317e377e9f40dd6696","version":1} -->
 
 At the start of this session, resolve the current Copilot session-state folder
 using the session identifier exposed as `COPILOT_AGENT_SESSION_ID`, or an
