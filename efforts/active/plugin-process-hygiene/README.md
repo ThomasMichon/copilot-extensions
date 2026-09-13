@@ -1671,3 +1671,187 @@ Remaining under #736: **#2323 only** (the resident classify/list accelerator
 wiring — still not started, still the highest-blast-radius item; concrete
 plan and validation bar unchanged from this README's earlier entries).
 
+### 2026-09-12 (new pickup, second worktree) — #2323: wired the resident classify daemon into `cmd_status_monitor`/`_classify_records`
+
+Resumed via a stored context handoff with #1841 and #2301 both already
+closed (#2301 landed separately, docs-only, via its own PR -- caught and
+split out of this worktree after an early commit accidentally bundled this
+#2323 code change into that docs-only PR; re-split into this dedicated
+worktree before either landed, so each stays independently reviewable).
+#2323 is the only remaining item under #736.
+
+Implemented the concrete plan already on file in this README's earlier
+entries:
+
+- **Server side** (`cmd_status_monitor`): starts a second, independent
+  `classify_daemon.CoalescingServer` (via `classify_daemon.start_server`)
+  alongside the existing `HookIpcServer`, publishes its rendezvous fields
+  into the same monitor lock file (namespaced `classify_*` keys, never
+  colliding with the hook server's `hook_*` keys), and closes it in the same
+  `finally` block. A failure to start it is swallowed (`classify_server =
+  None`) -- never fatal to the monitor, exactly like the hook server's own
+  best-effort start.
+- **Compute callback** (`_classify_daemon_compute`, new): resolves the named
+  project's own tracking records itself from `payload`'s `project`/
+  `status_filter`/`platform_filter`/`all` fields -- **never** trusts records
+  serialized by a caller. Mirrors `_list_records_for_args`'s exact filter
+  semantics (including the existing-worktree-with-a-`.git`-dir check unless
+  `all` is set) so a daemon answer is byte-identical to what the caller
+  would have resolved itself. Deliberately uses explicit `project`/`path`
+  parameters throughout (`cfg.project_dir(project)`, `cfg.load_config(path=...,
+  project=project)`) rather than ever touching `cfg`'s global active-project
+  state -- the daemon's `_Handler` is a `ThreadingTCPServer`, so two
+  different projects' classify requests can run truly concurrently in
+  different threads, and any global-state approach would have raced them.
+  Caught by the validation pass below before it became a production bug.
+- **Client side** (`_classify_records`): new opt-in `daemon_filters` kwarg
+  (default `None` -- every existing caller keeps its exact pre-#2323
+  behavior). When given (only `_build_list_json_payload`'s `list --json
+  --classify` path opts in, passing the identical filters it used to resolve
+  its own `records`), reads the monitor lock, tries
+  `classify_daemon.classify_via_daemon`, and on any miss falls through to
+  the **unchanged**, factored-out `_classify_records_lease_guarded` (the
+  pre-#2323 body, renamed but byte-identical) -- via a serialize/deserialize
+  round trip so both paths return through one shape (`_serialize_classify_map`
+  / `_deserialize_classify_map`).
+
+**Validation performed** (this effort's own stated bar for touching this
+entry point) entirely against isolated, temporary tracking/config
+directories -- no test here starts `cmd_status_monitor` or reaches this
+host's own real resident monitor:
+
+- A real `classify_daemon.CoalescingServer` running the real
+  `_classify_daemon_compute`, reached through a real lock file
+  `_classify_records` reads, proving the full wire round trip and that the
+  lease-guarded fallback is never invoked when the daemon is reachable.
+- The no-daemon-running case (no lock file) degrades to the exact
+  lease-guarded answer.
+- `daemon_filters=None` (every caller but one) never even attempts to
+  resolve a project -- proven by making that resolution call raise if hit.
+- The `all`-flag `.git`-existence filter matches `_list_records_for_args`
+  exactly.
+- Two concurrent compute calls for two *different* projects, run from two
+  threads with a barrier, never cross-contaminate each other's resolved
+  repo/config -- the check that caught the global-active-project mutation
+  risk above during design.
+
+9 new tests (`tests/test_classify_daemon_wiring.py`), plus the existing
+`test_classify_daemon.py` (7) and `test_classify_lease.py` (13) suites, all
+pass. Full plugin test suite run in parallel; not yet confirmed complete as
+of this entry (see next entry for the result before this lands).
+
+Remaining under #736: **#2323 only**, now implemented + isolated-tested;
+not yet landed to `main` pending the full-suite confirmation and PR review.
+
+### 2026-09-12/13 (same worktree) — Addressed PR #2574's Copilot review: boot-wait, response validation, monitor-lifecycle test, version bump
+
+The automated review on PR #2574 caught four real gaps in the first cut
+above (all four addressed before landing, not deferred):
+
+- **Boot-wait + subscriber lifecycle (medium)**: the first cut's
+  `_classify_records` only *dialed* an already-published rendezvous --
+  after the resident monitor idle-exits, the very next classify caller
+  would see no endpoint and fall straight to the lease path without ever
+  trying to boot one, and no request carried a `client_id`, so the
+  coalescing server's own ref-counted subscriber tracking never saw these
+  callers at all. Added `classify_daemon.classify_with_boot` (a thin
+  wrapper over `work_coalescing_singleton.client.call_with_fallback`):
+  dials, boots via `_ensure_status_monitor` when nothing answers, polls up
+  to `classify_daemon.BOOT_WAIT_S`, and sends the request with a fresh
+  per-call `client_id` (`wcs_client.new_client_id()`) so it registers as a
+  live (if brief) subscriber. `_classify_records` now calls this instead of
+  the simpler `classify_via_daemon` (kept, still used by `test_classify_
+  daemon.py`'s own wire-layer tests). Covered by two new tests: a real boot
+  invoked and polled to completion when no endpoint is initially published,
+  and the existing no-daemon-at-all case (now passing `ensure_monitor=None`
+  so the boot-wait poll loop is skipped entirely rather than spinning for
+  `BOOT_WAIT_S` in a test).
+- **Malformed/incomplete daemon response (medium)**: a successful-but-wrong
+  response (a non-dict entry, an unparseable field, or -- the sharper case
+  -- a *different* worktree-id set than the caller asked about) was
+  previously decoded leniently (skip the bad entry) and returned as a
+  partial `state_map`, silently blanking rows instead of falling back.
+  `_deserialize_classify_map` gained a `strict=True` mode (raises on the
+  first malformed entry) and `_classify_records`'s daemon path now decodes
+  strictly, then additionally checks the decoded id set against
+  `{rec.worktree_id for rec in records}` -- any mismatch (wrong shape OR
+  wrong coverage) re-runs `_classify_records_lease_guarded` directly rather
+  than trusting the daemon's answer. Two new tests: a daemon that answers
+  with an unrelated id set, and one with a non-dict per-entry value.
+- **Monitor-lifecycle test gap (low, nit)**: the first cut's tests only
+  exercised the wire layer standalone; nothing proved `cmd_status_monitor`
+  itself actually starts the classify server, publishes its fields, or
+  closes it. Added `test_classify_daemon_started_published_in_lock_and_
+  closed_on_exit` in `test_status_monitor.py`, mirroring the existing
+  `test_status_monitor_backs_off_at_iteration_boundary_without_mutating`'s
+  isolation technique (an immediate governance backoff that exits the loop
+  after one iteration) with a REAL `classify_daemon.CoalescingServer` and a
+  spy on `.close()` -- caught a genuine test-authoring bug while writing it
+  (the *first* lock write is a bare ownership stamp made before either
+  server exists; only the *second* write carries rendezvous fields), fixed
+  before the assertion was correct.
+- **Version bump (medium)**: bumped `plugins/agent-worktrees/plugin.json`,
+  `pyproject.toml`, and `.github/plugin/marketplace.json`'s per-plugin entry
+  from `1.5.5-dev90` to `1.5.5-dev91`, plus the marketplace catalog's own
+  `metadata.version` from `1.7.7-dev83` to `1.7.7-dev84` (agent-worktrees'
+  own extra catalog-version rule) -- missed in the first cut; per
+  `AGENTS.md`'s Version Bump section, skipping this makes an installed
+  machine report "already at latest" and silently ignore the whole change.
+
+Test count corrected: **11 new tests** total (10 in
+`test_classify_daemon_wiring.py`, 1 in `test_status_monitor.py`), plus the
+existing `test_classify_daemon.py` (7) and `test_classify_lease.py` (13)
+suites -- all 114 pass together. Documentation impact: this journal entry
+plus `classify_daemon.py`'s own module docstring (updated to say "wired
+into `cmd_status_monitor`/`_classify_records`" instead of "deliberately not
+wired yet") are the only documentation this change touches; no other
+authoritative doc (README, `docs/`) describes the resident monitor's wire
+protocol in enough detail to need a matching update.
+
+### 2026-09-13 (same worktree) — Second review round on PR #2574: two more real gaps closed
+
+The fresh Copilot review triggered by the push above confirmed the boot-wait
+and malformed-response fixes, then found two further real gaps introduced
+by the boot-wait fix itself:
+
+- **Resident-monitor opt-out ignored (medium)**: `AGENT_WORKTREES_STATUS_
+  MONITOR=0` is the documented per-session opt-out (each session falls back
+  to its own per-session `status-updater`); `cmd_list` already respects it by
+  skipping `_ensure_status_monitor()`. The new classify boot-wait path
+  unconditionally passed `_ensure_status_monitor` as its boot callback, so a
+  classify request with no reachable daemon would boot one **anyway**,
+  defeating the opt-out. Fixed by gating: `ensure_monitor=_ensure_status_
+  monitor if _status_monitor_enabled() else None` -- `classify_with_boot`'s
+  `ensure_monitor=None` path (already exercised by the no-daemon fallback
+  test) skips the boot/poll sequence entirely, going straight to the dial
+  result. Crucially, the opt-out only suppresses *booting a new one*: a
+  monitor that's already live (started before the opt-out was set this
+  session) is still dialed and used if reachable -- covered by a new test
+  that exercises both halves in one flow.
+- **One-shot callers never release their daemon subscription (medium)**:
+  `classify_with_boot` attaches a fresh `client_id` to every request (so the
+  coalescing server's `touch()` registers it as a live subscriber), but
+  never sent the corresponding `release` -- so every one-shot `list --json
+  --classify` call would sit in the daemon's subscriber map until the 45s
+  TTL reaper dropped it, meaning the configured 10s linger-to-idle-exit
+  could never actually begin between callers, and the subscriber map would
+  grow unbounded under repeated calls before any single one expired.
+  `work_coalescing_singleton.client.call_with_fallback` (the shared,
+  byte-identical-across-plugins vendored helper) has no post-request release
+  hook to attach a fix to, and modifying that vendored copy would break its
+  cross-plugin byte-identity invariant -- so `classify_with_boot` now
+  reimplements that same dial/boot/poll algorithm directly in
+  `classify_daemon.py` (unchanged in every branch/timing detail) and adds an
+  explicit `wcs_client.release(...)` in a `finally` right after the request,
+  best-effort per `release`'s own documented contract (a failed release is
+  backstopped by the same TTL reaper). Covered by a new test asserting
+  `server.subscriber_count() == 0` immediately after a one-shot request
+  completes.
+
+Two more new tests (`test_status_monitor_opt_out_skips_booting_but_still_
+dials`, `test_one_shot_request_releases_its_subscriber_id`), bringing the
+total to **13 new tests** in `test_classify_daemon_wiring.py` (14 including
+`test_status_monitor.py`'s monitor-lifecycle test) -- 116 pass together with
+the existing 20-test classify/lease suite. Re-ran the scoped
+classify/status-monitor/hook-ipc/list suite (279 tests) clean.
+

@@ -1813,6 +1813,73 @@ def test_status_monitor_backs_off_at_iteration_boundary_without_mutating(
     assert len(writes) == 2  # startup ownership stamp only; no loop renewal
 
 
+def test_classify_daemon_started_published_in_lock_and_closed_on_exit(
+    tmp_path, monkeypatch
+):
+    """Phase 4d (#2323): the resident monitor must actually start the
+    classify-coalescing server, publish its rendezvous fields into the SAME
+    lock write as the hook server's own fields, and close it on exit -- a
+    regression here would silently force every ``list --json --classify``
+    caller onto the (still-correct, but un-accelerated) lease-guarded path.
+    Exercises the real `cmd_status_monitor` startup/shutdown path (mirrors
+    `test_status_monitor_backs_off_at_iteration_boundary_without_mutating`'s
+    isolation technique -- an immediate governance backoff that exits the
+    loop after exactly one iteration) with a REAL `classify_daemon` server,
+    never this host's own real resident monitor or lock file.
+    """
+    lock = tmp_path / "status-monitor.lock"
+    monkeypatch.setattr(m, "_monitor_lock_path", lambda: lock)
+    monkeypatch.setattr(m, "_load_hook_client_module", lambda: None)
+    writes: list[dict | None] = []
+    monkeypatch.setattr(
+        m.locks,
+        "write_lock",
+        lambda _path, extra=None: writes.append(extra),
+    )
+    runtime_states = iter([False, True])
+    monkeypatch.setattr(m, "_runtime_superseded", lambda **_kw: next(runtime_states))
+    monkeypatch.setattr(
+        m,
+        "_monitor_sweep",
+        lambda *args, **kwargs: pytest.fail("sweep must not run in this test"),
+    )
+    sleeps: list[float] = []
+    monkeypatch.setattr(m.time, "sleep", sleeps.append)
+
+    class _Governance:
+        def recheck(self, checkpoint):
+            return {"status": "backoff", "reason": "test-exit"}
+
+    monkeypatch.setattr(m.loop_governance_mod, "LoopGovernance", lambda: _Governance())
+
+    from agent_worktrees import classify_daemon
+
+    closed = {"n": 0}
+    real_close = classify_daemon.CoalescingServer.close
+
+    def _spy_close(self):
+        closed["n"] += 1
+        real_close(self)
+
+    monkeypatch.setattr(classify_daemon.CoalescingServer, "close", _spy_close)
+
+    assert m.cmd_status_monitor(argparse.Namespace(interval=5)) == 0
+
+    assert len(writes) == 2  # early ownership stamp, then the servers-included stamp
+    early_stamp, servers_stamp = writes
+    # The very first write is the bare single-active ownership claim, made
+    # before either server exists -- it never carries rendezvous fields.
+    assert "classify_endpoint" not in early_stamp
+    assert "hook_endpoint" not in early_stamp
+    assert isinstance(servers_stamp, dict)
+    assert "classify_endpoint" in servers_stamp
+    assert "classify_token" in servers_stamp
+    assert "classify_generation" in servers_stamp
+    # Never collides with the hook server's own namespace.
+    assert "hook_endpoint" not in servers_stamp
+    assert closed["n"] == 1
+
+
 def test_sweep_rechecks_before_publish_and_retains_registered_session_on_generation_change(
     tmp_path, monkeypatch
 ):
