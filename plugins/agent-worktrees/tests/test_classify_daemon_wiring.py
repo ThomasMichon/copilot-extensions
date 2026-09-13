@@ -266,6 +266,10 @@ class TestClassifyRecordsDaemonFastPath:
         monkeypatch.setattr(m.cfg, "project_name", lambda: project)
         monkeypatch.setattr(m.cfg, "project_dir", lambda name=None: tmp_path / (name or project))
         monkeypatch.setattr(m.cfg, "load_config", _fake_load_config)
+        # The suite-wide autouse fixture disables the resident monitor
+        # (`AGENT_WORKTREES_STATUS_MONITOR=0`); this test is specifically
+        # about the boot path, so opt back in.
+        monkeypatch.setenv("AGENT_WORKTREES_STATUS_MONITOR", "1")
         _wire_common_classify_internals(monkeypatch, m)
 
         def _must_not_fall_back(*a, **k):
@@ -300,6 +304,102 @@ class TestClassifyRecordsDaemonFastPath:
 
         assert boot_calls == [1]
         assert out["wt1"].state == git_ops.WorktreeState.DIRTY
+
+    def test_status_monitor_opt_out_skips_booting_but_still_dials(
+        self, monkeypatch, tmp_path
+    ):
+        """`AGENT_WORKTREES_STATUS_MONITOR=0` (the resident-monitor opt-out)
+        must never be defeated by the classify fast path: no boot attempt,
+        ever, while it's set -- but a monitor that happens to already be
+        live (started before the opt-out was set) is still dialed and used
+        if reachable."""
+        from agent_worktrees import __main__ as m
+
+        monkeypatch.setenv("AGENT_WORKTREES_STATUS_MONITOR", "0")
+        project = "iso-proj"
+        tracking_dir = tmp_path / project / "worktrees"
+        tracking_dir.mkdir(parents=True)
+        wt_path = _make_worktree(tmp_path, "wt1")
+        rec = _rec(wt_path, worktree_id="wt1")
+        tracking.save_record(rec, tracking_dir / "wt1.yaml")
+
+        monkeypatch.setattr(m.cfg, "project_name", lambda: project)
+        monkeypatch.setattr(m.cfg, "project_dir", lambda name=None: tmp_path / (name or project))
+        monkeypatch.setattr(m.cfg, "load_config", _fake_load_config)
+        _wire_common_classify_internals(monkeypatch, m, state=git_ops.WorktreeState.WIP)
+
+        def _must_not_boot():
+            raise AssertionError("opt-out is set; must never boot a monitor")
+
+        monkeypatch.setattr(m, "_ensure_status_monitor", _must_not_boot)
+
+        # No lock file at all -- dial fails, and with the opt-out set, no
+        # boot attempt should follow; falls straight to the lease-guarded
+        # path (never raises, never hits the boot function above).
+        monkeypatch.setattr(m, "_monitor_lock_path", lambda: tmp_path / "no-monitor.lock")
+        out = m._classify_records(
+            [rec], None,
+            daemon_filters={"status_filter": None, "platform_filter": None, "all": False},
+        )
+        assert out["wt1"].state == git_ops.WorktreeState.WIP
+
+        # A monitor that's already live (e.g. started before the opt-out was
+        # set this session) is still reachable and used -- the opt-out only
+        # suppresses *booting a new one*, never an existing live daemon.
+        def _must_not_fall_back(*a, **k):
+            raise AssertionError("an already-live daemon was reachable")
+
+        monkeypatch.setattr(m, "_classify_records_lease_guarded", _must_not_fall_back)
+        lock_path = tmp_path / "status-monitor.lock"
+        monkeypatch.setattr(m, "_monitor_lock_path", lambda: lock_path)
+        server = classify_daemon.start_server(m._classify_daemon_compute)
+        server.start()
+        try:
+            _locks.write_lock(lock_path, extra=classify_daemon.rendezvous_fields(server))
+            out2 = m._classify_records(
+                [rec], None,
+                daemon_filters={
+                    "status_filter": None, "platform_filter": None, "all": False,
+                },
+            )
+        finally:
+            server.close()
+        assert out2["wt1"].state == git_ops.WorktreeState.WIP
+
+    def test_one_shot_request_releases_its_subscriber_id(self, monkeypatch, tmp_path):
+        """A one-shot classify caller must not linger in the daemon's
+        subscriber map after its request completes -- otherwise the
+        configured linger-on-idle can never actually begin between callers,
+        and repeated calls grow the subscriber map unbounded until the TTL
+        reaper eventually drops each one."""
+        from agent_worktrees import __main__ as m
+
+        monkeypatch.setenv("AGENT_WORKTREES_STATUS_MONITOR", "1")
+        project = "iso-proj"
+        monkeypatch.setattr(m.cfg, "project_name", lambda: project)
+        monkeypatch.setattr(m, "_monitor_lock_path", lambda: tmp_path / "status-monitor.lock")
+        monkeypatch.setattr(m.cfg, "load_config", lambda: _fake_load_config())
+        _wire_common_classify_internals(monkeypatch, m, state=git_ops.WorktreeState.WIP)
+
+        wt_path = _make_worktree(tmp_path, "wt1")
+        rec = _rec(wt_path, worktree_id="wt1")
+
+        server = classify_daemon.start_server(lambda kind, payload: {"wt1": {"state": "dirty"}})
+        server.start()
+        try:
+            lock_path = tmp_path / "status-monitor.lock"
+            _locks.write_lock(lock_path, extra=classify_daemon.rendezvous_fields(server))
+
+            m._classify_records(
+                [rec], None,
+                daemon_filters={
+                    "status_filter": None, "platform_filter": None, "all": False,
+                },
+            )
+
+            assert server.subscriber_count() == 0
+        finally:
+            server.close()
 
     def test_id_set_mismatch_from_daemon_falls_back_rather_than_returns_partial(
         self, monkeypatch, tmp_path

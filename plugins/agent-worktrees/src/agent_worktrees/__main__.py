@@ -570,7 +570,13 @@ def _classify_records(
 
             raw = classify_daemon.classify_with_boot(
                 read_lock_data=lambda: _locks.read_lock(_monitor_lock_path()),
-                ensure_monitor=_ensure_status_monitor,
+                # Honor the resident-monitor opt-out (AGENT_WORKTREES_STATUS_
+                # MONITOR=0): booting one just to serve this classify request
+                # would defeat a caller's explicit choice to stay per-session
+                # inline-only. A dial-only attempt (no boot) still runs, so an
+                # already-live monitor from before the opt-out was set is
+                # still used if reachable.
+                ensure_monitor=_ensure_status_monitor if _status_monitor_enabled() else None,
                 key=key,
                 payload=payload,
                 fallback=_fallback,

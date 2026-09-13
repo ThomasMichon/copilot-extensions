@@ -1808,3 +1808,50 @@ wired yet") are the only documentation this change touches; no other
 authoritative doc (README, `docs/`) describes the resident monitor's wire
 protocol in enough detail to need a matching update.
 
+### 2026-09-13 (same worktree) — Second review round on PR #2574: two more real gaps closed
+
+The fresh Copilot review triggered by the push above confirmed the boot-wait
+and malformed-response fixes, then found two further real gaps introduced
+by the boot-wait fix itself:
+
+- **Resident-monitor opt-out ignored (medium)**: `AGENT_WORKTREES_STATUS_
+  MONITOR=0` is the documented per-session opt-out (each session falls back
+  to its own per-session `status-updater`); `cmd_list` already respects it by
+  skipping `_ensure_status_monitor()`. The new classify boot-wait path
+  unconditionally passed `_ensure_status_monitor` as its boot callback, so a
+  classify request with no reachable daemon would boot one **anyway**,
+  defeating the opt-out. Fixed by gating: `ensure_monitor=_ensure_status_
+  monitor if _status_monitor_enabled() else None` -- `classify_with_boot`'s
+  `ensure_monitor=None` path (already exercised by the no-daemon fallback
+  test) skips the boot/poll sequence entirely, going straight to the dial
+  result. Crucially, the opt-out only suppresses *booting a new one*: a
+  monitor that's already live (started before the opt-out was set this
+  session) is still dialed and used if reachable -- covered by a new test
+  that exercises both halves in one flow.
+- **One-shot callers never release their daemon subscription (medium)**:
+  `classify_with_boot` attaches a fresh `client_id` to every request (so the
+  coalescing server's `touch()` registers it as a live subscriber), but
+  never sent the corresponding `release` -- so every one-shot `list --json
+  --classify` call would sit in the daemon's subscriber map until the 45s
+  TTL reaper dropped it, meaning the configured 10s linger-to-idle-exit
+  could never actually begin between callers, and the subscriber map would
+  grow unbounded under repeated calls before any single one expired.
+  `work_coalescing_singleton.client.call_with_fallback` (the shared,
+  byte-identical-across-plugins vendored helper) has no post-request release
+  hook to attach a fix to, and modifying that vendored copy would break its
+  cross-plugin byte-identity invariant -- so `classify_with_boot` now
+  reimplements that same dial/boot/poll algorithm directly in
+  `classify_daemon.py` (unchanged in every branch/timing detail) and adds an
+  explicit `wcs_client.release(...)` in a `finally` right after the request,
+  best-effort per `release`'s own documented contract (a failed release is
+  backstopped by the same TTL reaper). Covered by a new test asserting
+  `server.subscriber_count() == 0` immediately after a one-shot request
+  completes.
+
+Two more new tests (`test_status_monitor_opt_out_skips_booting_but_still_
+dials`, `test_one_shot_request_releases_its_subscriber_id`), bringing the
+total to **13 new tests** in `test_classify_daemon_wiring.py` (14 including
+`test_status_monitor.py`'s monitor-lifecycle test) -- 116 pass together with
+the existing 20-test classify/lease suite. Re-ran the scoped
+classify/status-monitor/hook-ipc/list suite (279 tests) clean.
+

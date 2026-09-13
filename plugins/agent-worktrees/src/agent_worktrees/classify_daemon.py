@@ -27,6 +27,7 @@ records over the wire).
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 
 from work_coalescing_singleton import CoalescingServer
@@ -105,36 +106,62 @@ def classify_with_boot(
     fallback: Callable[[], dict],
     request_deadline_s: float = REQUEST_DEADLINE_S,
     boot_wait_s: float = BOOT_WAIT_S,
+    poll_interval_s: float = 0.1,
 ) -> dict:
     """The full Phase 4d production sequence: dial, boot-and-wait if no
     resident monitor is currently publishing a classify endpoint, then send
     one coalesced request carrying a fresh per-call client id (so the
     daemon's own ref-counted idle-exit sees this caller as a live, if brief,
     subscriber -- see ``work_coalescing_singleton.server.CoalescingServer``'s
-    ``touch``-on-request behavior).
+    ``touch``-on-request behavior) -- and releases that same client id in a
+    ``finally`` right after, so a one-shot caller (this module has no
+    long-lived session to keep a subscription open for) doesn't linger in
+    the daemon's subscriber map until the 45s TTL reaper drops it. Release is
+    best-effort: any failure there is backstopped by that same reaper, per
+    ``work_coalescing_singleton.client.release``'s own contract.
 
-    ``read_lock_data`` is re-invoked on every boot-wait poll (never cached),
-    so a monitor that starts mid-wait is picked up. ``ensure_monitor=None``
-    (or its own failure) degrades to a dial-only attempt -- still safe, just
-    without the boot side. Never raises past this call: any miss at any stage
-    (no daemon, boot-wait timeout, request timeout/error) runs ``fallback()``,
-    identical in effect to :func:`classify_via_daemon`.
+    Deliberately reimplements (rather than calls)
+    ``work_coalescing_singleton.client.call_with_fallback``'s dial/boot/poll
+    algorithm, since that shared, byte-identical-across-plugins helper has no
+    post-request release hook to attach to. ``read_lock_data`` is re-invoked
+    on every boot-wait poll (never cached), so a monitor that starts mid-wait
+    is picked up. ``ensure_monitor=None`` (or its own failure) degrades to a
+    dial-only attempt -- still safe, just without the boot side. Never raises
+    past this call: any miss at any stage (no daemon, boot-wait timeout,
+    request timeout/error) runs ``fallback()``, identical in effect to
+    :func:`classify_via_daemon`.
     """
+    started = time.time()
 
     def _dial() -> tuple[str, int, str] | None:
         return endpoint_from_rendezvous(read_lock_data())
 
-    return wcs_client.call_with_fallback(
-        dial=_dial,
-        boot=ensure_monitor,
-        boot_wait_s=boot_wait_s,
-        kind=KIND,
-        key=key,
-        payload=payload,
-        request_deadline_s=request_deadline_s,
-        fallback=fallback,
-        client_id=wcs_client.new_client_id(),
-    )
+    endpoint = _dial()
+    if endpoint is None and ensure_monitor is not None:
+        ensure_monitor()
+        while endpoint is None and time.time() - started < boot_wait_s:
+            time.sleep(poll_interval_s)
+            endpoint = _dial()
+    if endpoint is None:
+        return fallback()
+
+    host, port, token = endpoint
+    client_id = wcs_client.new_client_id()
+    try:
+        return wcs_client.request(
+            host,
+            port,
+            token,
+            kind=KIND,
+            key=key,
+            payload=payload,
+            request_deadline_s=request_deadline_s,
+            client_id=client_id,
+        )
+    except wcs_client.DaemonUnavailable:
+        return fallback()
+    finally:
+        wcs_client.release(host, port, token, client_id, timeout=request_deadline_s)
 
 
 def classify_via_daemon(
