@@ -502,6 +502,9 @@ restart does not inherently close the child's pipes.
   Automatic handoff transfers queued rows in one database transaction, preserving
   FIFO ids and caller metadata; failed migration leaves the predecessor queue
   intact and emits a handoff failure rather than clearing undelivered prompts.
+  Background authority inspection owns turn admission before lifecycle, not
+  just during result application: a stop already admitted prevents new provider
+  probes, and an inspection already in flight finishes before stop admission.
   The manager remains the public facade; `session_resume.py`,
   `session_teardown.py`, and `session_ownership.py` own the bounded lifecycle
   implementations. Additive session migrations live in `db_migrations.py`.
