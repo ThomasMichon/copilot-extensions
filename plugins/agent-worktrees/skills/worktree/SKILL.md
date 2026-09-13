@@ -631,8 +631,9 @@ locks can be reclaimed with the `reclaim` flow above.
 ### Diagnosing a stranded handoff predecessor pane
 
 A worktree that accumulates extra mux panes after a series of handoffs (a
-confirmed cutover that left a predecessor pane alive) is a handoff-lifecycle
-bug, not something to fix by hand. Run
+predecessor left alive after its successor was spawned -- whether the
+handoff is only candidate-associated or already fully linked) is a
+handoff-lifecycle bug, not something to fix by hand. Run
 `agent-worktrees handoffs-check --worktree-id <id>` <!-- marketplace-isolation: allow diagnostic-tooling --> (read-only) or add
 `--execute` to retire what it finds, using the same choreography the
 resident status monitor uses for its own automatic sweep. `--all` checks

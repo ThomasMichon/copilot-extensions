@@ -226,11 +226,12 @@ documented in
 [`agent-worktrees`'s architecture doc](../agent-worktrees/docs/architecture.md#handoff-cutover-lifecycle-the-13-stage-trace)
 -- read that first when a handoff appears to have gone sideways rather than
 re-deriving the sequence from scratch. `handoffs-check` diagnoses (and can
-repair) a **stranded predecessor pane after a confirmed cutover** -- a
-recorded successor + spawn event exist, but the predecessor was never
-retired. It does **not** diagnose "ack but no pane at all" (a host
-acknowledgement with no successor ever recorded) -- that case has no
-dedicated diagnostic yet; a dedicated `handoff-trace` render command is
+repair) a **stranded predecessor pane after a spawn is recorded** -- a
+successor associated as a candidate *or* already linked, plus a recorded
+spawn event, but the predecessor was never retired. It does **not**
+diagnose "ack but no pane at all" (a host acknowledgement with no successor
+ever recorded) -- that case has no dedicated diagnostic yet; a dedicated
+`handoff-trace` render command is
 still open follow-on work.
 
 ## Payload-local CLI fallback

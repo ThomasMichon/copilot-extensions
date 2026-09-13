@@ -810,7 +810,7 @@ event names, so no event was renamed:
 | 5 | `status_reported` | the first status-report write in a session |
 | 6 | `handoff_triggered` | context-handoff's `trigger_handoff` |
 | 7 | `handoff_host_acknowledged` | the status monitor's claim, gated to `outcome="acquired"` only |
-| 8 | `handoff_successor_spawn_started` | emitted before success/failure is known, so a killed spawn still leaves a trace |
+| 8 | `handoff_successor_spawn_started` | emitted before success/failure is known, so a killed spawn still leaves a trace; the terminal outcome stamps a distinct event name at the same stage -- `handoff_cutover_spawn` on success, `handoff_successor_spawn_failed` on failure |
 | 9 | `handoff_successor_session_start_bound` | the successor's own sessionStart |
 | 10 | `handoff_successor_claimed` | the successor declares itself new head |
 | 11 | `handoff_pickup_confirmed_predecessor_closing` | the predecessor retire path, gated to `outcome="gone"` only, **or** the successor-link path's own direct emission of this event name (ungated) |
@@ -859,17 +859,27 @@ today and is safe to reach for immediately:
 
 - `agent-worktrees handoffs-check [--worktree-id <id>|--all] [--execute] [--json]`
   -- diagnoses (and, with `--execute`, retires) a predecessor pane left alive
-  after a confirmed cutover (a recorded successor + spawn event exist, but the
-  predecessor was never retired), using the same choreography as the resident
-  monitor's own sweep. Read-only without `--execute`. **It does not diagnose
-  a host acknowledgement with no successor pane at all** (`_pending_handoff_retire_requests`
-  requires a recorded successor session) -- that "ack but no pane" case has
-  no dedicated diagnostic yet.
+  after a spawn is recorded (`_pending_handoff_retire_requests` accepts either
+  `handoff.successor` -- linked/authoritative -- or `handoff.candidate` --
+  sessionStart-associated but the handoff still pending -- so this also
+  catches a predecessor that should retire before the cutover is fully
+  linked, not only a fully confirmed one), using the same choreography as
+  the resident monitor's own sweep. Read-only without `--execute`. **It does
+  not diagnose a host acknowledgement with no successor pane at all**
+  (no `handoff_cutover_spawn` was ever recorded for the token) -- that "ack
+  but no pane" case has no dedicated diagnostic yet.
 - `agent-bridge handoff-check [--worktree-id <id>|--all] [--execute] [--json]`
   -- a thin passthrough that shells out to `agent-worktrees handoffs-check`,
   forwarding `--execute` the same way; only usable when `agent-worktrees` is
   also resolvable on `PATH` (it fails closed with a clear error otherwise --
   `agent-bridge` alone does not implement the check/repair logic itself).
+  **Does not forward agent-bridge's own top-level `--project`/`-p`** to the
+  child command (`agent-worktrees handoffs-check` has no `--project` flag to
+  receive it either) -- from a neutral daemon CWD unrelated to the target
+  project, resolution falls back to whatever `agent-worktrees` derives from
+  its own CWD, which may not be the intended project. Run it from (or ensure
+  the daemon's CWD is) the target project's checkout when project scoping
+  matters.
 - `health.find_orphaned_handoffs()` already flags "claimed but no live
   successor pane" as a class of bug; feeding it from the durable trace so it
   can name the *exact* stalled stage (rather than just flagging that one
