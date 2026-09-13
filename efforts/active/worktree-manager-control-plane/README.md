@@ -518,6 +518,24 @@ its issues; the public artifacts stay self-contained and general-purpose.
   relaunching through its own relocated launcher in ordinary resume mode.
   This means the Windows path needs **no new relaunch code** in Worktree
   Manager at all. Docs-only; implementation not started.
+- **2026-09-12** — Second correction to Sub-slice 2b's design, made before
+  any implementation code was written. The prior revision's step 3 still
+  said `cmd_remux`/`_perform_remux`/`remux_bare_copilot`'s execution gets
+  **deleted** from agent-worktrees. That's unsafe: `_perform_remux` is not
+  solely the standalone `remux` verb's backend -- `_restore_before_resume`
+  also calls it internally, backing `resolve --restore` and, through it, the
+  bundled Picker's own **"Restore"** action, which must keep working with
+  **zero** session-host providers present (the bundled Picker still ships
+  and is still mux-capable until Phase 6c retires it). Deleting the action
+  would have regressed exactly the class of live bug this effort exists to
+  prevent. Sub-slice 2b is now **purely additive**: agent-worktrees' existing
+  remux/`--restore` action machinery is untouched and permanently stays (its
+  own zero-provider fallback); the new `mux-remux-plan` query only extracts
+  the guard/target-resolution logic into a shared function both the existing
+  action and the new query call, so Worktree Manager gains an independent
+  second consumer of the same plan for its own eventual "Restore"
+  Picker-parity action, without duplicating any tmux-naming logic. No
+  deletion, no cutover, no regression risk to the existing standalone path.
 - **2026-09-09** — Implemented the reviewed Phase 3b AHP relocation Steps 2-4
   without deleting the legacy path. agent-worktrees now exposes fenced,
   provider-neutral `execution-leg get/set/clear` JSON verbs, preserves legacy
