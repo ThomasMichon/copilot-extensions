@@ -440,6 +440,12 @@ restart does not inherently close the child's pipes.
   container claim only after all host authority is gone. Failed initial
   process-launch cleanup uses the same owned cancellation settlement as resume:
   shutdown or kill cannot be interrupted with a STARTING row left behind.
+  Committing a Session Host also retains its frontend client on the session and
+  persists the ACP identity before returning through provider cleanup. A
+  cancellation at that return boundary closes the retained client without
+  losing the successfully created conversation. Durable container partial-launch
+  markers block every background recovery eligibility check, even when restart
+  provenance exists but no host-index row survived.
   The manager remains the public facade; `session_resume.py`,
   `session_teardown.py`, and `session_ownership.py` own the bounded lifecycle
   implementations. Additive session migrations live in `db_migrations.py`.

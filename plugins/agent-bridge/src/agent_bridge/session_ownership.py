@@ -80,6 +80,8 @@ async def cleanup_resume_attempt(
     """Close an unsuccessful client and reclaim its retained local process."""
     from .session_host_ownership import abort_pending_host_launch
 
+    if client is None:
+        client = session.client
     if client is not None:
         try:
             await client.shutdown()
