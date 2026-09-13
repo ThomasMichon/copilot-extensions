@@ -136,9 +136,12 @@ installer. Know which kind you are changing.
      explain or dismiss invalid ones. Never wait for Copilot to approve --
      its review is always a non-blocking comment, never a required approval,
      no matter how many rounds you go through or how it's worded (a "changes
-     recommended" banner is not a gate). Merge once you've given it a bounded
-     window (order of minutes) and addressed what's genuinely worth
-     addressing; do not loop indefinitely re-requesting a review chasing a
+     recommended" banner is not a gate). Use `pr-watch wait <owner>/<repo> <PR>
+     --since r0 --until any --timeout 600` (a bounded ~10-minute window, not
+     `--timeout 0`) rather than waiting indefinitely, then act on whatever
+     review guidance has appeared by the time it returns -- address anything
+     genuinely worth addressing, or proceed straight to merge if nothing has
+     landed yet. Do not loop indefinitely re-requesting a review chasing a
      zero-finding pass that may never come.
    - Keep the branch current and mergeable. If `main` moves or conflicts appear,
      reconcile with the supported worktree PR verbs, re-run the required gates,
