@@ -499,6 +499,25 @@ its issues; the public artifacts stay self-contained and general-purpose.
   agent-worktrees' cross-repo session guidance should require fully-qualified
   `owner/repo#N` issue/PR references, since a bare `#N` auto-links to the
   current session's backing repo and can silently 404 against the wrong one).
+- **2026-09-12** — Taking sole ownership of this effort going forward (no
+  other agent actively claiming a slice via #352 at this time). Revised
+  Sub-slice 2b's design in
+  [`phase-3b-mux-relocation.md`](phase-3b-mux-relocation.md) after
+  discovering the coupling runs deeper than originally scoped: `remux.py`'s
+  POSIX action calls `sessions.py` mux-naming/argv-building helpers
+  (`mux_session_name`, `build_mux_new_window_argv`,
+  `build_mux_new_session_argv`) that are pervasive utilities used well beyond
+  remux, not remux-specific logic safe to duplicate into Worktree Manager.
+  Revised design mirrors the resolve/execute pattern Sub-slice 2a already
+  established: a new planning-only `agent-worktrees mux-remux-plan --json`
+  query keeps all tmux-naming/argv-building and guard logic in
+  agent-worktrees (unchanged in substance, just relocated out of
+  `_perform_remux`), and Worktree Manager becomes a thin executor — running
+  the returned POSIX `argv` directly, or (Windows) calling the
+  already-existing `agent-worktrees reclaim --bare-only --yes --json` then
+  relaunching through its own relocated launcher in ordinary resume mode.
+  This means the Windows path needs **no new relaunch code** in Worktree
+  Manager at all. Docs-only; implementation not started.
 - **2026-09-09** — Implemented the reviewed Phase 3b AHP relocation Steps 2-4
   without deleting the legacy path. agent-worktrees now exposes fenced,
   provider-neutral `execution-leg get/set/clear` JSON verbs, preserves legacy
