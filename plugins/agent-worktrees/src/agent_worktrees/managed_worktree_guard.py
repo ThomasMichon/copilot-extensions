@@ -157,7 +157,20 @@ def blockers_for(rec, repo) -> list[str]:
     # merged/completed-local owner-moved-on categories). remove-system had
     # no equivalent check at all, so it could discard a live resource out
     # from under its parent even though prune.py already refuses to.
-    owner_moved_on = rec.status == "finalized" or branch_is_merged
+    #
+    # `branch_is_merged` is trivially true for a branch with zero commits
+    # beyond upstream (a just-created, still-empty scaffold) -- that must
+    # NOT count as "moved on": prune._content_verdict deliberately keeps the
+    # claimant guard for its `empty` category, since the parent may still be
+    # about to populate it. Only treat the merge as "moved on" when the
+    # checkout actually has real content (state isn't UNUSED/CONVO); a
+    # missing checkout can't be told apart from an empty one here, so it
+    # does not count as moved on either -- fail closed.
+    content_confirmed_merged = branch_is_merged and checkout_exists and info.state not in (
+        git_ops.WorktreeState.UNUSED,
+        git_ops.WorktreeState.CONVO,
+    )
+    owner_moved_on = rec.status == "finalized" or content_confirmed_merged
     if rec.owner_ref and not owner_moved_on:
         from . import claimant
 

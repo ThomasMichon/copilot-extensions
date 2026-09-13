@@ -874,3 +874,32 @@ def test_remove_system_fails_closed_on_unknown_record_repo(tmp_path):
     assert "could not resolve a configured repository" in message
     assert "some-unregistered-repo" in message
     assert (tracking_dir / "managed-1.yaml").exists()
+
+
+def test_remove_system_refuses_empty_scaffold_owner_claim_despite_trivial_merge(tmp_path):
+    """is_branch_merged is trivially true for a branch with zero commits
+    beyond upstream (a just-created, still-empty scaffold) -- that must NOT
+    count as 'owner moved on'. prune._content_verdict deliberately keeps the
+    claimant guard for its `empty` category since the parent may still be
+    about to populate it."""
+    record, tracking_dir = _record(tmp_path)
+    record.owner_ref = "machine-a/some-project/some-worktree-id"
+    record.status = "active"
+    tracking.save_record(record, tracking_dir / "managed-1.yaml")
+    args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=False)
+
+    empty_info = git_ops.WorktreeStateInfo(
+        state=git_ops.WorktreeState.UNUSED, current_branch=record.branch,
+    )
+    with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
+         patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
+         patch("agent_worktrees.git_ops.classify_worktree", return_value=empty_info), \
+         patch("agent_worktrees.git_ops.is_branch_merged", return_value=True), \
+         patch("agent_worktrees.claimant.resolve_claimant_alive", return_value=True), \
+         patch("agent_worktrees.__main__._json_error") as json_error:
+        json_error.return_value = 1
+        result = cli.cmd_remove_system(args)
+
+    assert result == 1
+    message = json_error.call_args.args[0]
+    assert "owned as a resource by machine-a/some-project/some-worktree-id" in message
