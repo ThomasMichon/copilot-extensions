@@ -2013,19 +2013,23 @@ class SessionManager:
             return []
         return [r for r in self._host_index.all() if self._rec_host_alive(r)]
 
-    def _host_candidates(self) -> list[tuple[Any, Session | None, int | None]]:
+    def _host_candidates(self) -> list[tuple[Any, Session | None, int | None, int]]:
         """Snapshot records and lifecycle identity before maintenance can yield."""
+        if self._host_index is None:
+            return []
         candidates = []
         for record in self._live_host_records():
             session = self._sessions.get(record.session_id)
             candidates.append((
                 copy.deepcopy(record), session,
                 session._lifecycle_generation if session is not None else None,
+                self._host_index.revision(record.session_id),
             ))
         return candidates
 
     def _host_candidate_current(
         self, record: Any, session: Session | None, generation: int | None,
+        record_revision: int,
     ) -> bool:
         """Revalidate a maintenance candidate under its lifecycle ownership."""
         return (
@@ -2034,6 +2038,7 @@ class SessionManager:
             and not self._remote_reap_pending(record.session_id)
             and self._host_index is not None
             and self._host_index.get(record.session_id) == record
+            and self._host_index.revision(record.session_id) == record_revision
             and self._sessions.get(record.session_id) is session
             and (
                 session is None
@@ -2162,7 +2167,7 @@ class SessionManager:
         self._prune_dead_hosts()
         reattached = 0
         now = time.time()
-        for rec, session, generation in self._host_candidates():
+        for rec, session, generation, record_revision in self._host_candidates():
             if (
                 session is not None
                 and not self._background_recovery_allowed(session)
@@ -2206,7 +2211,7 @@ class SessionManager:
                     await locks.enter_async_context(session._lifecycle_lock)
                     if session.client is not None and session.client.is_running:
                         continue
-                if not self._host_candidate_current(rec, session, generation):
+                if not self._host_candidate_current(rec, session, generation, record_revision):
                     log.info("Skipping replaced startup host candidate %s", rec.session_id)
                     continue
                 plan = plan_host(
@@ -2306,6 +2311,7 @@ class SessionManager:
 
         groups: dict[str, tuple[Any, list[tuple[Session, Any]]]] = {}
         candidate_generations: dict[str, int] = {}
+        candidate_revisions: dict[str, int] = {}
         for session in self._sessions.values():
             if background and (
                 not self._background_recovery_allowed(session)
@@ -2378,6 +2384,8 @@ class SessionManager:
                     groups[name] = (spawner, [])
             groups[name][1].append((session, existing))
             candidate_generations[session.session_id] = session._lifecycle_generation
+            if background:
+                candidate_revisions[session.session_id] = self._host_index.revision(session.session_id)
 
         semaphore = asyncio.Semaphore(3)
 
@@ -2393,6 +2401,7 @@ class SessionManager:
                             self._background_recovery_allowed(session)
                             and not self._remote_reap_pending(session.session_id)
                             and self._host_index.get(session.session_id) == existing
+                            and self._host_index.revision(session.session_id) == candidate_revisions[session.session_id]
                             and candidate_generations[session.session_id]
                             == session._lifecycle_generation
                         ):
@@ -2498,6 +2507,7 @@ class SessionManager:
                         if (
                             self._sessions.get(session.session_id) is not session
                             or self._host_index.get(session.session_id) != existing
+                            or self._host_index.revision(session.session_id) != candidate_revisions[session.session_id]
                             or candidate_generations[session.session_id]
                             != session._lifecycle_generation
                         ):
@@ -3695,7 +3705,7 @@ class SessionManager:
         recovered = 0
         codespace_availability: dict[str, bool] = {}
         now = time.time()
-        for rec, session, generation in self._host_candidates():
+        for rec, session, generation, record_revision in self._host_candidates():
             if session is None or not session.acp_session_id:
                 continue
             if not self._background_recovery_allowed(session):
@@ -3704,7 +3714,7 @@ class SessionManager:
             if session._turn_start_lock.locked() or session._lifecycle_lock.locked():
                 continue
             async with session._turn_start_lock, session._lifecycle_lock:
-                if not self._host_candidate_current(rec, session, generation):
+                if not self._host_candidate_current(rec, session, generation, record_revision):
                     continue
                 client = session.client
                 if (
@@ -4119,14 +4129,14 @@ class SessionManager:
         self._prune_dead_hosts()
         now = time.time()
         reaped = 0
-        for rec, session, generation in self._host_candidates():
+        for rec, session, generation, record_revision in self._host_candidates():
             async with contextlib.AsyncExitStack() as locks:
                 if session is not None:
                     if session._turn_start_lock.locked() or session._lifecycle_lock.locked():
                         continue
                     await locks.enter_async_context(session._turn_start_lock)
                     await locks.enter_async_context(session._lifecycle_lock)
-                if not self._host_candidate_current(rec, session, generation):
+                if not self._host_candidate_current(rec, session, generation, record_revision):
                     continue
                 plan = plan_host(
                     protocol_version=rec.protocol_version,
