@@ -4350,9 +4350,16 @@ def add_resource_claim(
     If a claim with the same ``ref`` already exists it is refreshed in place
     (kind/state/note/created_at) rather than duplicated, so re-running the
     owning ``run`` wrapper is idempotent. Returns the stored claim.
+
+    ``finalized`` is deliberately **not** in the blocked set: finalize is a
+    non-terminal safe-to-prune assertion, not a frozen end state (a finalized
+    worktree can still be resumed and given follow-up work -- see
+    docs/worktree-lifecycle.md "Finalized is not terminal"). Only
+    ``finalizing`` (the in-flight finalize RMW window) and ``orphaned`` (a
+    genuinely broken/abandoned record) freeze creator ownership.
     """
     if (
-        record.status in {"finalizing", "finalized", "orphaned"}
+        record.status in {"finalizing", "orphaned"}
         or (
             record.kind in MANAGED_KINDS
             and record.status in {"complete", "completed"}

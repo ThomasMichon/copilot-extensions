@@ -283,7 +283,11 @@ deleted only when its content is verified on the default branch.
 
 **Finalized is not terminal.** Until it is pruned, a finalized worktree still
 appears in the picker and can be resumed to carry follow-up work — open a fresh
-PR for the new change. If a PR-mode worktree was already torn down (the `detach`
+PR for the new change. It can also still journal a fresh outbound resource
+claim (`claims add`) or take part in a claim handoff: `finalized` only stamps
+"no obligations as of this validation," not "frozen." (Only the in-flight
+`finalizing` RMW window and a genuinely broken `orphaned` record refuse new
+claims.) If a PR-mode worktree was already torn down (the `detach`
 disposition), recover it via
 [`references/pr-workflow.md` § Recovering a PR after teardown](../skills/worktree/references/pr-workflow.md).
 When in doubt, just `create` a fresh worktree and continue there.

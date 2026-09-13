@@ -12050,7 +12050,12 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
     # blocking record lock (no I/O in the window).
     with tracking._RecordLock(rec_path, require_sidecar=True):
         rec = tracking.load_record(rec_path)
-        if rec.status in {"finalizing", "finalized", "orphaned"}:
+        # ``finalized`` is deliberately not blocked here: finalize is a
+        # non-terminal safe-to-prune assertion, not a frozen end state, and a
+        # finalized worktree may legitimately resume and take on new work.
+        # Only the in-flight ``finalizing`` RMW window and a genuinely broken
+        # ``orphaned`` record freeze creator ownership.
+        if rec.status in {"finalizing", "orphaned"}:
             msg = (
                 f"claims add: owner worktree {wt_id} is {rec.status}; "
                 "creator ownership is frozen and cannot accept new resources"
