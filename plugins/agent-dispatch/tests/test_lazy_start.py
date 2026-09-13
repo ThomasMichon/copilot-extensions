@@ -145,3 +145,33 @@ def test_coordinator_spawn_resolves_installed_slot_not_sys_executable(
     m._spawn_coordinator_process()
 
     assert calls[0][0][0] == str(slot_py)
+
+
+def test_ensure_coordinator_cmd_reports_live_after_ensure(monkeypatch):
+    """The internal `_ensure-coordinator` entrypoint (installer-only, #2524):
+    runs the same tier-1 ensure path as any ordinary client command, then
+    reports success/failure via exit code rather than any command-specific
+    output -- so a shell installer's `do_start` fallback can trigger it
+    without depending on a data command's repo-resolution or output shape."""
+    calls = []
+    monkeypatch.setattr(m, "_ensure_local_coordinator", lambda args: calls.append(args))
+    monkeypatch.setattr("agent_dispatch.config.has_live_local_coordinator", lambda: True)
+    rc = m._cmd_ensure_coordinator(_args(["_ensure-coordinator"]))
+    assert rc == 0
+    assert len(calls) == 1
+
+
+def test_ensure_coordinator_cmd_reports_failure_when_still_down(monkeypatch):
+    monkeypatch.setattr(m, "_ensure_local_coordinator", lambda args: None)
+    monkeypatch.setattr("agent_dispatch.config.has_live_local_coordinator", lambda: False)
+    rc = m._cmd_ensure_coordinator(_args(["_ensure-coordinator"]))
+    assert rc == 1
+
+
+def test_ensure_coordinator_is_wired_into_the_cli_parser():
+    """The subcommand must actually be registered and route to the internal
+    handler (argparse.SUPPRESS keeps it out of its own help-line description;
+    it still appears in the bare subcommand-choices list, which is fine for
+    an unlisted/undocumented installer-only entrypoint)."""
+    args = _args(["_ensure-coordinator"])
+    assert args.func is m._cmd_ensure_coordinator

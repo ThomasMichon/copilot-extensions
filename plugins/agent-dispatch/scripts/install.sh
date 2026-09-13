@@ -399,6 +399,22 @@ _source_kind() {
 # === end install-contract:v4 source-kind ===
 
 # -- Version helpers + downgrade guard (parity with agent-bridge #1790) ------
+_resolve_runtime_python() {
+    # The canonical, junction-free versioned-runtime resolver (uniform-runtime-
+    # resolution, #765) -- the same one the binstub uses: current-version ->
+    # last-known-good -> newest complete slot. Prints the resolved interpreter
+    # path and returns 0, or returns 1 with nothing printed when no slot is
+    # installed. Deployed to $INSTALL_DIR/bin at install time; absent only on a
+    # never-installed host.
+    local resolver="$INSTALL_DIR/bin/resolve-runtime.sh"
+    [[ -f "$resolver" ]] || return 1
+    local AGENT_RT_PY="" AGENT_RT_ROOT="$INSTALL_DIR"
+    # shellcheck disable=SC1090
+    . "$resolver"
+    [[ -n "$AGENT_RT_PY" ]] || return 1
+    printf '%s' "$AGENT_RT_PY"
+}
+
 _installed_version() {
     # The version currently ACTIVE (via the current-version marker), for the
     # downgrade guard. Marker-only -- the `.venv` link is retired (#765).
@@ -1435,18 +1451,40 @@ do_update() {
 }
 
 do_start() {
-    command -v systemctl >/dev/null 2>&1 || { _fail 'systemd not available'; exit 1; }
-    if [[ ! -f "$UNIT_DIR/$SYSTEMD_UNIT" ]]; then
-        _fail "No service unit installed -- run: $0 install"
+    if command -v systemctl >/dev/null 2>&1 && [[ -f "$UNIT_DIR/$SYSTEMD_UNIT" ]]; then
+        systemctl --user start "$SYSTEMD_UNIT"
+        if systemctl --user is-active "$SYSTEMD_UNIT" &>/dev/null; then
+            _ok "Coordinator started"
+            _for_each_present_supervisor_unit _start_supervisor_callback
+            return 0
+        fi
+        _warn "systemd start did not activate the unit -- falling back to a direct start"
+    elif command -v systemctl >/dev/null 2>&1; then
+        _warn "No service unit installed -- falling back to a direct start"
+    else
+        _warn "systemd not available -- falling back to a direct start"
+    fi
+
+    # Direct-start fallback (systemd unavailable, unit missing, or activation
+    # failed): user-mode ensure must be sufficient to start the daemon on its
+    # own -- scheduled activation (the systemd unit above) is only a login-time
+    # convenience layered on top, never a prerequisite (service-lifecycle-
+    # supervision's rule 7; #2524). Reuses the CLI's own tier-1 lazy-autostart
+    # path via the internal `_ensure-coordinator` entrypoint -- the exact same
+    # code path every ordinary client command already triggers -- rather than
+    # re-implementing a detached spawn here (parity with agent-bridge's
+    # `do_start`, which has the equivalent direct-launch fallback).
+    local rt_py
+    rt_py="$(_resolve_runtime_python)" || { _fail "agent-dispatch not installed. Run: $0 install"; exit 1; }
+    if "$rt_py" -m agent_dispatch _ensure-coordinator >/dev/null 2>&1; then
+        _ok "Coordinator started (direct)"
+    else
+        _fail "Failed to start coordinator directly"
         exit 1
     fi
-    systemctl --user start "$SYSTEMD_UNIT"
-    systemctl --user is-active "$SYSTEMD_UNIT" &>/dev/null \
-        && _ok "Coordinator started" || { _fail "Failed to start coordinator"; exit 1; }
-    # Start every supervisor that is enabled (label-gated). Inert/disabled
-    # primary/profile supervisors are left alone.
     _for_each_present_supervisor_unit _start_supervisor_callback
 }
+
 
 do_stop() {
     command -v systemctl >/dev/null 2>&1 || { _fail 'systemd not available'; exit 1; }
