@@ -9201,6 +9201,26 @@ def _pending_handoff_retire_requests(
         except (TypeError, ValueError):
             predecessor_pid = None
         predecessor_start = str(spawn.get("predecessor_copilot_start_time") or "").strip() or None
+        # The recorded predecessor_copilot_pid/start_time can itself be
+        # permanently wrong for a handoff whose spawn event predates the
+        # process-identity fix (context-handoff previously logged its own
+        # Node extension-host pid, not the actual copilot process) -- no
+        # future fix corrects data already written. A fresh, session-scoped
+        # mux_binding_for_session() lookup is the same stronger identity
+        # proof the spawn-time fix now trusts; prefer it here too so a
+        # historically-poisoned old_pane/pid pairing can still be resolved
+        # and retired instead of permanently failing its identity check.
+        try:
+            live_binding = sessions.mux_binding_for_session(
+                predecessor_session,
+                expected_session_name=sessions.mux_session_name(worktree_id),
+            )
+        except Exception:
+            live_binding = None
+        if live_binding:
+            old_pane = live_binding.get("pane_id") or old_pane
+            predecessor_pid = live_binding.get("copilot_pid")
+            predecessor_start = str(live_binding.get("copilot_start_time") or "").strip() or None
         yield_reason = "linked" if getattr(handoff, "successor", None) else "candidate"
         requests.append({
             "handoff_token": token,

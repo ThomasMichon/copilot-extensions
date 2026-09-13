@@ -1809,6 +1809,57 @@ class TestCmdHandoffsCheck:
         assert finding["executed"] is True
         assert finding["retired"] is True
 
+    def test_trusts_live_binding_over_historically_wrong_recorded_pid(
+        self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
+    ):
+        """Regression: a handoff's spawn event can have a permanently wrong
+        recorded predecessor_copilot_pid (context-handoff previously logged
+        its own Node extension-host pid, never fixed retroactively for
+        already-written events -- see PR #2518). A fresh, session-scoped
+        mux_binding_for_session() lookup must override that bad recorded
+        value, or the identity check keeps failing forever even after the
+        root-cause bug is fixed going forward."""
+        self._record(
+            tmp_tracking_dir, "wt-check-8",
+            predecessor="old-sess", successor="new-sess",
+        )
+        monkeypatch.setattr(activity, "read_events", lambda **kw: (
+            [{
+                "handoff_token": "task-wt-check-8", "session_id": "old-sess",
+                "old_pane": "%9", "expected_mux_session": "wt-wt-check-8",
+                # The permanently wrong recorded values (e.g. a Node
+                # extension-host pid, not the real copilot process).
+                "predecessor_copilot_pid": 999999,
+                "predecessor_copilot_start_time": "wrong-start",
+            }] if kw.get("event") == "handoff_cutover_spawn" else []
+        ))
+        monkeypatch.setattr(
+            m.sessions, "mux_session_name", lambda wt_id: f"wt-{wt_id}",
+        )
+        monkeypatch.setattr(
+            m.sessions, "mux_binding_for_session",
+            lambda sid, **kw: (
+                {
+                    "pane_id": "%99", "copilot_pid": 12345,
+                    "copilot_start_time": "real-start",
+                    "session_name": "wt-wt-check-8",
+                }
+                if sid == "old-sess" else None
+            ),
+        )
+        captured = {}
+        monkeypatch.setattr(
+            m, "_monitor_retire_handoff_predecessor",
+            lambda req: (captured.__setitem__("req", req), (0, {"ok": True, "gone": True}))[1],
+        )
+
+        rc = m.cmd_handoffs_check(_ns(worktree_id="wt-check-8", execute=True, json=True))
+
+        assert rc == 0
+        assert captured["req"]["predecessor_pid"] == 12345
+        assert captured["req"]["predecessor_start_time"] == "real-start"
+        assert captured["req"]["retire_pane"] == "%99"
+
     def test_finds_already_linked_handoff_not_just_pending(
         self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
     ):
