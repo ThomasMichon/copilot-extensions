@@ -263,6 +263,32 @@ ready yet."
 | **Previous push-changes failed** (network, rebase conflict) | Fix the issue, then retry `<agent-worktrees catalog argv[0]> push-changes` |
 | **Unsure what state the worktree is in** | `<agent-worktrees catalog argv[0]> status` first, then decide |
 
+### Make a successful `finalize` the last thing you do
+
+When the user asks you to finalize/wrap up/sign off, or you judge your
+assigned goal/effort/task complete, drive `finalize` to a **successful
+result** as the last action before ending your turn -- don't stop at
+`push-changes`, and don't end the turn on a failed or skipped `finalize`
+without saying so.
+
+`finalize` is a **fail-fast assertion**, not a gate you route around: it
+re-validates non-mutating checks (branch content, dirtiness, claim state) and
+names the *specific* blocker on failure. Read the blocker and clean it up
+directly -- resolve the cited obligation, retry `push-changes`, settle the
+named claim -- then call `finalize` again. Repeat this diagnose-and-clean
+cycle until you get a clean pass or hit a genuine blocker only the operator
+can resolve (see the obligation gate below). **Never force-release a claim
+and never improvise a hand-off** to make `finalize` pass -- a claim only
+moves to a successor when the user explicitly names one (an
+`agent-dispatch` handoff task, an async bridge agent, etc.); absent that
+direction, the fix is to close out the obligation yourself.
+
+A `finalize` that reports content already on the default branch **is** the
+successful result, even when it also reports the branch/folder were left in
+place because the session is still live (see `finalize does not delete the
+worktree out from under a running session` above) -- that is normal, not a
+failure to loop on.
+
 ### Finalize is gated on outbound resource obligations
 
 `finalize` holds a worktree **accountable** for what it allocated. If this

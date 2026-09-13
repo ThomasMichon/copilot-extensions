@@ -207,7 +207,12 @@ def _load_actor_record(
         ) from exc
     if record.worktree_id != ref.worktree_id:
         raise ClaimHandoffError(f"{role} worktree record identity mismatch: {path}")
-    if record.status in {"finalizing", "finalized", "orphaned"}:
+    # ``finalized`` is deliberately not blocked: finalize is a non-terminal
+    # safe-to-prune assertion, not a frozen end state -- a finalized worktree
+    # may still legitimately act as a handoff source or consumer for
+    # follow-up work. Only the in-flight ``finalizing`` RMW window and a
+    # genuinely broken ``orphaned`` record are frozen.
+    if record.status in {"finalizing", "orphaned"}:
         raise ClaimHandoffError(
             f"{role} worktree {ref.canonical()} is {record.status}"
         )
@@ -278,7 +283,7 @@ def offer(
             _load_actor_record(consumer_ref, role="consumer", machine=machine)
             with tracking._RecordLock(source_path, require_sidecar=True):
                 source_record = tracking.load_record(source_path)
-                if source_record.status in {"finalizing", "finalized", "orphaned"}:
+                if source_record.status in {"finalizing", "orphaned"}:
                     raise ClaimHandoffError(
                         f"source worktree {source_canonical} is "
                         f"{source_record.status}"
