@@ -508,9 +508,10 @@ scenarios.
 - No new tests needed: `test_recipes.py` and `test_driver.py` already cover
   every moved command's behavior via `agent_dispatch.__main__` imports,
   which resolve unchanged through the re-export.
-- `__main__.py`: 4,979 -> 4,756 lines; `recipes_cli.py`: 275 lines. Both
-  comfortably under the 1,000-line cap. `tools/module-size-baseline.json`
-  refreshed (shrink-only).
+- `__main__.py`: 4,979 -> 4,756 lines; `recipes_cli.py`: 275 lines.
+  `recipes_cli.py` is comfortably under the 1,000-line cap; `__main__.py`
+  remains well over it and stays on the shrink-only module-size baseline
+  (refreshed to its new, smaller line count).
 - Full `agent-dispatch` suite (`tools/run-plugin-tests.py agent-dispatch`,
   2,706 tests across 5 sub-suites) passed after the split; zero
   regressions. `ruff check --select F,E9` and `ruff format --check` clean

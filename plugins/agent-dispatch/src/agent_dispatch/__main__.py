@@ -85,6 +85,7 @@ from .recipes_cli import (  # noqa: F401 -- re-exported for existing call sites/
     _cmd_recipes_list,
     _cmd_recipes_render,
     _parse_recipe_params,
+    _recipe_create_namespace,
     _recipe_dedup_key,
     _recipe_param_dicts,
 )
