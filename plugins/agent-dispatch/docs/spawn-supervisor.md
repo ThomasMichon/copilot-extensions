@@ -786,8 +786,19 @@ project** `_prepare_spawn_task` would have used to actually create this
 worktree -- `self._spawn_attribute(task, "allocation_project",
 embody.project_for_task(task) or "")`, not a plain re-derivation, since a
 routed/headless `spawn_fn` can select a different project via an
-`allocation_project_for` selector; this daemon is CWD-neutral either way)
-across every tracking status, not merely the ACTIVE-only set
+`allocation_project_for` selector; this daemon is CWD-neutral either way).
+That resolution call sits inside the same `try`/`except` as the probe itself
+-- `_spawn_attribute` can invoke an I/O-backed selector (the default headless
+one calls a strict registry lookup) that may raise when a backing registry is
+unavailable, and that must degrade only this one reservation to `unknown`
+for this cycle, never abort the whole `release_requested_bodies` polling
+pass over every other reservation. The probe also passes
+`--include-other-platforms`: the registry's default `list` filters to the
+host's *current* detected local platform, so a reservation created on this
+same host under a different local platform (e.g. Windows vs. WSL) would
+otherwise be silently omitted and its still-existing worktree misread as
+absent -- presence, not per-platform enumeration, is what this probe answers.
+It checks across every tracking status, not merely the ACTIVE-only set
 `live_worktrees()` uses for orphan reaping — a `finalized` worktree may still
 be fully present on disk. Only a confirmed absence retires the reservation;
 an unresolved probe, a claimed task under any owner string (well-formed or

@@ -456,7 +456,8 @@ class TestWorktreeDirectoryPresent:
         assert tracking.worktree_directory_present("wt", project="widget") is False
         assert captured["args"] == (
             "--project", "widget", "list", "--json",
-            "--tracking-status", "all", "--worktree-id", "wt",
+            "--tracking-status", "all", "--include-other-platforms",
+            "--worktree-id", "wt",
         )
 
     def test_omits_project_when_not_given(self, monkeypatch):
@@ -469,5 +470,6 @@ class TestWorktreeDirectoryPresent:
         monkeypatch.setattr(tracking, "run_agent_worktrees_capture", fake_run)
         assert tracking.worktree_directory_present("wt") is False
         assert captured["args"] == (
-            "list", "--json", "--tracking-status", "all", "--worktree-id", "wt",
+            "list", "--json", "--tracking-status", "all",
+            "--include-other-platforms", "--worktree-id", "wt",
         )

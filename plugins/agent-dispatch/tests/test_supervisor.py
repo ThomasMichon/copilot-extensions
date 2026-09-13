@@ -3963,6 +3963,72 @@ def test_probes_the_spawn_fns_own_allocation_project_when_overridden(q, client):
     assert probe_calls == [("wt-routed", "routed-project")]
 
 
+def test_allocation_project_resolution_failure_degrades_to_unknown(q, client):
+    # `_spawn_attribute` can invoke an I/O-backed `allocation_project_for`
+    # selector (the default headless one calls a strict registry lookup)
+    # that may raise when a backing registry is unavailable. That failure
+    # must degrade this reservation to unknown for this cycle -- never
+    # propagate out of release_requested_bodies and abort the whole polling
+    # pass over every other reservation.
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    other_task = q.create("other-work")
+    other_reservation, _ = q.reserve_spawn(other_task.id)
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-project-resolution-fails",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    q.record_spawn_worktree(
+        other_reservation.key,
+        "wt-other",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    q.request_spawn_release(
+        reservation.key,
+        detail="worktree preparation failed",
+        disposition="failed",
+    )
+    q.request_spawn_release(
+        other_reservation.key,
+        detail="worktree preparation failed",
+        disposition="failed",
+    )
+
+    def raising_project_selector(task_dict):
+        if task_dict.get("id") == task.id:
+            raise RuntimeError("bridge registry unavailable")
+        return "other-project"
+
+    spawn = _ok_spawn()
+    spawn.allocation_project_for = raising_project_selector
+    probed = []
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        machine="host-a",
+        verdict_fn=lambda *_args: "unknown",
+        worktree_directory_present_fn=lambda wt, project: probed.append(wt) or False,
+        attempt_conclusion_fn=lambda *_args: {
+            "action": "failed",
+            "reason": "lifecycle lock busy",
+        },
+        nudge=False,
+    )
+
+    # Both reservations get processed this cycle -- the raising selector for
+    # the first must not abort the loop before reaching the second.
+    assert sup.release_requested_bodies() == 1
+    assert q.get_reservation(reservation.key).state == SpawnState.RELEASING
+    assert q.get_reservation(other_reservation.key).state == SpawnState.FAILED
+    assert probed == ["wt-other"]
+
+
 def test_keeps_unleased_worktree_reservation_when_directory_still_present(
     q, client
 ):

@@ -443,6 +443,12 @@ def worktree_directory_present(
     falls back to ``agent-worktrees``' own CWD-based project discovery,
     which is only correct when the caller's CWD happens to match.
 
+    Always passes ``--include-other-platforms``: the registry's default
+    ``list`` filters to the host's *current* detected local platform, so a
+    reservation created on this same host under a different local platform
+    (e.g. Windows vs. WSL) would otherwise be silently omitted -- this
+    function answers presence, not per-platform enumeration.
+
     Returns ``None`` on **any** resolver failure (no CLI, non-zero exit,
     timeout, empty or unparseable output) so the caller degrades safe --
     an unresolved probe never counts as "gone". Never raises.
@@ -466,6 +472,12 @@ def worktree_directory_present(
         "--json",
         "--tracking-status",
         "all",
+        # A queue-recorded reservation may have been created on the same
+        # host but a different local platform (e.g. Windows vs. WSL); the
+        # registry's default platform filter would otherwise omit that row
+        # and make a live worktree look absent. Presence, not per-platform
+        # enumeration, is what this probe answers.
+        "--include-other-platforms",
         "--worktree-id",
         worktree,
     ]

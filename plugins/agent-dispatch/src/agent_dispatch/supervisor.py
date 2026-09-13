@@ -1578,12 +1578,21 @@ class Supervisor:
                             # unknown forever.
                             from . import embody
 
-                            probe_project = self._spawn_attribute(
-                                task,
-                                "allocation_project",
-                                embody.project_for_task(task) or "",
-                            ) or None
                             try:
+                                # Resolution happens inside this same guarded
+                                # block: `_spawn_attribute` can invoke an
+                                # I/O-backed `allocation_project_for`
+                                # selector (the default headless one calls a
+                                # strict registry lookup) that may raise when
+                                # a backing registry is unavailable -- that
+                                # must degrade this reservation to `unknown`
+                                # for this cycle, not abort the whole
+                                # `release_requested_bodies` polling pass.
+                                probe_project = self._spawn_attribute(
+                                    task,
+                                    "allocation_project",
+                                    embody.project_for_task(task) or "",
+                                ) or None
                                 present = self.worktree_directory_present_fn(
                                     worktree, probe_project
                                 )
