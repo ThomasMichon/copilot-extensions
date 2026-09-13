@@ -358,9 +358,13 @@ async def end_session_locked(self: SessionManager, session: Session, *, force: b
                 rec.boundary == "container"
                 and container.get("authoritative_identity_removed") is True
             ):
-                self._kill_forward_sync(session_id)
-                with contextlib.suppress(Exception):
-                    self._host_index.remove(session_id)
+                from .session_host_ownership import finish_host_metadata_cleanup
+
+                await self._drop_forward(session_id, strict=True, preserve_ownership=True)
+                if not finish_host_metadata_cleanup(self, session_id, rec):
+                    raise RemoteHostRecoveryPendingError(
+                        f"Host authority changed during end for {session_id}; ownership retained"
+                    )
             elif rec.boundary != "local":
                 self._kill_forward_sync(
                     session_id,

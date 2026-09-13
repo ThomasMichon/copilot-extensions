@@ -162,6 +162,8 @@ class HostIndex:
         except Exception:
             rec.resume_on_reattach = previous
             raise
+        self._revision += 1
+        self._record_revisions[session_id] = self._revision
         return True
 
     def prune_dead(self, is_alive: Callable[[int], bool]) -> list[HostRecord]:

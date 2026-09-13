@@ -491,6 +491,11 @@ restart does not inherently close the child's pipes.
   end join existing remote reaps before direct cleanup; shutdown retries
   retained failures rather than discarding them at database close. Resume-nudge
   flag writes restore the old in-memory value when persistence fails.
+  Successful resume-flag publications advance the same revision fence as host
+  registration. Startup, heartbeat, stranded sweeps, and authority-result
+  application capture and recheck that revision, including equal-value ABA.
+  End cleanup for an already-removed container identity uses strict metadata
+  cleanup and retains the session and lock when index removal fails.
   The manager remains the public facade; `session_resume.py`,
   `session_teardown.py`, and `session_ownership.py` own the bounded lifecycle
   implementations. Additive session migrations live in `db_migrations.py`.

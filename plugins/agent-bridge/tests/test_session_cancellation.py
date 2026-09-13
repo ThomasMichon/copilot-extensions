@@ -852,7 +852,7 @@ async def test_preconnect_start_claim_cleanup(owned_context, monkeypatch, fault,
     assert ctx.processes == []
 
 
-@pytest.mark.parametrize("replacement", ["none", "changed", "identical"])
+@pytest.mark.parametrize("replacement", ["none", "changed", "identical", "flag-aba"])
 async def test_remote_reap_fences_container_cleanup_to_exact_record(
     owned_context, monkeypatch, replacement,
 ):
@@ -872,7 +872,10 @@ async def test_remote_reap_fences_container_cleanup_to_exact_record(
     newer = replace(record, nonce="replacement-nonce") if replacement == "changed" else replace(record)
 
     async def disconnect(_host):
-        if replacement != "none":
+        if replacement == "flag-aba":
+            ctx.manager._host_index.set_resume_flag(session_id, True)
+            ctx.manager._host_index.set_resume_flag(session_id, False)
+        elif replacement != "none":
             ctx.manager._host_index.register(newer)
 
     connection = SimpleNamespace(
@@ -1230,3 +1233,64 @@ async def test_resume_nudge_clear_can_retry_failed_persistence(owned_context, mo
     assert ctx.manager._host_index.set_resume_flag(record.session_id, False)
     assert record.resume_on_reattach is False
     assert not HostIndex(ctx.manager._host_index._path).get(record.session_id).resume_on_reattach
+
+
+async def test_maintenance_candidate_rejects_equal_value_republication(owned_context):
+    from dataclasses import replace
+
+    ctx = owned_context
+    record = _remote_record(ctx)
+    candidate = next(item for item in ctx.manager._host_candidates() if item[0].session_id == record.session_id)
+    assert ctx.manager._host_candidate_current(*candidate)
+    ctx.manager._host_index.register(replace(record))
+    assert not ctx.manager._host_candidate_current(*candidate)
+
+
+async def test_authority_result_rejects_equal_value_republication(owned_context, monkeypatch):
+    from dataclasses import replace
+
+    ctx = owned_context
+    record = _remote_record(ctx)
+    replacement = replace(record)
+
+    async def recover(_session_id):
+        ctx.manager._host_index.register(replacement)
+        return replace(record)
+
+    spawner = SimpleNamespace(
+        can_inspect_without_wake=AsyncMock(return_value=True),
+        recover_record=AsyncMock(side_effect=recover),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
+        Mock(return_value=spawner),
+    )
+    monkeypatch.setattr("agent_bridge.relay_state.get_live_relay_port", lambda: None)
+    assert await ctx.manager._recover_remote_host_records(background=True) == 0
+    assert ctx.manager._host_index.get(record.session_id) is replacement
+
+
+async def test_end_preserves_removed_identity_when_index_write_fails(owned_context, monkeypatch):
+    ctx = owned_context
+    record = _remote_record(ctx)
+    record.boundary = "container"
+    ctx.manager._host_index.register(record)
+    ctx.session.target = SpawnTarget(
+        type="command",
+        container={"name": "example-container", "authoritative_identity_removed": True},
+    )
+    lock = Mock()
+    ctx.manager._container_locks["example-container"] = (lock, record.session_id)
+    ctx.manager._container_lock_sessions[record.session_id] = "example-container"
+    flush = ctx.manager._host_index._flush
+    monkeypatch.setattr(ctx.manager._host_index, "_flush", Mock(side_effect=OSError("remove failed")))
+    with pytest.raises(OSError, match="remove failed"):
+        await ctx.manager.end_session(record.session_id, force=True)
+    assert ctx.manager.get_session(record.session_id) is ctx.session
+    assert ctx.db.get_session(record.session_id) is not None
+    assert ctx.manager._host_index.get(record.session_id) == record
+    lock.release.assert_not_called()
+    monkeypatch.setattr(ctx.manager._host_index, "_flush", flush)
+    await ctx.manager.end_session(record.session_id, force=True)
+    assert ctx.manager.get_session(record.session_id) is None
+    lock.release.assert_called_once()
