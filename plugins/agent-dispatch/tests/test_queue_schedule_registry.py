@@ -16,14 +16,18 @@ have finished importing.
 
 from __future__ import annotations
 
+import pytest
+
 from agent_dispatch.queue import ResourceReservation, ScheduleLease, ScheduleRecord, TaskQueue
 from agent_dispatch.queue_schedule_registry import ScheduleRegistrationMixin
 
 
+@pytest.mark.guard
 def test_task_queue_inherits_the_schedule_registration_mixin():
     assert ScheduleRegistrationMixin in TaskQueue.__mro__
 
 
+@pytest.mark.guard
 def test_schedule_registry_methods_are_directly_importable():
     assert callable(ScheduleRegistrationMixin.register_schedule)
     assert callable(ScheduleRegistrationMixin.list_schedules)
@@ -32,6 +36,7 @@ def test_schedule_registry_methods_are_directly_importable():
     assert callable(ScheduleRegistrationMixin.set_schedule_paused)
 
 
+@pytest.mark.guard
 def test_supervisor_registration_methods_are_directly_importable():
     assert callable(ScheduleRegistrationMixin.register_registration)
     assert callable(ScheduleRegistrationMixin.list_registrations)
@@ -40,6 +45,7 @@ def test_supervisor_registration_methods_are_directly_importable():
     assert callable(ScheduleRegistrationMixin.set_registration_status)
 
 
+@pytest.mark.guard
 def test_schedule_lease_methods_are_directly_importable():
     assert callable(ScheduleRegistrationMixin.acquire_schedule_lease)
     assert callable(ScheduleRegistrationMixin.release_schedule_lease)
@@ -47,6 +53,7 @@ def test_schedule_lease_methods_are_directly_importable():
     assert callable(ScheduleRegistrationMixin.list_schedule_leases)
 
 
+@pytest.mark.guard
 def test_resource_reservation_methods_are_directly_importable():
     assert callable(ScheduleRegistrationMixin.acquire_resource_reservation)
     assert callable(ScheduleRegistrationMixin.bind_resource_reservation)

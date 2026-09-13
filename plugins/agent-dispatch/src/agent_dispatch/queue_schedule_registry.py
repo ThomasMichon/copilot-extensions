@@ -2,7 +2,7 @@
 job-leases, and external producer resource reservations.
 
 Extracted from :mod:`agent_dispatch.queue` (Phase 10 componentization,
-``efforts/active/review-automation-reliability`` #2357) as the next
+``efforts/active/review-automation-reliability`` #2423) as the next
 natural table cluster after the CLI-command split that produced
 ``loop_commands.py``: these four concerns (recurring schedules, supervisor
 registrations, single-producer job-leases, and external resource
