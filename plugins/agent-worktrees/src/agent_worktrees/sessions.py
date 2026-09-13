@@ -2162,6 +2162,70 @@ def mux_session_for_pane(
     return current_mux_session(pane_id, mux=mux)
 
 
+def _mux_target_window_id(target: str, mux_bin: str) -> str | None:
+    """Return the window id for one mux target, or ``None`` when unavailable."""
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            [mux_bin, "display-message", "-p", "-t", target, "#{window_id}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return None
+        window_id = result.stdout.strip()
+        return window_id or None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def mux_focus_pane(
+    session_name_or_worktree_id: str,
+    pane_id: str,
+    *,
+    mux: str | None = None,
+) -> bool:
+    """Make ``pane_id``'s window the current window for one mux session.
+
+    ``session_name_or_worktree_id`` may be the exact mux session name (for an
+    adopted anchor or other caller-owned session) or a bare worktree id, in
+    which case this resolves ``wt-<id>`` first. Returns ``False`` on any mux
+    error or if the pane/session identity cannot be positively confirmed.
+    """
+    import subprocess
+
+    if not session_name_or_worktree_id or not pane_id:
+        return False
+    mux_bin = _mux_bin(mux)
+    session_name = str(session_name_or_worktree_id).strip()
+    if not session_name:
+        return False
+    pane_session = _mux_pane_session_name(pane_id, mux_bin)
+    if pane_session != session_name and not session_name.startswith("wt-"):
+        session_name = mux_session_name(session_name)
+    if pane_session != session_name:
+        return False
+    target_window = _mux_target_window_id(pane_id, mux_bin)
+    if not target_window:
+        return False
+    session_target = _mux_named_session_target(session_name, mux_bin)
+    if _mux_target_window_id(session_target, mux_bin) == target_window:
+        return True
+    try:
+        result = subprocess.run(
+            [mux_bin, "select-window", "-t", target_window],
+            capture_output=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return False
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return _mux_target_window_id(session_target, mux_bin) == target_window
+
+
 def mux_binding_for_session(
     session_id: str,
     *,

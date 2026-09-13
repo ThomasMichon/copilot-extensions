@@ -2664,17 +2664,11 @@ def _wait_for_handoff_candidate(
     return None, "session-association-timeout"
 
 
-def _handoff_cutover_spawn_result(
-    args: argparse.Namespace,
+def _resolve_handoff_cutover_target(
+    raw_id: str | None,
+    session_id: str | None,
 ) -> tuple[int, dict[str, object]]:
-    """Return the spawn-mode ``handoff-cutover`` result without printing JSON."""
-    seed = getattr(args, "seed", None)
-    if not seed:
-        return 1, {
-            "ok": False, "error": "handoff-cutover requires --seed (or --retire-pane)",
-        }
-    raw_id = getattr(args, "worktree_id", None)
-    session_id = getattr(args, "session_id", None)
+    """Resolve the target worktree (or adopted anchor) for handoff cutover."""
     config = None
     if raw_id:
         wt_id = _resolve_worktree_id(raw_id)
@@ -2720,10 +2714,34 @@ def _handoff_cutover_spawn_result(
                         "bare-resumed worktree session"
                     ),
                 }
+    return 0, {
+        "ok": True,
+        "worktree_id": wt_id,
+        "anchor_mode": wt_id == tracking.ANCHOR_ID,
+        "config": config,
+    }
+
+
+def _handoff_cutover_spawn_result(
+    args: argparse.Namespace,
+) -> tuple[int, dict[str, object]]:
+    """Return the spawn-mode ``handoff-cutover`` result without printing JSON."""
+    seed = getattr(args, "seed", None)
+    if not seed:
+        return 1, {
+            "ok": False, "error": "handoff-cutover requires --seed (or --retire-pane)",
+        }
+    raw_id = getattr(args, "worktree_id", None)
+    session_id = getattr(args, "session_id", None)
+    rc, resolved = _resolve_handoff_cutover_target(raw_id, session_id)
+    if rc != 0:
+        return rc, resolved
+    wt_id = str(resolved.get("worktree_id") or "")
+    config = resolved.get("config")
 
     # A live cutover needs a mux session to cut into. Without one, the caller
     # (extension) must fall back to the store-task-and-reply flow.
-    anchor_mode = wt_id == tracking.ANCHOR_ID
+    anchor_mode = bool(resolved.get("anchor_mode"))
 
     mux_session = None
     record = None
@@ -2960,6 +2978,150 @@ def _handoff_cutover_spawn_result(
     return 0, response
 
 
+def _latest_handoff_cutover_retry_handoff(
+    record: tracking.WorktreeRecord,
+) -> tracking.SessionHandoff | None:
+    """Return the most recent non-cancelled handoff on ``record``."""
+    handoffs = [
+        handoff
+        for handoff in getattr(record, "handoffs", []) or []
+        if getattr(handoff, "state", None) != "cancelled"
+    ]
+    if not handoffs:
+        return None
+    return max(handoffs, key=lambda handoff: getattr(handoff, "ordinal", 0))
+
+
+def _handoff_cutover_retry_result(
+    args: argparse.Namespace,
+) -> tuple[int, dict[str, object]]:
+    """Retry a stuck cutover without duplicating a live successor."""
+    session_id = getattr(args, "session_id", None)
+    rc, resolved = _resolve_handoff_cutover_target(
+        getattr(args, "worktree_id", None),
+        session_id,
+    )
+    if rc != 0:
+        return rc, resolved
+    wt_id = str(resolved.get("worktree_id") or "")
+    if wt_id == tracking.ANCHOR_ID:
+        return 3, {
+            "ok": False,
+            "error": "handoff-cutover --retry only supports tracked worktrees",
+        }
+    record_path = cfg.tracking_dir() / f"{wt_id}.yaml"
+    if not record_path.exists():
+        return 1, {"ok": False, "error": f"Worktree not found: {wt_id}"}
+    record = tracking.load_record(record_path)
+    handoff = _latest_handoff_cutover_retry_handoff(record)
+    if handoff is None:
+        return 1, {
+            "ok": False,
+            "error": f"worktree {wt_id} has no recorded handoff to retry",
+        }
+    predecessor_session = str(getattr(handoff, "predecessor", "") or "").strip() or None
+    if session_id and predecessor_session and session_id != predecessor_session:
+        return 2, {
+            "ok": False,
+            "error": (
+                "handoff-cutover --retry must be invoked from the most recent "
+                f"handoff predecessor ({predecessor_session}), not {session_id}"
+            ),
+        }
+    handoff_token = str(getattr(handoff, "token", "") or "").strip() or None
+    explicit_token = str(getattr(args, "handoff_token", "") or "").strip() or None
+    if explicit_token and explicit_token != handoff_token:
+        return 2, {
+            "ok": False,
+            "error": (
+                f"handoff-cutover --retry targets the most recent handoff "
+                f"token {handoff_token}, not {explicit_token}"
+            ),
+        }
+    head_session = record.resolved_head_session
+    recorded_successor = str(getattr(handoff, "successor", "") or "").strip() or None
+    if recorded_successor and head_session not in {None, recorded_successor}:
+        return 2, {
+            "ok": False,
+            "error": (
+                "the most recent handoff's recorded successor disagrees with "
+                f"the resolved worktree head ({head_session}); retry refused"
+            ),
+        }
+    live_session = recorded_successor or (
+        str(getattr(handoff, "candidate", "") or "").strip() or None
+    )
+    expected_mux_session = sessions.mux_session_name(wt_id)
+    mux_bin = sessions._mux_bin()
+    if live_session:
+        try:
+            binding = sessions.mux_binding_for_session(
+                live_session,
+                expected_session_name=expected_mux_session,
+            )
+        except Exception:
+            binding = None
+        pane_id = str((binding or {}).get("pane_id") or "").strip() or None
+        if (
+            binding
+            and str(binding.get("session_name") or "").strip() == expected_mux_session
+            and pane_id
+            and sessions._mux_pane_alive(pane_id, mux_bin)
+        ):
+            response = {
+                "ok": True,
+                "outcome": "refocused",
+                "worktree_id": wt_id,
+                "handoff_token": handoff_token,
+                "handoff_state": (
+                    "linked" if recorded_successor else getattr(handoff, "state", None)
+                ),
+                "session": expected_mux_session,
+                "successor_session": live_session,
+                "successor_pane": pane_id,
+            }
+            if getattr(args, "dry_run", False):
+                response["dry_run"] = True
+                return 0, response
+            if sessions.mux_focus_pane(expected_mux_session, pane_id):
+                return 0, response
+            response.update(
+                {
+                    "ok": False,
+                    "error": (
+                        "a live successor pane already exists, but its mux "
+                        "window could not be focused"
+                    ),
+                }
+            )
+            return 5, response
+    request = _monitor_read_session_state_handoff(
+        _monitor_session_state_handoff_path(predecessor_session)
+    )
+    seed = str(getattr(args, "seed", "") or "").strip() or None
+    request_token = str((request or {}).get("handoffId") or "").strip() or None
+    if request_token in {None, handoff_token}:
+        if recorded_successor:
+            prompt_text = str((request or {}).get("promptText") or "").strip()
+            if prompt_text:
+                seed = prompt_text
+        if not seed:
+            request_seed = str((request or {}).get("seed") or "").strip()
+            if request_seed:
+                seed = request_seed
+    spawn_args = argparse.Namespace(**vars(args))
+    spawn_args.worktree_id = wt_id
+    spawn_args.session_id = predecessor_session or session_id
+    spawn_args.handoff_token = None if recorded_successor else handoff_token
+    spawn_args.seed = seed
+    rc, response = _handoff_cutover_spawn_result(spawn_args)
+    response.setdefault("worktree_id", wt_id)
+    response.setdefault("handoff_token", handoff_token)
+    if rc == 0 and response.get("ok"):
+        response["outcome"] = "spawned"
+    return rc, response
+
+
 # A losing Stage-13 claimant's brief retry window (see _maybe_emit_stage_13):
 # short enough to add negligible latency to a hook/monitor call, long enough
 # for the winner's own log_event() + failure-detection + rollback to settle.
@@ -3157,7 +3319,7 @@ def _handoff_cutover_retire_result(
 
 
 def cmd_handoff_cutover(args: argparse.Namespace) -> int:
-    """Live-cutover handoff: spawn a seeded successor Copilot or retire a pane.
+    """Live-cutover handoff: spawn/refocus a successor Copilot or retire a pane.
 
     Two modes (JSON out on stdout either way):
 
@@ -3180,6 +3342,10 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
       leaves a lingering parallel session that the mux later restores as a
       reappearing pane. Success requires **both** the pane retired and the old
       Copilot process gone.
+    * **retry** (``--retry``): inspect the most recent handoff on this worktree
+      and positively confirm whether its recorded successor session already has
+      a live pane in this mux. If so, do **not** spawn again -- just refocus
+      that existing window. If not, fall back to the ordinary spawn path.
 
     The mux choreography lives here (agent-worktrees owns launch + mux); the
     context-handoff extension is a thin trigger that shells out to this command.
@@ -3189,6 +3355,11 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
     if retire_pane:
         rc, result = _handoff_cutover_retire_result(args)
         _json_output(result)
+        return rc
+
+    if getattr(args, "retry", False):
+        rc, response = _handoff_cutover_retry_result(args)
+        _json_output(response)
         return rc
 
     # ── Spawn / cutover mode ─────────────────────────────────────────────
@@ -21925,6 +22096,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Retire mode: double-Ctrl-C this pane id (Copilot's "
         "clean quit) and report whether it exited",
+    )
+    p.add_argument(
+        "--retry",
+        action="store_true",
+        help="Retry mode: refocus an already-live successor pane for this "
+        "worktree's latest handoff, otherwise fall back to the ordinary "
+        "spawn attempt",
     )
     p.add_argument(
         "--successor-verified",

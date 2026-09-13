@@ -72,7 +72,7 @@ test("extension and CLI share the SDK-free handoff implementation", () => {
   assert.doesNotMatch(extension, /function (?:makeHandoffMetadata|dispatchHandoff|consumeDispatchHandoffTask)/);
 });
 
-test("payload-local fallback documents trigger and consume, not cutover", () => {
+test("payload-local fallback documents trigger, consume, and retry-cutover", () => {
   const skill = readFileSync(
     join(plugin, "skills", "context-handoff", "SKILL.md"),
     "utf8",
@@ -88,6 +88,7 @@ test("payload-local fallback documents trigger and consume, not cutover", () => 
     "trigger --handoff-token",
     "consume --locator \"task:<task-id>\"",
     "consume --locator \"file:<handoff-id>\"",
+    "retry-cutover --session-id",
   ]) {
     assert.ok(skill.includes(command), `fallback must document ${command}`);
   }

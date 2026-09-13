@@ -16,7 +16,7 @@ This plugin ships four cooperating payload pieces:
 | **continuity guidance hook** | Declarative `sessionStart` hook | Writes the full owner-marked continuity contract to the exact session folder and emits only `{}` |
 | **context-handoff extension** | Copilot CLI session extension (`extension.mjs`) | Monitors `session.usage_info` for exact token counts; applies percentage-based soft/hard thresholds (55% / 70% by default) with optional repository overrides, delivered on the next idle; provides `generate_handoff_prompt`, `save_handoff_prompt`, `consume_handoff`, and `trigger_handoff` tools plus **`/handoff-continue`**, **`/consume-handoff`**, and the compatibility **`/resume-handoff`** alias |
 | **context-handoff skill** | Skill | Owns the `/handoff` workflow: compose the continuation prompt from the extension's structured facts and the agent's live context, decide when to store it, and decide whether to ask or trigger |
-| **payload-local fallback CLI** | Node script (`handoff-cli.mjs`) | Extension-free facts, save, trigger, task/file consume, and `check-heads` auditing. Invoked by exact verified plugin-root-relative path; it has no PATH binstub or install/runtime step and shares `handoff-core.mjs` with the extension |
+| **payload-local fallback CLI** | Node script (`handoff-cli.mjs`) | Extension-free facts, save, trigger, task/file consume, `check-heads` auditing, and a safe `retry-cutover` remediation for a superseded session. Invoked by exact verified plugin-root-relative path; it has no PATH binstub or install/runtime step and shares `handoff-core.mjs` with the extension |
 
 ## The boundary
 
@@ -258,6 +258,7 @@ CH="$CH_ROOT/extensions/context-handoff/handoff-cli.mjs"
 
 node "$CH" facts --json --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 node "$CH" check-heads --json --cwd "$PWD"
+node "$CH" retry-cutover --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 node "$CH" save --title "<topic>" --prompt-file "<handoff.md>" \
   --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 node "$CH" trigger --title "<topic>" --prompt-file "<handoff.md>" \
@@ -286,6 +287,7 @@ $ch = Join-Path $chRoot 'extensions\context-handoff\handoff-cli.mjs'
 if (-not (Test-Path -LiteralPath $ch -PathType Leaf)) { throw 'context-handoff payload-local CLI not found' }
 node $ch facts --json --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch check-heads --json --cwd $PWD
+node $ch retry-cutover --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch save --title '<topic>' --prompt-file '<handoff.md>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch trigger --title '<topic>' --prompt-file '<handoff.md>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch trigger --handoff-token '<HANDOFF_TOKEN>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
@@ -315,8 +317,18 @@ Use the command directly:
 node "$CH" check-heads --json --cwd "$PWD"
 ```
 
-If the worktree is otherwise healthy and you simply need the successor to take
-over, store or re-trigger the handoff and let a fresh cutover move the head.
+If you are looking at a superseded predecessor session and the worktree already
+has a live successor pane, use:
+
+```bash
+node "$CH" retry-cutover --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
+```
+
+That shells to `agent-worktrees handoff-cutover --retry --session-id <sid> --json`: it
+first checks whether the latest handoff already has a live successor pane and,
+if so, refocuses that existing pane instead of spawning a duplicate successor.
+Only when no live successor exists does it fall back to a fresh spawn attempt.
+
 If the ledger itself is stale, repair the underlying worktree state with
 `agent-worktrees doctor --fix`, or explicitly repoint the head with
 `agent-worktrees conclude-session` / `link-succession` once you know the exact

@@ -64,9 +64,24 @@ Look for:
 
 ## Remediate it
 
-1. **If the worktree itself is healthy and you simply need pickup to happen,**
-   save or re-trigger the handoff and let a fresh cutover take over. The next
-   successful successor registration should move the head automatically.
+1. **If you are still attached to the superseded predecessor session, run the
+   safe retry command first:**
+
+   ```bash
+   node "$CH" retry-cutover --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
+   ```
+
+   PowerShell:
+
+   ```powershell
+   node $ch retry-cutover --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
+   ```
+
+   This shells to `agent-worktrees handoff-cutover --retry --session-id <sid> --json`.
+   It positively confirms whether the latest handoff already has a live
+   successor pane. If one exists, it **refocuses** that pane instead of
+   spawning anything new; only when no live successor exists does it fall back
+   to a fresh spawn attempt.
 2. **If the ledger cache is stale or the handoff is stranded after a failed
    successor,** run `agent-worktrees doctor --fix` to repair safe worktree <!-- marketplace-isolation: allow agent-worktrees-management -->
    state, including stale head cache and orphaned handoff cases.
