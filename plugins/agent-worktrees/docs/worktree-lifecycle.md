@@ -319,7 +319,7 @@ residue, and each **spares anything in use**:
 | `gc` | tracked reap (the cleanup verdict) **+ leaked system/bridge worktrees + on-disk orphan dirs + git prune** | see the managed-reap invariant below |
 | `reap-sessions` | leaked `wt-<id>` mux sessions whose worktree is finalized/gone/untracked **and** idle past grace | **attached, active, or recently-busy** sessions |
 | `reap-shells` | orphaned launcher shells (pwsh/python scaffolding stranded by a force-closed terminal) | anything with a live descendant; reports-only unless `--yes` |
-| `remove-system <id>` | one **system worktree** by id (the manual escape hatch) | — (explicit, targeted) |
+| `remove-system <id>` | one **system worktree** by id (the manual escape hatch) | dirty working tree, unmerged/unpushed branch content, branch drift, a live PR (open/creating/unpopulated), or a live outbound resource claim -- refused by default; an unadvertised `--force` overrides |
 
 ### System worktrees (`sys-*`, `[system]`/`[delegate]`)
 
@@ -332,8 +332,13 @@ finalizes without tearing its worktree down, they **leak**, and because their
 tracking status stays `active` (never marked complete) `gc`'s managed sweep
 records them as `not-final-or-unused` and keeps them — so they can accumulate.
 Clear a *provably dead* one with **`remove-system <id>`** (verify it isn't a live
-session first); the durable fix is for the owning service to `remove-system` on
-task completion.
+session first) -- it also independently guards against discarding real content:
+it refuses (by default) a worktree with uncommitted changes, unmerged/unpushed
+branch content (squash-merge-aware), checkout branch drift, a live PR record, or
+a live outbound resource claim, naming the blocker so the caller can resolve it;
+an unadvertised `--force` exists for a caller that has already confirmed
+discarding is correct. The durable fix is for the owning service to
+`remove-system` on task completion.
 
 ### The managed-reap invariant — what `gc` will never touch
 
