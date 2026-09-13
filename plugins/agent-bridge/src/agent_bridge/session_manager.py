@@ -1947,7 +1947,7 @@ class SessionManager:
             with contextlib.suppress(Exception):
                 await bridge_lock.write(
                     session_id, target.worktree_id, spawned.child_pid)
-        complete_host_launch(self, session_id)
+        complete_host_launch(self, session_id, client, acp_sid)
         return client, acp_sid
 
     async def _rollback_failed_host_launch(
@@ -2080,6 +2080,12 @@ class SessionManager:
     @staticmethod
     def _background_recovery_allowed(session: Session) -> bool:
         """Keep deliberate stops dormant, but retain restart recovery intent."""
+        container = session.target.container
+        if (
+            isinstance(container, dict)
+            and container.get("launch_pending_session_id") == session.session_id
+        ):
+            return False
         if session.status in {SessionStatus.ENDED, SessionStatus.FAILED}:
             return False
         return session.status != SessionStatus.STOPPED or session.restart_status in {
@@ -4407,12 +4413,14 @@ class SessionManager:
 
         async def _cleanup_failed_process_launch() -> None:
             """Reap a process-owned launch before recording terminal failure."""
-            if agent_proc is None:
+            if agent_proc is None and session.client is None:
                 return
             from .session_ownership import cleanup_failed_resume
 
-            pid = agent_proc.pid
+            pid = agent_proc.pid if agent_proc is not None else None
             await cleanup_failed_resume(self, session, client)
+            if agent_proc is None:
+                return
             session.event_log.append("failed_launch_cleanup", {
                 "pid": pid,
                 "reaped": not agent_proc.alive,

@@ -116,9 +116,15 @@ async def spawn_host_owned(
     return _remember(manager, session_id, spawner, spawned)
 
 
-def complete_host_launch(manager: SessionManager, session_id: str) -> None:
+def complete_host_launch(
+    manager: SessionManager, session_id: str, client: AcpClient, acp_session_id: str,
+) -> None:
     """Commit a fully initialized host before handing its client to the caller."""
     pending = manager._pending_host_launches[session_id]
+    session = manager._sessions[session_id]
+    manager.db.update_session_acp_id(session_id, acp_session_id)
+    session.acp_session_id = acp_session_id
+    session.client = client
     extra = dict(pending.record.extra)
     extra.pop("launch_cleanup_pending", None)
     completed = replace(pending.record, extra=extra)
