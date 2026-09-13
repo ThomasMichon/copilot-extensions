@@ -16,7 +16,7 @@ This plugin ships four cooperating payload pieces:
 | **continuity guidance hook** | Declarative `sessionStart` hook | Writes the full owner-marked continuity contract to the exact session folder and emits only `{}` |
 | **context-handoff extension** | Copilot CLI session extension (`extension.mjs`) | Monitors `session.usage_info` for exact token counts; applies percentage-based soft/hard thresholds (55% / 70% by default) with optional repository overrides, delivered on the next idle; provides `generate_handoff_prompt`, `save_handoff_prompt`, `consume_handoff`, and `trigger_handoff` tools plus **`/handoff-continue`**, **`/consume-handoff`**, and the compatibility **`/resume-handoff`** alias |
 | **context-handoff skill** | Skill | Owns the `/handoff` workflow: compose the continuation prompt from the extension's structured facts and the agent's live context, decide when to store it, and decide whether to ask or trigger |
-| **payload-local fallback CLI** | Node script (`handoff-cli.mjs`) | Extension-free facts, save, trigger, and task/file consume. Invoked by exact verified plugin-root-relative path; it has no PATH binstub or install/runtime step and shares `handoff-core.mjs` with the extension |
+| **payload-local fallback CLI** | Node script (`handoff-cli.mjs`) | Extension-free facts, save, trigger, task/file consume, and `check-heads` auditing. Invoked by exact verified plugin-root-relative path; it has no PATH binstub or install/runtime step and shares `handoff-core.mjs` with the extension |
 
 ## The boundary
 
@@ -257,6 +257,7 @@ CH="$CH_ROOT/extensions/context-handoff/handoff-cli.mjs"
 [ -f "$CH" ] || { echo "context-handoff payload-local CLI not found" >&2; exit 1; }
 
 node "$CH" facts --json --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
+node "$CH" check-heads --json --cwd "$PWD"
 node "$CH" save --title "<topic>" --prompt-file "<handoff.md>" \
   --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 node "$CH" trigger --title "<topic>" --prompt-file "<handoff.md>" \
@@ -284,12 +285,42 @@ if (-not (Test-Path -LiteralPath "$chRoot\plugin.json")) {
 $ch = Join-Path $chRoot 'extensions\context-handoff\handoff-cli.mjs'
 if (-not (Test-Path -LiteralPath $ch -PathType Leaf)) { throw 'context-handoff payload-local CLI not found' }
 node $ch facts --json --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
+node $ch check-heads --json --cwd $PWD
 node $ch save --title '<topic>' --prompt-file '<handoff.md>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch trigger --title '<topic>' --prompt-file '<handoff.md>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch trigger --handoff-token '<HANDOFF_TOKEN>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch consume --locator 'task:<task-id>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch consume --locator 'file:<handoff-id>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 ```
+
+## Auditing handoff head alignment
+
+`check-heads` compares the authoritative `agent-worktrees head-session --json`
+ledger view for each known worktree against the resident status-monitor's
+current registry of `wt-<id>` sessions. Its main failure mode is a pending
+handoff that still exists in the ledger but is not currently reachable through
+the monitor's served-session roster, which means a proactive cutover spawn will
+not visit that worktree.
+
+- `pending-handoff-unregistered` — the ledger still has one or more pending
+  handoffs, but the monitor currently has no registered `wt-<id>` target for
+  that worktree.
+- `pending-handoff-registry-path-mismatch` — the monitor has a registered
+  `wt-<id>` entry, but it points at a different checkout path than the worktree
+  inventory row being audited.
+
+Use the command directly:
+
+```bash
+node "$CH" check-heads --json --cwd "$PWD"
+```
+
+If the worktree is otherwise healthy and you simply need the successor to take
+over, store or re-trigger the handoff and let a fresh cutover move the head.
+If the ledger itself is stale, repair the underlying worktree state with
+`agent-worktrees doctor --fix`, or explicitly repoint the head with
+`agent-worktrees conclude-session` / `link-succession` once you know the exact
+predecessor and successor ids.
 
 ## Thresholds
 

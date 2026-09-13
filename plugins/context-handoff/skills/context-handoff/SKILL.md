@@ -45,6 +45,10 @@ cutover choreography. If a worktree manager, agent-bridge, or another control
 system wants to act on the pending handoff, it can. Otherwise a human can use
 the short seed manually.
 
+For a worktree-level cutover mismatch between the head-session ledger and a
+control plane's current sweep target, use the dedicated
+`diagnosing-handoff-cutover` skill.
+
 ## Continuity contract
 
 A handoff transfers **active responsibility for the original objective**. It is
@@ -226,6 +230,7 @@ CH="$CH_ROOT/extensions/context-handoff/handoff-cli.mjs"
 [ -f "$CH" ] || { echo "context-handoff payload-local CLI not found" >&2; exit 1; }
 
 node "$CH" facts --json --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
+node "$CH" check-heads --json --cwd "$PWD"
 node "$CH" save --title "<topic>" --prompt-file "<handoff.md>" \
   --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 node "$CH" trigger --title "<topic>" --prompt-file "<handoff.md>" \
@@ -253,6 +258,7 @@ if (-not (Test-Path -LiteralPath "$chRoot\plugin.json")) {
 $ch = Join-Path $chRoot 'extensions\context-handoff\handoff-cli.mjs'
 if (-not (Test-Path -LiteralPath $ch -PathType Leaf)) { throw 'context-handoff payload-local CLI not found' }
 node $ch facts --json --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
+node $ch check-heads --json --cwd $PWD
 node $ch save --title '<topic>' --prompt-file '<handoff.md>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch trigger --title '<topic>' --prompt-file '<handoff.md>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch trigger --handoff-token '<HANDOFF_TOKEN>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
