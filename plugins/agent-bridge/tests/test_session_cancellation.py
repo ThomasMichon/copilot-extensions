@@ -902,7 +902,12 @@ async def test_remote_reap_fences_container_cleanup_to_exact_record(
         lock.release.assert_called_once()
 
 
-async def test_remote_index_removal_failure_retains_cleanup_ownership(owned_context, monkeypatch):
+@pytest.mark.parametrize("failure_stage", ["index", "marker"])
+async def test_remote_index_removal_failure_retains_cleanup_ownership(
+    owned_context, monkeypatch, failure_stage,
+):
+    import json
+
     ctx = owned_context
     record = _remote_record(ctx)
     session_id = record.session_id
@@ -913,9 +918,14 @@ async def test_remote_index_removal_failure_retains_cleanup_ownership(owned_cont
     lock = Mock()
     ctx.manager._container_locks["example-container"] = (lock, session_id)
     ctx.manager._container_lock_sessions[session_id] = "example-container"
+    ctx.db.update_session_target(session_id, ctx.session.target.to_json(), ".")
     monkeypatch.setattr(ctx.manager, "_remote_reap", AsyncMock(return_value=True))
     flush = ctx.manager._host_index._flush
-    monkeypatch.setattr(ctx.manager._host_index, "_flush", Mock(side_effect=OSError("remove failed")))
+    update_target = ctx.db.update_session_target
+    if failure_stage == "index":
+        monkeypatch.setattr(ctx.manager._host_index, "_flush", Mock(side_effect=OSError("remove failed")))
+    else:
+        monkeypatch.setattr(ctx.db, "update_session_target", Mock(side_effect=OSError("remove failed")))
     ctx.manager._schedule_remote_reap(record, "old cleanup")
     task = next(iter(ctx.manager._remote_reaps_by_session[session_id]))
     with pytest.raises(OSError, match="remove failed"):
@@ -924,8 +934,10 @@ async def test_remote_index_removal_failure_retains_cleanup_ownership(owned_cont
     assert ctx.manager._host_index.get(session_id) == record
     assert ctx.manager._remote_reap_pending(session_id)
     assert ctx.session.target.container["launch_pending_session_id"] == session_id
+    assert json.loads(ctx.db.get_session(session_id)["target_json"])["container"]["launch_pending_session_id"] == session_id
     lock.release.assert_not_called()
     monkeypatch.setattr(ctx.manager._host_index, "_flush", flush)
+    monkeypatch.setattr(ctx.db, "update_session_target", update_target)
     await ctx.manager.stop_session(session_id, reap_host=True)
     assert not ctx.manager._remote_reap_pending(session_id)
     assert ctx.manager._host_index.get(session_id) is None

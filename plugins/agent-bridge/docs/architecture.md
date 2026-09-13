@@ -482,6 +482,10 @@ restart does not inherently close the child's pipes.
   persistence errors refuse duplicate resume launches. Failed authority
   registration releases a newly acquired container lock and leaves recovery
   explicitly inconclusive.
+  Remote cleanup clears the durable container marker before removing authority;
+  marker writes restore their in-memory value on failure, and an unsuccessful
+  index removal restores the marker before returning the cleanup error. The
+  venue lock is released only after both metadata operations succeed.
   The manager remains the public facade; `session_resume.py`,
   `session_teardown.py`, and `session_ownership.py` own the bounded lifecycle
   implementations. Additive session migrations live in `db_migrations.py`.

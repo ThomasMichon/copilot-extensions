@@ -109,8 +109,19 @@ async def reap_remote_record(
     current_revision = manager._host_index.revision(record.session_id) if manager._host_index else None
     if confirmed:
         if current == record and current_revision == record_revision:
-            manager._forget_host_record(record)
+            owner = manager._sessions.get(record.session_id)
+            container = owner.target.container if owner is not None else None
+            had_marker = (
+                isinstance(container, dict)
+                and container.get("launch_pending_session_id") == record.session_id
+            )
             manager._set_container_launch_pending(record.session_id, False)
+            try:
+                manager._forget_host_record(record)
+            except Exception:
+                if had_marker:
+                    manager._set_container_launch_pending(record.session_id, True)
+                raise
             manager._release_container_lock(record.session_id)
             owned = manager._remote_reaps_by_session.get(record.session_id)
             if owned is not None:
