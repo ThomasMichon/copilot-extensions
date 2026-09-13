@@ -467,6 +467,74 @@ scenarios.
 
 ## Journal
 
+### 2026-09-12 - Componentize queue.py further: extract queue_spawn_reservations.py
+
+- Continuing the operator's standing componentization instruction.
+  **First attempted the `supervise` CLI command group in `__main__.py`**
+  (the same slice an external report about `__main__.py` size prompted) --
+  built a complete extraction (`supervise_commands.py` + a shared
+  `cli_proxy.py` factored out of `loop_commands.py`) and only discovered
+  on rebase, right before pushing, that PR #2542
+  ("agent-dispatch: extract supervise_cli module to fix module-size gate
+  on main") had *already landed the identical extraction* moments earlier
+  as an emergency fix for a blocking CI failure (`__main__.py` had grown
+  past its grandfathered ceiling on `main` itself). Caught via the rebase
+  conflict rather than a wasted PR: `git rebase --abort` +
+  `git reset --hard origin/main` discarded the redundant local commit
+  before it was ever pushed, and picked a different, still-needed slice
+  instead. **Lesson for future legs**: `agent-worktrees git sync`
+  immediately before starting a *new* slice (not just before the final
+  push) would have surfaced this collision earlier, before writing 700+
+  lines of duplicate code -- worth doing when other agents/PRs are
+  plausibly touching the same file concurrently.
+- Picked the spawn-reservation lifecycle cluster in `queue.py` instead
+  (`reserve_spawn`, `rearm_spawn`, `_update_reservation`, `record_spawn`,
+  `record_spawn_worktree`, `record_cold`, `fail_spawn`, `defer_spawn`,
+  `retire_spawn`, `request_spawn_release`, `settle_spawn`,
+  `record_spawn_conclusion`, `claim_spawn_conclusion_retry`,
+  `validate_spawn_conclusion_claim` -- ~850 lines, the largest remaining
+  cluster after the two already extracted) -- verified via the same
+  AST-free-name-walk + test-monkeypatch grep as every prior slice (no
+  test mocks any of these fourteen methods by name).
+- Extracted them into a new `SpawnReservationMixin` in
+  `queue_spawn_reservations.py`, composed via
+  `class TaskQueue(ScheduleRegistrationMixin, RoutingAssignmentMixin,
+  SpawnReservationMixin):`. Four module-level helpers used exclusively by
+  this cluster (`spawn_key`, `_conclusion_payload`,
+  `_validate_conclusion_claim`, `_newer_worktree_reservation`) moved with
+  it. **Applied the `queue_records.py` lesson from the start again**:
+  `SpawnReservation` (the row-snapshot dataclass, previously defined in
+  `queue.py` itself) and `Status` (the task-state constants class, used
+  100 times across `queue.py` but with zero dependencies of its own) both
+  moved into the existing dependency-free `queue_records.py` alongside
+  `TaskError`/`SpawnState`/the schedule-registry records -- ordinary
+  top-level imports on both sides, no circular import, no
+  `get_type_hints()` gap.
+- **The three simple read-only lookups (`get_reservation`,
+  `latest_reservation`, `list_reservations`) stayed behind in `queue.py`
+  itself** -- moving the full 917-line block would have put the new
+  module at 1,021 lines, over the hard cap for a new file; `list_reservations`
+  also calls `self._canonical_repo` (a genuine `TaskQueue` helper), a
+  cleaner reason to leave the lookups on the class that still owns that
+  helper rather than force every dependency across the split.
+- Added `tests/test_queue_spawn_reservations.py`: guard-marked import-guard
+  tests, a guard-marked `get_type_hints()` regression test, and module-level
+  helper importability checks. Full behavioral coverage already existed via
+  `test_spawn_reservation.py`, `test_spawn_consistency_sweep.py`, and the
+  routing/supervisor integration coverage.
+- `queue.py`: 5,999 -> **5,012 lines**; `queue_spawn_reservations.py`: 955
+  lines; `queue_records.py` grows to 241 lines (`SpawnReservation` +
+  `Status` added). All comfortably under the 1,000-line cap.
+  `tools/module-size-baseline.json` refreshed (shrink-only) for `queue.py`
+  (and picked up the concurrent PR #2542's `__main__.py` shrink to 4,979
+  in the same refresh, since that hadn't been baselined yet either).
+- Full `agent-dispatch` suite (`tools/run-plugin-tests.py agent-dispatch`)
+  passed before and after; zero regressions. `ruff check --select F,E9`
+  and `ruff format` clean on every changed/new file.
+- Bumped agent-dispatch 0.1.2-dev90 -> dev91 (dev90 was already claimed by
+  the concurrent PR #2542) and ran the instruction-projections sync
+  immediately after.
+
 ### 2026-09-12 - Componentize queue.py further: extract queue_routing_assignments.py
 
 - Continuing the operator's standing componentization instruction, this
