@@ -96,7 +96,7 @@
   "plugins/budget-guidance/scripts/versioned_runtime.py": 1245,
   "plugins/customizing-copilot/libs/plugin-activation/src/plugin_activation/resolver.py": 1270,
   "plugins/customizing-copilot/skills/reviewing-customizations/scripts/instruction_projections.py": 1770,
-  "plugins/customizing-copilot/skills/reviewing-customizations/scripts/scan-customizations.py": 2415,
+  "plugins/customizing-copilot/skills/reviewing-customizations/scripts/scan-customizations.py": 2642,
   "plugins/harness-knowledge/skills/binding-knowledge/scripts/bind_knowledge.py": 1043,
   "tools/clean-room/scenarios/agent-index-installation-cells/scenario.py": 2429,
   "tools/clean-room/scenarios/agent-machines-installation-cells/scenario.py": 1117,
