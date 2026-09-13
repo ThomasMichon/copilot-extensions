@@ -203,7 +203,7 @@ def test_no_config_emits_safe_defaults(tmp_path: Path) -> None:
     repo = _git_repo(tmp_path / "repo")
     context = _context(_run(_native_hook(), repo, tmp_path / "home"))
     assert context.startswith(
-        "[owner: ai-attribution@0.1.0-dev12] Before publishing"
+        "[owner: ai-attribution@0.1.0-dev13] Before publishing"
     )
     assert "another party's repo require" in context
     assert "verified operator-owned repo, omit disclosure" in context
@@ -250,7 +250,7 @@ def test_payload_cwd_decodes_json_unicode_escapes(tmp_path: Path) -> None:
     hooks = _parity_hooks()
     for hook in hooks:
         assert _context(_run(hook, repo, tmp_path / "home")).startswith(
-            "[owner: ai-attribution@0.1.0-dev12]"
+            "[owner: ai-attribution@0.1.0-dev13]"
         )
 
 
@@ -380,7 +380,7 @@ def test_payload_depth_limit_has_shell_parity(
     for result in results:
         if accepted:
             assert _context(result).startswith(
-                "[owner: ai-attribution@0.1.0-dev12]"
+                "[owner: ai-attribution@0.1.0-dev13]"
             )
         else:
             assert result.stdout == "{}"
@@ -1081,7 +1081,7 @@ def test_setup_skill_structurally_owns_fallback_and_policy_setup() -> None:
         "legacyMarkers": [],
     }
     pointer = SESSION_GUIDANCE_TEMPLATE.read_text(encoding="utf-8")
-    assert "COPILOT_AGENT_SESSION_ID" in pointer
+    assert "already-disclosed session folder" in pointer
     assert "instructions/ai-attribution/session-guidance.instructions.md" in pointer
     assert "~/.copilot/session-state" not in pointer
 

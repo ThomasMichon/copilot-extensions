@@ -5,13 +5,13 @@
       "customizationKind": "instructions",
       "destination": ".github/instructions/agent-dispatch/session-guidance.instructions.md",
       "plugin": "agent-dispatch@copilot-extensions",
-      "pluginVersion": "0.1.2-dev86",
-      "renderedBytes": 984,
-      "renderedSha256": "3a99a6589074b5118df9ddcd30435e1c40b8c43ac385489c27d4446194232387",
+      "pluginVersion": "0.1.2-dev88",
+      "renderedBytes": 784,
+      "renderedSha256": "e810823912b6df001fd308ba00265b87b8944dd6476b5f94ff7eec20871a762a",
       "sourceId": "session-guidance",
       "template": "instructions/session-guidance.instructions.md",
-      "templateBytes": 444,
-      "templateSha256": "6335aaf6994816c3bcab1ddc48a16208106e491fc33022317e377e9f40dd6696"
+      "templateBytes": 244,
+      "templateSha256": "8969f4b96dfa1febf513b11827a4e94d6f0db32ea775a8c7b3610474b4668dd4"
     },
     {
       "applyTo": "**",
