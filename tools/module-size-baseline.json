@@ -77,7 +77,7 @@
   "plugins/agent-worktrees/libs/plugin-activation/src/plugin_activation/resolver.py": 1270,
   "plugins/agent-worktrees/scripts/installation-context/installation_context.py": 9169,
   "plugins/agent-worktrees/scripts/versioned_runtime.py": 1245,
-  "plugins/agent-worktrees/src/agent_worktrees/__main__.py": 28852,
+  "plugins/agent-worktrees/src/agent_worktrees/__main__.py": 28874,
   "plugins/agent-worktrees/src/agent_worktrees/config.py": 2098,
   "plugins/agent-worktrees/src/agent_worktrees/finalize.py": 1926,
   "plugins/agent-worktrees/src/agent_worktrees/git_ops.py": 1443,

@@ -9134,22 +9134,38 @@ def _pending_handoff_retire_requests(
     worktree_id = getattr(record, "worktree_id", None)
     if not worktree_id:
         return []
+    # The rolling activity.jsonl log is bounded (age + a 64-event read cap);
+    # a worktree with more than 64 later cutovers -- or one revisited well
+    # past the log's retention window -- can silently drop an older
+    # handoff's spawn/retire evidence right out of view. Both
+    # "handoff_cutover_spawn" and "handoff_predecessor_retire" are
+    # stage-mapped (HANDOFF_STAGE_MAP stages 8 and 11), so they also land in
+    # the durable, unrotated per-project trace store (handoff_trace.py,
+    # Phase 3) -- merge it in as the completeness backstop the bounded log
+    # can't be.
+    trace_events: list[dict[str, object]] = []
+    project = cfg.active_project()
+    if project:
+        try:
+            trace_events = handoff_trace.read_trace(project, worktree_id)
+        except Exception:
+            trace_events = []
+    spawn_events = [e for e in trace_events if e.get("event") == "handoff_cutover_spawn"]
+    spawn_events += activity.read_events(
+        worktree_id=worktree_id, event="handoff_cutover_spawn", limit=64,
+    )
     spawned = {
         str(event.get("handoff_token") or "").strip(): event
-        for event in activity.read_events(
-            worktree_id=worktree_id,
-            event="handoff_cutover_spawn",
-            limit=64,
-        )
+        for event in spawn_events
         if str(event.get("handoff_token") or "").strip()
     }
+    retire_events = [e for e in trace_events if e.get("event") == "handoff_predecessor_retire"]
+    retire_events += activity.read_events(
+        worktree_id=worktree_id, event="handoff_predecessor_retire", limit=64,
+    )
     retired = {
         str(event.get("handoff_token") or "").strip()
-        for event in activity.read_events(
-            worktree_id=worktree_id,
-            event="handoff_predecessor_retire",
-            limit=64,
-        )
+        for event in retire_events
         # Only a genuinely successful retirement counts as "handled" --
         # matching Stage 13's own success gate (see _maybe_emit_stage_13).
         # A failed attempt (e.g. "left-running" on a stale/incorrect
@@ -9298,7 +9314,13 @@ def cmd_handoffs_check(args: argparse.Namespace) -> int:
             if execute:
                 rc, response = _monitor_retire_handoff_predecessor(request)
                 finding["executed"] = True
-                finding["retired"] = rc == 0 and response.get("outcome") == "gone"
+                # `_handoff_cutover_retire_result`'s returned dict has no
+                # "outcome" key (that string is only computed for the
+                # activity-log event, never merged back) -- its actual
+                # success signal is `rc == 0` (== `response["ok"]`, set from
+                # `gone and proc_ok`). Checking a nonexistent "outcome" key
+                # made every real successful retire report retired=False.
+                finding["retired"] = rc == 0 and bool(response.get("ok"))
                 finding["result"] = response
             findings.append(finding)
 

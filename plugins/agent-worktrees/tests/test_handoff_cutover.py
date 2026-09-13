@@ -1778,6 +1778,13 @@ class TestCmdHandoffsCheck:
     def test_execute_retires_and_reports_success(
         self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
     ):
+        """Regression: the real ``_handoff_cutover_retire_result`` response
+        has no "outcome" key at all (that string is only computed for the
+        activity-log event, never merged back) -- its actual success signal
+        is ``ok``/``gone``. This mock intentionally omits "outcome" to match
+        that real shape; a prior version of cmd_handoffs_check checked
+        ``response.get("outcome") == "gone"``, which is always False against
+        the real function and reported every successful retire as failed."""
         self._record(
             tmp_tracking_dir, "wt-check-2",
             predecessor="old-sess", successor="new-sess",
@@ -1791,7 +1798,7 @@ class TestCmdHandoffsCheck:
         ))
         monkeypatch.setattr(
             m, "_monitor_retire_handoff_predecessor",
-            lambda req: (0, {"ok": True, "pane": req["retire_pane"], "outcome": "gone"}),
+            lambda req: (0, {"ok": True, "pane": req["retire_pane"], "gone": True}),
         )
 
         rc = m.cmd_handoffs_check(_ns(worktree_id="wt-check-2", execute=True, json=True))
@@ -1834,10 +1841,53 @@ class TestCmdHandoffsCheck:
         ))
         monkeypatch.setattr(
             m, "_monitor_retire_handoff_predecessor",
-            lambda req: (0, {"ok": True, "pane": req["retire_pane"], "outcome": "gone"}),
+            lambda req: (0, {"ok": True, "pane": req["retire_pane"], "gone": True}),
         )
 
         rc = m.cmd_handoffs_check(_ns(worktree_id="wt-check-6", execute=True, json=True))
+
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["found"] == 1
+        assert out["findings"][0]["retired"] is True
+
+    def test_finds_handoff_beyond_bounded_activity_log_via_durable_trace(
+        self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
+    ):
+        """Regression: activity.jsonl is bounded (age + a 64-event read cap),
+        so a worktree with more than 64 later cutovers -- or one revisited
+        past the log's retention window -- can drop an older handoff's
+        spawn/retire evidence out of the bounded activity.read_events()
+        window entirely. Both handoff_cutover_spawn and
+        handoff_predecessor_retire are stage-mapped, so they also land in
+        the durable, unrotated per-project trace store (Phase 3) -- this
+        must be consulted as a completeness backstop."""
+        self._record(
+            tmp_tracking_dir, "wt-check-7",
+            predecessor="old-sess", successor="new-sess",
+        )
+        # The bounded activity log has already aged this handoff's spawn
+        # event out -- simulate that by returning nothing from it.
+        monkeypatch.setattr(activity, "read_events", lambda **kw: [])
+        monkeypatch.setattr(m.cfg, "active_project", lambda: "aperture-labs")
+        monkeypatch.setattr(
+            m.handoff_trace, "read_trace",
+            lambda project, worktree_id: (
+                [{
+                    "event": "handoff_cutover_spawn",
+                    "handoff_token": "task-wt-check-7", "session_id": "old-sess",
+                    "old_pane": "%9", "expected_mux_session": "wt-wt-check-7",
+                    "predecessor_copilot_pid": 77, "predecessor_copilot_start_time": "old",
+                }]
+                if worktree_id == "wt-check-7" else []
+            ),
+        )
+        monkeypatch.setattr(
+            m, "_monitor_retire_handoff_predecessor",
+            lambda req: (0, {"ok": True, "pane": req["retire_pane"], "gone": True}),
+        )
+
+        rc = m.cmd_handoffs_check(_ns(worktree_id="wt-check-7", execute=True, json=True))
 
         assert rc == 0
         out = json.loads(capfd.readouterr().out)
@@ -1926,7 +1976,7 @@ class TestCmdHandoffsCheck:
             m, "_monitor_retire_handoff_predecessor",
             lambda req: (
                 retired_panes.append(req["retire_pane"]),
-                (0, {"ok": True, "pane": req["retire_pane"], "outcome": "gone"}),
+                (0, {"ok": True, "pane": req["retire_pane"], "gone": True}),
             )[1],
         )
 
