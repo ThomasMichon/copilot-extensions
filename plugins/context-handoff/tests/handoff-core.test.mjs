@@ -706,7 +706,7 @@ test("triggerHandoff logs the predecessor pid in the handoff_requested activity"
   );
   assert.ok(activityCall, "expected triggerHandoff to emit activity-log");
   assert.ok(
-    activityCall.argv.includes(`predecessor_pid=${process.pid}`),
+    activityCall.argv.includes(`predecessor_pid=${process.ppid}`),
     `expected predecessor_pid field in ${JSON.stringify(activityCall.argv)}`,
   );
 });
