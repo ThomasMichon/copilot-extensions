@@ -28,6 +28,33 @@ class TaskError(RuntimeError):
     """Raised on an illegal state transition or a lease/ownership violation."""
 
 
+class Status:
+    """The eight task states (string constants, stored verbatim)."""
+
+    PROPOSED = "proposed"
+    QUEUED = "queued"
+    CLAIMED = "claimed"
+    STARTED = "started"
+    #: Previously started, owner-preserving, dormant, and non-claimable.
+    SUSPENDED = "suspended"
+    COMPLETED = "completed"
+    ABANDONED = "abandoned"
+    #: Terminal failure: a held task requeued too many times (its owner kept
+    #: going gone) -- an actionable dead-letter end state rather than churning
+    #: crash -> gone -> requeue forever.
+    DEAD_LETTER = "dead_letter"
+
+    #: States a worker actively holds; recoverable by liveness GC (owner-gone).
+    HELD = frozenset({CLAIMED, STARTED})
+    #: Non-terminal states that retain an owner. Suspended tasks are deliberately
+    #: excluded from HELD because they have no active lease or embodiment.
+    OWNED = frozenset({CLAIMED, STARTED, SUSPENDED})
+    #: Terminal states -- no further transitions.
+    TERMINAL = frozenset({COMPLETED, ABANDONED, DEAD_LETTER})
+    #: Non-terminal states from which an abandon (with permission) is allowed.
+    ABANDONABLE = frozenset({PROPOSED, QUEUED, CLAIMED, STARTED, SUSPENDED})
+
+
 class SpawnState:
     """The lifecycle states of a spawn reservation."""
 
@@ -158,4 +185,57 @@ class ResourceReservation:
             acquired_at=row["acquired_at"],
             updated_at=row["updated_at"],
             expires_at=row["expires_at"],
+        )
+
+
+@dataclass(frozen=True)
+class SpawnReservation:
+    """A read-only snapshot of a spawn-reservation row."""
+
+    key: str
+    task_id: str
+    exclusive_key: str | None
+    attempt: int
+    state: str
+    reserved_by: str | None = None
+    session_handle: str | None = None
+    worktree: str | None = None
+    inherited_worktree: str | None = None
+    worktree_ownership: str | None = None
+    creating_host: str | None = None
+    driver: str | None = None
+    release_requested: bool = False
+    release_disposition: str | None = None
+    detail: str | None = None
+    conclusion_state: str | None = None
+    conclusion_detail: str | None = None
+    cleanup_claim_token: str | None = None
+    cleanup_claim_expires_at: float | None = None
+    reserved_at: float = 0.0
+    updated_at: float = 0.0
+
+    @classmethod
+    def _from_row(cls, row: sqlite3.Row) -> SpawnReservation:
+        return cls(
+            key=row["key"],
+            task_id=row["task_id"],
+            exclusive_key=row["exclusive_key"],
+            attempt=row["attempt"],
+            state=row["state"],
+            reserved_by=row["reserved_by"],
+            session_handle=row["session_handle"],
+            worktree=row["worktree"],
+            inherited_worktree=row["inherited_worktree"],
+            worktree_ownership=row["worktree_ownership"],
+            creating_host=row["creating_host"],
+            driver=row["driver"],
+            release_requested=bool(row["release_requested"]),
+            release_disposition=row["release_disposition"],
+            detail=row["detail"],
+            conclusion_state=row["conclusion_state"],
+            conclusion_detail=row["conclusion_detail"],
+            cleanup_claim_token=row["cleanup_claim_token"],
+            cleanup_claim_expires_at=row["cleanup_claim_expires_at"],
+            reserved_at=row["reserved_at"],
+            updated_at=row["updated_at"],
         )
