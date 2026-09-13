@@ -2497,6 +2497,7 @@ class SessionManager:
                             )
                             continue
                     if status == "live" and record is not None:
+                        lock_was_held = session.session_id in self._container_lock_sessions
                         container_target = (
                             session.target.container
                             if isinstance(session.target.container, dict)
@@ -2520,11 +2521,18 @@ class SessionManager:
                                     exc_info=True,
                                 )
                                 continue
-                        self._remote_recovery_inconclusive.discard(session.session_id)
-                        self._remote_recovery_skipped.discard(session.session_id)
                         if existing is not None:
                             record.resume_on_reattach = existing.resume_on_reattach
-                        self._host_index.register(record)
+                        try:
+                            self._host_index.register(record)
+                        except Exception:
+                            self._remote_recovery_inconclusive.add(session.session_id)
+                            if container_target is not None and existing is None and not lock_was_held:
+                                self._release_container_lock(session.session_id)
+                            log.error("Could not persist recovered authority for %s", session.session_id, exc_info=True)
+                            raise
+                        self._remote_recovery_inconclusive.discard(session.session_id)
+                        self._remote_recovery_skipped.discard(session.session_id)
                         if existing is None:
                             recovered += 1
                     elif status in {"dead", "missing"}:
@@ -2600,11 +2608,20 @@ class SessionManager:
                 getattr(rec, "port", None) != local_port
                 or endpoint.get("local_port") != local_port
             ):
-                rec.port = local_port
-                endpoint["local_port"] = local_port
-                rec.endpoint = endpoint
+                candidate = copy.deepcopy(rec)
+                candidate.port = local_port
+                candidate.endpoint = dict(endpoint, local_port=local_port)
                 if self._host_index is not None and is_dataclass(rec):
-                    self._host_index.register(rec)
+                    try:
+                        self._host_index.register(candidate)
+                    except Exception as exc:
+                        self._remote_recovery_inconclusive.add(rec.session_id)
+                        raise RemoteHostRecoveryPendingError(
+                            f"Could not persist refreshed forward for {rec.session_id}; "
+                            "retaining host authority and refusing duplicate spawn"
+                        ) from exc
+                rec.port = local_port
+                rec.endpoint = endpoint = candidate.endpoint
             if refresh_relays:
                 await self._replace_relays_from_endpoint(
                     rec.session_id,
@@ -3281,6 +3298,9 @@ class SessionManager:
         except asyncio.CancelledError:
             await _close_partial_reattach()
             raise
+        except RemoteHostRecoveryPendingError:
+            await _close_partial_reattach()
+            raise
         except Exception as exc:
             child_exit_code = (
                 streams.child_exit_code if streams is not None else None
@@ -3918,9 +3938,9 @@ class SessionManager:
 
     def _forget_host_record(self, rec: Any) -> None:
         """Remove reaped host metadata on the lifecycle event loop."""
-        self._pending_host_launches.pop(rec.session_id, None)
-        with contextlib.suppress(Exception):
+        if self._host_index is not None:
             self._host_index.remove(rec.session_id)
+        self._pending_host_launches.pop(rec.session_id, None)
         # #4272 bridge-lock: best-effort clear the lattice lock at teardown.
         # Fire-and-forget (this reap path is sync); a lingering lock is already
         # ignored by the picker's reader once the child pid dies.
@@ -3979,6 +3999,7 @@ class SessionManager:
         task = loop.create_task(reap_remote_record(
             self, copy.deepcopy(rec), session=session,
             generation=session._lifecycle_generation if session is not None else None,
+            record_revision=self._host_index.revision(rec.session_id) if self._host_index else None,
         ))
         self._remote_reap_tasks.add(task)
         owned = self._remote_reaps_by_session.setdefault(rec.session_id, set())

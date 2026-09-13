@@ -852,7 +852,7 @@ async def test_preconnect_start_claim_cleanup(owned_context, monkeypatch, fault,
     assert ctx.processes == []
 
 
-@pytest.mark.parametrize("replacement", [False, True])
+@pytest.mark.parametrize("replacement", ["none", "changed", "identical"])
 async def test_remote_reap_fences_container_cleanup_to_exact_record(
     owned_context, monkeypatch, replacement,
 ):
@@ -869,10 +869,10 @@ async def test_remote_reap_fences_container_cleanup_to_exact_record(
     lock = Mock()
     ctx.manager._container_locks["example-container"] = (lock, session_id)
     ctx.manager._container_lock_sessions[session_id] = "example-container"
-    newer = replace(record, nonce="replacement-nonce")
+    newer = replace(record, nonce="replacement-nonce") if replacement == "changed" else replace(record)
 
     async def disconnect(_host):
-        if replacement:
+        if replacement != "none":
             ctx.manager._host_index.register(newer)
 
     connection = SimpleNamespace(
@@ -890,7 +890,7 @@ async def test_remote_reap_fences_container_cleanup_to_exact_record(
         lambda rec: ctx.manager._host_index.remove(rec.session_id),
     )
     assert await reap_remote_record(ctx.manager, record)
-    if replacement:
+    if replacement != "none":
         assert ctx.manager._host_index.get(session_id) == newer
         assert ctx.session.target.container["launch_pending_session_id"] == session_id
         assert ctx.manager._container_lock_sessions[session_id] == "example-container"
@@ -900,6 +900,94 @@ async def test_remote_reap_fences_container_cleanup_to_exact_record(
         assert "launch_pending_session_id" not in ctx.session.target.container
         assert session_id not in ctx.manager._container_lock_sessions
         lock.release.assert_called_once()
+
+
+async def test_remote_index_removal_failure_retains_cleanup_ownership(owned_context, monkeypatch):
+    ctx = owned_context
+    record = _remote_record(ctx)
+    session_id = record.session_id
+    ctx.session.target = SpawnTarget(
+        type="command",
+        container={"name": "example-container", "launch_pending_session_id": session_id},
+    )
+    lock = Mock()
+    ctx.manager._container_locks["example-container"] = (lock, session_id)
+    ctx.manager._container_lock_sessions[session_id] = "example-container"
+    monkeypatch.setattr(ctx.manager, "_remote_reap", AsyncMock(return_value=True))
+    flush = ctx.manager._host_index._flush
+    monkeypatch.setattr(ctx.manager._host_index, "_flush", Mock(side_effect=OSError("remove failed")))
+    ctx.manager._schedule_remote_reap(record, "old cleanup")
+    task = next(iter(ctx.manager._remote_reaps_by_session[session_id]))
+    with pytest.raises(OSError, match="remove failed"):
+        await task
+    await asyncio.sleep(0)
+    assert ctx.manager._host_index.get(session_id) == record
+    assert ctx.manager._remote_reap_pending(session_id)
+    assert ctx.session.target.container["launch_pending_session_id"] == session_id
+    lock.release.assert_not_called()
+    monkeypatch.setattr(ctx.manager._host_index, "_flush", flush)
+    await ctx.manager.stop_session(session_id, reap_host=True)
+    assert not ctx.manager._remote_reap_pending(session_id)
+    assert ctx.manager._host_index.get(session_id) is None
+    lock.release.assert_called_once()
+
+
+async def test_recovered_container_releases_new_lock_after_index_failure(owned_context, monkeypatch):
+    ctx = owned_context
+    session_id = ctx.session.session_id
+    ctx.session.status = SessionStatus.IDLE
+    ctx.session.target = SpawnTarget(type="command", container={"name": "example-container"})
+    record = HostRecord(
+        session_id=session_id, port=51000, host_pid=123, child_pid=456,
+        boundary="container", extra={"remote_authority_v2": True},
+    )
+    spawner = SimpleNamespace(
+        boundary="container", can_inspect_without_wake=AsyncMock(return_value=True),
+        recover_record=AsyncMock(return_value=record),
+    )
+    lock = Mock()
+    monkeypatch.setattr("ssh_manager.TargetLock", Mock(return_value=lock))
+    monkeypatch.setattr(
+        "agent_bridge.session_host.container_transport.build_container_spawner",
+        Mock(return_value=spawner),
+    )
+    monkeypatch.setattr(ctx.manager._host_index, "_flush", Mock(side_effect=OSError("persist failed")))
+    with pytest.raises(OSError, match="persist failed"):
+        await ctx.manager._recover_remote_host_records(background=True)
+    lock.acquire.assert_called_once()
+    lock.release.assert_called_once()
+    assert session_id not in ctx.manager._container_lock_sessions
+    assert ctx.manager._host_index.get(session_id) is None
+    assert session_id in ctx.manager._remote_recovery_inconclusive
+
+
+async def test_forward_persistence_failure_refuses_duplicate_resume(owned_context, monkeypatch):
+    from agent_bridge.session_manager import RemoteHostRecoveryPendingError
+
+    ctx = owned_context
+    record = _remote_record(ctx)
+    record.extra = {}
+    ctx.manager._host_index.register(record)
+    ctx.session.status = SessionStatus.STOPPED
+    original_port = record.port
+    original_endpoint = dict(record.endpoint)
+    forward = SimpleNamespace(refresh=AsyncMock(return_value=51005), cancel=AsyncMock())
+    ctx.manager._forwards[record.session_id] = forward
+    monkeypatch.setattr(
+        ctx.manager, "_try_reattach_live_host",
+        SessionManager._try_reattach_live_host.__get__(ctx.manager),
+    )
+    monkeypatch.setattr(ctx.manager._host_index, "_flush", Mock(side_effect=OSError("persist failed")))
+    duplicate = AsyncMock(side_effect=AssertionError("must not create a duplicate host"))
+    monkeypatch.setattr(ctx.manager, "_resume_via_new_remote_host", duplicate)
+    with pytest.raises(RemoteHostRecoveryPendingError, match="persist refreshed forward"):
+        await ctx.manager.resume_session(record.session_id, drain=False)
+    duplicate.assert_not_awaited()
+    assert ctx.manager._host_index.get(record.session_id) is record
+    assert record.port == original_port
+    assert record.endpoint == original_endpoint
+    assert ctx.manager._forwards[record.session_id] is forward
+    assert ctx.processes == []
 
 
 async def test_stop_observes_reap_failure_completed_during_transport_cleanup(

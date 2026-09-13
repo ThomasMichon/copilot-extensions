@@ -475,6 +475,13 @@ restart does not inherently close the child's pipes.
   restart teardown persists its original restart intent with FAILED; only a
   successful cleanup retry transitions it to recoverable STOPPED. FAILED
   itself remains ineligible for background recovery.
+  Remote cleanup also checks an in-process HostIndex publication revision,
+  protecting equal-value replacement records from an older reap. Descriptor
+  removal must persist before pending handles or container ownership are
+  discarded. Forward refresh writes a copied candidate transactionally and
+  persistence errors refuse duplicate resume launches. Failed authority
+  registration releases a newly acquired container lock and leaves recovery
+  explicitly inconclusive.
   The manager remains the public facade; `session_resume.py`,
   `session_teardown.py`, and `session_ownership.py` own the bounded lifecycle
   implementations. Additive session migrations live in `db_migrations.py`.
