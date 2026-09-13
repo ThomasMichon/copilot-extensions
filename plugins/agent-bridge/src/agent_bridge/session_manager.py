@@ -4067,9 +4067,6 @@ class SessionManager:
             if mgr is not None:
                 with contextlib.suppress(Exception):
                     await mgr.disconnect(host)
-            if confirmed_dead:
-                self._set_container_launch_pending(rec.session_id, False)
-                self._release_container_lock(rec.session_id)
         return confirmed_dead
 
     async def sweep_stranded_hosts(self) -> int:

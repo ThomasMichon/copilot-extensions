@@ -805,3 +805,53 @@ async def test_preconnect_start_claim_cleanup(owned_context, monkeypatch, fault,
     else:
         release.assert_called_once_with("example-space", "example-owner")
     assert ctx.processes == []
+
+
+@pytest.mark.parametrize("replacement", [False, True])
+async def test_remote_reap_fences_container_cleanup_to_exact_record(
+    owned_context, monkeypatch, replacement,
+):
+    from dataclasses import replace
+    from agent_bridge.session_teardown import reap_remote_record
+
+    ctx = owned_context
+    record = _remote_record(ctx)
+    session_id = ctx.session.session_id
+    ctx.session.target = SpawnTarget(
+        type="command",
+        container={"name": "example-container", "launch_pending_session_id": session_id},
+    )
+    lock = Mock()
+    ctx.manager._container_locks["example-container"] = (lock, session_id)
+    ctx.manager._container_lock_sessions[session_id] = "example-container"
+    newer = replace(record, nonce="replacement-nonce")
+
+    async def disconnect(_host):
+        if replacement:
+            ctx.manager._host_index.register(newer)
+
+    connection = SimpleNamespace(
+        ensure_connected=AsyncMock(),
+        exec_command=AsyncMock(return_value=SimpleNamespace(exit_code=0, stdout="__REAPED__")),
+        disconnect=AsyncMock(side_effect=disconnect),
+    )
+    monkeypatch.setattr("ssh_manager.ConnectionManager", Mock(return_value=connection))
+    monkeypatch.setattr(
+        "agent_bridge.session_host.endpoints.ssh_config_from_endpoint",
+        Mock(return_value=SimpleNamespace(host_alias="example-host")),
+    )
+    monkeypatch.setattr(
+        ctx.manager, "_forget_host_record",
+        lambda rec: ctx.manager._host_index.remove(rec.session_id),
+    )
+    assert await reap_remote_record(ctx.manager, record)
+    if replacement:
+        assert ctx.manager._host_index.get(session_id) == newer
+        assert ctx.session.target.container["launch_pending_session_id"] == session_id
+        assert ctx.manager._container_lock_sessions[session_id] == "example-container"
+        lock.release.assert_not_called()
+    else:
+        assert ctx.manager._host_index.get(session_id) is None
+        assert "launch_pending_session_id" not in ctx.session.target.container
+        assert session_id not in ctx.manager._container_lock_sessions
+        lock.release.assert_called_once()
