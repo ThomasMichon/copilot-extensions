@@ -1373,13 +1373,12 @@ slice's deferral reasons and produced a new declared design:
   than declared as an independent set: REATTACH and SPAWN_FRESH_BOUND
   each name a real transition in the lifecycle table, checked by test.
 - The companion agent-bridge vision (`visions/plugins/agent-bridge/README.md`)
-  does not yet declare the hot/warm/cold tiers or the cache-is-never-
-  authority rule as of this slice -- it has a task-shaped verb set
-  (create/identify/read/steer/wait/interrupt/stop/resume/end) and a
-  "takeover" pattern, but nothing more specific. This module does not
-  duplicate or compete with those verbs; it declares only what this
-  effort's Phase 9 needs and should be reconciled with the vision once it
-  declares its own liveness model.
+  now declares the hot/warm/cold tiers and the cache-is-never-authority rule
+  (`cache-is-a-hint-never-authority`), reconciled from this effort's slice.
+  This module does not duplicate or compete with the vision's verb set; it
+  declares only the lifecycle states and liveness-to-transition coupling this
+  effort needs, realizing the vision's liveness model rather than waiting to
+  reconcile with it.
 - Added structural tests
   (`plugins/agent-dispatch/tests/test_bridge_state_machine.py`, 24
   passing): reachability/exit-checking of the lifecycle table, the live

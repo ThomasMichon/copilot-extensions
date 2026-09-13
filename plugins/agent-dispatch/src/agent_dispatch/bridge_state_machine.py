@@ -20,15 +20,12 @@ substitute for the live check.
 
 The companion agent-bridge vision
 (``visions/plugins/agent-bridge/README.md``) is the intended long-term
-source of truth for the bridge's own verb vocabulary. As of this slice it
-declares a task-shaped verb set (create/identify/read/steer/wait/
-interrupt/stop/resume/end) and a "takeover" pattern, but does not yet
-declare the hot/warm/cold liveness tiers or the cache-is-never-authority
-rule -- those live only in this effort's Phase 9 design today. This module
-does not duplicate or compete with the vision's verb set; it declares the
-lifecycle states and the liveness-to-transition coupling this effort
-needs, and should be reconciled with the vision's verbs once it declares
-its own liveness model.
+source of truth for the bridge's own verb vocabulary and now also declares
+the hot/warm/cold liveness tiers and the cache-is-never-authority rule (its
+``cache-is-a-hint-never-authority`` behavior). This module realizes that
+vision item: it implements the lifecycle states and the
+liveness-to-transition coupling this effort needs, reconciled with the
+vision rather than duplicating or competing with its verb set.
 """
 
 from __future__ import annotations
