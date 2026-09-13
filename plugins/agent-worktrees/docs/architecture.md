@@ -829,17 +829,24 @@ and always stamps stage 11 when it fires.
 
 **Two stores, two lifetimes.** Every stage-mapped `log_event()` call writes
 to the machine-global rolling `activity.jsonl` (7-day retention, see
-`activity.py`) and, best-effort write-through, to `handoff_trace.py`'s
-durable, per-project/per-worktree, lock-guarded store at
+`activity.py`); a record that actually gets stamped with `stage`/`stage_name`
+also write-throughs, best-effort, to `handoff_trace.py`'s durable,
+per-project/per-worktree, lock-guarded store at
 `~/.agent-worktrees/logs/handoff-traces/<project>/<worktree-id>.jsonl` --
 namespaced by project because worktree ids are only unique within one
 project. The write-through only fires when an active project and worktree
-id are resolvable at call time (both stores' writes are best-effort and
-swallow their own exceptions); in an ambient context where neither is known,
-the event still lands in `activity.jsonl` alone. The durable store is exempt
-from the rolling log's retention window, so a slow-to-audit handoff can
-still be re-traced after `activity.jsonl` has rotated past its stage-1
-event. `remove_trace()` deletes a worktree's file when its tracking record
+id are resolvable at call time *and* the event was actually stamped -- a
+gated attempt (`handoff_cutover_claim` with `outcome != "acquired"`,
+`handoff_predecessor_retire` with `outcome != "gone"`) never carries a
+`stage` field, so it lands in `activity.jsonl` only and is lost once that
+rolling log rotates past it; an ambient context with no resolved project/
+worktree id likewise records `activity.jsonl` alone. The durable store is
+exempt from the rolling log's retention window for events that *do* reach
+it, so a slow-to-audit handoff's successful stages can still be re-traced
+after `activity.jsonl` has rotated past its stage-1 event -- but a gated
+failure/retry signal (already-claimed, left-running, identity-mismatch)
+is not among them. `remove_trace()` deletes a worktree's file when its
+tracking record
 is removed, so a reused worktree id never inherits a stale predecessor's
 trace.
 
