@@ -754,6 +754,19 @@ auto-recovery: without a headless bridge session handle, a synthetic-owner fleet
 body is still not auto-joined to the origin's live-session registry; use
 headless fleet for recoverable remote sweeps.
 
+**Retiring an unleased worktree-only reservation.** A `release_requested`
+reservation whose task never reached a captured `owner_session_id` (the normal
+shape of a RESERVING-stage spawn failure — the attempt failed before any
+session/claim ever existed) has no owner identity to key a `gone` verdict on.
+`tracking.liveness_verdict` still resolves this to `GONE`, but only through a
+narrower, local-only exception: the bridge answers empty (no live session at
+all) *and* the recorded worktree is confirmed absent from the local
+agent-worktrees registry across every tracking status
+(`tracking.worktree_directory_present`), not merely excluded from the
+ACTIVE-only set `live_worktrees()` uses for orphan reaping — a `finalized`
+worktree may still be fully present on disk. A remote owner's machine has no
+such registry cross-check yet and stays `unknown` in the same situation.
+
 ## Transport for a containerized producer
 
 A producer running in a **Docker container** (e.g. a scheduled sweep container)

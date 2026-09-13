@@ -82,8 +82,88 @@ def test_verdict_unknown_when_owner_identity_not_captured(monkeypatch):
         tracking, "run_background_capture", _fake_run(0, '{"session_id": "S1"}')
     )
     assert tracking.liveness_verdict("wt", owner_session_id=None) == tracking.UNKNOWN
+    # `{}` (no live session) but the local agent-worktrees registry probe is
+    # itself unresolved -> still can't-tell, never guess "gone".
     monkeypatch.setattr(tracking, "run_background_capture", _fake_run(0, "{}"))
+    monkeypatch.setattr(
+        tracking, "run_agent_worktrees_capture", lambda *_a, **_k: None
+    )
     assert tracking.liveness_verdict("wt", owner_session_id=None) == tracking.UNKNOWN
+
+
+def test_verdict_unknown_when_owner_identity_not_captured_but_worktree_still_live(
+    monkeypatch,
+):
+    # `{}` (no live session), but the worktree checkout itself still exists in
+    # the local agent-worktrees registry -- a session could still start there,
+    # so this remains unattributable, not "gone".
+    _bridge_ok(monkeypatch)
+    monkeypatch.setattr(tracking, "run_background_capture", _fake_run(0, "{}"))
+    monkeypatch.setattr(
+        tracking,
+        "run_agent_worktrees_capture",
+        _fake_run(0, '[{"id": "wt"}]'),
+    )
+    assert tracking.liveness_verdict("wt", owner_session_id=None) == tracking.UNKNOWN
+
+
+def test_verdict_gone_when_owner_identity_not_captured_and_worktree_confirmed_absent(
+    monkeypatch,
+):
+    # Boundary: a RESERVING/RELEASING spawn reservation whose task never
+    # reached a captured owner_session_id (the spawn failed before any session
+    # existed), and whose recorded worktree has since been fully removed --
+    # confirmed by its absence from the local agent-worktrees registry itself
+    # (across every tracking status, not just active), not merely an empty
+    # bridge answer. Nothing can be occupying a checkout that no longer
+    # exists, so this is unambiguously "gone" even without an owner identity
+    # to compare against.
+    _bridge_ok(monkeypatch)
+    monkeypatch.setattr(tracking, "run_background_capture", _fake_run(0, "{}"))
+    monkeypatch.setattr(
+        tracking,
+        "run_agent_worktrees_capture",
+        _fake_run(0, "[]"),
+    )
+    assert tracking.liveness_verdict("wt", owner_session_id=None) == tracking.GONE
+
+
+def test_verdict_unknown_when_owner_identity_not_captured_and_worktree_finalized(
+    monkeypatch,
+):
+    # A `finalized` worktree is explicitly allowed to remain fully present on
+    # disk (unlike `live_worktrees()`'s deliberately ACTIVE-only scope, which
+    # would wrongly exclude it): the registry still returns a row for it, so
+    # this must stay unattributable, not "gone".
+    _bridge_ok(monkeypatch)
+    monkeypatch.setattr(tracking, "run_background_capture", _fake_run(0, "{}"))
+    monkeypatch.setattr(
+        tracking,
+        "run_agent_worktrees_capture",
+        _fake_run(0, '[{"id": "wt", "status": "finalized"}]'),
+    )
+    assert tracking.liveness_verdict("wt", owner_session_id=None) == tracking.UNKNOWN
+
+
+def test_verdict_unknown_when_owner_identity_not_captured_for_remote_machine(
+    monkeypatch,
+):
+    # The absent-worktree cross-check only covers the local agent-worktrees
+    # registry (no remote SSH plumbing for it); a remote machine's unattributed
+    # empty answer stays unknown rather than guessing "gone".
+    monkeypatch.setattr(tracking.remote_dispatch, "is_peer_machine", lambda _m: True)
+
+    def worktrees_forbidden(*_a, **_k):
+        raise AssertionError(
+            "must not probe the local agent-worktrees registry for a remote machine"
+        )
+
+    monkeypatch.setattr(tracking, "run_ssh_capture", _fake_run(0, "{}"))
+    monkeypatch.setattr(tracking, "run_agent_worktrees_capture", worktrees_forbidden)
+    assert (
+        tracking.liveness_verdict("wt", machine="peer-box", owner_session_id=None)
+        == tracking.UNKNOWN
+    )
 
 
 @pytest.mark.parametrize(
@@ -395,3 +475,43 @@ class TestLiveWorktrees:
             tracking, "run_agent_worktrees_capture", lambda *_a, **_k: None
         )
         assert tracking.live_worktrees() is None
+
+
+class TestWorktreeDirectoryPresent:
+    def test_true_when_row_present(self, monkeypatch):
+        monkeypatch.setattr(
+            tracking, "run_agent_worktrees_capture",
+            _fake_run(0, '[{"id": "wt", "status": "finalized"}]'),
+        )
+        assert tracking.worktree_directory_present("wt") is True
+
+    def test_false_when_no_row(self, monkeypatch):
+        monkeypatch.setattr(
+            tracking, "run_agent_worktrees_capture", _fake_run(0, "[]")
+        )
+        assert tracking.worktree_directory_present("wt") is False
+
+    def test_supports_object_wrapper(self, monkeypatch):
+        monkeypatch.setattr(
+            tracking, "run_agent_worktrees_capture",
+            _fake_run(0, '{"worktrees": [{"id": "wt"}]}'),
+        )
+        assert tracking.worktree_directory_present("wt") is True
+
+    def test_none_when_cli_absent(self, monkeypatch):
+        monkeypatch.setattr(
+            tracking, "run_agent_worktrees_capture", lambda *_a, **_k: None
+        )
+        assert tracking.worktree_directory_present("wt") is None
+
+    def test_none_on_nonzero_exit(self, monkeypatch):
+        monkeypatch.setattr(
+            tracking, "run_agent_worktrees_capture", _fake_run(2, "")
+        )
+        assert tracking.worktree_directory_present("wt") is None
+
+    def test_none_on_unparseable(self, monkeypatch):
+        monkeypatch.setattr(
+            tracking, "run_agent_worktrees_capture", _fake_run(0, "not json")
+        )
+        assert tracking.worktree_directory_present("wt") is None

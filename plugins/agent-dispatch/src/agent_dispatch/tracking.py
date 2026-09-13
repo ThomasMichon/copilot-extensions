@@ -315,8 +315,22 @@ def liveness_verdict(
     - :data:`UNKNOWN` -- the resolver could not answer (no CLI/ssh, non-zero exit,
       timeout, unparseable/non-object output -- a possibly restarting/partial
       registry), **or** ``owner_session_id`` is not captured yet (the claim ->
-      register window). GC leaves the task alone (degrade safe; never requeue on
-      ignorance or an unattributable snapshot).
+      register window) *and* either a live session is present or the local
+      agent-worktrees registry cannot confirm the worktree's directory is gone.
+      GC leaves the task alone (degrade safe; never requeue on ignorance or an
+      unattributable snapshot).
+
+    **Local-only exception:** when ``owner_session_id`` is not captured (no
+    session/claim ever existed for this attempt -- the normal shape of a
+    RESERVING-stage spawn failure) *and* the bridge resolver's answer is empty
+    (no live session at all) *and* the probe is local (``machine`` is None),
+    this additionally cross-checks the local agent-worktrees registry via
+    :func:`worktree_directory_present`. A worktree confirmed absent from that
+    registry (in every tracking status, not just active) resolves to
+    :data:`GONE` even without an owner identity: nothing can be occupying a
+    checkout that no longer exists. This exception does not apply to a remote
+    ``machine`` (no SSH plumbing for the registry check yet), which stays
+    :data:`UNKNOWN` in the same situation.
 
     Never raises. Mirrors :func:`resolve_live_session`'s transport (local
     ``agent-bridge``; a remote owner over ``ssh <machine> agent-bridge``).
@@ -351,9 +365,27 @@ def liveness_verdict(
     if not isinstance(data, dict):
         return UNKNOWN
     # The resolver answered. Without a captured owner identity we cannot safely
-    # attribute the worktree's state to this task's owner -> can't-tell.
+    # attribute an *occupied* worktree to this task's owner -> can't-tell.
     if owner_session_id is None:
-        return UNKNOWN
+        if data or machine is not None:
+            return UNKNOWN
+        # `{}` (no live session) on the *local* machine: an unattributed
+        # attempt (e.g. a RESERVING/RELEASING spawn reservation whose task
+        # never reached a captured owner_session_id, because the spawn failed
+        # before a session was ever created) can still be reaped once the
+        # worktree checkout itself is confirmed gone -- nothing can be
+        # occupying a directory that no longer exists, regardless of whose
+        # session was expected there. Cross-check the local agent-worktrees
+        # registry; an unresolved probe still degrades to UNKNOWN. This must
+        # NOT reuse `live_worktrees()`'s ACTIVE-only scope: a `finalized`
+        # worktree is explicitly allowed to remain fully present on disk, so
+        # excluding it here would misreport a real, existing checkout as
+        # "gone". `worktree_directory_present` checks across every tracking
+        # status and answers directory presence specifically.
+        present = worktree_directory_present(worktree)
+        if present is None:
+            return UNKNOWN
+        return UNKNOWN if present else GONE
     if not data:
         return GONE  # `{}` (CLI 404): the worktree is empty -> our owner is gone
     current = data.get("session_id") or data.get("id")
@@ -396,6 +428,49 @@ def live_worktrees(*, timeout: float = 5.0) -> set[str] | None:
         str(w["id"]) for w in wts
         if isinstance(w, dict) and w.get("id")
     }
+
+
+def worktree_directory_present(worktree: str, *, timeout: float = 5.0) -> bool | None:
+    """Whether ``worktree`` still exists on disk, per the local agent-worktrees
+    registry, in **any** tracking status.
+
+    Unlike :func:`live_worktrees` (deliberately ACTIVE-only, for orphan
+    reaping), this checks presence across ``active``/``complete``/
+    ``finalized``/``orphaned`` alike: a ``finalized`` worktree is explicitly
+    allowed to remain fully present on disk, so an ACTIVE-only scope would
+    misreport it as absent. The registry's own default listing (no ``--all``)
+    already excludes rows whose directory no longer exists on disk, so a
+    present row for this exact id is authoritative directory-presence
+    evidence; an empty result means the directory is genuinely gone.
+
+    Returns ``None`` on **any** resolver failure (no CLI, non-zero exit,
+    timeout, empty or unparseable output) so the caller degrades safe --
+    an unresolved probe never counts as "gone". Never raises.
+    """
+    proc = run_agent_worktrees_capture(
+        "list",
+        "--json",
+        "--tracking-status",
+        "all",
+        "--worktree-id",
+        worktree,
+        timeout=timeout,
+    )
+    if proc is None:
+        return None
+    if proc.returncode != 0:
+        return None
+    out = (proc.stdout or "").strip()
+    if not out:
+        return None
+    try:
+        data = json.loads(out)
+    except json.JSONDecodeError:
+        return None
+    wts = data.get("worktrees", data) if isinstance(data, dict) else data
+    if not isinstance(wts, list):
+        return None
+    return len(wts) > 0
 
 
 def enrich_task(
