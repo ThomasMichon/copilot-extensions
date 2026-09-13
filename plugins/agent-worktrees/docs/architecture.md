@@ -790,6 +790,70 @@ my-project --recovery   # Linux/WSL (also accepted on Windows)
 Skips vault credential loading for debugging broken bootstrap
 infrastructure.
 
+### Handoff cutover lifecycle: the 13-stage trace
+
+A handoff cutover (a worktree's Copilot session replaced by a successor
+without losing the operator's place) crosses `context-handoff` (arms the
+handoff), the resident status monitor (claims, spawns, and retires panes),
+and the mux/launcher layer -- three components, none of which alone can
+answer "what actually happened, in order, for this worktree?" (effort
+`handoff-cutover-lifecycle-journal`). `activity.py` defines a canonical
+13-stage vocabulary (`HANDOFF_STAGE_MAP`) layered on top of the existing wire
+event names, so no event was renamed:
+
+| # | Stage | Emitted by |
+|---|---|---|
+| 1 | `worktree_created` | `cmd_create` |
+| 2 | `mux_session_assigned` | `mux_attached` (launcher) / `mux_new_session`\`mux_new_window\` (programmatic cutover) |
+| 3 | `copilot_invoked` | the setup launcher's final exec point |
+| 4 | `session_start_bound` | `cmd_register_session` (sessionStart) |
+| 5 | `status_reported` | the first status-report write in a session |
+| 6 | `handoff_triggered` | context-handoff's `trigger_handoff` |
+| 7 | `handoff_host_acknowledged` | the status monitor's claim, gated to `outcome="acquired"` only |
+| 8 | `handoff_successor_spawn_started` | emitted before success/failure is known, so a killed spawn still leaves a trace |
+| 9 | `handoff_successor_session_start_bound` | the successor's own sessionStart |
+| 10 | `handoff_successor_claimed` | the successor declares itself new head |
+| 11 | `handoff_pickup_confirmed_predecessor_closing` | predecessor retire, gated to `outcome="gone"` only |
+| 12 | `session_end_bound` | the predecessor's sessionEnd |
+| 13 | `handoff_complete` | the runner's final confirmation |
+
+A gated stage (7, 11) only stamps `stage`/`stage_name` when its outcome field
+matches the success value above -- a duplicate/failed claim attempt or a
+retire that left the pane running (`outcome="left-running"` or
+`"identity-mismatch"`) is recorded as its ordinary event but never
+misrepresented as that stage's success.
+
+**Two stores, two lifetimes.** Every stage-mapped `log_event()` call writes
+to the machine-global rolling `activity.jsonl` (7-day retention, see
+`activity.py`) *and*, write-through, to `handoff_trace.py`'s durable,
+per-project/per-worktree, lock-guarded store at
+`~/.agent-worktrees/logs/handoff-traces/<project>/<worktree-id>.jsonl` --
+namespaced by project because worktree ids are only unique within one
+project. The durable store is exempt from the rolling log's retention
+window, so a slow-to-audit handoff can still be re-traced after
+`activity.jsonl` has rotated past its stage-1 event. `remove_trace()` deletes
+a worktree's file when its tracking record is removed, so a reused worktree
+id never inherits a stale predecessor's trace.
+
+**Diagnosing a stuck cutover today.** A dedicated `agent-worktrees
+handoff-trace <worktree-id>` command that renders the ordered 13-stage
+sequence (reading `handoff_trace.read_trace()` plus both sessions'
+session-state trace files) is still open follow-on work
+(`efforts/active/handoff-cutover-lifecycle-journal` Phase 3). What exists
+today and is safe to reach for immediately:
+
+- `agent-worktrees handoffs-check [--worktree-id <id>|--all] [--execute] [--json]`
+  -- diagnoses (and, with `--execute`, retires) a predecessor pane left alive
+  after a confirmed cutover, using the same choreography as the resident
+  monitor's own sweep. Read-only without `--execute`.
+- `agent-bridge handoff-check [--worktree-id <id>|--all] [--json]` -- a thin
+  passthrough to the same diagnostic, for callers that only have
+  `agent-bridge` available.
+- `health.find_orphaned_handoffs()` already flags "claimed but no live
+  successor pane" as a class of bug; feeding it from the durable trace so it
+  can name the *exact* stalled stage (rather than just flagging that one
+  exists) is also open follow-on work.
+
 ## Terminal Integration
 
 | File | Platform | Description |

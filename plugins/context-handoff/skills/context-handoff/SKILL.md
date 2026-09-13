@@ -193,6 +193,17 @@ already consumed, or is currently being consumed, by another session
    control system spawning more than one successor for the same handoff) --
    ask the user first, then file it if they say yes.
 
+### Diagnosing a stuck cutover ("ack but no pane", predecessor left running)
+
+`trigger_handoff` is one stage (6 of 13) in a wider cutover lifecycle traced
+across this plugin and `agent-worktrees`' resident status monitor -- see
+[context-handoff's README § Handoff-lifecycle observability](../../README.md#handoff-lifecycle-observability)
+for the full stage model and stores. For "acknowledged but nothing appeared"
+or a predecessor pane still alive after a confirmed cutover, run
+`agent-worktrees handoffs-check --worktree-id <id>` (or `--all`, `--execute`
+to actually retire what it finds) before assuming manual intervention is
+needed -- do not manually kill a predecessor pane yourself.
+
 ## CLI fallback
 
 When the extension is absent, invoke the payload-local CLI by exact verified

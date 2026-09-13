@@ -213,6 +213,23 @@ the claimant session id to the user and offer to file a bug (do not file one
 automatically): repeated or racing consumption of the same handoff is
 typically a sign of a real defect upstream, not routine behavior.
 
+## Handoff-lifecycle observability
+
+`trigger_handoff` is stage 6 of a wider 13-stage cutover lifecycle spanning
+this plugin, the resident `agent-worktrees` status monitor, and the mux
+layer -- worktree creation through the predecessor's confirmed retirement.
+The full stage vocabulary, the two durable stores that record it
+(`activity.jsonl`'s rolling log and `handoff_trace.py`'s unrotated
+per-worktree store), and the diagnostic tools available today
+(`agent-worktrees handoffs-check`, `agent-bridge handoff-check`) are
+documented in
+[`agent-worktrees`'s architecture doc](../agent-worktrees/docs/architecture.md#handoff-cutover-lifecycle-the-13-stage-trace)
+-- read that first when a handoff appears to have gone sideways ("ack but no
+pane", "already claimed" with no replacement pane) rather than re-deriving
+the sequence from scratch. A dedicated `handoff-trace` render command is
+still open follow-on work; until it lands, `handoffs-check` is the fastest
+read-only signal for "is a predecessor stranded on this worktree right now".
+
 ## Payload-local CLI fallback
 
 When the extension does not resolve or fails to load, the plugin's payload
