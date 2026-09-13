@@ -63,7 +63,7 @@ def test_confirm_writes_the_draft_before_dismissing(tmp_path, monkeypatch):
         return app
 
     app = asyncio.run(run())
-    assert app.result == {"feedback": "ship it"}
+    assert app.result == {"action": "confirm", "values": {"feedback": "ship it"}}
     # The draft is written as part of _confirm, unconditionally -- it is the
     # caller's job (once it confirms actual submission success) to clear it,
     # not this screen's dismissal.
@@ -84,7 +84,10 @@ def test_save_writes_the_draft_and_dismisses_with_none(tmp_path, monkeypatch):
         return app
 
     app = asyncio.run(run())
-    assert app.result is None
+    # Save returns the collected values too (envelope: {"action": "save", ...})
+    # so the caller can persist them as the task's durable coordinator-side
+    # card_draft, in addition to this local file.
+    assert app.result == {"action": "save", "values": {"feedback": "draft text"}}
     assert _draft_values("t-save") == {"feedback": "draft text"}
 
 

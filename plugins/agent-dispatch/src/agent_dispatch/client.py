@@ -408,6 +408,21 @@ class DispatchClient:
             )
         )
 
+    def save_card_draft(self, task_id: str, *, fields: dict) -> dict:
+        """Persist an operator's not-yet-submitted draft answer. Never touches
+        ``awaiting_steer``/status -- the task stays blocked exactly as before,
+        durably visible from any surface/machine via ``get``/``card show``."""
+        return self._unwrap(
+            self._http.post(
+                f"/tasks/{task_id}/card-draft",
+                json={"fields": fields},
+            )
+        )
+
+    def clear_card_draft(self, task_id: str) -> dict:
+        """Clear a task's saved draft. Never touches ``awaiting_steer``/status."""
+        return self._unwrap(self._http.delete(f"/tasks/{task_id}/card-draft"))
+
     def steer(
         self,
         task_id: str,
