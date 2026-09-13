@@ -805,7 +805,7 @@ event names, so no event was renamed:
 |---|---|---|
 | 1 | `worktree_created` | `cmd_create` |
 | 2 | `mux_session_assigned` | `mux_attached` (launcher) / `mux_new_session`/`mux_new_window` (programmatic cutover) |
-| 3 | `copilot_invoked` | the setup launcher's final exec point |
+| 3 | `copilot_invoked` | the setup launcher's final exec point, **or** `copilot_invocation_attempted` for config-driven/legacy setup paths that never reach that emitter (a coarser mark that does not itself prove Copilot was actually invoked) |
 | 4 | `session_start_bound` | `cmd_register_session` (sessionStart) |
 | 5 | `status_reported` | the first status-report write in a session |
 | 6 | `handoff_triggered` | context-handoff's `trigger_handoff` |
@@ -852,8 +852,12 @@ today and is safe to reach for immediately:
 
 - `agent-worktrees handoffs-check [--worktree-id <id>|--all] [--execute] [--json]`
   -- diagnoses (and, with `--execute`, retires) a predecessor pane left alive
-  after a confirmed cutover, using the same choreography as the resident
-  monitor's own sweep. Read-only without `--execute`.
+  after a confirmed cutover (a recorded successor + spawn event exist, but the
+  predecessor was never retired), using the same choreography as the resident
+  monitor's own sweep. Read-only without `--execute`. **It does not diagnose
+  a host acknowledgement with no successor pane at all** (`_pending_handoff_retire_requests`
+  requires a recorded successor session) -- that "ack but no pane" case has
+  no dedicated diagnostic yet.
 - `agent-bridge handoff-check [--worktree-id <id>|--all] [--execute] [--json]`
   -- a thin passthrough that shells out to `agent-worktrees handoffs-check`,
   forwarding `--execute` the same way; only usable when `agent-worktrees` is

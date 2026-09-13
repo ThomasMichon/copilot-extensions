@@ -224,11 +224,14 @@ per-worktree store), and the diagnostic tools available today
 (`agent-worktrees handoffs-check`, `agent-bridge handoff-check`) are
 documented in
 [`agent-worktrees`'s architecture doc](../agent-worktrees/docs/architecture.md#handoff-cutover-lifecycle-the-13-stage-trace)
--- read that first when a handoff appears to have gone sideways ("ack but no
-pane", "already claimed" with no replacement pane) rather than re-deriving
-the sequence from scratch. A dedicated `handoff-trace` render command is
-still open follow-on work; until it lands, `handoffs-check` is the fastest
-read-only signal for "is a predecessor stranded on this worktree right now".
+-- read that first when a handoff appears to have gone sideways rather than
+re-deriving the sequence from scratch. `handoffs-check` diagnoses (and can
+repair) a **stranded predecessor pane after a confirmed cutover** -- a
+recorded successor + spawn event exist, but the predecessor was never
+retired. It does **not** diagnose "ack but no pane at all" (a host
+acknowledgement with no successor ever recorded) -- that case has no
+dedicated diagnostic yet; a dedicated `handoff-trace` render command is
+still open follow-on work.
 
 ## Payload-local CLI fallback
 
