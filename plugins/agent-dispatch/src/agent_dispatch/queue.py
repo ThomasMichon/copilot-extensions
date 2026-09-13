@@ -47,7 +47,14 @@ from typing import Any
 
 from .identity import canonical_reviewer_target, canonicalize_remote
 from .payload import PayloadStore, is_blob_ref
-from .registrations import (
+from .queue_records import (  # noqa: F401 -- re-exported for existing call sites/tests
+    ResourceReservation,
+    ScheduleLease,
+    ScheduleRecord,
+    TaskError,
+)
+from .queue_schedule_registry import ScheduleRegistrationMixin
+from .registrations import (  # noqa: F401 -- re-exported for existing call sites/tests
     RegistrationError,
     RegistrationKind,
     RegistrationRecord,
@@ -201,10 +208,6 @@ class Status:
     ABANDONABLE = frozenset({PROPOSED, QUEUED, CLAIMED, STARTED, SUSPENDED})
 
 
-class TaskError(RuntimeError):
-    """Raised on an illegal state transition or a lease/ownership violation."""
-
-
 class ProducerScopeValidationError(TaskError):
     """Raised when a producer scope or producer identity is not narrow and exact."""
 
@@ -321,9 +324,7 @@ def encode_result(
     if result is None:
         return None
     if not isinstance(result, (dict, list)):
-        raise ResultValidationError(
-            "result must be a JSON object or array, not null or a scalar"
-        )
+        raise ResultValidationError("result must be a JSON object or array, not null or a scalar")
     try:
         encoded = json.dumps(
             result,
@@ -333,13 +334,9 @@ def encode_result(
             sort_keys=True,
         )
     except (TypeError, ValueError, OverflowError, RecursionError) as exc:
-        raise ResultValidationError(
-            f"result is not JSON-compatible: {exc}"
-        ) from exc
+        raise ResultValidationError(f"result is not JSON-compatible: {exc}") from exc
     if len(encoded.encode("utf-8")) > max_bytes:
-        raise ResultTooLargeError(
-            f"result exceeds the {max_bytes}-byte encoded limit"
-        )
+        raise ResultTooLargeError(f"result exceeds the {max_bytes}-byte encoded limit")
     return encoded
 
 
@@ -581,11 +578,7 @@ class Task:
             evaluator_ref=row["evaluator_ref"],
             exclusive_key=row["exclusive_key"],
             dedup_key=row["dedup_key"],
-            producer_fence=(
-                json.loads(row["producer_fence"])
-                if row["producer_fence"]
-                else None
-            ),
+            producer_fence=(json.loads(row["producer_fence"]) if row["producer_fence"] else None),
             owner=row["owner"],
             attempts=row["attempts"],
             not_before=row["not_before"],
@@ -599,9 +592,7 @@ class Task:
             result_ref=row["result_ref"],
             result=json.loads(raw_result) if raw_result is not None else None,
             has_result=(
-                bool(row["has_result"])
-                if "has_result" in columns
-                else raw_result is not None
+                bool(row["has_result"]) if "has_result" in columns else raw_result is not None
             ),
             latest_progress=row["latest_progress"],
             goal=row["goal"],
@@ -622,14 +613,10 @@ class Task:
 
 
 _TASK_DB_COLUMNS = tuple(
-    field.name
-    for field in dataclasses.fields(Task)
-    if field.name not in {"result", "has_result"}
+    field.name for field in dataclasses.fields(Task) if field.name not in {"result", "has_result"}
 )
 _TASK_SELECT = ", ".join((*_TASK_DB_COLUMNS, "result"))
-_TASK_BULK_SELECT = ", ".join(
-    (*_TASK_DB_COLUMNS, "result IS NOT NULL AS has_result")
-)
+_TASK_BULK_SELECT = ", ".join((*_TASK_DB_COLUMNS, "result IS NOT NULL AS has_result"))
 
 
 @dataclass(frozen=True)
@@ -765,94 +752,6 @@ class SpawnReservation:
         )
 
 
-@dataclass
-class ScheduleRecord:
-    """A read-only snapshot of a registered recurring-schedule row.
-
-    ``entry`` is the schedule dict the timer producer consumes verbatim (the
-    same shape a hand-authored spec's ``schedules[]`` entry has). Persisting it
-    turns the formerly hand-edited JSON spec into a managed registry the
-    coordinator owns, so recurring jobs can be registered / listed / inspected /
-    removed as first-class objects.
-    """
-
-    id: str
-    entry: dict
-    paused: bool = False
-    created_at: float = 0.0
-    updated_at: float = 0.0
-
-    @classmethod
-    def _from_row(cls, row: sqlite3.Row) -> ScheduleRecord:
-        return cls(
-            id=row["id"],
-            entry=json.loads(row["spec"]),
-            paused=bool(row["paused"]),
-            created_at=row["created_at"],
-            updated_at=row["updated_at"],
-        )
-
-
-@dataclass
-class ScheduleLease:
-    """A read-only snapshot of a schedule *job-lease* row.
-
-    The job-lease elects a **single producer** for a scope (e.g. the fleet
-    chronicler) -- the axis of "which machine runs the timer", distinct from the
-    engine's per-task claim. It is **pin-not-failover**: a first writer wins the
-    scope and renews it; a different caller is refused and must NOT steal it,
-    even if the recorded lease looks stale. This deliberately does *not*
-    reintroduce a wall-clock TTL takeover (the complement of the engine's
-    liveness-not-lease task recovery); reassignment is an explicit operator act
-    (:meth:`TaskQueue.release_schedule_lease` with ``force``). ``expires_at`` /
-    ``renewed_at`` are recorded for *observability* only -- staleness is
-    reported, never auto-transferred.
-    """
-
-    scope: str
-    holder: str
-    holder_session: str | None = None
-    acquired_at: float = 0.0
-    renewed_at: float = 0.0
-    expires_at: float | None = None
-
-    @classmethod
-    def _from_row(cls, row: sqlite3.Row) -> ScheduleLease:
-        return cls(
-            scope=row["scope"],
-            holder=row["holder"],
-            holder_session=row["holder_session"],
-            acquired_at=row["acquired_at"],
-            renewed_at=row["renewed_at"],
-            expires_at=row["expires_at"],
-        )
-
-
-@dataclass(frozen=True)
-class ResourceReservation:
-    """An atomic producer reservation for one external logical resource."""
-
-    key: str
-    owner: str
-    token: str
-    task_id: str | None = None
-    acquired_at: float = 0.0
-    updated_at: float = 0.0
-    expires_at: float | None = None
-
-    @classmethod
-    def _from_row(cls, row: sqlite3.Row) -> ResourceReservation:
-        return cls(
-            key=row["key"],
-            owner=row["owner"],
-            token=row["token"],
-            task_id=row["task_id"],
-            acquired_at=row["acquired_at"],
-            updated_at=row["updated_at"],
-            expires_at=row["expires_at"],
-        )
-
-
 # Column name -> DDL type, applied additively so existing DBs upgrade in place.
 _COLUMNS: dict[str, str] = {
     "id": "TEXT PRIMARY KEY",
@@ -932,7 +831,7 @@ def _task_transition_spec(name: str) -> tuple[frozenset[str], str]:
     return transition.from_states, transition.to_state
 
 
-class TaskQueue:
+class TaskQueue(ScheduleRegistrationMixin):
     """A leased, capability-gated task queue over a SQLite database file.
 
     Instances are cheap; each operation opens its own short-lived connection so
@@ -1044,12 +943,11 @@ class TaskQueue:
                 "('proposed','queued','claimed','started','suspended')"
             )
             current_index = conn.execute(
-                "SELECT sql FROM sqlite_master WHERE type = 'index' "
-                "AND name = 'idx_tasks_dedup'"
+                "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_tasks_dedup'"
             ).fetchone()
-            current_sql = " ".join(
-                str(current_index["sql"] or "").split()
-            ) if current_index else ""
+            current_sql = (
+                " ".join(str(current_index["sql"] or "").split()) if current_index else ""
+            )
             if current_sql != desired_dedup_index:
                 conn.execute("BEGIN IMMEDIATE")
                 try:
@@ -1065,9 +963,7 @@ class TaskQueue:
             # legacy task never leaks into a real repo's default-scoped views.
             # Idempotent: after the first run there are no NULL-repo rows (create
             # requires a repo).
-            conn.execute(
-                "UPDATE tasks SET repo = ? WHERE repo IS NULL", (LEGACY_REPO,)
-            )
+            conn.execute("UPDATE tasks SET repo = ? WHERE repo IS NULL", (LEGACY_REPO,))
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS task_events ("
                 "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -1125,8 +1021,7 @@ class TaskQueue:
                 ")"
             )
             conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_task_progress_task "
-                "ON task_progress(task_id)"
+                "CREATE INDEX IF NOT EXISTS idx_task_progress_task ON task_progress(task_id)"
             )
             # Append-only steer inbox -- the operator's answers to a task's card
             # (the human-in-the-loop counterpart of ``task_progress``). Each
@@ -1143,10 +1038,7 @@ class TaskQueue:
                 "  taken_at REAL"
                 ")"
             )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_task_steer_task "
-                "ON task_steer(task_id)"
-            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_task_steer_task ON task_steer(task_id)")
             # Durable wake outbox. A steer/resume transaction inserts the wake
             # row before commit; the coordinator loop claims and delivers it
             # later. The row id is also the downstream idempotency key, so a
@@ -1172,20 +1064,15 @@ class TaskQueue:
                 "  UNIQUE(task_id, generation, wake_seq)"
                 ")"
             )
-            wake_columns = {
-                r["name"] for r in conn.execute("PRAGMA table_info(wake_outbox)")
-            }
+            wake_columns = {r["name"] for r in conn.execute("PRAGMA table_info(wake_outbox)")}
             if "delivery_expires_at" not in wake_columns:
-                conn.execute(
-                    "ALTER TABLE wake_outbox ADD COLUMN delivery_expires_at REAL"
-                )
+                conn.execute("ALTER TABLE wake_outbox ADD COLUMN delivery_expires_at REAL")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_wake_outbox_due "
                 "ON wake_outbox(status, not_before, created_at)"
             )
             conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_wake_outbox_task "
-                "ON wake_outbox(task_id, wake_seq)"
+                "CREATE INDEX IF NOT EXISTS idx_wake_outbox_task ON wake_outbox(task_id, wake_seq)"
             )
             # Spawn reservations -- the atomic "exactly one embody spawn per
             # (task, attempt)" record that closes the gap between the queue's
@@ -1277,39 +1164,29 @@ class TaskQueue:
             )
             reservation_columns = {
                 row["name"]
-                for row in conn.execute(
-                    "PRAGMA table_info(spawn_reservations)"
-                ).fetchall()
+                for row in conn.execute("PRAGMA table_info(spawn_reservations)").fetchall()
             }
             for column in ("worktree_ownership", "creating_host", "driver"):
                 if column not in reservation_columns:
                     try:
-                        conn.execute(
-                            f"ALTER TABLE spawn_reservations ADD COLUMN {column} TEXT"
-                        )
+                        conn.execute(f"ALTER TABLE spawn_reservations ADD COLUMN {column} TEXT")
                     except sqlite3.OperationalError as exc:
                         if "duplicate column name" not in str(exc).lower():
                             raise
             reservation_columns = {
                 row["name"]
-                for row in conn.execute(
-                    "PRAGMA table_info(spawn_reservations)"
-                ).fetchall()
+                for row in conn.execute("PRAGMA table_info(spawn_reservations)").fetchall()
             }
             if "conclusion_state" not in reservation_columns:
                 try:
-                    conn.execute(
-                        "ALTER TABLE spawn_reservations "
-                        "ADD COLUMN conclusion_state TEXT"
-                    )
+                    conn.execute("ALTER TABLE spawn_reservations ADD COLUMN conclusion_state TEXT")
                 except sqlite3.OperationalError as exc:
                     if "duplicate column name" not in str(exc).lower():
                         raise
             if "conclusion_detail" not in reservation_columns:
                 try:
                     conn.execute(
-                        "ALTER TABLE spawn_reservations "
-                        "ADD COLUMN conclusion_detail TEXT"
+                        "ALTER TABLE spawn_reservations ADD COLUMN conclusion_detail TEXT"
                     )
                 except sqlite3.OperationalError as exc:
                     if "duplicate column name" not in str(exc).lower():
@@ -1317,8 +1194,7 @@ class TaskQueue:
             if "cleanup_claim_token" not in reservation_columns:
                 try:
                     conn.execute(
-                        "ALTER TABLE spawn_reservations "
-                        "ADD COLUMN cleanup_claim_token TEXT"
+                        "ALTER TABLE spawn_reservations ADD COLUMN cleanup_claim_token TEXT"
                     )
                 except sqlite3.OperationalError as exc:
                     if "duplicate column name" not in str(exc).lower():
@@ -1326,8 +1202,7 @@ class TaskQueue:
             if "cleanup_claim_expires_at" not in reservation_columns:
                 try:
                     conn.execute(
-                        "ALTER TABLE spawn_reservations "
-                        "ADD COLUMN cleanup_claim_expires_at REAL"
+                        "ALTER TABLE spawn_reservations ADD COLUMN cleanup_claim_expires_at REAL"
                     )
                 except sqlite3.OperationalError as exc:
                     if "duplicate column name" not in str(exc).lower():
@@ -1335,8 +1210,7 @@ class TaskQueue:
             if "inherited_worktree" not in reservation_columns:
                 try:
                     conn.execute(
-                        "ALTER TABLE spawn_reservations "
-                        "ADD COLUMN inherited_worktree TEXT"
+                        "ALTER TABLE spawn_reservations ADD COLUMN inherited_worktree TEXT"
                     )
                 except sqlite3.OperationalError as exc:
                     if "duplicate column name" not in str(exc).lower():
@@ -1348,10 +1222,7 @@ class TaskQueue:
             )
             if "exclusive_key" not in reservation_columns:
                 try:
-                    conn.execute(
-                        "ALTER TABLE spawn_reservations "
-                        "ADD COLUMN exclusive_key TEXT"
-                    )
+                    conn.execute("ALTER TABLE spawn_reservations ADD COLUMN exclusive_key TEXT")
                 except sqlite3.OperationalError as exc:
                     if "duplicate column name" not in str(exc).lower():
                         raise
@@ -1367,8 +1238,7 @@ class TaskQueue:
             if "release_disposition" not in reservation_columns:
                 try:
                     conn.execute(
-                        "ALTER TABLE spawn_reservations "
-                        "ADD COLUMN release_disposition TEXT"
+                        "ALTER TABLE spawn_reservations ADD COLUMN release_disposition TEXT"
                     )
                 except sqlite3.OperationalError as exc:
                     if "duplicate column name" not in str(exc).lower():
@@ -1394,18 +1264,14 @@ class TaskQueue:
                 ") WHERE exclusive_key IS NULL"
             )
             conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_spawn_res_task "
-                "ON spawn_reservations(task_id)"
+                "CREATE INDEX IF NOT EXISTS idx_spawn_res_task ON spawn_reservations(task_id)"
             )
             conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_spawn_res_state "
-                "ON spawn_reservations(state)"
+                "CREATE INDEX IF NOT EXISTS idx_spawn_res_state ON spawn_reservations(state)"
             )
             conn.execute("BEGIN IMMEDIATE")
             try:
-                conn.execute(
-                    "DROP INDEX IF EXISTS idx_spawn_res_exclusive_active"
-                )
+                conn.execute("DROP INDEX IF EXISTS idx_spawn_res_exclusive_active")
                 conn.execute(
                     "CREATE UNIQUE INDEX IF NOT EXISTS idx_spawn_res_exclusive_active "
                     "ON spawn_reservations(exclusive_key) "
@@ -1461,25 +1327,19 @@ class TaskQueue:
             )
             resource_reservation_columns = {
                 row["name"]
-                for row in conn.execute(
-                    "PRAGMA table_info(resource_reservations)"
-                ).fetchall()
+                for row in conn.execute("PRAGMA table_info(resource_reservations)").fetchall()
             }
             if "token" not in resource_reservation_columns:
-                conn.execute(
-                    "ALTER TABLE resource_reservations ADD COLUMN token TEXT"
-                )
+                conn.execute("ALTER TABLE resource_reservations ADD COLUMN token TEXT")
             for row in conn.execute(
-                "SELECT key FROM resource_reservations "
-                "WHERE token IS NULL OR token = ''"
+                "SELECT key FROM resource_reservations WHERE token IS NULL OR token = ''"
             ).fetchall():
                 conn.execute(
                     "UPDATE resource_reservations SET token = ? WHERE key = ?",
                     (secrets.token_urlsafe(24), row["key"]),
                 )
             conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_resource_res_owner "
-                "ON resource_reservations(owner)"
+                "CREATE INDEX IF NOT EXISTS idx_resource_res_owner ON resource_reservations(owner)"
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_resource_res_task "
@@ -1505,12 +1365,10 @@ class TaskQueue:
                 ")"
             )
             conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_registrations_scope "
-                "ON registrations(machine, env)"
+                "CREATE INDEX IF NOT EXISTS idx_registrations_scope ON registrations(machine, env)"
             )
             conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_registrations_kind "
-                "ON registrations(kind)"
+                "CREATE INDEX IF NOT EXISTS idx_registrations_kind ON registrations(kind)"
             )
             self._migrate_producer_schema(conn)
 
@@ -1523,14 +1381,11 @@ class TaskQueue:
             # never released; preserve any local prototype tables for inspection
             # but do not let their label-dependent authority reopen a real source.
             scope_columns = {
-                row["name"]
-                for row in conn.execute("PRAGMA table_info(producer_scopes)")
+                row["name"] for row in conn.execute("PRAGMA table_info(producer_scopes)")
             }
             history_columns = {
                 row["name"]
-                for row in conn.execute(
-                    "PRAGMA table_info(producer_scope_generations)"
-                )
+                for row in conn.execute("PRAGMA table_info(producer_scope_generations)")
             }
             legacy_scope = bool(scope_columns) and "repo" not in scope_columns
             legacy_history = bool(history_columns) and "repo" not in history_columns
@@ -1539,10 +1394,7 @@ class TaskQueue:
                 # creation of the canonical index on the replacement table.
                 conn.execute("DROP INDEX IF EXISTS idx_producer_scope_history")
                 if legacy_scope:
-                    conn.execute(
-                        "ALTER TABLE producer_scopes "
-                        "RENAME TO producer_scopes_label_v1"
-                    )
+                    conn.execute("ALTER TABLE producer_scopes RENAME TO producer_scopes_label_v1")
                 if legacy_history:
                     conn.execute(
                         "ALTER TABLE producer_scope_generations "
@@ -1588,9 +1440,11 @@ class TaskQueue:
                 "SELECT sql FROM sqlite_master WHERE type = 'index' "
                 "AND name = 'idx_producer_scope_history'"
             ).fetchone()
-            current_history_sql = " ".join(
-                str(current_history_index["sql"] or "").split()
-            ) if current_history_index else ""
+            current_history_sql = (
+                " ".join(str(current_history_index["sql"] or "").split())
+                if current_history_index
+                else ""
+            )
             if current_history_sql != desired_history_index:
                 conn.execute("DROP INDEX IF EXISTS idx_producer_scope_history")
                 conn.execute(desired_history_index)
@@ -1680,9 +1534,7 @@ class TaskQueue:
         )
 
     @staticmethod
-    def _completion_event_workers(
-        conn: sqlite3.Connection, task_id: str
-    ) -> list[str]:
+    def _completion_event_workers(conn: sqlite3.Connection, task_id: str) -> list[str]:
         """Return distinct owners from authoritative completion transitions."""
         rows = conn.execute(
             "SELECT DISTINCT worker FROM task_events"
@@ -1708,9 +1560,7 @@ class TaskQueue:
         return value
 
     @classmethod
-    def _validate_producer_scope(
-        cls, repo: object, source: object
-    ) -> tuple[str, str]:
+    def _validate_producer_scope(cls, repo: object, source: object) -> tuple[str, str]:
         canonical_repo = canonicalize_remote(repo if isinstance(repo, str) else None)
         if not canonical_repo:
             raise ProducerScopeValidationError(
@@ -2152,9 +2002,7 @@ class TaskQueue:
             history_truncated=truncated,
         )
 
-    def producer_scope_status(
-        self, repo: str, source: str
-    ) -> ProducerScopeState:
+    def producer_scope_status(self, repo: str, source: str) -> ProducerScopeState:
         """Inspect one exact producer scope without mutating it."""
         repo, source = self._validate_producer_scope(repo, source)
         with self._connect() as conn:
@@ -2254,15 +2102,11 @@ class TaskQueue:
                         required_label=effective_label,
                         requested_producer=producer,
                         active_producer=(
-                            current["active_producer"]
-                            if current is not None
-                            else None
+                            current["active_producer"] if current is not None else None
                         ),
                         requested_generation=expected_generation,
                         current_generation=(
-                            current["current_generation"]
-                            if current is not None
-                            else 0
+                            current["current_generation"] if current is not None else 0
                         ),
                         diagnostics=blockers,
                     )
@@ -2304,9 +2148,7 @@ class TaskQueue:
                         expected_generation + 1 == current_generation
                         and producer == current["active_producer"]
                     ):
-                        state = self._producer_scope_state_from_conn(
-                            conn, repo, source
-                        )
+                        state = self._producer_scope_state_from_conn(conn, repo, source)
                         conn.execute("COMMIT")
                         return ProducerScopeTransition(state=state, replayed=True)
                     raise ProducerFenceError(
@@ -2332,8 +2174,7 @@ class TaskQueue:
                 )
                 if retired.rowcount != 1:
                     raise ProducerFenceError(
-                        "producer fence history is inconsistent; current generation "
-                        "is not active",
+                        "producer fence history is inconsistent; current generation is not active",
                         reason="inconsistent_history",
                         repo=repo,
                         source=source,
@@ -2377,9 +2218,7 @@ class TaskQueue:
             )
 
     def _fetch(self, conn: sqlite3.Connection, task_id: str) -> Task | None:
-        row = conn.execute(
-            f"SELECT {_TASK_SELECT} FROM tasks WHERE id = ?", (task_id,)
-        ).fetchone()
+        row = conn.execute(f"SELECT {_TASK_SELECT} FROM tasks WHERE id = ?", (task_id,)).fetchone()
         return Task._from_row(row) if row else None
 
     def _enqueue_wake(
@@ -2427,15 +2266,11 @@ class TaskQueue:
             worker=task.owner,
             note=f"wake pending ({operation_id})",
         )
-        row = conn.execute(
-            "SELECT * FROM wake_outbox WHERE id = ?", (operation_id,)
-        ).fetchone()
+        row = conn.execute("SELECT * FROM wake_outbox WHERE id = ?", (operation_id,)).fetchone()
         return WakeOperation._from_row(row)
 
     @staticmethod
-    def _has_headless_reservation(
-        conn: sqlite3.Connection, task_id: str
-    ) -> bool:
+    def _has_headless_reservation(conn: sqlite3.Connection, task_id: str) -> bool:
         row = conn.execute(
             "SELECT 1 FROM spawn_reservations"
             " WHERE task_id = ? AND state IN (?, ?) AND"
@@ -2447,9 +2282,7 @@ class TaskQueue:
         return row is not None
 
     @staticmethod
-    def _has_cold_headless_reservation(
-        conn: sqlite3.Connection, task_id: str
-    ) -> bool:
+    def _has_cold_headless_reservation(conn: sqlite3.Connection, task_id: str) -> bool:
         row = conn.execute(
             "SELECT 1 FROM spawn_reservations"
             " WHERE task_id = ? AND state = ? AND"
@@ -2462,9 +2295,7 @@ class TaskQueue:
 
     # -- payload -------------------------------------------------------------
 
-    def _payload_needs_spill(
-        self, payload_ref: str | None, payload_inline: str | None
-    ) -> bool:
+    def _payload_needs_spill(self, payload_ref: str | None, payload_inline: str | None) -> bool:
         return (
             payload_ref is None
             and payload_inline is not None
@@ -2618,9 +2449,7 @@ class TaskQueue:
         if exclusive_key is not None:
             exclusive_key = exclusive_key.strip() or None
         if supersede_exclusive_key and exclusive_key is None:
-            raise TaskError(
-                "supersede_exclusive_key requires a non-empty exclusive_key"
-            )
+            raise TaskError("supersede_exclusive_key requires a non-empty exclusive_key")
         canonical_repo = self._canonical_repo(repo)
         if not canonical_repo:
             raise TaskError(
@@ -2696,9 +2525,7 @@ class TaskQueue:
             compatible_request_hashes.add(request_hash)
             pre_exclusive_fields = dict(request_fields)
             pre_exclusive_fields.pop("exclusive_key")
-            compatible_request_hashes.add(
-                self._producer_request_hash(pre_exclusive_fields)
-            )
+            compatible_request_hashes.add(self._producer_request_hash(pre_exclusive_fields))
             raw_requires = sorted(set(requires or ()))
             raw_excludes = sorted(set(excludes or ()))
             if (
@@ -2708,28 +2535,20 @@ class TaskQueue:
                 legacy_fields = dict(request_fields)
                 legacy_fields["requires"] = raw_requires
                 legacy_fields["excludes"] = raw_excludes
-                compatible_request_hashes.add(
-                    self._producer_request_hash(legacy_fields)
-                )
+                compatible_request_hashes.add(self._producer_request_hash(legacy_fields))
                 legacy_fields.pop("exclusive_key")
-                compatible_request_hashes.add(
-                    self._producer_request_hash(legacy_fields)
-                )
+                compatible_request_hashes.add(self._producer_request_hash(legacy_fields))
         ts = self._now(now)
         task_id = uuid.uuid4().hex
         spill_content = (
-            payload_inline
-            if self._payload_needs_spill(payload_ref, payload_inline)
-            else None
+            payload_inline if self._payload_needs_spill(payload_ref, payload_inline) else None
         )
         accepted: Task | None = None
         request_already_recorded = False
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             try:
-                managed = self._producer_scope_row(
-                    conn, repo=canonical_repo, source=source
-                )
+                managed = self._producer_scope_row(conn, repo=canonical_repo, source=source)
                 label_scopes = self._required_label_scope_rows(
                     conn,
                     labels=labels or (),
@@ -2758,9 +2577,7 @@ class TaskQueue:
                             active_producer=label_scope["active_producer"],
                             current_generation=label_scope["current_generation"],
                             producer_request_id=(
-                                str(fence["request_id"])
-                                if fence is not None
-                                else None
+                                str(fence["request_id"]) if fence is not None else None
                             ),
                             diagnostics={
                                 "owning_repo": owning_scope["repo"],
@@ -2782,8 +2599,7 @@ class TaskQueue:
                     assert isinstance(fence_scope, dict)
                     if fence_scope != owning_scope:
                         raise ProducerFenceError(
-                            "task required label belongs to a different managed "
-                            "producer scope",
+                            "task required label belongs to a different managed producer scope",
                             reason="required_label_scope_mismatch",
                             repo=canonical_repo,
                             source=label_scope["source"],
@@ -2864,10 +2680,7 @@ class TaskQueue:
                             request_id,
                         ),
                     ).fetchone()
-                    if (
-                        requested_generation != managed["current_generation"]
-                        and request is None
-                    ):
+                    if requested_generation != managed["current_generation"] and request is None:
                         raise ProducerFenceError(
                             f"producer generation {requested_generation} is retired; "
                             f"current generation is {managed['current_generation']}",
@@ -2883,8 +2696,7 @@ class TaskQueue:
                         )
                     if requested_producer != generation["producer_id"]:
                         raise ProducerFenceError(
-                            "producer_id does not match the selected producer "
-                            "for this generation",
+                            "producer_id does not match the selected producer for this generation",
                             reason="wrong_producer",
                             repo=canonical_repo,
                             source=scope_source,
@@ -2895,9 +2707,7 @@ class TaskQueue:
                             current_generation=managed["current_generation"],
                             producer_request_id=request_id,
                         )
-                    capability_hash = self._capability_hash(
-                        str(fence["capability"])
-                    )
+                    capability_hash = self._capability_hash(str(fence["capability"]))
                     if not hmac.compare_digest(
                         capability_hash, str(generation["capability_hash"])
                     ):
@@ -2927,8 +2737,7 @@ class TaskQueue:
                             )
                         if request["producer_id"] != requested_producer:
                             raise ProducerFenceError(
-                                "accepted producer request has inconsistent "
-                                "producer metadata",
+                                "accepted producer request has inconsistent producer metadata",
                                 reason="inconsistent_request_ledger",
                                 repo=canonical_repo,
                                 source=scope_source,
@@ -2952,9 +2761,7 @@ class TaskQueue:
                         accepted = Task._from_row(row)
                         request_already_recorded = True
                     if accepted is None:
-                        if required_label is not None and required_label not in set(
-                            labels or ()
-                        ):
+                        if required_label is not None and required_label not in set(labels or ()):
                             raise ProducerFenceError(
                                 "managed producer scope requires its configured label",
                                 reason="required_label_missing",
@@ -3045,11 +2852,7 @@ class TaskQueue:
                             )
                             if legacy is not None:
                                 accepted = Task._from_row(legacy)
-                if (
-                    fence is not None
-                    and accepted is not None
-                    and not request_already_recorded
-                ):
+                if fence is not None and accepted is not None and not request_already_recorded:
                     raise ProducerFenceError(
                         "managed create dedup collided with a task that is not "
                         "this exact accepted producer request",
@@ -3200,9 +3003,7 @@ class TaskQueue:
         if accepted.id != task_id:
             outcome = CreationOutcome(
                 task=accepted,
-                disposition=(
-                    "replayed" if request_already_recorded else "deduplicated"
-                ),
+                disposition=("replayed" if request_already_recorded else "deduplicated"),
                 event_type=None,
             )
             return outcome if _with_outcome else accepted
@@ -3220,9 +3021,7 @@ class TaskQueue:
         outcome = CreationOutcome(
             task=task,
             disposition="created",
-            event_type=(
-                "task.proposed" if status == Status.PROPOSED else "task.created"
-            ),
+            event_type=("task.proposed" if status == Status.PROPOSED else "task.created"),
         )
         return outcome if _with_outcome else task
 
@@ -3344,9 +3143,7 @@ class TaskQueue:
                                     "source": row["source"],
                                     "labels": row["labels"],
                                     "producer_fence": row["producer_fence"],
-                                    "producer_request_hash": row[
-                                        "producer_request_hash"
-                                    ],
+                                    "producer_request_hash": row["producer_request_hash"],
                                     "reason": rejection["reason"],
                                 },
                                 ensure_ascii=True,
@@ -3354,12 +3151,11 @@ class TaskQueue:
                                 sort_keys=True,
                             ).encode("utf-8")
                         ).hexdigest()
-                        rejection["fingerprint"] = str(
-                            rejection["_fingerprint"]
-                        )[:16]
-                    if (
-                        len(producer_rejections) < _CLAIM_REJECTION_EVENT_LIMIT
-                        and self._record_claim_rejection(conn, rejection, ts=ts)
+                        rejection["fingerprint"] = str(rejection["_fingerprint"])[:16]
+                    if len(
+                        producer_rejections
+                    ) < _CLAIM_REJECTION_EVENT_LIMIT and self._record_claim_rejection(
+                        conn, rejection, ts=ts
                     ):
                         rejection.pop("_fingerprint")
                         producer_rejections.append(rejection)
@@ -3454,7 +3250,8 @@ class TaskQueue:
             ).fetchall()
             owned_rows = conn.execute(
                 f"SELECT {_TASK_BULK_SELECT} FROM tasks "
-                "WHERE owner = ? AND status IN (?, ?, ?)" + repo_clause  # noqa: S608 (constant clause; parameterized)
+                "WHERE owner = ? AND status IN (?, ?, ?)"
+                + repo_clause  # noqa: S608 (constant clause; parameterized)
                 + " ORDER BY created_at ASC",
                 (
                     owner,
@@ -3565,9 +3362,7 @@ class TaskQueue:
         allowed = set(allowed)
         if expected_status is not None:
             if expected_status not in allowed:
-                raise TaskError(
-                    f"cannot expect {expected_status!r} when completing a task"
-                )
+                raise TaskError(f"cannot expect {expected_status!r} when completing a task")
             allowed = {expected_status}
         ts = self._now(now)
         with self._connect() as conn:
@@ -3609,15 +3404,11 @@ class TaskQueue:
                 current_ref = row["result_ref"]
                 if result_ref is not None and current_ref not in (None, result_ref):
                     conn.execute("COMMIT")
-                    raise TaskError(
-                        f"task {task_id!r} already has a different result_ref"
-                    )
+                    raise TaskError(f"task {task_id!r} already has a different result_ref")
                 if current_result is not None:
                     if current_result != encoded_result:
                         conn.execute("COMMIT")
-                        raise TaskError(
-                            f"task {task_id!r} already has a different result"
-                        )
+                        raise TaskError(f"task {task_id!r} already has a different result")
                     if task.completed_by is None:
                         conn.execute(
                             "UPDATE tasks SET completed_by = ?"
@@ -3651,14 +3442,11 @@ class TaskQueue:
             if task.status not in allowed:
                 conn.execute("COMMIT")
                 raise TaskError(
-                    f"cannot complete a {task.status!r} task"
-                    f" (allowed: {sorted(allowed)})"
+                    f"cannot complete a {task.status!r} task (allowed: {sorted(allowed)})"
                 )
             if task.owner not in (None, worker_id):
                 conn.execute("COMMIT")
-                raise TaskError(
-                    f"task {task_id!r} owned by {task.owner!r}, not {worker_id!r}"
-                )
+                raise TaskError(f"task {task_id!r} owned by {task.owner!r}, not {worker_id!r}")
             if expected_generation is not None and (
                 task.generation != expected_generation
                 or task.owner_session_id != expected_owner_session_id
@@ -3720,10 +3508,7 @@ class TaskQueue:
             if current is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
-            if (
-                current.status == Status.SUSPENDED
-                and current.owner == worker_id
-            ):
+            if current.status == Status.SUSPENDED and current.owner == worker_id:
                 self._audit(
                     conn,
                     task_id,
@@ -3991,22 +3776,16 @@ class TaskQueue:
                 raise TaskError(f"no such task {task_id!r}")
             if task.status not in Status.HELD:
                 conn.execute("COMMIT")
-                raise TaskError(
-                    f"cannot bind owner session on a {task.status!r} task"
-                )
+                raise TaskError(f"cannot bind owner session on a {task.status!r} task")
             if task.owner != worker_id:
                 conn.execute("COMMIT")
-                raise TaskError(
-                    f"task {task_id!r} owned by {task.owner!r}, not {worker_id!r}"
-                )
+                raise TaskError(f"task {task_id!r} owned by {task.owner!r}, not {worker_id!r}")
             if expected_generation is not None and task.generation != expected_generation:
                 conn.execute("COMMIT")
                 raise TaskError(f"task {task_id!r} ownership incarnation changed")
             if task.owner_session_id not in {None, owner_session_id}:
                 conn.execute("COMMIT")
-                raise TaskError(
-                    f"task {task_id!r} already bound to another owner session"
-                )
+                raise TaskError(f"task {task_id!r} already bound to another owner session")
             conn.execute(
                 "UPDATE tasks SET owner_session_id=?, updated_at=? WHERE id=?",
                 (owner_session_id, ts, task_id),
@@ -4035,8 +3814,7 @@ class TaskQueue:
         """Publish activity fenced to this task's active spawn reservation."""
         if activity not in {None, "ACTIVE", "IDLE", "STALLED"}:
             raise TaskError(
-                f"invalid task activity {activity!r} "
-                "(allowed: ACTIVE, IDLE, STALLED, or null)"
+                f"invalid task activity {activity!r} (allowed: ACTIVE, IDLE, STALLED, or null)"
             )
         ts = self._now(now)
         with self._connect() as conn:
@@ -4045,14 +3823,9 @@ class TaskQueue:
             if task is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
-            if (
-                task.status == Status.SUSPENDED
-                and activity not in {None, "IDLE"}
-            ):
+            if task.status == Status.SUSPENDED and activity not in {None, "IDLE"}:
                 conn.execute("COMMIT")
-                raise TaskError(
-                    f"cannot set active activity on suspended task {task_id!r}"
-                )
+                raise TaskError(f"cannot set active activity on suspended task {task_id!r}")
             reservation = conn.execute(
                 "SELECT task_id, state FROM spawn_reservations WHERE key = ?",
                 (reservation_key,),
@@ -4129,9 +3902,7 @@ class TaskQueue:
                 raise TaskError(f"cannot record progress on a {task.status!r} task")
             if task.owner != worker_id:
                 conn.execute("COMMIT")
-                raise TaskError(
-                    f"task {task_id!r} owned by {task.owner!r}, not {worker_id!r}"
-                )
+                raise TaskError(f"task {task_id!r} owned by {task.owner!r}, not {worker_id!r}")
             if extend_lease:
                 conn.execute(
                     "UPDATE tasks SET latest_progress = ?, lease_expires_at = ?,"
@@ -4205,9 +3976,7 @@ class TaskQueue:
                 raise TaskError(f"cannot set a card on a {task.status!r} task")
             if task.owner != worker_id:
                 conn.execute("COMMIT")
-                raise TaskError(
-                    f"task {task_id!r} owned by {task.owner!r}, not {worker_id!r}"
-                )
+                raise TaskError(f"task {task_id!r} owned by {task.owner!r}, not {worker_id!r}")
             to_status = Status.SUSPENDED if awaiting else task.status
             lease_expires_at = None if awaiting else ts + self.lease_seconds
             conn.execute(
@@ -4284,9 +4053,7 @@ class TaskQueue:
                 (task_id, ts, payload, sender),
             )
             resumed = task.status == Status.SUSPENDED
-            cold_headless = bool(
-                resumed and self._has_headless_reservation(conn, task_id)
-            )
+            cold_headless = bool(resumed and self._has_headless_reservation(conn, task_id))
             if cold_headless:
                 conn.execute(
                     "UPDATE tasks SET awaiting_steer = 0, resume_requested = 1,"
@@ -4322,7 +4089,9 @@ class TaskQueue:
                 to_status=(
                     Status.SUSPENDED
                     if cold_headless
-                    else Status.STARTED if resumed else task.status
+                    else Status.STARTED
+                    if resumed
+                    else task.status
                 ),
                 worker=sender,
                 note=(
@@ -4381,9 +4150,7 @@ class TaskQueue:
                 raise TaskError(f"cannot take a steer on a {task.status!r} task")
             if task.owner != worker_id:
                 conn.execute("COMMIT")
-                raise TaskError(
-                    f"task {task_id!r} owned by {task.owner!r}, not {worker_id!r}"
-                )
+                raise TaskError(f"task {task_id!r} owned by {task.owner!r}, not {worker_id!r}")
             rows = conn.execute(
                 "SELECT id, ts, fields, sender FROM task_steer "
                 "WHERE task_id = ? AND taken = 0 ORDER BY id ASC"
@@ -4414,11 +4181,7 @@ class TaskQueue:
                 from_status=task.status,
                 to_status=task.status,
                 worker=worker_id,
-                note=(
-                    f"{len(rows)} steers taken"
-                    if all_pending
-                    else "steer taken"
-                ),
+                note=(f"{len(rows)} steers taken" if all_pending else "steer taken"),
             )
             conn.execute("COMMIT")
         result = [
@@ -4456,8 +4219,7 @@ class TaskQueue:
         """List a task's durable wake operations, oldest first."""
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM wake_outbox WHERE task_id = ?"
-                " ORDER BY wake_seq ASC",
+                "SELECT * FROM wake_outbox WHERE task_id = ? ORDER BY wake_seq ASC",
                 (task_id,),
             ).fetchall()
         return [WakeOperation._from_row(row) for row in rows]
@@ -4653,8 +4415,7 @@ class TaskQueue:
                 status = "pending"
                 delay = min(
                     60.0,
-                    max(0.01, retry_base)
-                    * float(2 ** max(0, wake.attempts - 1)),
+                    max(0.01, retry_base) * float(2 ** max(0, wake.attempts - 1)),
                 )
                 note = f"wake retry scheduled ({wake.id})"
                 conn.execute(
@@ -4665,8 +4426,7 @@ class TaskQueue:
                     (ts, ts + delay, error or "delivery failed", wake.id),
                 )
             conn.execute(
-                "UPDATE tasks SET wake_status = ?"
-                " WHERE id = ? AND wake_operation_id = ?",
+                "UPDATE tasks SET wake_status = ? WHERE id = ? AND wake_operation_id = ?",
                 (status, wake.task_id, wake.id),
             )
             if task is not None:
@@ -4679,9 +4439,7 @@ class TaskQueue:
                     worker=wake.owner,
                     note=note,
                 )
-            result = conn.execute(
-                "SELECT * FROM wake_outbox WHERE id = ?", (wake.id,)
-            ).fetchone()
+            result = conn.execute("SELECT * FROM wake_outbox WHERE id = ?", (wake.id,)).fetchone()
             conn.execute("COMMIT")
         return WakeOperation._from_row(result)
 
@@ -4693,8 +4451,7 @@ class TaskQueue:
                 "SELECT status, COUNT(*) AS count FROM wake_outbox GROUP BY status"
             ).fetchall()
             oldest = conn.execute(
-                "SELECT MIN(created_at) FROM wake_outbox"
-                " WHERE status IN ('pending', 'delivering')"
+                "SELECT MIN(created_at) FROM wake_outbox WHERE status IN ('pending', 'delivering')"
             ).fetchone()[0]
         counts = {
             "pending": 0,
@@ -4706,9 +4463,7 @@ class TaskQueue:
         counts.update({row["status"]: row["count"] for row in rows})
         return {
             **counts,
-            "oldest_pending_age": (
-                round(ts - oldest, 3) if oldest is not None else None
-            ),
+            "oldest_pending_age": (round(ts - oldest, 3) if oldest is not None else None),
         }
 
     def recover_expired_leases(self, *, now: float | None = None) -> int:
@@ -4771,9 +4526,7 @@ class TaskQueue:
         if resolver is None:
             from . import tracking
 
-            def resolver(
-                worktree: str, machine: str | None, owner_session_id: str | None
-            ) -> str:
+            def resolver(worktree: str, machine: str | None, owner_session_id: str | None) -> str:
                 return tracking.liveness_verdict(
                     worktree, machine=machine, owner_session_id=owner_session_id
                 )
@@ -4781,8 +4534,12 @@ class TaskQueue:
         cap = self.DEFAULT_MAX_ATTEMPTS if max_attempts is None else max_attempts
         ts = self._now(now)
         counts = {
-            "checked": 0, "live": 0, "gone": 0, "unknown": 0,
-            "requeued": 0, "dead_lettered": 0,
+            "checked": 0,
+            "live": 0,
+            "gone": 0,
+            "unknown": 0,
+            "requeued": 0,
+            "dead_lettered": 0,
         }
         with self._connect() as conn:
             held = conn.execute(
@@ -4801,8 +4558,7 @@ class TaskQueue:
                 verdict = resolver(worktree, machine or None, row["owner_session_id"])
             counts[verdict] = counts.get(verdict, 0) + 1
             probed.append(
-                (row["id"], verdict, row["owner_session_id"], row["generation"],
-                 row["attempts"])
+                (row["id"], verdict, row["owner_session_id"], row["generation"], row["attempts"])
             )
         if not probed:
             return counts
@@ -4818,11 +4574,10 @@ class TaskQueue:
                 )
                 if verdict != self.LIVENESS_GONE:
                     continue
-                to_status = (
-                    Status.DEAD_LETTER if attempts >= cap else Status.QUEUED
-                )
+                to_status = Status.DEAD_LETTER if attempts >= cap else Status.QUEUED
                 owner_clause = (
-                    "owner_session_id = ?" if owner_session_id is not None
+                    "owner_session_id = ?"
+                    if owner_session_id is not None
                     else "owner_session_id IS NULL"
                 )
                 params: list[object] = [to_status, ts]
@@ -4845,9 +4600,13 @@ class TaskQueue:
                 cur = conn.execute(sql, params)
                 if cur.rowcount:
                     self._audit(
-                        conn, task_id, ts=ts,
-                        from_status=Status.STARTED, to_status=to_status,
-                        note="owner-gone" if to_status == Status.QUEUED
+                        conn,
+                        task_id,
+                        ts=ts,
+                        from_status=Status.STARTED,
+                        to_status=to_status,
+                        note="owner-gone"
+                        if to_status == Status.QUEUED
                         else "owner-gone (dead-letter: max attempts)",
                     )
                     if to_status == Status.QUEUED:
@@ -4932,8 +4691,11 @@ class TaskQueue:
                 )
                 if cur.rowcount:
                     self._audit(
-                        conn, task_id, ts=ts,
-                        from_status=status, to_status=Status.ABANDONED,
+                        conn,
+                        task_id,
+                        ts=ts,
+                        from_status=status,
+                        to_status=Status.ABANDONED,
                         note="orphaned: target worktree no longer live",
                     )
                     counts["reaped"] += 1
@@ -4969,6 +4731,7 @@ class TaskQueue:
         where_repo = " AND repo = ?" if repo is not None else ""
         args: tuple[object, ...] = (repo,) if repo is not None else ()
         with self._connect() as conn:
+
             def _count(status: str) -> int:
                 return conn.execute(
                     f"SELECT COUNT(*) FROM tasks WHERE status = ?{where_repo}",  # noqa: S608 (constant clause; parameterized)
@@ -5092,9 +4855,7 @@ class TaskQueue:
             if task.status not in allowed_set:
                 if idempotent_replay and task.status == to:
                     owner_ok = (
-                        not require_owner
-                        or worker_id is None
-                        or task.owner in (None, worker_id)
+                        not require_owner or worker_id is None or task.owner in (None, worker_id)
                     )
                     generation_ok = expected_generation is None or (
                         task.generation == expected_generation
@@ -5122,24 +4883,20 @@ class TaskQueue:
                 raise TaskError(f"task {task_id!r} owned by {task.owner!r}, not {worker_id!r}")
             if reject_pending_steer:
                 pending = conn.execute(
-                    "SELECT 1 FROM task_steer"
-                    " WHERE task_id = ? AND taken = 0 LIMIT 1",
+                    "SELECT 1 FROM task_steer WHERE task_id = ? AND taken = 0 LIMIT 1",
                     (task_id,),
                 ).fetchone()
                 if pending is not None:
                     conn.execute("COMMIT")
                     raise TaskError(
-                        f"cannot suspend task {task_id!r}: pending steer;"
-                        " take it and continue"
+                        f"cannot suspend task {task_id!r}: pending steer; take it and continue"
                     )
             if expected_generation is not None and (
                 task.generation != expected_generation
                 or task.owner_session_id != expected_owner_session_id
             ):
                 conn.execute("COMMIT")
-                raise TaskError(
-                    f"task {task_id!r} ownership incarnation changed"
-                )
+                raise TaskError(f"task {task_id!r} ownership incarnation changed")
             if (
                 reembody_headless_on_wake
                 and task.owner_session_id is None
@@ -5298,8 +5055,7 @@ class TaskQueue:
         with self._connect() as conn:
             # `where` is built from literal clause strings; values are bound.
             rows = conn.execute(
-                f"SELECT {_TASK_BULK_SELECT} FROM tasks "
-                f"{where} ORDER BY created_at DESC LIMIT ?",  # noqa: S608
+                f"SELECT {_TASK_BULK_SELECT} FROM tasks {where} ORDER BY created_at DESC LIMIT ?",  # noqa: S608
                 params,
             ).fetchall()
         return [Task._from_row(r) for r in rows]
@@ -5316,7 +5072,8 @@ class TaskQueue:
         with self._connect() as conn:
             rows = conn.execute(
                 f"SELECT {_TASK_BULK_SELECT} FROM tasks "
-                "WHERE (title LIKE ? OR prompt LIKE ?)" + repo_clause  # noqa: S608 (constant clause; parameterized)
+                "WHERE (title LIKE ? OR prompt LIKE ?)"
+                + repo_clause  # noqa: S608 (constant clause; parameterized)
                 + " ORDER BY created_at DESC LIMIT ?",
                 (like, like, *repo_param, limit),
             ).fetchall()
@@ -5404,8 +5161,7 @@ class TaskQueue:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
             rows = conn.execute(
-                "SELECT * FROM spawn_reservations WHERE task_id = ? "
-                "ORDER BY attempt ASC",
+                "SELECT * FROM spawn_reservations WHERE task_id = ? ORDER BY attempt ASC",
                 (task_id,),
             ).fetchall()
             if task.exclusive_key is not None:
@@ -5505,9 +5261,7 @@ class TaskQueue:
                     ts,
                 ),
             )
-            row = conn.execute(
-                "SELECT * FROM spawn_reservations WHERE key = ?", (key,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM spawn_reservations WHERE key = ?", (key,)).fetchone()
             conn.execute("COMMIT")
         return SpawnReservation._from_row(row), True
 
@@ -5548,21 +5302,14 @@ class TaskQueue:
             }
             if existing is not None:
                 current = RoutingAssignment.from_row(existing)
-                current_values = {
-                    key: getattr(current, key)
-                    for key in immutable
-                }
+                current_values = {key: getattr(current, key) for key in immutable}
                 conn.execute("COMMIT")
                 if current_values != immutable:
-                    raise TaskError(
-                        "routing assignment already exists with different facts"
-                    )
+                    raise TaskError("routing assignment already exists with different facts")
                 return current, False
             if reservation["state"] != SpawnState.RESERVING:
                 conn.execute("COMMIT")
-                raise TaskError(
-                    "new routing assignment requires a reserving spawn reservation"
-                )
+                raise TaskError("new routing assignment requires a reserving spawn reservation")
             parent = normalized["parent_assignment_id"]
             if parent is not None:
                 if parent == reservation_key:
@@ -5638,12 +5385,8 @@ class TaskQueue:
     ) -> tuple[RoutingAssignment, bool]:
         """Advance one routing assignment with atomic terminal semantics."""
         try:
-            event_type = str(
-                routing_token(event_type, field="event_type", limit=32)
-            )
-            actor_role = str(
-                routing_token(actor_role, field="actor_role", limit=32)
-            )
+            event_type = str(routing_token(event_type, field="event_type", limit=32))
+            actor_role = str(routing_token(actor_role, field="actor_role", limit=32))
             reason_code = routing_token(
                 reason_code,
                 field="reason_code",
@@ -5776,9 +5519,7 @@ class TaskQueue:
                     field="provider_billing_event_ref",
                 )
             )
-            actor_role = str(
-                routing_token(actor_role, field="actor_role", limit=32)
-            )
+            actor_role = str(routing_token(actor_role, field="actor_role", limit=32))
         except RoutingProvenanceError as exc:
             raise TaskError(str(exc)) from exc
         if actor_role not in ACTOR_ROLES:
@@ -5829,15 +5570,11 @@ class TaskQueue:
                 )
             except sqlite3.IntegrityError as exc:
                 conn.execute("ROLLBACK")
-                raise TaskError(
-                    "provider billing event reference is already assigned"
-                ) from exc
+                raise TaskError("provider billing event reference is already assigned") from exc
             conn.execute("COMMIT")
         return True
 
-    def get_routing_assignment(
-        self, assignment_id: str
-    ) -> RoutingAssignment | None:
+    def get_routing_assignment(self, assignment_id: str) -> RoutingAssignment | None:
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM routing_assignments WHERE assignment_id = ?",
@@ -5855,8 +5592,7 @@ class TaskQueue:
         with self._connect() as conn:
             if task_id is None:
                 rows = conn.execute(
-                    "SELECT * FROM routing_assignments "
-                    "ORDER BY created_at DESC LIMIT ?",
+                    "SELECT * FROM routing_assignments ORDER BY created_at DESC LIMIT ?",
                     (limit,),
                 ).fetchall()
             else:
@@ -5867,9 +5603,7 @@ class TaskQueue:
                 ).fetchall()
         return [RoutingAssignment.from_row(row) for row in rows]
 
-    def routing_assignment_events(
-        self, assignment_id: str
-    ) -> list[dict[str, object]]:
+    def routing_assignment_events(self, assignment_id: str) -> list[dict[str, object]]:
         if self.get_routing_assignment(assignment_id) is None:
             raise TaskError(f"no such routing assignment: {assignment_id}")
         with self._connect() as conn:
@@ -5928,20 +5662,16 @@ class TaskQueue:
             if active:
                 conn.execute("COMMIT")
                 raise TaskError(
-                    f"task {task_id!r} has active spawn reservation(s): "
-                    f"{', '.join(active)}"
+                    f"task {task_id!r} has active spawn reservation(s): {', '.join(active)}"
                 )
             failed = [row for row in rows if row["state"] == SpawnState.FAILED]
             pending_cleanup = [
-                row["key"]
-                for row in failed
-                if row["conclusion_state"] == "pending"
+                row["key"] for row in failed if row["conclusion_state"] == "pending"
             ]
             if pending_cleanup:
                 conn.execute("COMMIT")
                 raise TaskError(
-                    f"task {task_id!r} has pending spawn cleanup: "
-                    f"{', '.join(pending_cleanup)}"
+                    f"task {task_id!r} has pending spawn cleanup: {', '.join(pending_cleanup)}"
                 )
             if len(failed) < min_failures:
                 conn.execute("COMMIT")
@@ -5995,9 +5725,7 @@ class TaskQueue:
         ts = self._now(now)
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute(
-                "SELECT * FROM spawn_reservations WHERE key = ?", (key,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM spawn_reservations WHERE key = ?", (key,)).fetchone()
             if row is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such reservation: {key}")
@@ -6009,10 +5737,7 @@ class TaskQueue:
                 )
             if to_state == SpawnState.DEFERRED and row["release_requested"]:
                 conn.execute("COMMIT")
-                raise TaskError(
-                    f"reservation {key} has pending release "
-                    "(cannot defer)"
-                )
+                raise TaskError(f"reservation {key} has pending release (cannot defer)")
             if (
                 conclusion_state is not None
                 or conclusion_detail is not None
@@ -6024,7 +5749,8 @@ class TaskQueue:
                     claim_token,
                     now=ts,
                     required=(
-                        row["state"] in {
+                        row["state"]
+                        in {
                             SpawnState.FAILED,
                             SpawnState.SETTLED,
                         }
@@ -6035,10 +5761,7 @@ class TaskQueue:
                     newer = _newer_worktree_reservation(conn, row, key)
                     if newer is not None:
                         conn.execute("COMMIT")
-                        raise TaskError(
-                            "worktree carried by newer reservation "
-                            f"{newer['key']}"
-                        )
+                        raise TaskError(f"worktree carried by newer reservation {newer['key']}")
             if worktree is not None:
                 cleanup_claims = conn.execute(
                     "SELECT key FROM spawn_reservations "
@@ -6055,8 +5778,7 @@ class TaskQueue:
                 for cleanup_claim in cleanup_claims:
                     conn.execute("COMMIT")
                     raise TaskError(
-                        f"worktree {worktree!r} has in-flight cleanup "
-                        f"{cleanup_claim['key']}"
+                        f"worktree {worktree!r} has in-flight cleanup {cleanup_claim['key']}"
                     )
             conn.execute(
                 "UPDATE spawn_reservations SET state = ?, updated_at = ?, "
@@ -6089,10 +5811,7 @@ class TaskQueue:
                     key,
                 ),
             )
-            if (
-                to_state in SpawnState.RELEASABLE
-                and row["state"] in SpawnState.ACTIVE
-            ):
+            if to_state in SpawnState.RELEASABLE and row["state"] in SpawnState.ACTIVE:
                 latest = conn.execute(
                     "SELECT key FROM spawn_reservations WHERE task_id = ? "
                     "ORDER BY attempt DESC LIMIT 1",
@@ -6100,13 +5819,10 @@ class TaskQueue:
                 ).fetchone()
                 if latest is not None and latest["key"] == key:
                     conn.execute(
-                        "UPDATE tasks SET activity = NULL, activity_updated_at = ? "
-                        "WHERE id = ?",
+                        "UPDATE tasks SET activity = NULL, activity_updated_at = ? WHERE id = ?",
                         (ts, row["task_id"]),
                     )
-            row = conn.execute(
-                "SELECT * FROM spawn_reservations WHERE key = ?", (key,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM spawn_reservations WHERE key = ?", (key,)).fetchone()
             conn.execute("COMMIT")
         return SpawnReservation._from_row(row)
 
@@ -6127,9 +5843,7 @@ class TaskQueue:
         return self._update_reservation(
             key,
             to_state=SpawnState.SPAWNED,
-            allowed_from=frozenset(
-                {SpawnState.RESERVING, SpawnState.SPAWNED, SpawnState.COLD}
-            ),
+            allowed_from=frozenset({SpawnState.RESERVING, SpawnState.SPAWNED, SpawnState.COLD}),
             session_handle=session_handle,
             worktree=worktree,
             now=now,
@@ -6172,8 +5886,7 @@ class TaskQueue:
             if row["state"] != SpawnState.RESERVING:
                 conn.execute("COMMIT")
                 raise TaskError(
-                    f"reservation {key} is {row['state']!r}, not "
-                    f"{SpawnState.RESERVING!r}"
+                    f"reservation {key} is {row['state']!r}, not {SpawnState.RESERVING!r}"
                 )
             cleanup_claims = conn.execute(
                 "SELECT key FROM spawn_reservations "
@@ -6190,8 +5903,7 @@ class TaskQueue:
             for cleanup_claim in cleanup_claims:
                 conn.execute("COMMIT")
                 raise TaskError(
-                    f"worktree {worktree!r} has in-flight cleanup "
-                    f"{cleanup_claim['key']}"
+                    f"worktree {worktree!r} has in-flight cleanup {cleanup_claim['key']}"
                 )
             conn.execute(
                 "UPDATE spawn_reservations SET "
@@ -6221,9 +5933,7 @@ class TaskQueue:
             conn.execute("COMMIT")
         return SpawnReservation._from_row(updated)
 
-    def record_cold(
-        self, key: str, *, now: float | None = None
-    ) -> SpawnReservation:
+    def record_cold(self, key: str, *, now: float | None = None) -> SpawnReservation:
         """Mark a spawned headless body intentionally stopped and dormant."""
         return self._update_reservation(
             key,
@@ -6252,9 +5962,7 @@ class TaskQueue:
         return self._update_reservation(
             key,
             to_state=SpawnState.FAILED,
-            allowed_from=(
-                SpawnState.ACTIVE - frozenset({SpawnState.RELEASING})
-            )
+            allowed_from=(SpawnState.ACTIVE - frozenset({SpawnState.RELEASING}))
             | frozenset({SpawnState.FAILED}),
             detail=detail,
             conclusion_state=conclusion_state,
@@ -6274,9 +5982,7 @@ class TaskQueue:
         return self._update_reservation(
             key,
             to_state=SpawnState.DEFERRED,
-            allowed_from=(
-                SpawnState.ACTIVE - frozenset({SpawnState.RELEASING})
-            ),
+            allowed_from=(SpawnState.ACTIVE - frozenset({SpawnState.RELEASING})),
             detail=detail,
             now=now,
         )
@@ -6306,9 +6012,7 @@ class TaskQueue:
                 raise TaskError(f"no such reservation: {key}")
             if row["state"] != SpawnState.RELEASING:
                 conn.execute("COMMIT")
-                raise TaskError(
-                    f"reservation {key} is {row['state']!r}, not releasing"
-                )
+                raise TaskError(f"reservation {key} is {row['state']!r}, not releasing")
             to_state = (
                 SpawnState.SETTLED
                 if row["release_disposition"] == "settled"
@@ -6339,8 +6043,7 @@ class TaskQueue:
             ).fetchone()
             if latest is not None and latest["key"] == key:
                 conn.execute(
-                    "UPDATE tasks SET activity = NULL, activity_updated_at = ? "
-                    "WHERE id = ?",
+                    "UPDATE tasks SET activity = NULL, activity_updated_at = ? WHERE id = ?",
                     (ts, row["task_id"]),
                 )
             updated = conn.execute(
@@ -6364,17 +6067,14 @@ class TaskQueue:
         ts = self._now(now)
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute(
-                "SELECT * FROM spawn_reservations WHERE key = ?", (key,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM spawn_reservations WHERE key = ?", (key,)).fetchone()
             if row is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such reservation: {key}")
             if row["state"] not in SpawnState.ACTIVE:
                 conn.execute("COMMIT")
                 raise TaskError(
-                    f"reservation {key} is {row['state']!r}, not active "
-                    "(cannot request release)"
+                    f"reservation {key} is {row['state']!r}, not active (cannot request release)"
                 )
             if row["state"] == SpawnState.RELEASING:
                 release_disposition = (
@@ -6404,9 +6104,7 @@ class TaskQueue:
                         key,
                     ),
                 )
-            row = conn.execute(
-                "SELECT * FROM spawn_reservations WHERE key = ?", (key,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM spawn_reservations WHERE key = ?", (key,)).fetchone()
             conn.execute("COMMIT")
         return SpawnReservation._from_row(row)
 
@@ -6430,9 +6128,7 @@ class TaskQueue:
         return self._update_reservation(
             key,
             to_state=SpawnState.SETTLED,
-            allowed_from=(
-                SpawnState.ACTIVE - frozenset({SpawnState.RELEASING})
-            )
+            allowed_from=(SpawnState.ACTIVE - frozenset({SpawnState.RELEASING}))
             | frozenset({SpawnState.SETTLED}),
             detail=detail,
             conclusion_state=conclusion_state,
@@ -6465,21 +6161,18 @@ class TaskQueue:
             if row is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such reservation: {key}")
-            mutable_states = SpawnState.ACTIVE | frozenset(
-                {SpawnState.FAILED, SpawnState.SETTLED}
-            )
+            mutable_states = SpawnState.ACTIVE | frozenset({SpawnState.FAILED, SpawnState.SETTLED})
             if row["state"] not in mutable_states:
                 conn.execute("COMMIT")
-                raise TaskError(
-                    f"reservation {key} is {row['state']!r}, not mutable"
-                )
+                raise TaskError(f"reservation {key} is {row['state']!r}, not mutable")
             _validate_conclusion_claim(
                 row["cleanup_claim_token"],
                 row["cleanup_claim_expires_at"],
                 claim_token,
                 now=ts,
                 required=(
-                    row["state"] in {
+                    row["state"]
+                    in {
                         SpawnState.FAILED,
                         SpawnState.SETTLED,
                     }
@@ -6490,9 +6183,7 @@ class TaskQueue:
                 newer = _newer_worktree_reservation(conn, row, key)
                 if newer is not None:
                     conn.execute("COMMIT")
-                    raise TaskError(
-                        f"worktree carried by newer reservation {newer['key']}"
-                    )
+                    raise TaskError(f"worktree carried by newer reservation {newer['key']}")
             conn.execute(
                 "UPDATE spawn_reservations SET updated_at = ?, "
                 "detail = COALESCE(?, detail), conclusion_state = ?, "
@@ -6538,17 +6229,12 @@ class TaskQueue:
                 or row["conclusion_state"] != "pending"
             ):
                 conn.execute("COMMIT")
-                raise TaskError(
-                    f"reservation {key} has no retired pending cleanup"
-                )
+                raise TaskError(f"reservation {key} has no retired pending cleanup")
             try:
                 current_expiry = float(row["cleanup_claim_expires_at"] or 0)
             except (TypeError, ValueError):
                 current_expiry = 0.0
-            if (
-                row["cleanup_claim_token"]
-                and current_expiry > ts
-            ):
+            if row["cleanup_claim_token"] and current_expiry > ts:
                 conn.execute("COMMIT")
                 return SpawnReservation._from_row(row), False, None
             blocker = None
@@ -6599,11 +6285,7 @@ class TaskQueue:
                         separators=(",", ":"),
                     ),
                     claim_token,
-                    (
-                        ts + max(1.0, claim_seconds)
-                        if claim_token is not None
-                        else None
-                    ),
+                    (ts + max(1.0, claim_seconds) if claim_token is not None else None),
                     key,
                 ),
             )
@@ -6641,9 +6323,7 @@ class TaskQueue:
             newer = _newer_worktree_reservation(conn, row, key)
             if newer is not None:
                 conn.execute("COMMIT")
-                raise TaskError(
-                    f"worktree carried by newer reservation {newer['key']}"
-                )
+                raise TaskError(f"worktree carried by newer reservation {newer['key']}")
             updated = SpawnReservation._from_row(row)
             conn.execute("COMMIT")
         return updated
@@ -6651,17 +6331,14 @@ class TaskQueue:
     def get_reservation(self, key: str) -> SpawnReservation | None:
         """Return one reservation by key, or ``None``."""
         with self._connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM spawn_reservations WHERE key = ?", (key,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM spawn_reservations WHERE key = ?", (key,)).fetchone()
         return SpawnReservation._from_row(row) if row else None
 
     def latest_reservation(self, task_id: str) -> SpawnReservation | None:
         """Return the highest-attempt reservation for a task, or ``None``."""
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT * FROM spawn_reservations WHERE task_id = ? "
-                "ORDER BY attempt DESC LIMIT 1",
+                "SELECT * FROM spawn_reservations WHERE task_id = ? ORDER BY attempt DESC LIMIT 1",
                 (task_id,),
             ).fetchone()
         return SpawnReservation._from_row(row) if row else None
@@ -6694,9 +6371,7 @@ class TaskQueue:
             clauses.append("t.repo = ?")
             params.append(repo)
         if label is not None:
-            clauses.append(
-                "EXISTS (SELECT 1 FROM json_each(t.labels) WHERE value = ?)"
-            )
+            clauses.append("EXISTS (SELECT 1 FROM json_each(t.labels) WHERE value = ?)")
             params.append(label)
         if conclusion_state is not None:
             clauses.append("r.conclusion_state = ?")
@@ -6717,501 +6392,3 @@ class TaskQueue:
                 params,
             ).fetchall()
         return [SpawnReservation._from_row(r) for r in rows]
-
-    # -- schedule registry ---------------------------------------------------
-
-    def register_schedule(self, entry: dict, *, now: float | None = None) -> ScheduleRecord:
-        """Register (or update) a recurring schedule by its ``id``.
-
-        ``entry`` is a timer-producer schedule dict; it is validated eagerly
-        (id + title + a resolvable lane + exactly one valid cadence) so a
-        malformed schedule is rejected at register time rather than silently
-        failing every tick. Re-registering the same ``id`` upserts the spec
-        (preserving ``created_at`` and the ``paused`` flag).
-        """
-        from .producers.schedule import ScheduleError, due_occurrences
-
-        sid = entry.get("id")
-        if not sid or not str(sid).strip():
-            raise TaskError("schedule needs a non-empty 'id'")
-        if not str(entry.get("title") or "").strip():
-            raise TaskError(f"schedule {sid!r} needs a 'title'")
-        if not entry.get("repo"):
-            raise TaskError(f"schedule {sid!r} needs a 'repo' (the task lane)")
-        try:
-            due_occurrences(entry, now=self._now(now))
-        except ScheduleError as exc:
-            raise TaskError(str(exc)) from exc
-
-        ts = self._now(now)
-        spec = json.dumps(entry)
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            exists = conn.execute(
-                "SELECT id FROM schedules WHERE id = ?", (sid,)
-            ).fetchone()
-            if exists:
-                conn.execute(
-                    "UPDATE schedules SET spec = ?, updated_at = ? WHERE id = ?",
-                    (spec, ts, sid),
-                )
-            else:
-                conn.execute(
-                    "INSERT INTO schedules (id, spec, paused, created_at, updated_at) "
-                    "VALUES (?, ?, 0, ?, ?)",
-                    (sid, spec, ts, ts),
-                )
-            row = conn.execute("SELECT * FROM schedules WHERE id = ?", (sid,)).fetchone()
-            conn.execute("COMMIT")
-        return ScheduleRecord._from_row(row)
-
-    def list_schedules(self, *, include_paused: bool = True) -> list[ScheduleRecord]:
-        """List registered schedules, ordered by id."""
-        query = "SELECT * FROM schedules"
-        if not include_paused:
-            query += " WHERE paused = 0"
-        query += " ORDER BY id"
-        with self._connect() as conn:
-            rows = conn.execute(query).fetchall()
-        return [ScheduleRecord._from_row(r) for r in rows]
-
-    def get_schedule(self, sid: str) -> ScheduleRecord | None:
-        """Return one registered schedule by id, or ``None``."""
-        with self._connect() as conn:
-            row = conn.execute("SELECT * FROM schedules WHERE id = ?", (sid,)).fetchone()
-        return ScheduleRecord._from_row(row) if row else None
-
-    def remove_schedule(self, sid: str) -> bool:
-        """Delete a registered schedule; return whether a row was removed."""
-        with self._connect() as conn:
-            cur = conn.execute("DELETE FROM schedules WHERE id = ?", (sid,))
-        return cur.rowcount > 0
-
-    def set_schedule_paused(
-        self, sid: str, paused: bool, *, now: float | None = None
-    ) -> ScheduleRecord:
-        """Pause/resume a schedule (a paused schedule is skipped by the registry
-        tick but retains its definition). Raises if the schedule is unknown."""
-        ts = self._now(now)
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute("SELECT id FROM schedules WHERE id = ?", (sid,)).fetchone()
-            if row is None:
-                conn.execute("COMMIT")
-                raise TaskError(f"no such schedule: {sid}")
-            conn.execute(
-                "UPDATE schedules SET paused = ?, updated_at = ? WHERE id = ?",
-                (1 if paused else 0, ts, sid),
-            )
-            row = conn.execute("SELECT * FROM schedules WHERE id = ?", (sid,)).fetchone()
-            conn.execute("COMMIT")
-        return ScheduleRecord._from_row(row)
-
-    # -- supervisor registrations --------------------------------------------
-
-    @staticmethod
-    def _registration_from_row(row: sqlite3.Row) -> RegistrationRecord:
-        return RegistrationRecord(
-            id=row["id"],
-            kind=row["kind"],
-            spec=json.loads(row["spec"]),
-            machine=row["machine"],
-            env=row["env"],
-            status=row["status"],
-            created_at=row["created_at"],
-            updated_at=row["updated_at"],
-        )
-
-    def register_registration(
-        self,
-        kind: str,
-        spec: dict,
-        *,
-        reg_id: str | None = None,
-        machine: str | None = None,
-        env: str = "default",
-        now: float | None = None,
-    ) -> RegistrationRecord:
-        """Register (or upsert) a supervision unit; return its handle.
-
-        ``kind`` and ``spec`` are validated eagerly (see
-        :func:`registrations.validate_registration`) so a malformed unit is
-        refused here rather than failing every reconcile. The id is the caller's
-        explicit ``reg_id`` or a value **derived deterministically** from
-        ``(kind, machine, env, spec)`` -- so re-registering the same unit
-        **upserts** (idempotent by handle) rather than duplicating it, preserving
-        ``created_at`` and the ``status`` flag across the upsert.
-        """
-        if kind not in RegistrationKind.DIRECT:
-            raise TaskError(
-                f"registration kind {kind!r} is not available through direct registration"
-            )
-        try:
-            validate_registration(kind, spec)
-        except RegistrationError as exc:
-            raise TaskError(str(exc)) from exc
-        env = env or "default"
-        rid = reg_id or derive_registration_id(kind, spec, machine, env)
-        ts = self._now(now)
-        try:
-            spec_json = json.dumps(spec)
-        except TypeError as exc:
-            raise TaskError(
-                f"registration 'spec' is not JSON-serializable: {exc}"
-            ) from exc
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            exists = conn.execute(
-                "SELECT id FROM registrations WHERE id = ?", (rid,)
-            ).fetchone()
-            if exists:
-                conn.execute(
-                    "UPDATE registrations SET kind = ?, spec = ?, machine = ?, "
-                    "env = ?, updated_at = ? WHERE id = ?",
-                    (kind, spec_json, machine, env, ts, rid),
-                )
-            else:
-                conn.execute(
-                    "INSERT INTO registrations "
-                    "(id, kind, spec, machine, env, status, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (rid, kind, spec_json, machine, env, RegistrationStatus.ACTIVE, ts, ts),
-                )
-            row = conn.execute(
-                "SELECT * FROM registrations WHERE id = ?", (rid,)
-            ).fetchone()
-            conn.execute("COMMIT")
-        return self._registration_from_row(row)
-
-    def list_registrations(
-        self,
-        *,
-        kind: str | None = None,
-        machine: str | None = None,
-        env: str | None = None,
-        include_paused: bool = True,
-    ) -> list[RegistrationRecord]:
-        """List registrations, optionally filtered by kind / machine / env,
-        ordered by id."""
-        clauses: list[str] = []
-        params: list[object] = []
-        if kind is not None:
-            clauses.append("kind = ?")
-            params.append(kind)
-        if machine is not None:
-            clauses.append("machine = ?")
-            params.append(machine)
-        if env is not None:
-            clauses.append("env = ?")
-            params.append(env)
-        if not include_paused:
-            clauses.append("status != ?")
-            params.append(RegistrationStatus.PAUSED)
-        query = "SELECT * FROM registrations"
-        if clauses:
-            query += " WHERE " + " AND ".join(clauses)
-        query += " ORDER BY id"
-        with self._connect() as conn:
-            rows = conn.execute(query, params).fetchall()
-        return [self._registration_from_row(r) for r in rows]
-
-    def get_registration(self, rid: str) -> RegistrationRecord | None:
-        """Return one registration by id, or ``None``."""
-        with self._connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM registrations WHERE id = ?", (rid,)
-            ).fetchone()
-        return self._registration_from_row(row) if row else None
-
-    def remove_registration(self, rid: str) -> bool:
-        """Delete a registration; return whether a row was removed."""
-        with self._connect() as conn:
-            cur = conn.execute("DELETE FROM registrations WHERE id = ?", (rid,))
-        return cur.rowcount > 0
-
-    def set_registration_status(
-        self, rid: str, status: str, *, now: float | None = None
-    ) -> RegistrationRecord:
-        """Set a registration's lifecycle status (e.g. pause/resume). Raises if
-        the id is unknown or the status is invalid."""
-        if status not in RegistrationStatus.ALL:
-            raise TaskError(
-                f"invalid registration status {status!r}; expected one of "
-                f"{', '.join(sorted(RegistrationStatus.ALL))}"
-            )
-        ts = self._now(now)
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute(
-                "SELECT id FROM registrations WHERE id = ?", (rid,)
-            ).fetchone()
-            if row is None:
-                conn.execute("COMMIT")
-                raise TaskError(f"no such registration: {rid}")
-            conn.execute(
-                "UPDATE registrations SET status = ?, updated_at = ? WHERE id = ?",
-                (status, ts, rid),
-            )
-            row = conn.execute(
-                "SELECT * FROM registrations WHERE id = ?", (rid,)
-            ).fetchone()
-            conn.execute("COMMIT")
-        return self._registration_from_row(row)
-
-    # -- schedule job-leases (single-producer election) ----------------------
-
-    def acquire_schedule_lease(
-        self,
-        scope: str,
-        holder: str,
-        *,
-        holder_session: str | None = None,
-        ttl: float | None = None,
-        now: float | None = None,
-    ) -> tuple[ScheduleLease, bool]:
-        """Acquire or renew the job-lease for ``scope`` (pin-not-failover).
-
-        Returns ``(lease, granted)``. A first writer wins the scope
-        (``granted=True``); the same ``holder`` renews it (``granted=True``,
-        refreshing ``renewed_at``/``expires_at``); a **different** caller is
-        refused (``granted=False``) and MUST NOT run the scope's producer --
-        the recorded lease is never auto-stolen, even when stale. This elects a
-        single producer machine (e.g. the fleet chronicler on one host) without
-        a wall-clock takeover. ``ttl`` only sets ``expires_at`` for
-        observability; it does not enable a takeover.
-        """
-        ts = self._now(now)
-        expires_at = (ts + ttl) if ttl else None
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute(
-                "SELECT * FROM schedule_leases WHERE scope = ?", (scope,)
-            ).fetchone()
-            if row is None:
-                conn.execute(
-                    "INSERT INTO schedule_leases "
-                    "(scope, holder, holder_session, acquired_at, renewed_at, expires_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
-                    (scope, holder, holder_session, ts, ts, expires_at),
-                )
-                granted = True
-            elif row["holder"] == holder:
-                conn.execute(
-                    "UPDATE schedule_leases SET "
-                    "holder_session = COALESCE(?, holder_session), "
-                    "renewed_at = ?, expires_at = ? WHERE scope = ?",
-                    (holder_session, ts, expires_at, scope),
-                )
-                granted = True
-            else:
-                granted = False
-            row = conn.execute(
-                "SELECT * FROM schedule_leases WHERE scope = ?", (scope,)
-            ).fetchone()
-            conn.execute("COMMIT")
-        return ScheduleLease._from_row(row), granted
-
-    def release_schedule_lease(
-        self, scope: str, holder: str, *, force: bool = False, now: float | None = None
-    ) -> bool:
-        """Release the job-lease for ``scope``. The current holder may release
-        its own lease; ``force=True`` lets an operator reassign a lease held by
-        a different (e.g. retired) holder. Returns whether a lease was removed;
-        raises if a non-holder tries to release without ``force``."""
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute(
-                "SELECT holder FROM schedule_leases WHERE scope = ?", (scope,)
-            ).fetchone()
-            if row is None:
-                conn.execute("COMMIT")
-                return False
-            if not force and row["holder"] != holder:
-                conn.execute("COMMIT")
-                raise TaskError(
-                    f"lease {scope!r} is held by {row['holder']!r}, not {holder!r} "
-                    "(use force to reassign)"
-                )
-            conn.execute("DELETE FROM schedule_leases WHERE scope = ?", (scope,))
-            conn.execute("COMMIT")
-        return True
-
-    def get_schedule_lease(self, scope: str) -> ScheduleLease | None:
-        """Return the job-lease for ``scope``, or ``None`` if unheld."""
-        with self._connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM schedule_leases WHERE scope = ?", (scope,)
-            ).fetchone()
-        return ScheduleLease._from_row(row) if row else None
-
-    def list_schedule_leases(self) -> list[ScheduleLease]:
-        """List all held job-leases, ordered by scope."""
-        with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM schedule_leases ORDER BY scope"
-            ).fetchall()
-        return [ScheduleLease._from_row(r) for r in rows]
-
-    # -- external producer resource reservations ----------------------------
-
-    def acquire_resource_reservation(
-        self,
-        key: str,
-        owner: str,
-        *,
-        ttl: float,
-        token: str | None = None,
-        now: float | None = None,
-    ) -> tuple[ResourceReservation, bool]:
-        """Atomically elect one owner for an external logical resource.
-
-        An unbound reservation expires so another producer can recover after a
-        crash before task creation. Once bound to a task, it remains owned until
-        explicit terminal reconciliation releases it.
-        """
-        if not key or not owner:
-            raise TaskError("resource reservation key and owner are required")
-        if ttl <= 0:
-            raise TaskError("resource reservation ttl must be positive")
-        ts = self._now(now)
-        expires_at = ts + ttl
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute(
-                "SELECT * FROM resource_reservations WHERE key = ?", (key,)
-            ).fetchone()
-            if row is None:
-                token = secrets.token_urlsafe(24)
-                conn.execute(
-                    "INSERT INTO resource_reservations "
-                    "(key, owner, token, task_id, acquired_at, updated_at, expires_at) "
-                    "VALUES (?, ?, ?, NULL, ?, ?, ?)",
-                    (key, owner, token, ts, ts, expires_at),
-                )
-                granted = True
-            elif (
-                token is not None
-                and row["owner"] == owner
-                and secrets.compare_digest(row["token"], token)
-            ):
-                if row["task_id"] is None:
-                    conn.execute(
-                        "UPDATE resource_reservations "
-                        "SET updated_at = ?, expires_at = ? WHERE key = ?",
-                        (ts, expires_at, key),
-                    )
-                granted = True
-            elif row["task_id"] is None and (
-                row["expires_at"] is not None and row["expires_at"] <= ts
-            ):
-                token = secrets.token_urlsafe(24)
-                conn.execute(
-                    "UPDATE resource_reservations SET owner = ?, token = ?, task_id = NULL, "
-                    "acquired_at = ?, updated_at = ?, expires_at = ? WHERE key = ?",
-                    (owner, token, ts, ts, expires_at, key),
-                )
-                granted = True
-            else:
-                granted = False
-            row = conn.execute(
-                "SELECT * FROM resource_reservations WHERE key = ?", (key,)
-            ).fetchone()
-            conn.execute("COMMIT")
-        return ResourceReservation._from_row(row), granted
-
-    def bind_resource_reservation(
-        self,
-        key: str,
-        owner: str,
-        token: str,
-        task_id: str,
-        *,
-        now: float | None = None,
-    ) -> ResourceReservation:
-        """Bind an owned reservation to its created task."""
-        if not token or not task_id:
-            raise TaskError("resource reservation token and task_id are required")
-        ts = self._now(now)
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute(
-                "SELECT * FROM resource_reservations WHERE key = ?", (key,)
-            ).fetchone()
-            if row is None:
-                conn.execute("COMMIT")
-                raise TaskError(f"no such resource reservation: {key}")
-            if row["owner"] != owner or not secrets.compare_digest(
-                row["token"], token
-            ):
-                conn.execute("COMMIT")
-                raise TaskError(
-                    f"resource reservation {key!r} identity does not match"
-                )
-            if row["task_id"] not in (None, task_id):
-                conn.execute("COMMIT")
-                raise TaskError(
-                    f"resource reservation {key!r} is already bound to "
-                    f"{row['task_id']!r}"
-                )
-            conn.execute(
-                "UPDATE resource_reservations "
-                "SET task_id = ?, updated_at = ?, expires_at = NULL WHERE key = ?",
-                (task_id, ts, key),
-            )
-            row = conn.execute(
-                "SELECT * FROM resource_reservations WHERE key = ?", (key,)
-            ).fetchone()
-            conn.execute("COMMIT")
-        return ResourceReservation._from_row(row)
-
-    def release_resource_reservation(
-        self, key: str, owner: str, token: str
-    ) -> bool:
-        """Release only the caller's own resource reservation.
-
-        A non-owner receives ``False``; the current owner's reservation is
-        never modified.
-        """
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute(
-                "SELECT owner, token FROM resource_reservations WHERE key = ?",
-                (key,),
-            ).fetchone()
-            if row is None:
-                conn.execute("COMMIT")
-                return False
-            if row["owner"] != owner or not secrets.compare_digest(
-                row["token"], token
-            ):
-                conn.execute("COMMIT")
-                return False
-            conn.execute(
-                "DELETE FROM resource_reservations WHERE key = ?", (key,)
-            )
-            conn.execute("COMMIT")
-        return True
-
-    def list_resource_reservations(
-        self,
-        *,
-        owner_prefix: str | None = None,
-        task_id: str | None = None,
-    ) -> list[ResourceReservation]:
-        clauses: list[str] = []
-        params: list[object] = []
-        if owner_prefix is not None:
-            clauses.append("substr(owner, 1, ?) = ?")
-            params.extend((len(owner_prefix), owner_prefix))
-        if task_id is not None:
-            clauses.append("task_id = ?")
-            params.append(task_id)
-        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
-        with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM resource_reservations"
-                + where
-                + " ORDER BY key",
-                params,
-            ).fetchall()
-        return [ResourceReservation._from_row(row) for row in rows]
