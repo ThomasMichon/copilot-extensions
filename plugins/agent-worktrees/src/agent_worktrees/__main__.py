@@ -494,6 +494,8 @@ def _apply_tracking_override(
 def _classify_records(
     records: list[tracking.WorktreeRecord],
     session_ctx: sessions.SessionContext | None = None,
+    *,
+    daemon_filters: dict | None = None,
 ) -> dict[str, git_ops.WorktreeStateInfo]:
     """Classify each worktree's git state, keyed by worktree id.
 
@@ -506,6 +508,25 @@ def _classify_records(
     carries its own worktree states in ``list --json`` over SSH (the local
     picker cannot git-classify a remote worktree). No fetch (``behind`` reflects
     the last fetch); ~5 git calls per existing worktree, hence opt-in.
+
+    Resident-daemon fast path (Phase 4d, #2323): when ``daemon_filters`` names
+    the exact ``status_filter``/``platform_filter``/``all`` values the caller
+    used to resolve ``records`` (only ``list --json --classify`` opts in), this
+    first tries the resident status-monitor's classify daemon (see
+    :mod:`classify_daemon`) via the full boot-wait sequence
+    (:func:`classify_daemon.classify_with_boot`) -- booting one via
+    :func:`_ensure_status_monitor` when none is currently publishing a
+    classify endpoint, waiting up to ``classify_daemon.BOOT_WAIT_S`` -- so
+    concurrent classify passes for the same project + filter set coalesce
+    onto one resident execution instead of each independently racing the
+    lease below. ``daemon_filters=None`` (every other caller) skips the
+    daemon entirely -- unchanged behavior. Any miss (no resident monitor,
+    boot-wait timeout, unreachable, past its deadline, an error resolving the
+    project, or -- critically -- a successful-but-malformed/incomplete
+    response whose worktree-id set doesn't match ``records`` exactly) falls
+    through to the lease-guarded path exactly as if no daemon existed; a
+    partial or garbled daemon answer is never trusted over rendering nothing
+    for an affected row.
 
     Guarded by a per-project :class:`single_instance_lease.SingleInstance`
     (plugin-process-hygiene Phase 4c, #2315): this is the shared entry point
@@ -522,6 +543,117 @@ def _classify_records(
     advisory only: any lease-layer failure (not contention) degrades to
     classifying live, exactly as before this guard existed.
     """
+    if daemon_filters is not None:
+        try:
+            project = cfg.project_name()
+        except Exception:
+            project = ""
+        if project:
+            from . import classify_daemon
+            from . import locks as _locks
+
+            key = "|".join(
+                (
+                    project,
+                    str(daemon_filters.get("status_filter")),
+                    str(daemon_filters.get("platform_filter")),
+                    str(bool(daemon_filters.get("all"))),
+                )
+            )
+            payload = {"project": project, **daemon_filters}
+            expected_ids = {rec.worktree_id for rec in records}
+
+            def _fallback() -> dict:
+                return _serialize_classify_map(
+                    _classify_records_lease_guarded(records, session_ctx)
+                )
+
+            raw = classify_daemon.classify_with_boot(
+                read_lock_data=lambda: _locks.read_lock(_monitor_lock_path()),
+                # Honor the resident-monitor opt-out (AGENT_WORKTREES_STATUS_
+                # MONITOR=0): booting one just to serve this classify request
+                # would defeat a caller's explicit choice to stay per-session
+                # inline-only. A dial-only attempt (no boot) still runs, so an
+                # already-live monitor from before the opt-out was set is
+                # still used if reachable.
+                ensure_monitor=_ensure_status_monitor if _status_monitor_enabled() else None,
+                key=key,
+                payload=payload,
+                fallback=_fallback,
+            )
+            try:
+                decoded = _deserialize_classify_map(raw, strict=True)
+            except Exception:
+                decoded = None
+            if decoded is not None and set(decoded) == expected_ids:
+                return decoded
+            # The daemon answered, but with a shape/id-set mismatch (a
+            # different-version daemon, a partial compute, or corruption in
+            # transit) -- never render a partial/garbled state_map. Re-run
+            # the unchanged lease-guarded path directly, exactly as if the
+            # daemon had never answered at all.
+            return _classify_records_lease_guarded(records, session_ctx)
+    return _classify_records_lease_guarded(records, session_ctx)
+
+
+def _serialize_classify_map(
+    state_map: dict[str, git_ops.WorktreeStateInfo],
+) -> dict[str, dict]:
+    """Wire-serialize a classify result for the coalescing daemon's protocol."""
+    return {wt_id: dataclasses.asdict(info) for wt_id, info in state_map.items()}
+
+
+def _deserialize_classify_map(
+    raw: dict, *, strict: bool = False
+) -> dict[str, git_ops.WorktreeStateInfo]:
+    """Inverse of :func:`_serialize_classify_map`.
+
+    ``strict=False`` (the default) is tolerant of a malformed entry (skipped
+    rather than raised). ``strict=True`` raises on the first malformed entry
+    instead -- used by :func:`_classify_records`'s daemon fast path, which
+    must treat *any* shape problem as a daemon miss (triggering its own
+    lease-guarded re-run) rather than silently rendering a partial result.
+    """
+    out: dict[str, git_ops.WorktreeStateInfo] = {}
+    if not isinstance(raw, dict):
+        if strict:
+            raise ValueError("classify daemon result is not a dict")
+        return out
+    for wt_id, info_dict in raw.items():
+        if not isinstance(info_dict, dict):
+            if strict:
+                raise ValueError(f"classify daemon result for {wt_id!r} is not a dict")
+            continue
+        try:
+            state = git_ops.WorktreeState(info_dict.get("state"))
+        except ValueError:
+            if strict:
+                raise
+            state = git_ops.WorktreeState.UNKNOWN
+        try:
+            out[wt_id] = git_ops.WorktreeStateInfo(
+                state=state,
+                ahead=int(info_dict.get("ahead") or 0),
+                behind=int(info_dict.get("behind") or 0),
+                dirty=int(info_dict.get("dirty") or 0),
+                title=str(info_dict.get("title") or ""),
+                current_branch=info_dict.get("current_branch"),
+                branch_drift=bool(info_dict.get("branch_drift", False)),
+            )
+        except (TypeError, ValueError):
+            if strict:
+                raise
+            continue
+    return out
+
+
+def _classify_records_lease_guarded(
+    records: list[tracking.WorktreeRecord],
+    session_ctx: sessions.SessionContext | None = None,
+) -> dict[str, git_ops.WorktreeStateInfo]:
+    """The pre-#2323 lease-guarded classify path, factored out so
+    :func:`_classify_records`'s daemon fast path can fall back to it
+    directly."""
     try:
         lock_dir = cfg.project_dir()
     except Exception:
@@ -544,6 +676,54 @@ def _classify_records(
         return _classify_records_live(records, session_ctx)
     finally:
         lease.release()
+
+
+def _classify_daemon_compute(kind: str, payload: dict) -> dict:
+    """Resident classify daemon's ``compute`` callback (Phase 4d, #2323).
+
+    Runs inside the resident status-monitor process. Resolves + classifies
+    the named project's own records entirely here from ``payload``'s
+    identity + filters -- never trusts records serialized by a caller (see
+    :mod:`classify_daemon`'s own module docstring for the contract). Mirrors
+    ``_list_records_for_args``'s exact filter semantics (including the
+    existing-worktree-with-a-``.git``-dir check unless ``all`` is set) so a
+    caller gets an identical result whether or not the daemon answered it.
+    Any exception here propagates to the coalescing server, which surfaces
+    it to every joined caller -- each caller's own
+    :func:`classify_daemon.classify_via_daemon` treats that identically to
+    "no daemon" and runs its own fallback, so a daemon-side bug degrades to
+    correctness, never a wrong answer.
+    """
+    project = str(payload.get("project") or "")
+    if not project:
+        raise ValueError("classify request missing project")
+    status_filter = payload.get("status_filter")
+    platform_filter = payload.get("platform_filter")
+    tracking_path = cfg.project_dir(project) / "worktrees"
+    records = tracking.list_records(
+        tracking_path,
+        status_filter=status_filter,
+        platform_filter=platform_filter,
+    )
+    if not payload.get("all"):
+        records = [
+            r
+            for r in records
+            if r.worktree_path
+            and Path(r.worktree_path).exists()
+            and (Path(r.worktree_path) / ".git").exists()
+        ]
+    session_ctx = sessions.scan_sessions_fast(records)
+    config = cfg.load_config(path=cfg.project_dir(project) / "config.yaml", project=project)
+    repo = config.default_repo
+    active_paths = _build_active_paths(records, session_ctx)
+    state_map = {
+        rec.worktree_id: _classify_one_record(
+            rec, repo=repo, active_paths=active_paths, session_ctx=session_ctx
+        )
+        for rec in records
+    }
+    return _serialize_classify_map(state_map)
 
 
 def _classify_records_live(
@@ -10829,6 +11009,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     from . import pane_reaper
     from . import registry_paths
     from . import session_catalog
+    from . import classify_daemon
     from .hook_ipc import HookIpcServer, HookUnavailable
 
     mux = "psmux" if shutil.which("psmux") else ("tmux" if shutil.which("tmux") else None)
@@ -10951,6 +11132,18 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         except Exception:
             hook_server = None
 
+    # Phase 4d (#2323): resident classify/list accelerator. Independent of the
+    # hook-decision server above -- its own single-instance lease guard
+    # (`_classify_records_lease_guarded`) remains the always-correct fallback
+    # whenever this daemon is absent, unreachable, or errors, so a failure to
+    # start it here is never fatal to the monitor.
+    classify_server = None
+    try:
+        classify_server = classify_daemon.start_server(_classify_daemon_compute)
+        classify_server.start()
+    except Exception:
+        classify_server = None
+
     def _lock_extra() -> dict:
         extra = {"prefix": my_prefix, "mux": bool(mux_bin)}
         if isinstance(installation_context, dict):
@@ -10963,6 +11156,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             )
         if hook_server is not None:
             extra.update(hook_server.rendezvous())
+        if classify_server is not None:
+            extra.update(classify_daemon.rendezvous_fields(classify_server))
         return extra
 
     _locks.write_lock(lock, extra=_lock_extra())
@@ -11053,6 +11248,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     finally:
         if hook_server is not None:
             hook_server.close()
+        if classify_server is not None:
+            classify_server.close()
         # Release the lock only if it is still ours (never clobber a successor).
         d = _locks.read_lock(lock)
         if isinstance(d, dict) and d.get("pid") == os.getpid():
@@ -11291,7 +11488,19 @@ def _build_list_json_payload(
     session_ctx = sessions.scan_sessions_fast(records)
     state_map: dict[str, git_ops.WorktreeStateInfo] = {}
     if getattr(args, "classify", False):
-        state_map = _classify_records(records, session_ctx)
+        # Same status/platform/all filters _list_records_for_args used to
+        # resolve `records` -- so the resident classify daemon's independent
+        # re-resolution (#2323) is guaranteed to match this caller's own set.
+        daemon_filters = {
+            "status_filter": (
+                None if args.tracking_status == "all" else args.tracking_status
+            ),
+            "platform_filter": (
+                None if getattr(args, "include_other_platforms", False) else cfg.detect_platform()
+            ),
+            "all": bool(getattr(args, "all", False)),
+        }
+        state_map = _classify_records(records, session_ctx, daemon_filters=daemon_filters)
     # #93: same enriched pass as the streaming path -- mark worktrees hosting
     # a bare (un-muxed) bound Copilot so the Picker (local or over SSH) can
     # annotate the row. Gated on --mux-details (the Picker's flag) so a plain

@@ -1,29 +1,33 @@
-"""Resident classify/list accelerator scaffolding (plugin-process-hygiene #2323).
+"""Resident classify/list accelerator (plugin-process-hygiene #2323).
 
 Thin wrappers around the vendored ``work_coalescing_singleton`` library, scoped
 to agent-worktrees' own request shape: coalesce concurrent ``list --json
 --classify`` batch-classification passes for the same project onto one
-resident execution, instead of each independently recomputing it (today's
-Phase 4c fallback, the per-project :class:`single_instance_lease.SingleInstance`
-guard around ``_classify_records`` in ``__main__.py``, stays the correct
-degrade path when no daemon is reachable -- this module never replaces it,
-only gives a caller a faster path to try first).
+resident execution, instead of each independently recomputing it (the
+per-project :class:`single_instance_lease.SingleInstance` guard around
+``_classify_records`` in ``__main__.py`` stays the correct degrade path when
+no daemon is reachable -- this module never replaces it, only gives a caller
+a faster path to try first).
 
-**Deliberately NOT wired into any command yet.** This module owns only the
+**Wired into `cmd_status_monitor`/`_classify_records`.** This module owns the
 wire layer (start the daemon side, make one coalesced client request); the
-actual git-classification work stays exactly ``_classify_records_live`` /
-``_classify_from_cache`` in ``__main__.py``. Wiring -- publishing this
-daemon's rendezvous alongside the resident status-monitor's existing
-``HookIpcServer`` rendezvous, and trying it from ``_classify_records`` before
-falling back to today's lease-based path -- is tracked, still-open follow-up
-(see the ``plugin-process-hygiene`` effort journal for the concrete plan:
-the daemon's ``compute`` callback loads a project's records itself via
-``tracking.list_records``, so a request payload only needs to name the
-project, never serialize whole records over the wire).
+actual git-classification work stays in ``_classify_daemon_compute`` /
+``_classify_records_live`` / ``_classify_from_cache`` in ``__main__.py``. The
+resident status-monitor starts a :class:`work_coalescing_singleton.CoalescingServer`
+via :func:`start_server`, publishes its rendezvous alongside the existing
+``HookIpcServer`` rendezvous in the same lock file, and ``_classify_records``
+tries :func:`classify_with_boot` before falling back to the pre-#2323
+lease-guarded path (see the ``plugin-process-hygiene`` effort journal for the
+full design + validation writeup: the daemon's ``compute`` callback loads a
+project's records itself via ``tracking.list_records``, so a request payload
+only ever names the project + its list filters, never serializes whole
+records over the wire).
 """
+
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 
 from work_coalescing_singleton import CoalescingServer
@@ -91,6 +95,73 @@ def endpoint_from_rendezvous(data: dict | None) -> tuple[str, int, str] | None:
     except ValueError:
         return None
     return host, port, token
+
+
+def classify_with_boot(
+    *,
+    read_lock_data: Callable[[], dict | None],
+    ensure_monitor: Callable[[], bool] | None,
+    key: str,
+    payload: dict,
+    fallback: Callable[[], dict],
+    request_deadline_s: float = REQUEST_DEADLINE_S,
+    boot_wait_s: float = BOOT_WAIT_S,
+    poll_interval_s: float = 0.1,
+) -> dict:
+    """The full Phase 4d production sequence: dial, boot-and-wait if no
+    resident monitor is currently publishing a classify endpoint, then send
+    one coalesced request carrying a fresh per-call client id (so the
+    daemon's own ref-counted idle-exit sees this caller as a live, if brief,
+    subscriber -- see ``work_coalescing_singleton.server.CoalescingServer``'s
+    ``touch``-on-request behavior) -- and releases that same client id in a
+    ``finally`` right after, so a one-shot caller (this module has no
+    long-lived session to keep a subscription open for) doesn't linger in
+    the daemon's subscriber map until the 45s TTL reaper drops it. Release is
+    best-effort: any failure there is backstopped by that same reaper, per
+    ``work_coalescing_singleton.client.release``'s own contract.
+
+    Deliberately reimplements (rather than calls)
+    ``work_coalescing_singleton.client.call_with_fallback``'s dial/boot/poll
+    algorithm, since that shared, byte-identical-across-plugins helper has no
+    post-request release hook to attach to. ``read_lock_data`` is re-invoked
+    on every boot-wait poll (never cached), so a monitor that starts mid-wait
+    is picked up. ``ensure_monitor=None`` (or its own failure) degrades to a
+    dial-only attempt -- still safe, just without the boot side. Never raises
+    past this call: any miss at any stage (no daemon, boot-wait timeout,
+    request timeout/error) runs ``fallback()``, identical in effect to
+    :func:`classify_via_daemon`.
+    """
+    started = time.time()
+
+    def _dial() -> tuple[str, int, str] | None:
+        return endpoint_from_rendezvous(read_lock_data())
+
+    endpoint = _dial()
+    if endpoint is None and ensure_monitor is not None:
+        ensure_monitor()
+        while endpoint is None and time.time() - started < boot_wait_s:
+            time.sleep(poll_interval_s)
+            endpoint = _dial()
+    if endpoint is None:
+        return fallback()
+
+    host, port, token = endpoint
+    client_id = wcs_client.new_client_id()
+    try:
+        return wcs_client.request(
+            host,
+            port,
+            token,
+            kind=KIND,
+            key=key,
+            payload=payload,
+            request_deadline_s=request_deadline_s,
+            client_id=client_id,
+        )
+    except wcs_client.DaemonUnavailable:
+        return fallback()
+    finally:
+        wcs_client.release(host, port, token, client_id, timeout=request_deadline_s)
 
 
 def classify_via_daemon(
