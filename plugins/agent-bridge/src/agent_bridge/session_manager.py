@@ -1446,11 +1446,15 @@ class SessionManager:
         """The backing database (used by routes for cursor persistence)."""
         return self._db
 
-    def _mark_session_failed(self, session: Session, *, trigger: str) -> None:
+    def _mark_session_failed(
+        self, session: Session, *, trigger: str, restart_status: str | None = None,
+    ) -> None:
         """Persist and publish one authoritative failed transition."""
         session.status = SessionStatus.FAILED
+        session.restart_status = restart_status
         self._db.update_session_status(
-            session.session_id, SessionStatus.FAILED.value, time.time()
+            session.session_id, SessionStatus.FAILED.value, time.time(),
+            restart_status=restart_status,
         )
         if session.event_log:
             session.event_log.append(
@@ -1517,7 +1521,7 @@ class SessionManager:
             session.acp_session_id = row.get("acp_session_id")
             session.restart_status = (
                 row.get("restart_status")
-                if status == SessionStatus.STOPPED.value
+                if status in {SessionStatus.STOPPED.value, SessionStatus.FAILED.value}
                 else None
             )
 

@@ -468,6 +468,13 @@ restart does not inherently close the child's pipes.
   attached to the session until a confirmed explicit retry consumes them, so a
   stop cannot miss a failure that completed during another teardown await.
   Stranded-host sweeps await remote termination and count confirmed reaps only.
+  Host-index register/remove failures restore the previous in-memory snapshot,
+  keeping partial-launch rollback retryable after a failed persistence commit.
+  Shutdown also retries retained relay/forward handles (including orphan
+  channels) rather than exiting after a logged close failure. A failed
+  restart teardown persists its original restart intent with FAILED; only a
+  successful cleanup retry transitions it to recoverable STOPPED. FAILED
+  itself remains ineligible for background recovery.
   The manager remains the public facade; `session_resume.py`,
   `session_teardown.py`, and `session_ownership.py` own the bounded lifecycle
   implementations. Additive session migrations live in `db_migrations.py`.

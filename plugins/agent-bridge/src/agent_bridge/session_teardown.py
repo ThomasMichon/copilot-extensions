@@ -48,7 +48,10 @@ async def _detach_for_restart_owned(manager: SessionManager) -> None:
                 )
     while pending := [
         session for session in manager.list_sessions()
-        if session._owned_process is not None or (
+        if session._owned_process is not None
+        or session.session_id in manager._forwards
+        or session.session_id in manager._relays
+        or (
             session.session_id in manager._pending_host_launches
             and not manager._pending_host_launches[session.session_id].durable
         )
@@ -64,6 +67,7 @@ async def _detach_for_restart_owned(manager: SessionManager) -> None:
             try:
                 await manager.stop_session(
                     session.session_id, force=True, for_restart=True,
+                    cancel_turn=manager.cancel_turns_on_redeploy,
                     reap_host=session.session_id in manager._pending_host_launches,
                 )
             except Exception:
@@ -71,10 +75,16 @@ async def _detach_for_restart_owned(manager: SessionManager) -> None:
                     "Shutdown process cleanup retry failed for %s",
                     session.session_id, exc_info=True,
                 )
-    try:
-        await manager.close_frontend_transports()
-    except Exception:
-        log.warning("Failed to close frontend transports on shutdown", exc_info=True)
+    while True:
+        try:
+            await manager.close_frontend_transports()
+            break
+        except Exception:
+            log.error(
+                "Shutdown blocked by frontend transport cleanup; retaining "
+                "handles and database for retry", exc_info=True,
+            )
+            await asyncio.sleep(_SHUTDOWN_CLEANUP_RETRY_SECONDS)
     if manager._remote_reap_tasks:
         await finish_owned(asyncio.gather(*list(manager._remote_reap_tasks)))
 
@@ -150,7 +160,7 @@ async def stop_session_admitted(
         if for_restart:
             prior = (
                 session.restart_status
-                if session.status == SessionStatus.STOPPED
+                if session.status in {SessionStatus.STOPPED, SessionStatus.FAILED}
                 else session.status.value
             )
             if prior in (
@@ -166,8 +176,9 @@ async def stop_session_admitted(
                     for_restart=for_restart,
                 )
             except Exception:
-                session.restart_status = None
-                self._mark_session_failed(session, trigger="stop_cleanup_failed")
+                self._mark_session_failed(
+                    session, trigger="stop_cleanup_failed", restart_status=restart_status,
+                )
                 log.error("Stop cleanup failed for %s; ownership retained", session_id, exc_info=True)
                 raise
 

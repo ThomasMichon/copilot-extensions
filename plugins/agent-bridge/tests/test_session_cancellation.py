@@ -574,6 +574,51 @@ async def test_shutdown_retains_failed_process_cleanup_until_verified_exit(
     assert ctx.session._owned_process is None
     assert ctx.session.status == SessionStatus.STOPPED
     assert calls == 2
+    assert ctx.db.get_session(ctx.session.session_id)["restart_status"] == "idle"
+
+
+@pytest.mark.parametrize("channel", ["relay", "forward"])
+@pytest.mark.parametrize("known_session", [False, True])
+async def test_shutdown_retries_channel_cleanup_without_losing_restart_intent(
+    owned_context, monkeypatch, channel, known_session,
+):
+    from agent_bridge.session_teardown import detach_for_restart
+
+    ctx = owned_context
+    session_id = ctx.session.session_id if known_session else "orphan-channel"
+    ctx.session.status = SessionStatus.IDLE
+    ctx.db.update_session_status(ctx.session.session_id, "idle", time.time())
+    retry_entered, retry_release = asyncio.Event(), asyncio.Event()
+    calls = 0
+
+    async def close():
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OSError("transient channel failure")
+        retry_entered.set()
+        await retry_release.wait()
+
+    if channel == "relay":
+        ctx.manager._relays[session_id] = [SimpleNamespace(stop=close)]
+    else:
+        ctx.manager._forwards[session_id] = SimpleNamespace(cancel=close)
+    monkeypatch.setattr("agent_bridge.session_teardown._SHUTDOWN_CLEANUP_RETRY_SECONDS", 0.01)
+    shutdown = asyncio.create_task(detach_for_restart(ctx.manager))
+    await asyncio.wait_for(retry_entered.wait(), 2)
+    assert not shutdown.done()
+    if known_session:
+        row = ctx.db.get_session(session_id)
+        assert row["status"] == "failed"
+        assert row["restart_status"] == "idle"
+        assert ctx.session.restart_status == "idle"
+    retry_release.set()
+    await asyncio.wait_for(shutdown, 2)
+    assert ctx.manager._forwards == {}
+    assert ctx.manager._relays == {}
+    assert ctx.db.get_session(ctx.session.session_id)["restart_status"] == "idle"
+    restarted = SessionManager(ctx.db)
+    assert restarted._background_recovery_allowed(restarted.get_session(ctx.session.session_id))
 
 
 async def test_failed_explicit_remote_reap_keeps_authority_for_retry(owned_context, monkeypatch):
