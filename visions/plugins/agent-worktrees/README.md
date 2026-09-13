@@ -5,7 +5,7 @@
   obligations, disposition, and source-control completion.
 - **Scope:** leaf (concrete component; child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-09-09
+- **Last revised:** 2026-09-12
 - **Reality docs:** the agent-worktrees plugin `docs/`
 - **Supersedes / superseded by:** none
 
@@ -45,6 +45,30 @@ path into its own state — the suite-wide
 guarantee, with agent-worktrees as its repo-identity anchor. A worktree
 checkout's own directory name is a per-session, per-machine identifier that
 must never be adopted downstream as if it were the repo's registered name.
+
+A registered repo's identity extends beyond its path to its **contribution
+posture**: the concrete answer to "how may I propose and land a change here,
+and what is my standing to do so." agent-worktrees is the single durable
+record of that posture for every repo a project relates to. A project never
+needs a second, parallel catalog of the repos it works with, their
+contribution rules, or an operator's standing in each — whatever such a
+project previously tracked on its own converges into this one record instead.
+
+### Related-repo relationship and contribution posture
+
+Beyond a registered repo's own identity, agent-worktrees records how a project
+**relates** to each other repo it touches: the relationship's nature (the
+project owns it, contributes to it, merely consumes it, and so on), where work
+on it happens, and who else mediates that work. A related repo's contribution
+posture is a first-class part of this record, derived primarily from the
+target repo's own authoritative signals (its stated branch/review contract,
+required approvals, fork-vs-branch requirement, and similar facts it already
+publishes about itself) rather than from a hand-maintained duplicate. Where a
+repo's real contribution etiquette cannot be read off any signal — a courtesy
+convention, an expected wait before self-merging, how to coordinate with other
+concurrent contributors — that nuance is layered on as curated narrative
+alongside the derived facts, never invented to fill a gap the signals leave
+open.
 
 ### The worktree as a unit of agency
 
@@ -156,6 +180,23 @@ exclusive, and visible until settled or explicitly transferred.
 Worktree publication and completion honor each repository's own contribution
 contract, preserve isolated editing, and prove content safe before cleanup.
 
+### auto-discovered-contribution-posture
+
+For each repo a project relates to, agent-worktrees derives its contribution
+posture — how a change may be proposed there, and what standing the operator
+has to land it — primarily from that repo's own authoritative signals rather
+than a hand-maintained duplicate a project curates separately. Curated
+narrative supplements only the etiquette a signal cannot express; it never
+substitutes for a derivable fact.
+
+### ambient-cross-repo-contribution-guidance
+
+A session working across related repos receives, unprompted, a concise brief
+of its role and contribution posture for every repo relevant to its current
+work — through the same ambient guidance channel that already carries other
+session-scoped context — rather than requiring an explicit lookup before the
+operator or agent can act correctly.
+
 ### provider-observation-ingestion
 
 Execution hosts may publish bounded, attributable lifecycle and activity
@@ -199,6 +240,14 @@ coordination layers derive over both rather than copying either.
 When a provider is unreachable, agent-worktrees reports stale or unknown live
 state while preserving durable state. It does not infer that an objective is
 resolved, a session is dead, or a claim is abandoned from missing telemetry.
+
+### contribution-posture-degrades-honestly
+
+When a related repo's contribution posture cannot be discovered from its own
+signals — the signal is unreachable, ambiguous, or simply doesn't exist —
+agent-worktrees says so rather than guessing a posture or silently omitting
+guidance. A gap in discovered fact is never quietly papered over with an
+invented default.
 
 ### finalization-joins-durable-obligations
 
@@ -271,6 +320,16 @@ manager, or session-host implementation.
 
 ## Provenance
 
+- **2026-09-12** — Added *related-repo relationship and contribution posture*
+  (Concepts & Components), *auto-discovered-contribution-posture* and
+  *ambient-cross-repo-contribution-guidance* (Features), and
+  *contribution-posture-degrades-honestly* (Behaviors). Mined from an operator
+  observation that a project relating to several external repos had drifted
+  into hand-curating a second, parallel catalog of those repos' contribution
+  rules alongside agent-worktrees' own related-repo index — duplicating facts
+  a target repo already publishes about itself, and going stale as those rules
+  changed. Filed as
+  [#2562](https://github.com/ThomasMichon/copilot-extensions/issues/2562).
 - **2026-09-11** — Added *finalization-is-reversible-under-live-resume* after
   a live-reproduced defect: an actively resumed worktree (session count 2,
   resume count 6, still hosting the current session) was marked finalized —
