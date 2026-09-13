@@ -513,13 +513,20 @@ def _classify_records(
     the exact ``status_filter``/``platform_filter``/``all`` values the caller
     used to resolve ``records`` (only ``list --json --classify`` opts in), this
     first tries the resident status-monitor's classify daemon (see
-    :mod:`classify_daemon`) so concurrent classify passes for the same project
-    + filter set coalesce onto one resident execution instead of each
-    independently racing the lease below. ``daemon_filters=None`` (every other
-    caller) skips the daemon entirely -- unchanged behavior. Any daemon miss
-    (no resident monitor, unreachable, past its deadline, or an error resolving
-    the project) falls through to the lease-guarded path exactly as if no
-    daemon existed.
+    :mod:`classify_daemon`) via the full boot-wait sequence
+    (:func:`classify_daemon.classify_with_boot`) -- booting one via
+    :func:`_ensure_status_monitor` when none is currently publishing a
+    classify endpoint, waiting up to ``classify_daemon.BOOT_WAIT_S`` -- so
+    concurrent classify passes for the same project + filter set coalesce
+    onto one resident execution instead of each independently racing the
+    lease below. ``daemon_filters=None`` (every other caller) skips the
+    daemon entirely -- unchanged behavior. Any miss (no resident monitor,
+    boot-wait timeout, unreachable, past its deadline, an error resolving the
+    project, or -- critically -- a successful-but-malformed/incomplete
+    response whose worktree-id set doesn't match ``records`` exactly) falls
+    through to the lease-guarded path exactly as if no daemon existed; a
+    partial or garbled daemon answer is never trusted over rendering nothing
+    for an affected row.
 
     Guarded by a per-project :class:`single_instance_lease.SingleInstance`
     (plugin-process-hygiene Phase 4c, #2315): this is the shared entry point
@@ -545,7 +552,6 @@ def _classify_records(
             from . import classify_daemon
             from . import locks as _locks
 
-            lock_data = _locks.read_lock(_monitor_lock_path())
             key = "|".join(
                 (
                     project,
@@ -555,15 +561,32 @@ def _classify_records(
                 )
             )
             payload = {"project": project, **daemon_filters}
-            raw = classify_daemon.classify_via_daemon(
-                lock_data,
+            expected_ids = {rec.worktree_id for rec in records}
+
+            def _fallback() -> dict:
+                return _serialize_classify_map(
+                    _classify_records_lease_guarded(records, session_ctx)
+                )
+
+            raw = classify_daemon.classify_with_boot(
+                read_lock_data=lambda: _locks.read_lock(_monitor_lock_path()),
+                ensure_monitor=_ensure_status_monitor,
                 key=key,
                 payload=payload,
-                fallback=lambda: _serialize_classify_map(
-                    _classify_records_lease_guarded(records, session_ctx)
-                ),
+                fallback=_fallback,
             )
-            return _deserialize_classify_map(raw)
+            try:
+                decoded = _deserialize_classify_map(raw, strict=True)
+            except Exception:
+                decoded = None
+            if decoded is not None and set(decoded) == expected_ids:
+                return decoded
+            # The daemon answered, but with a shape/id-set mismatch (a
+            # different-version daemon, a partial compute, or corruption in
+            # transit) -- never render a partial/garbled state_map. Re-run
+            # the unchanged lease-guarded path directly, exactly as if the
+            # daemon had never answered at all.
+            return _classify_records_lease_guarded(records, session_ctx)
     return _classify_records_lease_guarded(records, session_ctx)
 
 
@@ -574,32 +597,47 @@ def _serialize_classify_map(
     return {wt_id: dataclasses.asdict(info) for wt_id, info in state_map.items()}
 
 
-def _deserialize_classify_map(raw: dict) -> dict[str, git_ops.WorktreeStateInfo]:
+def _deserialize_classify_map(
+    raw: dict, *, strict: bool = False
+) -> dict[str, git_ops.WorktreeStateInfo]:
     """Inverse of :func:`_serialize_classify_map`.
 
-    Tolerant of a malformed entry (skipped rather than raised) -- the wire
-    contract between this process and a resident daemon of a *different*
-    version should degrade, never crash, on a shape mismatch.
+    ``strict=False`` (the default) is tolerant of a malformed entry (skipped
+    rather than raised). ``strict=True`` raises on the first malformed entry
+    instead -- used by :func:`_classify_records`'s daemon fast path, which
+    must treat *any* shape problem as a daemon miss (triggering its own
+    lease-guarded re-run) rather than silently rendering a partial result.
     """
     out: dict[str, git_ops.WorktreeStateInfo] = {}
     if not isinstance(raw, dict):
+        if strict:
+            raise ValueError("classify daemon result is not a dict")
         return out
     for wt_id, info_dict in raw.items():
         if not isinstance(info_dict, dict):
+            if strict:
+                raise ValueError(f"classify daemon result for {wt_id!r} is not a dict")
             continue
         try:
             state = git_ops.WorktreeState(info_dict.get("state"))
         except ValueError:
+            if strict:
+                raise
             state = git_ops.WorktreeState.UNKNOWN
-        out[wt_id] = git_ops.WorktreeStateInfo(
-            state=state,
-            ahead=int(info_dict.get("ahead") or 0),
-            behind=int(info_dict.get("behind") or 0),
-            dirty=int(info_dict.get("dirty") or 0),
-            title=str(info_dict.get("title") or ""),
-            current_branch=info_dict.get("current_branch"),
-            branch_drift=bool(info_dict.get("branch_drift", False)),
-        )
+        try:
+            out[wt_id] = git_ops.WorktreeStateInfo(
+                state=state,
+                ahead=int(info_dict.get("ahead") or 0),
+                behind=int(info_dict.get("behind") or 0),
+                dirty=int(info_dict.get("dirty") or 0),
+                title=str(info_dict.get("title") or ""),
+                current_branch=info_dict.get("current_branch"),
+                branch_drift=bool(info_dict.get("branch_drift", False)),
+            )
+        except (TypeError, ValueError):
+            if strict:
+                raise
+            continue
     return out
 
 

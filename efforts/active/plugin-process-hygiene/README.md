@@ -1743,3 +1743,68 @@ of this entry (see next entry for the result before this lands).
 Remaining under #736: **#2323 only**, now implemented + isolated-tested;
 not yet landed to `main` pending the full-suite confirmation and PR review.
 
+### 2026-09-12/13 (same worktree) — Addressed PR #2574's Copilot review: boot-wait, response validation, monitor-lifecycle test, version bump
+
+The automated review on PR #2574 caught four real gaps in the first cut
+above (all four addressed before landing, not deferred):
+
+- **Boot-wait + subscriber lifecycle (medium)**: the first cut's
+  `_classify_records` only *dialed* an already-published rendezvous --
+  after the resident monitor idle-exits, the very next classify caller
+  would see no endpoint and fall straight to the lease path without ever
+  trying to boot one, and no request carried a `client_id`, so the
+  coalescing server's own ref-counted subscriber tracking never saw these
+  callers at all. Added `classify_daemon.classify_with_boot` (a thin
+  wrapper over `work_coalescing_singleton.client.call_with_fallback`):
+  dials, boots via `_ensure_status_monitor` when nothing answers, polls up
+  to `classify_daemon.BOOT_WAIT_S`, and sends the request with a fresh
+  per-call `client_id` (`wcs_client.new_client_id()`) so it registers as a
+  live (if brief) subscriber. `_classify_records` now calls this instead of
+  the simpler `classify_via_daemon` (kept, still used by `test_classify_
+  daemon.py`'s own wire-layer tests). Covered by two new tests: a real boot
+  invoked and polled to completion when no endpoint is initially published,
+  and the existing no-daemon-at-all case (now passing `ensure_monitor=None`
+  so the boot-wait poll loop is skipped entirely rather than spinning for
+  `BOOT_WAIT_S` in a test).
+- **Malformed/incomplete daemon response (medium)**: a successful-but-wrong
+  response (a non-dict entry, an unparseable field, or -- the sharper case
+  -- a *different* worktree-id set than the caller asked about) was
+  previously decoded leniently (skip the bad entry) and returned as a
+  partial `state_map`, silently blanking rows instead of falling back.
+  `_deserialize_classify_map` gained a `strict=True` mode (raises on the
+  first malformed entry) and `_classify_records`'s daemon path now decodes
+  strictly, then additionally checks the decoded id set against
+  `{rec.worktree_id for rec in records}` -- any mismatch (wrong shape OR
+  wrong coverage) re-runs `_classify_records_lease_guarded` directly rather
+  than trusting the daemon's answer. Two new tests: a daemon that answers
+  with an unrelated id set, and one with a non-dict per-entry value.
+- **Monitor-lifecycle test gap (low, nit)**: the first cut's tests only
+  exercised the wire layer standalone; nothing proved `cmd_status_monitor`
+  itself actually starts the classify server, publishes its fields, or
+  closes it. Added `test_classify_daemon_started_published_in_lock_and_
+  closed_on_exit` in `test_status_monitor.py`, mirroring the existing
+  `test_status_monitor_backs_off_at_iteration_boundary_without_mutating`'s
+  isolation technique (an immediate governance backoff that exits the loop
+  after one iteration) with a REAL `classify_daemon.CoalescingServer` and a
+  spy on `.close()` -- caught a genuine test-authoring bug while writing it
+  (the *first* lock write is a bare ownership stamp made before either
+  server exists; only the *second* write carries rendezvous fields), fixed
+  before the assertion was correct.
+- **Version bump (medium)**: bumped `plugins/agent-worktrees/plugin.json`,
+  `pyproject.toml`, and `.github/plugin/marketplace.json`'s per-plugin entry
+  from `1.5.5-dev90` to `1.5.5-dev91`, plus the marketplace catalog's own
+  `metadata.version` from `1.7.7-dev83` to `1.7.7-dev84` (agent-worktrees'
+  own extra catalog-version rule) -- missed in the first cut; per
+  `AGENTS.md`'s Version Bump section, skipping this makes an installed
+  machine report "already at latest" and silently ignore the whole change.
+
+Test count corrected: **11 new tests** total (10 in
+`test_classify_daemon_wiring.py`, 1 in `test_status_monitor.py`), plus the
+existing `test_classify_daemon.py` (7) and `test_classify_lease.py` (13)
+suites -- all 114 pass together. Documentation impact: this journal entry
+plus `classify_daemon.py`'s own module docstring (updated to say "wired
+into `cmd_status_monitor`/`_classify_records`" instead of "deliberately not
+wired yet") are the only documentation this change touches; no other
+authoritative doc (README, `docs/`) describes the resident monitor's wire
+protocol in enough detail to need a matching update.
+
