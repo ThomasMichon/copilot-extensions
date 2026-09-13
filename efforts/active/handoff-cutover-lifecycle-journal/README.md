@@ -542,6 +542,11 @@ renumbering from the "acknowledges handoff" step onward.)
       hours as an invisible orphan (the operator's reported "phantom
       agents"). Fixed with a lock-independent, identity-verified OS pid
       check as a fallback. See Journal for full evidence and the fix.
+- [x] **New item, this session:** a spawned successor pane was never
+      verified to actually become the operator's current mux pane/console
+      tab -- `mux_new_window` relied on an unverified tmux default. Added
+      `mux_doctor.verify_and_doctor_current_pane()` and wired it as a
+      hard precondition for a spawn to count as successful. See Journal.
 
 ### Phase 5 — Docs
 - [x] Document the 13-stage lifecycle in
@@ -1309,3 +1314,71 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
     (undecided) rather than misread as proof the predecessor is already gone.
     All existing `reclaim`/`handoff_cutover` tests (296 total after the added
     coverage) continue to pass.
+
+- **New capability, this session: verify + doctor the successor's mux pane
+  before declaring a cutover spawn successful.** The operator's own framing:
+  the lock-file-only liveness check we'd just fixed reads the lock *to learn
+  the pid*, but the actual monitored fact must be the OS process itself --
+  and symmetrically, a cutover's mux state must be actively tracked and
+  repaired at spawn time, because **"the cutover is only validly completed
+  if the successor session is now the current pane for the given console
+  tab."** Audited the spawn path (`_handoff_cutover_spawn_result` /
+  `sessions.mux_new_window`) and confirmed this was previously unverified:
+  `mux_new_window` relies on `tmux new-window` selecting the new window by
+  default (no `-d`), but nothing checked that assumption held, or repaired
+  it when it didn't (a differently configured mux server, a race with
+  another attached client, etc.) -- `handoff_cutover_spawn` and the eventual
+  `handoff_complete` (Stage 13) could both fire even if the operator's
+  console tab never actually switched to the successor.
+  - Added a new module, `mux_doctor.py`
+    (`verify_and_doctor_current_pane(pane_id, session_name)`): queries the
+    session's actual active pane, and if the successor isn't it, repairs
+    with `select-window` + `select-pane` and re-verifies. Returns
+    `{ok, was_current, doctored, active_pane}`.
+  - Wired it into the spawn path right after `mux_new_window` succeeds: the
+    outcome is recorded on the `handoff_cutover_spawn` event
+    (`pane_confirmed_current`, `pane_doctored`) for durable evidence, and a
+    confirmed-unrepairable pane now **fails the spawn outright**
+    (`error: pane-not-current`) rather than reporting success -- the same
+    fail-closed treatment already given to a failed successor-session
+    association. Since a handoff can only reach `linked` (and therefore
+    Stage 13) through a successful spawn, this makes "successor is the
+    current pane" a hard precondition for handoff completion without
+    needing to separately re-gate `_maybe_emit_stage_13`.
+  - `plugins/agent-worktrees/src/agent_worktrees/__main__.py` is a
+    grandfathered, shrink-only-baseline module; this change deliberately
+    widened its `tools/module-size-baseline.json` entry by exactly the net
+    lines this PR adds to the file (verified via `git diff --stat` against
+    `origin/main` at merge time, not a stale pre-rebase count), in the same
+    PR that touches the file (the legitimate case the guard's own error
+    message describes, distinct from the anti-pattern of bundling an
+    unrelated file's widen into an unrelated PR).
+  - Also fixed an unrelated, pre-existing one-line test bug hit while
+    running the full suite (`test_session_start_hook_fail_open.py` asserted
+    lowercase "its absence is not an error" against a template that
+    correctly capitalizes "Its" as a sentence start) -- confirmed failing
+    on unmodified `main` first, then fixed atomically alongside this PR per
+    the "track it or fix it" convention for very-minor pre-existing issues.
+  - New tests (`test_mux_doctor.py`) plus updated fixtures in
+    `test_handoff_cutover.py`/`test_profile_assignment.py` (which now
+    default the new check to a pass, since they target other spawn
+    concerns). Full `agent-worktrees` suite passes.
+  - **Round 2, addressing further Copilot review findings on the same PR:**
+    (a) a spawn whose pane was never confirmed current still logged
+    `handoff_cutover_spawn` unconditionally, and `_pending_handoff_retire_requests`
+    treated any such spawn as valid retirement evidence regardless -- the
+    successor's own independently-running process could still register and
+    reach `linked`/Stage 13 even after this function returned a failure.
+    Fixed by having that evidence-gathering function exclude any spawn
+    event with `pane_confirmed_current=False` (absence, i.e. pre-existing
+    history, stays confirmed for backward compatibility); (b) added a real
+    `cmd_handoff_cutover`-level integration test for the failure path
+    (rc 4, `error: pane-not-current`), since the existing autouse fixture
+    defaulted the new gate to a pass everywhere and never exercised the
+    actual wiring; (c) `mux_doctor` now targets the actual attached
+    client(s) via `switch-client -c <client-tty>` for repair (tmux exposes
+    no per-client "current window" -- it's a session-level property all
+    attached clients share -- so verification stays session-scoped, but
+    repair is strictly more precise this way); (d) reconciled the
+    module-size-baseline widen to the PR's true net diff after a rebase
+    made an earlier claimed line count stale.

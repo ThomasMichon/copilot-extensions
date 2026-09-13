@@ -88,6 +88,7 @@ from . import (
     list_cache,
     locks,
     managed_worktree_guard as remove_guard,
+    mux_doctor,
     obligations,
     output,
     permissions,
@@ -2913,6 +2914,11 @@ def _handoff_cutover_spawn_result(
         _spawn_failed(result.get("error"))
         return 4, failure
     new_pane = result.get("new_pane")
+    cutover_session_name = mux_session or sessions.mux_session_name(wt_id)
+    pane_doctor = (
+        mux_doctor.verify_and_doctor_current_pane(new_pane, cutover_session_name)
+        if new_pane else {"ok": False, "doctored": False}
+    )
     activity.log_event(
         "handoff_cutover_spawn", new_pane=new_pane,
         seeded=bool(result.get("prompt_received")),
@@ -2920,8 +2926,18 @@ def _handoff_cutover_spawn_result(
         candidate_session=None, candidate_status="awaiting-session-association",
         predecessor_copilot_pid=predecessor_pid,
         predecessor_copilot_start_time=predecessor_start,
+        pane_confirmed_current=pane_doctor.get("ok"),
+        pane_doctored=pane_doctor.get("doctored"),
         **spawn_event_ctx,
     )
+    if not pane_doctor.get("ok"):
+        # The successor pane was created but never became -- and could not be
+        # made -- the operator's actual console tab. A cutover the operator
+        # cannot see is not a completed cutover; fail closed rather than
+        # reporting success on unverified mux state.
+        _spawn_failed("successor pane never became the current mux pane")
+        failure = dict(result, ok=False, error="pane-not-current")
+        return 4, failure
     candidate_session = None
     if handoff_token and record_path is not None:
         candidate_session, candidate_status = _wait_for_handoff_candidate(
@@ -9159,6 +9175,14 @@ def _pending_handoff_retire_requests(
         str(event.get("handoff_token") or "").strip(): event
         for event in spawn_events
         if str(event.get("handoff_token") or "").strip()
+        # A spawn whose pane never became -- and could not be doctored into
+        # -- the operator's actual console tab is not valid retirement
+        # evidence: retiring the predecessor and completing Stage 13 off an
+        # unconfirmed pane would silently accept a cutover the operator
+        # never actually saw. Absence of the field (pre-mux-doctor history)
+        # is treated as confirmed for backward compatibility; only an
+        # explicit False excludes it.
+        and event.get("pane_confirmed_current", True) is not False
     }
     retire_events = [e for e in trace_events if e.get("event") == "handoff_predecessor_retire"]
     retire_events += activity.read_events(

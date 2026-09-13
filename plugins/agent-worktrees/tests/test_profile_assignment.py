@@ -658,6 +658,10 @@ def test_handoff_cutover_wires_assignment_profile_and_token(
     monkeypatch.setattr(m, "_build_env", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(m, "_repo_session_env", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(m.sessions, "mux_new_window", _window)
+    monkeypatch.setattr(
+        m.mux_doctor, "verify_and_doctor_current_pane",
+        lambda *a, **k: {"ok": True, "was_current": True, "doctored": False},
+    )
     monkeypatch.setattr(m.activity, "log_event", lambda *_args, **_kwargs: None)
     args = argparse.Namespace(
         seed="continue",
