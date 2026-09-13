@@ -1406,3 +1406,91 @@ Remaining under #736: #1841 (partially addressed — docs landed, full
 install/update/stop audit + #2524 fix still open), #2301 (not started),
 #2323 (not started).
 
+### 2026-09-12 (end of session) — Design breakdown for the three remaining risk-classed items
+
+Before diving in, broke each remaining item down by concrete design/risk
+(requested explicitly): see the design decisions folded into each fix's own
+entry below and above. Summary of the breakdown that shaped sequencing:
+
+- **#2524** (agent-dispatch POSIX `start` fallback) — smallest, most
+  mechanical: reuse an *already-existing, already-tested* Python-level
+  autostart primitive (`_ensure_local_coordinator`/`_lazy_start_coordinator`,
+  the same one every ordinary CLI command already triggers) rather than
+  writing new bash spawn logic. The only real design question was *how* the
+  shell installer reaches it without depending on a data command's repo-
+  resolution/output shape — resolved by adding a small, explicit, internal
+  (`_`-prefixed, help-suppressed) CLI entrypoint, `_ensure-coordinator`,
+  rather than shelling out to `list`/`health` (both wrong for different
+  reasons: `list` resolves/requires a repo *before* ever reaching the
+  autostart call; `health` explicitly passes `ensure=False`). Lowest risk of
+  the three: additive-only Python change + a straightforwardly testable
+  bash branch.
+- **#2323** (agent-worktrees resident classify/list wiring) — highest
+  blast radius: touches the live `cmd_status_monitor`/`_classify_records` in
+  agent-worktrees' 25k-line `__main__.py`, which every concurrent session on
+  this host (including this one) depends on for basic worktree operations.
+  Design already on file (this doc's earlier entries): the daemon's
+  `compute` callback resolves a project's own records via
+  `tracking.list_records` (never serializing whole records over the wire);
+  `_classify_records` tries the daemon via `classify_daemon.classify_via_daemon`
+  before falling back to today's unchanged lease-guarded path. The
+  **validation bar** before landing: a spawned, non-production test monitor
+  (isolated `AGENT_WORKTREES_*` env / tracking dir, never the real resident
+  monitor this session's own tooling talks to) must prove the full round
+  trip — cold boot, concurrent coalescing, fallback-on-timeout, idle-exit —
+  before any change to the production entry points.
+- **#2301** (process-count/`conhost.exe` audit) — genuinely open-ended
+  live-system diagnostics on a **shared** dev box (other sessions/operators
+  may be concurrently using the same coordinators). Design constraint:
+  **read-only first** — `agent-dispatch supervise daemon-status`/`health`
+  across discovered endpoints, `/proc`-style census (this session's WSL
+  target has real `/proc`), before any process is touched. Only act on a
+  finding that is unambiguously a bug (e.g. a definitively-stale/dead pid),
+  never a live, actively-used process just because its purpose is unclear.
+
+Picked up in that order (smallest/lowest-risk first): #2524 next.
+
+### 2026-09-12 (end of session, later) — Fixed #2524: agent-dispatch POSIX `start` now has a tier-1 direct-start fallback
+
+- **New internal CLI entrypoint** `agent_dispatch._cmd_ensure_coordinator`
+  (registered as the hidden subcommand `_ensure-coordinator`, `help=
+  argparse.SUPPRESS`): runs `_ensure_local_coordinator` (the existing,
+  already-production-tested tier-1 autostart primitive every ordinary client
+  command already triggers) and reports success via exit code — deliberately
+  NOT reusing a data command like `list` (resolves/requires a repo *before*
+  reaching the autostart call, so it's not a general-purpose trigger) or
+  `health` (explicitly passes `ensure=False`).
+- **`scripts/install.sh`'s `do_start`**: now falls back to a direct start
+  (`"$rt_py" -m agent_dispatch _ensure-coordinator`, resolved via a new
+  `_resolve_runtime_python` helper that sources the deployed canonical
+  `resolve-runtime.sh`) whenever systemd is unavailable, the unit isn't
+  installed, or `systemctl start` fails to activate it — mirroring
+  agent-bridge's own `do_start` and agent-dispatch's own Windows
+  `Invoke-Start`, both of which already had this fallback.
+- **Tests**: 3 new tests in `test_lazy_start.py` (the ensure-coordinator
+  entrypoint reports success/failure correctly by exit code; the subcommand
+  is actually wired into the parser). Full `test_lazy_start.py` +
+  `test_cli.py` (156 tests) green.
+- **Verified for real against this machine's actual production WSL
+  agent-dispatch coordinator** (`~/.agent-dispatch`, real systemd unit
+  `agent-dispatch.service`, PID 479, `Main PID` unchanged throughout):
+  built a fully isolated `HOME`/install-dir with an isolated `uv`-built venv
+  (editable install of this exact source change, since the real installed
+  slot's older `agent_procutil` couldn't satisfy the modified source's
+  imports) and NO systemd unit registered there; ran the actual
+  `install.sh start` and confirmed it printed "No service unit installed --
+  falling back to a direct start" then "Coordinator started (direct)", with
+  a genuinely new, isolated coordinator process spawned (confirmed via
+  `pgrep`) — then cleanly stopped it and confirmed the real production
+  coordinator's PID never changed. Did **not** re-test the pre-existing
+  "systemd unit present + healthy" branch live, since `systemctl --user` is
+  a single **per-UID** manager (not scoped by the shell's `$HOME` override)
+  and this box's real `agent-dispatch.service` is that exact unit — that
+  code path is unmodified by this change, so it was reasoned about instead
+  of re-exercised against production infrastructure.
+- `bash -n` clean; `py_compile` clean; `check-version-consistency.py`/
+  `check-docs-consistency.py` green; bumped agent-dispatch to `0.1.2-dev86`.
+
+**#2524 closed.** Remaining under #736: #1841's fuller audit (not started),
+#2301 (not started), #2323 (not started).
+
