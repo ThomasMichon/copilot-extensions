@@ -804,7 +804,7 @@ event names, so no event was renamed:
 | # | Stage | Emitted by |
 |---|---|---|
 | 1 | `worktree_created` | `cmd_create` |
-| 2 | `mux_session_assigned` | `mux_attached` (launcher) / `mux_new_session`\`mux_new_window\` (programmatic cutover) |
+| 2 | `mux_session_assigned` | `mux_attached` (launcher) / `mux_new_session`/`mux_new_window` (programmatic cutover) |
 | 3 | `copilot_invoked` | the setup launcher's final exec point |
 | 4 | `session_start_bound` | `cmd_register_session` (sessionStart) |
 | 5 | `status_reported` | the first status-report write in a session |
@@ -813,27 +813,35 @@ event names, so no event was renamed:
 | 8 | `handoff_successor_spawn_started` | emitted before success/failure is known, so a killed spawn still leaves a trace |
 | 9 | `handoff_successor_session_start_bound` | the successor's own sessionStart |
 | 10 | `handoff_successor_claimed` | the successor declares itself new head |
-| 11 | `handoff_pickup_confirmed_predecessor_closing` | predecessor retire, gated to `outcome="gone"` only |
+| 11 | `handoff_pickup_confirmed_predecessor_closing` | the predecessor retire path, gated to `outcome="gone"` only, **or** the successor-link path's own direct emission of this event name (ungated) |
 | 12 | `session_end_bound` | the predecessor's sessionEnd |
 | 13 | `handoff_complete` | the runner's final confirmation |
 
-A gated stage (7, 11) only stamps `stage`/`stage_name` when its outcome field
-matches the success value above -- a duplicate/failed claim attempt or a
-retire that left the pane running (`outcome="left-running"` or
-`"identity-mismatch"`) is recorded as its ordinary event but never
-misrepresented as that stage's success.
+Stage 7 is gated: `handoff_cutover_claim` only stamps `stage`/`stage_name`
+when `outcome="acquired"` -- a duplicate/failed claim attempt is recorded as
+its ordinary event but never misrepresented as that stage's success. Stage
+11 has two distinct emitters with different gating: `handoff_predecessor_retire`
+is gated to `outcome="gone"` only (a retire that left the pane running,
+`outcome="left-running"` or `"identity-mismatch"`, is recorded but not
+stamped as stage 11), while `handoff_pickup_confirmed_predecessor_closing`
+is a separate, ungated event emitted directly by the successor-link path
+and always stamps stage 11 when it fires.
 
 **Two stores, two lifetimes.** Every stage-mapped `log_event()` call writes
 to the machine-global rolling `activity.jsonl` (7-day retention, see
-`activity.py`) *and*, write-through, to `handoff_trace.py`'s durable,
-per-project/per-worktree, lock-guarded store at
+`activity.py`) and, best-effort write-through, to `handoff_trace.py`'s
+durable, per-project/per-worktree, lock-guarded store at
 `~/.agent-worktrees/logs/handoff-traces/<project>/<worktree-id>.jsonl` --
 namespaced by project because worktree ids are only unique within one
-project. The durable store is exempt from the rolling log's retention
-window, so a slow-to-audit handoff can still be re-traced after
-`activity.jsonl` has rotated past its stage-1 event. `remove_trace()` deletes
-a worktree's file when its tracking record is removed, so a reused worktree
-id never inherits a stale predecessor's trace.
+project. The write-through only fires when an active project and worktree
+id are resolvable at call time (both stores' writes are best-effort and
+swallow their own exceptions); in an ambient context where neither is known,
+the event still lands in `activity.jsonl` alone. The durable store is exempt
+from the rolling log's retention window, so a slow-to-audit handoff can
+still be re-traced after `activity.jsonl` has rotated past its stage-1
+event. `remove_trace()` deletes a worktree's file when its tracking record
+is removed, so a reused worktree id never inherits a stale predecessor's
+trace.
 
 **Diagnosing a stuck cutover today.** A dedicated `agent-worktrees
 handoff-trace <worktree-id>` command that renders the ordered 13-stage
@@ -846,9 +854,11 @@ today and is safe to reach for immediately:
   -- diagnoses (and, with `--execute`, retires) a predecessor pane left alive
   after a confirmed cutover, using the same choreography as the resident
   monitor's own sweep. Read-only without `--execute`.
-- `agent-bridge handoff-check [--worktree-id <id>|--all] [--json]` -- a thin
-  passthrough to the same diagnostic, for callers that only have
-  `agent-bridge` available.
+- `agent-bridge handoff-check [--worktree-id <id>|--all] [--execute] [--json]`
+  -- a thin passthrough that shells out to `agent-worktrees handoffs-check`,
+  forwarding `--execute` the same way; only usable when `agent-worktrees` is
+  also resolvable on `PATH` (it fails closed with a clear error otherwise --
+  `agent-bridge` alone does not implement the check/repair logic itself).
 - `health.find_orphaned_handoffs()` already flags "claimed but no live
   successor pane" as a class of bug; feeding it from the durable trace so it
   can name the *exact* stalled stage (rather than just flagging that one

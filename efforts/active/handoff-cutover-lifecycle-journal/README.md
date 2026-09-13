@@ -1243,6 +1243,7 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   `handoff-check` instead of manual intervention. Deliberately did **not**
   document a `handoff-trace` render command as if it existed -- Phase 3's
   dedicated CLI is still open follow-on work, and the docs say so
-  explicitly. Phase 4 item 4 (`find_orphaned_handoffs()` naming the exact
-  stalled stage) remains the only other open item before this effort can
-  move to Done.
+  explicitly. **Not the only remaining item:** Phase 3's cross-link/
+  session-state backfill work and its `handoff-trace` CLI, plus Phase 4
+  item 4 (`find_orphaned_handoffs()` naming the exact stalled stage), all
+  remain open before this effort can move to Done.
