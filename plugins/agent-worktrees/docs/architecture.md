@@ -873,14 +873,17 @@ today and is safe to reach for immediately:
   forwarding `--execute` the same way; only usable when `agent-worktrees` is
   also resolvable on `PATH` (it fails closed with a clear error otherwise --
   `agent-bridge` alone does not implement the check/repair logic itself).
-  **Does not forward agent-bridge's own top-level `--project`/`-p`** to the
-  child command -- `agent-worktrees` itself does have a global `--project`/
-  `-p` (it must come before the `handoffs-check` subcommand), but the bridge
-  wrapper never passes its own `--project`/`-p` value through to it, so from
-  a neutral daemon CWD unrelated to the target project the check resolves
-  against whatever `agent-worktrees` derives from its own CWD instead of the
-  project agent-bridge was scoped to. Run it from (or ensure the daemon's
-  CWD is) the target project's checkout when project scoping matters.
+  **No usable project-scoping path for a neutral-CWD caller.**
+  `agent-bridge`'s top-level parser rejects an *explicit* `--project` for
+  `handoff-check` outright (`_guard_project_scope`: only `agents`, `create`,
+  `machines`, and `send` consume that flag) unless it was injected by the
+  `<repo> <slug>` router; and even a router-injected value is never
+  forwarded to the child `agent-worktrees handoffs-check` invocation (which
+  does have its own global `--project`/`-p`, but only when it precedes the
+  subcommand on *that* command line). From a neutral daemon CWD unrelated to
+  the target project, invoke `agent-worktrees handoffs-check --project
+  <name> ...` directly instead -- `agent-bridge handoff-check` cannot be
+  scoped that way.
 - `health.find_orphaned_handoffs()` already flags "claimed but no live
   successor pane" as a class of bug; feeding it from the durable trace so it
   can name the *exact* stalled stage (rather than just flagging that one
