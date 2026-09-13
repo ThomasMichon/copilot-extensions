@@ -341,6 +341,21 @@ def test_claims_add_rejects_finalizing_owner(monkeypatch, tmp_path, capfd):
     assert tracking.load_record(path).resources == []
 
 
+def test_claims_add_allows_finalized_owner(monkeypatch, tmp_path, capfd):
+    """``finalized`` is not terminal (docs/worktree-lifecycle.md): a resumed,
+    already-finalized worktree may still accept a new outbound claim."""
+    _seed(tmp_path, monkeypatch)
+    path = tmp_path / "worktrees" / "wt-A.yaml"
+    rec = tracking.load_record(path)
+    rec.status = "finalized"
+    tracking.save_record(rec, path)
+    rc = m.cmd_claims(_add_args("codespace", "cs-resumed"))
+    assert rc == 0
+    out = json.loads(capfd.readouterr().out)
+    assert out["kind"] == "codespace" and out["ref"] == "cs-resumed"
+    assert [c.ref for c in tracking.load_record(path).resources] == ["cs-resumed"]
+
+
 def test_claims_add_missing_operands(monkeypatch, tmp_path):
     _seed(tmp_path, monkeypatch)
     rc = m.cmd_claims(argparse.Namespace(
