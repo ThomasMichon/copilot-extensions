@@ -1296,3 +1296,71 @@ above (tracked, not yet started) — the umbrella issue's own closing
 decision (close now vs. keep open pointing at that specific remaining
 follow-up) is for the next step of this session.
 
+### 2026-09-12 (final this session) — #744 closed; #736 checklist corrected; #1841/#2301 scoped as the remaining work
+
+Closed out the #744 arc for real (not just in this journal):
+
+- Posted evidence + closed **#866** and **#744** on GitHub (`gh issue close`,
+  routed through `agent-worktrees repos gh` for the account-scoped identity
+  check — a bare `gh issue close`/`gh issue comment` fails closed with an
+  EMU "Unauthorized" error on this repo, confirming the wrapper is load-
+  bearing, not optional).
+- Discovered the umbrella **#736**'s own body checklist was stale: it still
+  showed #738/#742/#743/#744 unchecked even though all four (and #737/#739/
+  #740/#741) were already closed — some from before this session even
+  started. Verified every one of #736's originally-listed sub-issues
+  (#737–#744) is CLOSED via individual `gh issue view --json state` calls
+  (not trusted from the checklist text) and edited #736's body to reflect
+  reality, adding the three still-open items this effort's own README (not
+  the GH issue) already tracked: **#2323**, **#1841**, **#2301**.
+- **#736 stays OPEN** — closing it now would violate this repo's own
+  completion-gate convention (an effort/umbrella is not Done while any of
+  its own tracked Plan items remain open). #2323, #1841, #2301 are the
+  actual remaining scope, each independently already filed and named.
+
+### Status of the three remaining tracked items (for the next pickup)
+
+- **#2323** (agent-worktrees resident classify/list accelerator): wire-
+  adoption landed (PR #2510); the live `cmd_status_monitor`/
+  `_classify_records` wiring is the well-defined remaining step (concrete
+  plan in the 2026-09-12 entry above). Not started.
+- **#1841** (declare service lifecycle tiers + reconcile user-mode ensure):
+  read in full this session. Mostly a **documentation** deliverable —
+  add a "declared lifecycle tier" section (default tier, availability
+  promises, Windows/POSIX mappings, escalation rationale) to
+  `agent-bridge/docs/architecture.md`, `agent-vault/docs/architecture.md`,
+  and an equivalent home for agent-dispatch (no `docs/architecture.md`
+  exists yet there; `docs/spawn-supervisor.md` documents the *supervisor*
+  loop's own persistent-service install, but the *coordinator* (`agent-
+  dispatch serve`) daemon's own lifecycle section wasn't yet located this
+  session -- confirm where the coordinator's own scheduled-task/systemd-unit
+  install is documented, or add a new section, before writing the tier
+  declaration) — plus an audit of `install`/`update`/`start`/`stop`/session-
+  start readiness against the user-mode-ensure contract (rules 7-9). Also
+  noticed `agent-vault/docs/architecture.md`'s own "Supervision and updates"
+  section still says "**In progress (#743)**" for the drain-safe cutover
+  that this session already **closed** for POSIX — that stale note should
+  be corrected in the same pass. Its own "Known linked gaps" (#1836, #1837)
+  are both already closed. **Not started** beyond this scoping read.
+- **#2301** (audit + close reality gaps against
+  `process-count-scales-with-services-not-sessions`): a **live-system**
+  audit (real coordinator/`conhost.exe` process-count diagnostics on a
+  shared dev box), explicitly higher-risk than #1841 — root-causing
+  `agent_dispatch serve` proliferation and windowless-launch gaps needs
+  careful, non-destructive investigation of processes this and other
+  concurrent sessions may depend on. Deliberately **not started** this
+  session; recommend its own dedicated, focused pickup rather than folding
+  it into a documentation-audit pass.
+
+### Handoff guidance for the next pickup
+
+Resume via this same effort (`plugin-process-hygiene`, #736). Suggested
+order: **#1841 first** (lower-risk, mostly docs + a careful non-mutating
+audit), **#2301 second** (live-system diagnostics, budget real time for
+careful non-disruptive investigation on shared hosts), **#2323 last** (the
+riskiest — live wiring into `agent-worktrees`' widely-depended-on resident
+monitor; do it only with a spawned, non-production test monitor exercising
+the full round trip, per the plan already on file). #736 closes only once
+all three are resolved or each is explicitly re-scoped into its own tracked
+successor issue with #736 updated to point at it.
+
