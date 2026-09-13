@@ -334,11 +334,13 @@ records them as `not-final-or-unused` and keeps them — so they can accumulate.
 Clear a *provably dead* one with **`remove-system <id>`** (verify it isn't a live
 session first) -- it also independently guards against discarding real content:
 it refuses (by default) a worktree with uncommitted changes, unmerged/unpushed
-branch content (squash-merge-aware), checkout branch drift, a live PR record, or
-a live outbound resource claim, naming the blocker so the caller can resolve it;
-an unadvertised `--force` exists for a caller that has already confirmed
-discarding is correct. The durable fix is for the owning service to
-`remove-system` on task completion.
+branch content (squash-merge-aware), checkout branch drift, an unclassifiable
+git state (a zombie checkout with no `.git`, an orphaned/unrelated-history
+checkout, or a timed-out probe), a live PR record, or a live outbound resource
+claim, naming the blocker so the caller can resolve it; an unadvertised
+`--force` exists for a caller that has already confirmed discarding is correct.
+The durable fix is for the owning service to `remove-system` on task
+completion.
 
 ### The managed-reap invariant — what `gc` will never touch
 

@@ -63,13 +63,21 @@ def blockers_for(rec, repo) -> list[str]:
             blockers.append(
                 f"{info.dirty} uncommitted change(s) in the working tree"
             )
-        elif info.state == git_ops.WorktreeState.UNKNOWN:
-            # classify_worktree only returns UNKNOWN when its own git calls
-            # timed out -- an honest "couldn't tell", not "clean". Treat it
-            # as a blocker rather than letting a stalled probe fall through
-            # to forced removal unclassified.
+        elif info.state in (
+            git_ops.WorktreeState.UNKNOWN,
+            git_ops.WorktreeState.GONE,
+            git_ops.WorktreeState.ORPHAN,
+        ):
+            # UNKNOWN: classify_worktree's own git calls timed out -- an
+            # honest "couldn't tell", not "clean". GONE here specifically
+            # means the checkout directory exists but has no .git entry (a
+            # zombie from a partial/aborted creation) -- it can still hold
+            # real, uninspected files. ORPHAN means no merge-base could be
+            # established (unrelated history) -- ahead/behind can't be
+            # trusted. None of these are safe to wave through unclassified.
             blockers.append(
-                "could not classify the working tree's git state (probe timed out)"
+                f"could not safely classify the working tree's git state "
+                f"({info.state.value}) -- inspect it manually before removing"
             )
         if info.branch_drift:
             # The checkout was switched to a different branch than the

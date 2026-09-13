@@ -55,7 +55,7 @@ def test_remove_system_retains_record_when_worktree_removal_fails(
     tmp_path,
 ):
     record, tracking_dir = _record(tmp_path)
-    args = argparse.Namespace(worktree_id=record.worktree_id, json=True)
+    args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=True)
 
     with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
          patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
@@ -80,7 +80,7 @@ def test_remove_system_deletes_record_after_worktree_removal_succeeds(
     tmp_path,
 ):
     record, tracking_dir = _record(tmp_path)
-    args = argparse.Namespace(worktree_id=record.worktree_id, json=True)
+    args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=True)
 
     with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
          patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
@@ -104,7 +104,7 @@ def test_remove_system_deletes_unregistered_leftover_and_record(
     tmp_path,
 ):
     record, tracking_dir = _record(tmp_path)
-    args = argparse.Namespace(worktree_id=record.worktree_id, json=True)
+    args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=True)
 
     with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
          patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
@@ -477,7 +477,7 @@ def test_remove_system_treats_unknown_classification_as_blocker(tmp_path):
 
     assert result == 1
     message = json_error.call_args.args[0]
-    assert "could not classify" in message
+    assert "could not safely classify" in message
     assert (tracking_dir / "managed-1.yaml").exists()
 
 
@@ -507,9 +507,11 @@ def test_remove_system_allows_squash_merged_branch(tmp_path):
     record, tracking_dir = _record(tmp_path)
     args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=False)
 
+    clean_info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
     with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
          patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
          patch("agent_worktrees.sessions.kill_tmux_session"), \
+         patch("agent_worktrees.git_ops.classify_worktree", return_value=clean_info), \
          patch("agent_worktrees.git_ops.is_branch_merged", return_value=True), \
          patch("agent_worktrees.git_ops.list_worktree_paths"), \
          patch("agent_worktrees.git_ops.remove_worktree", return_value=True), \
@@ -666,3 +668,48 @@ def test_remove_system_resolves_record_repo_not_default(tmp_path):
     json_output.assert_called_once_with({"removed": "managed-1"})
     # The removal ran against the record's OWN repo anchor, not the default.
     remove_worktree.assert_called_once_with(str(other_anchor), record.worktree_path)
+
+
+def test_remove_system_refuses_gone_zombie_checkout(tmp_path):
+    """A checkout directory that exists but has no .git entry (a zombie from
+    a partial/aborted creation) must not silently pass -- it can still hold
+    real, uninspected files."""
+    record, tracking_dir = _record(tmp_path)
+    args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=False)
+
+    (Path(record.worktree_path) / "leftover.txt").write_text("orphaned content", encoding="utf-8")
+    gone_info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.GONE)
+    with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
+         patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
+         patch("agent_worktrees.git_ops.classify_worktree", return_value=gone_info), \
+         patch("agent_worktrees.git_ops.is_branch_merged", return_value=True), \
+         patch("agent_worktrees.__main__._json_error") as json_error:
+        json_error.return_value = 1
+        result = cli.cmd_remove_system(args)
+
+    assert result == 1
+    message = json_error.call_args.args[0]
+    assert "could not safely classify" in message
+    assert "gone" in message
+    assert (Path(record.worktree_path) / "leftover.txt").exists()
+
+
+def test_remove_system_refuses_orphan_checkout(tmp_path):
+    """No merge-base could be established (unrelated history) -- ahead/
+    behind can't be trusted, so this must not pass unclassified."""
+    record, tracking_dir = _record(tmp_path)
+    args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=False)
+
+    orphan_info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.ORPHAN)
+    with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
+         patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
+         patch("agent_worktrees.git_ops.classify_worktree", return_value=orphan_info), \
+         patch("agent_worktrees.git_ops.is_branch_merged", return_value=True), \
+         patch("agent_worktrees.__main__._json_error") as json_error:
+        json_error.return_value = 1
+        result = cli.cmd_remove_system(args)
+
+    assert result == 1
+    message = json_error.call_args.args[0]
+    assert "could not safely classify" in message
+    assert "orphan" in message
