@@ -1671,3 +1671,75 @@ Remaining under #736: **#2323 only** (the resident classify/list accelerator
 wiring — still not started, still the highest-blast-radius item; concrete
 plan and validation bar unchanged from this README's earlier entries).
 
+### 2026-09-12 (new pickup, second worktree) — #2323: wired the resident classify daemon into `cmd_status_monitor`/`_classify_records`
+
+Resumed via a stored context handoff with #1841 and #2301 both already
+closed (#2301 landed separately, docs-only, via its own PR -- caught and
+split out of this worktree after an early commit accidentally bundled this
+#2323 code change into that docs-only PR; re-split into this dedicated
+worktree before either landed, so each stays independently reviewable).
+#2323 is the only remaining item under #736.
+
+Implemented the concrete plan already on file in this README's earlier
+entries:
+
+- **Server side** (`cmd_status_monitor`): starts a second, independent
+  `classify_daemon.CoalescingServer` (via `classify_daemon.start_server`)
+  alongside the existing `HookIpcServer`, publishes its rendezvous fields
+  into the same monitor lock file (namespaced `classify_*` keys, never
+  colliding with the hook server's `hook_*` keys), and closes it in the same
+  `finally` block. A failure to start it is swallowed (`classify_server =
+  None`) -- never fatal to the monitor, exactly like the hook server's own
+  best-effort start.
+- **Compute callback** (`_classify_daemon_compute`, new): resolves the named
+  project's own tracking records itself from `payload`'s `project`/
+  `status_filter`/`platform_filter`/`all` fields -- **never** trusts records
+  serialized by a caller. Mirrors `_list_records_for_args`'s exact filter
+  semantics (including the existing-worktree-with-a-`.git`-dir check unless
+  `all` is set) so a daemon answer is byte-identical to what the caller
+  would have resolved itself. Deliberately uses explicit `project`/`path`
+  parameters throughout (`cfg.project_dir(project)`, `cfg.load_config(path=...,
+  project=project)`) rather than ever touching `cfg`'s global active-project
+  state -- the daemon's `_Handler` is a `ThreadingTCPServer`, so two
+  different projects' classify requests can run truly concurrently in
+  different threads, and any global-state approach would have raced them.
+  Caught by the validation pass below before it became a production bug.
+- **Client side** (`_classify_records`): new opt-in `daemon_filters` kwarg
+  (default `None` -- every existing caller keeps its exact pre-#2323
+  behavior). When given (only `_build_list_json_payload`'s `list --json
+  --classify` path opts in, passing the identical filters it used to resolve
+  its own `records`), reads the monitor lock, tries
+  `classify_daemon.classify_via_daemon`, and on any miss falls through to
+  the **unchanged**, factored-out `_classify_records_lease_guarded` (the
+  pre-#2323 body, renamed but byte-identical) -- via a serialize/deserialize
+  round trip so both paths return through one shape (`_serialize_classify_map`
+  / `_deserialize_classify_map`).
+
+**Validation performed** (this effort's own stated bar for touching this
+entry point) entirely against isolated, temporary tracking/config
+directories -- no test here starts `cmd_status_monitor` or reaches this
+host's own real resident monitor:
+
+- A real `classify_daemon.CoalescingServer` running the real
+  `_classify_daemon_compute`, reached through a real lock file
+  `_classify_records` reads, proving the full wire round trip and that the
+  lease-guarded fallback is never invoked when the daemon is reachable.
+- The no-daemon-running case (no lock file) degrades to the exact
+  lease-guarded answer.
+- `daemon_filters=None` (every caller but one) never even attempts to
+  resolve a project -- proven by making that resolution call raise if hit.
+- The `all`-flag `.git`-existence filter matches `_list_records_for_args`
+  exactly.
+- Two concurrent compute calls for two *different* projects, run from two
+  threads with a barrier, never cross-contaminate each other's resolved
+  repo/config -- the check that caught the global-active-project mutation
+  risk above during design.
+
+9 new tests (`tests/test_classify_daemon_wiring.py`), plus the existing
+`test_classify_daemon.py` (7) and `test_classify_lease.py` (13) suites, all
+pass. Full plugin test suite run in parallel; not yet confirmed complete as
+of this entry (see next entry for the result before this lands).
+
+Remaining under #736: **#2323 only**, now implemented + isolated-tested;
+not yet landed to `main` pending the full-suite confirmation and PR review.
+
