@@ -9112,15 +9112,18 @@ def _monitor_pending_handoff_request(
     return None
 
 
-def _monitor_pending_handoff_predecessor_retire(
+def _pending_handoff_retire_requests(
     record: tracking.WorktreeRecord,
-) -> dict[str, object] | None:
-    """Return one consumed/associated handoff whose predecessor still needs retirement."""
-    if not _status_monitor_enabled():
-        return None
+) -> list[dict[str, object]]:
+    """Every consumed/associated handoff whose predecessor still needs
+    retirement, oldest first -- the shared core both
+    :func:`_monitor_pending_handoff_predecessor_retire` (the daemon's
+    one-at-a-time sweep) and ``handoffs-check`` (which retires every stale
+    predecessor on a worktree in one pass, not just the first) build on.
+    """
     worktree_id = getattr(record, "worktree_id", None)
     if not worktree_id:
-        return None
+        return []
     spawned = {
         str(event.get("handoff_token") or "").strip(): event
         for event in activity.read_events(
@@ -9137,8 +9140,14 @@ def _monitor_pending_handoff_predecessor_retire(
             event="handoff_predecessor_retire",
             limit=64,
         )
-        if str(event.get("handoff_token") or "").strip()
+        # Only a genuinely successful retirement counts as "handled" --
+        # matching Stage 13's own success gate (see _maybe_emit_stage_13).
+        # A failed attempt (e.g. "left-running" on a stale/incorrect
+        # identity hint) must stay retryable, not be permanently abandoned.
+        if event.get("outcome") == "gone"
+        and str(event.get("handoff_token") or "").strip()
     }
+    requests: list[dict[str, object]] = []
     for handoff in reversed(record.pending_handoffs):
         token = str(getattr(handoff, "token", "") or "").strip()
         if not token or token in retired:
@@ -9166,7 +9175,7 @@ def _monitor_pending_handoff_predecessor_retire(
             predecessor_pid = None
         predecessor_start = str(spawn.get("predecessor_copilot_start_time") or "").strip() or None
         yield_reason = "linked" if getattr(handoff, "successor", None) else "candidate"
-        return {
+        requests.append({
             "handoff_token": token,
             "worktree_id": worktree_id,
             "predecessor_session_id": predecessor_session,
@@ -9176,8 +9185,28 @@ def _monitor_pending_handoff_predecessor_retire(
             "mux_session": str(spawn.get("expected_mux_session") or "").strip() or None,
             "successor_session_id": successor_session,
             "retire_reason": f"monitor-successor-{yield_reason}",
-        }
-    return None
+        })
+    return requests
+
+
+def _monitor_pending_handoff_predecessor_retire(
+    record: tracking.WorktreeRecord,
+    *,
+    require_monitor_enabled: bool = True,
+) -> dict[str, object] | None:
+    """Return one consumed/associated handoff whose predecessor still needs retirement.
+
+    ``require_monitor_enabled`` gates this to the resident daemon's own
+    automatic sweep (default). An explicit, on-demand caller (``handoffs-check``)
+    passes ``False`` -- a manual diagnostic must work even when the background
+    monitor is disabled (``AGENT_WORKTREES_STATUS_MONITOR=0``); that toggle
+    only opts a machine out of *automatic* sweeps, not out of an agent's
+    ability to explicitly ask "is this worktree's cutover actually finished?".
+    """
+    if require_monitor_enabled and not _status_monitor_enabled():
+        return None
+    requests = _pending_handoff_retire_requests(record)
+    return requests[0] if requests else None
 
 
 def _monitor_retire_handoff_predecessor(
@@ -9203,6 +9232,100 @@ def _monitor_retire_handoff_predecessor(
     )
 
 
+def cmd_handoffs_check(args: argparse.Namespace) -> int:
+    """Diagnose (and optionally finish) a stalled handoff-cutover retirement.
+
+    A confirmed handoff cutover (the successor is recorded) can still leave
+    its predecessor's mux pane alive and un-retired -- the failure mode
+    behind a worktree accumulating stale panes across serial handoffs
+    (efforts/active/handoff-cutover-lifecycle-journal). This is the
+    on-demand counterpart to the resident status-monitor's own automatic
+    sweep: any agent can invoke it directly instead of waiting for (or
+    debugging) the background daemon.
+
+    ``--worktree-id`` checks one worktree; ``--all`` checks every tracked
+    worktree in the current project. Without ``--execute`` this only
+    reports what it finds (read-only). With ``--execute`` it retires each
+    found predecessor now, via the identical choreography
+    (:func:`_monitor_retire_handoff_predecessor`) the daemon uses --
+    including its process-identity guard (never retires a pid-reused
+    impostor process), just run synchronously instead of on the daemon's
+    own schedule.
+    """
+    worktree_id = getattr(args, "worktree_id", None)
+    check_all = bool(getattr(args, "all", False))
+    if not worktree_id and not check_all:
+        return _json_error("handoffs-check requires --worktree-id or --all")
+    if worktree_id and check_all:
+        return _json_error("handoffs-check: pass --worktree-id or --all, not both")
+
+    if check_all:
+        records = tracking.list_records(cfg.tracking_dir())
+    else:
+        resolved = _resolve_worktree_id(worktree_id)
+        record_path = cfg.tracking_dir() / f"{resolved}.yaml"
+        if not record_path.exists():
+            return _json_error(f"Worktree not found: {resolved}")
+        records = [tracking.load_record(record_path)]
+
+    execute = bool(getattr(args, "execute", False))
+    findings: list[dict[str, object]] = []
+    for record in records:
+        # ALL stale predecessors on this worktree, not just the first -- a
+        # worktree can accumulate several in a row (the exact failure mode
+        # this tool exists to clean up), and a single check/--execute pass
+        # must not require re-invoking once per predecessor.
+        for request in _pending_handoff_retire_requests(record):
+            finding: dict[str, object] = {
+                "worktree_id": request.get("worktree_id"),
+                "handoff_token": request.get("handoff_token"),
+                "predecessor_session_id": request.get("predecessor_session_id"),
+                "successor_session_id": request.get("successor_session_id"),
+                "retire_pane": request.get("retire_pane"),
+                "executed": False,
+            }
+            if execute:
+                rc, response = _monitor_retire_handoff_predecessor(request)
+                finding["executed"] = True
+                finding["retired"] = rc == 0 and response.get("outcome") == "gone"
+                finding["result"] = response
+            findings.append(finding)
+
+    payload = {
+        "checked": len(records),
+        "found": len(findings),
+        "executed": execute,
+        "findings": findings,
+    }
+    if getattr(args, "json", False):
+        _json_output(payload)
+    else:
+        if not findings:
+            output.ok("handoffs-check: no stalled predecessor retirements found.")
+        for finding in findings:
+            if not execute:
+                print(
+                    f"  {finding['worktree_id']}: predecessor "
+                    f"{finding['predecessor_session_id']} still alive "
+                    f"(pane {finding['retire_pane']}) -- token "
+                    f"{finding['handoff_token']}"
+                )
+            elif finding.get("retired"):
+                output.ok(
+                    f"{finding['worktree_id']}: retired predecessor "
+                    f"{finding['predecessor_session_id']} (pane {finding['retire_pane']})"
+                )
+            else:
+                output.err(
+                    f"{finding['worktree_id']}: could not retire predecessor "
+                    f"{finding['predecessor_session_id']}: "
+                    f"{(finding.get('result') or {}).get('method', 'unknown')}"
+                )
+    if execute and any(not f.get("retired") for f in findings):
+        return 1
+    return 0
+
+
 def _monitor_trigger_handoff_cutover(
     request: dict[str, object],
 ) -> tuple[int, dict[str, object]]:
@@ -9213,20 +9336,30 @@ def _monitor_trigger_handoff_cutover(
     old_pane = None
     mux_session = None
     if predecessor_session:
+        worktree_id = str(request.get("worktree_id") or "").strip() or None
+        expected_session_name = sessions.mux_session_name(worktree_id) if worktree_id else None
         try:
-            binding = sessions.mux_binding_for_session(predecessor_session)
+            binding = sessions.mux_binding_for_session(
+                predecessor_session, expected_session_name=expected_session_name,
+            )
         except Exception:
             binding = None
         if binding:
-            binding_start = str(binding.get("copilot_start_time") or "").strip() or None
-            if (
-                predecessor_pid in (None, binding.get("copilot_pid"))
-                and (predecessor_start is None or binding_start == str(predecessor_start))
-            ):
-                old_pane = binding.get("pane_id")
-                mux_session = binding.get("session_name")
-                predecessor_pid = binding.get("copilot_pid")
-                predecessor_start = binding_start
+            # Trust a freshly resolved, session-scoped binding unconditionally --
+            # it is keyed off the predecessor's own registered ``inuse.<pid>.lock``
+            # (a strong per-session identity proof), whereas ``predecessor_pid``
+            # here is only ever a caller-supplied *hint* (e.g. context-handoff's
+            # own `handoff_requested` activity field, which historically recorded
+            # its own Node extension-host pid rather than the actual `copilot`
+            # process -- #handoff-cutover-lifecycle-journal). Requiring agreement
+            # with an untrustworthy hint before accepting a good binding is what
+            # let every subsequent handoff on a worktree silently fail to retire
+            # its predecessor (permanently, since a failed attempt was still
+            # recorded as "handled") -- the hint is no longer load-bearing here.
+            old_pane = binding.get("pane_id")
+            mux_session = binding.get("session_name")
+            predecessor_pid = binding.get("copilot_pid")
+            predecessor_start = str(binding.get("copilot_start_time") or "").strip() or None
     rc, response = _handoff_cutover_spawn_result(
         argparse.Namespace(
             seed=request.get("seed"),
@@ -21678,6 +21811,27 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--json", action="store_true", help="JSON output mode (stdout is JSON only; always on)"
     )
+    # handoffs-check (on-demand diagnostic: is a confirmed cutover's predecessor
+    # pane still alive and un-retired? optionally finish retiring it now)
+    p = sub.add_parser(
+        "handoffs-check",
+        help="Diagnose (and with --execute, finish) a stalled handoff-cutover "
+        "predecessor retirement -- the on-demand counterpart to the resident "
+        "status-monitor's automatic sweep",
+    )
+    g = p.add_mutually_exclusive_group(required=True)
+    g.add_argument(
+        "--worktree-id", dest="worktree_id", default=None, help="Check only this worktree"
+    )
+    g.add_argument(
+        "--all", action="store_true", help="Check every tracked worktree in this project"
+    )
+    p.add_argument(
+        "--execute",
+        action="store_true",
+        help="Retire each found stale predecessor now (default: read-only report)",
+    )
+    p.add_argument("--json", action="store_true", help="JSON output")
     # embody (D5: agent-initiated CLI embodiment -- detached mux+Copilot spawn)
     p = sub.add_parser(
         "embody",
@@ -25849,6 +26003,7 @@ COMMAND_MAP = {
     "reconcile-sessions": cmd_reconcile_sessions,
     "status-monitor-restart": cmd_status_monitor_restart,
     "handoff-cutover": cmd_handoff_cutover,
+    "handoffs-check": cmd_handoffs_check,
     "embody": cmd_embody,
     "list": cmd_list,
     "claims": cmd_claims,

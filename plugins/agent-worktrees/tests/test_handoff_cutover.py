@@ -1684,3 +1684,215 @@ class TestCmdHandoffCutover:
             "handoff_successor_spawn_failed",
         ]
         assert recorded[1][1] == "unexpected mux blowup"
+
+
+class TestCmdHandoffsCheck:
+    """``handoffs-check`` -- the on-demand diagnostic + repair counterpart to
+    the resident status-monitor's own automatic predecessor-retire sweep."""
+
+    def _record(self, tmp_tracking_dir, worktree_id, *, predecessor, successor):
+        from agent_worktrees import tracking as _tracking
+
+        rec = _tracking.WorktreeRecord(
+            worktree_id=worktree_id, branch=f"worktree/{worktree_id}",
+            worktree_path=f"/tmp/src/{worktree_id}", repo="test-repo",
+            machine="test", platform="wsl", started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00", resume_count=0, title=None,
+            status="active", completed_at=None, sessions=[],
+        )
+        path = tmp_tracking_dir / f"{worktree_id}.yaml"
+        _tracking.save_record(rec, path)
+        _tracking.register_session(worktree_id, predecessor)
+        _tracking.register_session(worktree_id, successor)
+        loaded = _tracking.load_record(path)
+        _tracking.open_handoff(loaded, predecessor, f"task-{worktree_id}")
+        _tracking.associate_handoff_candidate(loaded, f"task-{worktree_id}", successor)
+        return path
+
+    def _record_with_chain(self, tmp_tracking_dir, worktree_id, session_ids):
+        """A worktree with several independent stale handoffs -- the exact
+        real-world shape this tool exists for (a serial chain of predecessors
+        each still alive, waiting on retirement)."""
+        from agent_worktrees import tracking as _tracking
+
+        rec = _tracking.WorktreeRecord(
+            worktree_id=worktree_id, branch=f"worktree/{worktree_id}",
+            worktree_path=f"/tmp/src/{worktree_id}", repo="test-repo",
+            machine="test", platform="wsl", started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00", resume_count=0, title=None,
+            status="active", completed_at=None, sessions=[],
+        )
+        path = tmp_tracking_dir / f"{worktree_id}.yaml"
+        _tracking.save_record(rec, path)
+        for sid in session_ids:
+            _tracking.register_session(worktree_id, sid)
+        loaded = _tracking.load_record(path)
+        for i in range(len(session_ids) - 1):
+            predecessor, successor = session_ids[i], session_ids[i + 1]
+            token = f"task-{worktree_id}-{i}"
+            _tracking.open_handoff(loaded, predecessor, token)
+            _tracking.associate_handoff_candidate(loaded, token, successor)
+        return path
+
+    def test_requires_worktree_id_or_all(self, capfd):
+        rc = m.cmd_handoffs_check(_ns())
+        assert rc == 1
+        out = json.loads(capfd.readouterr().out)
+        assert "error" in out
+
+    def test_reports_stale_predecessor_without_executing(
+        self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
+    ):
+        self._record(
+            tmp_tracking_dir, "wt-check-1",
+            predecessor="old-sess", successor="new-sess",
+        )
+        monkeypatch.setattr(activity, "read_events", lambda **kw: (
+            [{
+                "handoff_token": "task-wt-check-1", "session_id": "old-sess",
+                "old_pane": "%9", "expected_mux_session": "wt-wt-check-1",
+                "predecessor_copilot_pid": 77, "predecessor_copilot_start_time": "old",
+            }] if kw.get("event") == "handoff_cutover_spawn" else []
+        ))
+        retired = []
+
+        def _must_not_execute(req):
+            retired.append(req)
+            pytest.fail("must not execute without --execute")
+
+        monkeypatch.setattr(m, "_monitor_retire_handoff_predecessor", _must_not_execute)
+
+        rc = m.cmd_handoffs_check(_ns(worktree_id="wt-check-1", json=True))
+
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["checked"] == 1
+        assert out["found"] == 1
+        assert out["executed"] is False
+        finding = out["findings"][0]
+        assert finding["predecessor_session_id"] == "old-sess"
+        assert finding["retire_pane"] == "%9"
+        assert finding["executed"] is False
+        assert not retired
+
+    def test_execute_retires_and_reports_success(
+        self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
+    ):
+        self._record(
+            tmp_tracking_dir, "wt-check-2",
+            predecessor="old-sess", successor="new-sess",
+        )
+        monkeypatch.setattr(activity, "read_events", lambda **kw: (
+            [{
+                "handoff_token": "task-wt-check-2", "session_id": "old-sess",
+                "old_pane": "%9", "expected_mux_session": "wt-wt-check-2",
+                "predecessor_copilot_pid": 77, "predecessor_copilot_start_time": "old",
+            }] if kw.get("event") == "handoff_cutover_spawn" else []
+        ))
+        monkeypatch.setattr(
+            m, "_monitor_retire_handoff_predecessor",
+            lambda req: (0, {"ok": True, "pane": req["retire_pane"], "outcome": "gone"}),
+        )
+
+        rc = m.cmd_handoffs_check(_ns(worktree_id="wt-check-2", execute=True, json=True))
+
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        finding = out["findings"][0]
+        assert finding["executed"] is True
+        assert finding["retired"] is True
+
+    def test_execute_reports_failure_without_masking_it(
+        self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
+    ):
+        self._record(
+            tmp_tracking_dir, "wt-check-3",
+            predecessor="old-sess", successor="new-sess",
+        )
+        monkeypatch.setattr(activity, "read_events", lambda **kw: (
+            [{
+                "handoff_token": "task-wt-check-3", "session_id": "old-sess",
+                "old_pane": "%9", "expected_mux_session": "wt-wt-check-3",
+                "predecessor_copilot_pid": 77, "predecessor_copilot_start_time": "old",
+            }] if kw.get("event") == "handoff_cutover_spawn" else []
+        ))
+        monkeypatch.setattr(
+            m, "_monitor_retire_handoff_predecessor",
+            lambda req: (
+                1,
+                {
+                    "ok": False, "outcome": "left-running",
+                    "method": "process-identity-mismatch",
+                },
+            ),
+        )
+
+        rc = m.cmd_handoffs_check(_ns(worktree_id="wt-check-3", execute=True, json=True))
+
+        assert rc == 1
+        out = json.loads(capfd.readouterr().out)
+        finding = out["findings"][0]
+        assert finding["executed"] is True
+        assert finding["retired"] is False
+
+    def test_no_findings_is_clean_exit(
+        self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
+    ):
+        from agent_worktrees import tracking as _tracking
+
+        rec = _tracking.WorktreeRecord(
+            worktree_id="wt-check-4", branch="worktree/wt-check-4",
+            worktree_path="/tmp/src/wt-check-4", repo="test-repo",
+            machine="test", platform="wsl", started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00", resume_count=0, title=None,
+            status="active", completed_at=None, sessions=[],
+        )
+        _tracking.save_record(rec, tmp_tracking_dir / "wt-check-4.yaml")
+        monkeypatch.setattr(activity, "read_events", lambda **kw: [])
+
+        rc = m.cmd_handoffs_check(_ns(worktree_id="wt-check-4", json=True))
+
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["found"] == 0
+        assert out["findings"] == []
+
+    def test_execute_retires_every_stale_predecessor_in_one_pass(
+        self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
+    ):
+        """Regression: a worktree that accumulated several stale predecessors
+        in a row (the real failure mode this tool exists for) must have ALL
+        of them found and retired in one --execute pass, not just the first
+        -- forcing an operator to re-invoke once per stranded pane."""
+        sessions_chain = ["p0", "p1", "p2", "head"]
+        self._record_with_chain(tmp_tracking_dir, "wt-check-5", sessions_chain)
+
+        spawn_events = [
+            {
+                "handoff_token": f"task-wt-check-5-{i}", "session_id": sessions_chain[i],
+                "old_pane": f"%{i}", "expected_mux_session": "wt-wt-check-5",
+                "predecessor_copilot_pid": 100 + i,
+                "predecessor_copilot_start_time": f"start-{i}",
+            }
+            for i in range(len(sessions_chain) - 1)
+        ]
+        monkeypatch.setattr(activity, "read_events", lambda **kw: (
+            spawn_events if kw.get("event") == "handoff_cutover_spawn" else []
+        ))
+        retired_panes: list[str] = []
+        monkeypatch.setattr(
+            m, "_monitor_retire_handoff_predecessor",
+            lambda req: (
+                retired_panes.append(req["retire_pane"]),
+                (0, {"ok": True, "pane": req["retire_pane"], "outcome": "gone"}),
+            )[1],
+        )
+
+        rc = m.cmd_handoffs_check(_ns(worktree_id="wt-check-5", execute=True, json=True))
+
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["found"] == len(sessions_chain) - 1
+        assert sorted(retired_panes) == ["%0", "%1", "%2"]
+        assert all(f["retired"] for f in out["findings"])
+
