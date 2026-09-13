@@ -5825,8 +5825,11 @@ class PickerScreen(Widget):
         prose (title/status/link/body) from the standard ``card.*`` paths (the
         action's ``title_from`` overrides the header). On Confirm it substitutes
         ``{field.<name>}`` / ``{fields}`` (+ entry tokens like ``{task_id}``)
-        into ``run`` and executes it via the pivot runtime. Save/Cancel/Escape
-        submit nothing (Save/Esc persist a resumable draft)."""
+        into ``run`` and executes it via the pivot runtime (the steer
+        transport). Save persists the answer as the task's durable
+        ``card_draft`` on the coordinator instead of submitting a steer -- the
+        task stays blocked; Reset (wired inside the modal itself) clears that
+        same coordinator draft. Escape behaves exactly like Save."""
         from . import pivots as _pivots
 
         spec = action.form or {}
@@ -5841,14 +5844,29 @@ class PickerScreen(Widget):
         }
         task_id = ctx.get("task_id") or rec.get(reg.id_field) or ""
 
-        def _after(values):
-            if values is None:
-                self.debug = f"{action.label} · saved/cancelled (no submit)"
+        def _after(result):
+            if result is None:
+                self.debug = f"{action.label} · cancelled (no submit)"
                 return
-            self._run_pivot_form_submit(reg, action, ctx, title, values)
+            kind = result.get("action")
+            values = result.get("values") or {}
+            if kind == "confirm":
+                self._run_pivot_form_submit(reg, action, ctx, title, values)
+            elif kind == "save":
+                self._run_pivot_form_draft_save(reg, ctx, title, values)
+
+        def _on_clear_draft():
+            self._run_pivot_form_draft_clear(reg, ctx, title)
 
         self.app.push_screen(
-            PivotFormScreen(card, fields, action.label, task_id=str(task_id)), _after
+            PivotFormScreen(
+                card,
+                fields,
+                action.label,
+                task_id=str(task_id),
+                on_clear_draft=_on_clear_draft,
+            ),
+            _after,
         )
 
     def _run_pivot_form_submit(self, reg, action, ctx, title, values):
@@ -5862,10 +5880,18 @@ class PickerScreen(Widget):
 
         rt = self._pivot_runtime(reg)
         argv = _pivots.format_form_template(action.run, ctx, values)
+        task_id = ctx.get("task_id")
 
         def _work():
-            ok, msg = rt.run_resolved(argv)
-            rt.invalidate()
+            try:
+                ok, msg = rt.run_resolved(argv)
+            except Exception as exc:
+                ok, msg = False, f"{type(exc).__name__}: {exc}"
+            else:
+                try:
+                    rt.invalidate()
+                except Exception:
+                    pass
             return ok, msg
 
         def _done(result):
@@ -5878,8 +5904,9 @@ class PickerScreen(Widget):
                 # subprocess even runs (so a failed submission never loses the
                 # operator's answer). Once the submission has genuinely
                 # succeeded, that draft has served its purpose -- clear it so a
-                # future card for this task doesn't restore stale content.
-                task_id = ctx.get("task_id")
+                # future card for this task doesn't restore stale content
+                # (the coordinator clears its own ``card_draft`` server-side on
+                # a successful steer; this is just the local copy).
                 if task_id:
                     path = _steer_draft_path(str(task_id))
                     try:
@@ -5901,8 +5928,80 @@ class PickerScreen(Widget):
                 self.debug = f"{action.label} · {title}" + (f" — {short}" if short else "")
             else:
                 self.debug = f"{action.label} failed · {short or 'see command output'}"
+                draft_path = _steer_draft_path(str(task_id)) if task_id else None
+                self.app.push_screen(
+                    SubmitErrorScreen(action.label, msg or short, draft_path)
+                )
 
         self._run_bg(action.label, _work, _done)
+
+    def _run_pivot_form_draft_save(self, reg, ctx, title, values):
+        """Persist an operator's not-yet-submitted draft answer as the task's
+        durable ``card_draft`` on the coordinator (``agent-dispatch card draft
+        save``) -- the Steer form's **Save**. Never touches ``awaiting_steer``
+        or the task's status; the task stays blocked exactly as before. Runs
+        off the render flow via :meth:`_run_bg`, mirroring
+        :meth:`_run_pivot_form_submit`."""
+        from . import pivots as _pivots
+
+        rt = self._pivot_runtime(reg)
+        task_id = ctx.get("task_id")
+        argv = _pivots.format_form_template(
+            ["agent-dispatch", "card", "draft", "save", "{task_id}", "{fields}"],
+            ctx,
+            values,
+        )
+
+        def _work():
+            try:
+                return rt.run_resolved(argv)
+            except Exception as exc:
+                return False, f"{type(exc).__name__}: {exc}"
+
+        def _done(result):
+            ok, msg = result
+            short = (msg or "").splitlines()[0][:80] if msg else ""
+            if ok:
+                self.debug = f"Save · {title}" + (f" — {short}" if short else "")
+            else:
+                self.debug = f"Save failed · {short or 'see command output'}"
+                draft_path = _steer_draft_path(str(task_id)) if task_id else None
+                self.app.push_screen(
+                    SubmitErrorScreen("Save", msg or short, draft_path)
+                )
+
+        self._run_bg("Save", _work, _done, quiet=True)
+
+    def _run_pivot_form_draft_clear(self, reg, ctx, title):
+        """Clear a task's durable ``card_draft`` on the coordinator
+        (``agent-dispatch card draft clear``) -- the Steer form's **Reset**.
+        Never touches ``awaiting_steer``/status. Best-effort: Reset already
+        cleared the local draft and every on-screen field synchronously, so a
+        failure here only means the coordinator keeps a now-superseded draft
+        around -- worth surfacing, but not worth blocking on."""
+        from . import pivots as _pivots
+
+        rt = self._pivot_runtime(reg)
+        argv = _pivots.format_form_template(
+            ["agent-dispatch", "card", "draft", "clear", "{task_id}"], ctx, {}
+        )
+
+        def _work():
+            try:
+                return rt.run_resolved(argv)
+            except Exception as exc:
+                return False, f"{type(exc).__name__}: {exc}"
+
+        def _done(result):
+            ok, msg = result
+            short = (msg or "").splitlines()[0][:80] if msg else ""
+            self.debug = (
+                f"Reset · {title}"
+                if ok
+                else f"Reset: coordinator draft not cleared · {short or 'see command output'}"
+            )
+
+        self._run_bg("Reset", _work, _done, quiet=True)
 
     def _scope_label(self):
         return "All sources" if self.is_all() else self._current_tab()["label"]
@@ -7693,6 +7792,69 @@ class ResetConfirmScreen(ModalScreen[bool]):
         self.dismiss(False)
 
 
+class SubmitErrorScreen(ModalScreen[None]):
+    """Fail-fast blocking error surface for a form action's async submission
+    (e.g. the Steer form's Confirm).
+
+    A form action dismisses its input modal immediately and submits
+    off-thread (see ``_run_pivot_form_submit``); if that submission cannot be
+    *delivered* -- the command was not found, exited non-zero, raised, or the
+    coordinator round-trip otherwise failed -- that must never be reducible to
+    an easily-missed footer status-line message the very next background
+    refresh can silently overwrite (see
+    ThomasMichon/copilot-extensions#2453). This modal blocks until explicitly
+    acknowledged, so a delivery failure cannot pass unnoticed, and it always
+    names where the operator's answer is still safely recoverable from -- the
+    on-disk steer draft, which Confirm/Save/Esc all persist *before* the
+    submission ever runs and which a failed submission never clears."""
+
+    CSS = """
+    SubmitErrorScreen { align: center middle; background: $background 55%; }
+    SubmitErrorScreen > #submit-error-frame {
+        width: 68; height: auto; border: round #ff5f5f;
+        background: $surface; padding: 1 2;
+    }
+    SubmitErrorScreen #submit-error-title { height: auto; padding: 0 0 1 0; }
+    SubmitErrorScreen #submit-error-body { height: auto; padding: 0 0 1 0; }
+    SubmitErrorScreen #submit-error-hint { color: grey; height: auto; }
+    """
+    BINDINGS = [
+        Binding("enter", "ack", show=False),
+        Binding("escape", "ack", show=False),
+        Binding("space", "ack", show=False),
+    ]
+
+    def __init__(self, label: str, detail: str, draft_path: Path | None) -> None:
+        super().__init__()
+        self._label = label
+        self._detail = detail or "see command output"
+        self._draft_path = draft_path
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="submit-error-frame"):
+            yield Static(
+                Text(f" {self._label} could not be delivered", style=C_HEADER),
+                id="submit-error-title",
+            )
+            body = self._detail
+            if self._draft_path is not None:
+                body += (
+                    f"\n\nYour answer was NOT lost -- it was saved to:\n"
+                    f"{self._draft_path}\n"
+                    "It will be restored the next time this card is opened, "
+                    "so it is safe to retry."
+                )
+            yield Static(body, id="submit-error-body")
+            yield Static("Enter / Esc / Space to dismiss", id="submit-error-hint")
+
+    def on_mount(self) -> None:
+        self.query_one("#submit-error-frame", Vertical).border_title = "Delivery failed"
+        self.focus()
+
+    def action_ack(self) -> None:
+        self.dismiss(None)
+
+
 class PivotFormScreen(ModalScreen[dict]):
     """Docked card + tabbed elicitation modal (the DISPATCH-pivot 'Steer' surface).
 
@@ -7703,27 +7865,40 @@ class PivotFormScreen(ModalScreen[dict]):
     (``RadioSet``), multi-select (``SelectionList``), or free-form
     auto-expanding text box (up to 10 lines). A choice/multichoice that declares
     ``allow_other`` gains an **"Other…"** entry that reveals a free-text box.
-    Beneath sits a single-line Picker-style button row: **Confirm** (submit),
-    **Save** (persist a draft and close -- resume later), **Reset** (after an
-    are-you-sure, clears every field in place -- never closes the dialog).
+    Beneath sits a single-line Picker-style button row, with three genuinely
+    distinct semantics (not three names for the same close-and-persist action):
+
+    * **Confirm** -- submits the answer for real (``agent-dispatch steer
+      submit``): the task's ``card_draft`` is superseded, ``awaiting_steer``
+      clears, and the task resumes/re-queues.
+    * **Save** -- leaves the task exactly as blocked as it was, but durably
+      persists the answer as the task's ``card_draft`` on the coordinator
+      itself (``agent-dispatch card draft save``) -- visible from any surface
+      or machine, not just a local sidecar file -- so a later Confirm (from
+      this or any other Picker) starts from it.
+    * **Reset** -- after an are-you-sure, clears every field in place (never
+      closes the dialog) and clears the coordinator's saved ``card_draft`` too
+      (``agent-dispatch card draft clear``); the task stays blocked.
 
     Every path that *closes* this screen (Confirm, Save, Esc) saves the
     collected answer to the on-disk draft first, before anything else happens
-    -- so if the actual submission (which runs asynchronously, after this
-    screen has already dismissed) fails for any reason, the operator's answer
-    is never silently lost; it is exactly what reopening this card's next
-    steer prompt restores. Confirm's draft is only deleted once the caller
-    confirms the submission actually succeeded (see ``_run_pivot_form_submit``
-    in the engine module); Save's draft is deliberately left in place, since
-    Save never submits at all.
+    -- so if the actual coordinator call (which runs asynchronously, after
+    this screen has already dismissed) fails for any reason, the operator's
+    answer is never silently lost; it is exactly what reopening this card's
+    next steer prompt restores, and a failed delivery surfaces a blocking
+    :class:`SubmitErrorScreen` rather than an easily-missed status line.
+    Confirm's local draft is only deleted once the caller confirms the
+    submission actually succeeded (mirroring the coordinator's own
+    ``card_draft`` being cleared server-side on a successful steer -- see
+    ``TaskQueue.submit_steer``); Save's local draft is deliberately left in
+    place too, since Save never submits a steer.
 
-    On **Confirm** the collected ``{name: value}`` answer is returned via
-    ``dismiss(dict)`` (a multichoice value is a list); ``dismiss(None)`` on
-    Save/Esc. The caller substitutes those values into the action's ``run``
-    template (the steer transport) -- this screen never runs a command and
-    never carries a verdict; it only gathers the operator's answer.
+    Confirm/Save both dismiss with ``{"action": "confirm"|"save", "values":
+    dict}`` (a multichoice value is a list); this screen never runs a command
+    and never carries a verdict itself -- it only gathers the operator's
+    answer and tells the caller which coordinator call to make.
 
-    Esc saves a draft and closes (nothing is lost); Ctrl+S saves explicitly."""
+    Esc behaves exactly like Save (nothing is lost); Ctrl+S saves explicitly."""
 
     CSS = """
     PivotFormScreen { align: center middle; background: $background 55%; }
@@ -7761,12 +7936,20 @@ class PivotFormScreen(ModalScreen[dict]):
     ]
 
     def __init__(self, card: dict, fields: list[dict], submit_label: str,
-                 task_id: str = "") -> None:
+                 task_id: str = "", on_clear_draft=None) -> None:
         super().__init__()
         self._card = card or {}
         self._fields = fields or []
         self._submit_label = submit_label or "Steer"
         self._task_id = str(task_id or "")
+        # Fire-and-forget background hook the caller wires (see
+        # ``_open_pivot_form``) so Reset can clear the operator's draft on the
+        # coordinator itself (``card_draft``, distinct from an actual steer) --
+        # a durable, cross-surface scratchpad -- not just a local sidecar file
+        # only this machine can see. Optional: a caller with no coordinator
+        # draft support (or a plain read-only card) passes ``None`` and this
+        # screen behaves exactly as before (Reset only clears local state).
+        self._on_clear_draft = on_clear_draft
         # Per-question runtime refs, filled during compose:
         #   {name, type, options, allow_other, primary, other}
         self._q: list[dict] = []
@@ -8162,7 +8345,7 @@ class PivotFormScreen(ModalScreen[dict]):
         # it confirms the submission actually succeeded.
         self._write_draft()
         values = self._collect()
-        self.dismiss(values)
+        self.dismiss({"action": "confirm", "values": values})
 
     def _on_reset_pressed(self) -> None:
         def _after(confirmed: bool | None) -> None:
@@ -8173,8 +8356,10 @@ class PivotFormScreen(ModalScreen[dict]):
 
     def _perform_reset(self) -> None:
         """Clear every field back to its blank/default state, in place --
-        never closes this dialog. Also clears the on-disk draft, since a
-        reset answer has nothing left worth recovering."""
+        never closes this dialog. Also clears the on-disk draft and (when the
+        caller wired coordinator draft support) the durable ``card_draft`` on
+        the task itself, since a reset answer has nothing left worth
+        recovering from either place."""
         for rec in self._q:
             ftype = rec["type"]
             prim, other = rec["primary"], rec["other"]
@@ -8193,20 +8378,28 @@ class PivotFormScreen(ModalScreen[dict]):
                 other.display = False
         self._sync_conditional_fields()
         self._delete_draft()
+        if self._on_clear_draft is not None:
+            self._on_clear_draft()
         try:
             self.query_one("#steer-buttons", SteerButtonRow).focus()
         except Exception:
             pass
 
     def action_save(self) -> None:
+        # Local draft first (unchanged safety net -- survives even if the
+        # coordinator call below fails or agent-dispatch is unreachable), then
+        # dismiss so the caller can push the same answer onto the task itself
+        # (``card_draft``) as the durable, cross-surface copy. The task stays
+        # blocked exactly as before -- Save never submits a steer.
         self._write_draft()
-        self.dismiss(None)
+        self.dismiss({"action": "save", "values": self._collect()})
 
     def action_escape_close(self) -> None:
-        # Preserve work: Esc saves a draft (so nothing is lost if you step away)
-        # then closes without submitting.
+        # Preserve work: Esc behaves exactly like Save (draft persisted both
+        # locally and, once dismissed, on the coordinator) then closes without
+        # submitting.
         self._write_draft()
-        self.dismiss(None)
+        self.dismiss({"action": "save", "values": self._collect()})
 
 
 class MaintenanceView:
