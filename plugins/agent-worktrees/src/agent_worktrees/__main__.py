@@ -12004,17 +12004,19 @@ def _remove_system_blockers(rec, repo) -> list[str]:
     """Reasons a managed (system/bridge) worktree is not safe to discard.
 
     Mirrors the checks ``cleanup`` already applies to ordinary worktrees --
-    uncommitted changes and unpushed commits -- plus the two checks
+    uncommitted changes and unpushed commits -- plus two checks
     ``cleanup``/``finalize`` apply that ``remove-system`` historically
     skipped for *managed* worktrees entirely: an open PR and a still-live
     outbound resource claim. A managed worktree is exactly as capable of
-    holding real, never-landed content as an ordinary one (see aperture-labs
-    #6592: a harness that abandons a worktree mid-run before commit/push/PR
-    leaves genuine, unrecoverable content sitting in it) -- ``kind`` alone is
-    not evidence the worktree is disposable.
+    holding real, never-landed content as an ordinary one -- ``kind`` alone
+    is not evidence the worktree is disposable, and neither is a missing
+    checkout directory: the branch ref (and any unpushed commits on it)
+    lives in the shared repo regardless of whether the working directory
+    still exists, so the unpushed-commit check below runs unconditionally.
     """
     blockers: list[str] = []
-    if rec.worktree_path and Path(rec.worktree_path).exists():
+    checkout_exists = bool(rec.worktree_path) and Path(rec.worktree_path).exists()
+    if checkout_exists:
         info = git_ops.classify_worktree(
             rec.worktree_path,
             rec.branch,
@@ -12026,11 +12028,36 @@ def _remove_system_blockers(rec, repo) -> list[str]:
             blockers.append(
                 f"{info.dirty} uncommitted change(s) in the working tree"
             )
-        if info.ahead:
-            blockers.append(
-                f"{info.ahead} commit(s) on {rec.branch} not on "
-                f"{repo.remote}/{repo.default_branch}"
+    if rec.branch:
+        # Run against the anchor's shared repo, not the (possibly-missing)
+        # checkout -- the branch ref and its commits outlive the working
+        # directory, so a missing checkout must not silently skip this.
+        branch_exists = git_ops.git(
+            "rev-parse", "--verify", f"refs/heads/{rec.branch}",
+            cwd=repo.anchor, check=False,
+        ).returncode == 0
+        if branch_exists:
+            upstream = f"{repo.remote}/{repo.default_branch}"
+            ahead_r = git_ops.git(
+                "rev-list", "--count", f"{upstream}..{rec.branch}",
+                cwd=repo.anchor, check=False,
             )
+            if ahead_r.returncode == 0:
+                try:
+                    ahead = int(ahead_r.stdout.strip())
+                except (TypeError, ValueError):
+                    ahead = 0
+                if ahead:
+                    where = "" if checkout_exists else " (checkout directory is missing)"
+                    blockers.append(
+                        f"{ahead} commit(s) on {rec.branch} not on {upstream}{where}"
+                    )
+            else:
+                # Ancestry couldn't be established (e.g. unrelated history) --
+                # fail closed rather than assume it's safe.
+                blockers.append(
+                    f"could not verify {rec.branch} is merged into {upstream}"
+                )
     open_prs = [p for p in rec.prs if p.state == "open"]
     if open_prs:
         blockers.append(
