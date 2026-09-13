@@ -713,3 +713,115 @@ def test_remove_system_refuses_orphan_checkout(tmp_path):
     message = json_error.call_args.args[0]
     assert "could not safely classify" in message
     assert "orphan" in message
+
+
+def test_remove_system_refuses_when_inbound_owner_claimant_alive(tmp_path):
+    """A worktree that is ITSELF another worktree's outbound resource
+    (rec.owner_ref) must not be discarded while its owner still expects it
+    -- matching prune.assess()'s claimed-resource-not-reclaimed rule, which
+    remove-system previously had no equivalent for at all."""
+    record, tracking_dir = _record(tmp_path)
+    record.owner_ref = "machine-a/some-project/some-worktree-id"
+    record.status = "active"
+    clean_info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
+    tracking.save_record(record, tracking_dir / "managed-1.yaml")
+    args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=False)
+
+    with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
+         patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
+         patch("agent_worktrees.git_ops.classify_worktree", return_value=clean_info), \
+         patch("agent_worktrees.git_ops.is_branch_merged", return_value=True), \
+         patch("agent_worktrees.claimant.resolve_claimant_alive", return_value=True), \
+         patch("agent_worktrees.__main__._json_error") as json_error:
+        json_error.return_value = 1
+        result = cli.cmd_remove_system(args)
+
+    assert result == 1
+    message = json_error.call_args.args[0]
+    assert "owned as a resource by machine-a/some-project/some-worktree-id" in message
+    assert "claimant alive" in message
+
+
+def test_remove_system_refuses_when_inbound_owner_claimant_unconfirmed(tmp_path):
+    """An unconfirmed (None) claimant liveness is spared, not assumed gone --
+    same direction prune.assess() fails toward."""
+    record, tracking_dir = _record(tmp_path)
+    record.owner_ref = "machine-a/some-project/some-worktree-id"
+    record.status = "active"
+    clean_info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
+    tracking.save_record(record, tracking_dir / "managed-1.yaml")
+    args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=False)
+
+    with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
+         patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
+         patch("agent_worktrees.git_ops.classify_worktree", return_value=clean_info), \
+         patch("agent_worktrees.git_ops.is_branch_merged", return_value=True), \
+         patch("agent_worktrees.claimant.resolve_claimant_alive", return_value=None), \
+         patch("agent_worktrees.__main__._json_error") as json_error:
+        json_error.return_value = 1
+        result = cli.cmd_remove_system(args)
+
+    assert result == 1
+    assert "claimant liveness unconfirmed" in json_error.call_args.args[0]
+
+
+def test_remove_system_allows_inbound_owner_claimant_confirmed_gone(tmp_path):
+    """A claimant confirmed gone (probe returns False) frees this resource,
+    same as prune.assess()."""
+    record, tracking_dir = _record(tmp_path)
+    record.status = "active"
+    record.owner_ref = "machine-a/some-project/some-worktree-id"
+    tracking.save_record(record, tracking_dir / "managed-1.yaml")
+    args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=False)
+
+    clean_info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
+    with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
+         patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
+         patch("agent_worktrees.sessions.kill_tmux_session"), \
+         patch("agent_worktrees.claimant.resolve_claimant_alive", return_value=False), \
+         patch("agent_worktrees.git_ops.classify_worktree", return_value=clean_info), \
+         patch("agent_worktrees.git_ops.is_branch_merged", return_value=True), \
+         patch("agent_worktrees.git_ops.list_worktree_paths"), \
+         patch("agent_worktrees.git_ops.remove_worktree", return_value=True), \
+         patch("agent_worktrees.git_ops.git") as git, \
+         patch("agent_worktrees.disposition_history.remove"), \
+         patch("agent_worktrees.activity.log_event"), \
+         patch("agent_worktrees.__main__._json_output") as json_output:
+        git.return_value.returncode = 0
+        git.return_value.stdout = "0"
+        result = cli.cmd_remove_system(args)
+
+    assert result == 0
+    json_output.assert_called_once_with({"removed": "managed-1"})
+
+
+def test_remove_system_allows_finalized_resource_despite_owner_ref(tmp_path):
+    """A finalized resource is collectable garbage even under a live
+    claimant -- prune.assess()'s owner_moved_on narrowing -- so
+    remove-system must not probe claimant liveness at all here."""
+    record, tracking_dir = _record(tmp_path)
+    record.owner_ref = "machine-a/some-project/some-worktree-id"
+    record.status = "finalized"
+    tracking.save_record(record, tracking_dir / "managed-1.yaml")
+    args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=False)
+
+    clean_info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
+    with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
+         patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
+         patch("agent_worktrees.sessions.kill_tmux_session"), \
+         patch("agent_worktrees.claimant.resolve_claimant_alive") as resolve_alive, \
+         patch("agent_worktrees.git_ops.classify_worktree", return_value=clean_info), \
+         patch("agent_worktrees.git_ops.is_branch_merged", return_value=True), \
+         patch("agent_worktrees.git_ops.list_worktree_paths"), \
+         patch("agent_worktrees.git_ops.remove_worktree", return_value=True), \
+         patch("agent_worktrees.git_ops.git") as git, \
+         patch("agent_worktrees.disposition_history.remove"), \
+         patch("agent_worktrees.activity.log_event"), \
+         patch("agent_worktrees.__main__._json_output") as json_output:
+        git.return_value.returncode = 0
+        git.return_value.stdout = "0"
+        result = cli.cmd_remove_system(args)
+
+    assert result == 0
+    resolve_alive.assert_not_called()
+    json_output.assert_called_once_with({"removed": "managed-1"})

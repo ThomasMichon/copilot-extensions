@@ -123,6 +123,23 @@ def blockers_for(rec, repo) -> list[str]:
             "unsettled outbound resource claim(s): "
             + ", ".join(f"{c.kind}:{c.ref}" for c in live_claims if c.ref)
         )
+    # Inbound claim: this worktree is itself another worktree's outbound
+    # resource (rec.owner_ref). prune.assess() spares exactly this case --
+    # a live, or not-confirmed-gone, claimant may still be using it -- unless
+    # this resource has demonstrably finished (its own status is finalized;
+    # the merge check above already covers "content landed"). remove-system
+    # had no equivalent check at all, so it could discard a live resource out
+    # from under its parent even though prune.py already refuses to.
+    if rec.owner_ref and rec.status != "finalized":
+        from . import claimant
+
+        alive = claimant.resolve_claimant_alive(rec.owner_ref)
+        if alive is not False:
+            why = "claimant alive" if alive else "claimant liveness unconfirmed"
+            blockers.append(
+                f"owned as a resource by {rec.owner_ref} ({why}) -- removing "
+                "it could discard a resource its owner still expects"
+            )
     if rec.kind == "bridge" and blockers:
         blockers.append(
             "this is a bridge-owned worktree -- its owning agent-bridge session "
