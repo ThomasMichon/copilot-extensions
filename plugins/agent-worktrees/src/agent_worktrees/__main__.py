@@ -12036,6 +12036,16 @@ def _remove_system_blockers(rec, repo) -> list[str]:
             blockers.append(
                 "could not classify the working tree's git state (probe timed out)"
             )
+        if info.branch_drift:
+            # The checkout was switched to a different branch than the
+            # tracked one (e.g. an unpushed feature branch). The merge check
+            # below only looks at rec.branch -- if the drifted branch itself
+            # carries unmerged commits, forced removal would silently
+            # discard them. Refuse until the drift is reconciled.
+            blockers.append(
+                f"checkout is on branch {info.current_branch!r}, not the "
+                f"tracked {rec.branch!r} -- reconcile the drift before removing"
+            )
     if rec.branch:
         # Run against the anchor's shared repo, not the (possibly-missing)
         # checkout -- the branch ref and its commits outlive the working
@@ -12050,14 +12060,19 @@ def _remove_system_blockers(rec, repo) -> list[str]:
             blockers.append(
                 f"{rec.branch} has content not merged into {upstream}{where}"
             )
-    # `creating` is as live as `open` -- an in-flight PR that hasn't finished
-    # opening yet is exactly as much an obligation as one already open (the
-    # managed-worktree gc sweep applies the same predicate).
-    live_prs = [p for p in rec.prs if p.state in {"creating", "open"}]
-    if live_prs:
+    # A live PR is `has_live_pr()`'s notion of non-terminal -- open, creating,
+    # AND the empty ("" -- not yet populated) state, matching the predicate
+    # cleanup/gc already use. An unpopulated-but-real PR record is exactly as
+    # much a recovery source as an open one; only skip terminal (merged/
+    # closed) PRs.
+    if rec.has_live_pr():
+        live_prs = [p for p in rec.prs if p.state in tracking._PR_NON_TERMINAL]
         blockers.append(
             "in-progress or open PR(s): "
-            + ", ".join(p.url or f"#{p.number}" for p in live_prs if (p.url or p.number))
+            + ", ".join(
+                p.url or (f"#{p.number}" if p.number else "(unopened)")
+                for p in live_prs
+            )
         )
     live_claims = rec.live_resources
     if live_claims:
@@ -12090,7 +12105,6 @@ def cmd_remove_system(args: argparse.Namespace) -> int:
     correct; it is intentionally not advertised in ``--help``.
     """
     config = cfg.load_config()
-    repo = config.default_repo
     tracking_path = cfg.tracking_dir()
     wt_id = getattr(args, "worktree_id", None)
     force = getattr(args, "force", False)
@@ -12108,6 +12122,12 @@ def cmd_remove_system(args: argparse.Namespace) -> int:
             f"{wt_id} is not a managed (system/bridge) worktree (kind={rec.kind}); refusing"
         )
         return 1
+    # Resolve the record's OWN repository, not blindly config.default_repo --
+    # a managed worktree can belong to a different configured repo than the
+    # one this command happens to be invoked against, in which case checking
+    # (and removing) against the wrong repo's anchor is both a false-refusal
+    # risk and a wrong-repo teardown risk.
+    repo = _repo_for_record(config, rec) or config.default_repo
 
     if not force:
         blockers = _remove_system_blockers(rec, repo)
@@ -12144,6 +12164,7 @@ def cmd_remove_system(args: argparse.Namespace) -> int:
         return 1
     try:
         rec = tracking.load_record(yaml_path)
+        repo = _repo_for_record(config, rec) or config.default_repo
         if not force:
             blockers = _remove_system_blockers(rec, repo)
             if blockers:

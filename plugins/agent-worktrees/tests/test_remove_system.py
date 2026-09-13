@@ -578,3 +578,91 @@ def test_remove_system_force_skips_the_immediate_recheck(tmp_path):
     assert result == 0
     blockers.assert_not_called()
     json_output.assert_called_once_with({"removed": "managed-1"})
+
+
+def test_remove_system_refuses_checkout_branch_drift(tmp_path):
+    """The checkout was switched to a different branch than tracked -- must
+    not silently discard whatever that drifted branch carries."""
+    record, tracking_dir = _record(tmp_path)
+    args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=False)
+
+    drifted_info = git_ops.WorktreeStateInfo(
+        state=git_ops.WorktreeState.COMPLETED,
+        current_branch="some-other-branch",
+        branch_drift=True,
+    )
+    with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
+         patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
+         patch("agent_worktrees.git_ops.classify_worktree", return_value=drifted_info), \
+         patch("agent_worktrees.git_ops.is_branch_merged", return_value=True), \
+         patch("agent_worktrees.__main__._json_error") as json_error:
+        json_error.return_value = 1
+        result = cli.cmd_remove_system(args)
+
+    assert result == 1
+    message = json_error.call_args.args[0]
+    assert "some-other-branch" in message
+    assert "reconcile the drift" in message
+
+
+def test_remove_system_refuses_empty_state_pr_record(tmp_path):
+    """A PR record whose state hasn't been populated yet ("") is still a
+    live/non-terminal PR per has_live_pr() -- not yet-open is not the same
+    as never-going-to-open."""
+    record, tracking_dir = _record(tmp_path)
+    record.prs = [tracking.PRRecord(state="")]
+    tracking.save_record(record, tracking_dir / "managed-1.yaml")
+    args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=False)
+
+    with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
+         patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
+         patch("agent_worktrees.__main__._json_error") as json_error:
+        json_error.return_value = 1
+        result = cli.cmd_remove_system(args)
+
+    assert result == 1
+    assert "in-progress or open PR" in json_error.call_args.args[0]
+
+
+def test_remove_system_resolves_record_repo_not_default(tmp_path):
+    """A managed worktree belonging to a different configured repo than the
+    invoking context's default must be checked/removed against ITS OWN repo,
+    not against config.default_repo."""
+    record, tracking_dir = _record(tmp_path)
+    record.repo = "other-repo"
+    tracking.save_record(record, tracking_dir / "managed-1.yaml")
+    args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=True)
+
+    default_anchor = tmp_path / "default-anchor"
+    default_anchor.mkdir()
+    other_anchor = tmp_path / "other-anchor"
+    other_anchor.mkdir()
+    other_repo = types.SimpleNamespace(
+        anchor=str(other_anchor), remote="origin", default_branch="master",
+        worktree_root=str(tmp_path / "other-worktree-root"),
+    )
+    config = types.SimpleNamespace(
+        default_repo=types.SimpleNamespace(
+            anchor=str(default_anchor), remote="origin", default_branch="master",
+            worktree_root=str(tmp_path / "default-worktree-root"),
+        ),
+        repos={"other-repo": other_repo},
+    )
+
+    with patch("agent_worktrees.config.load_config", return_value=config), \
+         patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
+         patch("agent_worktrees.sessions.kill_tmux_session"), \
+         patch("agent_worktrees.git_ops.list_worktree_paths"), \
+         patch("agent_worktrees.git_ops.remove_worktree", return_value=True) as remove_worktree, \
+         patch("agent_worktrees.git_ops.git") as git, \
+         patch("agent_worktrees.disposition_history.remove"), \
+         patch("agent_worktrees.activity.log_event"), \
+         patch("agent_worktrees.__main__._json_output") as json_output:
+        git.return_value.returncode = 0
+        git.return_value.stdout = "0"
+        result = cli.cmd_remove_system(args)
+
+    assert result == 0
+    json_output.assert_called_once_with({"removed": "managed-1"})
+    # The removal ran against the record's OWN repo anchor, not the default.
+    remove_worktree.assert_called_once_with(str(other_anchor), record.worktree_path)
