@@ -10071,6 +10071,38 @@ def _reconcile_marketplace_snapshot(payload: dict, cwd: str) -> None:
     _write_session_lifecycle_snapshot("marketplace-overrides", payload, output_text)
 
 
+def _reconcile_knowledge_plugin_overlay(payload: dict, cwd: str) -> None:
+    """Best-effort sessionStart refresh of the knowledge-repo plugin overlay.
+
+    ``compose_from_pair`` otherwise only runs at worktree create time (or via
+    the manual ``knowledge compose-plugins`` CLI subcommand), so a plugin
+    enabled in the knowledge repo's own settings *after* the harness worktree
+    was created would never propagate into ``settings.local.json`` -- not
+    even across a restart. Re-running it here, silently no-op'ing when the
+    checkout isn't a valid/paired knowledge pair, closes that gap.
+    """
+    output_text = "{}"
+    try:
+        from . import knowledge_plugins
+
+        _activate_project_for_path(cwd)
+        summary = knowledge_plugins.compose_from_pair(cwd=cwd)
+        if summary.get("changed"):
+            path = summary.get("settings_local", "settings.local.json")
+            output_text = json.dumps(
+                {
+                    "additionalContext": (
+                        "Agent Worktrees updated the knowledge-repo plugin "
+                        f"enable overlay in {path}. Restart Copilot CLI for "
+                        "the newly enabled plugin(s) to take effect."
+                    )
+                }
+            )
+    except Exception:
+        pass
+    _write_session_lifecycle_snapshot("knowledge-plugin-overlay", payload, output_text)
+
+
 def _provisioning_status_diagnostic(cwd: str) -> str:
     status = _aw_runtime_home() / "logs" / "provision-status.json"
     try:
@@ -10258,6 +10290,7 @@ def _run_session_lifecycle(
         )
 
         _reconcile_marketplace_snapshot(payload, cwd)
+        _reconcile_knowledge_plugin_overlay(payload, cwd)
 
         registration_args = argparse.Namespace(
             worktree_id=None,

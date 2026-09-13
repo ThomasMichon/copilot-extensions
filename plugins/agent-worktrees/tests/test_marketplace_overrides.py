@@ -482,6 +482,75 @@ def test_checkout_root_decodes_filesystem_bytes(tmp_path: Path, monkeypatch):
     assert main._checkout_root(tmp_path) == repo.resolve()
 
 
+def test_reconcile_knowledge_plugin_overlay_emits_restart_hint(monkeypatch, tmp_path):
+    from agent_worktrees import knowledge_plugins as kp
+
+    snapshots: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        main,
+        "_write_session_lifecycle_snapshot",
+        lambda name, payload, output: snapshots.append((name, output)),
+    )
+    monkeypatch.setattr(main, "_activate_project_for_path", lambda cwd: None)
+    monkeypatch.setattr(
+        kp,
+        "compose_from_pair",
+        lambda **_kwargs: {
+            "action": "composed",
+            "changed": True,
+            "settings_local": str(tmp_path / "settings.local.json"),
+        },
+    )
+
+    main._reconcile_knowledge_plugin_overlay({}, str(tmp_path))
+
+    assert len(snapshots) == 1
+    name, output = snapshots[0]
+    assert name == "knowledge-plugin-overlay"
+    body = json.loads(output)
+    assert "Restart Copilot CLI" in body["additionalContext"]
+
+
+def test_reconcile_knowledge_plugin_overlay_noop_when_unchanged(monkeypatch, tmp_path):
+    from agent_worktrees import knowledge_plugins as kp
+
+    snapshots: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        main,
+        "_write_session_lifecycle_snapshot",
+        lambda name, payload, output: snapshots.append((name, output)),
+    )
+    monkeypatch.setattr(main, "_activate_project_for_path", lambda cwd: None)
+    monkeypatch.setattr(
+        kp, "compose_from_pair", lambda **_kwargs: {"action": "composed", "changed": False}
+    )
+
+    main._reconcile_knowledge_plugin_overlay({}, str(tmp_path))
+
+    assert snapshots == [("knowledge-plugin-overlay", "{}")]
+
+
+def test_reconcile_knowledge_plugin_overlay_swallows_pair_errors(monkeypatch, tmp_path):
+    from agent_worktrees import knowledge_plugins as kp
+
+    snapshots: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        main,
+        "_write_session_lifecycle_snapshot",
+        lambda name, payload, output: snapshots.append((name, output)),
+    )
+    monkeypatch.setattr(main, "_activate_project_for_path", lambda cwd: None)
+
+    def _fail(**_kwargs):
+        raise kp.KnowledgePluginError("not paired")
+
+    monkeypatch.setattr(kp, "compose_from_pair", _fail)
+
+    main._reconcile_knowledge_plugin_overlay({}, str(tmp_path))
+
+    assert snapshots == [("knowledge-plugin-overlay", "{}")]
+
+
 def test_launch_and_hook_surfaces_include_reconciler():
     plugin = Path(__file__).parents[1]
     assert "reconcile-marketplaces" in (
@@ -498,6 +567,8 @@ def test_launch_and_hook_surfaces_include_reconciler():
     ).read_text(encoding="utf-8")
     assert "_reconcile_marketplace_snapshot" in source
     assert "marketplace_overrides.reconcile" in source
+    assert "_reconcile_knowledge_plugin_overlay" in source
+    assert "knowledge_plugins.compose_from_pair" in source
 
 
 def test_tracked_local_settings_are_rejected(tmp_path: Path):

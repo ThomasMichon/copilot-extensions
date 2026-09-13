@@ -1238,6 +1238,13 @@ def test_combined_lifecycle_preserves_side_effect_snapshots(monkeypatch, tmp_pat
     )
     monkeypatch.setattr(
         main,
+        "_reconcile_knowledge_plugin_overlay",
+        lambda payload, cwd: snapshots.append(
+            ("knowledge-plugin-overlay", "{}")
+        ),
+    )
+    monkeypatch.setattr(
+        main,
         "_start_provisioning_if_needed",
         lambda cwd, environment: "provisioning\n",
     )
@@ -1253,6 +1260,7 @@ def test_combined_lifecycle_preserves_side_effect_snapshots(monkeypatch, tmp_pat
     assert snapshots == [
         ("register-nudge", '{"additionalContext": "register this repo"}'),
         ("marketplace-overrides", "{}"),
+        ("knowledge-plugin-overlay", "{}"),
         ("register-session", '{"additionalContext":"binding"}'),
     ]
     assert restored == ["before"]
