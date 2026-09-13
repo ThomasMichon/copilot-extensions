@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions (plugin + control-plane home; PR-required `main`, self-merge)
 - **Branch(es):** per-phase `pr/<slug>` worktrees → landed to `main`
 - **Created:** 2026-08-18
-- **Status:** Active <!-- Draft | Active | Blocked | Done -->
+- **Status:** Done <!-- Draft | Active | Blocked | Done -->
 - **Vision:** extends [`visions/plugin-services`](../../../visions/plugin-services/README.md)
   — **vision-extending**: adds the `single-instance-lease` and
   `work-coalescing-singleton` behaviors (written in first, Phase 1), plus the
@@ -1854,4 +1854,56 @@ total to **13 new tests** in `test_classify_daemon_wiring.py` (14 including
 `test_status_monitor.py`'s monitor-lifecycle test) -- 116 pass together with
 the existing 20-test classify/lease suite. Re-ran the scoped
 classify/status-monitor/hook-ipc/list suite (279 tests) clean.
+
+### 2026-09-13 — Merged PR #2574, closed #736: effort Done
+
+PR #2574 landed (squash-merged). Before merge, CI's `guards + lint` job
+flagged one real, PR-relevant gap the automated code review hadn't (a
+different, orthogonal guard): a **required version bump** the earlier
+`1.5.5-dev90 -> dev91` bump had already covered for the *first* round of
+review fixes, but the *second* round (opt-out gating + subscriber release)
+touched plugin content again without a further bump. Bumped again,
+`dev91 -> dev92` (catalog `1.7.7-dev84 -> dev85`), confirmed locally with
+`tools/check-version-bump.py`, pushed, merged.
+
+The same CI run's `module size` sub-check also failed, listing
+`agent-worktrees/__main__.py` (now 29,371 lines, over its recorded
+28,951-line grandfathered ceiling) among several **other, unrelated** files
+already over their own ceilings on `main` itself (agent-dispatch's
+`__main__.py`/`client.py`/`coordinator.py`/`queue.py`,
+`picker_tui/engine.py`, `sessions.py`, and the out-of-tree
+`worktree-manager` copy of `picker_tui/engine.py`) — confirmed by checking
+out `origin/main`'s own tree and running the same tool: `__main__.py`
+already sat at 29,162 lines (already over its ceiling) **before** this PR's
++209 lines. This is a pre-existing, repo-wide baseline-drift gap, not
+something this PR introduced or is positioned to fix; `guards + lint` is not
+a required status check on this repo (`gh api .../branches/main/protection`
+returns 404 -- no branch protection configured), so it didn't block the
+merge. Noting it here rather than silently ignoring it: a future,
+dedicated pass should either shrink these modules or do the "deliberate,
+reviewed edit to `tools/module-size-baseline.json`" the tool's own error
+message names as the other legitimate option -- out of scope for this
+effort.
+
+**Also fixed live, mid-merge**: an unrelated git-hygiene near-miss on this
+same pickup -- while investigating whether the module-size failure was
+pre-existing, an ill-considered `git checkout origin/main -- .` followed by
+`git stash pop` (intending to compare trees) collided with several old,
+unrelated stash entries from *other* past worktrees on this machine and
+produced a cascade of merge conflicts across many unrelated files. Recovered
+cleanly with `git reset --hard HEAD` (the stash entries themselves were
+never touched/dropped, still intact in `git stash list` afterward) before
+any of it was committed or pushed. No lasting effect, but worth naming: never
+`git checkout <other-ref> -- .` against a full-repo working tree merely to
+inspect a value that a `git show <ref>:<path>` or a scratch clone would have
+answered without mutating the current worktree's tracked files at all.
+
+Closed the umbrella **#736** with a summary comment (all of #737-#744,
+#1841, #2301, #2323 done; #2554/#2556 remain as their own independently
+tracked, already-filed follow-ups, not additional scope under #736). Moved
+this effort from `efforts/active/` to `efforts/2026/09/13
+plugin-process-hygiene/` (this repo's archived-effort convention) and set
+**Status: Done**.
+
+**plugin-process-hygiene is now complete.**
 
