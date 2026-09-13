@@ -855,3 +855,120 @@ async def test_remote_reap_fences_container_cleanup_to_exact_record(
         assert "launch_pending_session_id" not in ctx.session.target.container
         assert session_id not in ctx.manager._container_lock_sessions
         lock.release.assert_called_once()
+
+
+async def test_stop_observes_reap_failure_completed_during_transport_cleanup(
+    owned_context, monkeypatch,
+):
+    from agent_bridge.session_manager import RemoteHostRecoveryPendingError
+
+    ctx = owned_context
+    record = _remote_record(ctx)
+    release = asyncio.Event()
+
+    async def reap(*_args):
+        await release.wait()
+        return False
+
+    remote = AsyncMock(side_effect=reap)
+    monkeypatch.setattr(ctx.manager, "_remote_reap", remote)
+    ctx.manager._schedule_remote_reap(record, "existing cleanup")
+    task = next(iter(ctx.manager._remote_reaps_by_session[record.session_id]))
+
+    async def close_forward():
+        release.set()
+        await task
+        await asyncio.sleep(0)
+
+    ctx.manager._forwards[record.session_id] = SimpleNamespace(cancel=close_forward)
+    with pytest.raises(RemoteHostRecoveryPendingError, match="inconclusive"):
+        await ctx.manager.stop_session(record.session_id)
+    assert ctx.session.status == SessionStatus.FAILED
+    assert ctx.manager._remote_reap_pending(record.session_id)
+    assert ctx.manager._host_index.get(record.session_id) == record
+    remote.side_effect = None
+    remote.return_value = True
+    monkeypatch.setattr(
+        ctx.manager, "_forget_host_record",
+        lambda rec: ctx.manager._host_index.remove(rec.session_id),
+    )
+    await ctx.manager.stop_session(record.session_id, reap_host=True)
+    assert ctx.session.status == SessionStatus.STOPPED
+    assert not ctx.manager._remote_reap_pending(record.session_id)
+    assert record.session_id not in ctx.manager._remote_reaps_by_session
+
+
+@pytest.mark.parametrize("status", ["dead", "missing"])
+@pytest.mark.parametrize("channel", ["relay", "forward"])
+async def test_dead_authority_retains_failed_transport_cleanup(
+    owned_context, monkeypatch, status, channel,
+):
+    from agent_bridge.session_host.spawner import RemoteHostDeadError
+
+    ctx = owned_context
+    record = _remote_record(ctx)
+    spawner = SimpleNamespace(
+        can_inspect_without_wake=AsyncMock(return_value=True),
+        recover_record=AsyncMock(
+            return_value=None,
+            side_effect=RemoteHostDeadError("child exited") if status == "dead" else None,
+        ),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
+        Mock(return_value=spawner),
+    )
+    monkeypatch.setattr("agent_bridge.relay_state.get_live_relay_port", lambda: None)
+    close = AsyncMock(side_effect=OSError("channel cleanup failed"))
+    if channel == "relay":
+        handle = SimpleNamespace(stop=close)
+        ctx.manager._relays[record.session_id] = [handle]
+    else:
+        handle = SimpleNamespace(cancel=close)
+        ctx.manager._forwards[record.session_id] = handle
+    with pytest.raises(OSError, match="channel cleanup failed"):
+        await ctx.manager._recover_remote_host_records(background=True)
+    assert ctx.manager._host_index.get(record.session_id) == record
+    if channel == "relay":
+        assert ctx.manager._relays[record.session_id] == [handle]
+    else:
+        assert ctx.manager._forwards[record.session_id] is handle
+    assert record.session_id in ctx.manager._remote_recovery_inconclusive
+    close.side_effect = None
+    await ctx.manager._recover_remote_host_records(background=True)
+    assert ctx.manager._host_index.get(record.session_id) is None
+    assert record.session_id not in ctx.manager._forwards
+    assert record.session_id not in ctx.manager._relays
+
+
+@pytest.mark.parametrize("confirmed", [False, True])
+async def test_stranded_sweep_counts_only_confirmed_remote_reaps(
+    owned_context, monkeypatch, confirmed,
+):
+    from agent_bridge.session_host.version_mux import HostDisposition
+
+    ctx = owned_context
+    record = _remote_record(ctx)
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def reap(*_args):
+        entered.set()
+        await release.wait()
+        return confirmed
+
+    monkeypatch.setattr(ctx.manager, "_remote_reap", reap)
+    monkeypatch.setattr(
+        "agent_bridge.session_host.version_mux.plan_host",
+        lambda **_kwargs: SimpleNamespace(disposition=HostDisposition.FORCE_REAP, reason="obsolete host"),
+    )
+    monkeypatch.setattr(
+        ctx.manager, "_forget_host_record",
+        lambda rec: ctx.manager._host_index.remove(rec.session_id),
+    )
+    task = asyncio.create_task(ctx.manager.sweep_stranded_hosts())
+    await asyncio.wait_for(entered.wait(), 2)
+    assert not task.done()
+    assert ctx.manager._host_index.get(record.session_id) == record
+    release.set()
+    assert await asyncio.wait_for(task, 2) == int(confirmed)
+    assert (ctx.manager._host_index.get(record.session_id) is None) is confirmed

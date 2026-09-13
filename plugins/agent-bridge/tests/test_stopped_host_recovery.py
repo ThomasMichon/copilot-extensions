@@ -243,8 +243,11 @@ async def test_stop_serializes_destructive_recovery_settlement(
     settled = []
 
     async def blocked(*_args, **kwargs):
-        if kwargs.get("strict"):
+        if entered.is_set():
             return
+        if kind != "child_exit":
+            assert kwargs.get("strict") is True
+            assert kwargs.get("preserve_ownership") is True
         entered.set()
         await release.wait()
         assert ctx.session._lifecycle_lock.locked()
