@@ -199,6 +199,11 @@ boundary.
    from one that never reached spawning anything at all, letting
    `release_requested_bodies`' absent-worktree shortcut (see below) wrongly
    treat a genuinely-launched but unidentifiable body as confirmed absent.
+   The supervisor's own single spawn call site enforces the same rule
+   generically for **every** `spawn_fn`, not only the built-in factories: a
+   sessionless `ok=True` is downgraded to a failure before ever reaching
+   `record_spawn`, so a custom caller-supplied `spawn_fn` can't reintroduce
+   the ambiguity either.
 
 Fail-safe: if the reservation call itself errors, `create --spawn` **does not
 spawn** (better to leave the task queued than risk a second autonomous worker).

@@ -3423,6 +3423,26 @@ class Supervisor:
                 )
                 break
             ok, handle = self.spawn_fn(spawn_task)
+            if ok and not handle.get("session"):
+                # A spawn_fn reporting success with no session id would
+                # record a SPAWNED reservation with session_handle=None --
+                # indistinguishable from a reservation that never reached
+                # spawning anything at all, which release_requested_bodies'
+                # absent-worktree shortcut requires in order to avoid
+                # bypassing a real (if unidentifiable) body's own liveness
+                # resolution. This guards every spawn_fn generically (not
+                # only the built-in make_embody_spawn/make_headless_spawn
+                # factories, which already enforce this themselves) by
+                # downgrading to the ordinary failed/retry path instead of
+                # ever calling record_spawn with an empty handle.
+                ok = False
+                handle = {
+                    **handle,
+                    "error": (
+                        handle.get("error")
+                        or "spawn reported success with no session id"
+                    ),
+                }
             try:
                 if ok:
                     self.client.record_spawn(

@@ -46,7 +46,7 @@
   "plugins/agent-dispatch/src/agent_dispatch/queue.py": 5999,
   "plugins/agent-dispatch/src/agent_dispatch/registrar_registry.py": 1007,
   "plugins/agent-dispatch/src/agent_dispatch/repository_issue_loops.py": 1801,
-  "plugins/agent-dispatch/src/agent_dispatch/supervisor.py": 3515,
+  "plugins/agent-dispatch/src/agent_dispatch/supervisor.py": 3535,
   "plugins/agent-dispatch/src/agent_dispatch/supervisor_daemon.py": 2074,
   "plugins/agent-index/scripts/cell-runtime.py": 5161,
   "plugins/agent-index/scripts/installation-context/installation_context.py": 9169,

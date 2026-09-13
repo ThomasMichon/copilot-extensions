@@ -360,6 +360,29 @@ def test_poll_spawns_eligible_task_once(q, client):
     assert spawn.calls == [t.id]
 
 
+def test_poll_treats_a_sessionless_success_as_a_failure(q, client):
+    # A spawn_fn (built-in or custom) reporting success with no session id
+    # must not be recorded as SPAWNED with session_handle=None --
+    # indistinguishable from a reservation that never launched anything at
+    # all, which release_requested_bodies' absent-worktree shortcut relies on
+    # to avoid bypassing a real (if unidentifiable) body's own liveness
+    # resolution.
+    t = q.create("work")
+    calls = []
+
+    def sessionless_spawn(task):
+        calls.append(task["id"])
+        return True, {"worktree": "wt-1"}  # no "session" key at all
+
+    sup = Supervisor(client, spawn_fn=sessionless_spawn, repo=TEST_REPO, max_concurrent=5)
+
+    assert sup.poll_once() == []
+    assert calls == [t.id]
+    res = q.latest_reservation(t.id)
+    assert res.state != SpawnState.SPAWNED
+    assert res.session_handle is None
+
+
 def test_protected_label_pool_does_not_claim_unlabeled_task(q, client):
     q.handoff_producer_scope(
         TEST_REPO,
