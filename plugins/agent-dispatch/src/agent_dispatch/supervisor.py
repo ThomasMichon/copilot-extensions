@@ -233,17 +233,20 @@ class Supervisor:
         #: Local agent-worktrees directory-presence probe, used **only** by
         #: :meth:`release_requested_bodies`' unleased worktree-only retirement
         #: branch: when ``verdict_fn`` answers ``unknown`` because the task
-        #: never captured an ``owner_session_id`` (a RESERVING-stage spawn
-        #: failure), this reservation's own recorded worktree -- which
-        #: agent-dispatch itself created on THIS host (gated on a matching
-        #: ``creating_host``, since a shared cross-machine queue's reservation
-        #: may have been created elsewhere) -- can still be confirmed gone by
-        #: checking the local agent-worktrees registry directly, scoped to the
-        #: reservation's own repo project (this daemon is CWD-neutral). Never
-        #: used to escalate general claimed/started task liveness GC, where an
-        #: owner's worktree may have no agent-worktrees record at all.
-        #: Injectable for tests; ``None`` (unresolved probe) never counts as
-        #: gone.
+        #: never captured an ``owner_session_id`` AND its reservation never
+        #: recorded a ``session_handle`` either (a RESERVING-stage spawn
+        #: failure that never even reached spawning a body -- a spawned body
+        #: with a recorded handle must resolve through its own liveness path
+        #: instead, never this shortcut), this reservation's own recorded
+        #: worktree -- which agent-dispatch itself created on THIS host
+        #: (gated on a matching ``creating_host``, since a shared
+        #: cross-machine queue's reservation may have been created elsewhere)
+        #: -- can still be confirmed gone by checking the local
+        #: agent-worktrees registry directly, scoped to the reservation's own
+        #: repo project (this daemon is CWD-neutral). Never used to escalate
+        #: general claimed/started task liveness GC, where an owner's
+        #: worktree may have no agent-worktrees record at all. Injectable for
+        #: tests; ``None`` (unresolved probe) never counts as gone.
         self.worktree_directory_present_fn = (
             worktree_directory_present_fn or _default_worktree_directory_present
         )
@@ -1532,6 +1535,7 @@ class Supervisor:
                             verdict == _tracking().UNKNOWN
                             and task.get("owner") is None
                             and task.get("owner_session_id") is None
+                            and not res.get("session_handle")
                             and res.get("worktree") == worktree
                             and res.get("worktree_ownership") == "created"
                             and isinstance(res.get("creating_host"), str)
@@ -1549,7 +1553,17 @@ class Supervisor:
                             # record at all), an uncaptured owner_session_id
                             # here just means this RESERVING-stage attempt's
                             # spawn failed before any session/claim ever
-                            # existed. The creating_host gate matters
+                            # existed. The `not session_handle` gate matters
+                            # separately: a spawned-but-never-claimed body
+                            # (or one that yielded after claiming) can ALSO
+                            # have owner/owner_session_id both None while
+                            # `session_handle` still names a real recorded
+                            # body -- that body's actual liveness must be
+                            # resolved through its own recorded handle (the
+                            # fleet/local-body branches above, or verdict_fn's
+                            # ordinary session comparison once claimed), never
+                            # bypassed by this worktree-directory-only
+                            # shortcut. The creating_host gate matters
                             # separately from the owner-machine check above:
                             # an owner is unset for an unclaimed reservation
                             # regardless of which host actually created the

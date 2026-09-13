@@ -4153,7 +4153,58 @@ def test_does_not_confirm_absence_when_creating_host_is_a_different_machine(
     assert q.get_reservation(reservation.key).state == SpawnState.RELEASING
 
 
-def test_does_not_confirm_absence_for_a_malformed_non_slash_owner(q, client):
+def test_does_not_confirm_absence_for_a_spawned_body_with_a_session_handle(
+    q, client
+):
+    # The reviewer's exact scenario: a body was actually spawned (a raw
+    # CLI/mux session handle recorded -- not the "fleet-body:"/"local-body:"
+    # prefixes the branches above already special-case) but never claimed
+    # its task, so owner/owner_session_id are both still None, same as a
+    # pure RESERVING-stage failure. Unlike that case, a real body may still
+    # be alive under this handle; the worktree-directory-only shortcut must
+    # not bypass resolving it and wrongly retire a still-live reservation.
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-spawned-unclaimed",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    q.record_spawn(
+        reservation.key,
+        session_handle="cli-session-xyz",
+        worktree="wt-spawned-unclaimed",
+    )
+    assert q.get_reservation(reservation.key).state == SpawnState.SPAWNED
+    q.request_spawn_release(
+        reservation.key,
+        detail="yielded",
+        disposition="failed",
+    )
+    assert q.get(task.id).owner is None
+
+    def forbidden(_wt, _project):
+        raise AssertionError(
+            "must not probe the local agent-worktrees registry for a "
+            "reservation with a recorded session_handle"
+        )
+
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        machine="host-a",
+        verdict_fn=lambda *_args: "unknown",
+        worktree_directory_present_fn=forbidden,
+        nudge=False,
+    )
+
+    assert sup.release_requested_bodies() == 0
+    assert q.get_reservation(reservation.key).state == SpawnState.RELEASING
+
+
     # claim_one accepts arbitrary worker IDs (e.g. "worker-1", no
     # "<machine>/<worktree>" separator) -- `_machine_from_owner` on such a
     # string returns None just like an actually-unset owner, so the gate must

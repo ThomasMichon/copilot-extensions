@@ -769,14 +769,18 @@ record at all, and an uncaptured `owner_session_id` can legitimately mean
 additional, narrowly-scoped check on top: when `verdict_fn` answers `unknown`
 for exactly this shape (`task.get("owner")` and `owner_session_id` both
 literally `None` -- not merely an owner string `_machine_from_owner` fails to
-parse, e.g. a claimer's arbitrary non-`<machine>/<worktree>` worker id -- and
-the reservation's *own* recorded `worktree`, `worktree_ownership ==
-"created"`, and a `creating_host` matching this supervisor's own `machine`,
-compared case-insensitively like every other machine/SSH-alias comparison in
-this plugin — created by agent-dispatch itself via
-`embody.prepare_reusable_worktree`, so the local agent-worktrees registry is
-authoritative for whether it still exists), it cross-checks that registry
-directly (`worktree_directory_present_fn`, default
+parse, e.g. a claimer's arbitrary non-`<machine>/<worktree>` worker id --
+*and* the reservation's own `session_handle` is also empty, since a
+spawned-but-never-claimed body (or one that yielded after claiming) can have
+the same unset owner/owner_session_id while `session_handle` still names a
+real recorded body whose liveness must resolve through its own path, not this
+shortcut -- and the reservation's *own* recorded `worktree`,
+`worktree_ownership == "created"`, and a `creating_host` matching this
+supervisor's own `machine`, compared case-insensitively like every other
+machine/SSH-alias comparison in this plugin — created by agent-dispatch
+itself via `embody.prepare_reusable_worktree`, so the local agent-worktrees
+registry is authoritative for whether it still exists), it cross-checks that
+registry directly (`worktree_directory_present_fn`, default
 `tracking.worktree_directory_present`, scoped to the **same allocation
 project** `_prepare_spawn_task` would have used to actually create this
 worktree -- `self._spawn_attribute(task, "allocation_project",
