@@ -213,6 +213,32 @@ the claimant session id to the user and offer to file a bug (do not file one
 automatically): repeated or racing consumption of the same handoff is
 typically a sign of a real defect upstream, not routine behavior.
 
+## Handoff-lifecycle observability
+
+`trigger_handoff` is stage 6 of a wider 13-stage cutover lifecycle spanning
+this plugin, the resident `agent-worktrees` status monitor, and the mux
+layer -- worktree creation through the predecessor's confirmed retirement.
+The full stage vocabulary, the two durable stores that record it
+(`activity.jsonl`'s rolling log and `handoff_trace.py`'s unrotated
+per-worktree store), and the diagnostic tools available today
+(`agent-worktrees handoffs-check`, `agent-bridge handoff-check`) are
+documented in
+[`agent-worktrees`'s architecture doc](../agent-worktrees/docs/architecture.md#handoff-cutover-lifecycle-the-13-stage-trace)
+-- read that first when a handoff appears to have gone sideways rather than
+re-deriving the sequence from scratch. `handoffs-check` diagnoses (and can
+repair) an **unretired predecessor after a spawn is recorded** -- a
+successor associated as a candidate *or* already linked, plus a recorded
+spawn event, with no confirmed retirement since. Its read-only report does
+**not** itself confirm the pane is still alive (no `_mux_pane_alive()` call
+in that path) -- it lists every such unretired case as a candidate, even one
+whose pane already exited without ever being logged as retired; `--execute`
+is the step that performs the live check and actually resolves it. It does
+**not** diagnose "ack but no pane at all" (a host acknowledgement with no
+successor ever recorded) -- that case has no dedicated diagnostic yet; a
+dedicated
+`handoff-trace` render command is
+still open follow-on work.
+
 ## Payload-local CLI fallback
 
 When the extension does not resolve or fails to load, the plugin's payload

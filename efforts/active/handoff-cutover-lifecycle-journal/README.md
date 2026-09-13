@@ -537,11 +537,21 @@ renumbering from the "acknowledges handoff" step onward.)
       not addressed by this leg's remediation, left as a genuine follow-on.
 
 ### Phase 5 — Docs
-- [ ] Document the 13-stage lifecycle + trace command in
-      `plugins/agent-worktrees/docs/architecture.md` and the context-handoff
-      README's handoff-lifecycle section.
-- [ ] Update the `context-handoff` skill and `worktree` skill with a pointer
-      to `handoff-trace` for diagnosing a stuck cutover.
+- [x] Document the 13-stage lifecycle in
+      `plugins/agent-worktrees/docs/architecture.md` (new § "Handoff cutover
+      lifecycle: the 13-stage trace") and the context-handoff README's new
+      § "Handoff-lifecycle observability". Both document the stage table,
+      the two durable stores, and the diagnostic tools that exist **today**
+      (`agent-worktrees handoffs-check`, `agent-bridge handoff-check`) —
+      the dedicated `handoff-trace` render command itself is still open
+      Phase 3 follow-on work and is called out as such rather than
+      documented as if it already existed.
+- [x] Updated the `context-handoff` skill (new "Diagnosing a stuck cutover"
+      subsection under Resume flow) and the `worktree` skill (new
+      "Diagnosing a stranded handoff predecessor pane" subsection under
+      Session Detection) with a pointer to `agent-worktrees handoffs-check`
+      / `agent-bridge handoff-check` for diagnosing a stuck cutover, cross-
+      linked to the new architecture.md section.
 
 ## Validation Plan
 
@@ -1219,3 +1229,21 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   ground-truth owner. Fully migrating `context-handoff` to *only* write
   markers (removing its remaining logging responsibilities) is explicitly
   **not** done in this leg and remains a named follow-on.
+
+- **Phase 5 (docs) landed** (this session): documented the 13-stage
+  lifecycle table, the two durable stores (`activity.jsonl` rolling log +
+  `handoff_trace.py`'s unrotated per-worktree store), and the diagnostic
+  tools available today (`agent-worktrees handoffs-check`, `agent-bridge
+  handoff-check`) in `plugins/agent-worktrees/docs/architecture.md`
+  (new § "Handoff cutover lifecycle: the 13-stage trace") and
+  `plugins/context-handoff/README.md` (new §
+  "Handoff-lifecycle observability"), cross-linked both ways. Also added
+  pointer subsections to the `context-handoff` and `worktree` skills so an
+  agent diagnosing a stuck cutover reaches for `handoffs-check`/
+  `handoff-check` instead of manual intervention. Deliberately did **not**
+  document a `handoff-trace` render command as if it existed -- Phase 3's
+  dedicated CLI is still open follow-on work, and the docs say so
+  explicitly. **Not the only remaining item:** Phase 3's cross-link/
+  session-state backfill work and its `handoff-trace` CLI, plus Phase 4
+  item 4 (`find_orphaned_handoffs()` naming the exact stalled stage), all
+  remain open before this effort can move to Done.
