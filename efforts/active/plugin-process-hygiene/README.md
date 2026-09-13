@@ -1620,3 +1620,54 @@ Also updated #736's own body (removed #1841 from "still open", narrowed the
 stays-open condition to #2323/#2301) and posted a progress comment there
 pointing at #2554/#2556.
 
+### 2026-09-12 (new pickup) — Closed #2301: read-only process-count audit found no unambiguous bug
+
+Resumed via a stored context handoff with #1841 already closed; #2323 and
+#2301 the only remaining scope. Followed this README's own prior sequencing
+note (read-only/lower-risk before the high-blast-radius live wiring) rather
+than the handoff summary's numbered order, and picked up #2301 first.
+
+Ran the read-only diagnostics #2301 itself calls for, on this live host
+(`tmichon-cloud1`, ~10 concurrent worktree sessions): `agent-dispatch health`
+(coordinator `status: ok`, both reconcile loops completing cleanly),
+`agent-dispatch supervise daemon-status` (a healthy, empty `default`-scope
+coordinator — the live supervised-repo processes on this host run under a
+separate `--legacy-env` supervisor tree, which explains the empty
+registrations there rather than indicating a leak), and a full
+`Get-CimInstance Win32_Process` census cross-referenced against each
+service's own expected shape:
+
+- **`agent_worktrees status-monitor`**, **`agent_bridge start --passive`**,
+  **`agent_vault.service --foreground --persistent`**: exactly **one** live
+  instance each (wrapper/venv-python parent-child pairs, not independent
+  duplicates) — every singleton-lease guarantee is holding.
+- **`agent_dispatch supervise serve --legacy-env`**: one top-level serve
+  process with one child per declared `--supervisor-id` (5 distinct declared
+  repo/label combinations) — service-scoped, not session-scoped.
+- **`agent_dispatch emitter serve <config>.json`**: one process per declared
+  emitter config (4 distinct configs) — same shape.
+- **`conhost.exe`**: 106 total, only 1 with a dead parent, and that one's
+  creation timestamp lines up with this audit's own `Get-CimInstance`
+  invocation — almost certainly the query's own transient console, not a
+  leak.
+- WSL (`Ubuntu` distro) census: 50 total processes, 3 `python`, no anomaly
+  (this host's WSL side isn't in active use right now, so it wasn't a useful
+  proliferation signal this pass).
+
+No process was touched — the read-only-first design constraint held
+throughout, and no finding rose to "unambiguously a bug" (every resident
+service is correctly singleton-guarded; remaining pwsh/conhost/copilot counts
+are proportional to concurrently-active session shells, which the
+process-count-scales-with-services-not-sessions invariant is explicitly not
+about). Posted the full evidence as a comment on #2301 and closed it as
+**audited, compliant**, via `agent-worktrees repos gh ThomasMichon -- issue
+comment`/`issue close` (verified the wrapper-resolved identity via `api user
+--jq .login` matched `account-for` first — it had transiently shown a "could
+not mint a gh token" ambient-auth fallback warning on an earlier probe in
+this same session, which cleared on retry; confirmed correct identity before
+posting anything, per this repo's own account-verification convention).
+
+Remaining under #736: **#2323 only** (the resident classify/list accelerator
+wiring — still not started, still the highest-blast-radius item; concrete
+plan and validation bar unchanged from this README's earlier entries).
+
