@@ -221,8 +221,11 @@ realized in `main`; unchecked items are the remaining delta.
             against the full test suites (see journal). **Deletion of the
             old in-plugin scripts deliberately deferred** to a follow-up PR
             pending live-hardware proof.
-      - [ ] Sub-slice 2b: split `cmd_remux` (detection stays, relaunch action
-            moves).
+      - [x] Sub-slice 2b: added purely-additive `mux-remux-plan`/
+            `mux-pane-status` queries plus a Worktree Manager executor that
+            drives them; agent-worktrees' own `cmd_remux`/`_perform_remux`/
+            `remux_bare_copilot` remain untouched as its zero-provider-mode
+            fallback (the bundled Picker's standalone Restore action).
 - [ ] Update the Worktree Manager Picker to select Mux presentation and/or the
       AHP backend independently per launch/resume/create action, rather than
       assuming exactly one of them.
@@ -550,3 +553,20 @@ its issues; the public artifacts stay self-contained and general-purpose.
   version consistency, install contract, docs consistency, and `git diff
   --check`; all passed. Bumped agent-worktrees to `1.5.5-dev49`, marketplace
   metadata to `1.7.7-dev45`, and Worktree Manager to `0.1.0-dev34`.
+- **2026-09-12** — Landed the (twice design-corrected, see the two entries
+  above) Sub-slice 2b implementation as
+  [#2552](https://github.com/ThomasMichon/copilot-extensions/pull/2552):
+  purely additive `mux-remux-plan`/`mux-pane-status` queries in
+  agent-worktrees (extracting the guard/target-resolution logic out of
+  `_perform_remux` into a shared function, called by both the existing
+  standalone `remux`/`--restore` action and the new queries) plus a thin
+  Worktree Manager executor that runs the returned POSIX `argv` directly, or
+  on Windows calls `reclaim --bare-only --yes --json` then relaunches through
+  the already-relocated launcher in ordinary resume mode. Confirmed
+  agent-worktrees' own `cmd_remux`/`_perform_remux`/`remux_bare_copilot`
+  remain completely untouched — they stay as agent-worktrees' permanent
+  zero-provider-mode fallback backing the bundled Picker's standalone
+  "Restore" action, per the corrected design. Marks Phase 3b Slice 2
+  (Mux relocation) fully landed except the still-deliberately-deferred
+  Sub-slice 2a old-in-plugin-script deletion, and there is still no Picker
+  UI wiring for a Worktree Manager-side "Restore" action (CLI-only for now).
