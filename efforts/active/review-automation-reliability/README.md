@@ -578,6 +578,19 @@ scenarios.
     again) and added `queue_records.py` at 115 lines. Full suite (2,656
     tests with the new regression test) still passes; `--guards` picks up
     all six guard-marked tests in ~2s.
+- **A third review round on PR #2517 caught two more real findings, both
+  fixed**: (1) medium: extracting `queue_records.py` had incidentally
+  dropped `queue.py`'s pass-through re-export of the six `.registrations`
+  names (`RegistrationError`, `RegistrationKind`, `RegistrationRecord`,
+  `RegistrationStatus`, `derive_registration_id`, `validate_registration`)
+  it used to bind at module scope before this split -- an unintended API
+  break for any external `from agent_dispatch.queue import ...` consumer,
+  despite the PR's own "no API surface change" claim. Restored them as a
+  `# noqa: F401` re-export block, same precedent as the other four. (2)
+  low: the PR description's own final-size summary had gone stale after
+  the `queue_records.py` follow-up commit (still quoting the pre-fix
+  6,481/541 numbers instead of 6,386/529/115); corrected via `gh api ...
+  -X PATCH`.
 - **Standing note carried from the prior leg's handoff**: that leg's PR
   #2506 review included one declined false-positive finding (Copilot
   claimed `tools/module-size-baseline.json`'s prior `__main__.py` entry,

@@ -47,13 +47,21 @@ from typing import Any
 
 from .identity import canonical_reviewer_target, canonicalize_remote
 from .payload import PayloadStore, is_blob_ref
-from .queue_records import TaskError
 from .queue_records import (  # noqa: F401 -- re-exported for existing call sites/tests
     ResourceReservation,
     ScheduleLease,
     ScheduleRecord,
+    TaskError,
 )
 from .queue_schedule_registry import ScheduleRegistrationMixin
+from .registrations import (  # noqa: F401 -- re-exported for existing call sites/tests
+    RegistrationError,
+    RegistrationKind,
+    RegistrationRecord,
+    RegistrationStatus,
+    derive_registration_id,
+    validate_registration,
+)
 from .routing_provenance import (
     ACTOR_ROLES,
     ROUTING_SCHEMA_VERSION,
