@@ -955,6 +955,7 @@ def test_monitor_pending_handoff_predecessor_retire_uses_logged_predecessor_bind
     monkeypatch,
 ):
     monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    monkeypatch.setattr(m.handoff_trace, "read_trace", lambda *a, **k: [])
 
     def read_events(**kwargs):
         event = kwargs.get("event")
@@ -1014,6 +1015,7 @@ def test_monitor_pending_handoff_predecessor_retire_retries_after_failed_attempt
     ``handoff_predecessor_retire`` event -- success or failure -- permanently
     suppressed every future attempt, silently stranding the pane forever."""
     monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    monkeypatch.setattr(m.handoff_trace, "read_trace", lambda *a, **k: [])
 
     def read_events(**kwargs):
         event = kwargs.get("event")
@@ -1062,6 +1064,7 @@ def test_monitor_pending_handoff_predecessor_retire_skips_after_success(
     monkeypatch,
 ):
     monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    monkeypatch.setattr(m.handoff_trace, "read_trace", lambda *a, **k: [])
 
     def read_events(**kwargs):
         event = kwargs.get("event")
@@ -1276,6 +1279,91 @@ def test_sweep_triggers_pending_handoff_cutover_once(tmp_path, monkeypatch):
 
     assert m._monitor_sweep("tmux", "T", "P", set()) == 1
     assert triggered == [request]
+
+
+def test_sweep_triggers_pending_handoff_cutover_for_dormant_record(tmp_path, monkeypatch):
+    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    reg = tmp_path / "reg"
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
+    m._register_session_for_monitor("wt-a", "/w/a")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    monkeypatch.setattr(m, "_warm_list_cache_for_active_project", lambda **kw: 0)
+    monkeypatch.setattr(m.cfg, "project_name", lambda: "repo-a")
+    monkeypatch.setattr(m.cfg, "tracking_dir", lambda: m.Path("/tracking"))
+    monkeypatch.setattr(
+        m, "_activate_project_for_path", lambda *a, **k: m.cfg.set_active_project("repo-a")
+    )
+    monkeypatch.setattr(
+        m,
+        "_find_record_for_path",
+        lambda path: types.SimpleNamespace(
+            worktree_id="a",
+            worktree_path=path,
+            handoffs=[],
+            pending_handoffs=[],
+        ),
+    )
+    dormant = types.SimpleNamespace(
+        worktree_id="dormant",
+        worktree_path="/w/dormant",
+        handoffs=[
+            types.SimpleNamespace(
+                token="handoff-1",
+                predecessor="session-1",
+                candidate=None,
+                successor=None,
+                state="pending",
+            )
+        ],
+        pending_handoffs=[
+            types.SimpleNamespace(
+                token="handoff-1",
+                predecessor="session-1",
+                candidate=None,
+                successor=None,
+                state="pending",
+            )
+        ],
+    )
+    monkeypatch.setattr(m.tracking, "list_records", lambda path: [dormant])
+    _capture_set(monkeypatch)
+    triggered = []
+
+    def pending(record):
+        if getattr(record, "worktree_id", None) == "dormant":
+            return {
+                "token": "handoff-1",
+                "seed": "HANDOFF_SEED",
+                "worktree_id": "dormant",
+                "predecessor_session_id": "session-1",
+            }
+        return None
+
+    monkeypatch.setattr(m, "_monitor_pending_handoff_request", pending)
+    monkeypatch.setattr(
+        m,
+        "_monitor_pending_handoff_predecessor_retire",
+        lambda record, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        m,
+        "_monitor_trigger_handoff_cutover",
+        lambda item: triggered.append(item),
+    )
+
+    prior = m.cfg.active_project()
+    try:
+        assert m._monitor_sweep("tmux", "T", "P", set()) == 1
+    finally:
+        m.cfg.set_active_project(prior)
+    assert triggered == [{
+        "token": "handoff-1",
+        "seed": "HANDOFF_SEED",
+        "worktree_id": "dormant",
+        "predecessor_session_id": "session-1",
+    }]
 
 
 def test_sweep_does_not_double_trigger_same_pending_handoff(tmp_path, monkeypatch):

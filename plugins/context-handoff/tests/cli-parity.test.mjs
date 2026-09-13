@@ -15,7 +15,7 @@ test("payload-local CLI exposes the extension fallback flow", () => {
     encoding: "utf8",
   });
   assert.equal(result.status, 0, result.stderr);
-  for (const command of ["facts", "save", "trigger", "consume"]) {
+  for (const command of ["facts", "save", "trigger", "consume", "check-heads"]) {
     assert.match(result.stdout, new RegExp(`\\b${command}\\b`));
   }
   assert.match(result.stdout, /--locator/);
@@ -83,6 +83,7 @@ test("consume requires exactly one recovery target", () => {
 test("extension and CLI delegate storage, signaling, and consumption to the same core", () => {
   const source = readFileSync(cli, "utf8");
   for (const shared of [
+    "checkHeadAlignment",
     "storeHandoff",
     "buildSeedForStored",
     "triggerHandoff",

@@ -480,6 +480,129 @@ function discoverFileHandoffPath(
   return null;
 }
 
+function knownWorktreeRows(cwd, execute = runCli) {
+  let reposJson;
+  try {
+    reposJson = cliJson(
+      "agent-worktrees",
+      ["repos", "list", "--class", "worktree", "--json"],
+      cwd,
+      AGENT_WORKTREES_QUERY_TIMEOUT_MS,
+      execute,
+    );
+  } catch {
+    return [];
+  }
+  const rows = new Map();
+  for (const repo of reposJson?.repos || []) {
+    for (const anchorPath of registeredRepoPaths(repo?.paths)) {
+      let listed;
+      try {
+        listed = cliJson(
+          "agent-worktrees",
+          ["list", "--all", "--json"],
+          anchorPath,
+          AGENT_WORKTREES_QUERY_TIMEOUT_MS,
+          execute,
+        );
+      } catch {
+        continue;
+      }
+      for (const worktree of listed?.worktrees || []) {
+        if (!worktree?.id || !worktree?.path) continue;
+        const key = [
+          worktree.machine || "",
+          worktree.repo || repo?.name || "",
+          worktree.id,
+        ].join(":");
+        if (!rows.has(key)) rows.set(key, worktree);
+      }
+    }
+  }
+  return [...rows.values()];
+}
+
+function normalizeComparePath(value) {
+  if (!value) return "";
+  let normalized = String(value).trim().replace(/[\\/]+/g, "/");
+  normalized = normalized.replace(/\/+$/, "");
+  return process.platform === "win32"
+    ? normalized.toLowerCase()
+    : normalized;
+}
+
+export function readStatusMonitorRegistry(home = homedir()) {
+  const dir = join(home, ".agent-worktrees", "status-monitor.d");
+  const entries = {};
+  if (!existsSync(dir)) return entries;
+  for (const name of readdirSync(dir)) {
+    const path = join(dir, name);
+    try {
+      entries[name] = readFileSync(path, "utf-8").trim();
+    } catch {
+      // Best-effort diagnostic only.
+    }
+  }
+  return entries;
+}
+
+export function checkHeadAlignment(cwd, execute = runCli) {
+  const worktrees = knownWorktreeRows(cwd, execute);
+  const registry = readStatusMonitorRegistry();
+  const findings = [];
+  for (const worktree of worktrees) {
+    let head;
+    try {
+      head = cliJson(
+        "agent-worktrees",
+        ["head-session", "--worktree", worktree.id, "--json"],
+        cwd,
+        AGENT_WORKTREES_QUERY_TIMEOUT_MS,
+        execute,
+      );
+    } catch (error) {
+      findings.push({
+        reason: "head-query-failed",
+        worktree,
+        error: describeCliError(error),
+      });
+      continue;
+    }
+    const pending = Array.isArray(head?.pending_handoffs) ? head.pending_handoffs : [];
+    if (!pending.length) continue;
+    const monitorSession = `wt-${worktree.id}`;
+    const registeredPath = registry[monitorSession] || null;
+    const expectedPath = worktree.path || null;
+    const pathMatches = registeredPath
+      ? normalizeComparePath(registeredPath) === normalizeComparePath(expectedPath)
+      : null;
+    if (!registeredPath) {
+      findings.push({
+        reason: "pending-handoff-unregistered",
+        worktree,
+        head,
+        monitorSession,
+        monitorPath: null,
+      });
+      continue;
+    }
+    if (!pathMatches) {
+      findings.push({
+        reason: "pending-handoff-registry-path-mismatch",
+        worktree,
+        head,
+        monitorSession,
+        monitorPath: registeredPath,
+      });
+    }
+  }
+  return {
+    ok: true,
+    checked: worktrees.length,
+    findings,
+  };
+}
+
 export function writeJsonAtomic(path, value) {
   const tmp = `${path}.${process.pid}.tmp`;
   try {
