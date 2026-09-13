@@ -874,12 +874,13 @@ today and is safe to reach for immediately:
   also resolvable on `PATH` (it fails closed with a clear error otherwise --
   `agent-bridge` alone does not implement the check/repair logic itself).
   **Does not forward agent-bridge's own top-level `--project`/`-p`** to the
-  child command (`agent-worktrees handoffs-check` has no `--project` flag to
-  receive it either) -- from a neutral daemon CWD unrelated to the target
-  project, resolution falls back to whatever `agent-worktrees` derives from
-  its own CWD, which may not be the intended project. Run it from (or ensure
-  the daemon's CWD is) the target project's checkout when project scoping
-  matters.
+  child command -- `agent-worktrees` itself does have a global `--project`/
+  `-p` (it must come before the `handoffs-check` subcommand), but the bridge
+  wrapper never passes its own `--project`/`-p` value through to it, so from
+  a neutral daemon CWD unrelated to the target project the check resolves
+  against whatever `agent-worktrees` derives from its own CWD instead of the
+  project agent-bridge was scoped to. Run it from (or ensure the daemon's
+  CWD is) the target project's checkout when project scoping matters.
 - `health.find_orphaned_handoffs()` already flags "claimed but no live
   successor pane" as a class of bug; feeding it from the durable trace so it
   can name the *exact* stalled stage (rather than just flagging that one
