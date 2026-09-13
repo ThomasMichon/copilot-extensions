@@ -2536,19 +2536,18 @@ class SessionManager:
                         if existing is None:
                             recovered += 1
                     elif status in {"dead", "missing"}:
+                        from .session_host_ownership import finish_host_metadata_cleanup
+
                         self._remote_recovery_inconclusive.add(session.session_id)
                         await self._drop_forward(
                             session.session_id, strict=True, preserve_ownership=True,
                         )
-                        self._release_container_lock(session.session_id)
-                        self._set_container_launch_pending(
-                            session.session_id,
-                            False,
-                        )
+                        if not finish_host_metadata_cleanup(self, session.session_id, existing):
+                            log.warning("Authority changed during cleanup for %s; retaining replacement", session.session_id)
+                            continue
                         self._remote_recovery_inconclusive.discard(session.session_id)
                         self._remote_recovery_skipped.discard(session.session_id)
                         if existing is not None:
-                            self._host_index.remove(session.session_id)
                             log.info(
                                 "Pruned confirmed-%s remote Session Host for %s",
                                 status, session.session_id,

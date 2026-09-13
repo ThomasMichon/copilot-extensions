@@ -756,6 +756,7 @@ async def test_stopped_container_is_authoritative_remote_host_death(
         def __init__(self):
             self.removed = []
             self.existing = SimpleNamespace(
+                session_id="session-1",
                 extra={"remote_authority_v2": True},
                 resume_on_reattach=False,
             )
@@ -765,6 +766,7 @@ async def test_stopped_container_is_authoritative_remote_host_death(
 
         def remove(self, session_id):
             self.removed.append(session_id)
+            self.existing = None
 
         def register(self, record):
             raise AssertionError("dead container record must not be registered")
@@ -875,6 +877,7 @@ async def test_confirmed_absent_remote_host_drops_stale_authority(
         def __init__(self):
             self.removed = []
             self.existing = SimpleNamespace(
+                session_id="session-1",
                 extra={"remote_authority_v2": True},
                 resume_on_reattach=False,
             )
@@ -884,6 +887,7 @@ async def test_confirmed_absent_remote_host_drops_stale_authority(
 
         def remove(self, session_id):
             self.removed.append(session_id)
+            self.existing = None
 
         def register(self, record):
             raise AssertionError("confirmed-absent record must not be registered")

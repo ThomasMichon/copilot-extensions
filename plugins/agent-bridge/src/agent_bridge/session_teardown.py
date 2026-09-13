@@ -51,6 +51,7 @@ async def _detach_for_restart_owned(manager: SessionManager) -> None:
         if session._owned_process is not None
         or session.session_id in manager._forwards
         or session.session_id in manager._relays
+        or manager._remote_reap_pending(session.session_id)
         or (
             session.session_id in manager._pending_host_launches
             and not manager._pending_host_launches[session.session_id].durable
@@ -68,7 +69,10 @@ async def _detach_for_restart_owned(manager: SessionManager) -> None:
                 await manager.stop_session(
                     session.session_id, force=True, for_restart=True,
                     cancel_turn=manager.cancel_turns_on_redeploy,
-                    reap_host=session.session_id in manager._pending_host_launches,
+                    reap_host=(
+                        session.session_id in manager._pending_host_launches
+                        or manager._remote_reap_pending(session.session_id)
+                    ),
                 )
             except Exception:
                 log.error(
@@ -109,20 +113,9 @@ async def reap_remote_record(
     current_revision = manager._host_index.revision(record.session_id) if manager._host_index else None
     if confirmed:
         if current == record and current_revision == record_revision:
-            owner = manager._sessions.get(record.session_id)
-            container = owner.target.container if owner is not None else None
-            had_marker = (
-                isinstance(container, dict)
-                and container.get("launch_pending_session_id") == record.session_id
-            )
-            manager._set_container_launch_pending(record.session_id, False)
-            try:
-                manager._forget_host_record(record)
-            except Exception:
-                if had_marker:
-                    manager._set_container_launch_pending(record.session_id, True)
-                raise
-            manager._release_container_lock(record.session_id)
+            from .session_host_ownership import finish_host_metadata_cleanup
+
+            finish_host_metadata_cleanup(manager, record.session_id, record)
             owned = manager._remote_reaps_by_session.get(record.session_id)
             if owned is not None:
                 owned.difference_update(task for task in list(owned) if task.done())
@@ -150,6 +143,21 @@ async def reap_remote_checked(manager: SessionManager, session: Session, record:
             f"Remote Session Host reap is inconclusive for {session.session_id}; "
             "authority and ownership retained"
         )
+
+
+async def join_remote_reaps(
+    manager: SessionManager, session_id: str, *, retry_failed: bool = False,
+) -> None:
+    """Join existing reaps before any competing teardown or explicit retry."""
+    from .session_manager import RemoteHostRecoveryPendingError, asyncio
+
+    pending = list(manager._remote_reaps_by_session.get(session_id, ()))
+    if pending:
+        results = await asyncio.gather(*pending, return_exceptions=True)
+        if not retry_failed and any(result is not True for result in results):
+            raise RemoteHostRecoveryPendingError(
+                f"Pending remote reap is inconclusive for {session_id}; ownership retained"
+            )
 
 
 async def stop_session_admitted(
@@ -212,6 +220,7 @@ async def complete_stop(
     await manager._quiesce_session(session, cancel_turn=cancel_turn)
     await cleanup_owned_process(session)
     await manager._drop_forward(session_id, strict=True, preserve_ownership=True)
+    await join_remote_reaps(manager, session_id, retry_failed=reap_host)
     if not for_restart and manager._host_index is not None:
         manager._host_index.set_resume_flag(session_id, False)
     if reap_host and session_id in manager._pending_host_launches:
@@ -271,6 +280,7 @@ async def end_session_locked(self: SessionManager, session: Session, *, force: b
     if not force and session.has_active_background_tasks:
         raise SessionBusyError(session_id, session.active_background_tasks)
 
+    await join_remote_reaps(self, session_id)
     session._lifecycle_generation += 1
     if session_id in self._pending_host_launches:
         from .session_host_ownership import abort_pending_host_launch

@@ -1117,3 +1117,116 @@ async def test_stranded_sweep_counts_only_confirmed_remote_reaps(
     release.set()
     assert await asyncio.wait_for(task, 2) == int(confirmed)
     assert (ctx.manager._host_index.get(record.session_id) is None) is confirmed
+
+
+@pytest.mark.parametrize("confirmed", [False, True])
+async def test_end_joins_existing_remote_reap_before_cleanup(owned_context, monkeypatch, confirmed):
+    from agent_bridge.session_manager import RemoteHostRecoveryPendingError
+
+    ctx = owned_context
+    record = _remote_record(ctx)
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def reap(*_args):
+        entered.set()
+        await release.wait()
+        return confirmed
+
+    remote = AsyncMock(side_effect=reap)
+    monkeypatch.setattr(ctx.manager, "_remote_reap", remote)
+    ctx.manager._schedule_remote_reap(record, "existing cleanup")
+    await asyncio.wait_for(entered.wait(), 2)
+    end = asyncio.create_task(ctx.manager.end_session(record.session_id, force=True))
+    await asyncio.sleep(0)
+    assert not end.done()
+    assert remote.await_count == 1
+    release.set()
+    if confirmed:
+        await asyncio.wait_for(end, 2)
+        assert ctx.manager.get_session(record.session_id) is None
+    else:
+        with pytest.raises(RemoteHostRecoveryPendingError, match="inconclusive"):
+            await asyncio.wait_for(end, 2)
+        assert ctx.manager._host_index.get(record.session_id) == record
+    assert remote.await_count == 1
+
+
+async def test_shutdown_retries_retained_failed_remote_reap(owned_context, monkeypatch):
+    from agent_bridge.session_teardown import detach_for_restart
+
+    ctx = owned_context
+    record = _remote_record(ctx)
+    entered, release = asyncio.Event(), asyncio.Event()
+    calls = 0
+
+    async def reap(*_args):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return False
+        entered.set()
+        await release.wait()
+        return True
+
+    monkeypatch.setattr(ctx.manager, "_remote_reap", reap)
+    monkeypatch.setattr("agent_bridge.session_teardown._SHUTDOWN_CLEANUP_RETRY_SECONDS", 0.01)
+    ctx.manager._schedule_remote_reap(record, "existing cleanup")
+    pending = next(iter(ctx.manager._remote_reaps_by_session[record.session_id]))
+    assert await pending is False
+    await asyncio.sleep(0)
+    shutdown = asyncio.create_task(detach_for_restart(ctx.manager))
+    await asyncio.wait_for(entered.wait(), 2)
+    assert not shutdown.done()
+    assert ctx.manager._host_index.get(record.session_id) == record
+    release.set()
+    await asyncio.wait_for(shutdown, 2)
+    assert calls == 2
+    assert not ctx.manager._remote_reap_pending(record.session_id)
+    assert ctx.manager._host_index.get(record.session_id) is None
+
+
+@pytest.mark.parametrize("failure_stage", ["marker", "index"])
+async def test_dead_authority_metadata_failure_retains_container_lock(
+    owned_context, monkeypatch, failure_stage,
+):
+    ctx = owned_context
+    record = _remote_record(ctx)
+    session_id = record.session_id
+    ctx.session.target.container = {"name": "example-container", "launch_pending_session_id": session_id}
+    lock = Mock()
+    ctx.manager._container_locks["example-container"] = (lock, session_id)
+    ctx.manager._container_lock_sessions[session_id] = "example-container"
+    spawner = SimpleNamespace(
+        boundary="container", can_inspect_without_wake=AsyncMock(return_value=False),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_host.container_transport.build_container_spawner",
+        Mock(return_value=spawner),
+    )
+    if failure_stage == "marker":
+        monkeypatch.setattr(ctx.db, "update_session_target", Mock(side_effect=OSError("metadata failed")))
+    else:
+        monkeypatch.setattr(ctx.manager._host_index, "_flush", Mock(side_effect=OSError("metadata failed")))
+    with pytest.raises(OSError, match="metadata failed"):
+        await ctx.manager._recover_remote_host_records(session_ids={session_id})
+    assert ctx.manager._host_index.get(session_id) == record
+    assert ctx.session.target.container["launch_pending_session_id"] == session_id
+    assert ctx.manager._container_lock_sessions[session_id] == "example-container"
+    lock.release.assert_not_called()
+
+
+async def test_resume_nudge_clear_can_retry_failed_persistence(owned_context, monkeypatch):
+    from agent_bridge.session_host.host_index import HostIndex
+
+    ctx = owned_context
+    record = _remote_record(ctx)
+    ctx.manager._host_index.set_resume_flag(record.session_id, True)
+    flush = ctx.manager._host_index._flush
+    monkeypatch.setattr(ctx.manager._host_index, "_flush", Mock(side_effect=OSError("flag failed")))
+    with pytest.raises(OSError, match="flag failed"):
+        ctx.manager._host_index.set_resume_flag(record.session_id, False)
+    assert record.resume_on_reattach is True
+    monkeypatch.setattr(ctx.manager._host_index, "_flush", flush)
+    assert ctx.manager._host_index.set_resume_flag(record.session_id, False)
+    assert record.resume_on_reattach is False
+    assert not HostIndex(ctx.manager._host_index._path).get(record.session_id).resume_on_reattach

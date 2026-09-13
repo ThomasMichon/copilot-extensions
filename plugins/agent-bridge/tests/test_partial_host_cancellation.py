@@ -260,10 +260,11 @@ def test_dead_host_pruning_retains_partial_launch_authority(tmp_db, tmp_path, mo
 @pytest.mark.asyncio
 @pytest.mark.parametrize("indexed", [False, True])
 @pytest.mark.parametrize("confirmed", [False, True])
+@pytest.mark.parametrize("operation", ["stop", "rollback"])
 async def test_partial_host_reaping_releases_only_confirmed_container_claim(
-    tmp_db, tmp_path, monkeypatch, indexed, confirmed,
+    tmp_db, tmp_path, monkeypatch, indexed, confirmed, operation,
 ):
-    from agent_bridge.session_host_ownership import _remember
+    from agent_bridge.session_host_ownership import _remember, abort_pending_host_launch
 
     manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path / "hosts"))
     session_id = "example-session"
@@ -290,8 +291,12 @@ async def test_partial_host_reaping_releases_only_confirmed_container_claim(
         manager._host_index.remove(session_id)
     reap = AsyncMock(side_effect=AssertionError("partial launch must use its abort handle"))
     monkeypatch.setattr(manager, "_remote_reap", reap)
+    cleanup = (
+        manager.stop_session(session_id, reap_host=True)
+        if operation == "stop" else abort_pending_host_launch(manager, session_id)
+    )
     if confirmed:
-        await manager.stop_session(session_id, reap_host=True)
+        await cleanup
         lock.release.assert_called_once()
         assert session_id not in manager._container_lock_sessions
         assert manager._host_index.get(session_id) is None
@@ -300,12 +305,12 @@ async def test_partial_host_reaping_releases_only_confirmed_container_claim(
         assert session.status == SessionStatus.STOPPED
     else:
         with pytest.raises(RemoteSpawnCleanupPendingError, match="cleanup is inconclusive"):
-            await manager.stop_session(session_id, reap_host=True)
+            await cleanup
         lock.release.assert_not_called()
         assert manager._container_lock_sessions[session_id] == "example-container"
         assert session_id in manager._pending_host_launches
         assert session.target.container["launch_pending_session_id"] == session_id
-        assert session.status == SessionStatus.FAILED
+        assert session.status == (SessionStatus.FAILED if operation == "stop" else SessionStatus.STOPPED)
     spawner.abort_spawned.assert_awaited_once()
     reap.assert_not_awaited()
 
