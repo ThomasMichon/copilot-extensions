@@ -315,22 +315,23 @@ def liveness_verdict(
     - :data:`UNKNOWN` -- the resolver could not answer (no CLI/ssh, non-zero exit,
       timeout, unparseable/non-object output -- a possibly restarting/partial
       registry), **or** ``owner_session_id`` is not captured yet (the claim ->
-      register window) *and* either a live session is present or the local
-      agent-worktrees registry cannot confirm the worktree's directory is gone.
-      GC leaves the task alone (degrade safe; never requeue on ignorance or an
-      unattributable snapshot).
+      register window). GC leaves the task alone (degrade safe; never requeue on
+      ignorance or an unattributable snapshot).
 
-    **Local-only exception:** when ``owner_session_id`` is not captured (no
-    session/claim ever existed for this attempt -- the normal shape of a
-    RESERVING-stage spawn failure) *and* the bridge resolver's answer is empty
-    (no live session at all) *and* the probe is local (``machine`` is None),
-    this additionally cross-checks the local agent-worktrees registry via
-    :func:`worktree_directory_present`. A worktree confirmed absent from that
-    registry (in every tracking status, not just active) resolves to
-    :data:`GONE` even without an owner identity: nothing can be occupying a
-    checkout that no longer exists. This exception does not apply to a remote
-    ``machine`` (no SSH plumbing for the registry check yet), which stays
-    :data:`UNKNOWN` in the same situation.
+    This function is the shared resolver for *every* claimed/started task's
+    liveness GC (:meth:`agent_dispatch.queue.TaskQueue.reconcile_liveness`), not
+    only spawn-reservation-owned worktrees -- a generically claimed task's
+    ``worktree`` may be an arbitrary handle with no agent-worktrees record at
+    all, and an uncaptured ``owner_session_id`` can legitimately mean "claim
+    not yet registered" for a still-live worker. It therefore never escalates
+    an uncaptured ``owner_session_id`` to :data:`GONE` by itself, no matter
+    what the bridge or the local agent-worktrees registry reports. A caller
+    that positively knows a specific worktree is exclusively owned by its own
+    spawn reservation (so the local agent-worktrees registry is authoritative
+    for that worktree's existence) may layer an additional, narrowly-scoped
+    absent-worktree check of its own on top of this result -- see
+    :func:`worktree_directory_present` and its caller in
+    ``supervisor.release_requested_bodies``.
 
     Never raises. Mirrors :func:`resolve_live_session`'s transport (local
     ``agent-bridge``; a remote owner over ``ssh <machine> agent-bridge``).
@@ -365,27 +366,15 @@ def liveness_verdict(
     if not isinstance(data, dict):
         return UNKNOWN
     # The resolver answered. Without a captured owner identity we cannot safely
-    # attribute an *occupied* worktree to this task's owner -> can't-tell.
+    # attribute the worktree's state to this task's owner -> can't-tell. This
+    # holds regardless of what the resolver answered (empty or occupied): a
+    # generically claimed task's worktree may have no agent-worktrees record
+    # at all, and an uncaptured owner_session_id can legitimately mean "claim
+    # not yet registered" for a still-live worker. A caller that knows better
+    # (its own spawn-reservation-owned worktree) layers its own additional
+    # check on top of this result instead -- see `worktree_directory_present`.
     if owner_session_id is None:
-        if data or machine is not None:
-            return UNKNOWN
-        # `{}` (no live session) on the *local* machine: an unattributed
-        # attempt (e.g. a RESERVING/RELEASING spawn reservation whose task
-        # never reached a captured owner_session_id, because the spawn failed
-        # before a session was ever created) can still be reaped once the
-        # worktree checkout itself is confirmed gone -- nothing can be
-        # occupying a directory that no longer exists, regardless of whose
-        # session was expected there. Cross-check the local agent-worktrees
-        # registry; an unresolved probe still degrades to UNKNOWN. This must
-        # NOT reuse `live_worktrees()`'s ACTIVE-only scope: a `finalized`
-        # worktree is explicitly allowed to remain fully present on disk, so
-        # excluding it here would misreport a real, existing checkout as
-        # "gone". `worktree_directory_present` checks across every tracking
-        # status and answers directory presence specifically.
-        present = worktree_directory_present(worktree)
-        if present is None:
-            return UNKNOWN
-        return UNKNOWN if present else GONE
+        return UNKNOWN
     if not data:
         return GONE  # `{}` (CLI 404): the worktree is empty -> our owner is gone
     current = data.get("session_id") or data.get("id")

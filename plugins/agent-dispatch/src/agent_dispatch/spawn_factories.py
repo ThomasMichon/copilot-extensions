@@ -37,6 +37,13 @@ LivenessFn = Callable[[str, "str | None"], "dict | None"]
 #: death). Injectable so tests drive verdicts deterministically.
 VerdictFn = Callable[[str, "str | None", "str | None"], str]
 
+#: A local agent-worktrees directory-presence probe: ``worktree -> True`` (still
+#: on disk, any tracking status), ``False`` (confirmed absent), or ``None``
+#: (resolver failure -- never treated as absence). Used only to retire an
+#: unleased, worktree-only spawn reservation whose task never captured an
+#: ``owner_session_id`` -- see :meth:`Supervisor.release_requested_bodies`.
+WorktreeDirectoryPresentFn = Callable[[str], "bool | None"]
+
 #: A nudge sender: ``(worktree, machine, task) -> sent?``. Delivers a non-blocking
 #: steering message to a stalled-but-live embodied session. Injectable for tests.
 NudgeFn = Callable[[str, "str | None", dict], bool]
@@ -114,6 +121,16 @@ def _default_verdict(worktree: str, machine: str | None, owner_session_id: str |
     from . import tracking
 
     return tracking.liveness_verdict(worktree, machine=machine, owner_session_id=owner_session_id)
+
+
+def _default_worktree_directory_present(worktree: str) -> bool | None:
+    """Whether ``worktree`` still exists on disk, per the local agent-worktrees
+    registry (any tracking status). Delegates to
+    :func:`agent_dispatch.tracking.worktree_directory_present`; ``None`` on any
+    resolver failure, never a guess."""
+    from . import tracking
+
+    return tracking.worktree_directory_present(worktree)
 
 
 def _default_nudge(worktree: str, machine: str | None, task: dict) -> bool:
