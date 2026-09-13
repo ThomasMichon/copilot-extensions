@@ -754,6 +754,30 @@ auto-recovery: without a headless bridge session handle, a synthetic-owner fleet
 body is still not auto-joined to the origin's live-session registry; use
 headless fleet for recoverable remote sweeps.
 
+**Retiring an unleased worktree-only reservation.** A `release_requested`
+reservation whose task never reached a captured `owner_session_id` (the normal
+shape of a RESERVING-stage spawn failure — the attempt failed before any
+session/claim ever existed) has no owner identity for `verdict_fn`/
+`tracking.liveness_verdict` to key a `gone` verdict on, so that shared,
+identity-keyed resolver stays `unknown` here exactly as it does for every
+other claimed/started task's liveness GC — it must not be loosened generally,
+since a generically claimed task's worktree may have no agent-worktrees
+record at all, and an uncaptured `owner_session_id` can legitimately mean
+"claim not yet registered" for a still-live worker.
+
+`release_requested_bodies`'s own worktree-only retirement branch layers one
+additional, narrowly-scoped check on top: when `verdict_fn` answers `unknown`
+for exactly this shape (no `owner_session_id`, a local owner, and the
+reservation's *own* recorded `worktree` — created by agent-dispatch itself via
+`embody.prepare_reusable_worktree`, so the local agent-worktrees registry is
+authoritative for whether it still exists), it cross-checks that registry
+directly (`worktree_directory_present_fn`, default
+`tracking.worktree_directory_present`) across every tracking status, not
+merely the ACTIVE-only set `live_worktrees()` uses for orphan reaping — a
+`finalized` worktree may still be fully present on disk. Only a confirmed
+absence retires the reservation; an unresolved probe or a remote owner's
+machine (no registry cross-check plumbing for that yet) leaves it `unknown`.
+
 ## Transport for a containerized producer
 
 A producer running in a **Docker container** (e.g. a scheduled sweep container)

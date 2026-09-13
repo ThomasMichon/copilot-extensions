@@ -77,6 +77,13 @@ def test_verdict_gone_when_worktree_empty(monkeypatch):
 def test_verdict_unknown_when_owner_identity_not_captured(monkeypatch):
     # Even with a live session present, no captured owner identity means we can't
     # attribute it -> unknown (the claim-before-registration false-positive guard).
+    # This holds even when the bridge answers empty and the local
+    # agent-worktrees registry would confirm the worktree gone: this shared
+    # resolver serves every claimed/started task's liveness GC, not only a
+    # spawn reservation's own worktree, so it never escalates an uncaptured
+    # owner_session_id to GONE by itself (see `worktree_directory_present` for
+    # the narrowly-scoped exception a spawn-reservation-owning caller may
+    # layer on top).
     _bridge_ok(monkeypatch)
     monkeypatch.setattr(
         tracking, "run_background_capture", _fake_run(0, '{"session_id": "S1"}')
@@ -84,6 +91,8 @@ def test_verdict_unknown_when_owner_identity_not_captured(monkeypatch):
     assert tracking.liveness_verdict("wt", owner_session_id=None) == tracking.UNKNOWN
     monkeypatch.setattr(tracking, "run_background_capture", _fake_run(0, "{}"))
     assert tracking.liveness_verdict("wt", owner_session_id=None) == tracking.UNKNOWN
+
+
 
 
 @pytest.mark.parametrize(
@@ -395,3 +404,43 @@ class TestLiveWorktrees:
             tracking, "run_agent_worktrees_capture", lambda *_a, **_k: None
         )
         assert tracking.live_worktrees() is None
+
+
+class TestWorktreeDirectoryPresent:
+    def test_true_when_row_present(self, monkeypatch):
+        monkeypatch.setattr(
+            tracking, "run_agent_worktrees_capture",
+            _fake_run(0, '[{"id": "wt", "status": "finalized"}]'),
+        )
+        assert tracking.worktree_directory_present("wt") is True
+
+    def test_false_when_no_row(self, monkeypatch):
+        monkeypatch.setattr(
+            tracking, "run_agent_worktrees_capture", _fake_run(0, "[]")
+        )
+        assert tracking.worktree_directory_present("wt") is False
+
+    def test_supports_object_wrapper(self, monkeypatch):
+        monkeypatch.setattr(
+            tracking, "run_agent_worktrees_capture",
+            _fake_run(0, '{"worktrees": [{"id": "wt"}]}'),
+        )
+        assert tracking.worktree_directory_present("wt") is True
+
+    def test_none_when_cli_absent(self, monkeypatch):
+        monkeypatch.setattr(
+            tracking, "run_agent_worktrees_capture", lambda *_a, **_k: None
+        )
+        assert tracking.worktree_directory_present("wt") is None
+
+    def test_none_on_nonzero_exit(self, monkeypatch):
+        monkeypatch.setattr(
+            tracking, "run_agent_worktrees_capture", _fake_run(2, "")
+        )
+        assert tracking.worktree_directory_present("wt") is None
+
+    def test_none_on_unparseable(self, monkeypatch):
+        monkeypatch.setattr(
+            tracking, "run_agent_worktrees_capture", _fake_run(0, "not json")
+        )
+        assert tracking.worktree_directory_present("wt") is None

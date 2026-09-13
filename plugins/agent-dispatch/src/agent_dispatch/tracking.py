@@ -318,6 +318,21 @@ def liveness_verdict(
       register window). GC leaves the task alone (degrade safe; never requeue on
       ignorance or an unattributable snapshot).
 
+    This function is the shared resolver for *every* claimed/started task's
+    liveness GC (:meth:`agent_dispatch.queue.TaskQueue.reconcile_liveness`), not
+    only spawn-reservation-owned worktrees -- a generically claimed task's
+    ``worktree`` may be an arbitrary handle with no agent-worktrees record at
+    all, and an uncaptured ``owner_session_id`` can legitimately mean "claim
+    not yet registered" for a still-live worker. It therefore never escalates
+    an uncaptured ``owner_session_id`` to :data:`GONE` by itself, no matter
+    what the bridge or the local agent-worktrees registry reports. A caller
+    that positively knows a specific worktree is exclusively owned by its own
+    spawn reservation (so the local agent-worktrees registry is authoritative
+    for that worktree's existence) may layer an additional, narrowly-scoped
+    absent-worktree check of its own on top of this result -- see
+    :func:`worktree_directory_present` and its caller in
+    ``supervisor.release_requested_bodies``.
+
     Never raises. Mirrors :func:`resolve_live_session`'s transport (local
     ``agent-bridge``; a remote owner over ``ssh <machine> agent-bridge``).
     """
@@ -351,7 +366,13 @@ def liveness_verdict(
     if not isinstance(data, dict):
         return UNKNOWN
     # The resolver answered. Without a captured owner identity we cannot safely
-    # attribute the worktree's state to this task's owner -> can't-tell.
+    # attribute the worktree's state to this task's owner -> can't-tell. This
+    # holds regardless of what the resolver answered (empty or occupied): a
+    # generically claimed task's worktree may have no agent-worktrees record
+    # at all, and an uncaptured owner_session_id can legitimately mean "claim
+    # not yet registered" for a still-live worker. A caller that knows better
+    # (its own spawn-reservation-owned worktree) layers its own additional
+    # check on top of this result instead -- see `worktree_directory_present`.
     if owner_session_id is None:
         return UNKNOWN
     if not data:
@@ -396,6 +417,49 @@ def live_worktrees(*, timeout: float = 5.0) -> set[str] | None:
         str(w["id"]) for w in wts
         if isinstance(w, dict) and w.get("id")
     }
+
+
+def worktree_directory_present(worktree: str, *, timeout: float = 5.0) -> bool | None:
+    """Whether ``worktree`` still exists on disk, per the local agent-worktrees
+    registry, in **any** tracking status.
+
+    Unlike :func:`live_worktrees` (deliberately ACTIVE-only, for orphan
+    reaping), this checks presence across ``active``/``complete``/
+    ``finalized``/``orphaned`` alike: a ``finalized`` worktree is explicitly
+    allowed to remain fully present on disk, so an ACTIVE-only scope would
+    misreport it as absent. The registry's own default listing (no ``--all``)
+    already excludes rows whose directory no longer exists on disk, so a
+    present row for this exact id is authoritative directory-presence
+    evidence; an empty result means the directory is genuinely gone.
+
+    Returns ``None`` on **any** resolver failure (no CLI, non-zero exit,
+    timeout, empty or unparseable output) so the caller degrades safe --
+    an unresolved probe never counts as "gone". Never raises.
+    """
+    proc = run_agent_worktrees_capture(
+        "list",
+        "--json",
+        "--tracking-status",
+        "all",
+        "--worktree-id",
+        worktree,
+        timeout=timeout,
+    )
+    if proc is None:
+        return None
+    if proc.returncode != 0:
+        return None
+    out = (proc.stdout or "").strip()
+    if not out:
+        return None
+    try:
+        data = json.loads(out)
+    except json.JSONDecodeError:
+        return None
+    wts = data.get("worktrees", data) if isinstance(data, dict) else data
+    if not isinstance(wts, list):
+        return None
+    return len(wts) > 0
 
 
 def enrich_task(
