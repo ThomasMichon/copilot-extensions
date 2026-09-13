@@ -577,7 +577,7 @@ def _ns(**kw):
     base = dict(seed=None, worktree_id=None, session_id=None, old_pane=None,
                 retire_pane=None, mux_session=None, require_mux_identity=False,
                 expected_copilot_pid=None, expected_copilot_start_time=None,
-                dry_run=False,
+                dry_run=False, retry=False, handoff_token=None,
                 copilot_args=[], recovery=False)
     base.update(kw)
     return argparse.Namespace(**base)
@@ -626,6 +626,15 @@ class TestCmdHandoffCutover:
         ])
         assert args.mux_session == "caller-session"
         assert args.require_mux_identity is True
+
+    def test_parser_accepts_retry(self):
+        args = m.build_parser().parse_args([
+            "handoff-cutover",
+            "--retry",
+            "--session-id", "predecessor-1",
+        ])
+        assert args.retry is True
+        assert args.session_id == "predecessor-1"
 
     def test_retire_rejects_reused_predecessor_pid(self, monkeypatch, capfd):
         monkeypatch.setattr(
@@ -1146,6 +1155,126 @@ class TestCmdHandoffCutover:
         # The seed is NOT a launch arg -- the plain launch cmd is reported as-is.
         assert out["cmd"] == ["bash", "setup.sh", "--allow-all-tools"]
         assert out["seed_len"] == len("continue the work")
+
+    def test_retry_refocuses_live_successor_without_spawning(
+        self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
+    ):
+        from agent_worktrees import tracking as _tracking
+
+        rec = _tracking.WorktreeRecord(
+            worktree_id="wt-retry-refocus",
+            branch="worktree/wt-retry-refocus",
+            worktree_path="/tmp/src/wt-retry-refocus",
+            repo="test-repo",
+            machine="test",
+            platform="wsl",
+            started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00",
+            resume_count=0,
+            title=None,
+            status="active",
+            completed_at=None,
+            sessions=[],
+        )
+        _tracking.save_record(rec, tmp_tracking_dir / "wt-retry-refocus.yaml")
+        _tracking.register_session("wt-retry-refocus", "predecessor-1")
+        _tracking.register_session("wt-retry-refocus", "successor-1")
+        loaded = _tracking.load_record(tmp_tracking_dir / "wt-retry-refocus.yaml")
+        _tracking.open_handoff(loaded, "predecessor-1", "task-retry-refocus")
+        _tracking.link_handoff(loaded, "task-retry-refocus", "successor-1")
+
+        monkeypatch.setattr(
+            m,
+            "_handoff_cutover_spawn_result",
+            lambda args: pytest.fail("live successor retry must not spawn"),
+        )
+        monkeypatch.setattr(
+            sessions,
+            "mux_binding_for_session",
+            lambda sid, **kwargs: {
+                "session_name": "wt-wt-retry-refocus",
+                "pane_id": "%22",
+            } if sid == "successor-1" else None,
+        )
+        monkeypatch.setattr(sessions, "_mux_bin", lambda mux=None: "tmux")
+        monkeypatch.setattr(sessions, "_mux_pane_alive", lambda pane, mux_bin: pane == "%22")
+        focused = {}
+        monkeypatch.setattr(
+            sessions,
+            "mux_focus_pane",
+            lambda session_name, pane_id, **kwargs: focused.update(
+                session=session_name, pane=pane_id,
+            ) or True,
+        )
+
+        rc = m.cmd_handoff_cutover(
+            _ns(retry=True, worktree_id="wt-retry-refocus", session_id="predecessor-1")
+        )
+
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["outcome"] == "refocused"
+        assert out["successor_session"] == "successor-1"
+        assert out["successor_pane"] == "%22"
+        assert focused == {"session": "wt-wt-retry-refocus", "pane": "%22"}
+
+    def test_retry_falls_back_to_spawn_when_no_live_successor(
+        self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
+    ):
+        from agent_worktrees import tracking as _tracking
+
+        rec = _tracking.WorktreeRecord(
+            worktree_id="wt-retry-spawn",
+            branch="worktree/wt-retry-spawn",
+            worktree_path="/tmp/src/wt-retry-spawn",
+            repo="test-repo",
+            machine="test",
+            platform="wsl",
+            started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00",
+            resume_count=0,
+            title=None,
+            status="active",
+            completed_at=None,
+            sessions=[],
+        )
+        _tracking.save_record(rec, tmp_tracking_dir / "wt-retry-spawn.yaml")
+        _tracking.register_session("wt-retry-spawn", "predecessor-1")
+        loaded = _tracking.load_record(tmp_tracking_dir / "wt-retry-spawn.yaml")
+        _tracking.open_handoff(loaded, "predecessor-1", "task-retry-spawn")
+
+        monkeypatch.setattr(
+            m,
+            "_monitor_read_session_state_handoff",
+            lambda path: {
+                "handoffId": "task-retry-spawn",
+                "seed": "HANDOFF_SEED",
+                "promptText": "stored markdown",
+            },
+        )
+        monkeypatch.setattr(
+            sessions,
+            "mux_binding_for_session",
+            lambda sid, **kwargs: None,
+        )
+        captured = {}
+
+        def _spawn(args):
+            captured["args"] = args
+            return 0, {"ok": True, "session": "wt-wt-retry-spawn", "new_pane": "%33"}
+
+        monkeypatch.setattr(m, "_handoff_cutover_spawn_result", _spawn)
+
+        rc = m.cmd_handoff_cutover(
+            _ns(retry=True, worktree_id="wt-retry-spawn", session_id="predecessor-1")
+        )
+
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["outcome"] == "spawned"
+        assert captured["args"].seed == "HANDOFF_SEED"
+        assert captured["args"].handoff_token == "task-retry-spawn"
+        assert captured["args"].session_id == "predecessor-1"
 
     def test_spawn_dry_run_prefers_recorded_copilot_pane(
         self, monkeypatch, capfd, tmp_path
@@ -2038,4 +2167,3 @@ class TestCmdHandoffsCheck:
         assert out["found"] == len(sessions_chain) - 1
         assert sorted(retired_panes) == ["%0", "%1", "%2"]
         assert all(f["retired"] for f in out["findings"])
-

@@ -20,6 +20,7 @@ import {
   isolatedPythonArgs,
   manualFallbackInstructions,
   normalizeHandoffTitle,
+  retryStoredHandoffCutover,
   resolveSystemCli,
   runtimeEnvironment,
   safePathSegment,
@@ -273,6 +274,31 @@ test("checkHeadAlignment flags pending handoffs missing from the monitor registr
     assert.equal(result.findings[0].worktree.id, "dormant");
     assert.equal(result.findings[0].monitorSession, "wt-dormant");
   });
+});
+
+test("retryStoredHandoffCutover shells to agent-worktrees handoff-cutover --retry", () => {
+  const calls = [];
+  const result = retryStoredHandoffCutover(
+    "C:\\repo",
+    "predecessor-1",
+    (bin, argv, opts) => {
+      calls.push({ bin, argv, opts });
+      return JSON.stringify({
+        ok: true,
+        outcome: "refocused",
+        session: "wt-demo",
+        successor_session: "successor-1",
+        successor_pane: "%5",
+      });
+    },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.outcome, "refocused");
+  assert.deepEqual(calls, [{
+    bin: "agent-worktrees",
+    argv: ["handoff-cutover", "--retry", "--session-id", "predecessor-1", "--json"],
+    opts: { cwd: "C:\\repo", timeout: 30000 },
+  }]);
 });
 
 test("session-state handoff records can be written and marked consumed", () => {

@@ -603,6 +603,29 @@ export function checkHeadAlignment(cwd, execute = runCli) {
   };
 }
 
+export function retryStoredHandoffCutover(cwd, sid, execute = runCli) {
+  if (!sid) {
+    return {
+      ok: false,
+      error: "retry-cutover requires --session-id or COPILOT_AGENT_SESSION_ID",
+    };
+  }
+  try {
+    return cliJson(
+      "agent-worktrees",
+      ["handoff-cutover", "--retry", "--session-id", sid, "--json"],
+      cwd,
+      30000,
+      execute,
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      error: describeCliError(error) || "Could not retry handoff cutover.",
+    };
+  }
+}
+
 export function writeJsonAtomic(path, value) {
   const tmp = `${path}.${process.pid}.tmp`;
   try {
