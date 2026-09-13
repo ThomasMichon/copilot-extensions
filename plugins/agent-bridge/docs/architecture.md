@@ -446,6 +446,12 @@ restart does not inherently close the child's pipes.
   losing the successfully created conversation. Durable container partial-launch
   markers block every background recovery eligibility check, even when restart
   provenance exists but no host-index row survived.
+  If process-owned teardown fails during shutdown, the frontend does not close
+  its database or discard its only process handle: shutdown remains pending
+  and retries cleanup every five seconds with explicit error logs until exit
+  is confirmed. Repeated cancellation cannot abandon that cleanup owner.
+  Forced process termination by an external supervisor is outside this
+  graceful-shutdown guarantee.
   The manager remains the public facade; `session_resume.py`,
   `session_teardown.py`, and `session_ownership.py` own the bounded lifecycle
   implementations. Additive session migrations live in `db_migrations.py`.
