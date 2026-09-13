@@ -438,6 +438,7 @@ async def test_authority_result_is_stale_after_completed_prompt_admission(
 ):
     ctx = owned_context
     record = _remote_record(ctx)
+    admissions = []
     ctx.session.client = SimpleNamespace(
         is_running=True, pid=123, session_host_client=None,
         has_active_background_tasks=False, active_background_tasks=[],
@@ -450,7 +451,9 @@ async def test_authority_result_is_stale_after_completed_prompt_admission(
         admission = asyncio.create_task(
             ctx.manager.submit_prompt(ctx.session.session_id, "new turn")
         )
-        await admission
+        admissions.append(admission)
+        await asyncio.sleep(0)
+        assert not admission.done()
         return None
 
     spawner = SimpleNamespace(
@@ -465,6 +468,7 @@ async def test_authority_result_is_stale_after_completed_prompt_admission(
     cleanup = AsyncMock()
     monkeypatch.setattr(ctx.manager, "_drop_forward", cleanup)
     assert await ctx.manager._recover_remote_host_records(background=True) == 0
+    await admissions[0]
     await ctx.session._prompt_task
     cleanup.assert_not_awaited()
     assert ctx.manager._host_index.get(ctx.session.session_id) == record
@@ -1335,3 +1339,40 @@ async def test_stop_contains_independent_channels_after_process_failure(
     assert ctx.session._owned_process is process
     assert ctx.session.status == SessionStatus.FAILED
     assert (ctx.session.session_id in ctx.manager._relays) is relay_fails
+
+
+async def test_background_authority_probe_requires_turn_admission(owned_context, monkeypatch):
+    ctx = owned_context
+    record = _remote_record(ctx)
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def inspect():
+        assert ctx.session._turn_start_lock.locked()
+        assert ctx.session._lifecycle_lock.locked()
+        entered.set()
+        await release.wait()
+        return True
+
+    spawner = SimpleNamespace(
+        can_inspect_without_wake=AsyncMock(side_effect=inspect),
+        recover_record=AsyncMock(return_value=record),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
+        Mock(return_value=spawner),
+    )
+    monkeypatch.setattr("agent_bridge.relay_state.get_live_relay_port", lambda: None)
+    async with ctx.session._turn_start_lock:
+        assert await ctx.manager._recover_remote_host_records(background=True) == 0
+    spawner.can_inspect_without_wake.assert_not_awaited()
+    recovery = asyncio.create_task(ctx.manager._recover_remote_host_records(background=True))
+    await asyncio.wait_for(entered.wait(), 2)
+    stop = asyncio.create_task(ctx.manager.stop_session(record.session_id))
+    await asyncio.sleep(0)
+    assert not stop.done()
+    release.set()
+    await asyncio.wait_for(asyncio.gather(recovery, stop), 2)
+    assert ctx.session.status == SessionStatus.STOPPED
+    assert await ctx.manager._recover_remote_host_records(background=True) == 0
+    spawner.can_inspect_without_wake.assert_awaited_once()
+    spawner.recover_record.assert_awaited_once()

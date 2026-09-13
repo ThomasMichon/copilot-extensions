@@ -2384,8 +2384,9 @@ class SessionManager:
                 if background:
                     eligible = []
                     for session, existing in entries:
-                        if session._lifecycle_lock.locked():
+                        if session._turn_start_lock.locked() or session._lifecycle_lock.locked():
                             continue
+                        await locks.enter_async_context(session._turn_start_lock)
                         await locks.enter_async_context(session._lifecycle_lock)
                         if (
                             self._background_recovery_allowed(session)
