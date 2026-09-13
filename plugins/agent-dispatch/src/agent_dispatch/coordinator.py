@@ -723,6 +723,19 @@ class SteerBody(BaseModel):
     message: str | None = None
 
 
+class CardDraftBody(BaseModel):
+    """An operator's **not-yet-submitted** draft answer to a task's card.
+
+    Distinct from :class:`SteerBody`: saving a draft never resolves
+    ``awaiting_steer`` or moves the task's status -- it is a durable,
+    coordinator-visible scratchpad for a partial or complete answer the
+    operator hasn't submitted yet, readable from any surface/machine via
+    ``GET /tasks/{task_id}/card`` (not a local sidecar file). Not worker-owned,
+    mirroring :class:`SteerBody`."""
+
+    fields: dict = Field(default_factory=dict)
+
+
 class SteerTakeBody(BaseModel):
     """A worker consuming the next pending steer for a task it owns."""
 
@@ -2002,6 +2015,24 @@ def create_app(
                 else "no_owner" if body.wake else "not_requested"
             ),
         }
+
+    @app.post("/tasks/{task_id}/card-draft")
+    def save_card_draft(task_id: str, body: CardDraftBody) -> dict:
+        """Persist an operator's not-yet-submitted draft answer. Never touches
+        ``awaiting_steer``/status -- the task stays blocked exactly as before."""
+        return _guard(
+            lambda: queue.save_card_draft(task_id, fields=body.fields),
+            "task.card_draft",
+        )
+
+    @app.delete("/tasks/{task_id}/card-draft")
+    def clear_card_draft(task_id: str) -> dict:
+        """Clear a task's saved draft (the Steer form's Reset). Never touches
+        ``awaiting_steer``/status -- the task stays blocked exactly as before."""
+        return _guard(
+            lambda: queue.clear_card_draft(task_id),
+            "task.card_draft_cleared",
+        )
 
     @app.post("/tasks/{task_id}/steer/take")
     def steer_take(task_id: str, body: SteerTakeBody) -> dict:
