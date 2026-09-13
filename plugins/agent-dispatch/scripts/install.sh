@@ -1487,11 +1487,20 @@ do_start() {
 
 
 do_stop() {
-    command -v systemctl >/dev/null 2>&1 || { _fail 'systemd not available'; exit 1; }
     _for_each_present_supervisor_unit _stop_supervisor_callback
-    if systemctl --user is-active "$SYSTEMD_UNIT" &>/dev/null; then
+    if command -v systemctl >/dev/null 2>&1 && systemctl --user is-active "$SYSTEMD_UNIT" &>/dev/null; then
         systemctl --user stop "$SYSTEMD_UNIT" 2>/dev/null || true
         _ok "Coordinator stopped"
+        return 0
+    fi
+    # Not managed by (or not currently active under) systemd: it may still be a
+    # directly-spawned coordinator (the tier-1 do_start fallback above, #2524,
+    # or plain CLI lazy-autostart) that systemctl was never going to reach.
+    # Stop it gracefully over its own HTTP /shutdown route instead of leaving
+    # it running unmanaged.
+    local rt_py
+    if rt_py="$(_resolve_runtime_python)" && "$rt_py" -m agent_dispatch _stop-coordinator >/dev/null 2>&1; then
+        _ok "Coordinator stopped (direct, or already down)"
     else
         _skip "Coordinator not running"
     fi

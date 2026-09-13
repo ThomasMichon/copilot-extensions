@@ -175,3 +175,55 @@ def test_ensure_coordinator_is_wired_into_the_cli_parser():
     an unlisted/undocumented installer-only entrypoint)."""
     args = _args(["_ensure-coordinator"])
     assert args.func is m._cmd_ensure_coordinator
+
+
+class _FakeClient:
+    def __init__(self):
+        self.shutdown_called = False
+
+    def shutdown(self):
+        self.shutdown_called = True
+        return {"shutdown": True}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def test_stop_coordinator_cmd_is_noop_when_nothing_live(monkeypatch):
+    """`_stop-coordinator` (installer-only, do_stop's direct-stop fallback for
+    a coordinator not managed by systemd) must never try to build a client --
+    let alone raise -- when nothing is reachable to stop."""
+    monkeypatch.setattr("agent_dispatch.config.has_live_local_coordinator", lambda: False)
+    called = []
+    monkeypatch.setattr(m, "_client", lambda *a, **k: called.append(True))
+    rc = m._cmd_stop_coordinator(_args(["_stop-coordinator"]))
+    assert rc == 0
+    assert called == []
+
+
+def test_stop_coordinator_cmd_shuts_down_a_live_coordinator(monkeypatch):
+    monkeypatch.setattr("agent_dispatch.config.has_live_local_coordinator", lambda: True)
+    fake = _FakeClient()
+    monkeypatch.setattr(m, "_client", lambda *a, **k: fake)
+    rc = m._cmd_stop_coordinator(_args(["_stop-coordinator"]))
+    assert rc == 0
+    assert fake.shutdown_called
+
+
+def test_stop_coordinator_cmd_fails_soft_on_client_error(monkeypatch):
+    monkeypatch.setattr("agent_dispatch.config.has_live_local_coordinator", lambda: True)
+
+    def _boom(*a, **k):
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(m, "_client", _boom)
+    rc = m._cmd_stop_coordinator(_args(["_stop-coordinator"]))
+    assert rc == 1
+
+
+def test_stop_coordinator_is_wired_into_the_cli_parser():
+    args = _args(["_stop-coordinator"])
+    assert args.func is m._cmd_stop_coordinator
