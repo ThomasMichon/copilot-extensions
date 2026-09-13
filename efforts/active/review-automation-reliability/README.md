@@ -467,6 +467,66 @@ scenarios.
 
 ## Journal
 
+### 2026-09-12 - Componentize queue.py further: extract queue_routing_assignments.py
+
+- Continuing the operator's standing componentization instruction, this
+  time applying the lesson from the previous slice's review findings
+  proactively rather than reactively. Picked the routing-assignment
+  lifecycle cluster in `queue.py` (`record_routing_assignment`,
+  `transition_routing_assignment`, `record_routing_billing_ref`,
+  `get_routing_assignment`, `list_routing_assignments`,
+  `routing_assignment_events` -- ~350 contiguous lines) -- a distinct
+  concern (routing provenance / billing-ref tracking for spawn attempts)
+  from the surrounding spawn-reservation lifecycle methods, verified via
+  the same AST-free-name-walk + test-monkeypatch grep as every prior
+  slice (none of the six methods is mocked by name anywhere in
+  `tests/`).
+- Extracted them into a new `RoutingAssignmentMixin` in
+  `queue_routing_assignments.py` (402 lines), composed via
+  `class TaskQueue(ScheduleRegistrationMixin, RoutingAssignmentMixin):`.
+  **Applied the `queue_records.py` lesson from the start this time**:
+  `RoutingAssignment`/`normalize_assignment`/`RoutingProvenanceError`/
+  `routing_token`/`ROUTING_SCHEMA_VERSION`/`ACTOR_ROLES`/
+  `TERMINAL_DISPOSITIONS` already lived in `.routing_provenance` (a
+  module `queue.py` only ever re-exported, never defined), so the new
+  module imports them directly with zero circular-import risk. The one
+  name genuinely defined in `queue.py` that the cluster needed --
+  `SpawnState` (used pervasively elsewhere in `queue.py` too, 57 other
+  call sites) -- was moved into the existing dependency-free
+  `queue_records.py` alongside `TaskError`/`ScheduleRecord`/
+  `ScheduleLease`/`ResourceReservation`, exactly the shared-module
+  pattern the prior slice's review settled on, rather than repeating the
+  `TYPE_CHECKING`-guarded lazy-import mistake. Verified
+  `typing.get_type_hints()` resolves cleanly on every moved method
+  *before* opening the PR this time (a dedicated regression test asserts
+  it, mirroring `queue_schedule_registry.py`'s own guard).
+- `queue.py` re-exports the `.routing_provenance` names it used to import
+  (now via `# noqa: F401`, matching the established precedent) so nothing
+  outside this split notices a change -- learned from the accidental
+  `.registrations` re-export drop the prior slice's review caught.
+- Added `tests/test_queue_routing_assignments.py`: two `pytest.mark.guard`
+  import-guard tests, a guard-marked `get_type_hints()` regression test,
+  and one end-to-end test exercising the full assignment lifecycle
+  (record -> transition -> billing-ref -> events) against a real
+  `TaskQueue`. Full behavioral coverage for every moved method already
+  existed through the composed `TaskQueue` (`test_routing_provenance.py`,
+  429 lines) and needed no changes.
+- `queue.py` dropped from 6,394 to **5,999 lines** (under 6,000 for the
+  first time this effort); `queue_routing_assignments.py`: 402 lines;
+  `queue_records.py` grew to 161 lines (added `SpawnState`). All three
+  comfortably under the 1,000-line cap. `tools/module-size-baseline.json`
+  refreshed (shrink-only) for `queue.py`.
+- Full `agent-dispatch` suite (`tools/run-plugin-tests.py agent-dispatch`,
+  2,665 tests across 5 sub-suites) passed before and after; zero
+  regressions. `--guards` picks up the two new guard-marked tests
+  (8 total agent-dispatch guard tests now).
+- `ruff check --select F,E9` (CI's gate) and `ruff format` clean on every
+  changed/new file.
+- Bumped agent-dispatch 0.1.2-dev88 -> dev89 (rebased onto `origin/main`
+  after an unrelated PR had already claimed dev88; re-bumped to the next
+  free version) and ran the
+  instruction-projections sync immediately after.
+
 ### 2026-09-12 - Componentize queue.py: extract queue_schedule_registry.py
 
 - Continuing the operator's standing componentization instruction. Picked
