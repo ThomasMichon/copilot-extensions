@@ -105,11 +105,28 @@ independently-diverging Picker/Mux implementations.)
 ## Plan
 
 ### Phase 1 — Same-machine, any-repo listing
-- [ ] Add `--all-projects` (mirroring `agents`/`machines`) to the `sessions`
-      subparser and to `live-sessions list`; wire through `_listing_project()`
-      so the semantics (default = caller's project, explicit `--all-projects`
-      = everything, JSON mode defaults broad like `agents` already does)
-      match the existing verbs exactly.
+
+**Decided compatibility contract (resolves review finding "Do not silently
+narrow existing session listings"):** `_cmd_sessions`/`_cmd_live_sessions`
+apply **no filter today** — the no-flag default already returns every
+session on the daemon regardless of project, straight from
+`SessionManager.list_sessions()`/the unfiltered `/api/v1/sessions` route.
+That default **must not narrow**. `--all-projects` is therefore added only
+for **symmetry/discoverability** with `agents`/`machines` (an explicit,
+self-documenting way to say "yes, all of them") and is a no-op relative to
+today's default. The **new, actually-narrowing** capability is an explicit
+`--project <repo>` (or reusing the caller's cwd project when passed with no
+value), which does not exist today and is the option a caller reaches for to
+scope *down*. `--project` and `--all-projects` remain mutually exclusive,
+matching `agents`/`machines`.
+
+- [ ] Add `--project`/`--all-projects` to the `sessions` subparser and to
+      `live-sessions list`, wired through `_listing_project()`; confirm the
+      no-flag default is byte-for-byte unchanged (still unfiltered) via a
+      regression test before touching anything else.
+- [ ] Filter (only when `--project` is given) at the CLI layer against the
+      session/live-session's existing `project` field — no new server-side
+      filtering route needed since the field is already returned.
 - [ ] Surface the owning project/repo in both the human-readable and JSON
       output for `sessions` and `live-sessions list` (the field already exists
       server-side; only display is missing) — needed so an any-repo listing
@@ -117,8 +134,11 @@ independently-diverging Picker/Mux implementations.)
 - [ ] Add `sessions`/`live-sessions` to `_PROJECT_CONSUMING_VERBS` (or an
       equivalent listing-only allowance) so an explicit `--project <repo>`
       scopes down instead of being rejected by `_guard_project_scope`.
-- [ ] Unit/CLI tests: default scoping, `--all-projects`, explicit
-      `--project <repo>`, and JSON field presence.
+- [ ] Tests: **no-flag default unchanged** (mixed-project fixture: sessions
+      from 2+ distinct projects registered, no-flag call returns all of
+      them, unchanged from pre-change behavior), `--all-projects` (explicit,
+      equivalent to default), explicit `--project <repo>` (narrows), and JSON
+      field presence for the project label.
 
 ### Phase 2 — Cross-machine, same-repo lookup
 - [ ] Design the wire shape: a new verb (working name `agent-bridge find
@@ -131,11 +151,29 @@ independently-diverging Picker/Mux implementations.)
 - [ ] Server-side: a peer-bridge endpoint that answers "do you have a live
       session for repo X" from its own (already project-tagged) session list
       — reuses Phase 1's any-repo listing internally, filtered to one repo.
+- [ ] **Protocol-version gating (resolves review finding "Account for
+      protocol-version gating in the wire plan"):** this is a new,
+      behaviorful HTTP capability on the peer-bridge wire contract, so it
+      follows the existing pattern other capability additions use
+      (`plugins/agent-bridge/src/agent_bridge/protocol.py` version
+      constants; `BridgeClient.daemon_supports()` /
+      `assert_client_supported()` in `client.py`, e.g. the
+      `REMOTE_OPERATIONS_PROTOCOL_VERSION` / `REMOTE_COMMANDS_PROTOCOL_VERSION`
+      gates already in place for `remote.py`'s cross-machine routes):
+  - [ ] Reserve a new protocol version constant for the find/locate peer
+        endpoint.
+  - [ ] Client-side: gate the fan-out call per peer with
+        `daemon_supports(...)`; a peer running an older daemon is reported as
+        "unsupported" (not a hard failure) rather than erroring the whole
+        lookup.
+  - [ ] Define the exact unsupported-peer result shape returned to the CLI
+        (distinct from "unreachable" and "no session for this repo").
 - [ ] CLI: implement `find`/`locate`, including a reasonable timeout/partial-
       result story when some peers are unreachable (mirror how `machines`
-      already reports topology errors via `_report_topology_errors`).
+      already reports topology errors via `_report_topology_errors`), and
+      surfacing unsupported-peer results distinctly from true misses.
 - [ ] Tests: single match, multiple matches, no matches, partial mesh
-      unreachability.
+      unreachability, and an unsupported (old-protocol) peer.
 
 ### Phase 3 — Docs
 - [ ] Update `plugins/agent-bridge` CLI reference docs for the new
