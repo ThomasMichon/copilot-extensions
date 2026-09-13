@@ -530,7 +530,16 @@ scenarios.
   to track the agent-worktrees drift as a real componentization debt (not
   silently absorbed), and widened only that one baseline entry to 28,931
   as a documented, deliberate unblock -- not a decision that further growth
-  there is fine.
+  there is fine. A second, also-unrelated CI break from the same #2568
+  surfaced on the same push: `test_check_marketplace_isolation.py`'s
+  bare-global-command guard newly failed on
+  `plugins/context-handoff/skills/diagnosing-handoff-cutover/SKILL.md`
+  (added by #2568), which references `agent-worktrees` commands in prose
+  without the established `<!-- marketplace-isolation: allow ... -->`
+  marker every other skill doc in the repo already carries for the same
+  pattern. Added that marker to the five flagged lines (mechanical,
+  content-preserving) rather than filing a second issue for something this
+  small and this clearly convention-shaped.
 - Bumped agent-dispatch 0.1.2-dev93 -> dev94 and ran the
   instruction-projections sync immediately after.
 
