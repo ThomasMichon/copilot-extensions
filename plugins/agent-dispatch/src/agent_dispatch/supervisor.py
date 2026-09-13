@@ -1558,14 +1558,20 @@ class Supervisor:
                             # local registry for a worktree that in fact
                             # lives on a different host and wrongly retire a
                             # still-live remote reservation. Confirm absence
-                            # directly (scoped to the reservation's own repo
-                            # project, since this daemon is CWD-neutral)
-                            # instead of staying unknown forever.
+                            # directly (scoped to the same allocation project
+                            # this worktree was actually created under, since
+                            # this daemon is CWD-neutral) instead of staying
+                            # unknown forever.
                             from . import embody
 
+                            probe_project = self._spawn_attribute(
+                                task,
+                                "allocation_project",
+                                embody.project_for_task(task) or "",
+                            ) or None
                             try:
                                 present = self.worktree_directory_present_fn(
-                                    worktree, embody.project_for_task(task)
+                                    worktree, probe_project
                                 )
                             except Exception:
                                 present = None

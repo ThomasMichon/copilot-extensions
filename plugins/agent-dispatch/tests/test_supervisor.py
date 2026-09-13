@@ -3918,6 +3918,51 @@ def test_retires_unleased_worktree_reservation_when_directory_confirmed_absent(
     assert probe_calls == [("wt-gone", embody.project_for_task({"repo": TEST_REPO}))]
 
 
+def test_probes_the_spawn_fns_own_allocation_project_when_overridden(q, client):
+    # A routed/headless spawn_fn can select an allocation project different
+    # from plain embody.project_for_task(task) (e.g. via an
+    # `allocation_project_for` selector) -- the same one _prepare_spawn_task
+    # would have used to actually create this worktree. The absence probe
+    # must be scoped to THAT project, not silently re-derive a possibly
+    # different one, or it can query the wrong project's registry and
+    # wrongly retire a still-present worktree.
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-routed",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    q.request_spawn_release(
+        reservation.key,
+        detail="worktree preparation failed",
+        disposition="failed",
+    )
+    spawn = _ok_spawn()
+    spawn.allocation_project_for = lambda _task: "routed-project"
+    probe_calls = []
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        machine="host-a",
+        verdict_fn=lambda *_args: "unknown",
+        worktree_directory_present_fn=lambda wt, project: probe_calls.append(
+            (wt, project)
+        ) or False,
+        attempt_conclusion_fn=lambda *_args: {
+            "action": "failed",
+            "reason": "lifecycle lock busy",
+        },
+        nudge=False,
+    )
+
+    assert sup.release_requested_bodies() == 1
+    assert probe_calls == [("wt-routed", "routed-project")]
+
+
 def test_keeps_unleased_worktree_reservation_when_directory_still_present(
     q, client
 ):

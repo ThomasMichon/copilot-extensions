@@ -777,8 +777,12 @@ this plugin — created by agent-dispatch itself via
 `embody.prepare_reusable_worktree`, so the local agent-worktrees registry is
 authoritative for whether it still exists), it cross-checks that registry
 directly (`worktree_directory_present_fn`, default
-`tracking.worktree_directory_present`, scoped to the reservation's own repo
-project via `embody.project_for_task` since this daemon is CWD-neutral)
+`tracking.worktree_directory_present`, scoped to the **same allocation
+project** `_prepare_spawn_task` would have used to actually create this
+worktree -- `self._spawn_attribute(task, "allocation_project",
+embody.project_for_task(task) or "")`, not a plain re-derivation, since a
+routed/headless `spawn_fn` can select a different project via an
+`allocation_project_for` selector; this daemon is CWD-neutral either way)
 across every tracking status, not merely the ACTIVE-only set
 `live_worktrees()` uses for orphan reaping — a `finalized` worktree may still
 be fully present on disk. Only a confirmed absence retires the reservation;
