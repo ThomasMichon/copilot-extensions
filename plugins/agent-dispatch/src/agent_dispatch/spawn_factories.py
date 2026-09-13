@@ -37,6 +37,16 @@ LivenessFn = Callable[[str, "str | None"], "dict | None"]
 #: death). Injectable so tests drive verdicts deterministically.
 VerdictFn = Callable[[str, "str | None", "str | None"], str]
 
+#: A local agent-worktrees directory-presence probe:
+#: ``(worktree, project) -> True`` (still on disk, any tracking status),
+#: ``False`` (confirmed absent), or ``None`` (resolver failure -- never
+#: treated as absence). ``project`` names the target project explicitly (a
+#: CWD-neutral supervisor cannot rely on CWD-based project discovery). Used
+#: only to retire an unleased, worktree-only spawn reservation whose task
+#: never captured an ``owner_session_id`` -- see
+#: :meth:`Supervisor.release_requested_bodies`.
+WorktreeDirectoryPresentFn = Callable[[str, "str | None"], "bool | None"]
+
 #: A nudge sender: ``(worktree, machine, task) -> sent?``. Delivers a non-blocking
 #: steering message to a stalled-but-live embodied session. Injectable for tests.
 NudgeFn = Callable[[str, "str | None", dict], bool]
@@ -114,6 +124,19 @@ def _default_verdict(worktree: str, machine: str | None, owner_session_id: str |
     from . import tracking
 
     return tracking.liveness_verdict(worktree, machine=machine, owner_session_id=owner_session_id)
+
+
+def _default_worktree_directory_present(
+    worktree: str, project: str | None = None
+) -> bool | None:
+    """Whether ``worktree`` still exists on disk, per the local agent-worktrees
+    registry (any tracking status). ``project`` is threaded through to name the
+    target project explicitly, since this runs from a CWD-neutral supervisor.
+    Delegates to :func:`agent_dispatch.tracking.worktree_directory_present`;
+    ``None`` on any resolver failure, never a guess."""
+    from . import tracking
+
+    return tracking.worktree_directory_present(worktree, project=project)
 
 
 def _default_nudge(worktree: str, machine: str | None, task: dict) -> bool:
@@ -456,6 +479,18 @@ def make_embody_spawn(
         if result.returncode != 0:
             return False, {"error": (result.stderr or "").strip()[:200] or "nonzero exit"}
         handle = embody.parse_handle(result)
+        if not handle.get("session"):
+            # A zero exit with no recognizable session id is not a usable
+            # success: record_spawn would persist a SPAWNED reservation with
+            # session_handle=None, indistinguishable from a reservation that
+            # never reached spawning anything at all -- an ambiguity that
+            # would let a later release_requested_bodies() cleanup pass
+            # wrongly treat a genuinely-launched (but unidentifiable) body as
+            # confirmed absent. Fail loudly instead so this attempt is
+            # retried rather than silently spawning an untrackable body.
+            return False, {
+                "error": "embody reported success but returned no session id"
+            }
         return True, handle
 
     spawn.requires_reusable_worktree = True

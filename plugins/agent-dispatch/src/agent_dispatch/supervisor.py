@@ -65,6 +65,7 @@ from .spawn_factories import (  # noqa: F401 -- re-exported for existing call si
     SpawnFn,
     SpawnPreparationRetained,
     VerdictFn,
+    WorktreeDirectoryPresentFn,
     _default_attempt_conclusion,
     _default_conclusion,
     _default_fleet_activity,
@@ -82,6 +83,7 @@ from .spawn_factories import (  # noqa: F401 -- re-exported for existing call si
     _default_nudge,
     _default_redrive,
     _default_verdict,
+    _default_worktree_directory_present,
     _machine_from_owner,
     _parse_fleet_body_handle,
     _parse_local_body_handle,
@@ -172,6 +174,7 @@ class Supervisor:
         attempt_conclusion_fn: AttemptConclusionFn | None = None,
         machine: str | None = None,
         capacity_gate: Callable[[dict], bool] | None = None,
+        worktree_directory_present_fn: WorktreeDirectoryPresentFn | None = None,
         evaluator: Any | None = None,
         evaluator_ref: str | None = None,
         evaluate_limit: int = 100,
@@ -227,6 +230,26 @@ class Supervisor:
         #: Tri-state verdict resolver used by :meth:`recover_gone`. Injectable so
         #: tests drive ``gone``/``live``/``unknown`` deterministically.
         self.verdict_fn = verdict_fn or _default_verdict
+        #: Local agent-worktrees directory-presence probe, used **only** by
+        #: :meth:`release_requested_bodies`' unleased worktree-only retirement
+        #: branch: when ``verdict_fn`` answers ``unknown`` because the task
+        #: never captured an ``owner_session_id`` AND its reservation never
+        #: recorded a ``session_handle`` either (a RESERVING-stage spawn
+        #: failure that never even reached spawning a body -- a spawned body
+        #: with a recorded handle must resolve through its own liveness path
+        #: instead, never this shortcut), this reservation's own recorded
+        #: worktree -- which agent-dispatch itself created on THIS host
+        #: (gated on a matching ``creating_host``, since a shared
+        #: cross-machine queue's reservation may have been created elsewhere)
+        #: -- can still be confirmed gone by checking the local
+        #: agent-worktrees registry directly, scoped to the reservation's own
+        #: repo project (this daemon is CWD-neutral). Never used to escalate
+        #: general claimed/started task liveness GC, where an owner's
+        #: worktree may have no agent-worktrees record at all. Injectable for
+        #: tests; ``None`` (unresolved probe) never counts as gone.
+        self.worktree_directory_present_fn = (
+            worktree_directory_present_fn or _default_worktree_directory_present
+        )
         #: Tri-state verdict resolver for **headless fleet bodies** (probes the
         #: body's agent-bridge session on its pool host over SSH). Used by
         #: :meth:`recover_gone` (re-embody a confirmed-gone body) and
@@ -1508,6 +1531,75 @@ class Supervisor:
                             )
                         except Exception:
                             verdict = _tracking().UNKNOWN
+                        if (
+                            verdict == _tracking().UNKNOWN
+                            and task.get("owner") is None
+                            and task.get("owner_session_id") is None
+                            and not res.get("session_handle")
+                            and res.get("worktree") == worktree
+                            and res.get("worktree_ownership") == "created"
+                            and isinstance(res.get("creating_host"), str)
+                            and res["creating_host"].casefold()
+                            == (self.machine or "").casefold()
+                        ):
+                            # This reservation's own recorded worktree was
+                            # created by agent-dispatch itself on THIS host
+                            # (embody.prepare_reusable_worktree), so the local
+                            # agent-worktrees registry is authoritative for
+                            # whether it still exists on disk -- unlike
+                            # verdict_fn's general owner-identity-keyed
+                            # contract (required for arbitrary claimed tasks
+                            # whose worktree may have no agent-worktrees
+                            # record at all), an uncaptured owner_session_id
+                            # here just means this RESERVING-stage attempt's
+                            # spawn failed before any session/claim ever
+                            # existed. The `not session_handle` gate matters
+                            # separately: a spawned-but-never-claimed body
+                            # (or one that yielded after claiming) can ALSO
+                            # have owner/owner_session_id both None while
+                            # `session_handle` still names a real recorded
+                            # body -- that body's actual liveness must be
+                            # resolved through its own recorded handle (the
+                            # fleet/local-body branches above, or verdict_fn's
+                            # ordinary session comparison once claimed), never
+                            # bypassed by this worktree-directory-only
+                            # shortcut. The creating_host gate matters
+                            # separately from the owner-machine check above:
+                            # an owner is unset for an unclaimed reservation
+                            # regardless of which host actually created the
+                            # worktree, so without it a supervisor polling a
+                            # shared cross-machine queue could probe its OWN
+                            # local registry for a worktree that in fact
+                            # lives on a different host and wrongly retire a
+                            # still-live remote reservation. Confirm absence
+                            # directly (scoped to the same allocation project
+                            # this worktree was actually created under, since
+                            # this daemon is CWD-neutral) instead of staying
+                            # unknown forever.
+                            from . import embody
+
+                            try:
+                                # Resolution happens inside this same guarded
+                                # block: `_spawn_attribute` can invoke an
+                                # I/O-backed `allocation_project_for`
+                                # selector (the default headless one calls a
+                                # strict registry lookup) that may raise when
+                                # a backing registry is unavailable -- that
+                                # must degrade this reservation to `unknown`
+                                # for this cycle, not abort the whole
+                                # `release_requested_bodies` polling pass.
+                                probe_project = self._spawn_attribute(
+                                    task,
+                                    "allocation_project",
+                                    embody.project_for_task(task) or "",
+                                ) or None
+                                present = self.worktree_directory_present_fn(
+                                    worktree, probe_project
+                                )
+                            except Exception:
+                                present = None
+                            if present is False:
+                                verdict = _tracking().GONE
                         if verdict == _tracking().GONE:
                             conclusion_state, cleanup_payload = self._retired_cleanup_plan(
                                 res,
@@ -3331,6 +3423,26 @@ class Supervisor:
                 )
                 break
             ok, handle = self.spawn_fn(spawn_task)
+            if ok and not handle.get("session"):
+                # A spawn_fn reporting success with no session id would
+                # record a SPAWNED reservation with session_handle=None --
+                # indistinguishable from a reservation that never reached
+                # spawning anything at all, which release_requested_bodies'
+                # absent-worktree shortcut requires in order to avoid
+                # bypassing a real (if unidentifiable) body's own liveness
+                # resolution. This guards every spawn_fn generically (not
+                # only the built-in make_embody_spawn/make_headless_spawn
+                # factories, which already enforce this themselves) by
+                # downgrading to the ordinary failed/retry path instead of
+                # ever calling record_spawn with an empty handle.
+                ok = False
+                handle = {
+                    **handle,
+                    "error": (
+                        handle.get("error")
+                        or "spawn reported success with no session id"
+                    ),
+                }
             try:
                 if ok:
                     self.client.record_spawn(
