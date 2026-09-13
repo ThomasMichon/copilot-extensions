@@ -535,6 +535,83 @@ def test_unmanaged_collision_is_preserved(tmp_path: Path):
     assert summary["conflicts"]["enabled_plugins"] == ["skill@mine"]
 
 
+def test_knowledge_true_overrides_harness_committed_opt_in_false(tmp_path: Path):
+    """A harness plugin shipped `defaultEnabled: false` (opt-in) is exactly what
+    a knowledge repo's own `true` should be able to turn on -- that's the whole
+    point of an opt-in flag (see AGENTS.md / CONTRIBUTING.md capability-design
+    principles). This must compose cleanly, not be dropped as a conflict."""
+    harness = tmp_path / "harness"
+    knowledge = tmp_path / "knowledge"
+    harness.mkdir()
+    knowledge.mkdir()
+    _write_settings(
+        harness,
+        {
+            "extraKnownMarketplaces": {
+                "odsp-web-harness": {
+                    "source": {"source": "directory", "path": "./.ai"}
+                }
+            },
+            "enabledPlugins": {
+                "generating-weekly-updates@odsp-web-harness": False,
+            },
+        },
+    )
+    _write_settings(
+        knowledge,
+        {
+            "enabledPlugins": {
+                "generating-weekly-updates@odsp-web-harness": True,
+            },
+        },
+    )
+
+    summary = kp.compose(harness, knowledge)
+    overlay = _read_overlay(harness)
+
+    assert (
+        overlay["enabledPlugins"]["generating-weekly-updates@odsp-web-harness"]
+        is True
+    )
+    assert summary["conflicts"]["enabled_plugins"] == []
+    assert summary["enabled_plugins"] == [
+        "generating-weekly-updates@odsp-web-harness"
+    ]
+
+
+def test_knowledge_true_does_not_duplicate_harness_committed_true(tmp_path: Path):
+    """A plugin already `true` in the harness's own committed settings needs no
+    duplicate entry in the overlay, and is not reported as a conflict either."""
+    harness = tmp_path / "harness"
+    knowledge = tmp_path / "knowledge"
+    harness.mkdir()
+    knowledge.mkdir()
+    _write_settings(
+        harness,
+        {
+            "extraKnownMarketplaces": {
+                "odsp-web-harness": {
+                    "source": {"source": "directory", "path": "./.ai"}
+                }
+            },
+            "enabledPlugins": {"ownership-insights@odsp-web-harness": True},
+        },
+    )
+    _write_settings(
+        knowledge,
+        {"enabledPlugins": {"ownership-insights@odsp-web-harness": True}},
+    )
+
+    summary = kp.compose(harness, knowledge)
+    overlay = _read_overlay(harness)
+
+    assert "ownership-insights@odsp-web-harness" not in overlay.get(
+        "enabledPlugins", {}
+    )
+    assert summary["conflicts"]["enabled_plugins"] == []
+    assert summary["enabled_plugins"] == []
+
+
 def test_claude_local_marketplace_and_disable_are_conflicts(tmp_path: Path):
     harness = tmp_path / "harness"
     knowledge = tmp_path / "knowledge"
