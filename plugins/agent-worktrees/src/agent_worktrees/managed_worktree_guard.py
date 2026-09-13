@@ -23,16 +23,25 @@ def _resolve_repo(config, record):
     A small local duplicate of ``__main__._repo_for_record`` -- kept here
     (rather than imported) to avoid a circular import back into
     ``__main__``, which imports this module.
+
+    Returns ``None`` (unresolved) for a non-empty, unknown ``record.repo`` --
+    the caller must fail closed rather than silently substituting
+    ``config.default_repo``, which would check/remove against the wrong
+    repo's anchor entirely (e.g. after a repo entry is renamed/removed, a
+    same-named branch in the invoking default repo could be inspected and
+    deleted instead).
     """
     repos = getattr(config, "repos", {})
     record_repo = getattr(record, "repo", "")
     repo = repos.get(record_repo) if hasattr(repos, "get") else None
-    if repo is None and (not record_repo or record_repo == getattr(config, "repo_name", None)):
+    if repo is not None:
+        return repo
+    if not record_repo or record_repo == getattr(config, "repo_name", None):
         try:
-            repo = config.default_repo
+            return config.default_repo
         except (AttributeError, KeyError, ValueError):
-            repo = None
-    return repo or config.default_repo
+            return None
+    return None
 
 
 def blockers_for(rec, repo) -> list[str]:
@@ -89,6 +98,22 @@ def blockers_for(rec, repo) -> list[str]:
                 f"checkout is on branch {info.current_branch!r}, not the "
                 f"tracked {rec.branch!r} -- reconcile the drift before removing"
             )
+        elif info.current_branch is None and info.state not in (
+            git_ops.WorktreeState.UNKNOWN,
+            git_ops.WorktreeState.GONE,
+            git_ops.WorktreeState.ORPHAN,
+        ):
+            # A detached HEAD reports current_branch=None, which is falsy --
+            # branch_drift above never fires for it, so this checkout could
+            # carry unmerged commits under no branch name at all while only
+            # rec.branch (a completely different ref) gets merge-checked.
+            # Can't compare a detached HEAD to the tracked branch, so refuse
+            # rather than assume it's equivalent.
+            blockers.append(
+                "checkout HEAD is detached (not on the tracked branch) -- "
+                "reconcile it before removing"
+            )
+    branch_is_merged = True
     if rec.branch:
         # Run against the anchor's shared repo, not the (possibly-missing)
         # checkout -- the branch ref and its commits outlive the working
@@ -98,7 +123,8 @@ def blockers_for(rec, repo) -> list[str]:
         # its content is squash-merged upstream, so a raw SHA-ancestry check
         # would refuse every already-landed worktree forever.
         upstream = f"{repo.remote}/{repo.default_branch}"
-        if not git_ops.is_branch_merged(rec.branch, upstream, cwd=repo.anchor):
+        branch_is_merged = git_ops.is_branch_merged(rec.branch, upstream, cwd=repo.anchor)
+        if not branch_is_merged:
             where = "" if checkout_exists else " (checkout directory is missing)"
             blockers.append(
                 f"{rec.branch} has content not merged into {upstream}{where}"
@@ -126,11 +152,13 @@ def blockers_for(rec, repo) -> list[str]:
     # Inbound claim: this worktree is itself another worktree's outbound
     # resource (rec.owner_ref). prune.assess() spares exactly this case --
     # a live, or not-confirmed-gone, claimant may still be using it -- unless
-    # this resource has demonstrably finished (its own status is finalized;
-    # the merge check above already covers "content landed"). remove-system
-    # had no equivalent check at all, so it could discard a live resource out
+    # this resource has demonstrably finished (its own status is finalized,
+    # OR its branch content is already merged upstream, matching prune's
+    # merged/completed-local owner-moved-on categories). remove-system had
+    # no equivalent check at all, so it could discard a live resource out
     # from under its parent even though prune.py already refuses to.
-    if rec.owner_ref and rec.status != "finalized":
+    owner_moved_on = rec.status == "finalized" or branch_is_merged
+    if rec.owner_ref and not owner_moved_on:
         from . import claimant
 
         alive = claimant.resolve_claimant_alive(rec.owner_ref)
@@ -193,6 +221,15 @@ def perform(wt_id, yaml_path, config, *, force, remove_fn, tracking_path):
     """
     rec = tracking.load_record(yaml_path)
     repo = _resolve_repo(config, rec)
+    if repo is None:
+        return GuardedRemoval(
+            ok=False,
+            message=(
+                f"could not resolve a configured repository for {wt_id} "
+                f"(record repo {rec.repo!r} is not registered) -- refusing "
+                "rather than falling back to the invoking context's default repo"
+            ),
+        )
     if not force:
         blockers = blockers_for(rec, repo)
         if blockers:
@@ -211,6 +248,14 @@ def perform(wt_id, yaml_path, config, *, force, remove_fn, tracking_path):
     try:
         rec = tracking.load_record(yaml_path)
         repo = _resolve_repo(config, rec)
+        if repo is None:
+            return GuardedRemoval(
+                ok=False,
+                message=(
+                    f"could not resolve a configured repository for {wt_id} "
+                    f"(record repo {rec.repo!r} is not registered) -- refusing"
+                ),
+            )
         if not force:
             blockers = blockers_for(rec, repo)
             if blockers:

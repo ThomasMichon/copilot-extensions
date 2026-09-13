@@ -47,7 +47,9 @@ def _config(tmp_path: Path):
         default_repo=types.SimpleNamespace(
             anchor=str(anchor), remote="origin", default_branch="master",
             worktree_root=str(tmp_path / "worktree_root"),
-        )
+        ),
+        repos={},
+        repo_name="demo",
     )
 
 
@@ -444,7 +446,9 @@ def test_remove_system_refuses_when_checkout_gone_but_branch_unpushed(tmp_path):
         default_repo=types.SimpleNamespace(
             anchor=str(anchor), remote="origin", default_branch="master",
             worktree_root=str(tmp_path / "worktree_root"),
-        )
+        ),
+        repos={},
+        repo_name="demo",
     )
 
     with patch("agent_worktrees.config.load_config", return_value=config), \
@@ -507,7 +511,7 @@ def test_remove_system_allows_squash_merged_branch(tmp_path):
     record, tracking_dir = _record(tmp_path)
     args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=False)
 
-    clean_info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
+    clean_info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED, current_branch=record.branch)
     with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
          patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
          patch("agent_worktrees.sessions.kill_tmux_session"), \
@@ -723,14 +727,14 @@ def test_remove_system_refuses_when_inbound_owner_claimant_alive(tmp_path):
     record, tracking_dir = _record(tmp_path)
     record.owner_ref = "machine-a/some-project/some-worktree-id"
     record.status = "active"
-    clean_info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
+    clean_info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED, current_branch=record.branch)
     tracking.save_record(record, tracking_dir / "managed-1.yaml")
     args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=False)
 
     with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
          patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
          patch("agent_worktrees.git_ops.classify_worktree", return_value=clean_info), \
-         patch("agent_worktrees.git_ops.is_branch_merged", return_value=True), \
+         patch("agent_worktrees.git_ops.is_branch_merged", return_value=False), \
          patch("agent_worktrees.claimant.resolve_claimant_alive", return_value=True), \
          patch("agent_worktrees.__main__._json_error") as json_error:
         json_error.return_value = 1
@@ -748,14 +752,14 @@ def test_remove_system_refuses_when_inbound_owner_claimant_unconfirmed(tmp_path)
     record, tracking_dir = _record(tmp_path)
     record.owner_ref = "machine-a/some-project/some-worktree-id"
     record.status = "active"
-    clean_info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
+    clean_info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED, current_branch=record.branch)
     tracking.save_record(record, tracking_dir / "managed-1.yaml")
     args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=False)
 
     with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
          patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
          patch("agent_worktrees.git_ops.classify_worktree", return_value=clean_info), \
-         patch("agent_worktrees.git_ops.is_branch_merged", return_value=True), \
+         patch("agent_worktrees.git_ops.is_branch_merged", return_value=False), \
          patch("agent_worktrees.claimant.resolve_claimant_alive", return_value=None), \
          patch("agent_worktrees.__main__._json_error") as json_error:
         json_error.return_value = 1
@@ -766,33 +770,30 @@ def test_remove_system_refuses_when_inbound_owner_claimant_unconfirmed(tmp_path)
 
 
 def test_remove_system_allows_inbound_owner_claimant_confirmed_gone(tmp_path):
-    """A claimant confirmed gone (probe returns False) frees this resource,
-    same as prune.assess()."""
+    """A claimant confirmed gone (probe returns False) frees the OWNER-CLAIM
+    blocker specifically, same as prune.assess() -- even though the branch
+    isn't merged (so this worktree is still blocked overall for that
+    unrelated, independent reason)."""
     record, tracking_dir = _record(tmp_path)
     record.status = "active"
     record.owner_ref = "machine-a/some-project/some-worktree-id"
     tracking.save_record(record, tracking_dir / "managed-1.yaml")
     args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=False)
 
-    clean_info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
+    clean_info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED, current_branch=record.branch)
     with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
          patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
-         patch("agent_worktrees.sessions.kill_tmux_session"), \
          patch("agent_worktrees.claimant.resolve_claimant_alive", return_value=False), \
          patch("agent_worktrees.git_ops.classify_worktree", return_value=clean_info), \
-         patch("agent_worktrees.git_ops.is_branch_merged", return_value=True), \
-         patch("agent_worktrees.git_ops.list_worktree_paths"), \
-         patch("agent_worktrees.git_ops.remove_worktree", return_value=True), \
-         patch("agent_worktrees.git_ops.git") as git, \
-         patch("agent_worktrees.disposition_history.remove"), \
-         patch("agent_worktrees.activity.log_event"), \
-         patch("agent_worktrees.__main__._json_output") as json_output:
-        git.return_value.returncode = 0
-        git.return_value.stdout = "0"
+         patch("agent_worktrees.git_ops.is_branch_merged", return_value=False), \
+         patch("agent_worktrees.__main__._json_error") as json_error:
+        json_error.return_value = 1
         result = cli.cmd_remove_system(args)
 
-    assert result == 0
-    json_output.assert_called_once_with({"removed": "managed-1"})
+    assert result == 1
+    message = json_error.call_args.args[0]
+    assert "owned as a resource by" not in message
+    assert "not merged into" in message
 
 
 def test_remove_system_allows_finalized_resource_despite_owner_ref(tmp_path):
@@ -805,7 +806,7 @@ def test_remove_system_allows_finalized_resource_despite_owner_ref(tmp_path):
     tracking.save_record(record, tracking_dir / "managed-1.yaml")
     args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=False)
 
-    clean_info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
+    clean_info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED, current_branch=record.branch)
     with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
          patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
          patch("agent_worktrees.sessions.kill_tmux_session"), \
@@ -825,3 +826,51 @@ def test_remove_system_allows_finalized_resource_despite_owner_ref(tmp_path):
     assert result == 0
     resolve_alive.assert_not_called()
     json_output.assert_called_once_with({"removed": "managed-1"})
+
+
+def test_remove_system_refuses_detached_head_checkout(tmp_path):
+    """A detached HEAD reports current_branch=None, which is falsy --
+    branch_drift alone never catches it, so an unmerged commit sitting under
+    no branch name could otherwise reach forced removal unchecked."""
+    record, tracking_dir = _record(tmp_path)
+    args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=False)
+
+    detached_info = git_ops.WorktreeStateInfo(
+        state=git_ops.WorktreeState.COMPLETED, current_branch=None, branch_drift=False,
+    )
+    with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
+         patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
+         patch("agent_worktrees.git_ops.classify_worktree", return_value=detached_info), \
+         patch("agent_worktrees.git_ops.is_branch_merged", return_value=True), \
+         patch("agent_worktrees.__main__._json_error") as json_error:
+        json_error.return_value = 1
+        result = cli.cmd_remove_system(args)
+
+    assert result == 1
+    assert "detached" in json_error.call_args.args[0]
+
+
+def test_remove_system_fails_closed_on_unknown_record_repo(tmp_path):
+    """A record whose repo name is non-empty but not a registered repo must
+    not silently fall back to config.default_repo -- that could check/
+    remove against a completely different repo's anchor (e.g. after a repo
+    entry is renamed/removed)."""
+    record, tracking_dir = _record(tmp_path)
+    record.repo = "some-unregistered-repo"
+    tracking.save_record(record, tracking_dir / "managed-1.yaml")
+    args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=True)
+
+    config = _config(tmp_path)
+    config.repos = {}
+    config.repo_name = "demo"
+    with patch("agent_worktrees.config.load_config", return_value=config), \
+         patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
+         patch("agent_worktrees.__main__._json_error") as json_error:
+        json_error.return_value = 1
+        result = cli.cmd_remove_system(args)
+
+    assert result == 1
+    message = json_error.call_args.args[0]
+    assert "could not resolve a configured repository" in message
+    assert "some-unregistered-repo" in message
+    assert (tracking_dir / "managed-1.yaml").exists()

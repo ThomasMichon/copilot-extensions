@@ -319,7 +319,7 @@ residue, and each **spares anything in use**:
 | `gc` | tracked reap (the cleanup verdict) **+ leaked system/bridge worktrees + on-disk orphan dirs + git prune** | see the managed-reap invariant below |
 | `reap-sessions` | leaked `wt-<id>` mux sessions whose worktree is finalized/gone/untracked **and** idle past grace | **attached, active, or recently-busy** sessions |
 | `reap-shells` | orphaned launcher shells (pwsh/python scaffolding stranded by a force-closed terminal) | anything with a live descendant; reports-only unless `--yes` |
-| `remove-system <id>` | one **system worktree** by id (the manual escape hatch) | dirty working tree, unmerged/unpushed branch content, branch drift, a live PR (open/creating/unpopulated), or a live outbound resource claim -- refused by default; an unadvertised `--force` overrides |
+| `remove-system <id>` | one **system worktree** by id (the manual escape hatch) | dirty working tree, unmerged/unpushed branch content, branch drift or a detached HEAD, an unclassifiable git state, a live PR (open/creating/unpopulated), a live outbound resource claim, or (for a resource this worktree itself is, via `owner_ref`) a live/unconfirmed inbound claimant -- refused by default; an unadvertised `--force` overrides |
 
 ### System worktrees (`sys-*`, `[system]`/`[delegate]`)
 
@@ -334,12 +334,16 @@ records them as `not-final-or-unused` and keeps them — so they can accumulate.
 Clear a *provably dead* one with **`remove-system <id>`** (verify it isn't a live
 session first) -- it also independently guards against discarding real content:
 it refuses (by default) a worktree with uncommitted changes, unmerged/unpushed
-branch content (squash-merge-aware), checkout branch drift, an unclassifiable
-git state (a zombie checkout with no `.git`, an orphaned/unrelated-history
-checkout, or a timed-out probe), a live PR record, or a live outbound resource
-claim, naming the blocker so the caller can resolve it; an unadvertised
-`--force` exists for a caller that has already confirmed discarding is correct.
-The durable fix is for the owning service to `remove-system` on task
+branch content (squash-merge-aware), checkout branch drift or a detached HEAD,
+an unclassifiable git state (a zombie checkout with no `.git`, an
+orphaned/unrelated-history checkout, or a timed-out probe), a live PR record, a
+live outbound resource claim, or -- when this worktree is itself another
+worktree's outbound resource (`owner_ref`) -- a live or liveness-unconfirmed
+inbound claimant (unless this resource has itself finished: `finalized` status,
+or its branch content is already merged upstream), naming the blocker so the
+caller can resolve it; an unadvertised `--force` exists for a caller that has
+already confirmed discarding is correct. The durable fix is for the owning
+service to `remove-system` on task
 completion.
 
 ### The managed-reap invariant — what `gc` will never touch
