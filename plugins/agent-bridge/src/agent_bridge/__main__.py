@@ -5157,6 +5157,59 @@ def _cmd_handoff_request(args: argparse.Namespace) -> None:
     )
 
 
+def _cmd_handoff_check(args: argparse.Namespace) -> None:
+    """Diagnose (and optionally finish) a stalled handoff-cutover retirement.
+
+    Thin passthrough to ``agent-worktrees handoffs-check`` -- the ground-layer
+    owner of the mux/pane primitives a CLI-hosted worktree's cutover depends on
+    (mirroring how ``routes/worktrees.py`` already derives worktree/session
+    state from ``agent-worktrees list``). agent-bridge is the single surface an
+    agent reaches for either driver (ACP or mux/CLI); for a mux/CLI-hosted
+    worktree the actual check+retire logic still lives where the pane
+    primitives do. A future ACP-hosted equivalent belongs here too, once that
+    path needs the same on-demand diagnostic.
+    """
+    exe = shutil.which("agent-worktrees")
+    if not exe:
+        print("[FAIL] agent-worktrees is not on PATH; cannot check handoffs.", file=sys.stderr)
+        sys.exit(1)
+    argv = [exe, "handoffs-check", "--json"]
+    argv += ["--worktree-id", args.worktree_id] if args.worktree_id else ["--all"]
+    if args.execute:
+        argv.append("--execute")
+    try:
+        result = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+    except Exception as exc:
+        print(f"[FAIL] could not run agent-worktrees handoffs-check: {exc}", file=sys.stderr)
+        sys.exit(1)
+    try:
+        payload = json.loads(result.stdout or "{}")
+    except Exception:
+        payload = {"error": "unparseable agent-worktrees output", "raw": result.stdout}
+    if payload.get("error"):
+        if args.json:
+            _json_out(payload)
+        else:
+            print(f"[FAIL] handoff-check: {payload['error']}", file=sys.stderr)
+        sys.exit(1)
+    if args.json:
+        _json_out(payload)
+    elif not payload.get("findings"):
+        print("[OK] handoff-check: no stalled predecessor retirements found.")
+    else:
+        for finding in payload["findings"]:
+            wt = finding.get("worktree_id")
+            pred = finding.get("predecessor_session_id")
+            pane = finding.get("retire_pane")
+            if not finding.get("executed"):
+                print(f"  {wt}: predecessor {pred} still alive (pane {pane})")
+            elif finding.get("retired"):
+                print(f"[OK] {wt}: retired predecessor {pred} (pane {pane})")
+            else:
+                print(f"[FAIL] {wt}: could not retire predecessor {pred}", file=sys.stderr)
+    sys.exit(result.returncode)
+
+
 def _cmd_session_usage(args: argparse.Namespace) -> None:
     """Show context window usage for a session."""
     client = _get_client()
@@ -6278,6 +6331,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="Emit JSON.",
     )
     handoff_request_p.set_defaults(func=_cmd_handoff_request)
+
+    handoff_check_p = sub.add_parser(
+        "handoff-check",
+        help="Diagnose (and with --execute, finish) a stalled handoff-cutover "
+        "predecessor retirement for a mux/CLI-hosted worktree",
+    )
+    handoff_check_g = handoff_check_p.add_mutually_exclusive_group(required=True)
+    handoff_check_g.add_argument(
+        "--worktree-id", default=None, help="Check only this worktree"
+    )
+    handoff_check_g.add_argument(
+        "--all", action="store_true", help="Check every tracked worktree"
+    )
+    handoff_check_p.add_argument(
+        "--execute",
+        action="store_true",
+        help="Retire each found stale predecessor now (default: read-only report)",
+    )
+    handoff_check_p.add_argument("--json", action="store_true", help="Emit JSON.")
+    handoff_check_p.set_defaults(func=_cmd_handoff_check)
 
     usage_p = sub.add_parser(
         "session-usage", help="Show context window usage for a session"

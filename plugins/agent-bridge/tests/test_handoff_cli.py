@@ -170,3 +170,151 @@ def test_handoff_request_no_session_degrades_cleanly(monkeypatch, capsys):
         m._cmd_handoff_request(_request_args())
     err = capsys.readouterr().err
     assert "No current session for worktree wt-1 matches sess-1" in err
+
+
+class _FakeCompletedProcess:
+    def __init__(self, stdout: str, returncode: int = 0):
+        self.stdout = stdout
+        self.returncode = returncode
+
+
+def _check_args(*, worktree_id=None, all=False, execute=False, json=False):
+    return argparse.Namespace(worktree_id=worktree_id, all=all, execute=execute, json=json)
+
+
+class TestHandoffCheck:
+    """``agent-bridge handoff-check`` -- a thin passthrough to
+    ``agent-worktrees handoffs-check``, the ground-layer owner of the mux/pane
+    primitives a CLI-hosted worktree's cutover depends on."""
+
+    def test_no_agent_worktrees_on_path_fails_fast(self, monkeypatch):
+        monkeypatch.setattr(m.shutil, "which", lambda name: None)
+        with pytest.raises(SystemExit):
+            m._cmd_handoff_check(_check_args(worktree_id="wt-1"))
+
+    def test_passes_worktree_id_and_execute_through(self, monkeypatch):
+        monkeypatch.setattr(m.shutil, "which", lambda name: "/usr/bin/agent-worktrees")
+        captured = {}
+
+        def fake_run(argv, **kwargs):
+            captured["argv"] = argv
+            return _FakeCompletedProcess(
+                m.json.dumps({"checked": 1, "found": 0, "executed": True, "findings": []})
+            )
+
+        monkeypatch.setattr(m.subprocess, "run", fake_run)
+
+        with pytest.raises(SystemExit) as exc_info:
+            m._cmd_handoff_check(_check_args(worktree_id="wt-1", execute=True, json=True))
+
+        assert exc_info.value.code == 0
+        assert captured["argv"] == [
+            "/usr/bin/agent-worktrees", "handoffs-check", "--json",
+            "--worktree-id", "wt-1", "--execute",
+        ]
+
+    def test_passes_all_flag_through(self, monkeypatch):
+        monkeypatch.setattr(m.shutil, "which", lambda name: "/usr/bin/agent-worktrees")
+        captured = {}
+
+        def fake_run(argv, **kwargs):
+            captured["argv"] = argv
+            return _FakeCompletedProcess(
+                m.json.dumps({"checked": 3, "found": 0, "executed": False, "findings": []})
+            )
+
+        monkeypatch.setattr(m.subprocess, "run", fake_run)
+
+        with pytest.raises(SystemExit):
+            m._cmd_handoff_check(_check_args(all=True, json=True))
+
+        assert captured["argv"] == [
+            "/usr/bin/agent-worktrees", "handoffs-check", "--json", "--all",
+        ]
+
+    def test_json_output_round_trips_the_underlying_payload(self, monkeypatch, capsys):
+        monkeypatch.setattr(m.shutil, "which", lambda name: "/usr/bin/agent-worktrees")
+        payload = {
+            "checked": 1, "found": 1, "executed": True,
+            "findings": [{
+                "worktree_id": "wt-1", "predecessor_session_id": "old-sess",
+                "retire_pane": "%9", "executed": True, "retired": True,
+            }],
+        }
+        monkeypatch.setattr(
+            m.subprocess, "run",
+            lambda argv, **kwargs: _FakeCompletedProcess(m.json.dumps(payload)),
+        )
+
+        with pytest.raises(SystemExit):
+            m._cmd_handoff_check(_check_args(worktree_id="wt-1", execute=True, json=True))
+
+        assert m.json.loads(capsys.readouterr().out) == payload
+
+    def test_human_readable_output_reports_each_finding(self, monkeypatch, capsys):
+        monkeypatch.setattr(m.shutil, "which", lambda name: "/usr/bin/agent-worktrees")
+        payload = {
+            "checked": 1, "found": 1, "executed": True,
+            "findings": [{
+                "worktree_id": "wt-1", "predecessor_session_id": "old-sess",
+                "retire_pane": "%9", "executed": True, "retired": True,
+            }],
+        }
+        monkeypatch.setattr(
+            m.subprocess, "run",
+            lambda argv, **kwargs: _FakeCompletedProcess(m.json.dumps(payload)),
+        )
+
+        with pytest.raises(SystemExit):
+            m._cmd_handoff_check(_check_args(worktree_id="wt-1", execute=True))
+
+        out = capsys.readouterr().out
+        assert "retired predecessor old-sess" in out
+
+    def test_no_findings_reports_clean(self, monkeypatch, capsys):
+        monkeypatch.setattr(m.shutil, "which", lambda name: "/usr/bin/agent-worktrees")
+        monkeypatch.setattr(
+            m.subprocess, "run",
+            lambda argv, **kwargs: _FakeCompletedProcess(
+                m.json.dumps({"checked": 1, "found": 0, "executed": False, "findings": []})
+            ),
+        )
+
+        with pytest.raises(SystemExit):
+            m._cmd_handoff_check(_check_args(worktree_id="wt-1"))
+
+        assert "no stalled predecessor retirements found" in capsys.readouterr().out
+
+    def test_underlying_error_reports_failure_not_success(self, monkeypatch, capsys):
+        """Regression: an error payload from agent-worktrees (e.g. an unknown
+        worktree) must be surfaced as a failure, not silently read as "no
+        findings" (which looked identical: no "findings" key either way)."""
+        monkeypatch.setattr(m.shutil, "which", lambda name: "/usr/bin/agent-worktrees")
+        monkeypatch.setattr(
+            m.subprocess, "run",
+            lambda argv, **kwargs: _FakeCompletedProcess(
+                m.json.dumps({"error": "Worktree not found: wt-missing"}), returncode=1,
+            ),
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            m._cmd_handoff_check(_check_args(worktree_id="wt-missing"))
+
+        assert exc_info.value.code != 0
+        assert "Worktree not found: wt-missing" in capsys.readouterr().err
+
+    def test_unparseable_output_reports_failure_not_success(self, monkeypatch, capsys):
+        monkeypatch.setattr(m.shutil, "which", lambda name: "/usr/bin/agent-worktrees")
+        monkeypatch.setattr(
+            m.subprocess, "run",
+            lambda argv, **kwargs: _FakeCompletedProcess("not json", returncode=0),
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            m._cmd_handoff_check(_check_args(worktree_id="wt-1"))
+
+        assert exc_info.value.code != 0
+        err = capsys.readouterr().err
+        assert "no stalled predecessor retirements found" not in err
+        assert "unparseable" in err
+

@@ -1317,7 +1317,18 @@ function logHandoffActivity(
       "--field", `handoff_id=${stored.id}`,
       "--field", `storage=${stored.storage}`,
       "--field", `session_state=${sessionStatePath}`,
-      "--field", `predecessor_pid=${process.pid}`,
+      // `process.ppid`, NOT `process.pid`: this MCP-extension host runs as a
+      // direct child of the actual `copilot` CLI process, so its own pid is
+      // never the process the status-monitor daemon needs to identify and
+      // eventually retire -- recording `process.pid` here fed a wrong "expected
+      // copilot pid" into the daemon's spawn/retire identity check, which
+      // (harmlessly for spawning, but permanently for retiring, since a failed
+      // attempt was recorded as "handled") silently stranded every predecessor
+      // pane past the first handoff on a worktree. The daemon now resolves the
+      // authoritative pid itself via a live mux binding lookup and no longer
+      // gates on this value, but it stays correct here as defense in depth and
+      // for any future consumer that reads it verbatim.
+      "--field", `predecessor_pid=${process.ppid}`,
     ], {
       cwd,
       timeout: 5000,

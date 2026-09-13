@@ -973,17 +973,102 @@ def test_monitor_pending_handoff_predecessor_retire_uses_logged_predecessor_bind
     }
 
 
+def test_monitor_pending_handoff_predecessor_retire_retries_after_failed_attempt(
+    monkeypatch,
+):
+    """A retire attempt that failed (e.g. "left-running" on an identity
+    mismatch) must stay retryable -- only a genuinely successful retirement
+    ("gone") counts as handled. Before this fix, ANY logged
+    ``handoff_predecessor_retire`` event -- success or failure -- permanently
+    suppressed every future attempt, silently stranding the pane forever."""
+    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+
+    def read_events(**kwargs):
+        event = kwargs.get("event")
+        if event == "handoff_cutover_spawn":
+            return [{
+                "handoff_token": "handoff-1",
+                "session_id": "session-1",
+                "old_pane": "%9",
+                "expected_mux_session": "wt-a",
+                "predecessor_copilot_pid": 77,
+                "predecessor_copilot_start_time": "old-process",
+            }]
+        if event == "handoff_predecessor_retire":
+            return [{
+                "handoff_token": "handoff-1",
+                "outcome": "left-running",
+                "method": "process-identity-mismatch",
+            }]
+        return []
+
+    monkeypatch.setattr(m.activity, "read_events", read_events)
+    record = types.SimpleNamespace(
+        worktree_id="a",
+        pending_handoffs=[
+            types.SimpleNamespace(
+                token="handoff-1",
+                predecessor="session-1",
+                candidate="successor-1",
+                successor=None,
+            )
+        ],
+    )
+
+    assert m._monitor_pending_handoff_predecessor_retire(record) is not None
+
+
+def test_monitor_pending_handoff_predecessor_retire_skips_after_success(
+    monkeypatch,
+):
+    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+
+    def read_events(**kwargs):
+        event = kwargs.get("event")
+        if event == "handoff_cutover_spawn":
+            return [{
+                "handoff_token": "handoff-1",
+                "session_id": "session-1",
+                "old_pane": "%9",
+                "expected_mux_session": "wt-a",
+                "predecessor_copilot_pid": 77,
+                "predecessor_copilot_start_time": "old-process",
+            }]
+        if event == "handoff_predecessor_retire":
+            return [{"handoff_token": "handoff-1", "outcome": "gone", "method": "graceful"}]
+        return []
+
+    monkeypatch.setattr(m.activity, "read_events", read_events)
+    record = types.SimpleNamespace(
+        worktree_id="a",
+        pending_handoffs=[
+            types.SimpleNamespace(
+                token="handoff-1",
+                predecessor="session-1",
+                candidate="successor-1",
+                successor=None,
+            )
+        ],
+    )
+
+    assert m._monitor_pending_handoff_predecessor_retire(record) is None
+
+
 def test_monitor_trigger_handoff_cutover_retires_confirmed_successor(monkeypatch):
-    monkeypatch.setattr(
-        m.sessions,
-        "mux_binding_for_session",
-        lambda sid: {
+    captured_binding_call = {}
+
+    def binding(sid, *, expected_session_name=None):
+        captured_binding_call["sid"] = sid
+        captured_binding_call["expected_session_name"] = expected_session_name
+        return {
             "pane_id": "%9",
             "copilot_pid": 77,
             "copilot_start_time": "old-process",
             "session_name": "wt-a",
-        },
-    )
+        }
+
+    monkeypatch.setattr(m.sessions, "mux_binding_for_session", binding)
+    monkeypatch.setattr(m.sessions, "mux_session_name", lambda wt_id: f"wt-{wt_id}")
     captured = {}
 
     def spawn(args):
@@ -1016,6 +1101,9 @@ def test_monitor_trigger_handoff_cutover_retires_confirmed_successor(monkeypatch
 
     assert rc == 0
     assert response["candidate_session"] == "successor-1"
+    # The binding lookup is scoped to THIS worktree's mux session (never a
+    # bare, unscoped session_id.startswith("wt-") match across every worktree).
+    assert captured_binding_call == {"sid": "session-1", "expected_session_name": "wt-a"}
     assert captured["spawn"].old_pane == "%9"
     assert captured["spawn"].expected_copilot_pid == 77
     assert captured["spawn"].expected_copilot_start_time == "old-process"
@@ -1030,6 +1118,53 @@ def test_monitor_trigger_handoff_cutover_retires_confirmed_successor(monkeypatch
         "successor_session_id": "successor-1",
         "retire_reason": "monitor-successor-candidate",
     }
+
+
+def test_monitor_trigger_handoff_cutover_trusts_fresh_binding_over_bad_hint(
+    monkeypatch,
+):
+    """Regression (#handoff-cutover-lifecycle-journal): a caller-supplied
+    ``predecessor_pid`` hint (historically context-handoff's own Node
+    extension-host pid, never the actual `copilot` process) must NOT gate
+    acceptance of a freshly resolved, session-scoped mux binding -- requiring
+    agreement with that hint is exactly what silently and permanently
+    stranded every predecessor pane past the first handoff on a worktree
+    (the wrong pid got recorded into ``handoff_cutover_spawn`` and later
+    failed the retire step's identity check forever)."""
+    monkeypatch.setattr(
+        m.sessions,
+        "mux_binding_for_session",
+        lambda sid, **kw: {
+            "pane_id": "%9",
+            "copilot_pid": 12345,  # the REAL copilot pid
+            "copilot_start_time": "real-start",
+            "session_name": "wt-a",
+        },
+    )
+    monkeypatch.setattr(m.sessions, "mux_session_name", lambda wt_id: f"wt-{wt_id}")
+    captured = {}
+    monkeypatch.setattr(
+        m,
+        "_handoff_cutover_spawn_result",
+        lambda args: (captured.__setitem__("spawn", args), (0, {"ok": True}))[1],
+    )
+
+    m._monitor_trigger_handoff_cutover(
+        {
+            "token": "handoff-1",
+            "seed": "HANDOFF_SEED",
+            "worktree_id": "a",
+            "predecessor_session_id": "session-1",
+            # A wrong hint (e.g. an MCP-extension host pid), deliberately
+            # disagreeing with the binding above.
+            "predecessor_pid": 999999,
+            "predecessor_start_time": "wrong-start",
+        }
+    )
+
+    assert captured["spawn"].old_pane == "%9"
+    assert captured["spawn"].expected_copilot_pid == 12345
+    assert captured["spawn"].expected_copilot_start_time == "real-start"
 
 
 def test_monitor_retire_handoff_predecessor_preserves_identity_guard(
