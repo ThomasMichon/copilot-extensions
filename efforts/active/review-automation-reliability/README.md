@@ -467,6 +467,53 @@ scenarios.
 
 ## Journal
 
+### 2026-09-13 - Componentize __main__.py: extract producers_cli.py
+
+- Continuing the operator's standing componentization instruction. Picked
+  up the handoff's prescribed next candidate -- the `_cmd_schedule`/
+  `_cmd_emitter`/`_cmd_webhook`/`_cmd_reservations` cluster -- and, per the
+  standing lesson, re-derived its current line range first
+  (`grep -n "^def _cmd_" __main__.py`) rather than trusting the prior
+  handoff's stale numbers: it had shifted to roughly lines 2407-2644 after
+  the recipes extraction, still present and unclaimed by any concurrent
+  leg.
+- AST-walked the cluster and grepped `tests/` for monkeypatches before
+  committing to the split. Found `_client`, `_emit`, `_enrich`, and
+  `_resolve_client_target` genuinely shared with other `__main__.py`
+  commands (`_client`/`_emit` in particular are used by nearly every CLI
+  command) with no direct test monkeypatches of the cluster's own function
+  names found. `_registration_scope` and `DispatchError` already live
+  outside `__main__.py` (in `supervise_cli.py` and `client.py`
+  respectively, both already re-exported from `__main__.py` for other
+  consumers), so the new module imports them directly instead of proxying.
+  Left `_WORKTREE_PARENT_SUFFIX`/`_reject_worktree_checkout_as_repo_root`
+  and `_run_resolution_step` in place -- both sit physically adjacent to
+  the cluster but are unrelated (the former is used by `loop_commands.py`
+  via its own existing proxy; the latter by `_cmd_resolve`/`_cmd_run`).
+- Extracted `_cmd_schedule`, `_cmd_emitter`, `_cmd_webhook`,
+  `_parse_label_max_attempts`, and `_cmd_reservations` verbatim into a new
+  `producers_cli.py`, reusing the established `loop_commands.
+  _resolve_cli_module()` + `_proxy()` pattern for `_client`/`_emit`/
+  `_enrich`/`_resolve_client_target`. Re-exported all five names from
+  `__main__.py` for `build_parser`'s `set_defaults()` call sites and any
+  test that references them by their `agent_dispatch.__main__` attribute
+  path (`_parse_label_max_attempts` is itself already re-exported/proxied
+  by `supervise_cli.py` for its own use, so the re-export chain still
+  resolves through `__main__.py`).
+- `__main__.py`: 4,757 -> 4,581 lines; `producers_cli.py`: 238 lines
+  (comfortably under the cap). Full agent-dispatch suite (2,706 tests)
+  green throughout. `ruff check --select F,E9` clean on both files; a lone
+  pre-existing `B904` finding in the moved `_parse_label_max_attempts`
+  (verified via `git show HEAD:...` that it predates this move) was left
+  untouched per the pre-existing-issue triage rule -- it's a very minor,
+  out-of-scope style nit, not something this split introduced. Refreshed
+  `tools/module-size-baseline.json` for the shrunk `__main__.py` entry.
+  Bumped agent-dispatch 0.1.2-dev94 -> dev95 and re-ran the instruction-
+  projection sync (clean; only pre-existing, unrelated `applyTo` overlap
+  warnings among other plugins).
+- No sign of #2572 (agent-worktrees module-size drift) recurring this leg;
+  did not touch that file.
+
 ### 2026-09-12 - Componentize __main__.py: extract recipes_cli.py
 
 - Continuing the operator's standing componentization instruction. Picked
