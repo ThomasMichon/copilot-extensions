@@ -858,14 +858,21 @@ session-state trace files) is still open follow-on work
 today and is safe to reach for immediately:
 
 - `agent-worktrees handoffs-check [--worktree-id <id>|--all] [--execute] [--json]`
-  -- diagnoses (and, with `--execute`, retires) a predecessor pane left alive
-  after a spawn is recorded (`_pending_handoff_retire_requests` accepts either
+  -- diagnoses (and, with `--execute`, retires) an unretired handoff: a
+  spawn is recorded with no matching successful `handoff_predecessor_retire`
+  event (`_pending_handoff_retire_requests` accepts either
   `handoff.successor` -- linked/authoritative -- or `handoff.candidate` --
   sessionStart-associated but the handoff still pending -- so this also
-  catches a predecessor that should retire before the cutover is fully
-  linked, not only a fully confirmed one), using the same choreography as
-  the resident monitor's own sweep. Read-only without `--execute`. **It does
-  not diagnose a host acknowledgement with no successor pane at all**
+  catches one that should retire before the cutover is fully linked, not
+  only a fully confirmed one). **The read-only report does not itself check
+  whether the pane is still alive** (no `_mux_pane_alive()` call in the
+  finding path) -- it reports every unretired-per-the-log case as a
+  candidate, including one where the pane already exited or was removed
+  without that event ever being logged; `--execute` is what actually
+  attempts the live retirement (using the resident monitor's own
+  choreography, which does check liveness) and is the step that resolves
+  whether a reported finding was real. Read-only without `--execute`. **It
+  does not diagnose a host acknowledgement with no successor pane at all**
   (no `handoff_cutover_spawn` was ever recorded for the token) -- that "ack
   but no pane" case has no dedicated diagnostic yet.
 - `agent-bridge handoff-check [--worktree-id <id>|--all] [--execute] [--json]`
