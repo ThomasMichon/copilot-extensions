@@ -5200,6 +5200,8 @@ def _cmd_handoff_check(args: argparse.Namespace) -> None:
             _json_out(payload)
         else:
             print(f"[FAIL] handoff-check: {payload['error']}", file=sys.stderr)
+            if payload.get("stderr"):
+                print(payload["stderr"], file=sys.stderr)
         sys.exit(1)
     if args.json:
         _json_out(payload)

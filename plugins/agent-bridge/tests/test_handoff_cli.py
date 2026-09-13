@@ -336,4 +336,5 @@ class TestHandoffCheck:
         err = capsys.readouterr().err
         assert "no stalled predecessor retirements found" not in err
         assert "exited 1" in err
+        assert "some underlying failure text" in err
 
