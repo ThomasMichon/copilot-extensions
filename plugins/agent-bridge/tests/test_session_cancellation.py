@@ -528,6 +528,54 @@ async def test_channel_close_fences_an_already_admitted_resume(owned_context):
     assert ctx.manager._forwards == {}
 
 
+@pytest.mark.parametrize("cancel_shutdown", [False, True])
+async def test_shutdown_retains_failed_process_cleanup_until_verified_exit(
+    owned_context, monkeypatch, cancel_shutdown,
+):
+    from agent_bridge.session_teardown import detach_for_restart
+
+    ctx = owned_context
+    ctx.phase = "success"
+    await ctx.manager.resume_session(ctx.session.session_id, drain=False)
+    original_kill = AgentProcess.kill
+    retry_entered, retry_release = asyncio.Event(), asyncio.Event()
+    calls = 0
+
+    async def kill(process):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise PermissionError("transient cleanup refusal")
+        retry_entered.set()
+        await retry_release.wait()
+        await original_kill(process)
+
+    monkeypatch.setattr(AgentProcess, "kill", kill)
+    monkeypatch.setattr("agent_bridge.session_teardown._SHUTDOWN_CLEANUP_RETRY_SECONDS", 0.01)
+    shutdown = asyncio.create_task(detach_for_restart(ctx.manager))
+    await asyncio.wait_for(retry_entered.wait(), 3)
+    assert not shutdown.done()
+    assert ctx.processes[0].returncode is None
+    assert ctx.session._owned_process is not None
+    assert ctx.db.get_session(ctx.session.session_id)["status"] == "failed"
+    if cancel_shutdown:
+        shutdown.cancel()
+        await asyncio.sleep(0)
+        shutdown.cancel()
+        await asyncio.sleep(0)
+        assert not shutdown.done()
+    retry_release.set()
+    if cancel_shutdown:
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(shutdown, 3)
+    else:
+        await asyncio.wait_for(shutdown, 3)
+    assert ctx.processes[0].returncode is not None
+    assert ctx.session._owned_process is None
+    assert ctx.session.status == SessionStatus.STOPPED
+    assert calls == 2
+
+
 async def test_failed_explicit_remote_reap_keeps_authority_for_retry(owned_context, monkeypatch):
     from agent_bridge.session_manager import RemoteHostRecoveryPendingError
 

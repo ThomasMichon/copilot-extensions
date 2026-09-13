@@ -6,15 +6,22 @@ from typing import TYPE_CHECKING, Any
 
 from .session_ownership import cleanup_owned_process, finish_owned
 
+_SHUTDOWN_CLEANUP_RETRY_SECONDS = 5.0
+
 if TYPE_CHECKING:
     from .session_manager import Session, SessionManager
 
 
 async def detach_for_restart(manager: SessionManager) -> None:
-    """Detach active sessions and close owned channels at frontend shutdown."""
-    from .session_manager import log
-
+    """Keep shutdown ownership until process cleanup is confirmed."""
     manager._shutting_down = True
+    await finish_owned(_detach_for_restart_owned(manager))
+
+
+async def _detach_for_restart_owned(manager: SessionManager) -> None:
+    """Detach active sessions and close owned channels at frontend shutdown."""
+    from .session_manager import asyncio, log
+
     for session in manager.list_sessions():
         if (
             manager._background_recovery_allowed(session)
@@ -38,13 +45,30 @@ async def detach_for_restart(manager: SessionManager) -> None:
                     "Failed to stop session %s on shutdown",
                     session.session_id, exc_info=True,
                 )
+    while pending := [
+        session for session in manager.list_sessions()
+        if session._owned_process is not None
+    ]:
+        log.error(
+            "Shutdown blocked by unconfirmed process cleanup for %s; retaining "
+            "process handles and database, retrying in %.1fs",
+            ", ".join(session.session_id for session in pending),
+            _SHUTDOWN_CLEANUP_RETRY_SECONDS,
+        )
+        await asyncio.sleep(_SHUTDOWN_CLEANUP_RETRY_SECONDS)
+        for session in pending:
+            try:
+                await manager.stop_session(session.session_id, force=True, for_restart=True)
+            except Exception:
+                log.error(
+                    "Shutdown process cleanup retry failed for %s",
+                    session.session_id, exc_info=True,
+                )
     try:
         await manager.close_frontend_transports()
     except Exception:
         log.warning("Failed to close frontend transports on shutdown", exc_info=True)
     if manager._remote_reap_tasks:
-        from .session_manager import asyncio
-
         await finish_owned(asyncio.gather(*list(manager._remote_reap_tasks)))
 
 
