@@ -542,7 +542,7 @@ def test_remove_system_rechecks_immediately_before_removal(tmp_path):
 
     with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
          patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
-         patch("agent_worktrees.__main__._remove_system_blockers", side_effect=_blockers), \
+         patch("agent_worktrees.managed_worktree_guard.blockers_for", side_effect=_blockers), \
          patch("agent_worktrees.__main__._json_error") as json_error:
         json_error.return_value = 1
         result = cli.cmd_remove_system(args)
@@ -569,7 +569,7 @@ def test_remove_system_force_skips_the_immediate_recheck(tmp_path):
          patch("agent_worktrees.git_ops.git") as git, \
          patch("agent_worktrees.disposition_history.remove"), \
          patch("agent_worktrees.activity.log_event"), \
-         patch("agent_worktrees.__main__._remove_system_blockers") as blockers, \
+         patch("agent_worktrees.managed_worktree_guard.blockers_for") as blockers, \
          patch("agent_worktrees.__main__._json_output") as json_output:
         git.return_value.returncode = 0
         git.return_value.stdout = "0"
