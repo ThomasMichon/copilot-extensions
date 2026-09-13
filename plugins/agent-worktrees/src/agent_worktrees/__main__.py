@@ -12012,7 +12012,7 @@ def _remove_system_blockers(rec, repo) -> list[str]:
     is not evidence the worktree is disposable, and neither is a missing
     checkout directory: the branch ref (and any unpushed commits on it)
     lives in the shared repo regardless of whether the working directory
-    still exists, so the unpushed-commit check below runs unconditionally.
+    still exists, so the merge check below runs unconditionally.
     """
     blockers: list[str] = []
     checkout_exists = bool(rec.worktree_path) and Path(rec.worktree_path).exists()
@@ -12028,41 +12028,36 @@ def _remove_system_blockers(rec, repo) -> list[str]:
             blockers.append(
                 f"{info.dirty} uncommitted change(s) in the working tree"
             )
+        elif info.state == git_ops.WorktreeState.UNKNOWN:
+            # classify_worktree only returns UNKNOWN when its own git calls
+            # timed out -- an honest "couldn't tell", not "clean". Treat it
+            # as a blocker rather than letting a stalled probe fall through
+            # to forced removal unclassified.
+            blockers.append(
+                "could not classify the working tree's git state (probe timed out)"
+            )
     if rec.branch:
         # Run against the anchor's shared repo, not the (possibly-missing)
         # checkout -- the branch ref and its commits outlive the working
         # directory, so a missing checkout must not silently skip this.
-        branch_exists = git_ops.git(
-            "rev-parse", "--verify", f"refs/heads/{rec.branch}",
-            cwd=repo.anchor, check=False,
-        ).returncode == 0
-        if branch_exists:
-            upstream = f"{repo.remote}/{repo.default_branch}"
-            ahead_r = git_ops.git(
-                "rev-list", "--count", f"{upstream}..{rec.branch}",
-                cwd=repo.anchor, check=False,
+        # Squash-aware (tree/patch-id comparison, not commit-SHA identity):
+        # a worktree branch intentionally keeps its pre-squash commits after
+        # its content is squash-merged upstream, so a raw SHA-ancestry check
+        # would refuse every already-landed worktree forever.
+        upstream = f"{repo.remote}/{repo.default_branch}"
+        if not git_ops.is_branch_merged(rec.branch, upstream, cwd=repo.anchor):
+            where = "" if checkout_exists else " (checkout directory is missing)"
+            blockers.append(
+                f"{rec.branch} has content not merged into {upstream}{where}"
             )
-            if ahead_r.returncode == 0:
-                try:
-                    ahead = int(ahead_r.stdout.strip())
-                except (TypeError, ValueError):
-                    ahead = 0
-                if ahead:
-                    where = "" if checkout_exists else " (checkout directory is missing)"
-                    blockers.append(
-                        f"{ahead} commit(s) on {rec.branch} not on {upstream}{where}"
-                    )
-            else:
-                # Ancestry couldn't be established (e.g. unrelated history) --
-                # fail closed rather than assume it's safe.
-                blockers.append(
-                    f"could not verify {rec.branch} is merged into {upstream}"
-                )
-    open_prs = [p for p in rec.prs if p.state == "open"]
-    if open_prs:
+    # `creating` is as live as `open` -- an in-flight PR that hasn't finished
+    # opening yet is exactly as much an obligation as one already open (the
+    # managed-worktree gc sweep applies the same predicate).
+    live_prs = [p for p in rec.prs if p.state in {"creating", "open"}]
+    if live_prs:
         blockers.append(
-            "open PR(s): "
-            + ", ".join(p.url or f"#{p.number}" for p in open_prs if (p.url or p.number))
+            "in-progress or open PR(s): "
+            + ", ".join(p.url or f"#{p.number}" for p in live_prs if (p.url or p.number))
         )
     live_claims = rec.live_resources
     if live_claims:
@@ -12128,12 +12123,47 @@ def cmd_remove_system(args: argparse.Namespace) -> int:
             output.err(message)
             return 1
 
-    removed, warnings = _remove_managed_worktree(
-        rec,
-        repo,
-        tracking_path,
-        force=True,
+    # The check above and the removal below are not one atomic step -- a
+    # claim, PR, or dirty change can land in between. Serialize against other
+    # finalize/gc/remove-system callers with the same repo-wide lock the
+    # managed gc sweep uses, then reload the record fresh and recheck
+    # immediately before removing (skipped only under --force, which accepts
+    # that risk explicitly).
+    lifecycle_lock = fin.FinalizeLock(
+        Path(repo.worktree_root) / ".finalize.lock",
+        timeout=3,
+        stale_after=3600,
     )
+    try:
+        lifecycle_lock.acquire()
+    except TimeoutError:
+        message = f"could not acquire the repo lifecycle lock for {wt_id}; try again"
+        if getattr(args, "json", False):
+            return _json_error(message)
+        output.err(message)
+        return 1
+    try:
+        rec = tracking.load_record(yaml_path)
+        if not force:
+            blockers = _remove_system_blockers(rec, repo)
+            if blockers:
+                message = (
+                    f"refusing to remove system worktree {wt_id}: "
+                    f"{'; '.join(blockers)} (appeared after the initial check). "
+                    "Resolve this state first, or pass --force to discard it anyway."
+                )
+                if getattr(args, "json", False):
+                    return _json_error(message)
+                output.err(message)
+                return 1
+        removed, warnings = _remove_managed_worktree(
+            rec,
+            repo,
+            tracking_path,
+            force=True,
+        )
+    finally:
+        lifecycle_lock.release()
     if not removed:
         location = f"; worktree path: {rec.worktree_path}" if rec.worktree_path else ""
         message = (

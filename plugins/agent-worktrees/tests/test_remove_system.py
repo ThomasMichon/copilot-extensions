@@ -46,6 +46,7 @@ def _config(tmp_path: Path):
     return types.SimpleNamespace(
         default_repo=types.SimpleNamespace(
             anchor=str(anchor), remote="origin", default_branch="master",
+            worktree_root=str(tmp_path / "worktree_root"),
         )
     )
 
@@ -442,6 +443,7 @@ def test_remove_system_refuses_when_checkout_gone_but_branch_unpushed(tmp_path):
     config = types.SimpleNamespace(
         default_repo=types.SimpleNamespace(
             anchor=str(anchor), remote="origin", default_branch="master",
+            worktree_root=str(tmp_path / "worktree_root"),
         )
     )
 
@@ -453,6 +455,126 @@ def test_remove_system_refuses_when_checkout_gone_but_branch_unpushed(tmp_path):
 
     assert result == 1
     message = json_error.call_args.args[0]
-    assert "not on" in message
+    assert "not merged into" in message
     assert "checkout directory is missing" in message
     assert (tracking_dir / "managed-1.yaml").exists()
+
+
+def test_remove_system_treats_unknown_classification_as_blocker(tmp_path):
+    """A classify_worktree timeout reports UNKNOWN with dirty=0 -- must not
+    be read as 'clean' and fall through to forced removal."""
+    record, tracking_dir = _record(tmp_path)
+    args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=False)
+
+    unknown_info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.UNKNOWN)
+    with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
+         patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
+         patch("agent_worktrees.git_ops.classify_worktree", return_value=unknown_info), \
+         patch("agent_worktrees.git_ops.is_branch_merged", return_value=True), \
+         patch("agent_worktrees.__main__._json_error") as json_error:
+        json_error.return_value = 1
+        result = cli.cmd_remove_system(args)
+
+    assert result == 1
+    message = json_error.call_args.args[0]
+    assert "could not classify" in message
+    assert (tracking_dir / "managed-1.yaml").exists()
+
+
+def test_remove_system_refuses_creating_pr_by_default(tmp_path):
+    """`creating` is as live as `open` -- an in-flight PR is still an
+    obligation even before it has finished opening."""
+    record, tracking_dir = _record(tmp_path)
+    record.prs = [tracking.PRRecord(state="creating")]
+    tracking.save_record(record, tracking_dir / "managed-1.yaml")
+    args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=False)
+
+    with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
+         patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
+         patch("agent_worktrees.__main__._json_error") as json_error:
+        json_error.return_value = 1
+        result = cli.cmd_remove_system(args)
+
+    assert result == 1
+    assert "in-progress or open PR" in json_error.call_args.args[0]
+
+
+def test_remove_system_allows_squash_merged_branch(tmp_path):
+    """A worktree branch whose content was squash-merged upstream keeps its
+    original (pre-squash) commits locally -- those must not read as
+    'unpushed' forever after. `is_branch_merged` (tree/patch-id aware, not
+    raw SHA ancestry) is the correct check."""
+    record, tracking_dir = _record(tmp_path)
+    args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=False)
+
+    with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
+         patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
+         patch("agent_worktrees.sessions.kill_tmux_session"), \
+         patch("agent_worktrees.git_ops.is_branch_merged", return_value=True), \
+         patch("agent_worktrees.git_ops.list_worktree_paths"), \
+         patch("agent_worktrees.git_ops.remove_worktree", return_value=True), \
+         patch("agent_worktrees.git_ops.git") as git, \
+         patch("agent_worktrees.disposition_history.remove"), \
+         patch("agent_worktrees.activity.log_event"), \
+         patch("agent_worktrees.__main__._json_output") as json_output:
+        git.return_value.returncode = 0
+        git.return_value.stdout = "0"
+        result = cli.cmd_remove_system(args)
+
+    assert result == 0
+    json_output.assert_called_once_with({"removed": "managed-1"})
+
+
+def test_remove_system_rechecks_immediately_before_removal(tmp_path):
+    """The initial check and the removal are not one atomic step -- a claim
+    that appears in between (a concurrent writer) must still block removal,
+    not just the very first check."""
+    record, tracking_dir = _record(tmp_path)
+    args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=False)
+
+    clean_calls = {"n": 0}
+
+    def _blockers(rec, repo):
+        clean_calls["n"] += 1
+        if clean_calls["n"] == 1:
+            return []  # initial check: looked clean
+        return ["unsettled outbound resource claim(s): codespace:late-claim"]
+
+    with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
+         patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
+         patch("agent_worktrees.__main__._remove_system_blockers", side_effect=_blockers), \
+         patch("agent_worktrees.__main__._json_error") as json_error:
+        json_error.return_value = 1
+        result = cli.cmd_remove_system(args)
+
+    assert result == 1
+    assert clean_calls["n"] == 2
+    message = json_error.call_args.args[0]
+    assert "appeared after the initial check" in message
+    assert "late-claim" in message
+    assert (tracking_dir / "managed-1.yaml").exists()
+
+
+def test_remove_system_force_skips_the_immediate_recheck(tmp_path):
+    """--force means the caller already accepted the risk -- it must skip
+    both the initial check AND the immediate pre-removal recheck."""
+    record, tracking_dir = _record(tmp_path)
+    args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=True)
+
+    with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
+         patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
+         patch("agent_worktrees.sessions.kill_tmux_session"), \
+         patch("agent_worktrees.git_ops.list_worktree_paths"), \
+         patch("agent_worktrees.git_ops.remove_worktree", return_value=True), \
+         patch("agent_worktrees.git_ops.git") as git, \
+         patch("agent_worktrees.disposition_history.remove"), \
+         patch("agent_worktrees.activity.log_event"), \
+         patch("agent_worktrees.__main__._remove_system_blockers") as blockers, \
+         patch("agent_worktrees.__main__._json_output") as json_output:
+        git.return_value.returncode = 0
+        git.return_value.stdout = "0"
+        result = cli.cmd_remove_system(args)
+
+    assert result == 0
+    blockers.assert_not_called()
+    json_output.assert_called_once_with({"removed": "managed-1"})
