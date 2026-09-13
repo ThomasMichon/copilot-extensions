@@ -23,7 +23,7 @@ or appears to be targeting the wrong worktree.
 
 ## What the mismatch means
 
-`agent-worktrees head-session --worktree <id> --json` is the authoritative
+`agent-worktrees head-session --worktree <id> --json` is the authoritative <!-- marketplace-isolation: allow agent-worktrees-management -->
 ledger replay for a worktree's current head and pending handoffs. A cutover
 misalignment means that ledger still shows pending handoff state for one
 worktree, but the resident status-monitor is currently sweeping a different
@@ -50,7 +50,7 @@ PowerShell:
 node $ch check-heads --json --cwd $PWD
 ```
 
-This command shells to `agent-worktrees head-session --json` for each known
+This command shells to `agent-worktrees head-session --json` for each known <!-- marketplace-isolation: allow agent-worktrees-management -->
 worktree and compares that ledger view with the status-monitor's current
 `wt-<id>` registry.
 
@@ -68,11 +68,11 @@ Look for:
    save or re-trigger the handoff and let a fresh cutover take over. The next
    successful successor registration should move the head automatically.
 2. **If the ledger cache is stale or the handoff is stranded after a failed
-   successor,** run `agent-worktrees doctor --fix` to repair safe worktree
+   successor,** run `agent-worktrees doctor --fix` to repair safe worktree <!-- marketplace-isolation: allow agent-worktrees-management -->
    state, including stale head cache and orphaned handoff cases.
 3. **If you already know the exact predecessor and successor session ids,**
-   repair the ground truth explicitly with `agent-worktrees conclude-session`
-   or `agent-worktrees link-succession` rather than inventing a replacement
+   repair the ground truth explicitly with `agent-worktrees conclude-session` <!-- marketplace-isolation: allow agent-worktrees-management -->
+   or `agent-worktrees link-succession` rather than inventing a replacement <!-- marketplace-isolation: allow agent-worktrees-management -->
    head in another layer.
 
 Do not patch the deployed plugin payload or try to force a cutover by editing

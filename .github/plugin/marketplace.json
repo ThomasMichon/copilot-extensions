@@ -54,7 +54,7 @@
     {
       "name": "context-handoff",
       "description": "Context window monitoring and session handoff - a session-start continuity kernel plus a Copilot CLI extension that tracks token utilization, stores handoffs as worktree-pinned agent-dispatch tasks when available or one-time worktree-state files otherwise, and signals pending handoff pickup without performing process management",
-      "version": "0.1.1-dev16",
+      "version": "0.1.1-dev17",
       "source": "plugins/context-handoff"
     },
     {
@@ -78,7 +78,7 @@
     {
       "name": "agent-dispatch",
       "description": "Portable durable agent task-loop + per-host coordinator: a single-writer SQLite work queue (eight-state model with owner-preserving suspension, capability-gated atomic claim, affinity routing, liveness-reconciled recovery) so agents coordinate without push latency or an account per agent.",
-      "version": "0.1.2-dev93",
+      "version": "0.1.2-dev94",
       "source": "plugins/agent-dispatch"
     },
     {
