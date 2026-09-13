@@ -119,14 +119,26 @@ class HostIndex:
 
     # -- mutation ----------------------------------------------------------
     def register(self, record: HostRecord) -> None:
+        previous = self._records.get(record.session_id)
         self._records[record.session_id] = record
-        self._flush()
+        try:
+            self._flush()
+        except Exception:
+            if previous is None:
+                self._records.pop(record.session_id, None)
+            else:
+                self._records[record.session_id] = previous
+            raise
 
     def remove(self, session_id: str) -> bool:
-        existed = self._records.pop(session_id, None) is not None
-        if existed:
-            self._flush()
-        return existed
+        previous = self._records.pop(session_id, None)
+        if previous is not None:
+            try:
+                self._flush()
+            except Exception:
+                self._records[session_id] = previous
+                raise
+        return previous is not None
 
     def set_resume_flag(self, session_id: str, value: bool) -> bool:
         """Mark (or clear) a session to receive a 'Resume' nudge on reattach.

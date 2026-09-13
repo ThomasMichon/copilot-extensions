@@ -407,3 +407,51 @@ def test_dormant_container_retains_launch_fence_after_restart(
     restarted._acquire_container_lock(session_id, "example-container")
     lock.acquire.assert_called_once()
     restarted._release_container_lock(session_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flush_before_failure", [False, True])
+async def test_completed_host_persistence_failure_remains_rollbackable(
+    tmp_db, tmp_path, monkeypatch, flush_before_failure,
+):
+    from agent_bridge.session_host_ownership import (
+        _remember, abort_pending_host_launch, complete_host_launch,
+    )
+
+    state_dir = str(tmp_path / "hosts")
+    manager = SessionManager(tmp_db, session_host_state_dir=state_dir)
+    session = Session("example-session", "example-agent", SpawnTarget(type="command"))
+    tmp_db.create_session(
+        session.session_id, session.name, None, ".", "command", "starting", time.time(),
+    )
+    manager._sessions[session.session_id] = session
+    spawned = SpawnedHost(
+        local_port=51000, host_pid=123, child_pid=456, boundary="container",
+        protocol_version=PROTOCOL_VERSION, nonce="example-nonce",
+        state_file="/example/host.json",
+        endpoint={"kind": "container", "container": "example-container"},
+    )
+    spawner = SimpleNamespace(abort_spawned=AsyncMock(return_value=True))
+    pending = _remember(manager, session.session_id, spawner, spawned)
+    client = SimpleNamespace(shutdown=AsyncMock())
+    pending.client = client
+    flush = manager._host_index._flush
+
+    def fail():
+        if flush_before_failure:
+            flush()
+        raise OSError("index write failed")
+
+    monkeypatch.setattr(manager._host_index, "_flush", fail)
+    with pytest.raises(OSError, match="index write failed"):
+        complete_host_launch(manager, session.session_id, client, "example-acp")
+    assert manager._host_index.get(session.session_id) == pending.record
+    with pytest.raises(OSError, match="index write failed"):
+        manager._host_index.remove(session.session_id)
+    assert manager._host_index.get(session.session_id) == pending.record
+    monkeypatch.setattr(manager._host_index, "_flush", flush)
+    await abort_pending_host_launch(manager, session.session_id)
+    assert manager._pending_host_launches == {}
+    assert manager._host_index.get(session.session_id) is None
+    restarted = SessionManager(tmp_db, session_host_state_dir=state_dir)
+    assert restarted._host_index.get(session.session_id) is None
