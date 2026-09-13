@@ -484,6 +484,143 @@ class TestCreatePRForkFlow:
 
 
 # ---------------------------------------------------------------------------
+# create_pr -- role resolution drives pr.roles (not a forced pr.fork.enabled)
+#
+# The tests above force ``pr.fork.enabled`` directly on the base PRConfig.
+# These instead exercise the actual integration seam create_pr relies on in
+# practice: a repo that only sets ``pr.roles`` (fork disabled at the base),
+# with the caller's role resolved from a *live* (here, faked) GitHub viewer
+# permission via ``_resolve_caller_role`` -> ``providers.actor_viewer_permission``
+# -> ``cfg.resolve_role_pr_config``. Closes the one seam
+# efforts/active/role-aware-fork-pr-flow's Phase 3 left unit-untested.
+# ---------------------------------------------------------------------------
+
+class TestCreatePRRoleResolution:
+    def _roles_config(self, config, **role_overrides):
+        import dataclasses
+        repo = config.repos["ext"]
+        pr = dataclasses.replace(
+            repo.pr, provider="github", roles=dict(role_overrides),
+        )
+        return dataclasses.replace(
+            config, repos={"ext": dataclasses.replace(repo, pr=pr)},
+        )
+
+    def _fake_permission_provider(self, viewer_permission: str, *, supported=True):
+        from types import SimpleNamespace
+
+        class _FakeProvider:
+            name = "github"
+
+            def get_repo_policy(self, repo, *, api_base="", token=None):
+                return SimpleNamespace(
+                    supported=supported, viewer_permission=viewer_permission,
+                )
+
+        return _FakeProvider()
+
+    def _patch_live_permission(self, monkeypatch, viewer_permission: str, **kw):
+        fake = self._fake_permission_provider(viewer_permission, **kw)
+        monkeypatch.setattr(
+            "agent_worktrees.providers.get_provider", lambda name: fake,
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.providers.account_token_for_slug",
+            lambda *a, **k: None,
+        )
+        return fake
+
+    def test_live_write_permission_resolves_to_roles_write_fork(
+        self, pr_repo, monkeypatch,
+    ):
+        """A caller whose live GitHub permission reads 'write' gets the
+        `pr.roles.write` override applied -- including its `fork.enabled` --
+        purely from the live permission read, with no `pr.fork.enabled` set
+        anywhere on the base config."""
+        config, wid, wt_path, _remote_dir = pr_repo
+        config = self._roles_config(
+            config,
+            write=cfg.PRRoleOverride(
+                merge_actor="", fork=cfg.ForkConfig(enabled=True),
+            ),
+        )
+        self._patch_live_permission(monkeypatch, "write")
+
+        res = pr_ops.create_pr(wid, config, target_repo="acme/ext")
+
+        assert res["success"] is False
+        assert res["needs_confirmation"] == "fork_setup"
+        assert res["repo"] == "acme/ext"
+        # Nothing mutated: the base config never set pr.fork.enabled itself.
+        assert not git_ops.has_remote("fork", cwd=str(wt_path))
+
+    def test_live_maintain_permission_keeps_direct_push(
+        self, pr_repo, monkeypatch,
+    ):
+        """A caller whose live permission reads 'maintain' resolves to the
+        `pr.roles.maintain` override (fork disabled, direct push unchanged) --
+        proceeds without any fork confirmation."""
+        config, wid, _wt_path, _remote_dir = pr_repo
+        config = self._roles_config(
+            config,
+            write=cfg.PRRoleOverride(
+                merge_actor="", fork=cfg.ForkConfig(enabled=True),
+            ),
+            maintain=cfg.PRRoleOverride(
+                merge_actor="submitter-direct",
+                fork=cfg.ForkConfig(enabled=False),
+            ),
+        )
+        self._patch_live_permission(monkeypatch, "maintain")
+
+        res = pr_ops.create_pr(wid, config, target_repo="acme/ext")
+
+        assert res["success"] is True, res
+        assert "needs_confirmation" not in res
+        assert res["remote"] == "origin"
+
+    def test_live_permission_with_no_matching_role_is_unaffected(
+        self, pr_repo, monkeypatch,
+    ):
+        """A live permission that resolves to a role absent from `pr.roles`
+        (e.g. 'read') leaves the base PRConfig untouched -- no fork, no
+        confirmation gate -- exactly like an unconfigured repo."""
+        config, wid, _wt_path, _remote_dir = pr_repo
+        config = self._roles_config(
+            config,
+            write=cfg.PRRoleOverride(
+                merge_actor="", fork=cfg.ForkConfig(enabled=True),
+            ),
+        )
+        self._patch_live_permission(monkeypatch, "read")
+
+        res = pr_ops.create_pr(wid, config, target_repo="acme/ext")
+
+        assert res["success"] is True, res
+        assert "needs_confirmation" not in res
+
+    def test_unresolvable_live_permission_falls_back_to_base_config(
+        self, pr_repo, monkeypatch,
+    ):
+        """A provider read that can't determine `viewer_permission`
+        (`supported=False`) must fail OPEN to the base, non-role-scoped
+        config -- never treated as a denial or as any particular role."""
+        config, wid, _wt_path, _remote_dir = pr_repo
+        config = self._roles_config(
+            config,
+            write=cfg.PRRoleOverride(
+                merge_actor="", fork=cfg.ForkConfig(enabled=True),
+            ),
+        )
+        self._patch_live_permission(monkeypatch, "", supported=False)
+
+        res = pr_ops.create_pr(wid, config, target_repo="acme/ext")
+
+        assert res["success"] is True, res
+        assert "needs_confirmation" not in res
+
+
+# ---------------------------------------------------------------------------
 # create_pr -- refspec head scheme (#1815)
 # ---------------------------------------------------------------------------
 
