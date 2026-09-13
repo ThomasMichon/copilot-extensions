@@ -528,7 +528,7 @@ scenarios.
   baseline entry to 4,757, filed
   [#2572](https://github.com/ThomasMichon/copilot-extensions/issues/2572)
   to track the agent-worktrees drift as a real componentization debt (not
-  silently absorbed), and widened only that one baseline entry to 28,931
+  silently absorbed), and widened only that one baseline entry to 28,951
   as a documented, deliberate unblock -- not a decision that further growth
   there is fine. A second, also-unrelated CI break from the same #2568
   surfaced on the same push: `test_check_marketplace_isolation.py`'s
@@ -542,6 +542,20 @@ scenarios.
   small and this clearly convention-shaped.
 - Bumped agent-dispatch 0.1.2-dev93 -> dev94 and ran the
   instruction-projections sync immediately after.
+- A subsequent `agent-worktrees git sync` before the next push picked up
+  yet another concurrent-leg merge that grew
+  `agent_worktrees/__main__.py` further (28,931 -> 28,951); widened the
+  baseline entry a second time and commented on #2572 to record the
+  ongoing pattern rather than treat each occurrence as a one-off. Copilot's
+  review on the resulting push flagged the widen as scope creep (a fair
+  read in isolation) plus two documentation-accuracy nits (the journal's
+  first widen note briefly read 28,931 after the second widen moved the
+  actual ceiling to 28,951; the PR description's cap claim didn't
+  distinguish `recipes_cli.py` being newly under-cap from `__main__.py`
+  remaining a shrunk-but-still-grandfathered offender) -- corrected both
+  and left a reply on the scope-creep thread pointing at #2572 as the
+  already-filed, already-linked rationale rather than reverting a widen
+  that would just re-break CI for every other open PR.
 
 ### 2026-09-12 - Componentize queue.py further: extract queue_producer_fences.py
 
