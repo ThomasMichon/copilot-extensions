@@ -1619,7 +1619,7 @@ async def test_confirmed_dead_remote_authority_is_pruned(
 
     assert await session_manager._recover_remote_host_records() == 0
     assert session_manager._host_index.get("s1") is None
-    drop.assert_awaited_once_with("s1")
+    drop.assert_awaited_once_with("s1", strict=True, preserve_ownership=True)
 
 
 @pytest.mark.asyncio

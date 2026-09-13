@@ -2043,7 +2043,8 @@ class SessionManager:
     def _remote_reap_pending(self, session_id: str) -> bool:
         """Whether an existing cleanup operation still owns this host's fate."""
         return any(
-            not task.done() for task in self._remote_reaps_by_session.get(session_id, ())
+            not task.done() or task.cancelled() or task.exception() is not None or not task.result()
+            for task in self._remote_reaps_by_session.get(session_id, ())
         )
 
     def _live_remote_host_sessions(self) -> set[str]:
@@ -2532,7 +2533,11 @@ class SessionManager:
                         self._host_index.register(record)
                         if existing is None:
                             recovered += 1
-                    elif status == "dead":
+                    elif status in {"dead", "missing"}:
+                        self._remote_recovery_inconclusive.add(session.session_id)
+                        await self._drop_forward(
+                            session.session_id, strict=True, preserve_ownership=True,
+                        )
                         self._release_container_lock(session.session_id)
                         self._set_container_launch_pending(
                             session.session_id,
@@ -2541,31 +2546,14 @@ class SessionManager:
                         self._remote_recovery_inconclusive.discard(session.session_id)
                         self._remote_recovery_skipped.discard(session.session_id)
                         if existing is not None:
-                            await self._drop_forward(session.session_id)
                             self._host_index.remove(session.session_id)
                             log.info(
-                                "Pruned confirmed-dead remote Session Host for %s",
-                                session.session_id,
+                                "Pruned confirmed-%s remote Session Host for %s",
+                                status, session.session_id,
                             )
                     elif status == "unknown":
                         self._remote_recovery_skipped.discard(session.session_id)
                         self._remote_recovery_inconclusive.add(session.session_id)
-                    elif status == "missing":
-                        self._release_container_lock(session.session_id)
-                        self._set_container_launch_pending(
-                            session.session_id,
-                            False,
-                        )
-                        self._remote_recovery_inconclusive.discard(session.session_id)
-                        self._remote_recovery_skipped.discard(session.session_id)
-                        if existing is not None:
-                            await self._drop_forward(session.session_id)
-                            self._host_index.remove(session.session_id)
-                            log.info(
-                                "Pruned confirmed-absent remote Session Host "
-                                "authority for %s",
-                                session.session_id,
-                            )
                     elif status == "skipped":
                         self._remote_recovery_skipped.add(session.session_id)
         return recovered
@@ -4004,7 +3992,10 @@ class SessionManager:
 
         def settled(completed: asyncio.Task[bool]) -> None:
             self._remote_reap_tasks.discard(completed)
-            owned.discard(completed)
+            if not completed.cancelled() and completed.exception() is None and completed.result():
+                owned.discard(completed)
+            else:
+                log.warning("Remote reap failed for %s; result retained for cleanup retry", rec.session_id)
             if not owned:
                 self._remote_reaps_by_session.pop(rec.session_id, None)
 
@@ -4122,7 +4113,12 @@ class SessionManager:
 
                         await finish_owned(reap_local())
                     else:
-                        self._reap_host_record(rec, plan.reason)
+                        from .session_teardown import reap_remote_record
+
+                        if not await finish_owned(reap_remote_record(
+                            self, rec, session=session, generation=generation,
+                        )):
+                            continue
                     reaped += 1
         return reaped
 

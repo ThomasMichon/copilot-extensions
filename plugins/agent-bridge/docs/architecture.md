@@ -463,6 +463,11 @@ restart does not inherently close the child's pipes.
   Confirmed remote reap clears container markers and target locks only if the
   current host record still equals the reaped snapshot; replacement records
   retain their ownership even when an older cleanup finishes later.
+  Confirmed-dead authority cleanup closes relay/forward channels strictly before
+  dropping descriptors or venue ownership. Failed remote reap completions stay
+  attached to the session until a confirmed explicit retry consumes them, so a
+  stop cannot miss a failure that completed during another teardown await.
+  Stranded-host sweeps await remote termination and count confirmed reaps only.
   The manager remains the public facade; `session_resume.py`,
   `session_teardown.py`, and `session_ownership.py` own the bounded lifecycle
   implementations. Additive session migrations live in `db_migrations.py`.

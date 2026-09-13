@@ -98,6 +98,11 @@ async def reap_remote_record(
             manager._set_container_launch_pending(record.session_id, False)
             manager._release_container_lock(record.session_id)
             manager._forget_host_record(record)
+            owned = manager._remote_reaps_by_session.get(record.session_id)
+            if owned is not None:
+                owned.difference_update(task for task in list(owned) if task.done())
+                if not owned:
+                    manager._remote_reaps_by_session.pop(record.session_id, None)
     elif (
         session is not None
         and manager._sessions.get(record.session_id) is session
