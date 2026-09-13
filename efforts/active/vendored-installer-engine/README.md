@@ -144,11 +144,13 @@ as independent per-plugin PRs; see Coordination._
   `agent-codespaces`, `agent-dispatch`, `agent-ssh`, `agent-containers`,
   `agent-mcp`, `agent-machines`. This effort exists so that class of bug gets
   fixed once, not N times.
-- **Scale (current per-plugin canonical installer entrypoint line counts,
-  PowerShell side only — `install.ps1` where it exists, else `init.ps1`):**
-  agent-worktrees 3638, agent-dispatch 2940, agent-bridge 2806, agent-machines
+- **Scale (per-plugin canonical installer entrypoint line counts as of
+  2026-09-12, PowerShell side only — `install.ps1` where it exists, else
+  `init.ps1`; re-check before relying on these for the Validation Plan's
+  shrinkage measurement, as they drift with routine bugfixes):**
+  agent-worktrees 3638, agent-dispatch 2940, agent-bridge 2855, agent-machines
   2141 (`init.ps1`), agent-index 2228, agent-codespaces 1360, agent-logger
-  1339, agent-vault 1178, agent-containers 897 (`init.ps1`), budget-guidance
+  1392, agent-vault 1178, agent-containers 897 (`init.ps1`), budget-guidance
   886, agent-mcp 826 (`init.ps1`), agent-ssh 789. The `.sh` counterparts are
   similar in size. This is ~20,000+ lines of independently-authored installer
   logic across the fleet, most of it mechanically identical.
@@ -264,7 +266,19 @@ Concretely:
 - Track the vendored engine's own line count in the Validation Plan (below) —
   growth there is exactly the failure mode to watch for.
 
-### Phase 1 — Canonical engine + reference plugin + CI guard
+- [ ] **Critical: adapt `tools/check-install-contract.py` (lines ~280-368) to
+      the composed engine/wrapper split *before* converting any plugin.**
+      That guard currently text-scans each plugin's own `install.*`/`init.*`
+      for specific literal markers — `uv pip install`, the
+      `install-contract:v3 versioned-venv` block marker, `stamp`/`provision`,
+      source-kind blocks, and the v4 markers. A thin wrapper that moves those
+      blocks into `scripts/installer-engine.*` will fail this existing guard
+      even though the contract is still honored, just relocated. Either make
+      the guard also inspect the vendored engine file(s) a wrapper sources
+      (composed view), or keep the required literal marker seams present in
+      each plugin's thin wrapper itself (not just the engine). Add regression
+      coverage for whichever approach is chosen — this must land in the same
+      PR as the first engine/wrapper conversion, not after.
 - [ ] Create `libs/installer-engine/installer-engine.ps1` and
       `installer-engine.sh` — the canonical (a) and (b) functions from Phase 0,
       parameterized by a small config object/associative-array (service name,
@@ -343,6 +357,11 @@ engine under this effort.
 - [ ] `tools/sync-installer-engine.py --check` passes in CI for every plugin
       that has adopted the engine, and fails (with a clear diagnostic) when a
       vendored copy is hand-edited or drifts from canonical.
+- [ ] `tools/check-install-contract.py` passes for every converted plugin
+      *without modification to lower its bar* — verifying it was adapted (per
+      Phase 1's critical item) to recognize the contract seams from a
+      composed engine/wrapper, not that the seams were quietly dropped from
+      enforcement.
 - [ ] Each converted plugin's full existing test suite still passes
       (`pytest`, run through this repo's normal bounded test runner), plus
       any install-contract guard (`tools/check-install-contract.py`).
