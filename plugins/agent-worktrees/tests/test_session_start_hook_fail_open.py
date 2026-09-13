@@ -96,7 +96,7 @@ def test_session_guidance_projection_points_to_hook_written_file():
         "instructions/agent-worktrees/session-guidance.instructions.md"
         in template
     )
-    assert "its absence is not an error" in template
+    assert "Its absence is not an error" in template
     guide = (
         _PLUGIN / "instructions" / "worktree-context-guide.instructions.md"
     ).read_text(encoding="utf-8")

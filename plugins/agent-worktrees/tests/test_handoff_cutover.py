@@ -616,6 +616,15 @@ class TestCmdHandoffCutover:
             "_unsupported_hosted_launch",
             lambda config, record, operation: "",
         )
+        # Default the new post-spawn "is the successor pane actually the
+        # current one" check to a pass -- these tests target other spawn
+        # concerns and don't exercise a real mux; tests for the doctor gate
+        # itself override this explicitly (test_mux_doctor.py covers the
+        # primitive; the gate-failure path is covered directly here too).
+        monkeypatch.setattr(
+            m.mux_doctor, "verify_and_doctor_current_pane",
+            lambda *a, **k: {"ok": True, "was_current": True, "doctored": False},
+        )
 
     def test_parser_accepts_retire_mux_identity(self):
         args = m.build_parser().parse_args([
@@ -1491,6 +1500,63 @@ class TestCmdHandoffCutover:
         assert out["candidate_status"] == "pane-exited-before-session"
         assert "cleanup" not in out
 
+    def test_spawn_fails_closed_when_pane_never_becomes_current(
+        self, monkeypatch, capfd, tmp_path,
+    ):
+        # Copilot review catch on PR #2571: exercise the actual wiring
+        # (not just the mux_doctor helper in isolation) so a regression in
+        # __main__.py's gate would be caught here.
+        monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", lambda: "wtZ")
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: True)
+        monkeypatch.setattr(sessions, "mux_active_pane", lambda w: "%1")
+        (tmp_path / "wtZ.yaml").write_text("x", encoding="utf-8")
+        monkeypatch.setattr(m.cfg, "load_config", lambda: object())
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+
+        class _Rec:
+            worktree_path = str(tmp_path / "w")
+
+        monkeypatch.setattr(m.tracking, "load_record", lambda p: _Rec())
+        monkeypatch.setattr(
+            m, "_preflight_launch", lambda c, a, w: m.LaunchPreflight()
+        )
+        monkeypatch.setattr(m, "_build_launch_cmd", lambda *a, **k: ["copilot"])
+        monkeypatch.setattr(m, "_build_env", lambda p, s, work_dir=None: {})
+        monkeypatch.setattr(m, "_repo_session_env", lambda c, w: {})
+        monkeypatch.setattr(
+            sessions, "mux_new_window",
+            lambda *a, **k: {"ok": True, "new_pane": "%5", "prompt_received": True},
+        )
+        events: list[str] = []
+        monkeypatch.setattr(
+            m.activity, "log_event",
+            lambda event, **k: events.append(event),
+        )
+        # Override the class-wide default-pass mock: this is the one test
+        # that exercises the actual failure wiring.
+        monkeypatch.setattr(
+            m.mux_doctor, "verify_and_doctor_current_pane",
+            lambda *a, **k: {
+                "ok": False, "was_current": False, "doctored": True,
+                "active_pane": "%2",
+            },
+        )
+        monkeypatch.setattr(
+            m, "_wait_for_handoff_candidate",
+            lambda *a, **k: pytest.fail(
+                "must fail closed before waiting on a candidate session"
+            ),
+        )
+
+        rc = m.cmd_handoff_cutover(_ns(seed="continue", session_id="session-1"))
+
+        assert rc == 4
+        out = json.loads(capfd.readouterr().out)
+        assert out["ok"] is False
+        assert out["error"] == "pane-not-current"
+        assert "handoff_cutover_spawn" in events
+        assert "handoff_successor_spawn_failed" in events
+
     def test_token_launch_returns_associated_successor_session(
         self, monkeypatch, capfd, tmp_path,
     ):
@@ -1774,6 +1840,38 @@ class TestCmdHandoffsCheck:
         assert finding["retire_pane"] == "%9"
         assert finding["executed"] is False
         assert not retired
+
+    def test_unconfirmed_pane_spawn_is_not_retirement_evidence(
+        self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
+    ):
+        # Copilot review catch on PR #2571: a spawn whose pane never became
+        # -- and could not be doctored into -- the operator's console tab
+        # must not be treated as valid evidence to retire the predecessor
+        # (that would let a cutover the operator never actually saw
+        # complete anyway). Only an explicit pane_confirmed_current=False
+        # excludes it; absence (pre-mux-doctor history) stays confirmed.
+        self._record(
+            tmp_tracking_dir, "wt-check-9",
+            predecessor="old-sess", successor="new-sess",
+        )
+        monkeypatch.setattr(activity, "read_events", lambda **kw: (
+            [{
+                "handoff_token": "task-wt-check-9", "session_id": "old-sess",
+                "old_pane": "%9", "expected_mux_session": "wt-wt-check-9",
+                "predecessor_copilot_pid": 77, "predecessor_copilot_start_time": "old",
+                "pane_confirmed_current": False,
+            }] if kw.get("event") == "handoff_cutover_spawn" else []
+        ))
+        monkeypatch.setattr(
+            m, "_monitor_retire_handoff_predecessor",
+            lambda req: pytest.fail("must not retire off unconfirmed spawn evidence"),
+        )
+
+        rc = m.cmd_handoffs_check(_ns(worktree_id="wt-check-9", json=True))
+
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["found"] == 0
 
     def test_execute_retires_and_reports_success(
         self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
