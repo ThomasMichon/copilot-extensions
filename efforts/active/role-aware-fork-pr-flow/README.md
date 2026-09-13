@@ -303,14 +303,31 @@ so it absorbed both slices rather than stacking a second PR on an unmerged
 one). Phase 3's downstream-adoption item — `gim-home/odsp-web-harness`'s own
 config/docs — has landed
 ([gim-home/odsp-web-harness#292](https://github.com/gim-home/odsp-web-harness/pull/292),
-merged). All Plan and Validation Plan items for Phase 3 are resolved; the two
-remaining checkbox items under Phase 2b (branch-reuse/stale-PR pruning and a
-`pr.roles`-driven `merge_actor` override for `pr-merge`'s own flow
-classification) are explicitly deferred follow-ups, not blockers — they cover
-non-default combinations left for a later increment only if they prove
-necessary in practice. This effort is ready to move to `Done`.
+merged). All Plan and Validation Plan items for Phase 3 are resolved, including
+the previously-untested live-permission-resolution seam inside `create_pr`
+(now covered by `TestCreatePRRoleResolution`,
+[#2512](https://github.com/ThomasMichon/copilot-extensions/pull/2512),
+merged). The two remaining checkbox items under Phase 2b (branch-reuse/
+stale-PR pruning and a `pr.roles`-driven `merge_actor` override for
+`pr-merge`'s own flow classification) are explicitly deferred follow-ups, not
+blockers — they cover non-default combinations left for a later increment
+only if they prove necessary in practice. This effort is ready to move to
+`Done`.
 
 ## Journal
+
+### 2026-09-12 — Closed the one untested Phase 3 seam
+- Added `TestCreatePRRoleResolution` to `test_pr_ops.py`: exercises the real
+  `_resolve_caller_role` -> `providers.actor_viewer_permission` ->
+  `cfg.resolve_role_pr_config` path inside `create_pr` with a faked live
+  GitHub permission (rather than forcing `pr.fork.enabled` directly, as the
+  existing `TestCreatePRForkFlow` cases do). Covers: live "write" permission
+  resolving to `pr.roles.write`'s fork override (confirmation gate fires);
+  live "maintain" keeping direct push; an unmapped resolved role (e.g.
+  "read") and an unsupported/unresolvable permission read both failing open
+  to the unmodified base config. `agent-worktrees` bumped to `1.5.5-dev81`.
+  Merged [ThomasMichon/copilot-extensions#2512](https://github.com/ThomasMichon/copilot-extensions/pull/2512).
+  Full suite: 4254 passed, 41 skipped, 0 regressions.
 
 ### 2026-09-11 — Phase 3 downstream adoption landed
 - Merged `gim-home/odsp-web-harness#292`: adopted `pr.roles.write`
