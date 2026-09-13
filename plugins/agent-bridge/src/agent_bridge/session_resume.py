@@ -433,6 +433,12 @@ async def resync_session(self: SessionManager, session_id: str, *, background: b
             raise ValueError(
                 f"Session {session_id} is no longer running; skipping background resync"
             )
+        if self._remote_reap_pending(session_id):
+            from .session_manager import RemoteHostRecoveryPendingError
+
+            raise RemoteHostRecoveryPendingError(
+                f"Remote Session Host cleanup is pending for {session_id}"
+            )
         if session.status == SessionStatus.RUNNING:
             turn_live = (
                 session._prompt_task is not None

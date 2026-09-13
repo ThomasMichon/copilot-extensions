@@ -30,6 +30,7 @@ class PendingHostLaunch:
     sock: Any = None
     streams: Any = None
     client: AcpClient | None = None
+    durable: bool = False
 
 
 def require_no_pending_host_launch(manager: SessionManager, session_id: str) -> None:
@@ -92,6 +93,7 @@ def _remember(
         if manager._host_index is not None:
             manager._host_index.register(record)
         manager._set_container_launch_pending(session_id, True)
+        pending.durable = manager._host_index is not None
     except Exception as exc:
         log.error("Could not persist spawned-host ownership for %s", session_id, exc_info=True)
         raise RemoteSpawnCleanupPendingError(
@@ -106,14 +108,26 @@ async def spawn_host_owned(
     operation: Awaitable[SpawnedHost],
 ) -> PendingHostLaunch:
     """Join spawn and retain its result even when cancellation wins delivery."""
+    async def remember(spawned: SpawnedHost) -> PendingHostLaunch:
+        try:
+            return _remember(manager, session_id, spawner, spawned)
+        except Exception as exc:
+            await finish_owned(
+                abort_pending_host_launch(manager, session_id), propagate_cancel=False,
+            )
+            raise RuntimeError(
+                f"Could not persist Session Host ownership for {session_id}; "
+                "spawned host cleanup confirmed"
+            ) from exc
+
     task = asyncio.ensure_future(operation)
     try:
         spawned = await finish_owned(task)
     except asyncio.CancelledError:
         if task.done() and not task.cancelled() and task.exception() is None:
-            _remember(manager, session_id, spawner, task.result())
+            await remember(task.result())
         raise
-    return _remember(manager, session_id, spawner, spawned)
+    return await remember(spawned)
 
 
 def complete_host_launch(
