@@ -654,7 +654,16 @@ function Get-VersionedCurrent {
     $vr = Join-Path $ScriptDir 'versioned_runtime.py'
     $py = if (Test-Path $LinkPython) { $LinkPython } elseif (Test-Path $VenvPython) { $VenvPython } else { $null }
     if (-not $py) { return '' }
-    $out = & $py $vr --root $InstallDir --link-name 'venv' current 2>$null
+    # versioned_runtime.py routinely writes a "no pyvenv.cfg" notice to stderr
+    # when the 'venv' link is absent/legacy; under $ErrorActionPreference='Stop'
+    # that becomes a terminating error even with a 2>$null redirect.
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $out = & $py $vr --root $InstallDir --link-name 'venv' current 2>$null
+    } finally {
+        $ErrorActionPreference = $prevEAP
+    }
     return ("$out").Trim()
 }
 
