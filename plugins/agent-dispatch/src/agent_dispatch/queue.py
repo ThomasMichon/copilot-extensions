@@ -319,6 +319,16 @@ class Task:
     #: answered). The submitted answers live in the ``task_steer`` table.
     card: dict | None = None
     awaiting_steer: bool = False
+    #: A latest-only, **not-yet-submitted** operator draft of the card's answer
+    #: (``{fields, ts}``), or ``None``. Distinct from an actual steer: saving a
+    #: draft never touches ``awaiting_steer`` or the task's status -- the task
+    #: stays blocked exactly as before. This lets a surface (e.g. the Picker's
+    #: Steer form) persist a partial or complete answer durably on the
+    #: coordinator itself (visible to any surface, any machine) without
+    #: resolving the card, then submit it for real later via
+    #: :meth:`TaskQueue.submit_steer`. See :meth:`TaskQueue.save_card_draft` /
+    #: :meth:`TaskQueue.clear_card_draft`.
+    card_draft: dict | None = None
     #: A cold headless task has received a steer/resume request. The supervisor
     #: releases it for re-embodiment only after the prior body is confirmed
     #: stopped, preventing overlapping workers.
@@ -380,6 +390,7 @@ class Task:
             activity=row["activity"],
             activity_updated_at=row["activity_updated_at"],
             card=json.loads(row["card"]) if row["card"] else None,
+            card_draft=json.loads(row["card_draft"]) if row["card_draft"] else None,
             awaiting_steer=bool(row["awaiting_steer"]),
             resume_requested=bool(row["resume_requested"]),
             wake_seq=row["wake_seq"],
@@ -501,6 +512,7 @@ _COLUMNS: dict[str, str] = {
     # cleared when the operator submits a steer). The submitted answers accumulate
     # in the append-only ``task_steer`` table.
     "card": "TEXT",
+    "card_draft": "TEXT",
     "awaiting_steer": "INTEGER NOT NULL DEFAULT 0",
     "resume_requested": "INTEGER NOT NULL DEFAULT 0",
     "wake_seq": "INTEGER NOT NULL DEFAULT 0",
@@ -3083,7 +3095,7 @@ class TaskQueue(
             if cold_headless:
                 conn.execute(
                     "UPDATE tasks SET awaiting_steer = 0, resume_requested = 1,"
-                    " updated_at = ?"
+                    " card_draft = NULL, updated_at = ?"
                     " WHERE id = ? AND status = ?",
                     (ts, task_id, Status.SUSPENDED),
                 )
@@ -3092,6 +3104,7 @@ class TaskQueue(
                     "UPDATE tasks SET status = ?, awaiting_steer = 0,"
                     " resume_requested = 0, lease_expires_at = ?,"
                     " last_seen_at = ?, last_liveness = NULL,"
+                    " card_draft = NULL,"
                     " updated_at = ? WHERE id = ? AND status = ?",
                     (
                         Status.STARTED,
@@ -3104,7 +3117,8 @@ class TaskQueue(
                 )
             else:
                 conn.execute(
-                    "UPDATE tasks SET awaiting_steer = 0, updated_at = ? WHERE id = ?",
+                    "UPDATE tasks SET awaiting_steer = 0, card_draft = NULL,"
+                    " updated_at = ? WHERE id = ?",
                     (ts, task_id),
                 )
             self._audit(
@@ -3145,6 +3159,65 @@ class TaskQueue(
             conn.execute("COMMIT")
         if wake_enqueued:
             self._notify_wake()
+        return result  # type: ignore[return-value]
+
+    def save_card_draft(
+        self,
+        task_id: str,
+        *,
+        fields: dict,
+        now: float | None = None,
+    ) -> Task:
+        """Persist an operator's **not-yet-submitted** draft answer to a task's
+        card, without submitting a steer.
+
+        Unlike :meth:`submit_steer`, this never touches ``awaiting_steer`` or
+        the task's status -- the task remains exactly as blocked as before.
+        Stores the latest-only ``card_draft`` object (``{fields, ts}``) so a
+        draft saved from one surface/machine is durably visible from any other
+        (``card show``, the Picker's Steer form, a raw CLI call) rather than
+        living only in a local sidecar file that only the saving machine can
+        see. Deliberately **not** owner-gated, mirroring :meth:`submit_steer` --
+        the operator (or a surface acting for them), not the worker, owns this
+        draft. Allowed on any non-terminal task.
+        """
+        ts = self._now(now)
+        draft = {"fields": fields, "ts": ts}
+        payload = json.dumps(draft, separators=(",", ":"))
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            task = self._fetch(conn, task_id)
+            if task is None:
+                conn.execute("COMMIT")
+                raise TaskError(f"no such task {task_id!r}")
+            if task.status in Status.TERMINAL:
+                conn.execute("COMMIT")
+                raise TaskError(f"cannot save a draft on a {task.status!r} task")
+            conn.execute(
+                "UPDATE tasks SET card_draft = ?, updated_at = ? WHERE id = ?",
+                (payload, ts, task_id),
+            )
+            result = self._fetch(conn, task_id)
+            conn.execute("COMMIT")
+        return result  # type: ignore[return-value]
+
+    def clear_card_draft(self, task_id: str, *, now: float | None = None) -> Task:
+        """Clear a task's saved draft (the Steer form's Reset), without
+        touching ``awaiting_steer``/status -- the task remains blocked exactly
+        as before. A no-op (not an error) when there is no draft to clear."""
+        ts = self._now(now)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            task = self._fetch(conn, task_id)
+            if task is None:
+                conn.execute("COMMIT")
+                raise TaskError(f"no such task {task_id!r}")
+            conn.execute(
+                "UPDATE tasks SET card_draft = NULL, updated_at = ? WHERE id = ?",
+                (ts, task_id),
+            )
+            result = self._fetch(conn, task_id)
+            conn.execute("COMMIT")
         return result  # type: ignore[return-value]
 
     def take_steer(

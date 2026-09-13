@@ -1756,7 +1756,7 @@ def _cmd_card_set(args: argparse.Namespace) -> int:
 
 
 def _cmd_card_show(args: argparse.Namespace) -> int:
-    """Show a task's current card (plus its steer inbox)."""
+    """Show a task's current card (plus its steer inbox and any saved draft)."""
     with _client(args) as c:
         task = c.get(args.task_id)
         steers = c.steer_log(args.task_id)
@@ -1765,9 +1765,35 @@ def _cmd_card_show(args: argparse.Namespace) -> int:
             "task_id": args.task_id,
             "card": task.get("card"),
             "awaiting_steer": task.get("awaiting_steer"),
+            "card_draft": task.get("card_draft"),
             "steers": steers,
         }
     )
+
+
+def _cmd_card_draft_save(args: argparse.Namespace) -> int:
+    """Persist an operator's not-yet-submitted draft answer (--field k=v ...).
+    Never touches awaiting_steer/status -- the task stays blocked exactly as
+    before, and the draft is durably visible from any surface/machine (unlike
+    a local sidecar file)."""
+    fields: dict[str, str] = {}
+    for item in args.field or []:
+        key, sep, value = item.partition("=")
+        if not sep:
+            print(
+                f"agent-dispatch: --field must be key=value (got {item!r})",
+                file=sys.stderr,
+            )
+            return 2
+        fields[key.strip()] = value
+    with _client(args) as c:
+        return _emit(c.save_card_draft(args.task_id, fields=fields))
+
+
+def _cmd_card_draft_clear(args: argparse.Namespace) -> int:
+    """Clear a task's saved draft. Never touches awaiting_steer/status."""
+    with _client(args) as c:
+        return _emit(c.clear_card_draft(args.task_id))
 
 
 def _cmd_steer(args: argparse.Namespace) -> int:
@@ -3591,6 +3617,31 @@ def build_parser() -> argparse.ArgumentParser:
     ch = csub.add_parser("show", help="show a task's current card + its steer inbox")
     ch.add_argument("task_id")
     ch.set_defaults(func=_cmd_card_show)
+    cd = csub.add_parser(
+        "draft",
+        help="save/clear a not-yet-submitted operator draft answer, without "
+        "submitting a steer (the task stays blocked)",
+    )
+    cdsub = cd.add_subparsers(dest="card_draft_cmd", required=True)
+    cds = cdsub.add_parser(
+        "save",
+        help="persist a draft answer (--field k=v ...); never touches "
+        "awaiting_steer/status",
+    )
+    cds.add_argument("task_id")
+    cds.add_argument(
+        "--field",
+        action="append",
+        metavar="KEY=VALUE",
+        help="one draft answer field (repeatable), e.g. --field feedback='...'",
+    )
+    cds.set_defaults(func=_cmd_card_draft_save)
+    cdc = cdsub.add_parser(
+        "clear",
+        help="clear a task's saved draft; never touches awaiting_steer/status",
+    )
+    cdc.add_argument("task_id")
+    cdc.set_defaults(func=_cmd_card_draft_clear)
 
     sp = sub.add_parser(
         "steer",
