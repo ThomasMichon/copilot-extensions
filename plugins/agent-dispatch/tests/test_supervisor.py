@@ -2951,6 +2951,34 @@ def test_make_embody_spawn_records_handle_on_success(monkeypatch):
     assert handle["session"] == "sess-9"
 
 
+def test_make_embody_spawn_fails_when_a_zero_exit_yields_no_session_id(
+    monkeypatch,
+):
+    # A zero exit with no recognizable session id (e.g. an embody JSON shape
+    # this parser doesn't recognize) must not be reported as a usable
+    # success: record_spawn would otherwise persist a SPAWNED reservation
+    # with session_handle=None -- indistinguishable from a reservation that
+    # never reached spawning anything at all, which release_requested_bodies'
+    # absent-worktree shortcut could then wrongly treat as confirmed-gone
+    # without ever resolving whether a real, unidentifiable body exists.
+    import subprocess
+
+    from agent_dispatch import embody
+    from agent_dispatch.supervisor import make_embody_spawn
+
+    def fake_spawn_embodied_worker(task_id, **_kwargs):
+        return subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="{}", stderr="",
+        )
+
+    monkeypatch.setattr(embody, "spawn_embodied_worker", fake_spawn_embodied_worker)
+    ok, handle = make_embody_spawn()(
+        {"id": "t", "repo": "gitea.example/org/widgets"}
+    )
+    assert ok is False
+    assert "error" in handle
+
+
 def test_parse_handle_accepts_nested_worktree_object():
     """Older/newer agent-worktrees JSON shapes both preserve the worktree handle."""
     import subprocess

@@ -479,6 +479,18 @@ def make_embody_spawn(
         if result.returncode != 0:
             return False, {"error": (result.stderr or "").strip()[:200] or "nonzero exit"}
         handle = embody.parse_handle(result)
+        if not handle.get("session"):
+            # A zero exit with no recognizable session id is not a usable
+            # success: record_spawn would persist a SPAWNED reservation with
+            # session_handle=None, indistinguishable from a reservation that
+            # never reached spawning anything at all -- an ambiguity that
+            # would let a later release_requested_bodies() cleanup pass
+            # wrongly treat a genuinely-launched (but unidentifiable) body as
+            # confirmed absent. Fail loudly instead so this attempt is
+            # retried rather than silently spawning an untrackable body.
+            return False, {
+                "error": "embody reported success but returned no session id"
+            }
         return True, handle
 
     spawn.requires_reusable_worktree = True

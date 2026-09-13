@@ -192,7 +192,13 @@ boundary.
    or missing mechanism moves a reservation-created allocation to `releasing`;
    `create --spawn` immediately attempts the same exact-ID managed teardown as
    the supervisor. A later run cannot retry until the ground layer safely
-   removes the worktree or explicitly holds it for attention.
+   removes the worktree or explicitly holds it for attention. `make_embody_spawn`
+   treats a zero exit with no recognizable session id (`embody.parse_handle`
+   found nothing usable) as a **failure**, not a success: a `SPAWNED`
+   reservation with `session_handle=None` would otherwise be indistinguishable
+   from one that never reached spawning anything at all, letting
+   `release_requested_bodies`' absent-worktree shortcut (see below) wrongly
+   treat a genuinely-launched but unidentifiable body as confirmed absent.
 
 Fail-safe: if the reservation call itself errors, `create --spawn` **does not
 spawn** (better to leave the task queued than risk a second autonomous worker).
