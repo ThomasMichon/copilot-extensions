@@ -434,18 +434,27 @@ function Test-UvConfiguredIndex {
 function Ensure-UvIndex {
     if ($env:UV_DEFAULT_INDEX -or $env:UV_INDEX_URL -or (Test-UvConfiguredIndex)) { return }
     $idx = ''
-    if (Get-Command pip -CommandType Application -ErrorAction SilentlyContinue) {
-        $out = & pip config get global.index-url 2>$null
-        if ($LASTEXITCODE -eq 0) { $idx = ($out | Out-String).Trim() }
-    }
-    if (-not $idx) {
-        if (Get-Command py -CommandType Application -ErrorAction SilentlyContinue) {
-            $out = & py -3 -m pip config get global.index-url 2>$null
-            if ($LASTEXITCODE -eq 0) { $idx = ($out | Out-String).Trim() }
-        } elseif (Get-Command python -CommandType Application -ErrorAction SilentlyContinue) {
-            $out = & python -m pip config get global.index-url 2>$null
+    # pip writes routine "no such key" notices to stderr when unconfigured; under
+    # $ErrorActionPreference='Stop' that becomes a terminating error even with a
+    # 2>$null redirect, so relax it for the duration of these probes.
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        if (Get-Command pip -CommandType Application -ErrorAction SilentlyContinue) {
+            $out = & pip config get global.index-url 2>$null
             if ($LASTEXITCODE -eq 0) { $idx = ($out | Out-String).Trim() }
         }
+        if (-not $idx) {
+            if (Get-Command py -CommandType Application -ErrorAction SilentlyContinue) {
+                $out = & py -3 -m pip config get global.index-url 2>$null
+                if ($LASTEXITCODE -eq 0) { $idx = ($out | Out-String).Trim() }
+            } elseif (Get-Command python -CommandType Application -ErrorAction SilentlyContinue) {
+                $out = & python -m pip config get global.index-url 2>$null
+                if ($LASTEXITCODE -eq 0) { $idx = ($out | Out-String).Trim() }
+            }
+        }
+    } finally {
+        $ErrorActionPreference = $prevEAP
     }
     if (-not $idx) {
         $configPaths = @($env:PIP_CONFIG_FILE)
