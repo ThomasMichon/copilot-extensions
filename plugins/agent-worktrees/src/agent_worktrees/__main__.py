@@ -9120,6 +9120,16 @@ def _pending_handoff_retire_requests(
     :func:`_monitor_pending_handoff_predecessor_retire` (the daemon's
     one-at-a-time sweep) and ``handoffs-check`` (which retires every stale
     predecessor on a worktree in one pass, not just the first) build on.
+
+    Considers every non-``cancelled`` handoff on the record (``pending`` --
+    a candidate is associated but not yet linked -- and ``linked``, i.e.
+    fully confirmed), not just ``record.pending_handoffs``. A handoff
+    reaches ``linked`` well before its predecessor is actually retired (that
+    is a separate, later step), so restricting this to the still-``pending``
+    subset made a predecessor whose retire failed hours ago -- the daemon's
+    own sweep had already long since moved past that handoff to newer ones
+    -- permanently invisible to both the automatic sweep and this on-demand
+    check, even though the mux pane was still sitting there alive.
     """
     worktree_id = getattr(record, "worktree_id", None)
     if not worktree_id:
@@ -9148,7 +9158,8 @@ def _pending_handoff_retire_requests(
         and str(event.get("handoff_token") or "").strip()
     }
     requests: list[dict[str, object]] = []
-    for handoff in reversed(record.pending_handoffs):
+    candidates = [h for h in record.handoffs if getattr(h, "state", None) != "cancelled"]
+    for handoff in reversed(sorted(candidates, key=lambda h: getattr(h, "ordinal", 0))):
         token = str(getattr(handoff, "token", "") or "").strip()
         if not token or token in retired:
             continue

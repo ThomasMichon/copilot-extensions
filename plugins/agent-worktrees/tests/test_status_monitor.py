@@ -737,6 +737,14 @@ def _wire_monitor_handoff_session(tmp_path, monkeypatch):
         "_find_record_for_path",
         lambda path: types.SimpleNamespace(
             worktree_id="a",
+            handoffs=[
+                types.SimpleNamespace(
+                    token="handoff-1",
+                    predecessor="session-1",
+                    candidate=None,
+                    successor=None,
+                )
+            ],
             pending_handoffs=[
                 types.SimpleNamespace(
                     token="handoff-1",
@@ -785,6 +793,14 @@ def test_monitor_pending_handoff_request_returns_actionable_request(tmp_path, mo
     monkeypatch.setattr(m.locks, "process_start_time", lambda pid: "old-process")
     record = types.SimpleNamespace(
         worktree_id="a",
+        handoffs=[
+            types.SimpleNamespace(
+                token="handoff-1",
+                predecessor="session-1",
+                candidate=None,
+                successor=None,
+            )
+        ],
         pending_handoffs=[
             types.SimpleNamespace(
                 token="handoff-1",
@@ -838,6 +854,14 @@ def test_monitor_pending_handoff_request_skips_already_claimed(tmp_path, monkeyp
     )
     record = types.SimpleNamespace(
         worktree_id="a",
+        handoffs=[
+            types.SimpleNamespace(
+                token="handoff-1",
+                predecessor="session-1",
+                candidate=None,
+                successor=None,
+            )
+        ],
         pending_handoffs=[
             types.SimpleNamespace(
                 token="handoff-1",
@@ -950,6 +974,14 @@ def test_monitor_pending_handoff_predecessor_retire_uses_logged_predecessor_bind
     monkeypatch.setattr(m.activity, "read_events", read_events)
     record = types.SimpleNamespace(
         worktree_id="a",
+        handoffs=[
+            types.SimpleNamespace(
+                token="handoff-1",
+                predecessor="session-1",
+                candidate="successor-1",
+                successor=None,
+            )
+        ],
         pending_handoffs=[
             types.SimpleNamespace(
                 token="handoff-1",
@@ -1005,6 +1037,14 @@ def test_monitor_pending_handoff_predecessor_retire_retries_after_failed_attempt
     monkeypatch.setattr(m.activity, "read_events", read_events)
     record = types.SimpleNamespace(
         worktree_id="a",
+        handoffs=[
+            types.SimpleNamespace(
+                token="handoff-1",
+                predecessor="session-1",
+                candidate="successor-1",
+                successor=None,
+            )
+        ],
         pending_handoffs=[
             types.SimpleNamespace(
                 token="handoff-1",
@@ -1041,6 +1081,14 @@ def test_monitor_pending_handoff_predecessor_retire_skips_after_success(
     monkeypatch.setattr(m.activity, "read_events", read_events)
     record = types.SimpleNamespace(
         worktree_id="a",
+        handoffs=[
+            types.SimpleNamespace(
+                token="handoff-1",
+                predecessor="session-1",
+                candidate="successor-1",
+                successor=None,
+            )
+        ],
         pending_handoffs=[
             types.SimpleNamespace(
                 token="handoff-1",
@@ -1269,6 +1317,7 @@ def test_sweep_leaves_sessions_without_pending_handoff_untouched(tmp_path, monke
         "_find_record_for_path",
         lambda path: types.SimpleNamespace(
             worktree_id="a",
+            handoffs=[],
             pending_handoffs=[],
         ),
     )

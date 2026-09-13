@@ -1802,6 +1802,48 @@ class TestCmdHandoffsCheck:
         assert finding["executed"] is True
         assert finding["retired"] is True
 
+    def test_finds_already_linked_handoff_not_just_pending(
+        self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
+    ):
+        """Regression: a handoff reaches "linked" (successor confirmed) well
+        before its predecessor is actually retired -- that is a separate,
+        later step. A predecessor whose retire failed (or was never
+        attempted) hours ago is long past "pending" by the time anyone
+        checks, so this must still be found via the FULL handoffs list, not
+        just the "still pending" subset -- exactly the real shape this tool
+        was built to catch (this session's own worktree had three)."""
+        from agent_worktrees import tracking as _tracking
+
+        path = self._record(
+            tmp_tracking_dir, "wt-check-6",
+            predecessor="old-sess", successor="new-sess",
+        )
+        loaded = _tracking.load_record(path)
+        _tracking.link_handoff(loaded, "task-wt-check-6", "new-sess")
+        # Confirm the setup actually reproduces the real bug precondition:
+        # once linked, it is no longer in pending_handoffs at all.
+        reloaded = _tracking.load_record(path)
+        assert reloaded.pending_handoffs == []
+
+        monkeypatch.setattr(activity, "read_events", lambda **kw: (
+            [{
+                "handoff_token": "task-wt-check-6", "session_id": "old-sess",
+                "old_pane": "%9", "expected_mux_session": "wt-wt-check-6",
+                "predecessor_copilot_pid": 77, "predecessor_copilot_start_time": "old",
+            }] if kw.get("event") == "handoff_cutover_spawn" else []
+        ))
+        monkeypatch.setattr(
+            m, "_monitor_retire_handoff_predecessor",
+            lambda req: (0, {"ok": True, "pane": req["retire_pane"], "outcome": "gone"}),
+        )
+
+        rc = m.cmd_handoffs_check(_ns(worktree_id="wt-check-6", execute=True, json=True))
+
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["found"] == 1
+        assert out["findings"][0]["retired"] is True
+
     def test_execute_reports_failure_without_masking_it(
         self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
     ):
