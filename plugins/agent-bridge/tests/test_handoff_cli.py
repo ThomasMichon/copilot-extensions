@@ -243,8 +243,8 @@ class TestHandoffCheck:
         agent-worktrees' -- a "No module named agent_worktrees" failure
         that looks identical to agent-worktrees itself being broken."""
         monkeypatch.setattr(m.shutil, "which", lambda name: "/usr/bin/agent-worktrees")
-        monkeypatch.setenv("AGENT_RT_ROOT", "/home/tmichon/.agent-bridge")
-        monkeypatch.setenv("AGENT_RT_PY", "/home/tmichon/.agent-bridge/versions/x/bin/python")
+        monkeypatch.setenv("AGENT_RT_ROOT", "/home/example/.agent-bridge")
+        monkeypatch.setenv("AGENT_RT_PY", "/home/example/.agent-bridge/versions/x/bin/python")
         captured = {}
 
         def fake_run(argv, **kwargs):

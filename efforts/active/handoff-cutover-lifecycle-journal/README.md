@@ -492,14 +492,20 @@ renumbering from the "acknowledges handoff" step onward.)
       13-stage sequence for the selected worktree/token, with gaps visibly
       marked ("stage 8 logged, stage 9 never observed").
 
-### Phase 4 — Fix the reported failure class (deferred; evidence only for now)
+### Phase 4 — Fix the reported failure class (superseded — remediated live, see Journal)
 
-> **Scope note:** the operator explicitly declined remediation of the live
-> case-study worktree and asked this effort to focus on durable logging,
-> active-diagnosis accessibility, and archive-durable session-state
-> persistence first (Phases 1, 2, 3, 5). The items below stay as forward
-> tracking for when fix work is greenlit — do not start them as part of this
-> effort's first execution pass.
+> **Update (this session):** the operator later greenlit remediation
+> directly against this worktree's own live 4-mux-pane incident. The
+> concrete root causes found and fixed there (see Journal entries for PRs
+> #2518/#2525/#2533/#2537) are a **different, more complete set** than the
+> two-bug hypothesis this checklist originally captured -- four distinct
+> root causes (wrong pid source, over-eager "handled" flag,
+> `pending_handoffs` vs full `handoffs` scan gap, permanently-poisoned
+> historical spawn data) plus the `agent-bridge handoff-check` env-leak
+> bug, all fixed, deployed, and verified to bring both this worktree and
+> the whole facility to 0 stranded handoffs. The checklist items below are
+> left as the original historical record rather than rewritten in place;
+> treat the Journal entries as the authoritative closure evidence.
 - [x] Reproduce the "ack but no pane, retry says already-claimed" symptom —
       **found live**, not synthetic: a real worktree observed mid-cutover
       (identifiers withheld; see Proposal § Case study). Two distinct bugs identified from real
@@ -511,29 +517,24 @@ renumbering from the "acknowledges handoff" step onward.)
          `copilot_reaped: 0` on **every** observed cutover in this worktree,
          even ones with `successor_verified: true` — the predecessor pane may
          never actually be retired even on a "successful" cutover.
-- [ ] Fix bug 1: the file-backed record keying is only half the problem —
-      `dispatchHandoff()` also creates agent-dispatch tasks with
-      `--dedup-key handoff-${sid}`, so a task-backed retrigger from the same
-      resumed session id would keep colliding with the old task even after
-      the file token is fixed. Mint a **fresh per-trigger ID** for both the
-      file token and the dispatch dedup key, propagate that same fresh ID
-      into the tracking record and the monitor's pending scan, and preserve
-      the *existing* behavior only for an explicit recovery-token reuse
-      (e.g. `trigger_handoff --handoff-token <token>` resuming a known
-      in-flight token), not for an ordinary fresh trigger.
-- [ ] Investigate bug 2 rather than assume it: `left-running` +
-      `copilot_reaped: 0` is what the retirement code **intentionally**
-      reports for guard paths (last-window, identity mismatch, unavailable
-      identity), which also emit a separate `handoff_retire_guard` event —
-      confirm via the guard/method fields and actual pane liveness whether
-      this worktree's retirements are a real bug or working-as-designed guard
-      behavior before treating it as a confirmed root cause and before
-      changing `_monitor_claim_handoff_cutover`'s retire branch.
-- [ ] With the new trace command (Phase 3), confirm both fixes against a fresh
-      handoff cycle: full 13-stage trace, predecessor pane actually gone,
-      reciprocal_relation no longer left `"ambiguous"`.
+- [x] Fix bug 1 (superseded by a more complete root cause): the actual live
+      case study's blocking bug was the wrong `predecessor_pid` source
+      (`process.pid` instead of `process.ppid`) plus the "any retire event
+      counts as handled" flag, not specifically the file/dispatch dedup-key
+      collision theorized here. Fixed in PR #2518.
+- [x] Investigate bug 2 — confirmed as a **real bug**, not a working-as-designed
+      guard: the identity check was correct in principle but was being fed
+      permanently-wrong "expected" values (from the `process.pid` bug above,
+      and later from pre-fix historical spawn-event data). Fixed across PRs
+      #2518 (trust live binding for spawn) and #2533 (trust live binding for
+      retire, recovering from historically-poisoned data).
+- [x] With the new trace/check command (Phase 3's tooling plus the new
+      `handoffs-check`), confirmed both fixes against this worktree's real
+      predecessors and facility-wide: `agent-worktrees handoffs-check --all`
+      went from 2 real stranded handoffs to 0 after `--execute`.
 - [ ] Feed `health.find_orphaned_handoffs()` from the new trace so it can name
-      the exact stage where an orphaned handoff stalled.
+      the exact stage where an orphaned handoff stalled. **Still open** —
+      not addressed by this leg's remediation, left as a genuine follow-on.
 
 ### Phase 5 — Docs
 - [ ] Document the 13-stage lifecycle + trace command in
@@ -1105,3 +1106,112 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   module. Copilot's own review on this PR landed as `COMMENTED` (fittingly)
   with zero inline findings; merged without further changes. `agent-worktrees`
   bumped `1.5.5-dev78` -> `dev79` (catalog `dev72` -> `dev73`).
+- **Phase 4 (remediation) actually executed: this session's own worktree
+  became a live case study.** The operator reported this worktree itself had
+  accumulated 4 mux panes (3 real stranded predecessor sessions plus the
+  active one) -- Worktree Manager/mux plumbing failing at exactly the
+  cutover reliability problem this effort exists to fix. Root-caused via
+  direct process/tracking-record forensics rather than assuming: (1)
+  `context-handoff`'s `logHandoffActivity` logged `predecessor_pid:
+  process.pid` -- the Node extension-host's OWN pid, never the actual
+  `copilot` CLI process -- which flowed into `_monitor_trigger_handoff_cutover`
+  as a wrong "expected pid" gate that discarded a legitimately-resolved
+  `mux_binding_for_session()` result whenever it disagreed; (2) the retire
+  step's identity check then failed every time (`outcome: left-running`),
+  and **any** logged `handoff_predecessor_retire` event -- success or
+  failure -- was treated as "handled," permanently stranding the pane; (3)
+  `pending_handoffs` (the collection the monitor scanned) only includes
+  `state == "pending"` entries, but a real handoff reaches `"linked"`
+  (successor confirmed) well before its predecessor is retired -- making
+  every real stale predecessor invisible to the scan; (4) the historically
+  recorded `predecessor_copilot_pid` values baked into `handoff_cutover_spawn`
+  events written *before* fix (1) are permanently wrong -- no forward code
+  fix corrects already-written data, so retries against old events kept
+  failing `process-identity-mismatch` forever.
+- **PR #2518 (fix predecessor-retire identity bug; add `handoffs-check`),
+  merged.** Fixed `_monitor_trigger_handoff_cutover` to trust a fresh,
+  worktree-scoped `mux_binding_for_session()` result unconditionally over
+  any caller-supplied "expected pid" hint; fixed
+  `_monitor_pending_handoff_predecessor_retire` to only treat a retire as
+  "handled" when `outcome == "gone"`; fixed `context-handoff`'s
+  `logHandoffActivity` to log `process.ppid` (the actual copilot process),
+  not `process.pid`. Added the operator-requested purpose-built diagnostic
+  tool -- **`agent-worktrees handoffs-check [--worktree-id|--all]
+  [--execute] [--json]`** and a thin **`agent-bridge handoff-check`**
+  passthrough -- so a stuck cutover can be checked and (optionally)
+  finished on demand, never via a manual `kill`. Two Copilot review rounds
+  caught: a JSON error payload silently read as success in agent-bridge's
+  wrapper, and `handoffs-check` only processing the *first* stale
+  predecessor per worktree instead of all of them (fixed via a new shared
+  `_pending_handoff_retire_requests` helper). Deployed
+  (`agent-worktrees` dev82, `agent-bridge` dev476).
+- **PR #2525 (find already-linked, not just still-pending,
+  predecessors), merged.** Running the brand-new tool against this
+  worktree immediately found a second real bug:
+  `_pending_handoff_retire_requests` only scanned `pending_handoffs`
+  (state == "pending"), invisible to root cause (3) above. Generalized to
+  scan all non-"cancelled" `record.handoffs`. Two more review rounds
+  caught: `cmd_handoffs_check`'s "retired" computation checked a fictional
+  `response["outcome"]` key that the real retire-result dict never has
+  (only `ok`/`gone`/`method`) -- every real successful retire was being
+  reported as failed; and the bounded `activity.read_events(limit=64)`
+  lookup could miss older handoffs -- fixed by merging in the durable,
+  unrotated per-project `handoff_trace.read_trace()` store (from Phase 3)
+  as a completeness backstop. Deployed (`agent-worktrees` dev84).
+- **PR #2533 (trust live mux binding over corrupted historical pid;
+  surface agent-bridge failures), merged.** Running `handoffs-check
+  --execute` against this worktree's 3 real predecessors still failed all
+  three with `process-identity-mismatch` -- root cause (4) above: the old
+  spawn events' baked-in pids are permanently wrong, no forward fix helps.
+  Added a fresh `sessions.mux_binding_for_session()` lookup per candidate
+  in `_pending_handoff_retire_requests` that overrides the historically
+  poisoned pid/pane/start-time when a live binding resolves. Separately
+  fixed `agent-bridge`'s `_cmd_handoff_check` to distinguish a genuine
+  empty "no findings" result from a nonzero `agent-worktrees` exit with
+  empty/non-JSON stdout (both previously looked identical: `{}`), in both
+  the JSON-decode-exception path and the exit-code-only path, and in both
+  `--json` and human-readable output. Mid-PR, Copilot's review correctly
+  flagged that a module-size-baseline widen for `agent-dispatch` (grown by
+  *other*, unrelated, concurrently-merging PRs) had no place in this PR's
+  diff -- split out to a standalone **PR #2535** (merged first), then
+  dropped entirely from this PR via an interactive rebase, restoring the
+  principle that a baseline widen must live with the change that causes
+  it. Deployed (`agent-worktrees` dev85, `agent-bridge` dev478).
+- **PR #2537 (root-cause the `agent-bridge handoff-check` mystery
+  bug), merged.** PR #2533's stderr-surfacing fix finally made the
+  `agent-bridge handoff-check` wrapper's real failure visible instead of
+  a silent `{}`: `agent-bridge`'s own `runtime-gate.sh` **exports**
+  `AGENT_RT_ROOT` (pointing at agent-bridge's own runtime root) before
+  `exec`-ing into agent_bridge's python -- and that export survives into
+  any child process agent_bridge spawns. `_cmd_handoff_check`'s
+  `subprocess.run(["agent-worktrees", ...])` inherited it by default, and
+  agent-worktrees' own `resolve-runtime.sh` honors the *identical*
+  variable name -- silently resolving to agent-bridge's python instead of
+  agent-worktrees', which then failed with "No module named
+  agent_worktrees." Fixed by building an explicit child environment with
+  `AGENT_RT_ROOT`/`AGENT_RT_PY` stripped before the subprocess call.
+  Deployed (`agent-bridge` dev479).
+- **Live remediation confirmed, facility-wide.** After all five fixes
+  landed and deployed, `agent-worktrees handoffs-check --all` found 2 real
+  stranded predecessor handoffs across two different worktrees (this
+  worktree's chain, plus one other discovered incidentally) --
+  `--execute` retired both down to **0 findings facility-wide**.
+  `agent-bridge handoff-check --all --json` now round-trips the same
+  clean result instead of failing. **All four Phase 4 checklist items
+  (bug 1 reproduction/fix scope, bug 2 investigation, trace-confirmed fix,
+  orphan-naming feed) are effectively superseded by this concrete,
+  verified remediation** -- the original Phase 4 checklist described a
+  narrower two-bug hypothesis; the live case study surfaced four distinct,
+  now-fixed root causes instead. Phase 4's checklist items are left as-is
+  for historical record; this entry is the actual closure evidence.
+- **Design decision, deferred to a future effort:** the operator's
+  original architecture question -- whether `agent-worktrees`,
+  `agent-bridge`, and `agent-dispatch` should each own an independent
+  handoff-notification system -- was resolved narrower: keep
+  `context-handoff` as a thin marker/nudge writer and let
+  `agent-worktrees`'s resident status-monitor (not `agent-dispatch`) own
+  the actual mux/pane cutover choreography, with `agent-bridge` as the
+  single agent-facing diagnostic surface (`handoff-check`) over that one
+  ground-truth owner. Fully migrating `context-handoff` to *only* write
+  markers (removing its remaining logging responsibilities) is explicitly
+  **not** done in this leg and remains a named follow-on.
