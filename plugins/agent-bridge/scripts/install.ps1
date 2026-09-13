@@ -1033,8 +1033,16 @@ function Remove-VendoredProviders {
         return
     }
     foreach ($py in $targets) {
-        foreach ($pkg in $pkgs) {
-            & uv pip uninstall --python $py $pkg 2>&1 | Out-Null
+        # uv writes routine progress to stderr; under $ErrorActionPreference='Stop',
+        # a 2>&1 redirect turns that into a terminating error, so relax it here.
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            foreach ($pkg in $pkgs) {
+                & uv pip uninstall --python $py $pkg 2>&1 | Out-Null
+            }
+        } finally {
+            $ErrorActionPreference = $prevEAP
         }
         # Belt-and-suspenders: drop any raw-copied package dir / dist-info left
         # behind by the retired Install-PackageInto vendoring (no uv metadata).
