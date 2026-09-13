@@ -5177,8 +5177,20 @@ def _cmd_handoff_check(args: argparse.Namespace) -> None:
     argv += ["--worktree-id", args.worktree_id] if args.worktree_id else ["--all"]
     if args.execute:
         argv.append("--execute")
+    # agent-bridge's own runtime-gate.sh exports AGENT_RT_ROOT (pointing at
+    # THIS plugin's runtime root) before dispatching into agent_bridge's
+    # python; that export otherwise leaks into this child process and
+    # hijacks agent-worktrees' own resolve-runtime.sh (it honors the same
+    # variable name), silently resolving to agent-bridge's python instead
+    # of agent-worktrees' -- causing a "No module named agent_worktrees"
+    # failure that looks identical to agent-worktrees itself being broken.
+    child_env = dict(os.environ)
+    child_env.pop("AGENT_RT_ROOT", None)
+    child_env.pop("AGENT_RT_PY", None)
     try:
-        result = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+        result = subprocess.run(
+            argv, capture_output=True, text=True, timeout=60, env=child_env
+        )
     except Exception as exc:
         print(f"[FAIL] could not run agent-worktrees handoffs-check: {exc}", file=sys.stderr)
         sys.exit(1)

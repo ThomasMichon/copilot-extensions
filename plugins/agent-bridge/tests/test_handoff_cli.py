@@ -233,6 +233,35 @@ class TestHandoffCheck:
             "/usr/bin/agent-worktrees", "handoffs-check", "--json", "--all",
         ]
 
+    def test_strips_leaked_agent_rt_root_from_child_env(self, monkeypatch):
+        """Regression: agent-bridge's own runtime-gate.sh exports
+        AGENT_RT_ROOT (pointing at THIS plugin's runtime root) before
+        dispatching into agent_bridge's python. Left alone, that export
+        leaks into this subprocess and hijacks agent-worktrees' own
+        resolve-runtime.sh (which honors the same variable name),
+        silently resolving to agent-bridge's python instead of
+        agent-worktrees' -- a "No module named agent_worktrees" failure
+        that looks identical to agent-worktrees itself being broken."""
+        monkeypatch.setattr(m.shutil, "which", lambda name: "/usr/bin/agent-worktrees")
+        monkeypatch.setenv("AGENT_RT_ROOT", "/home/tmichon/.agent-bridge")
+        monkeypatch.setenv("AGENT_RT_PY", "/home/tmichon/.agent-bridge/versions/x/bin/python")
+        captured = {}
+
+        def fake_run(argv, **kwargs):
+            captured["env"] = kwargs.get("env")
+            return _FakeCompletedProcess(
+                m.json.dumps({"checked": 1, "found": 0, "executed": False, "findings": []})
+            )
+
+        monkeypatch.setattr(m.subprocess, "run", fake_run)
+
+        with pytest.raises(SystemExit):
+            m._cmd_handoff_check(_check_args(all=True, json=True))
+
+        assert captured["env"] is not None
+        assert "AGENT_RT_ROOT" not in captured["env"]
+        assert "AGENT_RT_PY" not in captured["env"]
+
     def test_json_output_round_trips_the_underlying_payload(self, monkeypatch, capsys):
         monkeypatch.setattr(m.shutil, "which", lambda name: "/usr/bin/agent-worktrees")
         payload = {
