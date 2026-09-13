@@ -4108,6 +4108,82 @@ def test_does_not_confirm_absence_when_creating_host_is_a_different_machine(
     assert q.get_reservation(reservation.key).state == SpawnState.RELEASING
 
 
+def test_does_not_confirm_absence_for_a_malformed_non_slash_owner(q, client):
+    # claim_one accepts arbitrary worker IDs (e.g. "worker-1", no
+    # "<machine>/<worktree>" separator) -- `_machine_from_owner` on such a
+    # string returns None just like an actually-unset owner, so the gate must
+    # check `task.get("owner") is None` explicitly rather than relying on
+    # that parse result alone.
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-malformed-owner",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    q.claim_one("worker-1", task_id=task.id)
+    assert q.get(task.id).owner == "worker-1"
+    q.request_spawn_release(
+        reservation.key,
+        detail="worktree preparation failed",
+        disposition="failed",
+    )
+
+    def forbidden(_wt, _project):
+        raise AssertionError(
+            "must not probe the local agent-worktrees registry for a claimed "
+            "(even if malformed-owner) task"
+        )
+
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        machine="host-a",
+        verdict_fn=lambda *_args: "unknown",
+        worktree_directory_present_fn=forbidden,
+        nudge=False,
+    )
+
+    assert sup.release_requested_bodies() == 0
+    assert q.get_reservation(reservation.key).state == SpawnState.RELEASING
+
+
+def test_confirms_absence_with_case_insensitive_creating_host_match(q, client):
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-mixed-case-host",
+        ownership="created",
+        creating_host="Host-A",
+        driver="agent-dispatch",
+    )
+    q.request_spawn_release(
+        reservation.key,
+        detail="worktree preparation failed",
+        disposition="failed",
+    )
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        machine="host-a",
+        verdict_fn=lambda *_args: "unknown",
+        worktree_directory_present_fn=lambda _wt, _project: False,
+        attempt_conclusion_fn=lambda *_args: {
+            "action": "failed",
+            "reason": "lifecycle lock busy",
+        },
+        nudge=False,
+    )
+
+    assert sup.release_requested_bodies() == 1
+    assert q.get_reservation(reservation.key).state == SpawnState.FAILED
+
+
 def test_held_attempt_cleanup_remains_visible_without_fencing_replacement(
     q, client
 ):

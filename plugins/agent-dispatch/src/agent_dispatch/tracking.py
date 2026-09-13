@@ -446,6 +446,17 @@ def worktree_directory_present(
     Returns ``None`` on **any** resolver failure (no CLI, non-zero exit,
     timeout, empty or unparseable output) so the caller degrades safe --
     an unresolved probe never counts as "gone". Never raises.
+
+    **Known residual risk (shared with** :func:`live_worktrees` **, not new
+    here):** agent-worktrees' own registry reader silently skips a tracking
+    record that fails to load (corrupt/partially-written YAML) rather than
+    reporting it, so an empty result cannot be perfectly distinguished from
+    "this exact record is transiently unreadable." This is an existing,
+    platform-wide characteristic of every caller of that registry today, not
+    a regression introduced by this function; closing it fully needs an
+    agent-worktrees-side signal (e.g. a skipped-record count or an exact-ID
+    lookup that reports "unreadable" distinctly from "absent"), which is out
+    of scope for this caller to invent unilaterally.
     """
     args: list[str] = []
     if project:

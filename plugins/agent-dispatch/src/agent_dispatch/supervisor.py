@@ -1530,11 +1530,13 @@ class Supervisor:
                             verdict = _tracking().UNKNOWN
                         if (
                             verdict == _tracking().UNKNOWN
+                            and task.get("owner") is None
                             and task.get("owner_session_id") is None
-                            and _machine_from_owner(task.get("owner")) is None
                             and res.get("worktree") == worktree
                             and res.get("worktree_ownership") == "created"
-                            and res.get("creating_host") == self.machine
+                            and isinstance(res.get("creating_host"), str)
+                            and res["creating_host"].casefold()
+                            == (self.machine or "").casefold()
                         ):
                             # This reservation's own recorded worktree was
                             # created by agent-dispatch itself on THIS host

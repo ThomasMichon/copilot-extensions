@@ -767,20 +767,29 @@ record at all, and an uncaptured `owner_session_id` can legitimately mean
 
 `release_requested_bodies`'s own worktree-only retirement branch layers one
 additional, narrowly-scoped check on top: when `verdict_fn` answers `unknown`
-for exactly this shape (no `owner_session_id`, an unowned/local task, and the
-reservation's *own* recorded `worktree`, `worktree_ownership == "created"`,
-and a `creating_host` matching this supervisor's own `machine` — created by
-agent-dispatch itself via `embody.prepare_reusable_worktree`, so the local
-agent-worktrees registry is authoritative for whether it still exists), it
-cross-checks that registry directly (`worktree_directory_present_fn`, default
+for exactly this shape (`task.get("owner")` and `owner_session_id` both
+literally `None` -- not merely an owner string `_machine_from_owner` fails to
+parse, e.g. a claimer's arbitrary non-`<machine>/<worktree>` worker id -- and
+the reservation's *own* recorded `worktree`, `worktree_ownership ==
+"created"`, and a `creating_host` matching this supervisor's own `machine`,
+compared case-insensitively like every other machine/SSH-alias comparison in
+this plugin — created by agent-dispatch itself via
+`embody.prepare_reusable_worktree`, so the local agent-worktrees registry is
+authoritative for whether it still exists), it cross-checks that registry
+directly (`worktree_directory_present_fn`, default
 `tracking.worktree_directory_present`, scoped to the reservation's own repo
 project via `embody.project_for_task` since this daemon is CWD-neutral)
 across every tracking status, not merely the ACTIVE-only set
 `live_worktrees()` uses for orphan reaping — a `finalized` worktree may still
 be fully present on disk. Only a confirmed absence retires the reservation;
-an unresolved probe, an owned task with a remote-machine owner, or a
-reservation whose `creating_host` differs from this host (a shared
+an unresolved probe, a claimed task under any owner string (well-formed or
+not), or a reservation whose `creating_host` differs from this host (a shared
 cross-machine queue's reservation created elsewhere) all leave it `unknown`.
+`worktree_directory_present`'s own docstring notes one residual, pre-existing
+platform limitation it shares with `live_worktrees()`: agent-worktrees'
+registry reader silently skips an unreadable tracking record rather than
+reporting it, so an empty result cannot be perfectly distinguished from a
+transient read failure for that exact record.
 
 ## Transport for a containerized producer
 
