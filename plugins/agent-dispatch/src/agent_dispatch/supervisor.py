@@ -97,24 +97,29 @@ from .spawn_factories import (  # noqa: F401 -- re-exported for existing call si
     make_label_routed_spawn,
     make_redrive_sender,
 )
+from .supervisor_conclusion import (  # noqa: F401 -- re-exported for existing call sites/tests
+    _CONCLUSION_COMPLETE,
+    _CONCLUSION_HELD,
+    _CONCLUSION_MAX_ATTEMPTS,
+    _CONCLUSION_PENDING,
+    _CONCLUSION_RETRY_BASE_SECONDS,
+    _TRANSIENT_CONCLUSION_REASONS,
+    _append_conclusion_detail,
+    _bounded_cleanup_failure,
+    _bounded_component_failure,
+    _cleanup_envelope_state,
+    _component_retry_meta,
+    _conclusion_retry_meta,
+    _conclusion_retry_payload,
+    _conclusion_state,
+    _hold_pending_cleanup,
+)
 
 log = logging.getLogger("agent-dispatch.supervisor")
 _GOVERNANCE_BACKOFF_SECONDS = 10.0
 
 _TERMINAL = frozenset({Status.COMPLETED, Status.ABANDONED})
 _LEASED = frozenset({Status.CLAIMED, Status.STARTED})
-_CONCLUSION_PENDING = "pending"
-_CONCLUSION_COMPLETE = "complete"
-_CONCLUSION_HELD = "held"
-_TRANSIENT_CONCLUSION_REASONS = frozenset(
-    {
-        "live-mux",
-        "live-session",
-        "session-identity-unavailable",
-    }
-)
-_CONCLUSION_MAX_ATTEMPTS = 12
-_CONCLUSION_RETRY_BASE_SECONDS = 30
 _CONCLUSION_PER_CYCLE = 10
 _COLD_RESUME_RETRY_SECONDS = 300
 _MIN_RESERVING_TIMEOUT_SECONDS = 600
@@ -1172,105 +1177,14 @@ class Supervisor:
             conclusion_detail=encoded,
         )
 
-    @staticmethod
-    def _bounded_cleanup_failure(
-        payload: dict,
-        *,
-        attempts: int,
-        now: float,
-    ) -> tuple[str, dict]:
-        attempts += 1
-        exhausted = attempts >= _CONCLUSION_MAX_ATTEMPTS
-        updated = {
-            **payload,
-            "attempts": attempts,
-            "next_attempt_at": (
-                0
-                if exhausted
-                else now
-                + min(
-                    300,
-                    _CONCLUSION_RETRY_BASE_SECONDS * (2 ** max(0, attempts - 1)),
-                )
-            ),
-        }
-        if exhausted:
-            updated["action"] = "preserved"
-            updated["reason"] = "cleanup-retry-exhausted"
-        return (
-            _CONCLUSION_HELD if exhausted else _CONCLUSION_PENDING,
-            updated,
-        )
-
-    @staticmethod
-    def _component_retry_meta(component: object) -> tuple[int, float]:
-        if not isinstance(component, dict):
-            return 0, 0.0
-        try:
-            return (
-                max(0, int(component.get("attempts", 0))),
-                max(0.0, float(component.get("next_attempt_at", 0))),
-            )
-        except (TypeError, ValueError):
-            return 0, 0.0
-
-    @classmethod
-    def _bounded_component_failure(
-        cls,
-        component: dict,
-        *,
-        now: float,
-    ) -> tuple[str, dict]:
-        attempts, _ = cls._component_retry_meta(component)
-        attempts += 1
-        exhausted = attempts >= _CONCLUSION_MAX_ATTEMPTS
-        return (
-            _CONCLUSION_HELD if exhausted else _CONCLUSION_PENDING,
-            {
-                **component,
-                "state": (_CONCLUSION_HELD if exhausted else _CONCLUSION_PENDING),
-                "attempts": attempts,
-                "next_attempt_at": (
-                    0
-                    if exhausted
-                    else now
-                    + min(
-                        300,
-                        _CONCLUSION_RETRY_BASE_SECONDS * (2 ** max(0, attempts - 1)),
-                    )
-                ),
-            },
-        )
-
-    @staticmethod
-    def _hold_pending_cleanup(payload: dict) -> dict:
-        updated = {
-            **payload,
-            "action": "preserved",
-            "reason": "cleanup-retry-exhausted",
-            "next_attempt_at": 0,
-        }
-        for name in ("session_end", "worktree_cleanup"):
-            component = updated.get(name)
-            if isinstance(component, dict) and component.get("state") == _CONCLUSION_PENDING:
-                updated[name] = {
-                    **component,
-                    "state": _CONCLUSION_HELD,
-                }
-        return updated
-
-    @staticmethod
-    def _cleanup_envelope_state(payload: dict) -> str:
-        states = []
-        for name in ("session_end", "worktree_cleanup"):
-            component = payload.get(name)
-            if isinstance(component, dict):
-                states.append(component.get("state"))
-        if _CONCLUSION_PENDING in states:
-            return _CONCLUSION_PENDING
-        if _CONCLUSION_HELD in states:
-            return _CONCLUSION_HELD
-        return _CONCLUSION_COMPLETE
+    # -- pure cleanup-retry / conclusion-classification helpers, extracted to
+    # -- supervisor_conclusion.py and re-exposed here so existing
+    # -- self._foo(...)/Supervisor._foo(...) call sites keep working -------
+    _bounded_cleanup_failure = staticmethod(_bounded_cleanup_failure)
+    _component_retry_meta = staticmethod(_component_retry_meta)
+    _bounded_component_failure = staticmethod(_bounded_component_failure)
+    _hold_pending_cleanup = staticmethod(_hold_pending_cleanup)
+    _cleanup_envelope_state = staticmethod(_cleanup_envelope_state)
 
     def release_requested_bodies(self, *, now: float | None = None) -> int:
         """Retire proven-absent bodies and preserve cleanup obligations."""
@@ -1960,56 +1874,12 @@ class Supervisor:
             "worktree": exact_worktree,
         }
 
-    @staticmethod
-    def _conclusion_state(outcome: dict) -> str:
-        action = str(outcome.get("action") or "")
-        reason = str(outcome.get("reason") or "")
-        if action in {
-            "primed",
-            "already-primed",
-            "removed",
-            "already-removed",
-        }:
-            return _CONCLUSION_COMPLETE
-        if action == "failed" or reason in _TRANSIENT_CONCLUSION_REASONS:
-            return _CONCLUSION_PENDING
-        return _CONCLUSION_HELD
-
-    @staticmethod
-    def _append_conclusion_detail(detail: str, outcome: dict | None) -> str:
-        if outcome is None:
-            return detail
-        action = str(outcome.get("action") or "unknown")
-        reason = str(outcome.get("reason") or "")
-        suffix = f"terminal conclusion {action}"
-        if reason:
-            suffix += f" ({reason})"
-        return f"{detail}; {suffix}"
-
-    @staticmethod
-    def _conclusion_retry_payload(reservation: dict) -> dict:
-        raw = reservation.get("conclusion_detail")
-        if not isinstance(raw, str) or not raw:
-            return {}
-        try:
-            payload = json.loads(raw)
-        except (TypeError, ValueError):
-            return {}
-        if not isinstance(payload, dict):
-            return {}
-        if not payload.get("acp_session_id") and payload.get("session"):
-            payload["acp_session_id"] = payload["session"]
-        return payload
-
-    @classmethod
-    def _conclusion_retry_meta(cls, reservation: dict) -> tuple[int, float]:
-        payload = cls._conclusion_retry_payload(reservation)
-        try:
-            attempts = max(0, int(payload.get("attempts", 0)))
-            next_at = max(0.0, float(payload.get("next_attempt_at", 0)))
-        except (TypeError, ValueError):
-            return 0, 0.0
-        return attempts, next_at
+    # -- pure terminal-conclusion classification helpers, extracted to
+    # -- supervisor_conclusion.py; re-exposed for existing call sites -------
+    _conclusion_state = staticmethod(_conclusion_state)
+    _append_conclusion_detail = staticmethod(_append_conclusion_detail)
+    _conclusion_retry_payload = staticmethod(_conclusion_retry_payload)
+    _conclusion_retry_meta = staticmethod(_conclusion_retry_meta)
 
     def _exclusive_terminal_release_ready(
         self,
