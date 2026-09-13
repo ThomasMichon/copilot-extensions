@@ -690,6 +690,7 @@ class Session:
         self.target = target
         self.client: AcpClient | None = None
         self._owned_process: AgentProcess | None = None
+        self._launch_codespace_claim: tuple[str, str] | None = None
         self.status = SessionStatus.CREATED
         # Status read from durable storage during daemon startup before
         # rehydrate converts an adoptable session to STOPPED. Persisted across
@@ -3037,6 +3038,19 @@ class SessionManager:
                 f"Container '{name}' is already owned by bridge session "
                 f"{existing[1]}"
             )
+        from .session_host_ownership import has_host_ownership
+
+        for other in self._sessions.values():
+            if (
+                other.session_id != session_id
+                and isinstance(other.target.container, dict)
+                and other.target.container.get("name") == name
+                and has_host_ownership(self, other.session_id)
+            ):
+                raise RuntimeError(
+                    f"Container '{name}' retains host ownership for bridge session "
+                    f"{other.session_id}; explicitly end it before a new launch"
+                )
         from ssh_manager import TargetLock
 
         lock = TargetLock(f"container:{name}", op="session-host")
@@ -4413,8 +4427,6 @@ class SessionManager:
 
         async def _cleanup_failed_process_launch() -> None:
             """Reap a process-owned launch before recording terminal failure."""
-            if agent_proc is None and session.client is None:
-                return
             from .session_ownership import cleanup_failed_resume
 
             pid = agent_proc.pid if agent_proc is not None else None
@@ -4646,7 +4658,8 @@ class SessionManager:
                     raise CodespaceCoordinationRejectedError(
                         cs_target["name"], claim_owner or "", _claim_detail
                     )
-
+                if _claim_status == "ok" and claim_owner and not parity_fault:
+                    session._launch_codespace_claim = (cs_target["name"], claim_owner)
 
                 # path injects, so a detached copilot on the CS has working
                 # ADO/git auth over the credential relay (the daemon owns the
@@ -4745,12 +4758,6 @@ class SessionManager:
                         parity_fault_result=session.parity_fault_result,
                     )
                 except RemoteSpawnCleanupPendingError:
-                    raise
-                except Exception:
-                    if not parity_fault:
-                        claim_key = _codespace_claim_key(session.target)
-                        if claim_key is not None:
-                            _release_codespace_claim(*claim_key)
                     raise
             elif self._is_codespace_target(target):
                 # A CodeSpace target MUST run under a Session Host: only then does
@@ -4869,6 +4876,7 @@ class SessionManager:
             session.client = client
             session.acp_session_id = acp_sid
             session.status = SessionStatus.IDLE
+            session._launch_codespace_claim = None
             if session.event_log:
                 session.event_log.set_telemetry_identity(
                     acp_session_id=acp_sid,

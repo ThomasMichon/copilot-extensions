@@ -452,6 +452,14 @@ restart does not inherently close the child's pipes.
   is confirmed. Repeated cancellation cannot abandon that cleanup owner.
   Forced process termination by an external supervisor is outside this
   graceful-shutdown guarantee.
+  Host-ownership persistence failures immediately attempt rollback; if rollback
+  is inconclusive and the handle is not durably recorded, shutdown retains that
+  cleanup owner too. New container admission checks preserved sessions' host
+  records and launch markers before taking a target lock, so a dormant owner
+  still fences its venue after restart without any provider probe.
+  Failed initial CodeSpace launches release their attempted claim only after
+  host cleanup is confirmed and no other session still owns that claim.
+  Direct resync refuses pending remote reaps before mutating session state.
   The manager remains the public facade; `session_resume.py`,
   `session_teardown.py`, and `session_ownership.py` own the bounded lifecycle
   implementations. Additive session migrations live in `db_migrations.py`.

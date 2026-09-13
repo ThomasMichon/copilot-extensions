@@ -308,3 +308,102 @@ async def test_partial_host_reaping_releases_only_confirmed_container_claim(
         assert session.status == SessionStatus.FAILED
     spawner.abort_spawned.assert_awaited_once()
     reap.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("persistence_stage", ["index", "marker"])
+@pytest.mark.parametrize("confirmed", [False, True])
+async def test_host_persistence_failure_aborts_before_returning(
+    tmp_db, tmp_path, monkeypatch, persistence_stage, confirmed,
+):
+    from agent_bridge.session_host_ownership import spawn_host_owned
+    from agent_bridge.session_teardown import detach_for_restart
+
+    manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path / "hosts"))
+    session = Session(
+        "example-session", "example-agent",
+        SpawnTarget(type="command", container={"name": "example-container"}),
+    )
+    tmp_db.create_session(
+        session.session_id, session.name, None, ".", "command", "starting",
+        time.time(), target_json=session.target.to_json(),
+    )
+    manager._sessions[session.session_id] = session
+    spawned = SpawnedHost(
+        local_port=51000, host_pid=123, child_pid=456, boundary="container",
+        protocol_version=PROTOCOL_VERSION, nonce="example-nonce",
+        state_file="/example/host.json",
+        endpoint={"kind": "container", "container": "example-container"},
+    )
+    spawner = SimpleNamespace(abort_spawned=AsyncMock(return_value=confirmed))
+    if persistence_stage == "index":
+        monkeypatch.setattr(
+            manager._host_index, "register", Mock(side_effect=OSError("persist failed")),
+        )
+    else:
+        set_marker = manager._set_container_launch_pending
+
+        def fail_marker(session_id, pending):
+            if pending:
+                raise OSError("persist failed")
+            set_marker(session_id, pending)
+
+        monkeypatch.setattr(manager, "_set_container_launch_pending", fail_marker)
+    error = RuntimeError if confirmed else RemoteSpawnCleanupPendingError
+    with pytest.raises(error):
+        await spawn_host_owned(manager, session.session_id, spawner, AsyncMock(return_value=spawned)())
+    spawner.abort_spawned.assert_awaited_once()
+    if confirmed:
+        assert manager._pending_host_launches == {}
+        assert manager._host_index.get(session.session_id) is None
+    else:
+        assert not manager._pending_host_launches[session.session_id].durable
+        monkeypatch.setattr("agent_bridge.session_teardown._SHUTDOWN_CLEANUP_RETRY_SECONDS", 0.01)
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def abort(_spawned, _session_id):
+            entered.set()
+            await release.wait()
+            return True
+
+        spawner.abort_spawned.side_effect = abort
+        shutdown = asyncio.create_task(detach_for_restart(manager))
+        await asyncio.wait_for(entered.wait(), 2)
+        assert not shutdown.done()
+        assert session.session_id in manager._pending_host_launches
+        release.set()
+        await asyncio.wait_for(shutdown, 2)
+        assert manager._pending_host_launches == {}
+
+
+@pytest.mark.parametrize("indexed", [False, True])
+def test_dormant_container_retains_launch_fence_after_restart(
+    tmp_db, tmp_path, monkeypatch, indexed,
+):
+    from agent_bridge.session_host.host_index import HostRecord
+
+    session_id = "example-session"
+    target = SpawnTarget(type="command", container={"name": "example-container"})
+    if not indexed:
+        target.container["launch_pending_session_id"] = session_id
+    tmp_db.create_session(
+        session_id, "example-agent", None, ".", "command", "stopped",
+        time.time(), target_json=target.to_json(),
+    )
+    state_dir = str(tmp_path / "hosts")
+    manager = SessionManager(tmp_db, session_host_state_dir=state_dir)
+    if indexed:
+        manager._host_index.register(HostRecord(
+            session_id=session_id, port=51000, host_pid=123, child_pid=456,
+            boundary="container",
+        ))
+    restarted = SessionManager(tmp_db, session_host_state_dir=state_dir)
+    lock = Mock()
+    factory = Mock(return_value=lock)
+    monkeypatch.setattr("ssh_manager.TargetLock", factory)
+    with pytest.raises(RuntimeError, match="retains host ownership"):
+        restarted._acquire_container_lock("another-session", "example-container")
+    factory.assert_not_called()
+    restarted._acquire_container_lock(session_id, "example-container")
+    lock.acquire.assert_called_once()
+    restarted._release_container_lock(session_id)

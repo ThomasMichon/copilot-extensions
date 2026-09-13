@@ -739,3 +739,69 @@ async def test_remote_reap_without_endpoint_cannot_acknowledge_success(owned_con
     reap.assert_not_awaited()
     assert ctx.manager._host_index.get(ctx.session.session_id) == record
     assert ctx.session.status == SessionStatus.FAILED
+
+
+async def test_resync_refuses_pending_remote_reap_without_mutation(owned_context, monkeypatch):
+    from agent_bridge.session_manager import RemoteHostRecoveryPendingError
+
+    ctx = owned_context
+    release = asyncio.Event()
+    reap = asyncio.create_task(release.wait())
+    ctx.manager._remote_reaps_by_session[ctx.session.session_id] = {reap}
+    generation = ctx.session._lifecycle_generation
+    try:
+        with pytest.raises(RemoteHostRecoveryPendingError, match="cleanup is pending"):
+            await ctx.manager.resync_session(ctx.session.session_id)
+        assert ctx.session._lifecycle_generation == generation
+        assert ctx.session.status == SessionStatus.STOPPED
+        assert ctx.processes == []
+    finally:
+        release.set()
+        await reap
+
+
+@pytest.mark.parametrize("fault", ["error", "cancel"])
+@pytest.mark.parametrize("retain_host", [False, True])
+async def test_preconnect_start_claim_cleanup(owned_context, monkeypatch, fault, retain_host):
+    ctx = owned_context
+    target = SpawnTarget(
+        type="command", caller_worktree="example-owner",
+        codespace={"name": "example-space", "repo": "example/repo", "acp_command": "example-agent"},
+    )
+    entered = asyncio.Event()
+    release = Mock(return_value=True)
+    monkeypatch.setattr("agent_bridge.session_manager._claim_codespace", Mock(return_value=("ok", "")))
+    monkeypatch.setattr("agent_bridge.session_manager._release_codespace_claim", release)
+    monkeypatch.setattr("agent_bridge.session_manager._resolve_relay_launch_env", Mock(return_value=("", None)))
+    monkeypatch.setattr("agent_bridge.relay_state.get_live_relay_port", lambda: None)
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
+        Mock(return_value=SimpleNamespace(transport=object())),
+    )
+
+    async def prepare(*_args):
+        created = next(s for s in ctx.manager.list_sessions() if s is not ctx.session)
+        if retain_host:
+            ctx.manager._host_index.register(HostRecord(
+                session_id=created.session_id, port=51000, host_pid=123, child_pid=456,
+                boundary="codespace",
+            ))
+        entered.set()
+        if fault == "error":
+            raise OSError("prepare failed")
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr("agent_bridge.session_manager._resolve_remote_ai_plugin_dirs", prepare)
+    task = asyncio.create_task(ctx.manager.start_session(target))
+    await asyncio.wait_for(entered.wait(), 2)
+    if fault == "cancel":
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, 3)
+    else:
+        await asyncio.wait_for(task, 3)
+    if retain_host:
+        release.assert_not_called()
+    else:
+        release.assert_called_once_with("example-space", "example-owner")
+    assert ctx.processes == []

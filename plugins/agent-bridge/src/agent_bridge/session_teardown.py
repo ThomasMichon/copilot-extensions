@@ -39,6 +39,7 @@ async def _detach_for_restart_owned(manager: SessionManager) -> None:
                     force=True,
                     cancel_turn=manager.cancel_turns_on_redeploy,
                     for_restart=True,
+                    reap_host=session.session_id in manager._pending_host_launches,
                 )
             except Exception:
                 log.warning(
@@ -47,18 +48,24 @@ async def _detach_for_restart_owned(manager: SessionManager) -> None:
                 )
     while pending := [
         session for session in manager.list_sessions()
-        if session._owned_process is not None
+        if session._owned_process is not None or (
+            session.session_id in manager._pending_host_launches
+            and not manager._pending_host_launches[session.session_id].durable
+        )
     ]:
         log.error(
-            "Shutdown blocked by unconfirmed process cleanup for %s; retaining "
-            "process handles and database, retrying in %.1fs",
+            "Shutdown blocked by unconfirmed cleanup for %s; retaining "
+            "cleanup handles and database, retrying in %.1fs",
             ", ".join(session.session_id for session in pending),
             _SHUTDOWN_CLEANUP_RETRY_SECONDS,
         )
         await asyncio.sleep(_SHUTDOWN_CLEANUP_RETRY_SECONDS)
         for session in pending:
             try:
-                await manager.stop_session(session.session_id, force=True, for_restart=True)
+                await manager.stop_session(
+                    session.session_id, force=True, for_restart=True,
+                    reap_host=session.session_id in manager._pending_host_launches,
+                )
             except Exception:
                 log.error(
                     "Shutdown process cleanup retry failed for %s",

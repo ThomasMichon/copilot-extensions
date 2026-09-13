@@ -93,11 +93,34 @@ async def cleanup_resume_attempt(
     try:
         await cleanup_owned_process(session)
         await abort_pending_host_launch(manager, session.session_id)
+        await release_unowned_launch_claim(manager, session)
     except Exception:
         manager._mark_session_failed(session, trigger="resume_cleanup_failed")
         log.error("Resume process cleanup failed for %s", session.session_id, exc_info=True)
         raise
     session.client = None
+
+
+async def release_unowned_launch_claim(manager: SessionManager, session: Session) -> None:
+    """Release only this failed launch's claim after its host ownership is gone."""
+    from .session_host_ownership import has_host_ownership
+    from .session_manager import _codespace_claim_key, _release_codespace_claim
+
+    key = session._launch_codespace_claim
+    if key is None or has_host_ownership(manager, session.session_id):
+        return
+    for other in manager.list_sessions():
+        if other is not session and (
+            other._launch_codespace_claim == key
+            or (_codespace_claim_key(other.target) == key and has_host_ownership(manager, other.session_id))
+        ):
+            session._launch_codespace_claim = None
+            return
+    if not await asyncio.to_thread(_release_codespace_claim, *key):
+        raise RuntimeError(
+            f"Launch claim cleanup failed for {session.session_id}; ownership retained"
+        )
+    session._launch_codespace_claim = None
 
 
 async def settle_cancelled_resume(
