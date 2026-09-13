@@ -467,6 +467,59 @@ scenarios.
 
 ## Journal
 
+### 2026-09-12 - Componentize __main__.py: extract recipes_cli.py
+
+- Continuing the operator's standing componentization instruction. Picked
+  up a handoff whose prescribed `queue.py` candidate had already landed
+  concurrently; re-surveyed instead per the standing lesson and switched to
+  `__main__.py` (4,979 lines), now the largest agent-dispatch module since
+  `queue.py` shrank to 4,217. Surveyed the two candidate clusters the
+  handoff named (`_cmd_recipes_*` and `_cmd_schedule`/`_cmd_emitter`/
+  `_cmd_webhook`/`_cmd_reservations`) and picked the recipes cluster: a
+  distinct, self-contained CLI concern (recipe listing/description/
+  rendering/kickoff/drive-loop) separate from the surrounding
+  task-lifecycle commands.
+- AST-walked the block's free names and grepped `tests/` for monkeypatches
+  before committing to the split (per the standing lesson -- the prior
+  leg named this candidate but explicitly had not done this verification
+  yet). Found `_emit` and `_cmd_create` genuinely shared with other
+  `__main__.py` commands and monkeypatched by tests via their
+  `agent_dispatch.__main__` attribute path; same for `_run_resolution_step`
+  and `_spawn_detached_waiter`, shared with `_cmd_resolve`/`_cmd_run`.
+  `_parse_recipe_params`/`_recipe_param_dicts`, by contrast, were used only
+  within the recipes cluster itself, so moved outright.
+- Extracted `_cmd_recipes_list`, `_cmd_recipes_describe`,
+  `_cmd_recipes_render`, `_recipe_dedup_key`, `_recipe_create_namespace`,
+  `_cmd_recipes_kick`, `_cmd_recipes_drive`, `_parse_recipe_params`, and
+  `_recipe_param_dicts` into a new `recipes_cli.py` (275 lines). Reused the
+  existing `loop_commands._resolve_cli_module()` + `_proxy()` pattern
+  (already reused once before by `supervise_cli.py`) for the four names
+  that must stay resolvable through `agent_dispatch.__main__` at call time
+  for test monkeypatches to take effect, rather than the
+  `queue_records.py`-style shared dependency-free module (`__main__.py`
+  genuinely can't be imported before its own CLI machinery runs, unlike
+  `queue.py`'s record dataclasses).
+- `__main__.py` re-exports all nine moved names via a `# noqa: F401` block
+  (`_DashDashParser` and `build_parser`'s `set_defaults()` still reference
+  several by their `agent_dispatch.__main__` attribute path). Confirmed
+  `typing.get_type_hints()` resolves cleanly on all nine before opening the
+  PR, and that the re-exported names are `is`-identical to the
+  `recipes_cli` module's own objects.
+- No new tests needed: `test_recipes.py` and `test_driver.py` already cover
+  every moved command's behavior via `agent_dispatch.__main__` imports,
+  which resolve unchanged through the re-export.
+- `__main__.py`: 4,979 -> 4,756 lines; `recipes_cli.py`: 275 lines. Both
+  comfortably under the 1,000-line cap. `tools/module-size-baseline.json`
+  refreshed (shrink-only).
+- Full `agent-dispatch` suite (`tools/run-plugin-tests.py agent-dispatch`,
+  2,706 tests across 5 sub-suites) passed after the split; zero
+  regressions. `ruff check --select F,E9` and `ruff format --check` clean
+  on both touched files; the broader strict `ruff check` findings on
+  `__main__.py` are pre-existing and untouched by this split (confirmed
+  none fall inside the moved block).
+- Bumped agent-dispatch 0.1.2-dev93 -> dev94 and ran the
+  instruction-projections sync immediately after.
+
 ### 2026-09-12 - Componentize queue.py further: extract queue_producer_fences.py
 
 - Continuing the operator's standing componentization instruction. Picked
