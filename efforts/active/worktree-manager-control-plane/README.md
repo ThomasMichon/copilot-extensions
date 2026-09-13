@@ -241,6 +241,25 @@ realized in `main`; unchecked items are the remaining delta.
       as a **guided first-run onboarding**, not an error, and points at the
       trustworthy bootstrap. Closes picker §`first-run-onboarding-entry`, installer
       §`onboards-from-empty-gracefully`.
+- [ ] **Open question, not yet designed:** the bare-invocation seam currently
+      health-probes specifically for a `worktree-manager` binstub on `PATH` --
+      it is not yet a generic, pluggable **registration** a third-party
+      control-plane provider could satisfy without being named `worktree-manager`
+      literally. If the seam is meant to stay open to a future alternative
+      Picker/control-plane provider (not just the one shipped here), this needs
+      an explicit registration contract (e.g. a well-known marker file/env var/
+      capability probe any conforming provider can satisfy), not a hardcoded
+      binstub-name check. Until that's decided, the seam is de facto
+      single-provider.
+- [ ] **Clarifying note (not a gap):** worktree creation does **not** need a
+      callback *from* agent-worktrees *into* Worktree Manager to set up Mux.
+      The interactive path already inverts that: Worktree Manager itself drives
+      creation through agent-worktrees' `--json` engine boundary and then owns
+      launch (Phase 3b), so it already knows when a worktree it just created
+      needs a Mux session -- there is no async notification gap to design there.
+      The *programmatic* path (`agent-worktrees create`, docs/mux.md's
+      automated/scripted case) is deliberately non-mux by design (a script
+      edits in its own process), so it correctly never needs one either.
 
 ### Phase 5 — Configurator: adoption, discovery, per-plugin config (Planned — #356 / #357)
 - [ ] First-harness-repo adoption + repo discovery/registration; edit config the
@@ -306,6 +325,16 @@ is the shared coordination token** for the remaining Worktree Manager work; clai
 a slice there (comment/assign) before starting, and land changes serially through
 the PR-required `main`. Downstream private plans may **link to** this effort and
 its issues; the public artifacts stay self-contained and general-purpose.
+
+This effort has already paid the cost of two sessions landing independently
+diverging work on the same Picker/Mux surface without being aware of each
+other (see the linked duplicate-implementation issue this effort's Phase 3b
+exists to correct). **[#2530](https://github.com/ThomasMichon/copilot-extensions/issues/2530)**
+tracks a related `agent-bridge` capability gap -- no way for a session to
+discover a same-machine peer working a different repo, or a same-repo peer on
+a different machine -- that would give future contributors a way to *notice*
+overlapping work before it diverges, rather than relying on issue-comment
+claiming discipline alone.
 
 ## Journal
 
@@ -488,3 +517,27 @@ its issues; the public artifacts stay self-contained and general-purpose.
   version consistency, install contract, docs consistency, and `git diff
   --check`; all passed. Bumped agent-worktrees to `1.5.5-dev49`, marketplace
   metadata to `1.7.7-dev45`, and Worktree Manager to `0.1.0-dev34`.
+
+- **2026-09-12** — Reconciliation pass folding in downstream findings: (1)
+  live-reproduced, exact-file-level root cause added to Phase 3b Slice 2 /
+  phase-3b-mux-relocation.md for the missed 	erminal/session-options.ps1
+  (+.sh) file -- the actual psmux/tmux status-left/status-right bar-template
+  wiring never got copied alongside the relocated launch-session.* scripts,
+  so a Worktree-Manager-launched session's status bar silently renders plain
+  defaults even though status-updater still populates @aw_ctx/@aw_seg
+  correctly; (2) flagged Phase 4's bare-invocation seam as currently
+  hardcoded to the literal worktree-manager binstub name rather than a
+  generic, pluggable provider-registration contract -- open question, not yet
+  designed, if a future alternative control-plane provider is meant to be
+  able to register the same seam; (3) clarified that no agent-worktrees-to-
+  Worktree-Manager creation *callback* is needed: the interactive path already
+  has Worktree Manager driving creation through the --json engine boundary
+  and then owning launch itself, so there is no async notification gap there,
+  and the programmatic (create, no-mux) path correctly never needs one
+  either; (4) linked #2530 (agent-bridge session-discovery gap: no
+  same-machine/any-repo or any-machine/same-repo lookup) in Coordination, as
+  infrastructure that would help future contributors notice overlapping work
+  on this effort's own surface before it diverges -- the exact failure mode
+  that produced the duplicate-Picker-implementation problem this effort's
+  Phase 3b exists to correct. Mined from operator-directed live investigation
+  on real Windows hardware, downstream of this effort.

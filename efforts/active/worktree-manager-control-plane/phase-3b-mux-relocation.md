@@ -26,11 +26,15 @@
   (`worktree-manager/tests/production_picker/test_picker_capture.py` and
   siblings) and clean-room scenarios, so "clean cutover" means *proven*, not
   merely *fast*.
-- **Status:** In progress — Sub-slice 2a Step 1 landed (script files copied
-  verbatim; deployment mechanism proven). Sub-slice 2a Step 2's
-  `cmd_launch` repoint + direct non-mux fallback is now implemented; the
-  old in-plugin scripts are intentionally still deployed as a temporary
-  rollback until the relocated path is proven live on real hardware.
+- **Status:** In progress — Sub-slice 2a Step 1 landed but **incomplete**:
+  script files copied verbatim (deployment mechanism proven), but
+  `terminal/session-options.ps1`/`.sh` — the file that actually wires the
+  psmux/tmux status-bar templates — was never copied alongside them,
+  live-reproduced as a real regression (see Step 1 below). Sub-slice 2a
+  Step 2's `cmd_launch` repoint + direct non-mux fallback is implemented;
+  the old in-plugin scripts are intentionally still deployed as a temporary
+  rollback until the relocated path (including the session-options fix) is
+  proven live on real hardware.
 
 ## Why this is a different shape of problem than AHP
 
@@ -120,10 +124,49 @@ about leaving Mux itself half-migrated.
 
 ### Sub-slice 2a — Move launcher scripts; repoint resolution; add the non-mux fallback
 
-1. **Step 1 (done):** copy `launch-session.{sh,ps1,cmd}` and
+1. **Step 1 (done, but incomplete — missed sibling file, live-reproduced
+   regression):** copy `launch-session.{sh,ps1,cmd}` and
    `pane-wrapper.{sh,ps1}` verbatim into `worktree-manager/bin/`. Zero logic
    changes. Proved deployable via the existing `_copy_payload` mechanism
    (no packaging code change needed) with a new self-install test.
+   - [ ] **Missed file — `terminal/session-options.ps1` (and its
+     `session-options.sh` counterpart) never got copied alongside the
+     launcher.** Live-reproduced on real Windows hardware at
+     `worktree-manager 0.1.0-dev36` (the exact version Step 2's "actual live
+     regression" fix landed in): a Worktree-Manager-launched muxed session's
+     psmux status bar renders the plain psmux default (`[#S] ... %H:%M
+     %d-%b-%y`) instead of the documented `@aw_ctx`/`@aw_seg` identity+
+     disposition segments, even though `status-updater` is confirmed live and
+     correctly populating both session options (verified directly via `psmux
+     show-options -t <session>`). Root cause, exact file/line: `Start-
+     StatusUpdater` in `launch-session.ps1` only **spawns** the updater
+     process; the actual `status-left '#{@aw_ctx} '` / `status-right
+     '#{@aw_seg} %H:%M '` `set-option` calls live in a **separate**
+     dot-sourced file, `session-options.ps1` (`plugins/agent-worktrees/
+     terminal/session-options.ps1` lines 53-56), which `launch-session.ps1`
+     loads via `$script:AwSessionOptions = Join-Path $PSScriptRoot
+     'session-options.ps1'` — i.e. it expects the file **alongside itself**.
+     Since only `launch-session.*`/`pane-wrapper.*` were copied into
+     `worktree-manager/bin/`, `Test-Path $script:AwSessionOptions` is `$false`
+     there and the dot-source (and the bar wiring it performs) is silently
+     skipped. Confirmed live: `~/.worktree-manager/versions/0.1.0-dev36/bin/`
+     contains exactly `launch-session.{cmd,ps1,sh}` and `pane-wrapper.{ps1,sh}`
+     — no `session-options.*`. Fix: copy `session-options.{sh,ps1}` (and,
+     for parity, `apply-mux-keybinds.ps1`/`psmux-passthrough.conf` from the
+     same `terminal/` directory, which are opt-in but belong with the rest of
+     the per-session mux config) alongside the already-relocated files, same
+     verbatim/hash-verified pattern as the rest of Step 1. Needs the same
+     validation gate as the rest of this sub-slice (Picker golden suite +
+     both plugins' test suites + live-hardware proof) before being marked
+     done.
+   - [ ] Separately noticed, not yet root-caused: the live `status-updater`
+     process observed during the above reproduction resolved to
+     `~/.agent-worktrees/versions/1.5.5-dev77`, two versions behind the
+     concurrently-installed `~/.agent-worktrees/versions/1.5.5-dev79`. Worth
+     checking whether `_spawn_status_updater`'s interpreter/module resolution
+     is pinning a stale version rather than the current one when re-seeded
+     from the `sessionStart` hook — possibly a distinct, smaller bug from the
+     missing-file issue above.
 2. **Step 2 (repoint + direct fallback portion done; deletion deferred by an
    explicit deviation):**
    - [x] Changed `agent-worktrees`'s `cmd_launch` to resolve
