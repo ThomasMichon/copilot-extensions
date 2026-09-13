@@ -860,6 +860,30 @@ class TestEnsureSessionCopilotReaped:
         assert out["identity_verified"] is True
         assert out["found"] == 0 and out["reaped"] == 0 and out["survivors"] == 0
 
+    def test_unreadable_start_time_is_unknown_not_gone(self, monkeypatch):
+        # Copilot review catch: an alive pid whose start-time can't be read
+        # (a transient /proc race, not a genuine mismatch) must not be
+        # treated as proof of death -- report identity_verified=False
+        # (undecided) rather than silently concluding the predecessor is
+        # already gone.
+        monkeypatch.setattr(reclaim, "resolve_bound_copilots", lambda **k: [])
+        monkeypatch.setattr(reclaim.sessions, "_is_process_alive",
+                            lambda pid: pid == 4242)
+        monkeypatch.setattr(reclaim.sessions, "_is_copilot_process",
+                            lambda pid: pid == 4242)
+        monkeypatch.setattr(reclaim.locks, "process_start_time",
+                            lambda pid: None)
+        monkeypatch.setattr(
+            reclaim, "reap_bound_copilots",
+            lambda *a, **k: pytest.fail("must not reap on an unknown identity"),
+        )
+        out = reclaim.ensure_session_copilot_reaped(
+            "sid", expected_pid=4242, expected_start_time="old-process",
+            grace=0, settle=0,
+        )
+        assert out["identity_verified"] is False
+        assert out["reaped"] == 0
+
 
 class TestIdentityBoundTermination:
     def test_windows_uses_same_verified_handle_for_termination(

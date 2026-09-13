@@ -1301,7 +1301,11 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
     surviving a "successful" retirement.
   - Landed with a regression test suite (`test_reclaim.py`) covering: the
     lock-released-but-still-alive case now gets reaped; the ordinary
-    lock-released-and-genuinely-gone case stays a no-op; and the
-    lock-independent check still refuses to touch a reused pid (start-time
-    mismatch). All existing `reclaim`/`handoff_cutover` tests (295) continue
-    to pass unmodified.
+    lock-released-and-genuinely-gone case stays a no-op; the lock-independent
+    check still refuses to touch a reused pid (start-time mismatch); and (a
+    Copilot review catch on the PR) an *unreadable* start time -- a process
+    that's alive but whose identity can't be confirmed one way or the other,
+    e.g. a transient `/proc` race -- is reported as `identity_verified=False`
+    (undecided) rather than misread as proof the predecessor is already gone.
+    All existing `reclaim`/`handoff_cutover` tests (296 total after the added
+    coverage) continue to pass.

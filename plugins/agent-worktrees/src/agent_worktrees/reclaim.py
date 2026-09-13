@@ -709,37 +709,37 @@ def ensure_session_copilot_reaped(
     the reaped process to actually disappear (termination is not instantaneous),
     so a caller that waits on this can trust ``survivors == 0`` means gone.
 
-    **The lock can outrace true death** -- Copilot may release it before the
-    process exits, so a lock scan alone can miss a survivor. With
-    ``expected_pid``/``expected_start_time``, also check the OS directly.
-
     Returns ``{checked, found, reaped, survivors, pids, waited_s}``.
     """
     import time
 
     started = time.monotonic()
     deadline = started + max(grace, 0.0)
-    def _pid_alive_without_lock() -> bool:
-        # Lock-independent, identity-verified (start-time) pid liveness.
+    def _pid_status_without_lock() -> str:
+        # Lock-independent verdict for expected_pid: alive/unknown/gone.
         if expected_pid is None or expected_start_time is None:
-            return False
-        return (sessions._is_process_alive(expected_pid)
-                and sessions._is_copilot_process(expected_pid)
-                and locks.process_start_time(expected_pid) == str(expected_start_time))
+            return "gone"
+        if not (sessions._is_process_alive(expected_pid)
+                and sessions._is_copilot_process(expected_pid)):
+            return "gone"
+        current_start = locks.process_start_time(expected_pid)
+        if current_start is None:
+            return "unknown"  # can't disprove liveness -- never "gone"
+        return "alive" if current_start == str(expected_start_time) else "gone"
     def _matching_bound() -> tuple[list[dict], bool]:
         current = resolve_bound_copilots(session_id=session_id)
         if expected_pid is None:
             return current, True
         exact = [item for item in current if item.get("pid") == expected_pid]
         if not exact:
-            if _pid_alive_without_lock():
+            status = _pid_status_without_lock()
+            if status == "alive":
                 fallback = {"session_id": session_id, "pid": expected_pid,
                             "worktree_id": None, "homing": "unknown",
                             "expected_start_time": str(expected_start_time)}
                 return [fallback], True
-            # The expected predecessor is already gone. A different pid bound
-            # to this session is not ours to terminate.
-            return [], not current
+            # "unknown" -> identity_verified=False; "gone" -> the old no-op.
+            return [], status != "unknown" and not current
         if expected_start_time is None:
             return [], False
         if locks.process_start_time(expected_pid) != str(expected_start_time):
