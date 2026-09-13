@@ -1330,6 +1330,7 @@ def test_sweep_triggers_pending_handoff_cutover_for_dormant_record(tmp_path, mon
     monkeypatch.setattr(m.tracking, "list_records", lambda path: [dormant])
     _capture_set(monkeypatch)
     triggered = []
+    mux_checked = []
 
     def pending(record):
         if getattr(record, "worktree_id", None) == "dormant":
@@ -1353,6 +1354,15 @@ def test_sweep_triggers_pending_handoff_cutover_for_dormant_record(tmp_path, mon
         lambda item: triggered.append(item),
     )
 
+    def has_mux_session(worktree_id):
+        # A dormant worktree missed by this tick's served-pane pass can still
+        # have a genuinely live mux session -- that is what this test is
+        # exercising -- so report it as live.
+        mux_checked.append(worktree_id)
+        return worktree_id == "dormant"
+
+    monkeypatch.setattr(m.sessions, "has_mux_session", has_mux_session)
+
     prior = m.cfg.active_project()
     try:
         assert m._monitor_sweep("tmux", "T", "P", set()) == 1
@@ -1364,6 +1374,109 @@ def test_sweep_triggers_pending_handoff_cutover_for_dormant_record(tmp_path, mon
         "worktree_id": "dormant",
         "predecessor_session_id": "session-1",
     }]
+    assert "dormant" in mux_checked
+
+
+def test_sweep_skips_pending_handoff_cutover_when_not_actually_in_mux(tmp_path, monkeypatch):
+    """A pending handoff on a worktree with no live mux session must never
+    trigger live cutover choreography, even though its ledger still carries
+    pending-handoff state (#handoff-cutover-head-misalignment follow-up)."""
+    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    reg = tmp_path / "reg"
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {})
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    monkeypatch.setattr(m, "_warm_list_cache_for_active_project", lambda **kw: 0)
+    monkeypatch.setattr(m.cfg, "project_name", lambda: "repo-a")
+    monkeypatch.setattr(m.cfg, "tracking_dir", lambda: m.Path("/tracking"))
+    monkeypatch.setattr(
+        m, "_activate_project_for_path", lambda *a, **k: m.cfg.set_active_project("repo-a")
+    )
+    truly_dormant = types.SimpleNamespace(
+        worktree_id="not-in-mux",
+        worktree_path="/w/not-in-mux",
+        handoffs=[
+            types.SimpleNamespace(
+                token="handoff-2",
+                predecessor="session-2",
+                candidate=None,
+                successor=None,
+                state="pending",
+            )
+        ],
+        pending_handoffs=[
+            types.SimpleNamespace(
+                token="handoff-2",
+                predecessor="session-2",
+                candidate=None,
+                successor=None,
+                state="pending",
+            )
+        ],
+    )
+    monkeypatch.setattr(m.tracking, "list_records", lambda path: [truly_dormant])
+    _capture_set(monkeypatch)
+    triggered = []
+
+    monkeypatch.setattr(
+        m,
+        "_monitor_pending_handoff_request",
+        lambda record: {
+            "token": "handoff-2",
+            "seed": "HANDOFF_SEED",
+            "worktree_id": "not-in-mux",
+            "predecessor_session_id": "session-2",
+        },
+    )
+    monkeypatch.setattr(
+        m,
+        "_monitor_pending_handoff_predecessor_retire",
+        lambda record, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        m,
+        "_monitor_trigger_handoff_cutover",
+        lambda item: triggered.append(item),
+    )
+    # No live mux session exists anywhere for this worktree.
+    monkeypatch.setattr(m.sessions, "has_mux_session", lambda worktree_id: False)
+
+    prior = m.cfg.active_project()
+    try:
+        assert m._monitor_sweep("tmux", "T", "P", set()) == 0
+    finally:
+        m.cfg.set_active_project(prior)
+    assert triggered == []
+
+
+def test_sweep_never_scans_dormant_handoffs_without_a_mux_binary(tmp_path, monkeypatch):
+    """Without a mux binary at all, the dormant-worktree scan must not run --
+    mirroring the served-pane pass's own ``if mux_bin:`` gate."""
+    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    reg = tmp_path / "reg"
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {})
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    monkeypatch.setattr(m, "_warm_list_cache_for_active_project", lambda **kw: 0)
+    monkeypatch.setattr(m.cfg, "project_name", lambda: "repo-a")
+    monkeypatch.setattr(m.cfg, "tracking_dir", lambda: m.Path("/tracking"))
+    monkeypatch.setattr(
+        m, "_activate_project_for_path", lambda *a, **k: m.cfg.set_active_project("repo-a")
+    )
+
+    def list_records_should_not_be_called(path):
+        raise AssertionError("dormant-worktree scan must not run without a mux binary")
+
+    monkeypatch.setattr(m.tracking, "list_records", list_records_should_not_be_called)
+    _capture_set(monkeypatch)
+
+    prior = m.cfg.active_project()
+    try:
+        assert m._monitor_sweep(None, "T", "P", set()) == 0
+    finally:
+        m.cfg.set_active_project(prior)
 
 
 def test_sweep_does_not_double_trigger_same_pending_handoff(tmp_path, monkeypatch):
