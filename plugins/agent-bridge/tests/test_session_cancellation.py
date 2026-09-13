@@ -1294,3 +1294,44 @@ async def test_end_preserves_removed_identity_when_index_write_fails(owned_conte
     await ctx.manager.end_session(record.session_id, force=True)
     assert ctx.manager.get_session(record.session_id) is None
     lock.release.assert_called_once()
+
+
+async def test_scheduled_reap_without_endpoint_retains_failed_cleanup(owned_context, monkeypatch):
+    ctx = owned_context
+    record = _remote_record(ctx)
+    record.endpoint = {}
+    ctx.manager._host_index.register(record)
+    remote = AsyncMock(side_effect=AssertionError("missing endpoint must not be probed"))
+    monkeypatch.setattr(ctx.manager, "_remote_reap", remote)
+    ctx.manager._schedule_remote_reap(record, "missing endpoint")
+    task = next(iter(ctx.manager._remote_reaps_by_session[record.session_id]))
+    assert await task is False
+    await asyncio.sleep(0)
+    assert ctx.manager._remote_reap_pending(record.session_id)
+    assert ctx.manager._host_index.get(record.session_id) == record
+    assert ctx.session.status == SessionStatus.FAILED
+    remote.assert_not_awaited()
+
+
+@pytest.mark.parametrize("relay_fails", [False, True])
+async def test_stop_contains_independent_channels_after_process_failure(
+    owned_context, monkeypatch, relay_fails,
+):
+    ctx = owned_context
+    process = SimpleNamespace(alive=True, pid=123, proc=Mock())
+    process.kill = AsyncMock(side_effect=PermissionError("process cleanup failed"))
+    ctx.session._owned_process = process
+    relay = SimpleNamespace(stop=AsyncMock(
+        side_effect=OSError("relay cleanup failed") if relay_fails else None,
+    ))
+    forward = SimpleNamespace(cancel=AsyncMock())
+    ctx.manager._relays[ctx.session.session_id] = [relay]
+    ctx.manager._forwards[ctx.session.session_id] = forward
+    with pytest.raises((PermissionError, OSError)):
+        await ctx.manager.stop_session(ctx.session.session_id)
+    relay.stop.assert_awaited_once()
+    forward.cancel.assert_awaited_once()
+    assert ctx.session.session_id not in ctx.manager._forwards
+    assert ctx.session._owned_process is process
+    assert ctx.session.status == SessionStatus.FAILED
+    assert (ctx.session.session_id in ctx.manager._relays) is relay_fails

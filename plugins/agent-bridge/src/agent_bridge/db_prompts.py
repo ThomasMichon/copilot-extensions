@@ -35,6 +35,18 @@ class _PromptsMixin:
         )
         return [dict(r) for r in rows]
 
+    def transfer_pending_prompts(self, source_id: str, target_id: str) -> int:
+        """Move durable follow-ups atomically without changing their FIFO ids."""
+        with self._write_lock:
+            with self._get_conn() as conn:
+                if conn.execute("SELECT 1 FROM sessions WHERE id=?", (target_id,)).fetchone() is None:
+                    raise KeyError(f"Session {target_id} not found")
+                cursor = conn.execute(
+                    "UPDATE pending_prompts SET session_id=? WHERE session_id=?",
+                    (target_id, source_id),
+                )
+                return cursor.rowcount
+
     def pop_pending_prompt(self, session_id: str) -> dict[str, Any] | None:
         """Atomically remove and return the oldest queued prompt (or None).
 

@@ -3180,15 +3180,17 @@ class SessionManager:
         preserve_ownership: bool = False,
     ) -> None:
         """Cancel and forget a session's remote-boundary forwards (if any)."""
-        await self._stop_relays(session_id, strict=strict)
-        fwd = self._forwards.get(session_id)
-        if fwd is not None:
-            if strict:
-                await fwd.cancel()
-            else:
-                with contextlib.suppress(Exception):
+        try:
+            await self._stop_relays(session_id, strict=strict)
+        finally:
+            fwd = self._forwards.get(session_id)
+            if fwd is not None:
+                if strict:
                     await fwd.cancel()
-        self._forwards.pop(session_id, None)
+                else:
+                    with contextlib.suppress(Exception):
+                        await fwd.cancel()
+            self._forwards.pop(session_id, None)
         if not preserve_ownership:
             self._release_container_lock(session_id)
 
@@ -4006,14 +4008,11 @@ class SessionManager:
         """Schedule a tracked remote ``kill`` of a detached far-side Host.
 
         Uses the durable endpoint's SSH config (no live Spawner needed) to run a
-        one-shot ``kill`` over the tunnel. Best-effort: if there is no running
-        loop or the exec fails, the detached Host lingers until the CodeSpace
-        stops -- never fatal, and never touches a local process. An explicit
-        stop awaits this session's scheduled reaps before acknowledging.
+        one-shot ``kill`` over the tunnel. Missing endpoints and failed remote
+        execs remain tracked as unconfirmed cleanup; no local process is
+        touched. An explicit stop joins this session's scheduled reaps before
+        acknowledging.
         """
-        endpoint = getattr(rec, "endpoint", None) or {}
-        if not endpoint:
-            return
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -6092,23 +6091,23 @@ class SessionManager:
                     if session.status in (SessionStatus.IDLE, SessionStatus.RUNNING):
                         session._handoff_pending = True
                     return
-                pending = self._db.list_pending_prompts(session_id)
                 successor = await self.handoff_session(
                     session_id, reason="context-pressure", _turn_admission_owned=True,
                 )
+                transferred = self._db.transfer_pending_prompts(session_id, successor.session_id)
+            if transferred:
+                if successor.event_log:
+                    successor.event_log.append("pending_prompts_transferred", {
+                        "predecessor_session_id": session_id, "count": transferred,
+                    })
+                await self._drain_pending_prompts(successor)
         except Exception as exc:
             log.warning("Auto-handoff of %s failed: %s", session_id, exc)
+            if session.event_log:
+                session.event_log.append("handoff_failed", {
+                    "phase": "handoff_or_queue_transfer", "error": str(exc),
+                })
             return
-        for row in pending:
-            with contextlib.suppress(Exception):
-                await self.submit_or_queue_prompt(
-                    successor.session_id,
-                    row["prompt"],
-                    caller_id=row.get("caller_id"),
-                )
-        if pending:
-            with contextlib.suppress(Exception):
-                self._db.clear_pending_prompts(session_id)
 
     @staticmethod
     def _build_handoff_prompt(session: Session) -> str:

@@ -115,6 +115,39 @@ class TestProactiveHandoff:
     """The usage-driven trigger fires an in-place cutover when idle."""
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("migration_fails", [False, True])
+    async def test_auto_handoff_transfers_queued_rows_atomically(
+        self, tmp_db, spawn_target, _patch_spawn, _patch_acp,
+        monkeypatch, migration_fails,
+    ) -> None:
+        sm = _sm(tmp_db, enabled=True)
+        pred = await sm.start_session(spawn_target, caller_id="example-owner")
+        successor = await sm.start_session(spawn_target, caller_id="example-owner")
+        first = tmp_db.enqueue_prompt(pred.session_id, "first follow-up", 1, caller_id="first-caller")
+        second = tmp_db.enqueue_prompt(pred.session_id, "second follow-up", 2, caller_id="second-caller")
+        monkeypatch.setattr(sm, "handoff_session", AsyncMock(return_value=successor))
+        drain = AsyncMock()
+        monkeypatch.setattr(sm, "_drain_pending_prompts", drain)
+        if migration_fails:
+            tmp_db.execute_write(
+                f"CREATE TRIGGER reject_queue_transfer BEFORE UPDATE ON pending_prompts "
+                f"WHEN OLD.id={second} BEGIN SELECT RAISE(ABORT, 'queue transfer failed'); END"
+            )
+        await sm._run_auto_handoff(pred, expected_generation=pred._lifecycle_generation)
+        source_rows = tmp_db.list_pending_prompts(pred.session_id)
+        target_rows = tmp_db.list_pending_prompts(successor.session_id)
+        if migration_fails:
+            assert [row["id"] for row in source_rows] == [first, second]
+            assert target_rows == []
+            assert _events(pred, "handoff_failed")
+            drain.assert_not_awaited()
+        else:
+            assert source_rows == []
+            assert [row["id"] for row in target_rows] == [first, second]
+            assert [row["caller_id"] for row in target_rows] == ["first-caller", "second-caller"]
+            drain.assert_awaited_once_with(successor)
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize("resume_after_stop", [False, True])
     async def test_scheduled_handoff_is_invalidated_by_stop(
         self, tmp_db, spawn_target, _patch_spawn, _patch_acp,

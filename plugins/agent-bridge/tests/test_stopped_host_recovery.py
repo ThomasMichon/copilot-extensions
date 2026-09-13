@@ -376,9 +376,12 @@ async def test_stop_surfaces_transport_teardown_failure_and_retains_retry_handle
     with pytest.raises(RuntimeError, match="teardown failed"):
         await ctx.manager.stop_session(ctx.session.session_id)
     assert ctx.db.get_session(ctx.session.session_id)["status"] == "failed"
-    assert ctx.manager._forwards[ctx.session.session_id] is forward
     if failure == "relay":
         assert ctx.manager._relays[ctx.session.session_id] == [relay]
+        assert ctx.session.session_id not in ctx.manager._forwards
+        forward.cancel.assert_awaited_once()
+    else:
+        assert ctx.manager._forwards[ctx.session.session_id] is forward
     failing.side_effect = None
     await ctx.manager.stop_session(ctx.session.session_id)
     assert ctx.session.status == SessionStatus.STOPPED
