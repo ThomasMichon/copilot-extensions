@@ -9455,6 +9455,15 @@ def _monitor_maybe_trigger_handoff_cutover(path: str, *, governance=None) -> Non
     record = _find_record_for_path(path)
     if record is None:
         return
+    _monitor_maybe_process_handoff_record(record, governance=governance)
+
+
+def _monitor_maybe_process_handoff_record(
+    record: tracking.WorktreeRecord,
+    *,
+    governance=None,
+) -> None:
+    """Run the monitor's handoff retire/spawn checks for one tracking record."""
     retire_request = _monitor_pending_handoff_predecessor_retire(record)
     if retire_request is not None:
         _status_monitor_recheck(governance, "pre-mutation:handoff-predecessor-retire")
@@ -9542,6 +9551,7 @@ def _monitor_sweep(
     warm_projects: dict[str, str | None] = {
         project: None for project in (picker_projects or set())
     }
+    served_path_keys: set[str] = set()
     for sess, path in served:
         if pane_observer is not None:
             pane_observer(sess, path)
@@ -9559,6 +9569,7 @@ def _monitor_sweep(
                     project = cfg.project_name()
                     if session_projects is not None:
                         session_projects[path_key] = project
+                served_path_keys.add(path_key)
                 warm_projects.setdefault(project, path)
             except Exception:
                 pass
@@ -9605,6 +9616,32 @@ def _monitor_sweep(
         if context_value is not None and _publish("@aw_ctx", context_value):
             ctx_done.add(sess)
         _publish("@aw_seg", segment_value)
+    scan_projects = list(warm_projects)
+    active_project = cfg.active_project()
+    if active_project and active_project not in scan_projects:
+        scan_projects.append(active_project)
+    for project in scan_projects:
+        _wait_for_lifecycle_priority(lifecycle_priority)
+        with project_lock if project_lock is not None else contextlib.nullcontext():
+            try:
+                cfg.set_active_project(project)
+                for record in tracking.list_records(cfg.tracking_dir()):
+                    worktree_path = getattr(record, "worktree_path", None)
+                    if worktree_path:
+                        try:
+                            if os.path.normcase(os.path.realpath(worktree_path)) in served_path_keys:
+                                continue
+                        except (OSError, ValueError):
+                            pass
+                    if not record.pending_handoffs:
+                        retire_request = _monitor_pending_handoff_predecessor_retire(record)
+                        if retire_request is None:
+                            continue
+                    _monitor_maybe_process_handoff_record(record, governance=governance)
+            except _StatusMonitorGovernanceDeferred:
+                raise
+            except Exception:
+                pass
     for project in warm_projects:
         _wait_for_lifecycle_priority(lifecycle_priority)
         with project_lock if project_lock is not None else contextlib.nullcontext():

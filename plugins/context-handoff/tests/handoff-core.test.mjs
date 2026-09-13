@@ -11,6 +11,7 @@ import {
   agentWorktreesGetResult,
   buildResumePrompt,
   buildSeedForStored,
+  checkHeadAlignment,
   consumeDispatchHandoffTask,
   consumeFileHandoff,
   decodeHandoffPayload,
@@ -184,6 +185,94 @@ test("resolveSystemCli resolves agent-bridge via its sibling payload, not bare P
     `expected a sibling-payload path, got: ${resolved}`,
   );
   assert.notEqual(resolved, "agent-bridge");
+});
+
+test("checkHeadAlignment flags pending handoffs missing from the monitor registry", () => {
+  withTempHome((home) => {
+    const repoRoot = join(home, "repo");
+    mkdirSync(repoRoot, { recursive: true });
+    mkdirSync(join(repoRoot, "wt-active"), { recursive: true });
+    mkdirSync(join(repoRoot, "wt-dormant"), { recursive: true });
+    const registryDir = join(home, ".agent-worktrees", "status-monitor.d");
+    mkdirSync(registryDir, { recursive: true });
+    writeFileSync(join(registryDir, "wt-active"), join(repoRoot, "wt-active"), "utf8");
+
+    const execute = (_bin, argv, opts = {}) => {
+      if (
+        argv[0] === "repos"
+        && argv[1] === "list"
+        && argv.includes("--class")
+        && argv.includes("worktree")
+        && argv.includes("--json")
+      ) {
+        return JSON.stringify({
+          repos: [{
+            name: "copilot-extensions",
+            paths: { windows: repoRoot },
+          }],
+        });
+      }
+      if (
+        argv[0] === "list"
+        && argv.includes("--all")
+        && argv.includes("--json")
+        && opts.cwd === repoRoot
+      ) {
+        return JSON.stringify({
+          worktrees: [
+            {
+              id: "active",
+              path: join(repoRoot, "wt-active"),
+              repo: "copilot-extensions",
+              machine: "host-a",
+              status: "active",
+            },
+            {
+              id: "dormant",
+              path: join(repoRoot, "wt-dormant"),
+              repo: "copilot-extensions",
+              machine: "host-a",
+              status: "active",
+            },
+          ],
+        });
+      }
+      if (
+        argv[0] === "head-session"
+        && argv[1] === "--worktree"
+        && argv[2] === "active"
+      ) {
+        return JSON.stringify({
+          tracked: true,
+          head_session: "session-active",
+          active: true,
+          occupied: true,
+          pending_handoffs: [],
+        });
+      }
+      if (
+        argv[0] === "head-session"
+        && argv[1] === "--worktree"
+        && argv[2] === "dormant"
+      ) {
+        return JSON.stringify({
+          tracked: true,
+          head_session: null,
+          active: false,
+          occupied: true,
+          pending_handoffs: [{ token: "handoff-1" }],
+        });
+      }
+      throw new Error(`unexpected command: ${argv.join(" ")} @ ${opts.cwd || ""}`);
+    };
+
+    const result = checkHeadAlignment(repoRoot, execute);
+    assert.equal(result.checked, 2);
+    assert.equal(result.findings.length, 1);
+    assert.equal(result.findings[0].reason, "pending-handoff-unregistered");
+    assert.equal(result.findings[0].worktree.id, "dormant");
+    assert.equal(result.findings[0].monitorSession, "wt-dormant");
+  });
 });
 
 test("session-state handoff records can be written and marked consumed", () => {
