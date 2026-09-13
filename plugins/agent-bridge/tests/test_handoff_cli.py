@@ -173,9 +173,10 @@ def test_handoff_request_no_session_degrades_cleanly(monkeypatch, capsys):
 
 
 class _FakeCompletedProcess:
-    def __init__(self, stdout: str, returncode: int = 0):
+    def __init__(self, stdout: str, returncode: int = 0, stderr: str = ""):
         self.stdout = stdout
         self.returncode = returncode
+        self.stderr = stderr
 
 
 def _check_args(*, worktree_id=None, all=False, execute=False, json=False):
@@ -317,6 +318,23 @@ class TestHandoffCheck:
         err = capsys.readouterr().err
         assert "no stalled predecessor retirements found" not in err
         assert "unparseable" in err
+
+    def test_unparseable_nonzero_exit_surfaces_stderr(self, monkeypatch, capsys):
+        """Regression: a nonzero exit with non-JSON stdout took the
+        json.loads except branch, which set payload["error"] directly --
+        skipping the later stderr-attaching check entirely (it only ran
+        when payload had no "error" yet) and hiding the diagnostic."""
+        monkeypatch.setattr(m.shutil, "which", lambda name: "/usr/bin/agent-worktrees")
+        proc = _FakeCompletedProcess("not json", returncode=1)
+        proc.stderr = "some underlying failure text"
+        monkeypatch.setattr(m.subprocess, "run", lambda argv, **kwargs: proc)
+
+        with pytest.raises(SystemExit) as exc_info:
+            m._cmd_handoff_check(_check_args(worktree_id="wt-1"))
+
+        assert exc_info.value.code != 0
+        err = capsys.readouterr().err
+        assert "some underlying failure text" in err
 
     def test_empty_stdout_nonzero_exit_reports_failure_not_success(self, monkeypatch, capsys):
         """Regression: a nonzero agent-worktrees exit with completely empty

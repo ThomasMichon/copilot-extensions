@@ -5185,7 +5185,11 @@ def _cmd_handoff_check(args: argparse.Namespace) -> None:
     try:
         payload = json.loads(result.stdout or "{}")
     except Exception:
-        payload = {"error": "unparseable agent-worktrees output", "raw": result.stdout}
+        payload = {
+            "error": "unparseable agent-worktrees output",
+            "raw": result.stdout,
+            "stderr": result.stderr,
+        }
     if result.returncode != 0 and "findings" not in payload and not payload.get("error"):
         # agent-worktrees failed (nonzero exit) without a JSON error envelope
         # -- e.g. empty stdout -- so json.loads("{}" fallback) looks

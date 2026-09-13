@@ -8,7 +8,7 @@
   "plugins/agent-bridge/libs/ssh-manager/src/ssh_manager/carrier.py": 1313,
   "plugins/agent-bridge/scripts/installation-context/installation_context.py": 9169,
   "plugins/agent-bridge/scripts/versioned_runtime.py": 1245,
-  "plugins/agent-bridge/src/agent_bridge/__main__.py": 6495,
+  "plugins/agent-bridge/src/agent_bridge/__main__.py": 6499,
   "plugins/agent-bridge/src/agent_bridge/acp_client.py": 1631,
   "plugins/agent-bridge/src/agent_bridge/agent_registry.py": 2810,
   "plugins/agent-bridge/src/agent_bridge/app.py": 1111,
