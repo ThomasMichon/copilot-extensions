@@ -23,6 +23,7 @@ from agent_bridge.transport import SpawnTarget
     ("spawn", "cancel"), ("connect", "cancel"), ("attach", "cancel"),
     ("streams", "cancel"), ("initialize", "cancel"), ("load", "cancel"),
     ("connect", "error"), ("attach", "error"), ("streams", "error"),
+    ("committed", "cancel"),
 ])
 @pytest.mark.parametrize("abort_confirmed", [False, True])
 async def test_cancelled_host_launch_aborts_or_retains_retry_authority(
@@ -34,6 +35,8 @@ async def test_cancelled_host_launch_aborts_or_retains_retry_authority(
     session = Session("example-session", "example-agent", target)
     session.status = SessionStatus.STOPPED
     session.acp_session_id = "example-acp"
+    if phase == "committed":
+        session.acp_session_id = None
     tmp_db.create_session(
         session.session_id, session.name, None, str(tmp_path), "local", "stopped",
         time.time(), target_json=target.to_json(),
@@ -93,6 +96,7 @@ async def test_cancelled_host_launch_aborts_or_retains_retry_authority(
     client = SimpleNamespace(
         start_streams=AsyncMock(side_effect=initialize),
         load_session=AsyncMock(side_effect=load),
+        new_session=AsyncMock(return_value="new-acp"),
         shutdown=AsyncMock(),
         mark_transport_lost=Mock(),
         mark_host_child_exited=Mock(),
@@ -108,7 +112,7 @@ async def test_cancelled_host_launch_aborts_or_retains_retry_authority(
     monkeypatch.setattr("agent_bridge.session_manager._cleanup_worktree", AsyncMock())
 
     async def host_resume(current, *, on_acp_event, permission_callback, load_existing):
-        return await manager._connect_via_session_host(
+        result = await manager._connect_via_session_host(
             current.target,
             tracker=ConnectTracker(current.event_log.append, session_id=current.session_id),
             session_id=current.session_id,
@@ -116,13 +120,18 @@ async def test_cancelled_host_launch_aborts_or_retains_retry_authority(
             spawner=spawner, remote_child_argv=["example-agent"],
             remote_cwd="/example/workspace", load_session_id=current.acp_session_id,
         )
+        # Container resume can await preparation cleanup after the host commits.
+        await stage("committed")
+        return result
 
     monkeypatch.setattr(manager, "_resume_via_new_remote_host", host_resume)
-    task = asyncio.create_task(manager.resume_session(session.session_id, drain=False))
+    task = asyncio.create_task(manager.resume_session(
+        session.session_id, drain=False, allow_recreate=phase == "committed",
+    ))
     await asyncio.wait_for(entered.wait(), 2)
     if phase != "spawn":
         assert manager._host_index.get(session.session_id) is not None
-        assert session.session_id in manager._pending_host_launches
+        assert (session.session_id in manager._pending_host_launches) is (phase != "committed")
     if fault == "cancel":
         task.cancel()
         if phase == "spawn":
@@ -133,10 +142,22 @@ async def test_cancelled_host_launch_aborts_or_retains_retry_authority(
         release.set()
     error = (
         (asyncio.CancelledError if fault == "cancel" else Exception)
-        if abort_confirmed else RemoteSpawnCleanupPendingError
+        if abort_confirmed or phase == "committed" else RemoteSpawnCleanupPendingError
     )
     with pytest.raises(error):
         await asyncio.wait_for(task, 3)
+    if phase == "committed":
+        spawner.abort_spawned.assert_not_awaited()
+        client.shutdown.assert_awaited_once()
+        assert session.client is None
+        assert session.status == SessionStatus.STOPPED
+        assert session.acp_session_id == "new-acp"
+        assert tmp_db.get_session(session.session_id)["acp_session_id"] == "new-acp"
+        assert not manager._host_index.get(session.session_id).extra.get("launch_cleanup_pending")
+        restarted = SessionManager(tmp_db, session_host_state_dir=state_dir)
+        assert restarted.get_session(session.session_id).acp_session_id == "new-acp"
+        assert restarted._host_index.get(session.session_id) is not None
+        return
     # Inconclusive handshake rollback is retried by the outer resume cleanup.
     expected_aborts = 2 if not abort_confirmed and phase != "spawn" else 1
     assert spawner.abort_spawned.await_count == expected_aborts
@@ -187,6 +208,33 @@ async def test_durable_container_marker_blocks_resume_without_host_index(
     attach.assert_not_awaited()
     assert manager._host_index.get(session_id) is None
     assert manager.get_session(session_id).target.container["launch_pending_session_id"] == session_id
+
+
+@pytest.mark.asyncio
+async def test_restarted_partial_container_never_enters_background_recovery(
+    tmp_db, tmp_path, monkeypatch,
+):
+    session_id = "example-session"
+    target = SpawnTarget(
+        type="command",
+        container={"name": "example-container", "launch_pending_session_id": session_id},
+    )
+    tmp_db.create_session(
+        session_id, "example-agent", None, ".", "command", "starting",
+        time.time(), target_json=target.to_json(),
+    )
+    tmp_db.update_session_acp_id(session_id, "example-acp")
+    manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path / "hosts"))
+    factory = Mock(side_effect=AssertionError("partial launch must not probe a provider"))
+    monkeypatch.setattr("agent_bridge.session_host.container_transport.build_container_spawner", factory)
+    session = manager.get_session(session_id)
+    assert session.restart_status == "starting"
+    assert not manager._background_recovery_allowed(session)
+    assert await manager._recover_remote_host_records(background=True) == 0
+    assert await manager.reattach_session_hosts() == 0
+    factory.assert_not_called()
+    assert manager._host_index.get(session_id) is None
+    assert session.target.container["launch_pending_session_id"] == session_id
 
 
 def test_dead_host_pruning_retains_partial_launch_authority(tmp_db, tmp_path, monkeypatch):
