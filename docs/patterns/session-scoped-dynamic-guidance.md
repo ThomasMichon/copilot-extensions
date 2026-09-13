@@ -44,6 +44,19 @@ performed only a file-write side effect. Across repeated runs:
   `~/.copilot/session-state/<sessionId>/` convention) and read a named file
   inside it was **followed correctly** by the agent, which located and reported
   the dynamically written content.
+- A separate capture (a fresh, non-repository launch with zero plugins or
+  custom instructions active) found that the Copilot CLI base system prompt
+  **unconditionally** discloses the already-resolved session-state folder
+  absolute path in a `<session_context>` block. The resolution mechanism
+  (`COPILOT_AGENT_SESSION_ID`, the `~/.copilot/session-state/<sessionId>/`
+  convention) is therefore host/runtime-level, not something the static
+  pointer needs to teach the agent. A follow-up clean-room test (a disposable
+  plugin, a nonsensical canary instruction with no semantic link to the
+  pointer wording, three fresh runs) confirmed a pointer that skips the
+  resolution explanation entirely and only names the file to read still
+  reliably drives the agent to find and obey the dynamic file (3/3 pass).
+  The static pointer template below reflects this: it names only the file to
+  read, not how to resolve the folder it lives in.
 
 ## Standard approach
 
@@ -67,18 +80,17 @@ non-interpolated pointer:
 applyTo: "**"
 ---
 
-At the start of this session, resolve your current Copilot session-state folder
-using the session identifier exposed as `COPILOT_AGENT_SESSION_ID`, or any
-equivalent mechanism available to you, and read the file at
-`instructions/<plugin>/<topic>.instructions.md` inside that folder, if it
-exists. Treat its contents as authoritative for this session. If the file does
-not exist, proceed without it -- do not treat its absence as an error.
+Read `instructions/<plugin>/<topic>.instructions.md` in this session's
+already-disclosed session folder, if it exists, and treat its contents as
+authoritative for this session. Its absence is not an error.
 ```
 
-This file never embeds a session ID, host path, or other live value -- it
-instructs the *agent* to resolve one at read time, which is not interpolation
-and satisfies the existing static-instruction constraints. It fails open by
-design: a missing dynamic file is explicitly a no-op, never a blocker.
+This file never embeds a session ID, host path, or other live value, and never
+explains how to resolve the session folder -- the base system prompt's
+`<session_context>` block already discloses that absolute path unconditionally,
+so re-teaching the resolution mechanism per plugin is pure duplication. It
+fails open by design: a missing dynamic file is explicitly a no-op, never a
+blocker.
 
 ### 2. Dynamic half: a session-folder file, written as a side effect
 

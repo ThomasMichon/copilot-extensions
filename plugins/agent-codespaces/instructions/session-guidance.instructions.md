@@ -2,9 +2,6 @@
 applyTo: "**"
 ---
 
-At the start of this session, resolve the current Copilot session-state folder
-using the session identifier exposed as `COPILOT_AGENT_SESSION_ID`, or an
-equivalent available mechanism. Read
-`instructions/agent-codespaces/session-guidance.instructions.md` inside that
-folder if it exists, and treat its contents as authoritative for this session.
-If the file does not exist, proceed without it; its absence is not an error.
+Read `instructions/agent-codespaces/session-guidance.instructions.md` in this
+session's already-disclosed session folder, if it exists, and treat its
+contents as authoritative for this session. Its absence is not an error.
