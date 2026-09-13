@@ -535,6 +535,13 @@ renumbering from the "acknowledges handoff" step onward.)
 - [ ] Feed `health.find_orphaned_handoffs()` from the new trace so it can name
       the exact stage where an orphaned handoff stalled. **Still open** —
       not addressed by this leg's remediation, left as a genuine follow-on.
+- [x] **New item, found and fixed live this session:** a graceful retire can
+      release `inuse.<pid>.lock` before the OS process actually exits,
+      making `ensure_session_copilot_reaped()`'s lock-gated scan report
+      "already gone" while the real predecessor process keeps running for
+      hours as an invisible orphan (the operator's reported "phantom
+      agents"). Fixed with a lock-independent, identity-verified OS pid
+      check as a fallback. See Journal for full evidence and the fix.
 
 ### Phase 5 — Docs
 - [x] Document the 13-stage lifecycle in
@@ -1247,3 +1254,58 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   session-state backfill work and its `handoff-trace` CLI, plus Phase 4
   item 4 (`find_orphaned_handoffs()` naming the exact stalled stage), all
   remain open before this effort can move to Done.
+
+- **New root cause found and fixed live (this session): "phantom agent"
+  false-positive retirement.** The operator reported recurring "phantom
+  agents" continuing handoffs with no corresponding mux pane. Live forensics
+  on this machine's own `activity.jsonl` + `handoff_trace.py` records for a
+  real worktree caught it exactly: `handoffs-check`'s resident-monitor sweep
+  retried a predecessor retirement roughly every 30-40s for **2.5 hours**
+  (`outcome=left-running`/`method=process-identity-mismatch`, the existing
+  safety guard correctly refusing to kill a process it couldn't positively
+  identify), then one attempt reported `outcome=gone`/`method=graceful` --
+  and the actual Copilot agent process kept running for **three more hours**
+  after that "gone" declaration, fully orphaned off its now-closed mux pane
+  (confirmed live via `ps`/`/proc`: a real, CPU-active `copilot --allow-all
+  --interactive` process on a pty with no owning tmux session anywhere,
+  continuing the exact same task lineage as a *newer*, correctly-mux-hosted
+  successor also running concurrently) -- until it finally exited on its own
+  right as this investigation reached it.
+  - **Root cause:** `reclaim.ensure_session_copilot_reaped()`'s "is the
+    predecessor actually dead" check is entirely gated on the presence of a
+    live `inuse.<pid>.lock` file (`resolve_bound_copilots()` only reports a
+    pid when its lock still exists). Copilot's own shutdown sequence can
+    release that lock as an early step, before the OS process has actually
+    exited -- inverting the docstring's stated assumption ("a graceful quit
+    releases its lock on its own" implicitly assumed lock-release means the
+    process is gone). The instant the lock disappears, the pid vanishes from
+    the lock-gated scan entirely, so the retirement path concluded "already
+    gone" while the real process persisted for hours, invisible to any mux
+    pane and untouched by any subsequent sweep (a gone/graceful outcome is
+    treated as fully handled, never retried).
+  - **Fix:** `ensure_session_copilot_reaped()` now also checks the exact
+    `expected_pid` directly against the OS (`sessions._is_process_alive` +
+    `sessions._is_copilot_process`, lock-file-independent), identity-verified
+    against the same start-time token used everywhere else in this pipeline
+    (`locks.process_start_time`) to guard against pid reuse, before trusting
+    an empty lock-gated scan as proof of death. A pid that's still alive and
+    still identity-matches is now folded into the same `reap_bound_copilots`
+    kill path instead of being silently waved through.
+  - This is a **distinct root cause** from the four already fixed earlier in
+    this effort (wrong pid source, over-eager "any event = handled", the
+    `pending_handoffs`-vs-full-scan gap, poisoned historical spawn data) --
+    all of those were about *identifying* the right process; this one is
+    about the *confirmation-of-death* check itself being fooled by an early
+    lock release. It directly explains the operator's "phantom agent" reports
+    and is very likely the dominant remaining cause of predecessors
+    surviving a "successful" retirement.
+  - Landed with a regression test suite (`test_reclaim.py`) covering: the
+    lock-released-but-still-alive case now gets reaped; the ordinary
+    lock-released-and-genuinely-gone case stays a no-op; the lock-independent
+    check still refuses to touch a reused pid (start-time mismatch); and (a
+    Copilot review catch on the PR) an *unreadable* start time -- a process
+    that's alive but whose identity can't be confirmed one way or the other,
+    e.g. a transient `/proc` race -- is reported as `identity_verified=False`
+    (undecided) rather than misread as proof the predecessor is already gone.
+    All existing `reclaim`/`handoff_cutover` tests (296 total after the added
+    coverage) continue to pass.
