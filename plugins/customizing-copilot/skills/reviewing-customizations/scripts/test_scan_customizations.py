@@ -2248,6 +2248,139 @@ def test_context_budget_splits_hooks_without_executing(
     assert "payload size unknown (not additionalContext)" in output
 
 
+def _write_session_file_hook(marker_dir_name: str) -> dict:
+    """A sessionStart command hook that writes a session-scoped file.
+
+    Mirrors the real facility write_session_guidance.py contract: it derives
+    the session-state root from $HOME/$USERPROFILE (never a hardcoded path)
+    and writes under instructions/<marker_dir_name>/.
+    """
+    session_id = "scan-customizations-dynamic-capture"
+    bash = (
+        f'mkdir -p "$HOME/.copilot/session-state/{session_id}/instructions/'
+        f'{marker_dir_name}" && printf \'dynamic content\' > '
+        f'"$HOME/.copilot/session-state/{session_id}/instructions/'
+        f'{marker_dir_name}/topic.instructions.md"'
+    )
+    powershell = (
+        f"New-Item -ItemType Directory -Force -Path "
+        f"\"$env:USERPROFILE\\.copilot\\session-state\\{session_id}\\"
+        f"instructions\\{marker_dir_name}\" | Out-Null; Set-Content -Path "
+        f"\"$env:USERPROFILE\\.copilot\\session-state\\{session_id}\\"
+        f"instructions\\{marker_dir_name}\\topic.instructions.md\" "
+        f"-Value 'dynamic content' -NoNewline"
+    )
+    return {"type": "command", "bash": bash, "powershell": powershell}
+
+
+def test_capture_dynamic_disabled_by_default(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    plugin = tmp_path / "plugin"
+    (plugin / "skills").mkdir(parents=True)
+    (plugin / "hooks.json").write_text(json.dumps({
+        "version": 1,
+        "hooks": {"sessionStart": [_write_session_file_hook("plugin-x")]},
+    }), encoding="utf-8")
+    source = scan.PluginSource(
+        skills_root=plugin / "skills", origin="market/plugin",
+    )
+
+    budget = scan.build_context_budget(repo, [source], home=home)
+    dynamic = budget["dynamic_session_files"]
+    assert dynamic == {
+        "captured": False, "totals": {
+            "characters": 0, "bytes": 0, "words": 0, "estimated_tokens": 0,
+        }, "files": [], "errors": [],
+    }
+    assert not (home / ".copilot" / "session-state").exists()
+
+
+def test_capture_dynamic_sandboxes_and_measures_session_files(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    plugin = tmp_path / "plugin"
+    (plugin / "skills").mkdir(parents=True)
+    (plugin / "hooks.json").write_text(json.dumps({
+        "version": 1,
+        "hooks": {"sessionStart": [_write_session_file_hook("plugin-x")]},
+    }), encoding="utf-8")
+    source = scan.PluginSource(
+        skills_root=plugin / "skills", origin="market/plugin",
+    )
+
+    budget = scan.build_context_budget(
+        repo, [source], home=home, capture_dynamic=True,
+    )
+    dynamic = budget["dynamic_session_files"]
+    assert dynamic["captured"] is True
+    assert dynamic["errors"] == []
+    assert len(dynamic["files"]) == 1
+    entry = dynamic["files"][0]
+    assert entry["path"] == "<session-instructions>/plugin-x/topic.instructions.md"
+    assert entry["characters"] == len("dynamic content")
+    assert dynamic["totals"]["characters"] == len("dynamic content")
+
+    # The real home fixture is never touched -- only the disposable sandbox.
+    assert not (home / ".copilot" / "session-state").exists()
+
+
+def test_capture_dynamic_reports_hook_failures_without_raising(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    plugin = tmp_path / "plugin"
+    (plugin / "skills").mkdir(parents=True)
+    (plugin / "hooks.json").write_text(json.dumps({
+        "version": 1,
+        "hooks": {"sessionStart": [{
+            "type": "command",
+            "bash": "exit 3",
+            "powershell": "exit 3",
+        }]},
+    }), encoding="utf-8")
+    source = scan.PluginSource(
+        skills_root=plugin / "skills", origin="market/plugin",
+    )
+
+    budget = scan.build_context_budget(
+        repo, [source], home=home, capture_dynamic=True,
+    )
+    dynamic = budget["dynamic_session_files"]
+    assert dynamic["files"] == []
+    assert len(dynamic["errors"]) == 1
+    assert dynamic["errors"][0]["plugin"] == "plugin:market/plugin"
+    assert "exit code" in dynamic["errors"][0]["detail"]
+
+
+def test_capture_dynamic_skips_repo_and_user_hooks(tmp_path: Path):
+    """Only plugin-owned sessionStart hooks run; repo/user ones never do."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    home = tmp_path / "home"
+    user_hooks = home / ".copilot" / "hooks"
+    user_hooks.mkdir(parents=True)
+    (user_hooks / "personal.json").write_text(json.dumps({
+        "hooks": {"sessionStart": [_write_session_file_hook("user-plugin")]},
+    }), encoding="utf-8")
+    (repo / "hooks.json").write_text(json.dumps({
+        "version": 1,
+        "hooks": {"sessionStart": [_write_session_file_hook("repo-plugin")]},
+    }), encoding="utf-8")
+
+    budget = scan.build_context_budget(
+        repo, [], home=home, capture_dynamic=True,
+    )
+    dynamic = budget["dynamic_session_files"]
+    assert dynamic["files"] == []
+    assert dynamic["errors"] == []
+
+
 def test_json_context_budget_shape(tmp_path: Path, capsys, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -2262,6 +2395,7 @@ def test_json_context_budget_shape(tmp_path: Path, capsys, monkeypatch):
         "token_estimate",
         "static_instruction_payloads",
         "metadata_upper_bounds",
+        "dynamic_session_files",
         "hook_registrations",
         "known_totals",
     }

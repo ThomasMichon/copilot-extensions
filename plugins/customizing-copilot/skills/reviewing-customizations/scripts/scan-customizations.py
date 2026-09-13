@@ -39,7 +39,7 @@ Checks (all stdlib, no dependencies):
 
 Usage:
     scan-customizations.py [REPO_ROOT] [--json] [--strict]
-                           [--context-budget]
+                           [--context-budget] [--capture-dynamic]
                            [--from-settings]
                            [--owned-agent-root RELATIVE_DIR]
                            [--include-plugins DIR ...] [--include-installed]
@@ -59,7 +59,16 @@ and conditional repository instructions, standard personal instructions,
 configured instruction directories, enabled skill/agent frontmatter, and
 additionalContext, prompt, and other hook registrations without executing hooks
 or printing file contents. Estimated tokens use the fixed, intentionally coarse
-heuristic `ceil(Unicode characters / 4)`.
+heuristic `ceil(Unicode characters / 4)`. `--capture-dynamic` (only meaningful
+with `--context-budget`) additionally invokes each already-enabled plugin's
+`sessionStart` **command** hook once, inside a disposable sandbox
+`HOME`/`USERPROFILE` (never the real `~/.copilot/session-state` tree), with a
+synthetic session payload, then measures the session-scoped
+`instructions/**/*.instructions.md` files the hook writes as its documented
+side effect (see `docs/patterns/session-scoped-dynamic-guidance.md`) -- turning
+the previously "unknown (not executed)" additionalContext-hook row into real
+byte/token counts. Per-plugin invocation failures are reported, never silently
+dropped; the sandbox directory is always removed afterward.
 """
 
 from __future__ import annotations
@@ -68,8 +77,12 @@ import argparse
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -2149,14 +2162,189 @@ def _hook_registrations(
     return context_capable, prompt_hooks, not_additional_context_capable
 
 
+_DYNAMIC_CAPTURE_SESSION_ID = "scan-customizations-dynamic-capture"
+_DYNAMIC_CAPTURE_TIMEOUT_MARGIN_S = 5.0
+
+
+def _synthetic_session_payload(root: Path, session_id: str) -> bytes:
+    """Build a minimal, synthetic sessionStart stdin payload.
+
+    Field names/shape match the observed lower-bound schema documented in
+    docs/patterns/session-scoped-dynamic-guidance.md
+    (``sessionId``, ``timestamp``, ``cwd``, ``source``, ``initialPrompt``).
+    """
+    payload = {
+        "sessionId": session_id,
+        "cwd": str(root),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "source": "startup",
+        "initialPrompt": "",
+    }
+    return json.dumps(payload).encode("utf-8")
+
+
+def _run_sandboxed_session_start_hook(
+    script: str,
+    *,
+    plugin_root: Path,
+    project_dir: Path,
+    sandbox_home: Path,
+    payload: bytes,
+    timeout: float,
+) -> tuple[bool, str]:
+    """Run one sessionStart command hook with HOME/USERPROFILE sandboxed.
+
+    Every facility session-guidance writer resolves its session-state root via
+    ``Path.home()`` (see docs/patterns/session-scoped-dynamic-guidance.md), so
+    overriding HOME (POSIX) / USERPROFILE (Windows) fully redirects the write
+    to the sandbox -- the real ``~/.copilot/session-state`` tree is never
+    touched. Never raises; returns (ok, detail) so a single plugin's failure
+    never aborts the capture pass.
+    """
+    env = {
+        **os.environ,
+        "HOME": str(sandbox_home),
+        "USERPROFILE": str(sandbox_home),
+        "COPILOT_PLUGIN_ROOT": str(plugin_root),
+        "PLUGIN_ROOT": str(plugin_root),
+        "CLAUDE_PLUGIN_ROOT": str(plugin_root),
+        "COPILOT_EXTENSIONS_CONTEXT": "1",
+        "COPILOT_PROJECT_DIR": str(project_dir),
+    }
+    if os.name == "nt":
+        shell = (
+            shutil.which("pwsh")
+            or shutil.which("powershell.exe")
+            or shutil.which("powershell")
+        )
+        if not shell:
+            return False, "no PowerShell interpreter found"
+        argv = [shell, "-NoLogo", "-NoProfile", "-Command", script]
+    else:
+        shell = shutil.which("bash")
+        if not shell:
+            return False, "bash not found"
+        argv = [shell, "-c", script]
+    try:
+        completed = subprocess.run(
+            argv,
+            input=payload,
+            capture_output=True,
+            timeout=timeout,
+            env=env,
+            cwd=str(sandbox_home),
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return False, f"timed out after {timeout:.0f}s"
+    except OSError as exc:
+        return False, str(exc)
+    if completed.returncode != 0:
+        return False, f"exit code {completed.returncode}"
+    return True, ""
+
+
+def capture_dynamic_session_files(
+    root: Path,
+    plugin_sources: list[PluginSource],
+    home: Path,
+) -> tuple[list[dict], list[dict]]:
+    """Invoke each plugin-owned sessionStart command hook once, sandboxed.
+
+    Returns ``(entries, errors)``: ``entries`` are the measured
+    ``instructions/**/*.instructions.md`` files the hooks wrote to the sandbox
+    session-state folder (same shape as ``_measure_files``); ``errors`` name
+    every plugin whose hook could not be run or timed out, so a gap is always
+    visible rather than silently reported as zero. Only **plugin-owned**
+    sessionStart hooks are invoked -- repository- and user-level hook files
+    are left alone, since those are ad-hoc/local configuration rather than a
+    reviewed, installed plugin.
+    """
+    errors: list[dict] = []
+    # ignore_cleanup_errors: a plugin's sessionStart hook can do more than
+    # write its guidance file (observed: a full install-stage bootstrap that
+    # leaves read-only files behind on Windows) -- never let sandbox teardown
+    # itself raise.
+    with tempfile.TemporaryDirectory(
+        prefix="scan-customizations-dynamic-home-",
+        ignore_cleanup_errors=True,
+    ) as sandbox:
+        sandbox_home = Path(sandbox)
+        session_id = _DYNAMIC_CAPTURE_SESSION_ID
+        payload = _synthetic_session_payload(root, session_id)
+        for path, source, data, aliases in _hook_documents(
+            root, plugin_sources, home
+        ):
+            if not source.startswith("plugin:"):
+                continue
+            hooks = data.get("hooks")
+            if not isinstance(hooks, dict):
+                continue
+            entries = hooks.get("sessionStart")
+            if not isinstance(entries, list):
+                continue
+            plugin_root = aliases[0][0] if aliases else path.parent
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                if str(entry.get("type", "command")) != "command":
+                    continue
+                script = entry.get(
+                    "powershell" if os.name == "nt" else "bash"
+                )
+                if not isinstance(script, str) or not script.strip():
+                    continue
+                try:
+                    timeout = float(entry.get("timeoutSec", 15))
+                except (TypeError, ValueError):
+                    timeout = 15.0
+                timeout += _DYNAMIC_CAPTURE_TIMEOUT_MARGIN_S
+                ok, detail = _run_sandboxed_session_start_hook(
+                    script,
+                    plugin_root=plugin_root,
+                    project_dir=root,
+                    sandbox_home=sandbox_home,
+                    payload=payload,
+                    timeout=timeout,
+                )
+                if not ok:
+                    errors.append({
+                        "plugin": source,
+                        "path": _display_path(path, root, aliases),
+                        "detail": detail,
+                    })
+        instructions_root = (
+            sandbox_home / ".copilot" / "session-state" / session_id
+            / "instructions"
+        )
+        dynamic_files: set[Path] = set()
+        if instructions_root.is_dir():
+            dynamic_files = {
+                p for p in instructions_root.rglob("*.instructions.md")
+                if p.is_file()
+            }
+        file_entries = _measure_files(
+            dynamic_files,
+            root,
+            aliases=((instructions_root, "session-instructions"),),
+        )
+    return file_entries, errors
+
+
 def build_context_budget(
     root: Path,
     plugin_sources: list[PluginSource] | None = None,
     *,
     home: Path | None = None,
     owned_agent_roots: tuple[Path, ...] = (),
+    capture_dynamic: bool = False,
 ) -> dict:
-    """Build a counts-only context inventory; hook commands are never run."""
+    """Build a counts-only context inventory.
+
+    Hook commands are never run unless ``capture_dynamic`` is explicitly set,
+    in which case only plugin-owned sessionStart hooks run, sandboxed (see
+    ``capture_dynamic_session_files``).
+    """
     sources = plugin_sources or []
     home = home or Path.home()
     repo_always, repo_conditional = _repo_instruction_files(root)
@@ -2190,6 +2378,13 @@ def build_context_budget(
         + personal_entries
         + custom_entries
     )
+    dynamic_entries: list[dict] = []
+    dynamic_errors: list[dict] = []
+    if capture_dynamic:
+        dynamic_entries, dynamic_errors = capture_dynamic_session_files(
+            root, sources, home,
+        )
+    known_totals_entries = static_entries + metadata_entries + dynamic_entries
     return {
         "token_estimate": {
             "heuristic": "ceil(unicode_characters / 4)",
@@ -2205,6 +2400,12 @@ def build_context_budget(
         "metadata_upper_bounds": {
             "totals": _sum_metrics(metadata_entries),
             "files": metadata_entries,
+        },
+        "dynamic_session_files": {
+            "captured": capture_dynamic,
+            "totals": _sum_metrics(dynamic_entries),
+            "files": dynamic_entries,
+            "errors": dynamic_errors,
         },
         "hook_registrations": {
             "additional_context_capable": {
@@ -2223,13 +2424,14 @@ def build_context_budget(
                 "registrations": other_hooks,
             },
         },
-        "known_totals": _sum_metrics(static_entries + metadata_entries),
+        "known_totals": _sum_metrics(known_totals_entries),
     }
 
 
 def _print_context_budget(budget: dict) -> None:
     static = budget["static_instruction_payloads"]
     metadata = budget["metadata_upper_bounds"]
+    dynamic = budget.get("dynamic_session_files")
     hooks = budget["hook_registrations"]
     print("\nContext budget (token estimate: ceil(Unicode characters / 4))")
     print("Category                       Files  Chars   Bytes   Words  Est tokens")
@@ -2254,11 +2456,29 @@ def _print_context_budget(budget: dict) -> None:
             f"{totals['bytes']:>6}  {totals['words']:>6}  "
             f"{totals['estimated_tokens']:>10}"
         )
+    if dynamic is not None and dynamic["captured"]:
+        dyn_totals = dynamic["totals"]
+        print(
+            f"{'Dynamic session-start files':<29}  "
+            f"{len(dynamic['files']):>5}  {dyn_totals['characters']:>6}  "
+            f"{dyn_totals['bytes']:>6}  {dyn_totals['words']:>6}  "
+            f"{dyn_totals['estimated_tokens']:>10}"
+        )
+        if dynamic["errors"]:
+            print(
+                f"  ({len(dynamic['errors'])} sessionStart hook(s) failed to "
+                "run -- see JSON output for detail; not counted above)"
+            )
     context_hooks = hooks["additional_context_capable"]
     prompt_hooks = hooks["prompt_hooks"]
     other_hooks = hooks["not_additional_context_capable"]
-    print(f"additionalContext hooks        {context_hooks['count']:>5}  "
-          "payload size unknown (not executed)")
+    if dynamic is not None and dynamic["captured"]:
+        print(f"additionalContext hooks        {context_hooks['count']:>5}  "
+              "payload size measured via --capture-dynamic above "
+              "(dynamic session files), not this row")
+    else:
+        print(f"additionalContext hooks        {context_hooks['count']:>5}  "
+              "payload size unknown (not executed)")
     print(f"Prompt hooks                   {prompt_hooks['count']:>5}  "
           "payload size unknown (not additionalContext)")
     print(f"Other hook events              {other_hooks['count']:>5}  "
@@ -2281,6 +2501,12 @@ def main(argv: list[str] | None = None) -> int:
                     help="exit non-zero if any BLOCKING finding is reported")
     ap.add_argument("--context-budget", action="store_true",
                     help="report counts-only context usage without executing hooks")
+    ap.add_argument("--capture-dynamic", action="store_true",
+                    help="with --context-budget, additionally invoke each "
+                         "plugin's sessionStart command hook once inside a "
+                         "sandboxed HOME/USERPROFILE and measure the "
+                         "session-scoped instructions/*.instructions.md files "
+                         "it writes (never touches the real session-state tree)")
     ap.add_argument("--from-settings", action="store_true",
                     help="assemble the plugin set actually LOADED for this repo "
                          "(from .github/copilot/settings.json + user settings) and "
@@ -2372,6 +2598,7 @@ def main(argv: list[str] | None = None) -> int:
             root,
             sources,
             owned_agent_roots=owned_agent_roots,
+            capture_dynamic=args.capture_dynamic,
         )
         if args.context_budget
         else None
