@@ -1364,3 +1364,45 @@ the full round trip, per the plan already on file). #736 closes only once
 all three are resolved or each is explicitly re-scoped into its own tracked
 successor issue with #736 updated to point at it.
 
+### 2026-09-12 (still later) — #1841: declared lifecycle tiers for agent-bridge/agent-vault/agent-dispatch; found + filed a real POSIX gap (#2524)
+
+Picked up #1841's documentation deliverable. Added a "Declared lifecycle
+tier" section (default tier, availability promise, Windows/POSIX mappings,
+escalation rationale — the exact fields
+`service-lifecycle-supervision.md` requires) to:
+
+- `agent-bridge/docs/architecture.md` — tier 2, confirmed compliant:
+  `do_start` prefers systemd/Scheduled Task but falls back to a direct
+  daemon launch when unavailable (genuine tier-1 convergence).
+- `agent-vault/docs/architecture.md` — tier 2, confirmed compliant per
+  #1836 (closed this session). Also **fixed a stale doc note**: the
+  "Supervision and updates" section still said drain-safe cutover was "In
+  progress (#743)" when this session already **closed** #743 for POSIX;
+  rewrote it to describe what's actually shipped (the `set-environment`
+  handoff, verified end-to-end against a real WSL KeePass vault) and to
+  name the Windows named-pipe DACL gap as the explicit, separately-tracked
+  remainder — not vague "in progress" language.
+- `agent-dispatch/README.md` — tier 2, **found a real, evidenced gap**: its
+  Windows `Invoke-Start` already has a non-elevated direct-launch fallback
+  when no Scheduled Task exists (fixed for #3602), and agent-bridge's own
+  `do_start` has the equivalent POSIX fallback — but agent-dispatch's own
+  POSIX `do_start` does not: it hard-fails ("No service unit installed")
+  when the systemd unit is missing, with no direct-launch fallback. Filed
+  as **#2524** rather than fixed live, per #1841's own explicit deliverable
+  ("file or update focused plugin issues for implementation mismatches
+  rather than hiding them in documentation") and this effort's standing
+  caution about touching this session's own in-use coordinator without
+  dedicated isolated testing.
+
+**#1841's scope not yet fully closed**: the issue also calls for auditing
+`install`/`update`/`start`/`stop`/session-start readiness paths against the
+user-mode-ensure contract for all three plugins, not just `start`. This
+session's audit was a targeted `do_start`/`Invoke-Start` comparison (enough
+to find the #2524 gap); a fuller pass across `update`/`stop`/session-start
+readiness for all three, plus closing #2524 itself, remains open follow-up
+under #1841 (left open, not closed this session).
+
+Remaining under #736: #1841 (partially addressed — docs landed, full
+install/update/stop audit + #2524 fix still open), #2301 (not started),
+#2323 (not started).
+

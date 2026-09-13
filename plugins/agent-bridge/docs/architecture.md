@@ -262,6 +262,26 @@ downstream agent.
 
 ## Deployment
 
+### Declared lifecycle tier (per `service-lifecycle-supervision`)
+
+- **Default tier: 2 — scheduled activation**, layered around the tier-1
+  user-mode ensure path. `do_start` (POSIX) and `Invoke-Start`-equivalent
+  (Windows) both prefer the registered scheduled mechanism but **fall back
+  to a direct daemon launch** when it is unavailable or unregistered — the
+  scheduled trigger is a convenience, never a prerequisite for `start`/
+  `stop`/`update`/session-start readiness.
+- **Availability promise:** starts with the user's session; restarts at
+  logon; does not survive full logout or start before login (no concrete
+  requirement for either has been identified).
+- **Windows:** Scheduled Task, `AtLogOn`, 15-second delay, non-elevated.
+- **POSIX:** systemd **user** unit (`~/.config/systemd/user/`); no
+  requirement for lingering has been identified (the daemon is expected to
+  restart at the next logon, not persist across a full logout).
+- **macOS:** planned, not yet implemented.
+- **No escalation:** no tier-3 (system service) or tier-4
+  (container-managed) requirement has been identified for the standalone
+  deployment shape.
+
 ### Platform-Specific Service Management
 
 | Platform | Service manager | Install location | Config |
