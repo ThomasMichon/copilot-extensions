@@ -9616,32 +9616,52 @@ def _monitor_sweep(
         if context_value is not None and _publish("@aw_ctx", context_value):
             ctx_done.add(sess)
         _publish("@aw_seg", segment_value)
-    scan_projects = list(warm_projects)
-    active_project = cfg.active_project()
-    if active_project and active_project not in scan_projects:
-        scan_projects.append(active_project)
-    for project in scan_projects:
-        _wait_for_lifecycle_priority(lifecycle_priority)
-        with project_lock if project_lock is not None else contextlib.nullcontext():
-            try:
-                cfg.set_active_project(project)
-                for record in tracking.list_records(cfg.tracking_dir()):
-                    worktree_path = getattr(record, "worktree_path", None)
-                    if worktree_path:
-                        try:
-                            if os.path.normcase(os.path.realpath(worktree_path)) in served_path_keys:
+    # A pending-handoff worktree that this tick's served-pane pass never
+    # observed (dormant since the last sweep, or missed by a stale project
+    # scope) can still need its cutover check run -- that is the whole point
+    # of this pass (#handoff-cutover-head-misalignment). But it must never
+    # attempt live cutover choreography (subprocess mux queries, a spawn, a
+    # retire) against a worktree that is not *actually* sitting in a live mux
+    # session right now: mirror the served-pane pass's own ``if mux_bin:``
+    # gate, then positively confirm liveness with ``has_mux_session`` per
+    # worktree rather than only inferring dormancy from "not in the served
+    # set" (served can miss a genuinely live session for reasons unrelated to
+    # whether it is safe to act -- e.g. a stale project scope on this tick).
+    if mux_bin:
+        scan_projects = list(warm_projects)
+        active_project = cfg.active_project()
+        if active_project and active_project not in scan_projects:
+            scan_projects.append(active_project)
+        for project in scan_projects:
+            _wait_for_lifecycle_priority(lifecycle_priority)
+            with project_lock if project_lock is not None else contextlib.nullcontext():
+                try:
+                    cfg.set_active_project(project)
+                    for record in tracking.list_records(cfg.tracking_dir()):
+                        worktree_path = getattr(record, "worktree_path", None)
+                        if worktree_path:
+                            try:
+                                if (
+                                    os.path.normcase(os.path.realpath(worktree_path))
+                                    in served_path_keys
+                                ):
+                                    continue
+                            except (OSError, ValueError):
+                                pass
+                        if not record.pending_handoffs:
+                            retire_request = _monitor_pending_handoff_predecessor_retire(record)
+                            if retire_request is None:
                                 continue
-                        except (OSError, ValueError):
-                            pass
-                    if not record.pending_handoffs:
-                        retire_request = _monitor_pending_handoff_predecessor_retire(record)
-                        if retire_request is None:
+                        try:
+                            if not sessions.has_mux_session(record.worktree_id):
+                                continue
+                        except Exception:
                             continue
-                    _monitor_maybe_process_handoff_record(record, governance=governance)
-            except _StatusMonitorGovernanceDeferred:
-                raise
-            except Exception:
-                pass
+                        _monitor_maybe_process_handoff_record(record, governance=governance)
+                except _StatusMonitorGovernanceDeferred:
+                    raise
+                except Exception:
+                    pass
     for project in warm_projects:
         _wait_for_lifecycle_priority(lifecycle_priority)
         with project_lock if project_lock is not None else contextlib.nullcontext():
