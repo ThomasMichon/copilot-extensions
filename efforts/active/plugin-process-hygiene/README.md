@@ -1491,6 +1491,69 @@ Picked up in that order (smallest/lowest-risk first): #2524 next.
 - `bash -n` clean; `py_compile` clean; `check-version-consistency.py`/
   `check-docs-consistency.py` green; bumped agent-dispatch to `0.1.2-dev86`.
 
-**#2524 closed.** Remaining under #736: #1841's fuller audit (not started),
+**#2524 closed.**
+
+### 2026-09-12 (end of session, still later) — Found + fixed a consequential follow-on gap in `do_stop`, with a live-production incident and recovery along the way
+
+Fixing #2524's `do_start` surfaced a direct consequence: a coordinator now
+startable via the direct fallback (or, pre-existing, via the CLI's own lazy
+autostart) is a bare detached process with **no service-manager entry**, so
+`install.sh stop`'s `systemctl --user stop` could never reach it — the
+daemon would be left running, unmanaged, forever.
+
+- Added `agent_dispatch._cmd_stop_coordinator` (hidden subcommand
+  `_stop-coordinator`, same internal-entrypoint convention as
+  `_ensure-coordinator`): gracefully stops a local coordinator over its own
+  existing HTTP `/shutdown` route (`DispatchClient.shutdown()`) — a no-op
+  when nothing is reachable, fail-soft on any client error.
+- `install.sh`'s `do_stop` now stops via systemd when the unit is actually
+  active, else falls back to `_stop-coordinator`.
+- 4 new tests; `test_lazy_start.py`/`test_cli.py`/`test_coordinator_stop.py`
+  (166 tests) green.
+
+**Live-production incident during testing (full transparency):** the first
+isolated E2E test of the new `do_stop` fallback **stopped this machine's
+real production WSL agent-dispatch coordinator** (systemd unit
+`agent-dispatch.service`, previously PID 479, `code=killed, signal=TERM`).
+Root cause: `do_stop`'s systemd branch checks live status via
+`systemctl --user is-active "$SYSTEMD_UNIT"` directly — unlike `do_start`'s
+check, this is **not gated on the unit *file* existing under the isolated
+test's own `$UNIT_DIR` first**. `systemctl --user` is a single **per-UID**
+manager, not namespaced by a shell's `$HOME` override (the same hazard
+already reasoned about, and correctly avoided, for #2524's `do_start` test
+one entry above — but not re-applied carefully enough to `do_stop`'s
+differently-shaped check before the first live run). Since this box's real
+`agent-dispatch.service` unit is genuinely active, the isolated test's
+`systemctl --user is-active "agent-dispatch"` matched the **real** unit and
+the isolated `do_stop` call sent it a real `stop`.
+
+This is a **pre-existing hazard in the unmodified code**, not one this
+change introduced — `do_stop`'s systemd-status check had exactly this same
+shape before this session touched it. Recorded here anyway because it fired
+for real, against production, during this session's own testing.
+
+**Immediate recovery** (before doing anything else): `systemctl --user
+start agent-dispatch` — confirmed running again (new PID, healthy) within
+under a minute of the incident. Then re-ran the `do_stop` fallback test
+properly isolated this time, via a `PATH`-shadowed fake `systemctl` that
+always fails (so the test genuinely cannot reach the real per-UID manager
+under any code path, not just the ones this session's own reasoning
+anticipated) — confirmed the direct-stop fallback works correctly and
+leaves zero isolated processes behind, with the real production coordinator
+verified unaffected before and after.
+
+**Lesson folded into this effort's own standing testing discipline (not
+just this one fix)**: for any future test of `agent-dispatch`
+install/start/stop code, shadow `systemctl` in `PATH` (or otherwise prove
+no real code path can reach the actual per-UID systemd manager) *before*
+the first live run — an isolated `$HOME`/`$INSTALL_DIR` alone is
+insufficient whenever the code under test can query `systemctl --user`
+directly, because that manager is keyed by UID, not by any env var a test
+harness controls.
+
+- `bash -n`/`py_compile` clean; version-consistency/docs-consistency guards
+  green; bumped agent-dispatch to `0.1.2-dev87`.
+
+Remaining under #736: #1841's fuller audit (not started),
 #2301 (not started), #2323 (not started).
 
