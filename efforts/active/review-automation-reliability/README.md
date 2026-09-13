@@ -467,6 +467,70 @@ scenarios.
 
 ## Journal
 
+### 2026-09-12 - Componentize supervisor.py: extract supervisor_conclusion.py
+
+- Continuing the operator's standing componentization instruction, and its
+  explicit priority that "state-adjacent pure logic" get directly
+  unit-tested rather than only exercised through much larger integration
+  assertions. `supervisor.py` (3,423 lines) was the next candidate, but
+  its bulk is the `Supervisor` class's own large *stateful* methods
+  (`reconcile` ~472 lines, `release_requested_bodies` ~443 lines, and
+  others) that close over live queue/session state and the module's
+  concurrency invariants -- genuinely higher-risk to split than any
+  `queue.py`/`__main__.py` cluster so far, per the prior handoff's
+  explicit caution. Rather than force a risky cut there, looked for the
+  safe seam the handoff asked for: a truly side-effect-free helper.
+- Found one: nine methods already decorated `@staticmethod`/`@classmethod`
+  (`_bounded_cleanup_failure`, `_component_retry_meta`,
+  `_bounded_component_failure`, `_hold_pending_cleanup`,
+  `_cleanup_envelope_state`, `_conclusion_state`,
+  `_append_conclusion_detail`, `_conclusion_retry_payload`,
+  `_conclusion_retry_meta`) -- pure cleanup-retry/conclusion-classification
+  decisions over plain dicts, touching no instance state despite living on
+  the class. Exactly the `spawn_attempt_projection.py` precedent: a small,
+  pure, state-adjacent decision cluster the operator wants directly
+  tested.
+- Extracted all nine (plus the six `_CONCLUSION_*` constants they close
+  over, used ~100 times elsewhere in `supervisor.py` too but themselves
+  dependency-free) into a new `supervisor_conclusion.py` as plain
+  module-level functions/constants -- the two former `classmethod`s
+  (`_bounded_component_failure`, `_conclusion_retry_meta`) never actually
+  needed `cls`; they only called another pure sibling function, so they
+  became ordinary functions calling that sibling directly.
+- **`Supervisor` re-exposes every one of the nine as a class-level
+  `staticmethod(imported_function)` alias**, at the exact spot each
+  method used to live, so both `self._conclusion_state(...)` instance
+  calls throughout the rest of the class *and* the one direct
+  `Supervisor._conclusion_state(...)` class-attribute access an existing
+  test uses keep working completely unchanged -- verified by smoke-testing
+  all four differently-shaped helpers (a plain staticmethod, a
+  former-classmethod-now-staticmethod, one taking `attempts`/`now`
+  kwargs, one taking a bare dict) directly against `Supervisor` before
+  running the suite.
+- Added `tests/test_supervisor_conclusion.py`: 18 direct behavioral tests
+  covering every one of the nine pure functions' actual decision logic
+  (attempt-cap thresholds, retry backoff, state-precedence ordering,
+  action/reason classification, JSON payload parsing) plus one test
+  confirming the `Supervisor` alias surface. Full integration coverage
+  already existed indirectly via `test_supervisor.py`'s `reconcile()` /
+  `release_requested_bodies()` tests and needed no changes.
+- `supervisor.py`: 3,423 -> 3,293 lines at extraction time;
+  `supervisor_conclusion.py`: 195 lines. Both comfortably under the
+  1,000-line cap. On rebase, an unrelated concurrent PR
+  (`visions: add process-telemetry`, #2502) had independently grown
+  `supervisor.py` to 3,535 lines -- the two changes merged cleanly (no
+  code conflict, only the baseline JSON needed a manual resolve), landing
+  `supervisor.py` at its true post-merge count of 3,405 lines.
+  `tools/module-size-baseline.json` updated to that verified figure
+  (recomputed via `wc -l` and rechecked with `tools/check-module-size.py`
+  itself, not assumed from either side of the conflict).
+- Full `agent-dispatch` suite (`tools/run-plugin-tests.py agent-dispatch`,
+  2,684 tests across 5 sub-suites) passed before and after; zero
+  regressions. `ruff check --select F,E9` and `ruff format` clean on
+  every changed/new file.
+- Bumped agent-dispatch 0.1.2-dev91 -> dev92 and ran the
+  instruction-projections sync immediately after.
+
 ### 2026-09-12 - Componentize queue.py further: extract queue_spawn_reservations.py
 
 - Continuing the operator's standing componentization instruction.
