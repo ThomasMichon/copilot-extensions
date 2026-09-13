@@ -297,13 +297,16 @@ Concretely:
 
 ### Phase 2+ — Roll remaining plugins onto the engine, one small batch per PR
 
-**In-scope adopter set for this effort's completion (11 plugins):**
-`agent-bridge`, `agent-logger`, `agent-vault`, `agent-ssh`, `agent-codespaces`,
-`agent-index`, `agent-dispatch`, `agent-containers`, `agent-mcp`,
-`agent-machines` — plus `agent-worktrees` **only** in the sense that its
-permanent exclusion (below) is itself part of "done." `budget-guidance` is
-**not** in this set (see Context: not an `agent-*` persistent-service
-plugin) and is never expected to adopt the engine under this effort.
+**Non-exempt adopter set — every plugin this effort requires to actually
+adopt the engine (10 plugins):** `agent-bridge`, `agent-logger`,
+`agent-vault`, `agent-ssh`, `agent-codespaces`, `agent-index`,
+`agent-dispatch`, `agent-containers`, `agent-mcp`, `agent-machines`.
+`agent-worktrees` is **not** part of this set — it carries a separately
+recorded, permanent, non-adopting exception (below), so "every plugin in the
+non-exempt adopter set has adopted" can be fully satisfied without it ever
+adopting. `budget-guidance` is also not part of this set (see Context: not
+an `agent-*` persistent-service plugin) and is never expected to adopt the
+engine under this effort.
 
 - [ ] `agent-logger` (already has the pyvenv.cfg fix hand-applied today —
       good second-mover to prove the engine covers a second plugin's needs).
@@ -313,19 +316,22 @@ plugin) and is never expected to adopt the engine under this effort.
       venv — prove the config schema handles these before doing the rest).
 - [ ] `agent-dispatch`, `agent-containers`, `agent-mcp`, `agent-machines`.
 - [ ] **`agent-worktrees` is a decided permanent exception, not a deferred
-      evaluation.** It is the control-plane plugin and by far the largest,
-      most bespoke installer (3638 lines), and it already opts out of the
-      related `resolve-runtime.*` fan-out for the same specialization reason
-      (see `tools/sync-versioned-runtime.py`'s `RESOLVER_BESPOKE` set). It
-      does **not** adopt the shared engine in this effort's scope, now or
-      later — its exclusion is intentional and permanent, not a TODO. State
-      this in `tools/sync-installer-engine.py`'s adopter set and any
-      completion-criteria/guard scope alongside it, so a future "is this
-      effort done" check does not treat agent-worktrees' non-adoption as
-      unfinished work.
-- [ ] Retire the opt-in gate once every plugin in the **in-scope adopter set**
-      named above has adopted the engine — mirroring how a fully-adopted
-      primitive eventually becomes mandatory in `check-install-contract.py`.
+      evaluation, and not part of the non-exempt adopter set above.** It is
+      the control-plane plugin and by far the largest, most bespoke installer
+      (3638 lines), and it already opts out of the related
+      `resolve-runtime.*` fan-out for the same specialization reason (see
+      `tools/sync-versioned-runtime.py`'s `RESOLVER_BESPOKE` set). It does
+      **not** adopt the shared engine in this effort's scope, now or later —
+      its exclusion is intentional and permanent, not a TODO. Record this
+      exception explicitly in `tools/sync-installer-engine.py` (an exclusion
+      list, analogous to `RESOLVER_BESPOKE`) and in any completion-criteria/
+      guard scope alongside it, so a future "is this effort done" check does
+      not treat agent-worktrees' non-adoption as unfinished work.
+- [ ] Retire the opt-in gate once every plugin in the **non-exempt adopter
+      set** named above has adopted the engine, with `agent-worktrees`'
+      permanent-exception record still present and accurate — mirroring how a
+      fully-adopted primitive eventually becomes mandatory in
+      `check-install-contract.py`.
       "Done" for this effort means *that* set is fully adopted, not "every
       plugin in the repo, no exceptions."
 
