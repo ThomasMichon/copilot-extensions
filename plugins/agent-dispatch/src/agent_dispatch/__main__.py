@@ -435,6 +435,32 @@ def _cmd_ensure_coordinator(args: argparse.Namespace) -> int:
     return 0 if has_live_local_coordinator() else 1
 
 
+def _cmd_stop_coordinator(args: argparse.Namespace) -> int:
+    """Internal, non-public entrypoint: gracefully stop a local coordinator
+    that is NOT (or no longer) managed by systemd, via its own HTTP
+    ``/shutdown`` route.
+
+    Exists for ``install.sh``'s ``do_stop`` fallback: a coordinator started
+    through the tier-1 direct-start fallback (``_cmd_ensure_coordinator``,
+    #2524) or plain CLI lazy-autostart is a bare detached process with no
+    service-manager entry, so ``systemctl --user stop`` cannot reach it and
+    would otherwise leave it running unmanaged. A no-op (exit 0) when no
+    local coordinator is reachable at all; fail-soft on any client/transport
+    error (a best-effort teardown aid for the installer, never a hard
+    requirement). Not part of the public CLI surface.
+    """
+    from .config import has_live_local_coordinator
+
+    if not has_live_local_coordinator():
+        return 0
+    try:
+        with _client(args, ensure=False) as c:
+            c.shutdown()
+    except Exception:
+        return 1
+    return 0
+
+
 def _parse_affinity(pairs: list[str] | None) -> dict[str, str]:
     out: dict[str, str] = {}
     for item in pairs or []:
@@ -5347,6 +5373,12 @@ def build_parser() -> argparse.ArgumentParser:
         help=argparse.SUPPRESS,  # internal: installer-only tier-1 ensure entrypoint
     )
     p.set_defaults(func=_cmd_ensure_coordinator)
+
+    p = sub.add_parser(
+        "_stop-coordinator",
+        help=argparse.SUPPRESS,  # internal: installer-only direct-stop entrypoint
+    )
+    p.set_defaults(func=_cmd_stop_coordinator)
 
     p = sub.add_parser(
         "installer-readiness",
