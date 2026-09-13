@@ -5,12 +5,19 @@ register|status|list|remove|serve|daemon-status|override`` subcommands and
 the transitional bare-``supervise`` foreground loop. Split out to keep
 ``__main__.py`` under its module-size ceiling (see
 ``tools/check-module-size.py``) rather than growing an already very large
-file further -- this is purely a move, no behavior change. The four names
-this module still needs from ``__main__`` (``_client``, ``_emit``,
-``_scope_repo``, ``_spawn_route``) are imported lazily inside each function
-that uses them, matching this codebase's existing lazy-import convention and
-avoiding a module-level circular import back into ``__main__`` (which
-imports these command functions from here).
+file further -- this is purely a move, no behavior change.
+
+This module still needs a handful of names that genuinely belong to
+``__main__.py`` (``_client``, ``_emit``, ``_scope_repo``, ``_spawn_route``,
+``_parse_label_max_attempts``, ``_REPO_UNRESOLVED``). ``python -m
+agent_dispatch`` (the marketplace launcher) loads ``__main__.py`` as
+``sys.modules["__main__"]``, never as ``sys.modules["agent_dispatch.__main__"]``
+-- a naive ``from .__main__ import X`` would therefore import and execute an
+*independent second copy* of that module rather than the one actually
+running, silently diverging any monkeypatched/mutated state (tests patch the
+live module). ``loop_commands._resolve_cli_module()`` already solves exactly
+this for ``loop_commands.py``; reuse it here via the same ``_proxy()``
+pattern instead of duplicating the resolution logic.
 """
 
 from __future__ import annotations
@@ -23,6 +30,24 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
+
+from .loop_commands import _resolve_cli_module
+
+
+def _proxy(name: str):
+    """Delegate to ``agent_dispatch.__main__.<name>`` via ``_resolve_cli_module``."""
+
+    def _fn(*args, **kwargs):
+        return getattr(_resolve_cli_module(), name)(*args, **kwargs)
+
+    return _fn
+
+
+_client = _proxy("_client")
+_emit = _proxy("_emit")
+_scope_repo = _proxy("_scope_repo")
+_spawn_route = _proxy("_spawn_route")
+_parse_label_max_attempts = _proxy("_parse_label_max_attempts")
 
 def _registration_scope(args: argparse.Namespace) -> tuple[str | None, str]:
     """Resolve the (machine, env) a registration is scoped to.
@@ -82,8 +107,6 @@ def _build_registration_spec(args: argparse.Namespace) -> dict:
     flags (repo/labels/limits/evaluator) so the singleton daemon can later
     reconstruct the supervise invocation from the stored row.
     """
-    from .__main__ import _parse_label_max_attempts, _scope_repo
-
     raw = getattr(args, "spec", None)
     if raw:
         text = raw
@@ -173,8 +196,6 @@ def _cmd_supervise_register(args: argparse.Namespace) -> int:
     back to the caller, instead of becoming the foreground loop. The singleton
     supervisor daemon (a later increment) is what runs the registered unit.
     """
-    from .__main__ import _client, _emit
-
     kind = getattr(args, "kind", None) or "supervised-lane"
     spec = _build_registration_spec(args)
     machine, env = _registration_scope(args)
@@ -193,16 +214,12 @@ def _cmd_supervise_register(args: argparse.Namespace) -> int:
 
 def _cmd_supervise_status(args: argparse.Namespace) -> int:
     """``supervise status <id>`` -- query a registration by its handle."""
-    from .__main__ import _client, _emit
-
     with _client(args) as c:
         return _emit(c.get_registration(args.id))
 
 
 def _cmd_supervise_list(args: argparse.Namespace) -> int:
     """``supervise list`` -- list registrations on this (or a filtered) scope."""
-    from .__main__ import _client, _emit
-
     machine = getattr(args, "machine", None)
     env = getattr(args, "env", None)
     with _client(args) as c:
@@ -218,8 +235,6 @@ def _cmd_supervise_list(args: argparse.Namespace) -> int:
 
 def _cmd_supervise_remove(args: argparse.Namespace) -> int:
     """``supervise remove <id>`` -- drop a registration by its handle."""
-    from .__main__ import _client, _emit
-
     with _client(args) as c:
         return _emit(c.remove_registration(args.id))
 
@@ -286,8 +301,6 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
     active registration in its own subprocess, reconciling on every tick.
     Single-instance-guarded -- a second daemon for the same scope stands down.
     """
-    from .__main__ import _client
-
     # Never hold the Copilot plugin payload dir as CWD (Windows locks it against
     # `copilot plugin update`); this daemon is lazy-started and inherits the
     # launching session's CWD. Relocate before the long-lived loop.
@@ -383,8 +396,6 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
 def _cmd_supervise_daemon_status(args: argparse.Namespace) -> int:
     """``supervise daemon-status`` -- is a daemon running here, and what would it
     run."""
-    from .__main__ import _client, _emit
-
     from .config import overrides_path, run_dir
     from .overrides import load_overrides, overridden_off_ids
     from .single_instance import is_locked, lock_path_for
@@ -430,8 +441,6 @@ def _cmd_supervise_override(args: argparse.Namespace) -> int:
     so a disabled unit winds down and stays down until re-enabled -- even across a
     repo re-sync of its declaration.
     """
-    from .__main__ import _emit
-
     from .config import overrides_path
     from .overrides import (
         clear_override,
@@ -473,15 +482,6 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
     ``supervise`` (no subcommand) remains the transitional foreground loop until
     the singleton daemon subsumes it.
     """
-    from .__main__ import (
-        _REPO_UNRESOLVED,
-        _client,
-        _emit,
-        _parse_label_max_attempts,
-        _scope_repo,
-        _spawn_route,
-    )
-
     sub = getattr(args, "supervise_command", None)
     if sub == "register":
         return _cmd_supervise_register(args)
@@ -509,7 +509,7 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
     all_repos = bool(getattr(args, "all_repos", False))
     repo = None if all_repos else _scope_repo(args)
     if not all_repos and not repo:
-        print(_REPO_UNRESOLVED, file=sys.stderr)
+        print(_resolve_cli_module()._REPO_UNRESOLVED, file=sys.stderr)
         return 2
     pool = [h for h in (getattr(args, "pool", "") or "").split(",") if h.strip()]
     # Embody backend default is HEADLESS: a dispatched/supervised task is a
