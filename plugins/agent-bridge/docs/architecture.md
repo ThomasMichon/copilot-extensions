@@ -486,6 +486,11 @@ restart does not inherently close the child's pipes.
   marker writes restore their in-memory value on failure, and an unsuccessful
   index removal restores the marker before returning the cleanup error. The
   venue lock is released only after both metadata operations succeed.
+  Confirmed partial-launch rollback and confirmed-dead authority recovery use
+  that same metadata cleanup path, retaining replacement ownership. Stop and
+  end join existing remote reaps before direct cleanup; shutdown retries
+  retained failures rather than discarding them at database close. Resume-nudge
+  flag writes restore the old in-memory value when persistence fails.
   The manager remains the public facade; `session_resume.py`,
   `session_teardown.py`, and `session_ownership.py` own the bounded lifecycle
   implementations. Additive session migrations live in `db_migrations.py`.

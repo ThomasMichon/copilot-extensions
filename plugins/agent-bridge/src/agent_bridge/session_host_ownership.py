@@ -64,6 +64,32 @@ def has_host_ownership(manager: SessionManager, session_id: str) -> bool:
     )
 
 
+def finish_host_metadata_cleanup(
+    manager: SessionManager, session_id: str, record: HostRecord | None,
+) -> bool:
+    """Commit confirmed cleanup before releasing venue ownership."""
+    current = manager._host_index.get(session_id) if manager._host_index is not None else None
+    if current != record:
+        return False
+    owner = manager._sessions.get(session_id)
+    container = owner.target.container if owner is not None else None
+    had_marker = (
+        isinstance(container, dict)
+        and container.get("launch_pending_session_id") == session_id
+    )
+    manager._set_container_launch_pending(session_id, False)
+    try:
+        if record is not None:
+            manager._forget_host_record(record)
+    except Exception:
+        if had_marker:
+            manager._set_container_launch_pending(session_id, True)
+        raise
+    if not has_host_ownership(manager, session_id):
+        manager._release_container_lock(session_id)
+    return True
+
+
 def _remember(
     manager: SessionManager, session_id: str, spawner: Any, spawned: SpawnedHost,
 ) -> PendingHostLaunch:
@@ -206,12 +232,12 @@ async def rollback_host_launch(
     if confirmed:
         pending = manager._pending_host_launches.get(session_id)
         if pending is not None:
-            if manager._host_index is not None:
-                current = manager._host_index.get(session_id)
-                if current == pending.record:
-                    manager._host_index.remove(session_id)
-            manager._set_container_launch_pending(session_id, False)
+            current = manager._host_index.get(session_id) if manager._host_index is not None else None
+            if current is None or current == pending.record:
+                finish_host_metadata_cleanup(manager, session_id, current)
             manager._pending_host_launches.pop(session_id, None)
+            if not has_host_ownership(manager, session_id):
+                manager._release_container_lock(session_id)
         manager._remote_recovery_inconclusive.discard(session_id)
     if result is not None:
         result.update({

@@ -155,8 +155,13 @@ class HostIndex:
         rec = self._records.get(session_id)
         if rec is None or rec.resume_on_reattach == value:
             return False
+        previous = rec.resume_on_reattach
         rec.resume_on_reattach = value
-        self._flush()
+        try:
+            self._flush()
+        except Exception:
+            rec.resume_on_reattach = previous
+            raise
         return True
 
     def prune_dead(self, is_alive: Callable[[int], bool]) -> list[HostRecord]:
