@@ -5,8 +5,8 @@
 - **Branch(es):** independent per-phase PRs (see Coordination)
 - **Created:** 2026-09-12
 - **Status:** Draft <!-- Draft | Active | Blocked | Done -->
-- **Vision:** extends `visions/plugin-services` §Behaviors/`self-contained-runtime`
-  + §Behaviors/`immutable-versioned-runtime` (see Context)
+- **Vision:** extends `visions/plugin-services` §Features/`self-contained-runtime`
+  + §Features/`immutable-versioned-runtime` (see Context)
 - **Umbrella issue:** _TBD — file once this effort's plan clears review_
 - **Sub-issues:** _TBD_
 
@@ -70,14 +70,19 @@ as independent per-plugin PRs; see Coordination._
 - **Delegates:** none yet — this is currently solo work. If parallelized,
   each delegate should own one *plugin's* rollout PR (Phase 2+), never a
   cross-cutting slice of the canonical engine itself.
-- **Handoff:** a phase is "done" only when its PR is merged, its plugin(s)
-  redeployed and verified healthy, and `tools/check-vendored-libs-sync.py` /
-  the new sync tool (Phase 1) is green in CI. Use the standard context-handoff
-  flow to hand off between phases; the Journal below is the resumption point.
+- **Handoff:** completion criteria differ by phase type. **Phase 0** (audit,
+  no code) is "done" once its PR merges with reviewed audit findings recorded
+  in `## Proposal` — no deploy or sync-tool check applies, since neither a
+  plugin change nor the sync tool exists yet at that point. **Phase 1+**
+  (any phase that changes a plugin's installer) is "done" only when its PR is
+  merged, its plugin(s) redeployed and verified healthy, and
+  `tools/sync-installer-engine.py --check` (built in Phase 1) is green in CI.
+  Use the standard context-handoff flow to hand off between phases; the
+  Journal below is the resumption point.
 
 ## Context
 
-- **`visions/plugin-services` §Behaviors/`self-contained-runtime`**: *"Every
+- **`visions/plugin-services` §Features/`self-contained-runtime`**: *"Every
   runtime plugin owns a complete, standalone runtime (venv + binstub +
   service) that its own installer deploys and updates. Nothing a service
   needs to run is borrowed from a sibling plugin or from a git checkout of
@@ -86,7 +91,7 @@ as independent per-plugin PRs; see Coordination._
   checkout at install/runtime, which is why byte-vendoring (not a git-fetch
   bootstrap) is this effort's chosen mechanism (see the design-decision note
   before Phase 1).
-- **`visions/plugin-services` §Behaviors/`immutable-versioned-runtime`**: the
+- **`visions/plugin-services` §Features/`immutable-versioned-runtime`**: the
   vendored engine lives *inside* each plugin's existing immutable versioned
   install; this effort does not change that model, only what authoring-time
   duplication looks like beneath it.
@@ -199,7 +204,7 @@ Before Phase 1 started, the operator raised a real alternative: instead of
 vendoring (byte-copying) the engine into every plugin, ship each plugin with a
 tiny bootstrap stub that fetches the canonical engine directly via
 `uv`'s git-VCS support (`uv pip install`/`uvx --from
-"git+https://github.com/ThomasMichon/copilot-extensions@<pinned-sha>#subdirectory=libs/installer-engine"
+"git+https://github.com/<org>/<this-repo>@<pinned-sha>#subdirectory=libs/installer-engine"
 ...`), pinned to an exact commit. This is technically feasible — `uv` is
 pip-compatible for `git+URL@rev#subdirectory=path` sources and has its own git
 support — and, if the engine were also rewritten as a single cross-platform
@@ -291,6 +296,15 @@ Concretely:
       + verify agent-bridge before starting Phase 2.
 
 ### Phase 2+ — Roll remaining plugins onto the engine, one small batch per PR
+
+**In-scope adopter set for this effort's completion (11 plugins):**
+`agent-bridge`, `agent-logger`, `agent-vault`, `agent-ssh`, `agent-codespaces`,
+`agent-index`, `agent-dispatch`, `agent-containers`, `agent-mcp`,
+`agent-machines` — plus `agent-worktrees` **only** in the sense that its
+permanent exclusion (below) is itself part of "done." `budget-guidance` is
+**not** in this set (see Context: not an `agent-*` persistent-service
+plugin) and is never expected to adopt the engine under this effort.
+
 - [ ] `agent-logger` (already has the pyvenv.cfg fix hand-applied today —
       good second-mover to prove the engine covers a second plugin's needs).
 - [ ] `agent-vault`, `agent-ssh` (smaller installers, low risk).
@@ -309,9 +323,8 @@ Concretely:
       completion-criteria/guard scope alongside it, so a future "is this
       effort done" check does not treat agent-worktrees' non-adoption as
       unfinished work.
-- [ ] Retire the opt-in gate once every plugin in this effort's **permanent**
-      adopter set (every runtime plugin except the `agent-worktrees`
-      exception above) has adopted the engine — mirroring how a fully-adopted
+- [ ] Retire the opt-in gate once every plugin in the **in-scope adopter set**
+      named above has adopted the engine — mirroring how a fully-adopted
       primitive eventually becomes mandatory in `check-install-contract.py`.
       "Done" for this effort means *that* set is fully adopted, not "every
       plugin in the repo, no exceptions."
