@@ -586,11 +586,19 @@ scenarios.
   it used to bind at module scope before this split -- an unintended API
   break for any external `from agent_dispatch.queue import ...` consumer,
   despite the PR's own "no API surface change" claim. Restored them as a
-  `# noqa: F401` re-export block, same precedent as the other four. (2)
-  low: the PR description's own final-size summary had gone stale after
-  the `queue_records.py` follow-up commit (still quoting the pre-fix
+  `# noqa: F401` re-export block, same precedent as the other four; this
+  restored block is itself 8 lines, pushing `queue.py` to 6,394 lines --
+  a deliberate, reviewed widen of the module-size baseline (6,386 ->
+  6,394), not uncontrolled drift, and still a net reduction from the
+  file's original 7,217 lines before this PR. (2) low: the PR
+  description's own final-size summary had gone stale after the
+  `queue_records.py` follow-up commit (still quoting the pre-fix
   6,481/541 numbers instead of 6,386/529/115); corrected via `gh api ...
   -X PATCH`.
+- **A fourth review round caught one more low finding (fixed)**: the fix
+  for the third round's re-export finding itself left this very journal
+  entry's `queue.py` line count one commit stale (6,386, not the
+  post-re-export 6,394) -- corrected here.
 - **Standing note carried from the prior leg's handoff**: that leg's PR
   #2506 review included one declined false-positive finding (Copilot
   claimed `tools/module-size-baseline.json`'s prior `__main__.py` entry,
