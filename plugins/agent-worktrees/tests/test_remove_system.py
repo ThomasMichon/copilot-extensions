@@ -91,6 +91,7 @@ def test_remove_system_deletes_record_after_worktree_removal_succeeds(
          patch("agent_worktrees.activity.log_event"), \
          patch("agent_worktrees.__main__._json_output") as json_output:
         git.return_value.returncode = 0
+        git.return_value.stdout = "0"
         result = cli.cmd_remove_system(args)
 
     assert result == 0
@@ -117,6 +118,7 @@ def test_remove_system_deletes_unregistered_leftover_and_record(
          patch("agent_worktrees.activity.log_event"), \
          patch("agent_worktrees.__main__._json_output"):
         git.return_value.returncode = 0
+        git.return_value.stdout = "0"
         result = cli.cmd_remove_system(args)
 
     assert result == 0
@@ -398,3 +400,59 @@ def test_remove_system_help_does_not_advertise_force():
     assert remove_system_parser is not None
     help_text = remove_system_parser.format_help()
     assert "--force" not in help_text
+
+
+def test_remove_system_refuses_when_checkout_gone_but_branch_unpushed(tmp_path):
+    """A missing checkout directory must not bypass the unpushed-commit
+    check -- the branch ref (and any commits on it) lives in the shared
+    anchor repo regardless of whether the working directory still exists."""
+    record, tracking_dir = _record(tmp_path)
+    anchor = tmp_path / "anchor"
+    anchor.mkdir()
+    import subprocess
+
+    def _git(*args, cwd=anchor):
+        subprocess.run(
+            ["git", *args], cwd=cwd, check=True, capture_output=True, text=True,
+        )
+
+    _git("init", "--quiet", "-b", "master")
+    _git("config", "user.email", "test@example.com")
+    _git("config", "user.name", "Test")
+    (anchor / "f.txt").write_text("base", encoding="utf-8")
+    _git("add", "f.txt")
+    _git("commit", "--quiet", "-m", "base")
+    base_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=anchor, check=True,
+        capture_output=True, text=True,
+    ).stdout.strip()
+    # Simulate having fetched origin/master at `base_sha` -- no real remote
+    # needed, just the remote-tracking ref classify/rev-list reads.
+    _git("update-ref", "refs/remotes/origin/master", base_sha)
+    _git("checkout", "--quiet", "-b", record.branch)
+    (anchor / "f.txt").write_text("unpushed change", encoding="utf-8")
+    _git("commit", "--quiet", "-am", "unpushed work")
+    _git("checkout", "--quiet", "master")
+    # Simulate the checkout directory being gone entirely (e.g. /tmp cleared).
+    import shutil
+
+    shutil.rmtree(record.worktree_path)
+    args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=False)
+
+    config = types.SimpleNamespace(
+        default_repo=types.SimpleNamespace(
+            anchor=str(anchor), remote="origin", default_branch="master",
+        )
+    )
+
+    with patch("agent_worktrees.config.load_config", return_value=config), \
+         patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
+         patch("agent_worktrees.__main__._json_error") as json_error:
+        json_error.return_value = 1
+        result = cli.cmd_remove_system(args)
+
+    assert result == 1
+    message = json_error.call_args.args[0]
+    assert "not on" in message
+    assert "checkout directory is missing" in message
+    assert (tracking_dir / "managed-1.yaml").exists()
