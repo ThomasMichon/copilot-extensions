@@ -87,6 +87,7 @@ from . import (
     handoff_trace,
     list_cache,
     locks,
+    managed_worktree_guard as remove_guard,
     obligations,
     output,
     permissions,
@@ -12003,13 +12004,13 @@ def _slugify(text: str) -> str:
 def cmd_remove_system(args: argparse.Namespace) -> int:
     """Remove a system worktree by id (git worktree + tracking record).
 
-    Refuses non-system worktrees. Used by daemons at end-of-run and by the
-    System-menu browse view to reap leaked worktrees.
+    Refuses non-system worktrees. Guarded like ``cleanup`` (see
+    ``managed_worktree_guard``); an unadvertised ``--force`` bypasses it.
     """
     config = cfg.load_config()
-    repo = config.default_repo
     tracking_path = cfg.tracking_dir()
     wt_id = getattr(args, "worktree_id", None)
+    force = getattr(args, "force", False)
     if not wt_id:
         output.err("remove-system requires a worktree id")
         return 2
@@ -12025,23 +12026,20 @@ def cmd_remove_system(args: argparse.Namespace) -> int:
         )
         return 1
 
-    removed, warnings = _remove_managed_worktree(
-        rec,
-        repo,
-        tracking_path,
-        force=True,
-    )
-    if not removed:
-        location = f"; worktree path: {rec.worktree_path}" if rec.worktree_path else ""
-        message = (
+    def _fail(message: str) -> int:
+        return _json_error(message) if getattr(args, "json", False) else (output.err(message) or 1)
+
+    outcome = remove_guard.perform(wt_id, yaml_path, config, force=force, remove_fn=_remove_managed_worktree, tracking_path=tracking_path)
+    if not outcome.ok:
+        return _fail(outcome.message)
+    if not outcome.removed:
+        rec = outcome.rec
+        loc = f"; worktree path: {rec.worktree_path}" if rec.worktree_path else ""
+        return _fail(
             f"failed to fully remove system worktree {wt_id}: "
-            f"{'; '.join(warnings) or 'removal failed'}{location}; "
+            f"{'; '.join(outcome.warnings) or 'removal failed'}{loc}; "
             "tracking record retained for retry"
         )
-        if getattr(args, "json", False):
-            return _json_error(message)
-        output.err(message)
-        return 1
     activity.log_event("system_worktree_removed", worktree_id=wt_id)
     if getattr(args, "json", False):
         _json_output({"removed": wt_id})
@@ -22197,6 +22195,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p = sub.add_parser("remove-system", help="Remove a system worktree by id")
     p.add_argument("worktree_id", help="Worktree id to remove")
+    # --force is not advertised: resolve the refusal instead of reaching for it.
+    p.add_argument("--force", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
 
     # cleanup
