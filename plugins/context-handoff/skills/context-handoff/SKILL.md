@@ -193,18 +193,20 @@ already consumed, or is currently being consumed, by another session
    control system spawning more than one successor for the same handoff) --
    ask the user first, then file it if they say yes.
 
-### Diagnosing a stuck cutover (predecessor pane left running)
+### Diagnosing a stuck cutover (predecessor not confirmed retired)
 
 `trigger_handoff` is one stage (6 of 13) in a wider cutover lifecycle traced
 across this plugin and `agent-worktrees`' resident status monitor -- see
 [context-handoff's README § Handoff-lifecycle observability](../../README.md#handoff-lifecycle-observability)
-for the full stage model and stores. For a predecessor pane still alive
-after its successor was spawned (a successor associated as a candidate *or*
-already linked, plus a recorded spawn event -- not only a fully confirmed
-cutover), run `agent-worktrees handoffs-check --worktree-id <id>` <!-- marketplace-isolation: allow diagnostic-tooling --> (or `--all`, `--execute`
+for the full stage model and stores. For a predecessor whose retirement was
+never confirmed after its successor was spawned (a successor associated as
+a candidate *or* already linked, plus a recorded spawn event -- not only a
+fully confirmed cutover), run `agent-worktrees handoffs-check --worktree-id <id>` <!-- marketplace-isolation: allow diagnostic-tooling --> (or `--all`, `--execute`
 to actually retire what it finds) before assuming manual intervention is
-needed -- do not manually kill a predecessor pane yourself. It does **not**
-diagnose "acknowledged but nothing appeared" (no successor was ever
+needed -- the read-only report does not itself confirm the pane is still
+alive, only `--execute`'s live check does -- and do not manually kill a
+predecessor pane yourself. It does **not** diagnose "acknowledged but
+nothing appeared" (no successor was ever
 recorded) -- that case has no dedicated diagnostic yet.
 
 ## CLI fallback

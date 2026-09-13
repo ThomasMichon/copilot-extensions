@@ -226,11 +226,16 @@ documented in
 [`agent-worktrees`'s architecture doc](../agent-worktrees/docs/architecture.md#handoff-cutover-lifecycle-the-13-stage-trace)
 -- read that first when a handoff appears to have gone sideways rather than
 re-deriving the sequence from scratch. `handoffs-check` diagnoses (and can
-repair) a **stranded predecessor pane after a spawn is recorded** -- a
+repair) an **unretired predecessor after a spawn is recorded** -- a
 successor associated as a candidate *or* already linked, plus a recorded
-spawn event, but the predecessor was never retired. It does **not**
-diagnose "ack but no pane at all" (a host acknowledgement with no successor
-ever recorded) -- that case has no dedicated diagnostic yet; a dedicated
+spawn event, with no confirmed retirement since. Its read-only report does
+**not** itself confirm the pane is still alive (no `_mux_pane_alive()` call
+in that path) -- it lists every such unretired case as a candidate, even one
+whose pane already exited without ever being logged as retired; `--execute`
+is the step that performs the live check and actually resolves it. It does
+**not** diagnose "ack but no pane at all" (a host acknowledgement with no
+successor ever recorded) -- that case has no dedicated diagnostic yet; a
+dedicated
 `handoff-trace` render command is
 still open follow-on work.
 
