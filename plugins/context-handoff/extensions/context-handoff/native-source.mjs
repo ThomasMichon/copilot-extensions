@@ -7,7 +7,8 @@ import {
 } from "./handoff-core.mjs";
 import { readNativeGoal } from "./native-transport.mjs";
 import { freezeNativeGoal } from "./native-goal.mjs";
-import { isHerdrPane, resolveHerdrCwd, launchHerdrSuccessor } from "./herdr.mjs";
+import { prepareObservationHandoff } from "./native-observation.mjs";
+import { isHerdrPane, resolveHerdrCwd, launchHerdrSuccessor, workerLifecycle } from "./herdr.mjs";
 
 export const NATIVE_LAUNCHER = join(dirname(fileURLToPath(import.meta.url)), "native-launch.mjs");
 
@@ -82,12 +83,13 @@ export async function saveNativeBaton(session, { promptText, title, cwd, preferT
   return stored;
 }
 
-export async function requestNativeCutover(session, seed) {
+export async function requestNativeCutover(session, seed, observers) {
   const found = readSessionStateHandoff(session.sessionId);
   if (!found?.record?.nativeGoal || found.record.seed !== seed) {
     throw new Error("No matching native handoff was saved for this session.");
   }
-  const { record, path } = found;
+  const { path } = found;
+  let { record } = found;
   const goal = record.nativeGoal;
   if (record.consumed || goal.admissionComplete) {
     throw new Error("This handoff is already admitted; do not resume the source.");
@@ -113,6 +115,7 @@ export async function requestNativeCutover(session, seed) {
   if ((state?.id ?? null) !== goal.sourceObjectiveId) {
     throw new Error("The source objective changed after save; preserve it and save a new handoff.");
   }
+  record = await prepareObservationHandoff(session, path, record, observers);
   const mode = await session.rpc.mode.get();
   const profile = {
     model: await session.rpc.model.getCurrent(),
@@ -187,8 +190,9 @@ export async function freezeAndLaunchNative(session, path) {
     writeJsonAtomic(path, { ...current, launch });
     return launch;
   }
+  const lifecycle = workerLifecycle(record, path, "handoff-prepare", session.sessionId, runCli);
   goal = {
-    ...goal, launchRequested: true,
+    ...goal, ...(lifecycle.managed ? { workerLifecycle: lifecycle } : {}), launchRequested: true,
     launchTransport: isHerdrPane() ? "herdr" : "mux",
   };
   record = { ...record, nativeGoal: goal };

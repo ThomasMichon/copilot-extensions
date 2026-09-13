@@ -53,6 +53,7 @@ test("direct native launcher rejects unsupported modes before spawning a CLI", (
         readFileSync: () => checkpoint,
         existsSync: () => false, process: { env: {} },
         homedir: () => "/owned", join: (...args) => args.join("/"),
+        workerLifecycle: () => assert.fail("Unmanaged launch must not call lifecycle"),
       });
       vm.runInContext(`${source}\nglobalThis.run = runNativeSuccessor;`, context);
       assert.throws(() => context.run({

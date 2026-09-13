@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
+import { prepareObservationHandoff } from "../extensions/context-handoff/native-observation.mjs";
 
 // Exercise the actual caller AND core's execFileSync path. Only the executable
 // locator is replaced: an owned Node child emits the mux CLI protocol and exits.
@@ -17,7 +18,8 @@ const source = readFileSync(new URL(
   .replaceAll("export ", "").replace("import.meta.url", '"file:///owned/native-source.mjs"');
 
 function fixture({ status = 0, output = '{"ok":true,"new_pane":"%5"}',
-  permissionMode = "allow-all", herdr = false, onExit = () => {} } = {}) {
+  permissionMode = "allow-all", herdr = false, onExit = () => {},
+  lifecycle = () => ({ managed: false }), tasks = [] } = {}) {
   let record = {
     sessionId: "source", handoffId: "token", seed: "owned seed",
     nativeGoal: {
@@ -28,6 +30,7 @@ function fixture({ status = 0, output = '{"ok":true,"new_pane":"%5"}',
   const calls = [];
   const pauses = [];
   const context = vm.createContext({
+    prepareObservationHandoff,
     process, JSON, dirname: () => "/owned", join: (...parts) => parts.join("/"),
     fileURLToPath: value => value,
     execFileSync: (bin, args, options) => {
@@ -46,11 +49,13 @@ function fixture({ status = 0, output = '{"ok":true,"new_pane":"%5"}',
     readNativeGoal: async () => ({ state: null }),
     isHerdrPane: () => herdr,
     launchHerdrSuccessor: () => assert.fail("No Herdr launch expected"),
+    workerLifecycle: lifecycle,
   });
   vm.runInContext(`${runCliSource}\n${source}
     globalThis.request = requestNativeCutover;
     globalThis.launch = freezeAndLaunchNative;`, context);
   const session = { sessionId: "source", rpc: {
+    tasks: { list: async () => ({ tasks }) },
     mode: {
       get: async () => "interactive",
       set: async value => { pauses.push(value); return {}; },
@@ -65,6 +70,40 @@ function fixture({ status = 0, output = '{"ok":true,"new_pane":"%5"}',
     launch: () => context.launch(session, "owned-checkpoint"),
   };
 }
+
+test("managed registry preparation precedes the first receiver launch and preparation failure spawns nothing", async () => {
+  const order = [];
+  const selectors = { managed: true, owner_id: "stable-owner", mode: "off", depth: 1 };
+  const f = fixture({
+    lifecycle: (_record, _path, action) => {
+      assert.equal(action, "handoff-prepare");
+      order.push("registry-prepared");
+      return selectors;
+    },
+    onExit: record => {
+      order.push("receiver-created");
+      assert.deepEqual(record.nativeGoal.workerLifecycle, selectors);
+    },
+  });
+
+  await f.launch();
+  assert.deepEqual(order, ["registry-prepared", "receiver-created"]);
+  const failed = fixture({ lifecycle: () => { throw new Error("registry prepare failed"); } });
+  await assert.rejects(failed.launch(), /registry prepare failed/);
+  assert.equal(failed.calls.length, 0);
+  assert.equal(failed.record().nativeGoal.launchRequested, undefined);
+});
+
+test("actual cutover refuses attached work before pause, arming or launch", async () => {
+  const f = fixture({ tasks: [
+    { type: "shell", attachmentMode: "attached", status: "running", id: "original-work" },
+  ] });
+  const before = structuredClone(f.record());
+  await assert.rejects(f.request(), /Undeclared attached shells: original-work/);
+  assert.deepEqual(f.record(), before);
+  assert.deepEqual(f.pauses, []);
+  assert.deepEqual(f.calls, []);
+});
 
 test("rc4 retained receiver publishes the receipt and retry never spawns again", async () => {
   const receipt = {

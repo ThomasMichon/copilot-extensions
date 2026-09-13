@@ -3,6 +3,8 @@ import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { workerLifecycle } from "./herdr.mjs";
+import { runCli } from "./handoff-core.mjs";
 
 export function nativeLaunchArguments(record, phase, args = [], { receiverExists = false } = {}) {
   const goal = record.nativeGoal;
@@ -46,7 +48,7 @@ export function nativeLaunchArguments(record, phase, args = [], { receiverExists
   ];
 }
 
-export function runNativeSuccessor({ checkpoint, cli, args = [], spawn = spawnSync }) {
+export function runNativeSuccessor({ checkpoint, cli, args = [], spawn = spawnSync, lifecycleCheck = workerLifecycle }) {
   const load = () => JSON.parse(readFileSync(checkpoint, "utf8"));
   let record = load();
   const run = phase => {
@@ -58,7 +60,17 @@ export function runNativeSuccessor({ checkpoint, cli, args = [], spawn = spawnSy
     const receiverExists = existsSync(join(
       home, "session-state", record.nativeGoal.successorSessionId, "events.jsonl",
     ));
-    const result = spawn(cli, nativeLaunchArguments(record, phase, args, { receiverExists }), {
+    const lifecycle = record.nativeGoal.workerLifecycle;
+    if (lifecycle) {
+      lifecycleCheck(record, checkpoint, "handoff-check", record.nativeGoal.successorSessionId, runCli);
+    }
+    const selectors = lifecycle ? [
+      "--worker-selectors", lifecycle.config_home, lifecycle.xdg_home,
+      lifecycle.mode, String(lifecycle.depth),
+    ] : [];
+    const result = spawn(cli, [
+      ...selectors, ...nativeLaunchArguments(record, phase, args, { receiverExists }),
+    ], {
       cwd: record.nativeGoal.cwd,
       stdio: "inherit",
       env: {
@@ -77,6 +89,10 @@ export function runNativeSuccessor({ checkpoint, cli, args = [], spawn = spawnSy
   if (record.nativeGoal.phase === "frozen") {
     run("prepare");
     record = load();
+  }
+  if (record.nativeGoal.workerLifecycle && record.nativeGoal.admissionComplete) {
+    run("resume");
+    return;
   }
   if (!["prepared", "hydrated"].includes(record.nativeGoal.phase)
     || record.nativeGoal.admissionComplete) {

@@ -2,7 +2,20 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import { assertNativeProfile, bindNativeSuccessor } from "../extensions/context-handoff/native-runtime.mjs";
+import { assertNativeProfile, bindNativeSuccessor, describeNativeStartupError } from "../extensions/context-handoff/native-runtime.mjs";
+
+test("ordinary registration errors do not claim a failed restoration or a predecessor", () => {
+  const error = Object.assign(new Error("command failed"), { stderr: "missing native binding\n" });
+  const message = describeNativeStartupError(error);
+  assert.match(message, /^Worker lifecycle registration failed: missing native binding/);
+  assert.match(message, /no handoff restoration was attempted/);
+  assert.doesNotMatch(message, /Native restoration failed|Predecessor preserved/);
+});
+
+test("checkpoint startup errors preserve native restoration diagnostics", () => {
+  assert.equal(describeNativeStartupError(new Error("profile mismatch"), "/checkpoint.json"),
+    "Native restoration failed: profile mismatch. Predecessor preserved.");
+});
 
 test("mux admission requires token binding and verified head, not a candidate", () => {
   const record = {

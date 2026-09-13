@@ -1,9 +1,33 @@
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, parse, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export function isHerdrPane() {
   return process.env.HERDR_ENV === "1" && Boolean(process.env.HERDR_PANE_ID);
+}
+
+export function workerLifecycle(record, checkpoint, action, sessionId, execute) {
+  const goal = record.nativeGoal;
+  const home = goal.workerLifecycle?.config_home || goal.profile?.copilotHome
+    || process.env.COPILOT_HOME || join(homedir(), ".copilot");
+  const reference = join(home, "session-state", goal.sourceSessionId, "files", "worker-lifecycle.json");
+  if (!goal.workerLifecycle && !existsSync(reference)) return { managed: false };
+  const result = JSON.parse(execute(join(homedir(), ".local", "bin", "copilot-pane"), [
+    "lifecycle", "--config-home", home, action, "--checkpoint", checkpoint, "--session", sessionId,
+  ], { cwd: goal.cwd, timeout: 30000 }));
+  if (!result.managed) throw new Error("Managed handoff lost its lifecycle registry; source preserved.");
+  return result;
+}
+
+export function advertiseWorkerLifecycle(sessionId, execute) {
+  if (!isHerdrPane()) return;
+  const home = process.env.COPILOT_HOME || join(homedir(), ".copilot");
+  if (!existsSync(join(home, "worker-lifecycle", "installation.json"))) return;
+  execute(join(homedir(), ".local", "bin", "copilot-pane"), [
+    "lifecycle", "--config-home", home, "native-ready", "--session", sessionId,
+    "--plugin-path", fileURLToPath(new URL("../..", import.meta.url)),
+  ], { timeout: 30000 });
 }
 
 export function herdrStateDir(cwd) {
@@ -44,12 +68,18 @@ export function captureHerdrPredecessor(sessionId, execute) {
   return { ...identity, sessionId, transport: "herdr" };
 }
 
-export function retireHerdrPredecessor(metadata, successorSessionId, execute) {
+export function retireHerdrPredecessor(metadata, successorSessionId, execute, checkpoint = null) {
   const predecessor = metadata.predecessor;
   if (!isHerdrPane() || !successorSessionId
     || predecessor.paneId === process.env.HERDR_PANE_ID
     || predecessor.sessionId === successorSessionId) {
     throw new Error("Herdr successor identity is not distinct; predecessor preserved.");
+  }
+  if (metadata.nativeGoal?.workerLifecycle) {
+    const state = workerLifecycle(metadata, checkpoint, "handoff-retire-check", successorSessionId, execute);
+    if (state.source_exited) {
+      return { host: "herdr", successorVerified: true, retired: true, pane: predecessor.paneId, alreadyGone: true };
+    }
   }
   const successor = agentIdentity(process.env.HERDR_PANE_ID, execute);
   if (successor.sessionId && successor.sessionId !== successorSessionId) {
@@ -94,6 +124,7 @@ export function launchHerdrSuccessor(cwd, seed, execute, permissionMode, native 
     return {
       ok: true, host: "herdr", new_pane: values.pane_handle,
       new_session: values.copilot_session_id, startup_pending: values.startup_pending === "true",
+      ...(values.native_startup_error ? { native_startup_error: values.native_startup_error } : {}),
     };
   } finally {
     rmSync(taskDir, { recursive: true, force: true });

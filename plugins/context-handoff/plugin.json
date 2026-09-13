@@ -1,7 +1,8 @@
 {
   "name": "context-handoff",
   "description": "Context window monitoring and native goal continuity for Copilot CLI -- durable task/file handoffs, exact remaining soft caps, profile-preserving successor admission, and identity-checked live cutover through Herdr or agent-worktrees",
-  "version": "0.1.1-dev13",
+  "version": "0.1.1-dev16",
+  "managedWorkerLifecycleVersion": 1,
   "runtimeScope": "none",
   "hooks": "hooks.json",
   "sessionContext": "session-context.json",

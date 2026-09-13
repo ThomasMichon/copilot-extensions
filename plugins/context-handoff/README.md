@@ -82,6 +82,27 @@ conflict boundaries have real-runtime coverage. Task/mux ownership and psmux
 spaced-argument transport have regression fixtures; this is not a claim of
 real Windows acceptance.
 
+### Source-private observers
+
+On the tested CLI 1.0.84-5 task API, native `session.idle` waits for attached
+shells. `continue_handoff` checks the actual source task roster before pausing
+or arming cutover. Pass `observers` only for explicitly owned, separate
+read-only observers of independently running jobs:
+`{shell_id, job: {host, id, identity, artifact_path, terminal_path, reattach}}`.
+The checkpoint preserves the original job and runtime observer identity
+before reporting that the attached observer must be parked. Verify separation
+from the job, stop only that exact shell using `stop_bash`, and retry the same
+request. No process is automatically signalled; undeclared attached work is
+not a disposable observer. The job must persist terminal results without its
+observer.
+
+The restored brief carries this metadata without executing it. After native
+admission, inspect durable terminal evidence first; a job can finish during
+the observation gap. Otherwise attach a fresh event-driven observer to the
+same job and record its new identity. Never reuse an old shell ID as proof,
+relaunch a job, or change goal/mode/budget. Paused/no-goal handoffs do not gain
+an automatic observation or business turn. See the skill for preparation.
+
 ### Recovery
 
 - Retain the source checkpoint and fixed successor identity on failure.
@@ -116,6 +137,72 @@ real Windows acceptance.
   A user's replacement objective is a conflict, not permission to overwrite it.
 - Ordinary admitted deliveries never rebuild the goal or replay the message.
   The CLI fallback shares the restoration gate and cannot bypass hydration.
+
+## Managed worker continuity
+
+An ordinary session may register its frontend with the paired lifecycle module
+without restoring a handoff. If registration fails, startup and tool errors
+identify that registration failure and the unavailable managed-launch capability.
+Only startup with a native checkpoint reports a restoration failure and a
+preserved predecessor; the underlying failure remains visible in both cases.
+Reload also refreshes frontend registration for an already managed session.
+An existing logical binding is not proof that its current extension/process
+registration has survived a paired update.
+
+The optional lifecycle bridge preserves an external managed-worker registry;
+it does not add a scheduler, a second registry, or a new goal/admission turn.
+Only sources with a managed session reference use the bridge. Unmanaged
+handoffs keep their existing behavior.
+
+The trusted hosted `copilot-pane lifecycle` interface owns stable registry,
+logical owner/worker IDs, generations, current bindings, result persistence and
+acceptance. Native checkpoints carry its non-executable receipt and frozen
+mode/depth/configuration selectors, not commands from the handoff brief.
+The module prepares the fixed receiver's reference before launch. A fresh
+receiver directory cannot imply an empty worker roster.
+
+In a paired Herdr configuration, native startup advertises the loaded
+protocol/plugin path and actual frontend identity through that same external
+module. Only a fresh CLI that loaded the installed completion hook can become
+a new managed root; pre-installation sessions remain on the ordinary untracked
+path. Unmanaged non-Herdr startup does not invoke this bridge.
+
+After native hydration/consumption, profile checks and (when running) the
+observed continuation event, `native-runtime.mjs` commits external authority
+before native predecessor retirement. The successor is then the only logical
+owner, including during retirement failure. `herdr.mjs` remains the physical
+retirement owner: its managed route checks the original process family through
+the same lifecycle interface and can recover a lost close receipt only when
+the exact source pane and processes are already gone. Retiring a source does
+not close its logical worker or still-running children.
+
+Managed preparation/cold resume uses the same receiver UUID and reapplies the
+frozen mode/depth/configuration selectors at the hosted shim's final exec.
+This preserves explicit off and external delegation depth through shell
+startup/dotenv. Model, permissions, goal intent and exact remaining soft caps
+remain owned by the existing native restoration path.
+
+`retry_handoff_cutover` in that fixed receiver recovers failed preparation,
+consumption/admission, registry commitment or retirement without re-saving,
+spawning another receiver, re-consuming an acknowledged baton, or replaying
+business continuation. Failure receipts stay in the checkpoint. A completed
+lifecycle-retirement receipt is not reapplied to a later handoff generation.
+Unknown native send outcomes still require the matching event; retries never
+guess delivery.
+
+Validate and deploy the native bridge and external lifecycle module together,
+using supported source-plugin/user-extension discovery for isolated local
+validation and the repository's supported deployment flow. Do not patch an
+installed cache or copy authentication files. An unpaired managed source
+fails visibly instead of falling back to an empty/unmanaged registry.
+Current process-family/exit validation is Linux/Herdr-specific; this adds no
+macOS or Windows managed-worker acceptance claim.
+
+An external preToolUse completion guard can deny `task_complete` in allow-all
+autopilot (verified on CLI 1.0.84-5). Ordinary interactive final answers have
+no such tool. Neither handoff nor the bridge enables autopilot to obtain a
+gate: paused/exhausted/completed/no-goal intent is preserved, and explicit
+parent acceptance remains necessary in interactive mode.
 
 ## Why the monitor is an extension
 

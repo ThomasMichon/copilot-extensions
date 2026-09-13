@@ -77,6 +77,31 @@ the work.
 
 ## Two triggers, two gates
 
+### Attached observers: prepare before cutover
+
+Native `session.idle` includes attached shells, not just the agent turn.
+For a source-private read-only observer of an independently running job,
+call `continue_handoff` with the exact seed and `observers` entries:
+`{shell_id, job: {host, id, identity, artifact_path, terminal_path, reattach}}`.
+`identity` is the original scheduler ID or PID/start identity; preserve
+authorization and remaining budget in the brief. The job must write durable
+terminal status independently of the observer.
+
+The tool saves the job and runtime observer metadata, then rejects an active
+attached shell without arming cutover or stopping any process. Verify the
+declared observer is separate and read-only; use `stop_bash` for ONLY that
+source shell ID, never the original job or its launcher. Retry the SAME saved
+request using `retry_handoff_cutover`; do not save/spawn again. Undeclared
+attached work must finish or be explicitly identified, never blindly killed.
+
+The admitted successor reads the restored observation records and checks
+durable terminal status FIRST, including a result written during the
+observation gap. Validate terminal artifacts or attach a NEW event-driven
+observer to the SAME job, recording its new session/shell/PID identity.
+Historical source shell IDs are not restored observers. Do not automatically
+execute metadata, restart work, enable autopilot, create a goal or add budget.
+Stopped/no-goal handoffs still send no automatic business message.
+
 ### 1. Context-pressure-driven handoff: trigger directly
 
 When context pressure is the reason for handing off and the objective still has
