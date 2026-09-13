@@ -1197,13 +1197,17 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   worktree's chain, plus one other discovered incidentally) --
   `--execute` retired both down to **0 findings facility-wide**.
   `agent-bridge handoff-check --all --json` now round-trips the same
-  clean result instead of failing. **All four Phase 4 checklist items
-  (bug 1 reproduction/fix scope, bug 2 investigation, trace-confirmed fix,
-  orphan-naming feed) are effectively superseded by this concrete,
-  verified remediation** -- the original Phase 4 checklist described a
-  narrower two-bug hypothesis; the live case study surfaced four distinct,
-  now-fixed root causes instead. Phase 4's checklist items are left as-is
-  for historical record; this entry is the actual closure evidence.
+  clean result instead of failing. **Three of Phase 4's four checklist
+  items (bug 1 reproduction/fix scope, bug 2 investigation, trace-confirmed
+  fix) are effectively superseded by this concrete, verified remediation**
+  -- the original Phase 4 checklist described a narrower two-bug
+  hypothesis; the live case study surfaced four distinct, now-fixed root
+  causes instead. **The fourth item -- feeding
+  `health.find_orphaned_handoffs()` from the new trace so it can name the
+  exact stalled stage -- remains genuinely open**, not addressed by this
+  leg's remediation (see the updated checkbox in Phase 4 above). Phase 4's
+  checklist items are left as-is for historical record; this entry is the
+  closure evidence for the three completed items.
 - **Design decision, deferred to a future effort:** the operator's
   original architecture question -- whether `agent-worktrees`,
   `agent-bridge`, and `agent-dispatch` should each own an independent
