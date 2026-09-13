@@ -750,7 +750,7 @@ function Enter-InstallLock {
        another install held it the whole window -- the caller then DEFERS (the
        in-flight install lands the version). A non-contention error degrades to
        "proceed WITHOUT the lock" so a lock fault can never wedge the installer. #>
-    param([int]$TimeoutSec = 150)
+    param([int]$TimeoutSec = 300)
     if (-not (Test-Path $InstallDir)) { New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null }
     $lockPath = Join-Path $InstallDir '.install.lock'
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
