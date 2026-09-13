@@ -318,3 +318,22 @@ class TestHandoffCheck:
         assert "no stalled predecessor retirements found" not in err
         assert "unparseable" in err
 
+    def test_empty_stdout_nonzero_exit_reports_failure_not_success(self, monkeypatch, capsys):
+        """Regression: a nonzero agent-worktrees exit with completely empty
+        stdout (no JSON at all) made json.loads fall back to "{}" -- which
+        looks identical, from cmd_handoff_check's perspective, to a
+        legitimate "no findings" result. Must surface the failure (and its
+        stderr) instead of silently reporting success."""
+        monkeypatch.setattr(m.shutil, "which", lambda name: "/usr/bin/agent-worktrees")
+        proc = _FakeCompletedProcess("", returncode=1)
+        proc.stderr = "some underlying failure text"
+        monkeypatch.setattr(m.subprocess, "run", lambda argv, **kwargs: proc)
+
+        with pytest.raises(SystemExit) as exc_info:
+            m._cmd_handoff_check(_check_args(worktree_id="wt-1"))
+
+        assert exc_info.value.code != 0
+        err = capsys.readouterr().err
+        assert "no stalled predecessor retirements found" not in err
+        assert "exited 1" in err
+
