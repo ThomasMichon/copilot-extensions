@@ -3094,8 +3094,18 @@ class PickerScreen(Widget):
             ctx.append(" bridge / system worktree(s)", style=C_DIM)
         else:                                   # New worktree (default)
             ctx.append("    creates on ", style=C_DIM)
-            ctx.append(f"{tm} ", style=C_META)
-            ctx.append(te, style=C_ENV.get(te, C_META))
+            if tm is None:
+                # ``_src_local()`` deliberately returns a ``(None, None)``
+                # placeholder until the local identity cache is populated --
+                # rendering never blocks on source/config I/O (see
+                # ``_src_local``'s docstring). Show a neutral placeholder
+                # instead of crashing: ``Text.append`` requires a str/Text,
+                # and ``te`` can be ``None`` here (#psb-picker-none-env).
+                ctx.append("…", style=C_DIM)
+            else:
+                ctx.append(f"{tm} ", style=C_META)
+                if te:
+                    ctx.append(te, style=C_ENV.get(te, C_META))
             if host_tag:
                 ctx.append(host_tag, style=C_DIM)
         return ctx
@@ -3799,7 +3809,12 @@ class PickerScreen(Widget):
         # version, branch, env, repo. Always kept: "Worktree Manager" + machine.
         ver = f" · v{VERSION}"
         m, e = self._src_local()
-        host = f"{m.lower()}"
+        # ``_src_local()`` deliberately returns a ``(None, None)`` placeholder
+        # until the local identity cache is populated -- rendering never
+        # blocks on source/config I/O (see ``_src_local``'s docstring). Render
+        # a neutral placeholder instead of crashing on ``None.lower()`` /
+        # appending ``None`` to a ``Text`` (#psb-picker-none-env).
+        host = m.lower() if m else "…"
         # Repo name + default branch are project config, surfaced by the data
         # source (data_local/data_ssh expose REPO/BRANCH from the resolved
         # config); never hardcoded. Empty when a source omits them (e.g. a
@@ -3807,7 +3822,7 @@ class PickerScreen(Widget):
         # fabricated name.
         repo, branch = self._src_repo_branch()
         present = {"update_text": True, "version": True, "repo": bool(repo),
-                   "env": True, "branch": bool(branch)}
+                   "env": bool(e), "branch": bool(branch)}
         upd_focused = self.sel[0] == "UPD"
 
         def build():

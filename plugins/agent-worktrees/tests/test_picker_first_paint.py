@@ -118,6 +118,40 @@ def test_skeleton_does_not_touch_src_local():
     assert screen.machine_state(1) == "loading"
 
 
+def test_skeleton_paint_renders_with_uncached_local_identity():
+    """``_src_local()`` deliberately returns a ``(None, None)`` placeholder
+    until ``_source_local`` is populated (by ``_setup_skeleton()`` or
+    ``reload()``) -- rendering never blocks on source/config I/O. A paint that
+    lands before either has run (e.g. the headless ``picker screenshot``
+    capture path, which mounts ``PickerApp`` and can render before its first
+    ``reload()`` completes, unlike the interactive path's synchronous
+    ``_setup_skeleton()``) must still render the action-row caption and
+    topbar without crashing on a ``None`` env label (regression: ``Text.
+    append`` raised ``TypeError: Only str or Text can be appended to Text``
+    when the "All" tab -- the default ``machine_idx`` before any reload runs
+    -- surfaced the placeholder straight into ``ctx.append(te, ...)``, and
+    ``topbar()`` crashed on ``None.lower()`` the same way)."""
+    pytest.importorskip("textual")
+    from agent_worktrees.picker_tui import engine as eng
+
+    class Src:
+        LOCAL = ("host", "Win")
+
+    screen = eng.PickerScreen(Src(), live=True)
+    # Deliberately skip ``_setup_skeleton()``/``reload()``: this is the raw
+    # post-``__init__`` state a too-early paint would observe.
+    assert screen._source_local is None  # the uncached placeholder state
+    assert screen.is_all()  # machine_idx defaults to 0 ("All") pre-poll
+
+    # New-worktree action-row caption: must not raise on a None env label.
+    row = screen.new_worktree_row(80, True, 0)
+    assert "…" in row.plain
+
+    # Topbar: must not raise on ``None.lower()`` for the host segment.
+    l1, _l2 = screen.topbar(80)
+    assert "…" in l1.plain
+
+
 @pytest.mark.parametrize("live", [False, True])
 def test_first_refresh_callback_is_scheduled_in_every_mode(monkeypatch, live):
     pytest.importorskip("textual")
