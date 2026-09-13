@@ -92,10 +92,13 @@ async def _detach_for_restart_owned(manager: SessionManager) -> None:
 async def reap_remote_record(
     manager: SessionManager, record: Any, *,
     session: Session | None = None, generation: int | None = None,
+    record_revision: int | None = None,
 ) -> bool:
     """Keep authority until termination is confirmed; never forget a replacement."""
     from .session_manager import log
 
+    if record_revision is None and manager._host_index is not None:
+        record_revision = manager._host_index.revision(record.session_id)
     endpoint = getattr(record, "endpoint", None) or {}
     if endpoint:
         confirmed = await manager._remote_reap(record, endpoint)
@@ -103,11 +106,12 @@ async def reap_remote_record(
         log.warning("Cannot confirm remote reap without endpoint for %s", record.session_id)
         confirmed = False
     current = manager._host_index.get(record.session_id) if manager._host_index else None
+    current_revision = manager._host_index.revision(record.session_id) if manager._host_index else None
     if confirmed:
-        if current == record:
+        if current == record and current_revision == record_revision:
+            manager._forget_host_record(record)
             manager._set_container_launch_pending(record.session_id, False)
             manager._release_container_lock(record.session_id)
-            manager._forget_host_record(record)
             owned = manager._remote_reaps_by_session.get(record.session_id)
             if owned is not None:
                 owned.difference_update(task for task in list(owned) if task.done())
@@ -118,6 +122,7 @@ async def reap_remote_record(
         and manager._sessions.get(record.session_id) is session
         and session._lifecycle_generation == generation
         and current == record
+        and current_revision == record_revision
     ):
         manager._mark_session_failed(session, trigger="remote_reap_inconclusive")
     return confirmed

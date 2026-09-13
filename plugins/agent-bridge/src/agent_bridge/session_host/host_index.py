@@ -87,6 +87,8 @@ class HostIndex:
     def __init__(self, path: str | os.PathLike[str]) -> None:
         self._path = Path(path)
         self._records: dict[str, HostRecord] = {}
+        self._revision = 0
+        self._record_revisions: dict[str, int] = {}
         self._load()
 
     # -- persistence -------------------------------------------------------
@@ -129,6 +131,8 @@ class HostIndex:
             else:
                 self._records[record.session_id] = previous
             raise
+        self._revision += 1
+        self._record_revisions[record.session_id] = self._revision
 
     def remove(self, session_id: str) -> bool:
         previous = self._records.pop(session_id, None)
@@ -138,6 +142,7 @@ class HostIndex:
             except Exception:
                 self._records[session_id] = previous
                 raise
+            self._record_revisions.pop(session_id, None)
         return previous is not None
 
     def set_resume_flag(self, session_id: str, value: bool) -> bool:
@@ -166,6 +171,10 @@ class HostIndex:
     # -- query -------------------------------------------------------------
     def get(self, session_id: str) -> HostRecord | None:
         return self._records.get(session_id)
+
+    def revision(self, session_id: str) -> int:
+        """Return the in-process publication token, including equal-value replacements."""
+        return self._record_revisions.get(session_id, 0)
 
     def all(self) -> list[HostRecord]:
         return list(self._records.values())
