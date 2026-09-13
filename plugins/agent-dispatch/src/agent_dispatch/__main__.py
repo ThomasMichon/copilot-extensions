@@ -416,6 +416,25 @@ def _ensure_local_coordinator(args: argparse.Namespace) -> None:
         pass
 
 
+def _cmd_ensure_coordinator(args: argparse.Namespace) -> int:
+    """Internal, non-public entrypoint: run the tier-1 user-mode-ensure
+    autostart path and report whether a local coordinator is reachable.
+
+    Exists so a service-lifecycle installer (``install.sh``'s ``do_start``)
+    can trigger exactly the same lazy autostart every ordinary client command
+    already performs via ``_client(..., ensure=True)``/``_ensure_local_coordinator``
+    -- without depending on any specific data-bearing subcommand's own side
+    effects, output shape, or repo-resolution requirements (several real
+    subcommands, e.g. ``list``, resolve/require a repo *before* ever reaching
+    the client/autostart call, so they are not safe/general-purpose triggers).
+    Not part of the public CLI surface (unlisted; leading underscore).
+    """
+    _ensure_local_coordinator(args)
+    from .config import has_live_local_coordinator
+
+    return 0 if has_live_local_coordinator() else 1
+
+
 def _parse_affinity(pairs: list[str] | None) -> dict[str, str]:
     out: dict[str, str] = {}
     for item in pairs or []:
@@ -5322,6 +5341,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("health", help="check coordinator health")
     p.set_defaults(func=lambda args: _emit(_client(args, ensure=False).health()))
+
+    p = sub.add_parser(
+        "_ensure-coordinator",
+        help=argparse.SUPPRESS,  # internal: installer-only tier-1 ensure entrypoint
+    )
+    p.set_defaults(func=_cmd_ensure_coordinator)
 
     p = sub.add_parser(
         "installer-readiness",
