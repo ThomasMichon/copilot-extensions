@@ -1557,3 +1557,66 @@ harness controls.
 Remaining under #736: #1841's fuller audit (not started),
 #2301 (not started), #2323 (not started).
 
+### 2026-09-12 (new session) — Resumed via handoff; completed #1841's fuller audit
+
+Picked up in the recommended order (#1841 first — reading/comparing, no live
+process manipulation for the audit itself). Read `docs/install-contract.md`'s
+"Hard rules" 7-9 (the "user-mode-ensure contract" the handoff cited) and
+`docs/patterns/service-lifecycle-supervision.md`, then compared each of
+agent-bridge's, agent-vault's, and agent-dispatch's `install`/`update`/
+`start`/`stop`/session-start-readiness paths against them (last session's
+audit only covered `do_start`/`Invoke-Start`, which found #2524).
+
+Two real, evidenced mismatches found and filed (not fixed live — both touch
+POSIX `systemctl --user` code, which this same session's predecessor already
+learned the hard way requires isolated, `systemctl`-shadowed testing before
+any live run; filing per #1841's own explicit deliverable):
+
+- **#2554** — every POSIX `do_stop` (agent-bridge, agent-vault,
+  agent-dispatch) calls `systemctl --user is-active "$SYSTEMD_UNIT"`
+  directly, with **no prior check that the unit file exists** under this
+  install's own unit dir — unlike each plugin's own `do_start`, which does
+  gate on that file first. `systemctl --user` is a single per-UID manager,
+  not namespaced by `$HOME`; this is the *exact* unguarded shape that
+  caused this effort's own production incident (agent-dispatch, recorded
+  three journal entries above) — and it was **not actually fixed** by that
+  incident's own follow-up fix, which added a direct-stop fallback but left
+  the root-cause unguarded check in place. Same shape confirmed present,
+  previously unaudited, in agent-bridge's and agent-vault's own `do_stop`.
+- **#2556** — agent-vault's POSIX `do_start`/`do_stop` still hard-require
+  systemd (`command -v systemctl || { _fail; exit 1; }`, no fallback),
+  while its own Windows twin `Invoke-Start` already has the direct-launch
+  user-mode-ensure fallback (added under #1836, whose comment literally says
+  "`start` must not depend on a registered Scheduled Task"). #1836 was
+  closed with only the Windows half of its own stated goal realized — the
+  POSIX side never got the equivalent of #2524's agent-dispatch fix. In
+  practice `agent_vault.cli.ensure_service`/`start_service` (which every
+  ordinary `agent-vault` command already relies on) has its own direct-
+  `Popen` fallback, so the daemon is not actually unreachable in normal use
+  — but `install.sh start`/`stop` themselves have no way to reach it
+  without systemd, unlike every sibling installer.
+
+Everything else audited came back clean against rules 7-9: `do_update` in
+all three never re-elevates or re-registers (each converges through the
+same install/`_install_service`-style path, gracefully skipping systemd
+when absent rather than failing); session-start readiness
+(`scripts/bootstrap-check.sh`, shared across the `agent-*` family per its
+own header comment) never touches `systemctl`/Scheduled Tasks/elevation in
+any of the three plugins; Windows `install.ps1` `Invoke-Stop` for
+agent-vault already gates on `Get-ScheduledTask` existing (the POSIX-side
+analog #2554 asks for); #1837 (agent-dispatch avoiding force-registration
+under elevated updates) is already closed and unrelated to this pass's
+findings.
+
+**#1841 closed** — its own two deliverables (lifecycle-tier documentation,
+landed last session; full install/update/stop/session-start-readiness audit
+with focused follow-up issues, done this entry) are both complete, with
+#2554 and #2556 now the tracked successors for the concrete mismatches
+found.
+
+Remaining under #736: #2301 (not started), #2323 (not started).
+
+Also updated #736's own body (removed #1841 from "still open", narrowed the
+stays-open condition to #2323/#2301) and posted a progress comment there
+pointing at #2554/#2556.
+
