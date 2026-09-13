@@ -467,6 +467,77 @@ scenarios.
 
 ## Journal
 
+### 2026-09-12 - Componentize queue.py further: extract queue_producer_fences.py
+
+- Continuing the operator's standing componentization instruction. Picked
+  up mid-session after a prior handoff leg's routing-assignment/spawn-
+  reservation extractions had already landed concurrently (verified via
+  `agent-worktrees git sync` before starting, per the standing lesson from
+  two legs ago). Surveyed `queue.py` (5,012 lines post-sync) for the next
+  candidate and picked the producer scope/fence validation cluster: 16
+  methods (`_validate_producer_token`, `_validate_producer_scope`,
+  `_validate_required_label`, `_validate_producer_capability`,
+  `_capability_hash`, `_normalize_producer_fence`, `_producer_request_hash`,
+  `_producer_scope_row`, `_required_label_scope_rows`,
+  `_task_fence_matches_scope`, `_claim_fence_rejection`, `_scope_blockers`,
+  `_record_claim_rejection`, `_producer_scope_state_from_conn`,
+  `producer_scope_status`, `handoff_producer_scope`) plus the two exception
+  classes (`ProducerScopeValidationError`, `ProducerFenceError`) and two
+  dataclasses (`ProducerScopeState`, `ProducerScopeTransition`) they use --
+  a distinct concern (multi-tenant producer identity/generation fencing
+  over the `producer_scopes`/`producer_scope_generations`/
+  `producer_create_requests`/`producer_claim_rejections` tables) from the
+  task-claim and spawn-reservation lifecycles surrounding it. Verified via
+  the same grep-for-monkeypatch check as every prior slice: none of the 16
+  methods or 4 types is mocked/patched by name anywhere in `tests/`.
+- Extracted into a new `ProducerFenceMixin` in `queue_producer_fences.py`
+  (867 lines), composed via `class TaskQueue(ScheduleRegistrationMixin,
+  RoutingAssignmentMixin, SpawnReservationMixin, ProducerFenceMixin):`.
+  Applied the `queue_records.py` lesson proactively (per the standing
+  gotcha): `Status`/`TaskError` are ordinary top-level imports from the
+  existing dependency-free `queue_records.py`, no circular import, no
+  `get_type_hints()` gap. One genuinely one-directional dependency
+  remained -- `_scope_blockers` needs `queue.py`'s `_TASK_BULK_SELECT`
+  constant, a plain runtime SQL-column string with no type-annotation use,
+  so a lazy, function-local import (`from .queue import _TASK_BULK_SELECT`
+  inside the method) is safe and matches the existing
+  `_task_transition_spec`/`task_state_machine` precedent for a true
+  one-directional need, not the bidirectional case the `queue_records.py`
+  lesson warns against.
+- `queue.py` re-exports all four moved types (`ProducerFenceError`,
+  `ProducerScopeState`, `ProducerScopeTransition`,
+  `ProducerScopeValidationError`) via a `# noqa: F401` import block,
+  matching the established precedent -- confirmed both `coordinator.py`
+  and `mcp_http.py` (plus `test_producer_fences.py`) import all four from
+  `agent_dispatch.queue` specifically, not a submodule, before deciding
+  what to re-export.
+- Added `tests/test_queue_producer_fences.py`: guard-marked import-guard
+  tests (mixin actually in `TaskQueue.__mro__`; all 16 methods directly
+  importable; `agent_dispatch.queue`'s re-exports are `is`-identical to the
+  mixin module's own objects, not just same-named), a guard-marked
+  `get_type_hints()` regression test covering all 16 methods (including
+  `_scope_blockers`'s lazy import), and one end-to-end test exercising
+  `producer_scope_status`/`handoff_producer_scope`'s handoff + replay
+  semantics against a real `TaskQueue`. Full behavioral coverage (fence
+  rejection, claim-time blocking diagnostics, generation-mismatch replay)
+  already existed via `test_producer_fences.py` and needed no changes.
+- `queue.py`: 5,012 -> 4,217 lines; `queue_producer_fences.py`: 867 lines.
+  Both comfortably under the 1,000-line cap.
+  `tools/module-size-baseline.json` refreshed (shrink-only) for `queue.py`.
+- Full `agent-dispatch` suite (`tools/run-plugin-tests.py agent-dispatch`,
+  2,716 tests across 5 sub-suites) passed before and after; zero
+  regressions. `--guards` mode picks up all 17 guard-marked tests (11
+  pre-existing + 6 new) in ~1.5s. `ruff check --select F,E9` and
+  `ruff format` clean on every changed/new file; the broader
+  `ruff check` (strict `S`/`B`/`A`/`RUF` config) finding count on the
+  touched files is unchanged before/after the split (28 vs 29, the +1
+  being this module's own docstring-driven `S101`/`S608` findings that
+  already existed verbatim in the pre-split file at the same lines --
+  confirmed by running the identical broader check against the pre-split
+  `queue.py` from `HEAD`).
+- Bumped agent-dispatch 0.1.2-dev92 -> dev93 and ran the
+  instruction-projections sync immediately after.
+
 ### 2026-09-12 - Componentize supervisor.py: extract supervisor_conclusion.py
 
 - Continuing the operator's standing componentization instruction, and its
