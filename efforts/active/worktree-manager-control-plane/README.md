@@ -474,6 +474,31 @@ its issues; the public artifacts stay self-contained and general-purpose.
   Worktree Manager binstub was temporarily removed from `PATH` so the
   bare-invocation seam fell back to the bundled, already-mux-capable Picker;
   it should be safe to restore once this fix is deployed.
+- **2026-09-10** — A second, independent session hit the same live
+  regression on the same machine before the fix above had landed, and drafted
+  its own `agent-worktrees`-side safety gate (raising
+  `_WORKTREE_MANAGER_MIN_PICKER_VERSION` past every released Worktree Manager
+  build). Rebasing onto the real fix (the two entries above,
+  [#2429](https://github.com/ThomasMichon/copilot-extensions/pull/2429))
+  made that gate redundant, so it was reverted rather than landed alongside
+  the real fix — avoiding two competing mitigations for the same regression.
+  While independently re-running the full `agent-worktrees` suite to validate
+  against the merged fix, found and fixed three real, previously-masked test
+  bugs (unrelated to the regression itself): `test_registry_paths.py` and
+  `test_session_context_companions.py` both spawned subprocesses without
+  scrubbing this test process's own inherited Copilot session-identity env
+  vars (`COPILOT_PLUGIN_ROOT`, `COPILOT_AGENT_SESSION_ID`, etc. — leaked
+  whenever the suite runs, as it normally does, from inside a live Copilot CLI
+  session), and `test_config.py`'s
+  `test_cp_related_pr_map_includes_knowledge_overlay` had a stale mock
+  signature masked by the code under test's own `except Exception` fallback.
+  Landed as [#2439](https://github.com/ThomasMichon/copilot-extensions/pull/2439)
+  (full suite: 4092 passed, 47 skipped, 0 failed). Also filed
+  [#2523](https://github.com/ThomasMichon/copilot-extensions/issues/2523)
+  (unrelated, general session-guidance gap surfaced in the same session:
+  agent-worktrees' cross-repo session guidance should require fully-qualified
+  `owner/repo#N` issue/PR references, since a bare `#N` auto-links to the
+  current session's backing repo and can silently 404 against the wrong one).
 - **2026-09-09** — Implemented the reviewed Phase 3b AHP relocation Steps 2-4
   without deleting the legacy path. agent-worktrees now exposes fenced,
   provider-neutral `execution-leg get/set/clear` JSON verbs, preserves legacy
