@@ -16,6 +16,14 @@ this is a plain mixin, not a proxy-forwarding split like
 :class:`agent_dispatch.queue.TaskQueue` via multiple inheritance; it relies
 on ``self._connect()`` and ``self._now()`` from that class and is not
 usable standalone.
+
+``TaskError``/``ScheduleRecord``/``ScheduleLease``/``ResourceReservation``
+live in :mod:`agent_dispatch.queue_records`, a small module with no
+dependency on either ``queue.py`` or this one, so both can import them as
+ordinary top-level names -- no circular import, and (unlike an earlier
+version of this module that fetched them back from ``queue`` via a lazy,
+function-local import) no runtime-introspection gap: ``typing.get_type_hints``
+on any method below resolves cleanly.
 """
 
 from __future__ import annotations
@@ -23,8 +31,8 @@ from __future__ import annotations
 import json
 import secrets
 import sqlite3
-from typing import TYPE_CHECKING
 
+from .queue_records import ResourceReservation, ScheduleLease, ScheduleRecord, TaskError
 from .registrations import (
     RegistrationError,
     RegistrationKind,
@@ -33,13 +41,6 @@ from .registrations import (
     derive_registration_id,
     validate_registration,
 )
-
-if TYPE_CHECKING:
-    # Type-checking-only: the real values come back from ``.queue`` via lazy,
-    # function-local imports (see each method below) to avoid a real circular
-    # import at module-load time -- ``queue.py`` imports this module's
-    # ``ScheduleRegistrationMixin`` for ``TaskQueue`` to inherit from.
-    from .queue import ResourceReservation, ScheduleLease, ScheduleRecord
 
 
 class ScheduleRegistrationMixin:
@@ -58,7 +59,6 @@ class ScheduleRegistrationMixin:
         (preserving ``created_at`` and the ``paused`` flag).
         """
         from .producers.schedule import ScheduleError, due_occurrences
-        from .queue import ScheduleRecord, TaskError
 
         sid = entry.get("id")
         if not sid or not str(sid).strip():
@@ -94,7 +94,6 @@ class ScheduleRegistrationMixin:
 
     def list_schedules(self, *, include_paused: bool = True) -> list[ScheduleRecord]:
         """List registered schedules, ordered by id."""
-        from .queue import ScheduleRecord
 
         query = "SELECT * FROM schedules"
         if not include_paused:
@@ -106,7 +105,6 @@ class ScheduleRegistrationMixin:
 
     def get_schedule(self, sid: str) -> ScheduleRecord | None:
         """Return one registered schedule by id, or ``None``."""
-        from .queue import ScheduleRecord
 
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM schedules WHERE id = ?", (sid,)).fetchone()
@@ -123,7 +121,6 @@ class ScheduleRegistrationMixin:
     ) -> ScheduleRecord:
         """Pause/resume a schedule (a paused schedule is skipped by the registry
         tick but retains its definition). Raises if the schedule is unknown."""
-        from .queue import ScheduleRecord, TaskError
 
         ts = self._now(now)
         with self._connect() as conn:
@@ -175,7 +172,6 @@ class ScheduleRegistrationMixin:
         **upserts** (idempotent by handle) rather than duplicating it, preserving
         ``created_at`` and the ``status`` flag across the upsert.
         """
-        from .queue import TaskError
 
         if kind not in RegistrationKind.DIRECT:
             raise TaskError(
@@ -261,7 +257,6 @@ class ScheduleRegistrationMixin:
     ) -> RegistrationRecord:
         """Set a registration's lifecycle status (e.g. pause/resume). Raises if
         the id is unknown or the status is invalid."""
-        from .queue import TaskError
 
         if status not in RegistrationStatus.ALL:
             raise TaskError(
@@ -305,7 +300,6 @@ class ScheduleRegistrationMixin:
         a wall-clock takeover. ``ttl`` only sets ``expires_at`` for
         observability; it does not enable a takeover.
         """
-        from .queue import ScheduleLease
 
         ts = self._now(now)
         expires_at = (ts + ttl) if ttl else None
@@ -345,7 +339,6 @@ class ScheduleRegistrationMixin:
         its own lease; ``force=True`` lets an operator reassign a lease held by
         a different (e.g. retired) holder. Returns whether a lease was removed;
         raises if a non-holder tries to release without ``force``."""
-        from .queue import TaskError
 
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -367,7 +360,6 @@ class ScheduleRegistrationMixin:
 
     def get_schedule_lease(self, scope: str) -> ScheduleLease | None:
         """Return the job-lease for ``scope``, or ``None`` if unheld."""
-        from .queue import ScheduleLease
 
         with self._connect() as conn:
             row = conn.execute(
@@ -377,7 +369,6 @@ class ScheduleRegistrationMixin:
 
     def list_schedule_leases(self) -> list[ScheduleLease]:
         """List all held job-leases, ordered by scope."""
-        from .queue import ScheduleLease
 
         with self._connect() as conn:
             rows = conn.execute("SELECT * FROM schedule_leases ORDER BY scope").fetchall()
@@ -400,7 +391,6 @@ class ScheduleRegistrationMixin:
         crash before task creation. Once bound to a task, it remains owned until
         explicit terminal reconciliation releases it.
         """
-        from .queue import ResourceReservation, TaskError
 
         if not key or not owner:
             raise TaskError("resource reservation key and owner are required")
@@ -462,7 +452,6 @@ class ScheduleRegistrationMixin:
         now: float | None = None,
     ) -> ResourceReservation:
         """Bind an owned reservation to its created task."""
-        from .queue import ResourceReservation, TaskError
 
         if not token or not task_id:
             raise TaskError("resource reservation token and task_id are required")
@@ -522,7 +511,6 @@ class ScheduleRegistrationMixin:
         owner_prefix: str | None = None,
         task_id: str | None = None,
     ) -> list[ResourceReservation]:
-        from .queue import ResourceReservation
 
         clauses: list[str] = []
         params: list[object] = []

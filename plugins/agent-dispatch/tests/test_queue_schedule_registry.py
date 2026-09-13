@@ -7,18 +7,17 @@ Every method here is already thoroughly exercised through
 ``test_producers_emitter.py`` / ``test_coordinator.py``) -- this file only
 guards that ``agent_dispatch.queue_schedule_registry`` remains directly
 importable with its own stable public surface, is actually composed into
-``TaskQueue`` (rather than merely defined alongside it), and that its
-lazy, function-local ``from .queue import ...`` calls (used to avoid a real
-circular import at module-load time, since ``queue.py`` imports this
-module's mixin class to inherit from) resolve correctly once both modules
-have finished importing.
+``TaskQueue`` (rather than merely defined alongside it), and that its record
+dataclasses (``agent_dispatch.queue_records``, re-exported from ``queue``
+for existing call sites) resolve correctly end-to-end.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from agent_dispatch.queue import ResourceReservation, ScheduleLease, ScheduleRecord, TaskQueue
+from agent_dispatch.queue import TaskQueue
+from agent_dispatch.queue_records import ResourceReservation, ScheduleLease, ScheduleRecord
 from agent_dispatch.queue_schedule_registry import ScheduleRegistrationMixin
 
 
@@ -61,11 +60,11 @@ def test_resource_reservation_methods_are_directly_importable():
     assert callable(ScheduleRegistrationMixin.list_resource_reservations)
 
 
-def test_mixin_methods_resolve_the_lazy_queue_record_imports(tmp_path):
+def test_mixin_methods_resolve_their_record_dataclasses_end_to_end(tmp_path):
     """Exercise one method from each of the four sub-clusters against a real
-    ``TaskQueue`` so the lazy, function-local ``from .queue import ...``
-    calls each method makes are proven to resolve their record dataclasses
-    correctly, not just that the names are importable in isolation."""
+    ``TaskQueue`` so the top-level ``queue_records`` imports each method uses
+    are proven to resolve correctly at runtime, not just that the names are
+    importable in isolation."""
     q = TaskQueue(str(tmp_path / "q.sqlite3"))
 
     record = q.register_schedule(
@@ -89,3 +88,30 @@ def test_mixin_methods_resolve_the_lazy_queue_record_imports(tmp_path):
     reservation, granted = q.acquire_resource_reservation("res-a", "owner-1", ttl=60)
     assert isinstance(reservation, ResourceReservation)
     assert granted is True
+
+
+@pytest.mark.guard
+def test_mixin_method_annotations_resolve_via_get_type_hints():
+    """Regression guard for a real finding from this module's own PR review:
+    an earlier version of this mixin satisfied static analysis with a
+    ``TYPE_CHECKING``-only import of the record dataclasses, which left them
+    unresolvable to runtime introspection (``typing.get_type_hints`` raised
+    ``NameError`` for every annotated method) since they were never actually
+    bound in the module's real globals. Now that
+    ``queue_schedule_registry`` imports them as ordinary top-level names
+    from ``queue_records``, every annotated method must resolve cleanly."""
+    import typing
+
+    for name in (
+        "register_schedule",
+        "list_schedules",
+        "get_schedule",
+        "set_schedule_paused",
+        "acquire_schedule_lease",
+        "get_schedule_lease",
+        "list_schedule_leases",
+        "acquire_resource_reservation",
+        "bind_resource_reservation",
+        "list_resource_reservations",
+    ):
+        typing.get_type_hints(getattr(ScheduleRegistrationMixin, name))

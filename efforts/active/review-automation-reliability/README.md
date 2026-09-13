@@ -542,6 +542,42 @@ scenarios.
 - Bumped agent-dispatch 0.1.2-dev85 -> dev86, then immediately ran
   `manage-instruction-projections.py sync .` per the gotcha the prior leg
   recorded (skipping this cost a review round-trip last time).
+- **PR #2517's review caught two real findings, one of them substantive
+  (both fixed before merge)**:
+  1. **Moderate: the new import-guard tests weren't guard-marked.** The
+     repo has an existing `pytest.mark.guard` convention (registered per
+     plugin, e.g. `agent-bridge`, `agent-worktrees`) for fast structural/
+     contract checks a pre-push sweep runs via `--guards` -- agent-dispatch
+     had never adopted it. Registered the marker in agent-dispatch's own
+     `pyproject.toml` and tagged the five purely-structural tests in
+     `test_queue_schedule_registry.py`.
+  2. **Moderate: the `TYPE_CHECKING`-guarded `from .queue import ...`
+     satisfied `ruff` but broke runtime introspection.** Verified directly:
+     `typing.get_type_hints()` on every moved method that referenced
+     `ScheduleRecord`/`ScheduleLease`/`ResourceReservation` raised
+     `NameError`, since those names were never actually bound in
+     `queue_schedule_registry`'s real module globals (only inside
+     `TYPE_CHECKING`, which is `False` at runtime, and inside each method's
+     own local scope). Fixed properly rather than patching around it:
+     extracted `TaskError` and the three record dataclasses into a new,
+     dependency-free `queue_records.py` that both `queue.py` and
+     `queue_schedule_registry.py` import as ordinary top-level names --
+     eliminating the lazy-import workaround (and the underlying circular-
+     import risk) entirely, not just papering over the symptom. `queue.py`
+     re-exports all four (`# noqa: F401` for the three now only used via
+     re-export, matching the `loop_commands.py` precedent) for existing
+     call sites. Added a regression test
+     (`test_mixin_method_annotations_resolve_via_get_type_hints`, itself
+     guard-marked) asserting `get_type_hints()` succeeds on every affected
+     method, so this exact failure mode can't silently return.
+  3. **Nit (also fixed): the Phase 10 tracking-issue reference was wrong.**
+     `queue_schedule_registry.py`'s module docstring and the PR body both
+     cited #2357 (Phase 9, now complete) instead of #2423 (this effort's
+     actual Phase 10 coordination token); corrected both.
+  - This further shrank `queue.py` to 6,386 lines (baseline refreshed
+    again) and added `queue_records.py` at 115 lines. Full suite (2,656
+    tests with the new regression test) still passes; `--guards` picks up
+    all six guard-marked tests in ~2s.
 - **Standing note carried from the prior leg's handoff**: that leg's PR
   #2506 review included one declined false-positive finding (Copilot
   claimed `tools/module-size-baseline.json`'s prior `__main__.py` entry,
