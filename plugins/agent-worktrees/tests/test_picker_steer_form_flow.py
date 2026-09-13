@@ -63,14 +63,14 @@ def test_confirm_writes_the_draft_before_dismissing(tmp_path, monkeypatch):
         return app
 
     app = asyncio.run(run())
-    assert app.result == {"feedback": "ship it"}
+    assert app.result == {"action": "confirm", "values": {"feedback": "ship it"}}
     # The draft is written as part of _confirm, unconditionally -- it is the
     # caller's job (once it confirms actual submission success) to clear it,
     # not this screen's dismissal.
     assert _draft_values("t-confirm") == {"feedback": "ship it"}
 
 
-def test_save_writes_the_draft_and_dismisses_with_none(tmp_path, monkeypatch):
+def test_save_writes_the_draft_and_returns_a_save_envelope(tmp_path, monkeypatch):
     monkeypatch.setenv(engine_mod._STEER_DRAFTS_ENV, str(tmp_path))
     screen = PivotFormScreen(_CARD, _FIELDS, "Steer", task_id="t-save")
 
@@ -84,7 +84,10 @@ def test_save_writes_the_draft_and_dismisses_with_none(tmp_path, monkeypatch):
         return app
 
     app = asyncio.run(run())
-    assert app.result is None
+    # Save returns the collected values too (envelope: {"action": "save", ...})
+    # so the caller can persist them as the task's durable coordinator-side
+    # card_draft, in addition to this local file.
+    assert app.result == {"action": "save", "values": {"feedback": "draft text"}}
     assert _draft_values("t-save") == {"feedback": "draft text"}
 
 
@@ -113,7 +116,14 @@ def test_reset_confirmation_declined_leaves_the_form_untouched_and_open(
 
 def test_reset_confirmed_clears_fields_without_closing(tmp_path, monkeypatch):
     monkeypatch.setenv(engine_mod._STEER_DRAFTS_ENV, str(tmp_path))
-    screen = PivotFormScreen(_CARD, _FIELDS, "Steer", task_id="t-reset-yes")
+    cleared: list[str] = []
+    screen = PivotFormScreen(
+        _CARD,
+        _FIELDS,
+        "Steer",
+        task_id="t-reset-yes",
+        on_clear_draft=lambda: cleared.append("called"),
+    )
 
     async def run():
         app = _HostApp(screen)
@@ -125,7 +135,13 @@ def test_reset_confirmed_clears_fields_without_closing(tmp_path, monkeypatch):
 
         # action_save above already dismissed the screen; re-mount a second
         # instance to exercise reset against a still-open dialog.
-        screen2 = PivotFormScreen(_CARD, _FIELDS, "Steer", task_id="t-reset-yes")
+        screen2 = PivotFormScreen(
+            _CARD,
+            _FIELDS,
+            "Steer",
+            task_id="t-reset-yes",
+            on_clear_draft=lambda: cleared.append("called"),
+        )
         app2 = _HostApp(screen2)
         async with app2.run_test() as pilot:
             screen2.query_one("#q-0", Input).value = "clear me too"
@@ -141,7 +157,29 @@ def test_reset_confirmed_clears_fields_without_closing(tmp_path, monkeypatch):
         return app2
 
     asyncio.run(run())
+    assert cleared == ["called"]
     assert _draft_values("t-reset-yes") is None
+
+
+def test_escape_behaves_like_save_and_returns_a_save_envelope(tmp_path, monkeypatch):
+    monkeypatch.setenv(engine_mod._STEER_DRAFTS_ENV, str(tmp_path))
+    screen = PivotFormScreen(_CARD, _FIELDS, "Steer", task_id="t-esc")
+
+    async def run():
+        app = _HostApp(screen)
+        async with app.run_test() as pilot:
+            screen.query_one("#q-0", Input).value = "unsaved but escaped"
+            await pilot.pause()
+            screen.action_escape_close()
+            await pilot.pause()
+        return app
+
+    app = asyncio.run(run())
+    assert app.result == {
+        "action": "save",
+        "values": {"feedback": "unsaved but escaped"},
+    }
+    assert _draft_values("t-esc") == {"feedback": "unsaved but escaped"}
 
 
 @pytest.mark.parametrize("verdict,expect_stay", [(True, False), (False, True)])
