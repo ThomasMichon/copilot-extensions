@@ -42,6 +42,7 @@ that pattern to this repository.
 | [Worktree Manager Control Plane](active/worktree-manager-control-plane/README.md) | Active | #352 |
 | [agent-index Engine Daemon](active/agent-index-engine-daemon/README.md) | Done; pending archive | See effort |
 | [Uniform Runtime Resolution](active/uniform-runtime-resolution/README.md) | Done; pending archive | #765 |
+| [Vendored Installer Engine](active/vendored-installer-engine/README.md) | Draft | See effort |
 
 ## Local conventions
 
