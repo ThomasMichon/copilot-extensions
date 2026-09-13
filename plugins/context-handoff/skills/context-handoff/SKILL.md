@@ -200,7 +200,7 @@ across this plugin and `agent-worktrees`' resident status monitor -- see
 [context-handoff's README § Handoff-lifecycle observability](../../README.md#handoff-lifecycle-observability)
 for the full stage model and stores. For "acknowledged but nothing appeared"
 or a predecessor pane still alive after a confirmed cutover, run
-`agent-worktrees handoffs-check --worktree-id <id>` (or `--all`, `--execute`
+`agent-worktrees handoffs-check --worktree-id <id>` <!-- marketplace-isolation: allow diagnostic-tooling --> (or `--all`, `--execute`
 to actually retire what it finds) before assuming manual intervention is
 needed -- do not manually kill a predecessor pane yourself.
 
