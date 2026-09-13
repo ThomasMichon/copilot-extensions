@@ -628,6 +628,23 @@ union of signals: tracked session locks under `~/.copilot/session-state/`, live
 bridge-owned session locks. Dead PIDs are filtered automatically, and stale
 locks can be reclaimed with the `reclaim` flow above.
 
+### Diagnosing an unretired handoff predecessor pane
+
+A worktree that accumulates extra mux panes after a series of handoffs (a
+predecessor whose successor was spawned but whose own retirement was never
+confirmed -- whether the handoff is only candidate-associated or already
+fully linked) is a handoff-lifecycle bug, not something to fix by hand. Run
+`agent-worktrees handoffs-check --worktree-id <id>` <!-- marketplace-isolation: allow diagnostic-tooling --> (read-only) or add
+`--execute` to retire what it finds. The read-only report does not itself
+confirm the pane is still alive -- it lists every unretired candidate it
+finds; `--execute` runs the same live-check choreography the resident
+status monitor uses for its own automatic sweep, and is what actually
+resolves whether a listed candidate was real. `--all` checks
+every tracked worktree in the current project. See
+[architecture.md § Handoff cutover lifecycle](../../docs/architecture.md#handoff-cutover-lifecycle-the-13-stage-trace)
+for the full 13-stage model this diagnoses against. **Never manually kill a
+pane/process** to work around a suspected stuck handoff -- use this tool.
+
 ## Resource Leases (atomic, cross-machine, same-harness)
 
 The payload-local `lease` operation is the harness's **one atomic primitive** for exclusive,
