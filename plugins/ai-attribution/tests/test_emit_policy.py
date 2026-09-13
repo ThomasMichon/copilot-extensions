@@ -1081,7 +1081,7 @@ def test_setup_skill_structurally_owns_fallback_and_policy_setup() -> None:
         "legacyMarkers": [],
     }
     pointer = SESSION_GUIDANCE_TEMPLATE.read_text(encoding="utf-8")
-    assert "COPILOT_AGENT_SESSION_ID" in pointer
+    assert "already-disclosed session folder" in pointer
     assert "instructions/ai-attribution/session-guidance.instructions.md" in pointer
     assert "~/.copilot/session-state" not in pointer
 
