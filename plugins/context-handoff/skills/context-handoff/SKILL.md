@@ -203,9 +203,19 @@ already consumed, or is currently being consumed, by another session
 across this plugin and `agent-worktrees`' resident status monitor -- see
 [context-handoff's README § Handoff-lifecycle observability](../../README.md#handoff-lifecycle-observability)
 for the full stage model and stores. For a predecessor whose retirement was
-never confirmed after its successor was spawned (a successor associated as
-a candidate *or* already linked, plus a recorded spawn event -- not only a
-fully confirmed cutover), run `agent-worktrees handoffs-check --worktree-id <id>` <!-- marketplace-isolation: allow diagnostic-tooling --> (or `--all`, `--execute`
+never confirmed after its successor was spawned, first run the safe retry when
+you are still inside the superseded predecessor session:
+
+```bash
+node "$CH" retry-cutover --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
+```
+
+That path refocuses an already-live successor instead of spawning a duplicate.
+If no live successor exists, it falls back to a fresh spawn attempt. If the
+problem is specifically an unretired predecessor after a spawn is recorded (a
+successor associated as a candidate *or* already linked, plus a recorded spawn
+event -- not only a fully confirmed cutover), then run
+`agent-worktrees handoffs-check --worktree-id <id>` <!-- marketplace-isolation: allow diagnostic-tooling --> (or `--all`, `--execute`
 to actually retire what it finds) before assuming manual intervention is
 needed -- the read-only report does not itself confirm the pane is still
 alive, only `--execute`'s live check does -- and do not manually kill a
@@ -231,6 +241,7 @@ CH="$CH_ROOT/extensions/context-handoff/handoff-cli.mjs"
 
 node "$CH" facts --json --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 node "$CH" check-heads --json --cwd "$PWD"
+node "$CH" retry-cutover --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 node "$CH" save --title "<topic>" --prompt-file "<handoff.md>" \
   --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 node "$CH" trigger --title "<topic>" --prompt-file "<handoff.md>" \
@@ -259,6 +270,7 @@ $ch = Join-Path $chRoot 'extensions\context-handoff\handoff-cli.mjs'
 if (-not (Test-Path -LiteralPath $ch -PathType Leaf)) { throw 'context-handoff payload-local CLI not found' }
 node $ch facts --json --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch check-heads --json --cwd $PWD
+node $ch retry-cutover --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch save --title '<topic>' --prompt-file '<handoff.md>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch trigger --title '<topic>' --prompt-file '<handoff.md>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch trigger --handoff-token '<HANDOFF_TOKEN>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
