@@ -217,9 +217,11 @@ async def complete_stop(
     from .session_manager import RemoteHostRecoveryPendingError, SessionStatus, asyncio, log, time
 
     session_id = session.session_id
-    await manager._quiesce_session(session, cancel_turn=cancel_turn)
-    await cleanup_owned_process(session)
-    await manager._drop_forward(session_id, strict=True, preserve_ownership=True)
+    try:
+        await manager._quiesce_session(session, cancel_turn=cancel_turn)
+        await cleanup_owned_process(session)
+    finally:
+        await manager._drop_forward(session_id, strict=True, preserve_ownership=True)
     await join_remote_reaps(manager, session_id, retry_failed=reap_host)
     if not for_restart and manager._host_index is not None:
         manager._host_index.set_resume_flag(session_id, False)

@@ -496,6 +496,12 @@ restart does not inherently close the child's pipes.
   application capture and recheck that revision, including equal-value ABA.
   End cleanup for an already-removed container identity uses strict metadata
   cleanup and retains the session and lock when index removal fails.
+  Missing-endpoint reaps also retain an unsuccessful cleanup task instead of
+  disappearing as a no-op. Stop attempts independent relay/forward containment
+  even if process cleanup fails, keeping failed handles and surfacing errors.
+  Automatic handoff transfers queued rows in one database transaction, preserving
+  FIFO ids and caller metadata; failed migration leaves the predecessor queue
+  intact and emits a handoff failure rather than clearing undelivered prompts.
   The manager remains the public facade; `session_resume.py`,
   `session_teardown.py`, and `session_ownership.py` own the bounded lifecycle
   implementations. Additive session migrations live in `db_migrations.py`.
