@@ -27,6 +27,13 @@ def _mock_agent_proc():
     proc.proc.stdout = MagicMock()
     proc.proc.stderr = MagicMock()
     proc.proc.stderr.readline = AsyncMock(return_value=b"")
+    proc.alive = True
+
+    async def kill():
+        proc.alive = False
+        proc.proc.returncode = -15
+
+    proc.kill = AsyncMock(side_effect=kill)
     return proc
 
 
@@ -106,6 +113,30 @@ class TestOptInFailSafe:
 
 class TestProactiveHandoff:
     """The usage-driven trigger fires an in-place cutover when idle."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("resume_after_stop", [False, True])
+    async def test_scheduled_handoff_is_invalidated_by_stop(
+        self, tmp_db, spawn_target, _patch_spawn, _patch_acp,
+        monkeypatch, resume_after_stop,
+    ) -> None:
+        sm = _sm(tmp_db, enabled=True)
+        pred = await sm.start_session(spawn_target, caller_id="example-worktree")
+        handoff = AsyncMock(side_effect=AssertionError("stale auto-handoff"))
+        monkeypatch.setattr(sm, "handoff_session", handoff)
+
+        _cross_critical(sm, pred)
+        assert sm._auto_handoff_tasks
+        await sm.stop_session(pred.session_id)
+        if resume_after_stop:
+            await sm.resume_session(pred.session_id, drain=False)
+        await _drain_auto_tasks(sm)
+
+        handoff.assert_not_awaited()
+        assert pred.status == (
+            SessionStatus.IDLE if resume_after_stop else SessionStatus.STOPPED
+        )
+        assert sm._db.get_session(pred.session_id)["successor_id"] is None
 
     @pytest.mark.asyncio
     async def test_fires_with_existing_self_authored_brief_path(
@@ -201,25 +232,39 @@ class TestPromptTriggeredHandoff:
     async def test_prompt_rolls_then_delivers_to_successor(
         self, tmp_db, spawn_target, _patch_spawn, _patch_acp, mock_acp_client
     ) -> None:
-        mock_acp_client.send_prompt = AsyncMock(return_value={
-            "response_text": "## Objective\nX", "stop_reason": "end_turn",
-        })
+        release_seed = asyncio.Event()
+        calls = 0
+
+        async def respond(_prompt):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                await release_seed.wait()
+            return {"response_text": "## Objective\nX", "stop_reason": "end_turn"}
+
+        mock_acp_client.send_prompt = AsyncMock(side_effect=respond)
         sm = _sm(tmp_db, enabled=True)
         pred = await sm.start_session(spawn_target, caller_id="wt-1")
         pred._crossed_thresholds.add("critical")  # already saturated
         pred.subscriber_count = 2  # prompt path fires regardless of watchers
 
-        result = await sm.submit_or_queue_prompt(pred.session_id, "next thing")
-
-        # Predecessor retired; the user's prompt landed on a fresh successor.
-        assert pred.status == SessionStatus.STOPPED
-        succ = sm.get_session(_events(pred, "session_handoff")[0].data["rolled_to"])
-        assert succ is not None and succ.session_id != pred.session_id
-        # The successor is warm (seed turn running), so the user's prompt is
-        # durably queued behind it rather than dropped.
-        assert result["queued"] is True
-        assert sm._db.count_pending_prompts(succ.session_id) == 1
-        assert sm._db.count_pending_prompts(pred.session_id) == 0
+        succ = None
+        try:
+            result = await sm.submit_or_queue_prompt(pred.session_id, "next thing")
+            assert pred.status == SessionStatus.STOPPED
+            succ = sm.get_session(_events(pred, "session_handoff")[0].data["rolled_to"])
+            assert succ is not None and succ.session_id != pred.session_id
+            assert result["queued"] is True
+            assert sm._db.count_pending_prompts(succ.session_id) == 1
+            assert sm._db.count_pending_prompts(pred.session_id) == 0
+        finally:
+            release_seed.set()
+            if succ is not None and succ._prompt_task is not None:
+                seed_task = succ._prompt_task
+                await seed_task
+                next_task = succ._prompt_task
+                if next_task is not None and next_task is not seed_task:
+                    await next_task
 
     @pytest.mark.asyncio
     async def test_prompt_without_optin_is_normal_delivery(

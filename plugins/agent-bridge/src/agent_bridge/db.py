@@ -16,7 +16,7 @@ from typing import Any
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 # Post-base ``sessions`` columns ensured idempotently on every init, independent
 # of ``schema_version``. Version-gated ``ALTER TABLE ... ADD COLUMN`` migrations
@@ -34,6 +34,7 @@ _SESSIONS_ENSURE_COLUMNS: tuple[tuple[str, str], ...] = (
     ("predecessor_id", "TEXT"),
     ("successor_id", "TEXT"),
     ("handoff_at", "REAL"),
+    ("restart_status", "TEXT"),
 )
 
 # A live interactive session is kept alive by the extension's 30s heartbeat
@@ -126,6 +127,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     target_type TEXT NOT NULL DEFAULT 'local',
     target_json TEXT,
     status TEXT NOT NULL DEFAULT 'created',
+    restart_status TEXT,
     pid INTEGER,
     acp_session_id TEXT,
     config_json TEXT,
@@ -505,27 +507,10 @@ class Database:
             conn.commit()
 
     def _ensure_columns(self, conn: sqlite3.Connection) -> None:
-        """Idempotently add any missing post-base ``sessions`` columns.
+        """Ensure canonical nullable session columns independently of schema stamps."""
+        from .db_migrations import ensure_session_columns
 
-        Independent of ``schema_version`` (that is the whole point): the
-        version-gated migrations below only run when the DB is *below* their
-        target version, so a table already stamped at/after that version but
-        missing the column would never receive it. This ensures the canonical
-        nullable column set on every init.
-        """
-        existing = {r[1] for r in conn.execute("PRAGMA table_info(sessions)")}
-        added: list[str] = []
-        for col, col_type in _SESSIONS_ENSURE_COLUMNS:
-            if col not in existing:
-                conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} {col_type}")
-                added.append(col)
-        if added:
-            conn.commit()
-            log.warning(
-                "Ensured missing sessions column(s) via safety net: %s "
-                "(schema was stamped past their migration gate; see #815)",
-                ", ".join(added),
-            )
+        ensure_session_columns(conn, _SESSIONS_ENSURE_COLUMNS)
 
     def _migrate(self, conn: sqlite3.Connection, from_version: int) -> None:
         """Run schema migrations from from_version to SCHEMA_VERSION."""
@@ -860,6 +845,10 @@ class Database:
                 "Schema migrated to version 17: delivery cursor invalidations"
             )
 
+        from .db_migrations import migrate_restart_status
+
+        migrate_restart_status(conn, from_version)
+
     def execute_write(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
         """Execute a write query under the write lock."""
         conn = self._get_conn()
@@ -897,18 +886,13 @@ class Database:
         )
 
     def update_session_status(
-        self, session_id: str, status: str, now: float, pid: int | None = None
+        self, session_id: str, status: str, now: float, pid: int | None = None,
+        *, restart_status: str | None = None,
     ) -> None:
-        if pid is not None:
-            self.execute_write(
-                "UPDATE sessions SET status=?, pid=?, updated_at=? WHERE id=?",
-                (status, pid, now, session_id),
-            )
-        else:
-            self.execute_write(
-                "UPDATE sessions SET status=?, pid=NULL, updated_at=? WHERE id=?",
-                (status, now, session_id),
-            )
+        self.execute_write(
+            "UPDATE sessions SET status=?, pid=?, updated_at=?, restart_status=? WHERE id=?",
+            (status, pid, now, restart_status, session_id),
+        )
 
     def update_session_acp_id(self, session_id: str, acp_session_id: str) -> None:
         """Persist the ACP session ID for resume support."""

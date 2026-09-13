@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
 import inspect
 import json
 import logging
@@ -688,11 +689,11 @@ class Session:
         self.caller_id = caller_id
         self.target = target
         self.client: AcpClient | None = None
+        self._owned_process: AgentProcess | None = None
         self.status = SessionStatus.CREATED
         # Status read from durable storage during daemon startup before
-        # rehydrate converts an adoptable session to STOPPED. Used only by the
-        # startup reattach path to decide whether a surviving Session Host needs
-        # an explicit driver nudge.
+        # rehydrate converts an adoptable session to STOPPED. Persisted across
+        # interrupted recovery; an explicit stop clears this recovery intent.
         self.restart_status: str | None = None
         self.turn_count = 0
         self.context_size: int | None = None
@@ -733,6 +734,7 @@ class Session:
         self.progress: dict[str, str] = {}
         self._prompt_task: asyncio.Task | None = None
         self._lifecycle_lock = asyncio.Lock()
+        self._lifecycle_generation = 0
         self._turn_start_lock = asyncio.Lock()
         # Set when a context-pressure handoff is owed but the session is not yet
         # idle (usage crosses critical mid-turn). The turn-settle path fires the
@@ -915,6 +917,8 @@ class SessionManager:
         # Strong refs to in-flight best-effort remote-reap tasks (so they are not
         # GC'd mid-flight); each removes itself on completion.
         self._remote_reap_tasks: set[Any] = set()
+        self._remote_reaps_by_session: dict[str, set[asyncio.Task[bool]]] = {}
+        self._pending_host_launches: dict[str, Any] = {}
         from pathlib import Path as _Path
 
         from .session_host.host_index import HostIndex
@@ -947,6 +951,7 @@ class SessionManager:
         # starts un-drained). Teardown (stop/end) is *never* gated -- it is the
         # operation the drain is waiting for (#1755).
         self._draining = False
+        self._shutting_down = False
         # Drain observability + bounded lifetime (#1757). When the gate opens we
         # record when/why/by-whom and arm a watchdog that WARNs on an interval
         # and finally auto-releases the gate if no cutover ever retires this
@@ -1302,14 +1307,17 @@ class SessionManager:
         cancelled: list[str] = []
         for sid in targets:
             session = self._sessions.get(sid)
-            if session is None or session.client is None:
+            if session is None:
                 continue
-            with contextlib.suppress(Exception):
-                await session.client.cancel_prompt()
-            if self._host_index is not None:
+            async with session._lifecycle_lock:
+                if session.status != SessionStatus.RUNNING or session.client is None:
+                    continue
                 with contextlib.suppress(Exception):
-                    self._host_index.set_resume_flag(sid, True)
-            cancelled.append(sid)
+                    await session.client.cancel_prompt()
+                if self._host_index is not None:
+                    with contextlib.suppress(Exception):
+                        self._host_index.set_resume_flag(sid, True)
+                cancelled.append(sid)
         if cancelled:
             log.info(
                 "Graceful-cancel: sent ACP cancel to %d in-flight turn(s); "
@@ -1506,7 +1514,11 @@ class SessionManager:
             session.created_at = row["created_at"]
             session.updated_at = row["updated_at"]
             session.acp_session_id = row.get("acp_session_id")
-            session.restart_status = status
+            session.restart_status = (
+                row.get("restart_status")
+                if status == SessionStatus.STOPPED.value
+                else None
+            )
 
             # Mark formerly-active sessions as stopped
             interrupted_on_restart = False
@@ -1515,8 +1527,12 @@ class SessionManager:
                 SessionStatus.IDLE.value,
                 SessionStatus.STARTING.value,
             ):
+                session.restart_status = status
                 session.status = SessionStatus.STOPPED
-                self._db.update_session_status(sid, SessionStatus.STOPPED.value, now)
+                self._db.update_session_status(
+                    sid, SessionStatus.STOPPED.value, now,
+                    restart_status=session.restart_status,
+                )
                 log.info("Session %s (%s) marked STOPPED after restart", sid, session.name)
 
                 # Mark incomplete turns as interrupted
@@ -1718,13 +1734,17 @@ class SessionManager:
         can re-forward and reattach. Teardown DETACHES (host-mode
         ``AcpClient.shutdown``), never reaping the child inadvertently -- goal 1.
         """
-        from . import __version__
+        from .session_host_ownership import (
+            abort_pending_host_launch, complete_host_launch,
+            require_no_pending_host_launch, spawn_host_owned,
+        )
+        from .session_ownership import finish_owned
         from .session_host.acp_adapter import open_acp_streams
         from .session_host.client import SessionHostClient
-        from .session_host.host_index import HostRecord
         from .session_host.spawner import LocalSpawner
         from .transport import resolve_local_launch
 
+        require_no_pending_host_launch(self, session_id)
         if spawner is None:
             spawner = LocalSpawner(
                 unexpected_reap_seconds=self._session_host_unexpected_reap_seconds,
@@ -1766,51 +1786,43 @@ class SessionManager:
             # 127.0.0.1:<local_port>. spawn() blocks briefly on host readiness,
             # so it is already off-loop.
             step_started = time.monotonic()
-            spawned = await spawner.spawn(
-                args, cwd=work_dir, env=child_env, session_id=session_id,
+            pending = await spawn_host_owned(
+                self, session_id, spawner,
+                spawner.spawn(args, cwd=work_dir, env=child_env, session_id=session_id),
             )
+            spawned = pending.spawned
             timing.add("host_spawn", time.monotonic() - step_started)
-            # Retain a remote-boundary forward so reattach can refresh it and
-            # teardown can cancel it.
-            if getattr(spawned, "forward", None) is not None:
-                self._forwards[session_id] = spawned.forward
-            relays = getattr(spawned, "relay", None)
-            if relays is not None:
-                if not isinstance(relays, (list, tuple, set)):
-                    relays = [relays]
-                relays = list(relays)
-                if relays:
-                    self._relays[session_id] = relays
-            step_started = time.monotonic()
-            sock = await SessionHostClient.connect(port=spawned.local_port)
-            timing.add("host_connect", time.monotonic() - step_started)
-            step_started = time.monotonic()
-            await sock.attach(0, nonce=spawned.nonce.encode())
-            timing.add("host_attach", time.monotonic() - step_started)
-            step_started = time.monotonic()
-            streams = await open_acp_streams(sock)
-            timing.add("host_streams", time.monotonic() - step_started)
-
-            async def _closer() -> None:
-                await streams.aclose()
-                await sock.close()
-
-            client = AcpClient(
-                on_event=on_acp_event,
-                on_permission=permission_callback,
-                model_override=model,
-                effort_override=effort,
-            )
-            # Surface a mid-session transport drop (loopback socket down, host +
-            # child alive) as ``disconnected`` so the reattach driver fires (P1).
-            streams.on_transport_lost = client.mark_transport_lost
-            streams.on_child_exit = client.mark_host_child_exited
-            # Retain the host control channel so the manager can push STATUS
-            # (reapable) / DETACH (graceful) for host self-reap (#51).
-            client.session_host_client = sock
-            if permission_callback:
-                client.auto_approve = False
+            sock = None
+            streams = None
             try:
+                step_started = time.monotonic()
+                sock = await SessionHostClient.connect(port=spawned.local_port)
+                pending.sock = sock
+                timing.add("host_connect", time.monotonic() - step_started)
+                step_started = time.monotonic()
+                await sock.attach(0, nonce=spawned.nonce.encode())
+                timing.add("host_attach", time.monotonic() - step_started)
+                step_started = time.monotonic()
+                streams = await open_acp_streams(sock)
+                pending.streams = streams
+                timing.add("host_streams", time.monotonic() - step_started)
+
+                async def _closer() -> None:
+                    await streams.aclose()
+                    await sock.close()
+
+                client = AcpClient(
+                    on_event=on_acp_event,
+                    on_permission=permission_callback,
+                    model_override=model,
+                    effort_override=effort,
+                )
+                pending.client = client
+                streams.on_transport_lost = client.mark_transport_lost
+                streams.on_child_exit = client.mark_host_child_exited
+                client.session_host_client = sock
+                if permission_callback:
+                    client.auto_approve = False
                 step_started = time.monotonic()
                 await asyncio.wait_for(
                     client.start_streams(
@@ -1851,6 +1863,11 @@ class SessionManager:
                     )
                     timing.add("session_new_total", time.monotonic() - step_started)
                 log.info("ACP launch timing: result=ok %s", timing.summary())
+            except asyncio.CancelledError:
+                await finish_owned(
+                    abort_pending_host_launch(self, session_id), propagate_cancel=False,
+                )
+                raise
             except (TimeoutError, asyncio.TimeoutError) as exc:
                 # Leave a queryable marker so a stalled session-host resume/launch
                 # is not a silent [starting]->[stopped] (#1468). The child's
@@ -1920,23 +1937,6 @@ class SessionManager:
                     ) from exc
                 raise
 
-        if self._host_index is not None:
-            self._host_index.register(HostRecord(
-                session_id=session_id,
-                port=spawned.local_port,
-                host_pid=spawned.host_pid,
-                child_pid=spawned.child_pid,
-                host_version=__version__,
-                protocol_version=spawned.protocol_version,
-                state_file=spawned.state_file,
-                created_at=time.time(),
-                nonce=spawned.nonce,
-                boundary=spawned.boundary,
-                endpoint=getattr(spawned, "endpoint", {}) or {},
-                extra={
-                    "remote_authority_v2": spawned.boundary != "local",
-                },
-            ))
         # #4272 bridge-lock: mark this bridge-owned session's liveness as a
         # lattice file the picker reads cheaply, so a bare/bridge Copilot
         # (cwd=home) still shows ACTIVE (#1416). LOCAL boundary only -- a remote
@@ -1947,6 +1947,7 @@ class SessionManager:
             with contextlib.suppress(Exception):
                 await bridge_lock.write(
                     session_id, target.worktree_id, spawned.child_pid)
+        complete_host_launch(self, session_id, client, acp_sid)
         return client, acp_sid
 
     async def _rollback_failed_host_launch(
@@ -1958,36 +1959,13 @@ class SessionManager:
         session_id: str,
         result: dict[str, Any] | None,
     ) -> bool:
-        """Reap a failed Host launch and remove every local holder."""
-        with contextlib.suppress(Exception):
-            await sock.terminate()
-        with contextlib.suppress(Exception):
-            await streams.aclose()
-        with contextlib.suppress(Exception):
-            await sock.close()
+        """Join failed-host cleanup without abandoning ownership on cancellation."""
+        from .session_host_ownership import rollback_host_launch
+        from .session_ownership import finish_owned
 
-        remote = getattr(spawned, "boundary", "local") != "local"
-        confirmed = not remote
-        if remote:
-            abort = getattr(spawner, "abort_spawned", None)
-            if callable(abort):
-                try:
-                    confirmed = bool(await abort(spawned, session_id))
-                except Exception:
-                    confirmed = False
-        with contextlib.suppress(Exception):
-            await spawned.aclose()
-        self._forwards.pop(session_id, None)
-        self._relays.pop(session_id, None)
-        if result is not None:
-            result.update({
-                "host_process_removed": confirmed,
-                "child_process_removed": confirmed,
-                "remote_authority_removed": confirmed,
-                "forward_removed": session_id not in self._forwards,
-                "relay_removed": session_id not in self._relays,
-            })
-        return confirmed
+        return await finish_owned(
+            rollback_host_launch(self, spawner, spawned, sock, streams, session_id, result)
+        )
 
     # -- boundary-aware Session Host liveness ---------------------------------
     def _rec_host_alive(self, rec: Any) -> bool:
@@ -2020,6 +1998,43 @@ class SessionManager:
             return []
         return [r for r in self._host_index.all() if self._rec_host_alive(r)]
 
+    def _host_candidates(self) -> list[tuple[Any, Session | None, int | None]]:
+        """Snapshot records and lifecycle identity before maintenance can yield."""
+        candidates = []
+        for record in self._live_host_records():
+            session = self._sessions.get(record.session_id)
+            candidates.append((
+                copy.deepcopy(record), session,
+                session._lifecycle_generation if session is not None else None,
+            ))
+        return candidates
+
+    def _host_candidate_current(
+        self, record: Any, session: Session | None, generation: int | None,
+    ) -> bool:
+        """Revalidate a maintenance candidate under its lifecycle ownership."""
+        return (
+            not self._shutting_down
+            and not (getattr(record, "extra", None) or {}).get("launch_cleanup_pending")
+            and not self._remote_reap_pending(record.session_id)
+            and self._host_index is not None
+            and self._host_index.get(record.session_id) == record
+            and self._sessions.get(record.session_id) is session
+            and (
+                session is None
+                or (
+                    session._lifecycle_generation == generation
+                    and self._background_recovery_allowed(session)
+                )
+            )
+        )
+
+    def _remote_reap_pending(self, session_id: str) -> bool:
+        """Whether an existing cleanup operation still owns this host's fate."""
+        return any(
+            not task.done() for task in self._remote_reaps_by_session.get(session_id, ())
+        )
+
     def _live_remote_host_sessions(self) -> set[str]:
         """Session ids backed by a live **remote** (ssh/codespace) Session Host.
 
@@ -2042,12 +2057,42 @@ class SessionManager:
 
     def _prune_dead_hosts(self) -> None:
         """Drop records whose host is dead (local only -- remote is verified by
-        the reattach probe, never by a local pid check)."""
+        the reattach probe, never by a local pid check).
+
+        Runs on the lifecycle event loop without yielding; skips records owned
+        by an in-flight lifecycle operation or a dormant session.
+        """
         if self._host_index is None:
             return
-        for r in [r for r in self._host_index.all() if not self._rec_host_alive(r)]:
-            with contextlib.suppress(Exception):
-                self._host_index.remove(r.session_id)
+        for rec in self._host_index.all():
+            if (getattr(rec, "extra", None) or {}).get("launch_cleanup_pending"):
+                continue
+            session = self._sessions.get(rec.session_id)
+            if session is not None and (
+                session._lifecycle_lock.locked()
+                or not self._background_recovery_allowed(session)
+            ):
+                continue
+            if not self._rec_host_alive(rec):
+                with contextlib.suppress(Exception):
+                    self._host_index.remove(rec.session_id)
+
+    @staticmethod
+    def _background_recovery_allowed(session: Session) -> bool:
+        """Keep deliberate stops dormant, but retain restart recovery intent."""
+        container = session.target.container
+        if (
+            isinstance(container, dict)
+            and container.get("launch_pending_session_id") == session.session_id
+        ):
+            return False
+        if session.status in {SessionStatus.ENDED, SessionStatus.FAILED}:
+            return False
+        return session.status != SessionStatus.STOPPED or session.restart_status in {
+            SessionStatus.RUNNING.value,
+            SessionStatus.IDLE.value,
+            SessionStatus.STARTING.value,
+        }
 
     async def reattach_session_hosts(
         self,
@@ -2081,7 +2126,7 @@ class SessionManager:
         startup_session_ids = {
             session.session_id
             for session in self._sessions.values()
-            if session.status not in {SessionStatus.ENDED, SessionStatus.FAILED}
+            if self._background_recovery_allowed(session)
         }
         recovery_budget = min(
             startup_budget / 2,
@@ -2090,6 +2135,7 @@ class SessionManager:
         recovered = await self._recover_remote_host_records(
             session_ids=startup_session_ids,
             timeout_seconds=recovery_budget,
+            background=True,
         )
         if recovered:
             log.info(
@@ -2100,14 +2146,13 @@ class SessionManager:
         self._prune_dead_hosts()
         reattached = 0
         now = time.time()
-        for rec in self._live_host_records():
-            session = self._sessions.get(rec.session_id)
+        for rec, session, generation in self._host_candidates():
             if (
                 session is not None
-                and session.status in {SessionStatus.ENDED, SessionStatus.FAILED}
+                and not self._background_recovery_allowed(session)
             ):
                 log.info(
-                    "Skipping startup reattach for terminal session %s (%s)",
+                    "Skipping startup reattach for dormant session %s (%s)",
                     rec.session_id, session.status.value,
                 )
                 continue
@@ -2128,57 +2173,57 @@ class SessionManager:
                     rec.session_id,
                 )
                 continue
-            plan = plan_host(
-                protocol_version=rec.protocol_version,
-                child_alive=self._rec_child_alive(rec),
-                age_seconds=(now - rec.created_at) if rec.created_at else None,
-                stale_reap_seconds=self._session_host_stale_reap_seconds,
-            )
-            if plan.disposition is HostDisposition.STRAND:
-                log.info(
-                    "Session %s pinned to incompatible Session Host "
-                    "(proto=%s, build=%s, pid=%s); %s",
-                    rec.session_id, rec.protocol_version, rec.host_version,
-                    rec.host_pid, plan.reason,
+            async with contextlib.AsyncExitStack() as locks:
+                if session is not None:
+                    if (
+                        session._turn_start_lock.locked()
+                        or session._lifecycle_lock.locked()
+                    ):
+                        self._remote_recovery_inconclusive.add(rec.session_id)
+                        log.info(
+                            "Skipping startup reattach for %s: an in-flight "
+                            "resume/lifecycle operation already owns it",
+                            rec.session_id,
+                        )
+                        continue
+                    await locks.enter_async_context(session._turn_start_lock)
+                    await locks.enter_async_context(session._lifecycle_lock)
+                    if session.client is not None and session.client.is_running:
+                        continue
+                if not self._host_candidate_current(rec, session, generation):
+                    log.info("Skipping replaced startup host candidate %s", rec.session_id)
+                    continue
+                plan = plan_host(
+                    protocol_version=rec.protocol_version,
+                    child_alive=self._rec_child_alive(rec),
+                    age_seconds=(now - rec.created_at) if rec.created_at else None,
+                    stale_reap_seconds=self._session_host_stale_reap_seconds,
                 )
-                continue
-            if plan.disposition in (HostDisposition.REAP_STOPPED,
-                                    HostDisposition.FORCE_REAP):
-                self._reap_host_record(rec, plan.reason)
-                continue
-            session = self._sessions.get(rec.session_id)
-            if session is None or not session.acp_session_id:
-                # A live host with no adoptable session -- ended out from under
-                # it (its row was deleted) or a pre-#1786 orphan. Reap it rather
-                # than leak the host + child forever.
-                self._reap_host_record(rec, "no adoptable session on reattach")
-                continue
+                if plan.disposition is HostDisposition.STRAND:
+                    log.info(
+                        "Session %s pinned to incompatible Session Host "
+                        "(proto=%s, build=%s, pid=%s); %s",
+                        rec.session_id, rec.protocol_version, rec.host_version,
+                        rec.host_pid, plan.reason,
+                    )
+                    continue
+                if plan.disposition in (HostDisposition.REAP_STOPPED,
+                                        HostDisposition.FORCE_REAP):
+                    self._reap_host_record(rec, plan.reason)
+                    continue
+                if session is None or not session.acp_session_id:
+                    self._reap_host_record(rec, "no adoptable session on reattach")
+                    continue
 
-            remaining = deadline - loop.time()
-            if remaining <= 0:
-                self._remote_recovery_inconclusive.add(rec.session_id)
-                log.warning(
-                    "Startup Session Host reattach budget exhausted before %s",
-                    rec.session_id,
-                )
-                continue
-            # A request-driven resume_session() already holds this session's
-            # `_lifecycle_lock` for the exact same reattach-or-respawn decision.
-            # Racing it from this background startup pass would let both paths
-            # read/recover the far-side authority and establish competing
-            # forwards concurrently. Skip here (non-blocking check-then-acquire
-            # is safe -- no `await` happens between them) and leave the session
-            # for resume_session (or a later reconciliation pass) to finish.
-            if session._lifecycle_lock.locked():
-                self._remote_recovery_inconclusive.add(rec.session_id)
-                log.info(
-                    "Skipping startup reattach for %s: an in-flight "
-                    "resume/lifecycle operation already owns it",
-                    rec.session_id,
-                )
-                continue
-            try:
-                async with session._lifecycle_lock:
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    self._remote_recovery_inconclusive.add(rec.session_id)
+                    log.warning(
+                        "Startup Session Host reattach budget exhausted before %s",
+                        rec.session_id,
+                    )
+                    continue
+                try:
                     attached = await asyncio.wait_for(
                         self._reattach_one(
                             rec, session, new_status=SessionStatus.IDLE,
@@ -2201,15 +2246,15 @@ class SessionManager:
                         ),
                         timeout=remaining,
                     )
-            except asyncio.TimeoutError:
-                self._remote_recovery_inconclusive.add(rec.session_id)
-                log.warning(
-                    "Startup Session Host reattach timed out for %s after %.1fs",
-                    rec.session_id, remaining,
-                )
-                continue
-            if attached:
-                reattached += 1
+                except asyncio.TimeoutError:
+                    self._remote_recovery_inconclusive.add(rec.session_id)
+                    log.warning(
+                        "Startup Session Host reattach timed out for %s after %.1fs",
+                        rec.session_id, remaining,
+                    )
+                    continue
+                if attached:
+                    reattached += 1
         if reattached:
             log.info("Reattached %d session(s) to surviving Session Hosts", reattached)
         return reattached
@@ -2220,14 +2265,20 @@ class SessionManager:
         allow_wake: bool = False,
         session_ids: set[str] | None = None,
         timeout_seconds: float = 120.0,
+        background: bool = False,
     ) -> int:
         """Rebuild missing remote HostIndex rows from far-side records.
 
         The frontend DB identifies adoptable ACP sessions and their remote venue
         targets. The Session Host itself is authoritative for host/child PID,
         port, nonce, version, and relay-forward metadata.
+
+        Background callers lock and recheck eligibility before provider probes.
+        Explicit resume/cleanup callers already own their lifecycle decision.
         """
         if self._host_index is None:
+            return 0
+        if background and self._shutting_down:
             return 0
         from .relay_state import get_live_relay_port
         from .session_host.codespace_transport import (
@@ -2238,7 +2289,13 @@ class SessionManager:
         from .session_host.spawner import RemoteHostDeadError
 
         groups: dict[str, tuple[Any, list[tuple[Session, Any]]]] = {}
+        candidate_generations: dict[str, int] = {}
         for session in self._sessions.values():
+            if background and (
+                not self._background_recovery_allowed(session)
+                or self._remote_reap_pending(session.session_id)
+            ):
+                continue
             if session_ids is not None and session.session_id not in session_ids:
                 continue
             target = session.target
@@ -2248,7 +2305,11 @@ class SessionManager:
             )
             if not session.acp_session_id and not has_container_target:
                 continue
-            existing = self._host_index.get(session.session_id)
+            existing = copy.deepcopy(self._host_index.get(session.session_id))
+            if background and existing is not None and (
+                getattr(existing, "extra", None) or {}
+            ).get("launch_cleanup_pending"):
+                continue
             if (
                 existing is not None
                 and not (getattr(existing, "extra", {}) or {}).get(
@@ -2300,11 +2361,29 @@ class SessionManager:
                     )
                     groups[name] = (spawner, [])
             groups[name][1].append((session, existing))
+            candidate_generations[session.session_id] = session._lifecycle_generation
 
         semaphore = asyncio.Semaphore(3)
 
         async def _inspect_group(spawner: Any, entries: list[tuple[Session, Any]]):
-            async with semaphore:
+            async with semaphore, contextlib.AsyncExitStack() as locks:
+                if background:
+                    eligible = []
+                    for session, existing in entries:
+                        if session._lifecycle_lock.locked():
+                            continue
+                        await locks.enter_async_context(session._lifecycle_lock)
+                        if (
+                            self._background_recovery_allowed(session)
+                            and not self._remote_reap_pending(session.session_id)
+                            and self._host_index.get(session.session_id) == existing
+                            and candidate_generations[session.session_id]
+                            == session._lifecycle_generation
+                        ):
+                            eligible.append((session, existing))
+                    entries = eligible
+                    if not entries:
+                        return []
                 inspect_before_connect = (
                     not allow_wake
                     or getattr(spawner, "boundary", "") == "container"
@@ -2356,7 +2435,13 @@ class SessionManager:
         tasks = list(task_entries)
         if not tasks:
             return 0
-        done, pending = await asyncio.wait(tasks, timeout=timeout_seconds)
+        try:
+            done, pending = await asyncio.wait(tasks, timeout=timeout_seconds)
+        except asyncio.CancelledError:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
         for task in pending:
             task.cancel()
         if pending:
@@ -2384,73 +2469,94 @@ class SessionManager:
                     self._remote_recovery_skipped.add(session.session_id)
                 continue
             for session, existing, status, record in results:
-                if status == "live" and record is not None:
-                    container_target = (
-                        session.target.container
-                        if isinstance(session.target.container, dict)
-                        and session.target.container.get("name")
-                        else None
-                    )
-                    if container_target is not None:
-                        try:
-                            self._acquire_container_lock(
+                async with contextlib.AsyncExitStack() as locks:
+                    if background:
+                        if self._shutting_down or self._remote_reap_pending(session.session_id):
+                            continue
+                        if session._turn_start_lock.locked() or session._lifecycle_lock.locked():
+                            continue
+                        await locks.enter_async_context(session._turn_start_lock)
+                        await locks.enter_async_context(session._lifecycle_lock)
+                        if not self._background_recovery_allowed(session):
+                            continue
+                        if (
+                            self._sessions.get(session.session_id) is not session
+                            or self._host_index.get(session.session_id) != existing
+                            or candidate_generations[session.session_id]
+                            != session._lifecycle_generation
+                        ):
+                            log.info(
+                                "Discarding stale remote authority result for %s",
                                 session.session_id,
-                                container_target["name"],
-                            )
-                        except Exception:
-                            self._remote_recovery_inconclusive.add(
-                                session.session_id
-                            )
-                            log.warning(
-                                "Live container Session Host authority for %s "
-                                "could not reclaim target ownership",
-                                session.session_id,
-                                exc_info=True,
                             )
                             continue
-                    self._remote_recovery_inconclusive.discard(session.session_id)
-                    self._remote_recovery_skipped.discard(session.session_id)
-                    if existing is not None:
-                        record.resume_on_reattach = existing.resume_on_reattach
-                    self._host_index.register(record)
-                    if existing is None:
-                        recovered += 1
-                elif status == "dead":
-                    self._release_container_lock(session.session_id)
-                    self._set_container_launch_pending(
-                        session.session_id,
-                        False,
-                    )
-                    self._remote_recovery_inconclusive.discard(session.session_id)
-                    self._remote_recovery_skipped.discard(session.session_id)
-                    if existing is not None:
-                        await self._drop_forward(session.session_id)
-                        self._host_index.remove(session.session_id)
-                        log.info(
-                            "Pruned confirmed-dead remote Session Host for %s",
-                            session.session_id,
+                    if status == "live" and record is not None:
+                        container_target = (
+                            session.target.container
+                            if isinstance(session.target.container, dict)
+                            and session.target.container.get("name")
+                            else None
                         )
-                elif status == "unknown":
-                    self._remote_recovery_skipped.discard(session.session_id)
-                    self._remote_recovery_inconclusive.add(session.session_id)
-                elif status == "missing":
-                    self._release_container_lock(session.session_id)
-                    self._set_container_launch_pending(
-                        session.session_id,
-                        False,
-                    )
-                    self._remote_recovery_inconclusive.discard(session.session_id)
-                    self._remote_recovery_skipped.discard(session.session_id)
-                    if existing is not None:
-                        await self._drop_forward(session.session_id)
-                        self._host_index.remove(session.session_id)
-                        log.info(
-                            "Pruned confirmed-absent remote Session Host "
-                            "authority for %s",
+                        if container_target is not None:
+                            try:
+                                self._acquire_container_lock(
+                                    session.session_id,
+                                    container_target["name"],
+                                )
+                            except Exception:
+                                self._remote_recovery_inconclusive.add(
+                                    session.session_id
+                                )
+                                log.warning(
+                                    "Live container Session Host authority for %s "
+                                    "could not reclaim target ownership",
+                                    session.session_id,
+                                    exc_info=True,
+                                )
+                                continue
+                        self._remote_recovery_inconclusive.discard(session.session_id)
+                        self._remote_recovery_skipped.discard(session.session_id)
+                        if existing is not None:
+                            record.resume_on_reattach = existing.resume_on_reattach
+                        self._host_index.register(record)
+                        if existing is None:
+                            recovered += 1
+                    elif status == "dead":
+                        self._release_container_lock(session.session_id)
+                        self._set_container_launch_pending(
                             session.session_id,
+                            False,
                         )
-                elif status == "skipped":
-                    self._remote_recovery_skipped.add(session.session_id)
+                        self._remote_recovery_inconclusive.discard(session.session_id)
+                        self._remote_recovery_skipped.discard(session.session_id)
+                        if existing is not None:
+                            await self._drop_forward(session.session_id)
+                            self._host_index.remove(session.session_id)
+                            log.info(
+                                "Pruned confirmed-dead remote Session Host for %s",
+                                session.session_id,
+                            )
+                    elif status == "unknown":
+                        self._remote_recovery_skipped.discard(session.session_id)
+                        self._remote_recovery_inconclusive.add(session.session_id)
+                    elif status == "missing":
+                        self._release_container_lock(session.session_id)
+                        self._set_container_launch_pending(
+                            session.session_id,
+                            False,
+                        )
+                        self._remote_recovery_inconclusive.discard(session.session_id)
+                        self._remote_recovery_skipped.discard(session.session_id)
+                        if existing is not None:
+                            await self._drop_forward(session.session_id)
+                            self._host_index.remove(session.session_id)
+                            log.info(
+                                "Pruned confirmed-absent remote Session Host "
+                                "authority for %s",
+                                session.session_id,
+                            )
+                    elif status == "skipped":
+                        self._remote_recovery_skipped.add(session.session_id)
         return recovered
 
     async def _ensure_forward(
@@ -2621,12 +2727,17 @@ class SessionManager:
         if started:
             self._relays[session_id] = started
 
-    async def _stop_relays(self, session_id: str) -> None:
+    async def _stop_relays(self, session_id: str, *, strict: bool = False) -> None:
         """Stop and forget a session's credential-relay supervisors."""
-        relays = self._relays.pop(session_id, [])
-        for relay in relays:
-            with contextlib.suppress(Exception):
+        relays = self._relays.get(session_id, [])
+        for relay in list(relays):
+            if strict:
                 await relay.stop()
+            else:
+                with contextlib.suppress(Exception):
+                    await relay.stop()
+            relays.remove(relay)
+        self._relays.pop(session_id, None)
 
     async def interrupt_relays_for_parity(
         self,
@@ -2991,14 +3102,47 @@ class SessionManager:
             session.target.cwd,
         )
 
-    async def _drop_forward(self, session_id: str) -> None:
+    async def close_frontend_transports(self) -> None:
+        """Fence new work and release owned channels under admission/lifecycle."""
+        self._shutting_down = True
+        failed: list[str] = []
+        for session_id in sorted(set(self._forwards) | set(self._relays)):
+            session = self._sessions.get(session_id)
+            try:
+                async with contextlib.AsyncExitStack() as locks:
+                    if session is not None:
+                        await locks.enter_async_context(session._turn_start_lock)
+                        await locks.enter_async_context(session._lifecycle_lock)
+                    await self._drop_forward(
+                        session_id, strict=True, preserve_ownership=True,
+                    )
+            except Exception:
+                failed.append(session_id)
+                log.warning(
+                    "Failed to close frontend transports for %s",
+                    session_id, exc_info=True,
+                )
+        if failed:
+            raise RuntimeError(
+                "Frontend transport cleanup failed for: " + ", ".join(failed)
+            )
+
+    async def _drop_forward(
+        self, session_id: str, *, strict: bool = False,
+        preserve_ownership: bool = False,
+    ) -> None:
         """Cancel and forget a session's remote-boundary forwards (if any)."""
-        await self._stop_relays(session_id)
-        fwd = self._forwards.pop(session_id, None)
+        await self._stop_relays(session_id, strict=strict)
+        fwd = self._forwards.get(session_id)
         if fwd is not None:
-            with contextlib.suppress(Exception):
+            if strict:
                 await fwd.cancel()
-        self._release_container_lock(session_id)
+            else:
+                with contextlib.suppress(Exception):
+                    await fwd.cancel()
+        self._forwards.pop(session_id, None)
+        if not preserve_ownership:
+            self._release_container_lock(session_id)
 
     async def _reattach_one(
         self,
@@ -3059,7 +3203,8 @@ class SessionManager:
                 with contextlib.suppress(Exception):
                     await sock.close()
 
-        def _settle_dead_child(exit_code: int) -> None:
+        async def _settle_dead_child(exit_code: int) -> None:
+            await self._join_exited_child_prompt(session)
             client_obj = session.client
             if client_obj is not None:
                 client_obj.mark_host_child_exited(exit_code)
@@ -3068,6 +3213,7 @@ class SessionManager:
             )
             session.client = None
             session.status = SessionStatus.STOPPED
+            session.restart_status = None
             self._db.update_session_status(
                 rec.session_id, SessionStatus.STOPPED.value, time.time()
             )
@@ -3112,11 +3258,13 @@ class SessionManager:
             if streams.child_exit_code is not None:
                 client.mark_host_child_exited(streams.child_exit_code)
                 await _close_partial_reattach()
-                _settle_dead_child(streams.child_exit_code)
+                await _settle_dead_child(streams.child_exit_code)
                 return False
             client.adopt_session(session.acp_session_id)
             session.client = client
             session.status = new_status
+            session.restart_status = None
+            session._lifecycle_generation += 1
             self._db.update_session_status(
                 rec.session_id, new_status.value, time.time(), pid=session.pid,
             )
@@ -3136,7 +3284,7 @@ class SessionManager:
                 raise
             if child_exit_code is not None:
                 session.client = client
-                _settle_dead_child(child_exit_code)
+                await _settle_dead_child(child_exit_code)
                 return False
             log.warning(
                 "Failed to reattach session %s to host pid=%s%s",
@@ -3155,9 +3303,12 @@ class SessionManager:
         # nudge it back to work with a single "Resume" now that the frontend is
         # reattached (a bare "Resume" re-orients a Copilot session well).
         if send_resume and self._host_index is not None:
-            self._host_index.set_resume_flag(rec.session_id, False)
             try:
-                await self.submit_prompt(rec.session_id, "Resume")
+                if session.client is None or not session.client.is_running:
+                    raise ConnectionError("Reattached transport dropped before resume nudge")
+                self._host_index.set_resume_flag(rec.session_id, False)
+                # Automatic reattach callers hold turn admission before lifecycle.
+                await self._submit_prompt_locked(rec.session_id, "Resume")
                 log.info(
                     "Sent 'Resume' to reattached session %s "
                     "(turn was graceful-cancelled for redeploy)",
@@ -3188,6 +3339,10 @@ class SessionManager:
         """
         if self._host_index is None:
             return False
+        if self._remote_reap_pending(session.session_id):
+            raise RemoteHostRecoveryPendingError(
+                f"Remote Session Host cleanup is pending for {session.session_id}"
+            )
         if not session.acp_session_id:
             return False
         rec = self._host_index.get(session.session_id)
@@ -3499,66 +3654,64 @@ class SessionManager:
         recovered = 0
         codespace_availability: dict[str, bool] = {}
         now = time.time()
-        for rec in list(self._live_host_records()):
-            session = self._sessions.get(rec.session_id)
+        for rec, session, generation in self._host_candidates():
             if session is None or not session.acp_session_id:
                 continue
-            client = session.client
-            if (
-                client is not None
-                and client.host_child_exit_code is not None
-            ):
-                with contextlib.suppress(Exception):
-                    await client.shutdown()
-                self._reap_host_record(
-                    rec,
-                    "Session Host child exit observed by attached client",
-                )
-                session.client = None
-                session.status = SessionStatus.STOPPED
-                self._db.update_session_status(
-                    rec.session_id, SessionStatus.STOPPED.value, time.time()
-                )
-                if session.event_log:
-                    session.event_log.append("session_state_changed", {
-                        "status": SessionStatus.STOPPED.value,
-                        "host_child_exited": True,
-                        "exit_code": client.host_child_exit_code,
-                    })
+            if not self._background_recovery_allowed(session):
                 continue
-            # A live, running client needs nothing; surface a stall and move on.
-            if client is not None and client.is_running:
-                if session.liveness_state(now) == "stalled":
-                    log.warning(
-                        "Session %s stalled (channel up, no output) -- "
-                        "surfaced, not reattached", rec.session_id,
+            # Skip sessions owned by an explicit lifecycle operation this pass.
+            if session._turn_start_lock.locked() or session._lifecycle_lock.locked():
+                continue
+            async with session._turn_start_lock, session._lifecycle_lock:
+                if not self._host_candidate_current(rec, session, generation):
+                    continue
+                client = session.client
+                if (
+                    client is not None
+                    and client.host_child_exit_code is not None
+                ):
+                    await self._join_exited_child_prompt(session)
+                    with contextlib.suppress(Exception):
+                        await client.shutdown()
+                    self._reap_host_record(
+                        rec,
+                        "Session Host child exit observed by attached client",
                     )
-                continue
-            # Transport is down. Only resume if the child is still there; a dead
-            # child is a real end, left to normal teardown/GC.
-            if not self._rec_child_alive(rec):
-                continue
-            # Respect version-mux: never drive a host this build can't speak to.
-            plan = plan_host(
-                protocol_version=rec.protocol_version,
-                child_alive=True,
-                age_seconds=(now - rec.created_at) if rec.created_at else None,
-                stale_reap_seconds=self._session_host_stale_reap_seconds,
-            )
-            if plan.disposition is not HostDisposition.REATTACH:
-                continue
-            # Preserve a RUNNING turn's status so its replayed buffered frames
-            # keep flowing; otherwise land it IDLE and drivable.
-            keep = (SessionStatus.RUNNING
-                    if session.status == SessionStatus.RUNNING
-                    else SessionStatus.IDLE)
-            # Same in-flight-resume race as the startup reattach path (see
-            # reattach_session_hosts): skip this session for this pass rather
-            # than race a concurrent resume_session()/lifecycle operation that
-            # already holds the lock.
-            if session._lifecycle_lock.locked():
-                continue
-            async with session._lifecycle_lock:
+                    session.client = None
+                    session.status = SessionStatus.STOPPED
+                    session.restart_status = None
+                    self._db.update_session_status(
+                        rec.session_id, SessionStatus.STOPPED.value, time.time()
+                    )
+                    if session.event_log:
+                        session.event_log.append("session_state_changed", {
+                            "status": SessionStatus.STOPPED.value,
+                            "host_child_exited": True,
+                            "exit_code": client.host_child_exit_code,
+                        })
+                    continue
+                # A live, running client needs nothing; surface a stall and move on.
+                if client is not None and client.is_running:
+                    if session.liveness_state(now) == "stalled":
+                        log.warning(
+                            "Session %s stalled (channel up, no output) -- "
+                            "surfaced, not reattached", rec.session_id,
+                        )
+                    continue
+                if not self._rec_child_alive(rec):
+                    continue
+                plan = plan_host(
+                    protocol_version=rec.protocol_version,
+                    child_alive=True,
+                    age_seconds=(now - rec.created_at) if rec.created_at else None,
+                    stale_reap_seconds=self._session_host_stale_reap_seconds,
+                )
+                if plan.disposition is not HostDisposition.REATTACH:
+                    continue
+                # Preserve a live turn while buffered frames replay.
+                keep = (SessionStatus.RUNNING
+                        if session.status == SessionStatus.RUNNING
+                        else SessionStatus.IDLE)
                 if (
                     getattr(rec, "boundary", "local") == "codespace"
                     and not await self._codespace_host_available(
@@ -3639,7 +3792,12 @@ class SessionManager:
                 if (liveness == "stalled" and threshold > 0
                         and silent_for > threshold):
                     try:
-                        await self.interrupt_turn(sid)
+                        await self.interrupt_turn(sid, expected_task=task)
+                        if (
+                            session.status == SessionStatus.STOPPED
+                            or session._prompt_task is not task
+                        ):
+                            continue
                         healed += 1
                         log.warning(
                             "Interrupted live-stalled RUNNING session %s "
@@ -3677,7 +3835,7 @@ class SessionManager:
                 if not (threshold > 0 and silent_for > threshold):
                     continue
             try:
-                await self.resync_session(sid)
+                await self.resync_session(sid, background=True)
                 healed += 1
                 log.warning(
                     "Reconciled wedged RUNNING session %s to idle "
@@ -3715,25 +3873,20 @@ class SessionManager:
 
         Kills the **child first** -- a POSIX SIGTERM to the host does not run its
         cleanup, so the child could otherwise orphan -- then the host, then
-        removes the record. Cross-platform via ``osutil.kill_pid`` (on Windows
+        removes the record after confirmed termination. Remote authority remains
+        indexed until its asynchronous reap succeeds. Cross-platform via
+        ``osutil.kill_pid`` (on Windows
         ``taskkill /T`` collects the process tree, and the host's kill-on-close
         job also takes the child). Used for both the explicit-terminate reap
         (#1786) and the version-mux stranded/forced reap.
         """
-        from .session_host.osutil import kill_pid, reap_zombie
-
         log.info(
             "Reaping Session Host for session %s (host pid=%s, child pid=%s): %s",
             rec.session_id, rec.host_pid, rec.child_pid, reason,
         )
         boundary = getattr(rec, "boundary", "local")
         if boundary == "local":
-            kill_pid(rec.child_pid, force=True)
-            kill_pid(rec.host_pid, force=True)
-            # Clear the zombie a host we parented leaves behind (no-op for a
-            # reattached host that init reaps, or on Windows).
-            reap_zombie(rec.child_pid)
-            reap_zombie(rec.host_pid)
+            self._terminate_local_host_processes(rec)
         else:
             # Remote (CodeSpace / mesh) boundary: host_pid/child_pid live on the
             # FAR side -- killing those pid numbers locally would hit unrelated
@@ -3744,6 +3897,22 @@ class SessionManager:
                 release_container_lock=False,
             )
             self._schedule_remote_reap(rec, reason)
+            return
+        self._forget_host_record(rec)
+
+    @staticmethod
+    def _terminate_local_host_processes(rec: Any) -> None:
+        """Blocking process teardown only; safe to offload without manager state."""
+        from .session_host.osutil import kill_pid, reap_zombie
+
+        kill_pid(rec.child_pid, force=True)
+        kill_pid(rec.host_pid, force=True)
+        reap_zombie(rec.child_pid)
+        reap_zombie(rec.host_pid)
+
+    def _forget_host_record(self, rec: Any) -> None:
+        """Remove reaped host metadata on the lifecycle event loop."""
+        self._pending_host_launches.pop(rec.session_id, None)
         with contextlib.suppress(Exception):
             self._host_index.remove(rec.session_id)
         # #4272 bridge-lock: best-effort clear the lattice lock at teardown.
@@ -3783,12 +3952,13 @@ class SessionManager:
                     proc.kill()
 
     def _schedule_remote_reap(self, rec: Any, reason: str) -> None:
-        """Fire-and-forget a remote ``kill`` of a detached far-side Host.
+        """Schedule a tracked remote ``kill`` of a detached far-side Host.
 
         Uses the durable endpoint's SSH config (no live Spawner needed) to run a
         one-shot ``kill`` over the tunnel. Best-effort: if there is no running
         loop or the exec fails, the detached Host lingers until the CodeSpace
-        stops -- never fatal, and never touches a local process.
+        stops -- never fatal, and never touches a local process. An explicit
+        stop awaits this session's scheduled reaps before acknowledging.
         """
         endpoint = getattr(rec, "endpoint", None) or {}
         if not endpoint:
@@ -3797,9 +3967,24 @@ class SessionManager:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
-        task = loop.create_task(self._remote_reap(rec, endpoint))
+        from .session_teardown import reap_remote_record
+
+        session = self._sessions.get(rec.session_id)
+        task = loop.create_task(reap_remote_record(
+            self, copy.deepcopy(rec), session=session,
+            generation=session._lifecycle_generation if session is not None else None,
+        ))
         self._remote_reap_tasks.add(task)
-        task.add_done_callback(self._remote_reap_tasks.discard)
+        owned = self._remote_reaps_by_session.setdefault(rec.session_id, set())
+        owned.add(task)
+
+        def settled(completed: asyncio.Task[bool]) -> None:
+            self._remote_reap_tasks.discard(completed)
+            owned.discard(completed)
+            if not owned:
+                self._remote_reaps_by_session.pop(rec.session_id, None)
+
+        task.add_done_callback(settled)
 
     async def _remote_reap(self, rec: Any, endpoint: dict) -> bool:
         from ssh_manager import ConnectionManager
@@ -3873,7 +4058,7 @@ class SessionManager:
                 self._release_container_lock(rec.session_id)
         return confirmed_dead
 
-    def sweep_stranded_hosts(self) -> int:
+    async def sweep_stranded_hosts(self) -> int:
         """Reap stranded incompatible Session Hosts that are now reapable.
 
         A periodic counterpart to the startup-time gate in
@@ -3886,22 +4071,38 @@ class SessionManager:
         """
         if self._host_index is None:
             return 0
+        from .session_ownership import finish_owned
         from .session_host.version_mux import HostDisposition, plan_host
 
         self._prune_dead_hosts()
         now = time.time()
         reaped = 0
-        for rec in self._live_host_records():
-            plan = plan_host(
-                protocol_version=rec.protocol_version,
-                child_alive=self._rec_child_alive(rec),
-                age_seconds=(now - rec.created_at) if rec.created_at else None,
-                stale_reap_seconds=self._session_host_stale_reap_seconds,
-            )
-            if plan.disposition in (HostDisposition.REAP_STOPPED,
-                                    HostDisposition.FORCE_REAP):
-                self._reap_host_record(rec, plan.reason)
-                reaped += 1
+        for rec, session, generation in self._host_candidates():
+            async with contextlib.AsyncExitStack() as locks:
+                if session is not None:
+                    if session._turn_start_lock.locked() or session._lifecycle_lock.locked():
+                        continue
+                    await locks.enter_async_context(session._turn_start_lock)
+                    await locks.enter_async_context(session._lifecycle_lock)
+                if not self._host_candidate_current(rec, session, generation):
+                    continue
+                plan = plan_host(
+                    protocol_version=rec.protocol_version,
+                    child_alive=self._rec_child_alive(rec),
+                    age_seconds=(now - rec.created_at) if rec.created_at else None,
+                    stale_reap_seconds=self._session_host_stale_reap_seconds,
+                )
+                if plan.disposition in (HostDisposition.REAP_STOPPED,
+                                        HostDisposition.FORCE_REAP):
+                    if getattr(rec, "boundary", "local") == "local":
+                        async def reap_local() -> None:
+                            await asyncio.to_thread(self._terminate_local_host_processes, rec)
+                            self._forget_host_record(rec)
+
+                        await finish_owned(reap_local())
+                    else:
+                        self._reap_host_record(rec, plan.reason)
+                    reaped += 1
         return reaped
 
     # -- Subscriber tracking + idle reaper (#1826) ----------------------------
@@ -4054,7 +4255,7 @@ class SessionManager:
             env_overrides: Request-owned environment overrides already merged
                 into ``target.env`` by the route.
         """
-        if self._draining:
+        if self._draining or self._shutting_down:
             raise DaemonDrainingError("session")
         from .protocol import FAILED_ACP_HANDSHAKE_FAULT
 
@@ -4145,6 +4346,8 @@ class SessionManager:
                     agent_name,
                 )
                 await self.end_session(existing.session_id, force=True)
+                if self._shutting_down:
+                    raise DaemonDrainingError("session")
                 existing = self._find_active_session(ws_key)
             if (
                 existing is not None
@@ -4210,19 +4413,14 @@ class SessionManager:
 
         async def _cleanup_failed_process_launch() -> None:
             """Reap a process-owned launch before recording terminal failure."""
+            if agent_proc is None and session.client is None:
+                return
+            from .session_ownership import cleanup_failed_resume
+
+            pid = agent_proc.pid if agent_proc is not None else None
+            await cleanup_failed_resume(self, session, client)
             if agent_proc is None:
                 return
-            pid = agent_proc.pid
-            if client is not None:
-                with contextlib.suppress(Exception):
-                    await client.shutdown()
-            # AcpClient.shutdown owns this same process, but retain the
-            # AgentProcess whole-tree kill as a fallback if shutdown failed or
-            # returned before a wrapper/SSH descendant exited.
-            if agent_proc.alive:
-                with contextlib.suppress(Exception):
-                    await agent_proc.kill()
-            session.client = None
             session.event_log.append("failed_launch_cleanup", {
                 "pid": pid,
                 "reaped": not agent_proc.alive,
@@ -4233,6 +4431,11 @@ class SessionManager:
                 pid,
                 agent_proc.alive,
             )
+
+        # No await separates publishing the STARTING row from taking this lock.
+        # A stop must wait for initial launch just as it waits for reattachment.
+        await session._lifecycle_lock.acquire()
+        from .session_ownership import finish_owned, settle_cancelled_resume, spawn_owned
 
         try:
             cs_target = None
@@ -4577,12 +4780,12 @@ class SessionManager:
                 # ThomasMichon/copilot-extensions#566), so this is their only
                 # path. It is NOT reachable for a local target. Emits per-stage
                 # checkpoints (auth-env, ssh-connect, worktree) into the event log.
-                agent_proc = await spawn(
+                agent_proc = await spawn_owned(session, spawn(
                     target,
                     tracker=tracker,
                     connect_timeout=connect_timeout,
                     session_id=session_id,
-                )
+                ))
 
                 # Stage 7: launch + initialize Copilot in ACP mode. Should be
                 # fast; bound it so a hung launch fails fast.
@@ -4700,6 +4903,12 @@ class SessionManager:
                         target.worktree_id, acp_sid, pid=session.pid,
                         worktree_dir=target.cwd,
                     )
+        except asyncio.CancelledError:
+            await finish_owned(
+                settle_cancelled_resume(self, session, client, trigger="start_cancelled"),
+                propagate_cancel=False,
+            )
+            raise
         except ConnectError as exc:
             # Structured failure: we know exactly which stage failed and
             # whether a retry could help -- never an opaque "agent died".
@@ -4761,6 +4970,8 @@ class SessionManager:
             self._mark_session_failed(session, trigger="start_exception")
             session.event_log.append("error", {"message": str(exc)})
             log.error("Failed to start session %s: %s", session_id, exc, exc_info=True)
+        finally:
+            session._lifecycle_lock.release()
 
         session.touch()
         return session
@@ -4891,450 +5102,39 @@ class SessionManager:
         if not session:
             raise KeyError(f"Session {session_id} not found")
 
-        async with session._lifecycle_lock:
-            if session.status != SessionStatus.STOPPED:
-                raise ValueError(
-                    f"Session {session_id} is {session.status.value}, not stopped"
-                )
-            if not session.acp_session_id and not allow_recreate:
-                raise RuntimeError(
-                    f"Session {session_id} has no ACP session ID -- cannot resume"
-                )
-
-            # Prefer reattaching to a surviving Session Host (adopt the running
-            # child + its in-flight turn) over a fresh child + load_session, so a
-            # resume after a transport drop (laptop sleep / tunnel flap / SSH
-            # sever) recovers the SAME work instead of abandoning a mid-turn tool
-            # call (#145). Falls through to the fresh-child path below when no
-            # live host survives (a genuinely dead child).
-            #
-            # The provider target refresh is deferred until AFTER this reattach
-            # attempt. `_try_reattach_live_host` (and the `_recover_remote_host_
-            # records` it drives) inspects and dials the far side using the
-            # target already persisted on this session, so it needs no
-            # refreshed provider data -- refreshing here provides no benefit to
-            # reattach. Refreshing eagerly used to abort resume outright (and so
-            # permanently block reattach) whenever the resolver could not yet
-            # resolve the agent -- e.g. immediately after a daemon restart before
-            # providers finish loading, or for a legacy session that predates
-            # request-override provenance -- even though a perfectly
-            # reattachable Session Host was waiting on the other end.
-            if await self._try_reattach_live_host(session):
-                log.info(
-                    "Session %s (%s) resumed by reattaching to its live "
-                    "Session Host (no respawn)", session_id, session.name,
-                )
-                session.touch()
-                return session
-
-            await self._refresh_provider_target(session)
-
-            session.status = SessionStatus.STARTING
-            self._db.update_session_status(
-                session_id, SessionStatus.STARTING.value, time.time()
+        async with session._turn_start_lock:
+            resumed = await self._resume_session_admitted(
+                session, permission_callback, allow_recreate=allow_recreate,
             )
+            if drain and resumed.status == SessionStatus.IDLE:
+                await self._drain_pending_prompts_locked(resumed)
+            return resumed
 
-            def on_acp_event(event_type: str, data: dict[str, Any]) -> None:
-                if session.event_log:
-                    session.event_log.append(event_type, data)
-                self._capture_progress(session, event_type, data)
-                if event_type == "usage_update":
-                    self._handle_usage_update(session, data)
+    async def _resume_session_admitted(
+        self,
+        session: Session,
+        permission_callback: Any | None = None,
+        *,
+        allow_recreate: bool = False,
+    ) -> Session:
+        """Delegate to the typed session_resume implementation."""
+        from .session_resume import resume_session_admitted
 
-            client: AcpClient | None = None
-            from .session_host.spawner import RemoteSpawnCleanupPendingError
+        return await resume_session_admitted(
+            self, session, permission_callback, allow_recreate=allow_recreate,
+        )
 
-            for attempt in range(1, _MAX_RESUME_ROUNDS + 1):
-                client = None
-                try:
-                    load_existing = bool(session.acp_session_id)
-                    host_result = await self._resume_via_new_remote_host(
-                        session,
-                        on_acp_event=on_acp_event,
-                        permission_callback=permission_callback,
-                        load_existing=load_existing,
-                    )
-                    resumed_acp_id = (
-                        host_result[1] if host_result is not None else None
-                    )
-                    client = host_result[0] if host_result is not None else None
-                    if client is None:
-                        agent_proc = await spawn(session.target)
-                        client = AcpClient(
-                            on_event=on_acp_event,
-                            on_permission=permission_callback,
-                            model_override=session.model_override,
-                            effort_override=session.effort_override,
-                        )
-                        if permission_callback:
-                            client.auto_approve = False
-                        # Bound each round so a stalled Copilot ACP launch (the
-                        # "Resuming…"/extension-reload race, #1468) fails fast and
-                        # we re-roll, rather than hanging in STARTING.
-                        await asyncio.wait_for(
-                            client.start(agent_proc.proc),
-                            timeout=self._timeouts.session_start,
-                        )
-                        if session.acp_session_id:
-                            await asyncio.wait_for(
-                                client.load_session(
-                                    cwd=(
-                                        session.target.cwd
-                                        or _default_cwd(session.target)
-                                    ),
-                                    session_id=session.acp_session_id,
-                                ),
-                                timeout=self._timeouts.session_new,
-                            )
-                            resumed_acp_id = session.acp_session_id
-                        else:
-                            resumed_acp_id = await asyncio.wait_for(
-                                client.new_session(
-                                    cwd=(
-                                        session.target.cwd
-                                        or _default_cwd(session.target)
-                                    ),
-                                    mcp_servers=session.mcp_servers,
-                                ),
-                                timeout=self._timeouts.session_new,
-                            )
+    async def resync_session(self, session_id: str, *, background: bool = False) -> int:
+        """Delegate to the typed session_resume implementation."""
+        from .session_resume import resync_session
 
-                    if resumed_acp_id and (
-                        resumed_acp_id != session.acp_session_id
-                    ):
-                        session.acp_session_id = resumed_acp_id
-                        self._db.update_session_acp_id(
-                            session_id,
-                            resumed_acp_id,
-                        )
-
-                    session.client = client
-                    session.status = SessionStatus.IDLE
-                    self._db.update_session_status(
-                        session_id, SessionStatus.IDLE.value, time.time(),
-                        pid=session.pid,
-                    )
-                    if session.event_log:
-                        session.event_log.append("session_state_changed", {
-                            "status": SessionStatus.IDLE.value,
-                            "resumed": True,
-                            "acp_session_id": session.acp_session_id,
-                            "resume_attempt": attempt,
-                        })
-                    log.info(
-                        "Session %s (%s) resumed, pid=%s (attempt %d/%d)",
-                        session_id, session.name, session.pid,
-                        attempt, _MAX_RESUME_ROUNDS,
-                    )
-                    break  # success -- leave the ladder
-                except Exception as exc:
-                    if isinstance(exc, RemoteSpawnCleanupPendingError):
-                        session.status = SessionStatus.STOPPED
-                        self._db.update_session_status(
-                            session_id,
-                            SessionStatus.STOPPED.value,
-                            time.time(),
-                        )
-                        if session.event_log:
-                            session.event_log.append(
-                                "remote_launch_cleanup_pending",
-                                {"message": str(exc)},
-                            )
-                        raise
-                    # Capture the child's startup stderr tail BEFORE tearing the
-                    # client down, so the retry marker records why it stalled.
-                    stderr_tail = client.stderr_tail() if client else ""
-                    # Many stall exceptions (notably ``asyncio.TimeoutError()``)
-                    # have an empty ``str()`` -- keep the type so markers/logs are
-                    # interpretable.
-                    exc_desc = f"{type(exc).__name__}: {exc}".rstrip(": ")
-                    # Stop the wedged child before the next round (the "stop" in
-                    # stop->resume); re-rolls the launch against the SAME ACP
-                    # session, preserving prior-turn context.
-                    if client:
-                        with contextlib.suppress(Exception):
-                            await client.shutdown()
-                    session.client = None
-                    if session.event_log:
-                        session.event_log.append("acp_resume_retry", {
-                            "attempt": attempt,
-                            "of": _MAX_RESUME_ROUNDS,
-                            "error": exc_desc,
-                            "stderr_tail": stderr_tail,
-                            "will_retry": attempt < _MAX_RESUME_ROUNDS,
-                        })
-                    if attempt < _MAX_RESUME_ROUNDS:
-                        log.warning(
-                            "Resume attempt %d/%d for session %s failed (%s); "
-                            "stopping the wedged child and re-rolling",
-                            attempt, _MAX_RESUME_ROUNDS, session_id, exc_desc,
-                        )
-                        continue
-                    # Ladder exhausted.
-                    if not allow_recreate:
-                        # No fresh-session fallback (e.g. an explicit `resume`):
-                        # surface the failure rather than silently drop context.
-                        session.status = SessionStatus.STOPPED
-                        self._db.update_session_status(
-                            session_id, SessionStatus.STOPPED.value, time.time()
-                        )
-                        if session.event_log:
-                            session.event_log.append("error", {
-                                "message": f"Resume failed after "
-                                           f"{_MAX_RESUME_ROUNDS} attempts: "
-                                           f"{exc_desc}",
-                            })
-                        log.error(
-                            "Failed to resume session %s after %d attempts: %s",
-                            session_id, _MAX_RESUME_ROUNDS, exc_desc,
-                        )
-                        raise
-                    # allow_recreate: fall through to the in-place end+create
-                    # (fresh ACP session, prior-turn context dropped) below.
-                    log.warning(
-                        "Resume ladder exhausted for session %s after %d "
-                        "attempts (%s); falling back to a fresh ACP session "
-                        "(end+create, prior-turn context dropped)",
-                        session_id, _MAX_RESUME_ROUNDS, exc_desc,
-                    )
-                    break
-
-            # End+create last resort (opt-in, ladder exhausted). The stop->resume
-            # rounds above all failed to reattach the persisted ACP session; as a
-            # final recovery, end it and create a FRESH ACP session in place --
-            # SAME bridge session id (delivery cursor / affinity intact), new
-            # (empty) ACP session -- so a wedged CodeSpace resume still yields a
-            # working session, trading prior-turn context for availability
-            # (#1468). Only reached when allow_recreate and no round succeeded.
-            if session.status != SessionStatus.IDLE:
-                recreate_client: AcpClient | None = None
-                try:
-                    host_result = await self._resume_via_new_remote_host(
-                        session,
-                        on_acp_event=on_acp_event,
-                        permission_callback=permission_callback,
-                        load_existing=False,
-                    )
-                    if host_result is not None:
-                        recreate_client, new_acp = host_result
-                    else:
-                        agent_proc = await spawn(session.target)
-                        recreate_client = AcpClient(
-                            on_event=on_acp_event,
-                            on_permission=permission_callback,
-                            model_override=session.model_override,
-                            effort_override=session.effort_override,
-                        )
-                        if permission_callback:
-                            recreate_client.auto_approve = False
-                        await asyncio.wait_for(
-                            recreate_client.start(agent_proc.proc),
-                            timeout=self._timeouts.session_start,
-                        )
-                        new_acp = await asyncio.wait_for(
-                            recreate_client.new_session(
-                                cwd=(
-                                    _venue_workspace_cwd(session.target)
-                                    or session.target.cwd
-                                    or _default_cwd(session.target)
-                                ),
-                                mcp_servers=session.mcp_servers,
-                            ),
-                            timeout=self._timeouts.session_new,
-                        )
-                    old_acp = session.acp_session_id
-                    session.client = recreate_client
-                    session.acp_session_id = new_acp
-                    session.status = SessionStatus.IDLE
-                    if session.event_log:
-                        session.event_log.set_telemetry_identity(
-                            acp_session_id=new_acp,
-                            worktree_id=session.target.worktree_id,
-                        )
-                    # The fresh ACP session starts EMPTY -- reset context-usage /
-                    # handoff state so stale "critical" usage or a pending
-                    # context-pressure handoff from the dropped session can't
-                    # misfire against the new (empty) session (review on #1468).
-                    session.context_size = None
-                    session.context_used = None
-                    session._crossed_thresholds = set()
-                    session._handoff_pending = False
-                    self._db.update_session_acp_id(session_id, new_acp)
-                    self._db.update_session_status(
-                        session_id, SessionStatus.IDLE.value, time.time(),
-                        pid=session.pid,
-                    )
-                    if session.event_log:
-                        # Durable lifecycle transition for SSE/telemetry consumers
-                        # (the recreate is still a resume-to-IDLE, just onto a
-                        # fresh ACP session).
-                        session.event_log.append("session_state_changed", {
-                            "status": SessionStatus.IDLE.value,
-                            "resumed": True,
-                            "recreated": True,
-                            "acp_session_id": new_acp,
-                        })
-                        session.event_log.append("acp_resume_recreated", {
-                            "old_acp_session_id": old_acp,
-                            "new_acp_session_id": new_acp,
-                            "context_dropped": True,
-                        })
-                    log.warning(
-                        "Session %s (%s) recreated with a fresh ACP session %s "
-                        "(was %s) after the resume ladder was exhausted -- "
-                        "prior-turn context dropped",
-                        session_id, session.name, new_acp, old_acp,
-                    )
-                except Exception as exc:
-                    if recreate_client:
-                        with contextlib.suppress(Exception):
-                            await recreate_client.shutdown()
-                    session.client = None
-                    session.status = SessionStatus.STOPPED
-                    self._db.update_session_status(
-                        session_id, SessionStatus.STOPPED.value, time.time()
-                    )
-                    exc_desc = f"{type(exc).__name__}: {exc}".rstrip(": ")
-                    if session.event_log:
-                        session.event_log.append("error", {
-                            "message": f"Resume + recreate failed: {exc_desc}",
-                        })
-                    log.error(
-                        "Resume + recreate failed for session %s: %s",
-                        session_id, exc_desc,
-                    )
-                    raise
-
-        session.touch()
-        # Queue outlived the restart? Deliver it now that the session is IDLE.
-        # Outside the lifecycle lock (drain submits a fresh turn). Skipped by the
-        # auto-resume-from-submit path (drain=False) to avoid a double turn.
-        if drain and session.status == SessionStatus.IDLE:
-            await self._drain_pending_prompts(session)
-        return session
-
-    async def resync_session(self, session_id: str) -> int:
-        """Rebuild a session's event log from the agent's authoritative replay.
-
-        Reattaches to the persisted ACP session and captures the full
-        conversation history the agent streams back during load (per the ACP
-        spec), then replaces the event log with it. This heals logs that were
-        truncated by a mid-session disconnect (e.g. an oversized ACP frame
-        that crashed the read loop): the agent always holds the complete
-        history, so its replay is the source of truth.
-
-        Idempotent: resyncing an already-complete session rebuilds the same
-        log. Leaves the session IDLE with a live client, ready for prompts.
-        Returns the number of events in the rebuilt log.
-
-        A ``RUNNING`` status only blocks resync while a turn is *actually* live
-        in this daemon. A **wedged** session -- status left at ``RUNNING`` with
-        no live prompt task (a turn whose runner already exited without a
-        terminal event, or a session rehydrated after a daemon restart) -- is
-        exactly what needs healing, so it is allowed through; only a genuinely
-        live turn is refused (issue #22 / #2385).
-        """
-        session_id = self._resolve_ref(session_id) or session_id
-        session = self._sessions.get(session_id)
-        if not session:
-            raise KeyError(f"Session {session_id} not found")
-        if not session.acp_session_id:
-            raise RuntimeError(
-                f"Session {session_id} has no ACP session ID -- cannot resync"
-            )
-
-        async with session._lifecycle_lock:
-            if session.status == SessionStatus.RUNNING:
-                turn_live = (
-                    session._prompt_task is not None
-                    and not session._prompt_task.done()
-                )
-                if turn_live:
-                    raise ValueError(
-                        f"Session {session_id} is running a live turn "
-                        "-- cannot resync"
-                    )
-                # Wedged RUNNING: no live turn to protect. Cancel any lingering
-                # (already-finished) task handle and heal the stuck state.
-                log.warning(
-                    "Resyncing wedged RUNNING session %s (no live turn)",
-                    session_id,
-                )
-                if session._prompt_task is not None:
-                    with contextlib.suppress(Exception):
-                        session._prompt_task.cancel()
-
-            # Tear down any live client so we can reattach cleanly.
-            if session.client:
-                with contextlib.suppress(Exception):
-                    await session.client.shutdown()
-                session.client = None
-
-            session.status = SessionStatus.STARTING
-            self._db.update_session_status(
-                session_id, SessionStatus.STARTING.value, time.time()
-            )
-
-            captured: list[tuple[str, dict[str, Any]]] = []
-
-            def on_capture(event_type: str, data: dict[str, Any]) -> None:
-                captured.append((event_type, data))
-                if event_type == "usage_update":
-                    self._handle_usage_update(session, data)
-
-            client: AcpClient | None = None
-            try:
-                agent_proc = await spawn(session.target)
-                client = AcpClient(
-                    on_event=on_capture,
-                    model_override=session.model_override,
-                    effort_override=session.effort_override,
-                )
-                await client.start(agent_proc.proc)
-                # suppress_replay=False -> the replayed history is captured.
-                await client.load_session(
-                    cwd=session.target.cwd or _default_cwd(session.target),
-                    session_id=session.acp_session_id,
-                    suppress_replay=False,
-                )
-
-                count = 0
-                if session.event_log:
-                    count = session.event_log.rebuild(captured)
-                    session.event_log.append("session_state_changed", {
-                        "status": SessionStatus.IDLE.value,
-                        "resynced": True,
-                        "acp_session_id": session.acp_session_id,
-                    })
-
-                session.client = client
-                session.status = SessionStatus.IDLE
-                self._db.update_session_status(
-                    session_id, SessionStatus.IDLE.value, time.time(),
-                    pid=session.pid,
-                )
-                log.info(
-                    "Session %s (%s) resynced: rebuilt %d events",
-                    session_id, session.name, count,
-                )
-            except Exception as exc:
-                if client:
-                    with contextlib.suppress(Exception):
-                        await client.shutdown()
-                session.client = None
-                session.status = SessionStatus.STOPPED
-                self._db.update_session_status(
-                    session_id, SessionStatus.STOPPED.value, time.time()
-                )
-                log.error("Failed to resync session %s: %s", session_id, exc)
-                raise
-
-        session.touch()
-        return count
+        return await resync_session(
+            self, session_id, background=background,
+        )
 
     async def submit_prompt(self, session_id: str, prompt: str) -> int:
         """Atomically start a turn against conditional idle teardown."""
-        if self._draining:
+        if self._draining or self._shutting_down:
             raise DaemonDrainingError("turn")
         resolved = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(resolved)
@@ -5356,7 +5156,7 @@ class SessionManager:
         automatically re-spawned and the session resumed before
         delivering the prompt.
         """
-        if self._draining:
+        if self._draining or self._shutting_down:
             raise DaemonDrainingError("turn")
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
@@ -5385,11 +5185,10 @@ class SessionManager:
             # end+create last resort: if the stop->resume ladder is exhausted,
             # recreate a fresh ACP session in place rather than failing the send
             # (#1468).
-            await self.resume_session(
-                session_id, drain=False, allow_recreate=True
-            )
+            await self._resume_session_admitted(session, allow_recreate=True)
             # resume_session sets status to IDLE and attaches a new client
 
+        session._lifecycle_generation += 1
         turn_index = session.turn_count
         session.turn_count += 1
         now = time.time()
@@ -5491,8 +5290,11 @@ class SessionManager:
                 prompt,
                 caller_id=caller_id,
             )
+            kick_generation = session._lifecycle_generation
         if kick_session is not None:
-            await self._kick_pending_drain(kick_session)
+            await self._kick_pending_drain(
+                kick_session, expected_generation=kick_generation,
+            )
         return result
 
     async def _submit_or_queue_prompt_locked(
@@ -5519,7 +5321,7 @@ class SessionManager:
                 and self._auto_handoff_eligible(session)):
             session._handoff_pending = False
             successor = await self.handoff_session(
-                session_id, reason="context-pressure-prompt"
+                session_id, reason="context-pressure-prompt", _turn_admission_owned=True,
             )
             return (
                 await self.submit_or_queue_prompt(
@@ -5536,7 +5338,7 @@ class SessionManager:
         queue_nonempty = self._db.count_pending_prompts(session_id) > 0
         # During a redeploy drain we must not start a new turn, but we can still
         # persist the follow-up -- it delivers after the restart resumes.
-        must_queue = turn_live or queue_nonempty or self._draining
+        must_queue = turn_live or queue_nonempty or self._draining or self._shutting_down
 
         if not must_queue:
             turn_index = await self._submit_prompt_locked(session_id, prompt)
@@ -5568,7 +5370,9 @@ class SessionManager:
         # mid-drain -- kick delivery now, resuming a recoverable STOPPED session
         # if needed. A live turn's settle tail (or the post-restart resume) will
         # drain otherwise.
-        kick_session = session if not turn_live and not self._draining else None
+        kick_session = (
+            session if not turn_live and not self._draining and not self._shutting_down else None
+        )
         return (
             {
                 "queued": True,
@@ -5579,7 +5383,9 @@ class SessionManager:
             kick_session,
         )
 
-    async def _kick_pending_drain(self, session: Session) -> None:
+    async def _kick_pending_drain(
+        self, session: Session, *, expected_generation: int,
+    ) -> None:
         """Start draining a queue when no turn-settle will do it for us.
 
         For an IDLE session with a live client, drain directly. For a
@@ -5589,12 +5395,21 @@ class SessionManager:
         queued for the next resume/settle, never lost.
         """
         try:
-            if (session.status == SessionStatus.IDLE
-                    and session.client and session.client.is_running):
-                await self._drain_pending_prompts(session)
-            elif (session.status == SessionStatus.STOPPED
-                    and session.acp_session_id):
-                await self.resume_session(session.session_id)
+            async with session._turn_start_lock:
+                if (
+                    self._sessions.get(session.session_id) is not session
+                    or session._lifecycle_generation != expected_generation
+                    or self._draining
+                    or self._shutting_down
+                ):
+                    return
+                if (session.status == SessionStatus.IDLE
+                        and session.client and session.client.is_running):
+                    await self._drain_pending_prompts_locked(session)
+                elif (session.status == SessionStatus.STOPPED
+                        and session.acp_session_id):
+                    await self._resume_session_admitted(session)
+                    await self._drain_pending_prompts_locked(session)
         except Exception as exc:
             log.warning(
                 "Kick-drain for session %s failed (queue preserved): %s",
@@ -5890,6 +5705,14 @@ class SessionManager:
         for session in list(self._sessions.values()):
             await self._notify_host_reapable(session)
 
+    @staticmethod
+    async def _join_exited_child_prompt(session: Session) -> None:
+        """Join the old driver before publishing authoritative child-exit state."""
+        task = session._prompt_task
+        if task is not None and task is not asyncio.current_task() and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
     async def _quiesce_session(
         self, session: Session, *, cancel_turn: bool = True
     ) -> None:
@@ -5931,6 +5754,9 @@ class SessionManager:
                     session.session_id, exc_info=True,
                 )
             session.client = None
+        from .session_ownership import cleanup_owned_process
+
+        await cleanup_owned_process(session)
         # Clean up unused worktrees (0-turn sessions from crash-loops)
         try:
             await _cleanup_worktree(session.target, session.turn_count)
@@ -5940,7 +5766,9 @@ class SessionManager:
                 session.session_id, exc_info=True,
             )
 
-    async def interrupt_turn(self, session_id: str) -> "Session":
+    async def interrupt_turn(
+        self, session_id: str, *, expected_task: asyncio.Task | None = None,
+    ) -> "Session":
         """Interrupt the in-flight turn, leaving the session alive and idle.
 
         Sends an ACP cancel to the active prompt so the current turn stops and
@@ -5959,24 +5787,19 @@ class SessionManager:
         if not session:
             raise KeyError(f"Session {session_id} not found")
 
-        task = session._prompt_task
-        if (session.status != SessionStatus.RUNNING
-                or task is None or task.done()):
-            # Nothing live to interrupt -- return the session as-is.
-            return session
-
-        # Operator explicitly cancelled this turn: retire its durable queue too,
-        # BEFORE the runner settles IDLE (whose tail would otherwise drain it).
-        # Auto-firing a batch of queued follow-ups right after a manual
-        # interrupt would surprise the operator -- mirror NF's "queue cleared if
-        # cancelled" (#4114). Cleared before the ACP cancel so the drain that
-        # runs on settle finds nothing.
-        self._clear_pending_queue(session, reason="interrupted")
-
-        # Ask the agent to cancel the active turn (ACP session/cancel).
-        if session.client is not None:
-            with contextlib.suppress(Exception):
-                await session.client.cancel_prompt()
+        async with session._turn_start_lock, session._lifecycle_lock:
+            task = session._prompt_task
+            if (
+                session.status != SessionStatus.RUNNING
+                or task is None or task.done()
+                or (expected_task is not None and task is not expected_task)
+            ):
+                return session
+            # Clear queued follow-ups before cancellation can settle the turn.
+            self._clear_pending_queue(session, reason="interrupted")
+            if session.client is not None:
+                with contextlib.suppress(Exception):
+                    await session.client.cancel_prompt()
 
         # Give the runner a bounded moment to settle to a terminal state so the
         # caller sees idle promptly. `shield` so this wait never cancels the
@@ -5984,7 +5807,10 @@ class SessionManager:
         # over the event stream (and the wedged-session watchdog is the backstop).
         # Never force-kill the task here -- that would end the session.
         with contextlib.suppress(Exception):
-            await asyncio.wait_for(asyncio.shield(task), timeout=10.0)
+            await asyncio.wait_for(
+                asyncio.shield(asyncio.gather(task, return_exceptions=True)),
+                timeout=10.0,
+            )
 
         log.info("Interrupted in-flight turn for session %s", session_id)
         return session
@@ -6030,7 +5856,7 @@ class SessionManager:
 
     async def stop_session(
         self, session_id: str, *, force: bool = False, reap_host: bool = False,
-        cancel_turn: bool = True,
+        cancel_turn: bool = True, for_restart: bool = False,
     ) -> None:
         """Stop a session -- shut down ACP client, preserve state for resume.
 
@@ -6055,37 +5881,32 @@ class SessionManager:
         ``False`` (dotfiles#1661) so the frontend detaches without cancelling --
         the host + child + turn survive for reattach. An explicit operator stop
         keeps the default (a stop IS an explicit host cancel).
+
+        ``for_restart`` is reserved for frontend shutdown: persist recovery
+        intent independently of whether redeploy cancels turns. Ordinary stops
+        stay dormant until an explicit resume/send, including after restart.
         """
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
 
-        if not force and session.has_active_background_tasks:
-            raise SessionBusyError(session_id, session.active_background_tasks)
+        async with session._turn_start_lock:
+            await self._stop_session_admitted(
+                session, force=force, reap_host=reap_host,
+                cancel_turn=cancel_turn, for_restart=for_restart,
+            )
 
-        await self._quiesce_session(session, cancel_turn=cancel_turn)
+    async def _stop_session_admitted(
+        self, session: Session, *, force: bool = False, reap_host: bool = False,
+        cancel_turn: bool = True, for_restart: bool = False,
+    ) -> None:
+        """Delegate to the typed session_teardown implementation."""
+        from .session_teardown import stop_session_admitted
 
-        # Idle-reaper only: free the Session Host child (a plain stop detaches
-        # to keep it reattachable). Safe here because the session is idle.
-        if reap_host and self._host_index is not None:
-            rec = self._host_index.get(session_id)
-            if rec is not None:
-                self._reap_host_record(rec, "idle reap (#1826)")
-
-        session.status = SessionStatus.STOPPED
-        now = time.time()
-        self._db.update_session_status(session_id, SessionStatus.STOPPED.value, now)
-        # Release the per-worktree ownership reservation (#2912): a stopped
-        # owned session is no longer actively controlling the worktree, so free
-        # it for a live CLI (or a later fresh owner) to claim.
-        self._db.release_worktree_ownership(session_id=session_id)
-        if session.event_log:
-            session.event_log.append("session_state_changed", {
-                "status": SessionStatus.STOPPED.value,
-            })
-        session.touch()
-        log.info("Session %s (%s) stopped", session_id, session.name)
+        return await stop_session_admitted(
+            self, session, force=force, reap_host=reap_host, cancel_turn=cancel_turn, for_restart=for_restart,
+        )
 
     async def end_session_if_idle(
         self,
@@ -6098,7 +5919,7 @@ class SessionManager:
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
-        async with session._turn_start_lock:
+        async with session._turn_start_lock, session._lifecycle_lock:
             if self._sessions.get(session_id) is not session:
                 raise KeyError(f"Session {session_id} not found")
             if (
@@ -6108,7 +5929,7 @@ class SessionManager:
                 raise ValueError(f"Session {session_id} is not idle")
             if self._db.count_pending_prompts(session_id) > 0:
                 raise ValueError(f"Session {session_id} has queued prompts")
-            await self.end_session(session_id, force=force)
+            await self._end_session_locked(session, force=force)
 
     async def end_session(self, session_id: str, *, force: bool = False) -> None:
         """End a session -- shut down client and clean up all state.
@@ -6135,143 +5956,15 @@ class SessionManager:
         if not session:
             raise KeyError(f"Session {session_id} not found")
 
-        if not force and session.has_active_background_tasks:
-            raise SessionBusyError(session_id, session.active_background_tasks)
+        async with session._turn_start_lock, session._lifecycle_lock:
+            await self._end_session_locked(session, force=force)
 
-        container = (
-            session.target.container
-            if isinstance(session.target.container, dict)
-            else {}
-        )
-        explicit_absence = (
-            container.get("authoritative_identity_removed") is True
-            or container.get("recreate_failed_without_host") is True
-        )
-        cleanup_pending = (
-            session_id in self._container_lock_sessions
-            or container.get("launch_pending_session_id") == session_id
-        )
-        recovery_inconclusive = session_id in self._remote_recovery_inconclusive
-        if (
-            (cleanup_pending or recovery_inconclusive)
-            and self._host_index is not None
-            and self._host_index.get(session_id) is None
-            and not explicit_absence
-        ):
-            self._remote_recovery_inconclusive.discard(session_id)
-            try:
-                await self._recover_remote_host_records(
-                    allow_wake=True,
-                    session_ids={session_id},
-                )
-            except Exception as exc:
-                self._remote_recovery_inconclusive.add(session_id)
-                raise RemoteHostRecoveryPendingError(
-                    "Remote Session Host cleanup could not inspect authority "
-                    f"for {session_id}; retained session and remote ownership"
-                ) from exc
-            if (
-                self._host_index.get(session_id) is None
-                and session_id in self._remote_recovery_inconclusive
-            ):
-                raise RemoteHostRecoveryPendingError(
-                    "Remote Session Host cleanup is inconclusive; retained "
-                    f"session {session_id} and remote ownership"
-                )
-            if (
-                self._host_index.get(session_id) is None
-                and session_id not in self._remote_recovery_inconclusive
-            ):
-                self._set_container_launch_pending(session_id, False)
-                container = (
-                    session.target.container
-                    if isinstance(session.target.container, dict)
-                    else {}
-                )
+    async def _end_session_locked(self, session: Session, *, force: bool = False) -> None:
+        """Delegate to the typed session_teardown implementation."""
+        from .session_ownership import finish_owned
+        from .session_teardown import end_session_locked
 
-        await self._quiesce_session(session)
-
-        # Session-Host mode: an explicit end is a *sanctioned terminate*, so it
-        # must REAP the child -- unlike stop, whose host-mode shutdown only
-        # detaches to keep the child reattachable. Without this the host + child
-        # survive with a dangling index record and are never collected (#1786;
-        # goal 1: termination is intentional, not inadvertent).
-        rec = None
-        if self._host_index is not None:
-            rec = self._host_index.get(session_id)
-            if rec is not None:
-                container = (
-                    session.target.container
-                    if isinstance(session.target.container, dict)
-                    else {}
-                )
-                if (
-                    rec.boundary == "container"
-                    and container.get("authoritative_identity_removed") is True
-                ):
-                    self._kill_forward_sync(session_id)
-                    with contextlib.suppress(Exception):
-                        self._host_index.remove(session_id)
-                elif rec.boundary == "container":
-                    self._kill_forward_sync(
-                        session_id,
-                        release_container_lock=False,
-                    )
-                    confirmed_dead = await self._remote_reap(
-                        rec,
-                        getattr(rec, "endpoint", None) or {},
-                    )
-                    if not confirmed_dead:
-                        self._mark_session_failed(
-                            session, trigger="remote_reap_inconclusive"
-                        )
-                        raise RemoteHostRecoveryPendingError(
-                            "Container Session Host reap is inconclusive; "
-                            f"retained session {session_id} and target ownership"
-                        )
-                    with contextlib.suppress(Exception):
-                        self._host_index.remove(session_id)
-                    with contextlib.suppress(Exception):
-                        from . import bridge_lock
-                        bridge_lock.remove_sync(session_id)
-                    self._set_container_launch_pending(session_id, False)
-                else:
-                    self._reap_host_record(rec, "session ended")
-
-        if (
-            container
-            and container.get("launch_pending_session_id") != session_id
-            and (
-                (self._host_index is not None and rec is None)
-                or
-                container.get("authoritative_identity_removed") is True
-                or container.get("recreate_failed_without_host") is True
-            )
-        ):
-            self._release_container_lock(session_id)
-
-        session.status = SessionStatus.ENDED
-        with contextlib.suppress(Exception):
-            self._clear_pending_queue(session, reason="ended")
-        # #897: release the exclusive CodeSpace claim this session held, so the
-        # box is immediately re-dispatchable by another worktree instead of
-        # waiting for the liveness/TTL sweep. Best-effort and idempotent (the
-        # CLI only releases a claim this owner actually holds). Keyed off the
-        # persisted target, so it is correct even after a daemon restart.
-        with contextlib.suppress(Exception):
-            claim_key = _codespace_claim_key(session.target)
-            if claim_key is not None:
-                _release_codespace_claim(*claim_key)
-        with contextlib.suppress(Exception):
-            self._db.update_session_status(
-                session_id, SessionStatus.ENDED.value, time.time()
-            )
-        with contextlib.suppress(Exception):
-            self._db.release_worktree_ownership(session_id=session_id)
-        with contextlib.suppress(Exception):
-            self._db.delete_session(session_id)
-        self._sessions.pop(session_id, None)
-        log.info("Session %s (%s) ended and cleaned up", session_id, session.name)
+        return await finish_owned(end_session_locked(self, session, force=force))
 
     # -- Context-aware in-place handoff --------------------------------------
 
@@ -6283,7 +5976,7 @@ class SessionManager:
         predecessor and successor at once, so the spawn-then-retire cutover does
         not apply (their retire-before-spawn variant is deferred, mirroring the
         guard in ``handoff_session``)."""
-        if not self._auto_handoff.enabled:
+        if self._shutting_down or not self._auto_handoff.enabled:
             return False
         if _workspace_key(session.agent_name, session.target, session.caller_id):
             return False
@@ -6319,23 +6012,39 @@ class SessionManager:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
-        task = loop.create_task(self._run_auto_handoff(session.session_id))
+        task = loop.create_task(self._run_auto_handoff(
+            session, expected_generation=session._lifecycle_generation,
+        ))
         self._auto_handoff_tasks.add(task)
         task.add_done_callback(self._auto_handoff_tasks.discard)
 
-    async def _run_auto_handoff(self, session_id: str) -> None:
+    async def _run_auto_handoff(
+        self, session: Session, *, expected_generation: int,
+    ) -> None:
         """Perform a policy-driven handoff and migrate any durably-queued
         follow-ups onto the successor, so no prompt is stranded on the retired
-        predecessor. Best-effort: a failed handoff logs and leaves the
-        predecessor current (``handoff_session`` never orphans the worktree)."""
+        predecessor. Failures are logged; incomplete predecessor retirement is
+        also recorded on both session event streams."""
+        session_id = session.session_id
         try:
-            pending = self._db.list_pending_prompts(session_id)
-        except Exception:
-            pending = []
-        try:
-            successor = await self.handoff_session(
-                session_id, reason="context-pressure"
-            )
+            async with session._turn_start_lock:
+                if (
+                    self._sessions.get(session_id) is not session
+                    or session._lifecycle_generation != expected_generation
+                    or not self._auto_handoff_eligible(session)
+                ):
+                    return
+                if (
+                    session.status != SessionStatus.IDLE
+                    or (self._auto_handoff.unwatched_only and session.subscriber_count > 0)
+                ):
+                    if session.status in (SessionStatus.IDLE, SessionStatus.RUNNING):
+                        session._handoff_pending = True
+                    return
+                pending = self._db.list_pending_prompts(session_id)
+                successor = await self.handoff_session(
+                    session_id, reason="context-pressure", _turn_admission_owned=True,
+                )
         except Exception as exc:
             log.warning("Auto-handoff of %s failed: %s", session_id, exc)
             return
@@ -6424,6 +6133,7 @@ class SessionManager:
         the duration and restored to IDLE afterward so watchdogs and the
         concurrency guard see a coherent state.
         """
+        session._lifecycle_generation += 1
         turn_index = session.turn_count
         session.turn_count += 1
         now = time.time()
@@ -6461,6 +6171,7 @@ class SessionManager:
         seed: bool = True,
         seed_text: str | None = None,
         handoff_token: str | None = None,
+        _turn_admission_owned: bool = False,
     ) -> Session:
         """Hand a hosted session off to a fresh successor in the same worktree.
 
@@ -6482,7 +6193,9 @@ class SessionManager:
 
         Ordering is spawn-then-retire so a failed successor spawn leaves the
         predecessor untouched and current -- a handoff never orphans the
-        worktree. Returns the successor session.
+        worktree. Returns the successor session only after predecessor retirement
+        succeeds. Retirement failures propagate and emit ``handoff_failed`` on
+        both streams; identities and succession links remain for explicit cleanup.
 
         The self-authored-brief path is the normal and currently only
         self-contained route for agent-bridge's own ACP-hosted sessions,
@@ -6492,12 +6205,20 @@ class SessionManager:
         create any dependency on Copilot CLI extensions being active in the
         hosted child.
         """
-        if self._draining:
+        if self._draining or self._shutting_down:
             raise DaemonDrainingError("handoff")
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
+        if not _turn_admission_owned:
+            async with session._turn_start_lock:
+                if self._sessions.get(session_id) is not session:
+                    raise KeyError(f"Session {session_id} not found")
+                return await self.handoff_session(
+                    session_id, reason=reason, seed=seed, seed_text=seed_text,
+                    handoff_token=handoff_token, _turn_admission_owned=True,
+                )
 
         # Single-checkout (CodeSpace/command) agents cannot host predecessor and
         # successor at once, so the spawn-then-retire ordering below does not
@@ -6522,7 +6243,7 @@ class SessionManager:
                     "cannot hand off"
                 )
             session.status = SessionStatus.STOPPED
-            await self.resume_session(session_id, drain=False)
+            await self._resume_session_admitted(session)
 
         # 1. Resolve the successor's opening turn. External requestors may
         #    provide the exact prompt text; otherwise the predecessor authors a
@@ -6660,8 +6381,28 @@ class SessionManager:
 
         # 6. Retire the predecessor: STOPPED keeps it resumable and preserves its
         #    transcript + succession link (end_session would delete both).
-        with contextlib.suppress(Exception):
-            await self.stop_session(session_id, force=True)
+        try:
+            await self._stop_session_admitted(session, force=True)
+        except Exception as exc:
+            failure = {
+                "phase": "predecessor_retirement",
+                "predecessor_id": session_id,
+                "successor_id": successor.session_id,
+                "reason": reason,
+                "message": str(exc),
+                "cleanup_required": True,
+            }
+            log.error(
+                "Handoff predecessor retirement failed for %s (successor %s); cleanup required",
+                session_id, successor.session_id, exc_info=True,
+            )
+            for participant in (session, successor):
+                if participant.event_log:
+                    participant.event_log.append("handoff_failed", failure)
+            raise RuntimeError(
+                f"Handoff successor {successor.session_id} started, but predecessor "
+                f"{session_id} could not be stopped; cleanup required"
+            ) from exc
 
         log.info(
             "Handoff: session %s -> %s (worktree %s)",

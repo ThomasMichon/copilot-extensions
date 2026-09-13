@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import sqlite3
 
 
 import pytest
@@ -16,6 +17,37 @@ def test_connection_pragmas_for_fast_ingest(tmp_db: Database) -> None:
     conn = tmp_db._get_conn()
     assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
     assert conn.execute("PRAGMA synchronous").fetchone()[0] == 1  # 1 == NORMAL
+
+
+def test_restart_status_migrates_legacy_stopped_rows_without_optin(tmp_path):
+    path = tmp_path / "legacy.db"
+    with sqlite3.connect(path) as conn:
+        conn.executescript("""
+            CREATE TABLE schema_version (version INTEGER NOT NULL);
+            INSERT INTO schema_version VALUES (17);
+            CREATE TABLE sessions (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, agent_name TEXT,
+                target_dir TEXT, target_type TEXT NOT NULL DEFAULT 'local',
+                target_json TEXT, status TEXT NOT NULL DEFAULT 'created',
+                pid INTEGER, acp_session_id TEXT, config_json TEXT,
+                created_at REAL NOT NULL, updated_at REAL NOT NULL
+            );
+            INSERT INTO sessions (id, name, status, created_at, updated_at)
+                VALUES ('example-session', 'example-agent', 'stopped', 0, 0);
+        """)
+    db = Database(path)
+    try:
+        row = db.get_session("example-session")
+        assert row["status"] == "stopped"
+        assert row["restart_status"] is None
+        db.update_session_status(
+            "example-session", "stopped", 1, restart_status="running",
+        )
+        assert db.get_session("example-session")["restart_status"] == "running"
+        db.update_session_status("example-session", "stopped", 2)
+        assert db.get_session("example-session")["restart_status"] is None
+    finally:
+        db.close()
 
 
 class TestSessionCRUD:
