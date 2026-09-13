@@ -173,6 +173,25 @@ opens a per-task action sub-menu. The seam is a filesystem manifest registry,
 not a Python import -- the plugins live in separate venvs -- so a stale or absent
 picker simply ignores it. Source: `pivots/agent-dispatch.json`.
 
+### Declared lifecycle tier (per `docs/patterns/service-lifecycle-supervision.md`)
+
+- **Default tier: 2 — scheduled activation**, layered around a tier-1
+  user-mode ensure path — **partially realized today, one gap found and
+  filed** (#2524, not yet fixed): the coordinator's Windows `Invoke-Start`
+  already falls back to a direct detached launch when no Scheduled Task is
+  registered (fixed for #3602), but the POSIX `do_start` still hard-fails
+  when the systemd unit isn't installed/available, with no direct-launch
+  fallback (unlike agent-bridge's own `do_start`). Until #2524 lands, POSIX
+  `start` is effectively tier-2-only, not tier-1-convergent.
+- **Availability promise:** starts with the user's session; restarts at
+  logon; does not survive full logout or start before login.
+- **Windows:** Scheduled Task `agent-dispatch`, `AtLogOn`, non-elevated;
+  the embody supervisor(s) register their own named tasks the same way.
+- **POSIX:** systemd **user** unit `agent-dispatch.service` (no system-level
+  unit); supervisor profiles register their own named units.
+- **No escalation:** no tier-3/tier-4 requirement has been identified for
+  the standalone per-host coordinator.
+
 ### Running the coordinator as a service
 
 On the host that *is* a coordinator, the service is installed by default
