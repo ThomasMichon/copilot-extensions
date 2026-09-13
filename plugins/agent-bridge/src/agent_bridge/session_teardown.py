@@ -95,6 +95,8 @@ async def reap_remote_record(
     current = manager._host_index.get(record.session_id) if manager._host_index else None
     if confirmed:
         if current == record:
+            manager._set_container_launch_pending(record.session_id, False)
+            manager._release_container_lock(record.session_id)
             manager._forget_host_record(record)
     elif (
         session is not None
