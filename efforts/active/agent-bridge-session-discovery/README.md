@@ -114,40 +114,82 @@ session on the daemon regardless of project, straight from
 That default **must not narrow**. `--all-projects` is therefore added only
 for **symmetry/discoverability** with `agents`/`machines` (an explicit,
 self-documenting way to say "yes, all of them") and is a no-op relative to
-today's default. The **new, actually-narrowing** capability is an explicit
-`--project <repo>` (or reusing the caller's cwd project when passed with no
-value), which does not exist today and is the option a caller reaches for to
-scope *down*. `--project` and `--all-projects` remain mutually exclusive,
-matching `agents`/`machines`.
+today's default.
 
-- [ ] Add `--project`/`--all-projects` to the `sessions` subparser and to
-      `live-sessions list`, wired through `_listing_project()`; confirm the
-      no-flag default is byte-for-byte unchanged (still unfiltered) via a
-      regression test before touching anything else.
-- [ ] Filter (only when `--project` is given) at the CLI layer against the
-      session/live-session's existing `project` field — no new server-side
-      filtering route needed since the field is already returned.
+**Exact syntax (resolves review finding on `--project` ambiguity):** there is
+already exactly **one** `--project`/`-p REPO` flag in this CLI — the
+**top-level**, required-value option consumed by `_sender_repo()` and
+rejected for non-consenting verbs by `_guard_project_scope`
+(`_PROJECT_CONSUMING_VERBS`). This effort does **not** invent a second,
+subparser-level `--project` with different (optional-value) semantics. The
+only change needed is adding `sessions`/`live-sessions` to
+`_PROJECT_CONSUMING_VERBS` so that already-existing top-level flag is
+*accepted* (and used to filter) for these two verbs instead of rejected. A
+caller narrows with `agent-bridge --project <repo> sessions`; omitting it
+keeps today's unfiltered default; `--all-projects` (new, subparser-level,
+listing verbs only — mirrors `agents`/`machines`) is the explicit synonym for
+that same default. `--project` (top-level) and `--all-projects` (subparser)
+are mutually exclusive, matching how `agents`/`machines` already reject that
+combination.
+
+**Elevated sub-daemon coverage (resolves review finding on the one-daemon
+premise):** `/api/v1/sessions` does not describe the full picture on
+Windows — `elevated.py` can run a **sibling elevated bridge** on a separate
+loopback port/config directory, and the primary daemon's `list_sessions`
+route already merges in that sub-daemon's *persisted* session rows
+(`routes/sessions.py`, the `elevated.persisted_session_rows()` /
+`is_subdaemon()` merge block) when it is not itself the sub-daemon. Phase 1's
+any-repo listing must cover both authorities as today's listing already does:
+the new `--project`/`--all-projects` scoping applies uniformly across the
+merged result, and a live-but-elevated row whose sub-daemon is unreachable is
+represented the same way the existing merge already represents it
+(persisted-row fallback, `daemon_running` flag) — no new elevated-specific
+gap to introduce, but the plan must not accidentally filter *before* that
+merge happens.
+
+- [ ] Add `sessions`/`live-sessions` to `_PROJECT_CONSUMING_VERBS` so the
+      existing top-level `--project REPO` is accepted (and narrows) instead
+      of rejected by `_guard_project_scope`; confirm the no-flag default is
+      byte-for-byte unchanged (still unfiltered, still includes merged
+      elevated sub-daemon rows) via a regression test before touching
+      anything else.
+- [ ] Add `--all-projects` to the `sessions` subparser and to
+      `live-sessions list` (mirroring `agents`/`machines`), wired through
+      `_listing_project()`.
+- [ ] Filter (only when `--project` is given) against the session/
+      live-session's existing `project` field, applied **after** the
+      existing primary+elevated merge — no new server-side filtering route
+      needed since the field is already returned.
 - [ ] Surface the owning project/repo in both the human-readable and JSON
       output for `sessions` and `live-sessions list` (the field already exists
       server-side; only display is missing) — needed so an any-repo listing
       is actually useful rather than an undifferentiated dump.
-- [ ] Add `sessions`/`live-sessions` to `_PROJECT_CONSUMING_VERBS` (or an
-      equivalent listing-only allowance) so an explicit `--project <repo>`
-      scopes down instead of being rejected by `_guard_project_scope`.
 - [ ] Tests: **no-flag default unchanged** (mixed-project fixture: sessions
       from 2+ distinct projects registered, no-flag call returns all of
-      them, unchanged from pre-change behavior), `--all-projects` (explicit,
-      equivalent to default), explicit `--project <repo>` (narrows), and JSON
+      them including a merged elevated-sub-daemon row, unchanged from
+      pre-change behavior), `--all-projects` (explicit, equivalent to
+      default), explicit top-level `--project <repo>` (narrows), and JSON
       field presence for the project label.
 
 ### Phase 2 — Cross-machine, same-repo lookup
 - [ ] Design the wire shape: a new verb (working name `agent-bridge find
       --repo <repo>` per the issue's suggestion) that fans a lookup out to
-      every peer bridge in the mesh (reusing the transport `send`/`create`
-      already use to reach a named machine) and aggregates
-      machine + session-id matches. Confirm naming against existing verbs
-      (`agents`, `machines`, `send`) before implementing — avoid a
-      near-duplicate of `agents --all-projects`.
+      every peer bridge in the mesh and aggregates machine + session-id
+      matches. Confirm naming against existing verbs (`agents`, `machines`,
+      `send`) before implementing — avoid a near-duplicate of
+      `agents --all-projects`.
+- [ ] **Deliverability (resolves review finding on the `send` assumption):**
+      today's `send <target>` CLI resolves `<target>` through the caller's
+      own local `BridgeClient` — it has no "machine + session id" addressing
+      shape. Machine-addressed delivery already exists server-side as
+      `send_remote_live_message`/the remote route, but is not exposed as a
+      `send` CLI argument today. `find` must do one of:
+      (a) return a target string that today's `send`/`create` can already
+      consume as-is (e.g. an agent/machine name it already resolves), or
+      (b) land a documented remote-send/converse CLI shape (extending `send`
+      to accept `--machine <key> --session <id>`, or a new verb) in the same
+      phase, so a `find` result is actually actionable and not just
+      informational. Decide and record which before implementation.
 - [ ] Server-side: a peer-bridge endpoint that answers "do you have a live
       session for repo X" from its own (already project-tagged) session list
       — reuses Phase 1's any-repo listing internally, filtered to one repo.
@@ -194,7 +236,9 @@ matching `agents`/`machines`.
       default-scoping logic doesn't regress that for existing callers).
 - [ ] `agent-bridge find --repo <repo>` (or the chosen verb name) against a
       real 2-machine mesh locates a live session on the peer machine and
-      returns enough to `send`/converse with it.
+      returns a target actually deliverable through the Phase 2
+      deliverability decision (an existing-`send`-consumable name, or the
+      new remote-send/converse shape) — not just an informational row.
 - [ ] `agent-bridge find --repo <repo-with-no-sessions-anywhere>` returns a
       clean empty result, not an error.
 - [ ] Existing `agents --all-projects` / `machines --all-projects` behavior
