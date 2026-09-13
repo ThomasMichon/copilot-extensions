@@ -499,7 +499,9 @@ def _compose_locked(
 
     Local marketplaces are re-pointed at ``knowledge_path``.  Remote
     marketplaces and enabled plugins are carried when the committed harness
-    base does not already provide them.  Existing unmanaged local settings are
+    base does not already provide them, or when the base's own value is an
+    explicit opt-in ``false`` (the operator's knowledge-bound ``true`` wins --
+    that is exactly what an opt-in flag is for).  Existing unmanaged local settings are
     preserved.  A private ownership marker records exact managed values, so a
     later re-point/removal can retire stale entries without deleting operator
     edits.
@@ -642,7 +644,17 @@ def _compose_locked(
         if source in harness_settings.enabled:
             if harness_settings.enabled[source] is True:
                 continue
-            conflicting_enabled.append(source)
+            # An explicit harness-committed `false` for a plugin marks it
+            # opt-in (not default-on), not forbidden -- per this harness's own
+            # documented convention (AGENTS.md / CONTRIBUTING.md), the operator
+            # turns an opt-in plugin on via their own machine/knowledge-bound
+            # config, without changing the committed harness default. Let the
+            # knowledge repo's `true` win here instead of dropping it as an
+            # unresolvable conflict. A genuine conflict -- two different
+            # marketplace definitions colliding on the same name -- is caught
+            # separately above and is unaffected by this.
+            enabled[source] = True
+            managed_enabled[source] = True
             continue
         if source in proven_legacy_enabled:
             managed_enabled[source] = True
