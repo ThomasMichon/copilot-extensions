@@ -12000,16 +12000,78 @@ def _slugify(text: str) -> str:
     return s or "daemon"
 
 
+def _remove_system_blockers(rec, repo) -> list[str]:
+    """Reasons a managed (system/bridge) worktree is not safe to discard.
+
+    Mirrors the checks ``cleanup`` already applies to ordinary worktrees --
+    uncommitted changes and unpushed commits -- plus the two checks
+    ``cleanup``/``finalize`` apply that ``remove-system`` historically
+    skipped for *managed* worktrees entirely: an open PR and a still-live
+    outbound resource claim. A managed worktree is exactly as capable of
+    holding real, never-landed content as an ordinary one (see aperture-labs
+    #6592: a harness that abandons a worktree mid-run before commit/push/PR
+    leaves genuine, unrecoverable content sitting in it) -- ``kind`` alone is
+    not evidence the worktree is disposable.
+    """
+    blockers: list[str] = []
+    if rec.worktree_path and Path(rec.worktree_path).exists():
+        info = git_ops.classify_worktree(
+            rec.worktree_path,
+            rec.branch,
+            fetch=False,
+            remote=repo.remote,
+            default_branch=repo.default_branch,
+        )
+        if info.dirty:
+            blockers.append(
+                f"{info.dirty} uncommitted change(s) in the working tree"
+            )
+        if info.ahead:
+            blockers.append(
+                f"{info.ahead} commit(s) on {rec.branch} not on "
+                f"{repo.remote}/{repo.default_branch}"
+            )
+    open_prs = [p for p in rec.prs if p.state == "open"]
+    if open_prs:
+        blockers.append(
+            "open PR(s): "
+            + ", ".join(p.url or f"#{p.number}" for p in open_prs if (p.url or p.number))
+        )
+    live_claims = rec.live_resources
+    if live_claims:
+        blockers.append(
+            "unsettled outbound resource claim(s): "
+            + ", ".join(f"{c.kind}:{c.ref}" for c in live_claims if c.ref)
+        )
+    if rec.kind == "bridge" and blockers:
+        blockers.append(
+            "this is a bridge-owned worktree -- its owning agent-bridge session "
+            "may have its own cleanup/teardown path (e.g. `agent-bridge stop`/"
+            "`end`); check that before discarding the worktree out from under it"
+        )
+    return blockers
+
+
 def cmd_remove_system(args: argparse.Namespace) -> int:
     """Remove a system worktree by id (git worktree + tracking record).
 
     Refuses non-system worktrees. Used by daemons at end-of-run and by the
     System-menu browse view to reap leaked worktrees.
+
+    Guarded the same way ``cleanup`` guards ordinary worktrees: a system/
+    bridge worktree with uncommitted changes, unpushed commits, an open PR,
+    or a still-live outbound resource claim is refused by default. The
+    calling agent must resolve that state -- land the work, close/merge the
+    PR, settle the claim, or use the owning service's own cleanup path for a
+    bridge worktree -- rather than reach for ``--force`` as a first move.
+    ``--force`` exists for a caller that has already confirmed discarding is
+    correct; it is intentionally not advertised in ``--help``.
     """
     config = cfg.load_config()
     repo = config.default_repo
     tracking_path = cfg.tracking_dir()
     wt_id = getattr(args, "worktree_id", None)
+    force = getattr(args, "force", False)
     if not wt_id:
         output.err("remove-system requires a worktree id")
         return 2
@@ -12024,6 +12086,20 @@ def cmd_remove_system(args: argparse.Namespace) -> int:
             f"{wt_id} is not a managed (system/bridge) worktree (kind={rec.kind}); refusing"
         )
         return 1
+
+    if not force:
+        blockers = _remove_system_blockers(rec, repo)
+        if blockers:
+            message = (
+                f"refusing to remove system worktree {wt_id}: "
+                f"{'; '.join(blockers)}. Resolve this state first (commit+push+land "
+                "the work, close/merge the PR, settle the claim), or pass --force "
+                "to discard it anyway once you've confirmed that's correct."
+            )
+            if getattr(args, "json", False):
+                return _json_error(message)
+            output.err(message)
+            return 1
 
     removed, warnings = _remove_managed_worktree(
         rec,
@@ -22197,6 +22273,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p = sub.add_parser("remove-system", help="Remove a system worktree by id")
     p.add_argument("worktree_id", help="Worktree id to remove")
+    p.add_argument(
+        "--force",
+        action="store_true",
+        # Deliberately not advertised: a caller should hit the refusal message
+        # and resolve the blocking state (or explicitly discover this flag by
+        # reading source/docs), not casually reach for it from --help.
+        help=argparse.SUPPRESS,
+    )
     p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
 
     # cleanup

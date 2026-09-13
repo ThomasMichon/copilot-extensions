@@ -44,7 +44,9 @@ def _config(tmp_path: Path):
     anchor = tmp_path / "anchor"
     anchor.mkdir()
     return types.SimpleNamespace(
-        default_repo=types.SimpleNamespace(anchor=str(anchor))
+        default_repo=types.SimpleNamespace(
+            anchor=str(anchor), remote="origin", default_branch="master",
+        )
     )
 
 
@@ -257,3 +259,142 @@ def test_worktree_registration_probe_can_fail_closed(tmp_path):
     with patch("agent_worktrees.git_ops.git", return_value=failure), \
          pytest.raises(RuntimeError, match="not a git repository"):
         git_ops.list_worktree_paths(cwd=tmp_path, fail_on_error=True)
+
+
+def _init_dirty_git_worktree(worktree: Path) -> None:
+    """Turn a plain directory into a minimal real git repo with one
+    uncommitted change, so ``git_ops.classify_worktree`` reports DIRTY."""
+    import subprocess
+
+    def _git(*args):
+        subprocess.run(
+            ["git", *args], cwd=worktree, check=True,
+            capture_output=True, text=True,
+        )
+
+    _git("init", "--quiet")
+    _git("config", "user.email", "test@example.com")
+    _git("config", "user.name", "Test")
+    (worktree / "committed.txt").write_text("v1", encoding="utf-8")
+    _git("add", "committed.txt")
+    _git("commit", "--quiet", "-m", "initial")
+    (worktree / "uncommitted.txt").write_text("scratch", encoding="utf-8")
+
+
+def test_remove_system_refuses_dirty_worktree_by_default(tmp_path):
+    record, tracking_dir = _record(tmp_path)
+    _init_dirty_git_worktree(Path(record.worktree_path))
+    args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=False)
+
+    with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
+         patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
+         patch("agent_worktrees.__main__._json_error") as json_error:
+        json_error.return_value = 1
+        result = cli.cmd_remove_system(args)
+
+    assert result == 1
+    message = json_error.call_args.args[0]
+    assert "uncommitted change" in message
+    # Nothing was torn down: the record and the working tree survive.
+    assert (tracking_dir / "managed-1.yaml").exists()
+    assert (Path(record.worktree_path) / "uncommitted.txt").exists()
+
+
+def test_remove_system_refuses_open_pr_by_default(tmp_path):
+    record, tracking_dir = _record(tmp_path)
+    record.prs = [tracking.PRRecord(state="open", url="https://example/pulls/9", number=9)]
+    tracking.save_record(record, tracking_dir / "managed-1.yaml")
+    args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=False)
+
+    with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
+         patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
+         patch("agent_worktrees.__main__._json_error") as json_error:
+        json_error.return_value = 1
+        result = cli.cmd_remove_system(args)
+
+    assert result == 1
+    message = json_error.call_args.args[0]
+    assert "open PR" in message
+    assert "https://example/pulls/9" in message
+    assert (tracking_dir / "managed-1.yaml").exists()
+
+
+def test_remove_system_refuses_live_resource_claim_by_default(tmp_path):
+    record, tracking_dir = _record(tmp_path)
+    record.resources = [
+        tracking.ResourceClaim(kind="codespace", ref="example-cs-1", state="active")
+    ]
+    tracking.save_record(record, tracking_dir / "managed-1.yaml")
+    args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=False)
+
+    with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
+         patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
+         patch("agent_worktrees.__main__._json_error") as json_error:
+        json_error.return_value = 1
+        result = cli.cmd_remove_system(args)
+
+    assert result == 1
+    message = json_error.call_args.args[0]
+    assert "unsettled outbound resource claim" in message
+    assert "codespace:example-cs-1" in message
+    assert (tracking_dir / "managed-1.yaml").exists()
+
+
+def test_remove_system_bridge_kind_blocker_mentions_owning_service(tmp_path):
+    record, tracking_dir = _record(tmp_path)
+    record.resources = [
+        tracking.ResourceClaim(kind="codespace", ref="example-cs-1", state="active")
+    ]
+    tracking.save_record(record, tracking_dir / "managed-1.yaml")
+    args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=False)
+
+    with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
+         patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
+         patch("agent_worktrees.__main__._json_error") as json_error:
+        json_error.return_value = 1
+        cli.cmd_remove_system(args)
+
+    message = json_error.call_args.args[0]
+    assert "agent-bridge" in message
+
+
+def test_remove_system_force_bypasses_all_guards(tmp_path):
+    record, tracking_dir = _record(tmp_path)
+    _init_dirty_git_worktree(Path(record.worktree_path))
+    record.prs = [tracking.PRRecord(state="open", url="https://example/pulls/9", number=9)]
+    record.resources = [
+        tracking.ResourceClaim(kind="codespace", ref="example-cs-1", state="active")
+    ]
+    tracking.save_record(record, tracking_dir / "managed-1.yaml")
+    args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=True)
+
+    with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
+         patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
+         patch("agent_worktrees.sessions.kill_tmux_session"), \
+         patch("agent_worktrees.git_ops.list_worktree_paths"), \
+         patch("agent_worktrees.git_ops.remove_worktree", return_value=True), \
+         patch("agent_worktrees.git_ops.git") as git, \
+         patch("agent_worktrees.disposition_history.remove"), \
+         patch("agent_worktrees.activity.log_event"), \
+         patch("agent_worktrees.__main__._json_output") as json_output:
+        git.return_value.returncode = 0
+        result = cli.cmd_remove_system(args)
+
+    assert result == 0
+    json_output.assert_called_once_with({"removed": "managed-1"})
+    assert not (tracking_dir / "managed-1.yaml").exists()
+
+
+def test_remove_system_help_does_not_advertise_force():
+    """--force exists (tested above) but must not appear in --help output --
+    a caller should hit the refusal message and resolve the blocking state,
+    not discover this escape hatch by reading --help."""
+    parser = cli.build_parser()
+    remove_system_parser = None
+    for action in parser._subparsers._group_actions:
+        for choice_name, subparser in action.choices.items():
+            if choice_name == "remove-system":
+                remove_system_parser = subparser
+    assert remove_system_parser is not None
+    help_text = remove_system_parser.format_help()
+    assert "--force" not in help_text
