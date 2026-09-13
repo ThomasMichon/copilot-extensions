@@ -825,3 +825,21 @@ enforcement before migrating the complete contributor stack.
   deferral level; F1, F2, and F3 are rejected. Freeze epoch remains 3. Run the
   remaining F4 edge with every other coordinate fixed before publishing the
   capability-guide deferral decision.
+
+### 2026-09-12 - Ad-hoc dynamic-capture landed, outside the clean-room lane
+
+An aperture-labs facility dedup sweep needed a way to see the *real* per-session
+dynamic guidance a plugin's `sessionStart` hook writes, for a static
+redundancy-review snapshot -- not a clean-room experiment. Landed in
+`reviewing-customizations`' `scan-customizations.py` (PR #2511): an opt-in
+`--capture-dynamic` flag on `--context-budget` that invokes each already-
+enabled plugin's `sessionStart` command hook once, sandboxed under a
+disposable `HOME`/`USERPROFILE` (every session-guidance writer resolves its
+session-state root via `Path.home()`, per
+`docs/patterns/session-scoped-dynamic-guidance.md`), then measures the
+`instructions/**/*.instructions.md` files it writes. This is deliberately
+**not gated behind this effort's phases** (Phase 6's "extend context-budget
+output" bullet remains a separate, later, reviewed-contract-driven pass) --
+it is a standalone, ad-hoc tool usable against any target repo/worktree today.
+Filed #2513 for a pre-existing, unrelated `agent-codespaces` session-start
+classification gap surfaced along the way.
