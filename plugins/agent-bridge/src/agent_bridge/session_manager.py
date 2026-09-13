@@ -3123,17 +3123,23 @@ class SessionManager:
         if session is None or not isinstance(session.target.container, dict):
             return
         target = session.target.container
+        previous = target.get("launch_pending_session_id")
         if pending:
             target["launch_pending_session_id"] = session_id
         elif target.get("launch_pending_session_id") == session_id:
             target.pop("launch_pending_session_id", None)
         else:
             return
-        self._db.update_session_target(
-            session_id,
-            session.target.to_json(),
-            session.target.cwd,
-        )
+        try:
+            self._db.update_session_target(
+                session_id, session.target.to_json(), session.target.cwd,
+            )
+        except Exception:
+            if previous is None:
+                target.pop("launch_pending_session_id", None)
+            else:
+                target["launch_pending_session_id"] = previous
+            raise
 
     async def close_frontend_transports(self) -> None:
         """Fence new work and release owned channels under admission/lifecycle."""
