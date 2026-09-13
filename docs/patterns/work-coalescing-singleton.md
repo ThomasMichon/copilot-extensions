@@ -229,6 +229,36 @@ project's records itself via `tracking.list_records`, so a request payload
 only needs to name the project — never serialize whole records over the
 wire).
 
-**Still fully open:** the agent-mcp multiplexer — vendoring its own copy per
-`tools/check-vendored-libs-sync.py` convention, as an independent, separately
-reviewed follow-up.
+**Still open — `#2323` (agent-worktrees resident classify/list
+accelerator):** the helper is now vendored into
+`plugins/agent-worktrees/libs/work-coalescing-singleton/`, and
+`agent_worktrees.classify_daemon` provides the request-kind-specific wire
+wrappers (`start_server`, `rendezvous_fields`, `classify_via_daemon`), with
+its own tests. **Deliberately not yet wired into any command** —
+`cmd_status_monitor` does not start this daemon or publish its rendezvous,
+and `_classify_records` does not try it before its existing
+`single_instance_lease`-guarded path. Wiring those in is real behavior
+change to a live, widely-depended-on resident process and stays its own
+follow-up, done with the same test discipline once ready (see the effort
+journal for the concrete plan: the daemon's `compute` callback resolves a
+project's records itself via `tracking.list_records`, so a request payload
+only needs to name the project — never serialize whole records over the
+wire).
+
+**Correction — the agent-mcp multiplexer was already built, entirely
+independently of this document.** An earlier revision of this section
+described it as unstarted; that was wrong (it conflated issue #744's body
+text, written before implementation, with its actual current state — its
+own *comments* record five already-merged slices: `BridgeSession` + a
+resident `serve` session-host, #763; a thin `agent-mcp forward` child,
+#861; the host's single-instance lease + idle-evict, #863; a genuinely-thin
+forwarder with a proven RAM win, #864; and the default-on flip, #865). It
+independently realizes this same shape — coalescing many sessions' cost
+onto one warm host, ref-counted attach/detach, bounded idle self-eviction,
+an always-correct direct-bridge fallback — without importing this document's
+library, which postdates it. The only item the issue's own tracking left
+open was a clean-room process-topology scenario, **landed** as
+[`tools/clean-room/scenarios/agent-mcp-multiplexer/`](../../tools/clean-room/scenarios/agent-mcp-multiplexer/manifest.json)
+(#866): asserts N sessions collapse onto exactly one resident host, the
+`AGENT_MCP_NO_MULTIPLEX` direct fallback spawns zero hosts, and the host
+self-evicts after its last attached session detaches.
