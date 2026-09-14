@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** reviewed plan PR, followed by serial implementation PRs
 - **Created:** 2026-08-28
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/agent-fabric` - `legible-live-state`,
   `resource-claims`, `resource-accountability`,
   `disposition-is-asserted-pulse-is-derived`, and
@@ -135,6 +135,15 @@ _Verbatim operator request; original spelling and punctuation preserved._
 - [ ] Add focused fixtures for a retained finalized record that receives new
   work, a Git-settled record with held claims, and a Git-settled record with
   multiple follow-ups.
+- [x] Prune-verdict slice only: `cleanup_disposition` and
+  `classify_managed_worktree` now treat a held resource claim
+  (`active`/`at-rest`) as a blocker even when `status == finalized` or Git is
+  COMPLETED/merged (new `held-claims` bucket/reason), closing the safety gap
+  PR #2592 opened (a finalized owner can now accept a new claim, but nothing
+  downstream of that fix previously re-checked for one before cleanup/GC).
+  The cross-surface **compact token/style/blocker-count parity** across list
+  JSON, mux, and Picker (the rest of this bullet) is not done -- no unified
+  descriptor exists yet; that's the remaining Phase 1/4 work.
 - [ ] Assert the same expected compact token, semantic style, blocker counts,
   and prune verdict across list JSON, mux rendering, and Picker derivation.
 - [ ] Add compatibility fixtures for legacy boolean-only records and active
@@ -147,44 +156,100 @@ _Verbatim operator request; original spelling and punctuation preserved._
   consumers.
 
 ### Phase 2 - Make finalized records resumable
-- [ ] Centralize claim add/update/remove/settle/release mutations so direct list
-  replacement cannot bypass transition policy.
-- [ ] Keep `finalizing` and `orphaned` hard-reject states. Atomically reopen
-  `finalized -> active` only when a mutation changes the held obligation set:
-  a new/reopened follow-up, a new claim, `released/abandoned ->
-  active/at-rest`, or an accepted inbound obligation. Materializing an
-  already-effective legacy synthetic follow-up is a no-op and does not reopen.
-- [ ] Leave idempotent reads, pure settlement, release, removal, and
-  metadata/heartbeat refreshes free to operate without reopening.
-- [ ] Preserve the finalize freeze invariant: once the record becomes
+- [x] Centralize claim add/update/remove/settle/release mutations so direct list
+  replacement cannot bypass transition policy. Reopening now lives in one
+  place: `tracking.add_resource_claim` computes whether a mutation increases
+  held obligations (`_claim_reopens_owner`) and calls
+  `reopen_finalized_owner`, which every claim-adding caller (`claims add`,
+  future claim-handoff acceptance) already routes through. Claim-add is still
+  the only ledger-mutating claim path -- `settle_resource_claim` and release
+  paths were not changed since they never increase held obligations (see the
+  reopen table below).
+- [x] Keep `finalizing` and `orphaned` hard-reject states (unchanged). Atomically
+  reopen `finalized -> active` only when a mutation changes the held obligation
+  set: a new claim, or `released/abandoned -> active/at-rest` re-added via
+  `add_resource_claim`. **Follow-up and accepted-inbound-obligation reopen
+  triggers are NOT done** -- `FollowUpRecord` doesn't exist yet (Phase 3), and
+  claim-handoff acceptance itself isn't implemented yet (`claim_handoffs.py` is
+  still "Phase 1": offer/decline/cancel only, no `accept`). Materializing an
+  already-effective legacy synthetic follow-up doesn't apply yet for the same
+  reason.
+- [x] Leave idempotent reads, pure settlement, release, removal, and
+  metadata/heartbeat refreshes free to operate without reopening --
+  `_claim_reopens_owner` returns `False` for a same-state replay and for
+  settling `active -> at-rest` (already held, not an increase); neither of
+  those code paths calls `reopen_finalized_owner`.
+- [x] Preserve the finalize freeze invariant: once the record becomes
   `finalizing`, claim/follow-up acquisition remains rejected until finalize
-  commits or rolls back.
-- [ ] Implement finalize rollback and stale-`finalizing` recovery so a failure
+  commits or rolls back (unchanged -- `add_resource_claim` already hard-rejects
+  `finalizing`).
+- [x] Implement finalize rollback and stale-`finalizing` recovery so a failure
   after the freeze restores a mutable stable state instead of wedging the
-  worktree permanently.
-- [ ] Preserve historical finalization timestamps separately from current
-  lifecycle state and re-arm disposition nudges when a worktree reopens.
+  worktree permanently. Found and fixed a **real wedge bug**: neither the
+  post-freeze `lock.acquire()` `TimeoutError` path nor the outer cleanup
+  `except Exception` path reverted `record.status` off `finalizing` on
+  failure, so either failure permanently froze creator ownership (no path
+  back, since `add_resource_claim` hard-rejects `finalizing`). Added
+  `finalize._rollback_finalizing_freeze` (captures the pre-freeze status,
+  reverts it on either failure path, no-ops if a concurrent process already
+  resolved the record) with unit tests. **Not done:** a dedicated operator-
+  facing `stale-finalizing recovery` CLI verb using lock/owner-liveness+age
+  evidence for a wedge that predates this fix or crashes before either catch
+  block runs (e.g. process killed mid-freeze) -- the automatic rollback only
+  covers failures raised *within* `validate_and_finalize` itself.
+- [x] Preserve historical finalization timestamps separately from current
+  lifecycle state and re-arm disposition nudges when a worktree reopens. Added
+  `WorktreeRecord.last_finalized_at` (copied from `completed_at` before it's
+  cleared by the reopen) and clear `status_note_at` on reopen so a stale
+  "nothing left to do" note doesn't linger.
 - [ ] Reopen output and guidance must list prior resources that were released or
   re-homed by the earlier finalize cascade; reopening the worktree does not
-  restore those resources.
+  restore those resources. `claims add`'s CLI output now reports `reopened:
+  true` and prints a one-line notice, but it does not yet enumerate the prior
+  finalize's released/re-homed resources -- that needs `finalize`'s
+  `release_all_resources` cascade to leave a durable trail on the record for
+  a later reopen to read back.
 
 ### Phase 3 - Replace the boolean-only follow-up model
-- [ ] Add a migration-free `FollowUpRecord` list with stable IDs, summary,
+- [x] Add a migration-free `FollowUpRecord` list with stable IDs, summary,
   state, timestamps, typed objective references, per-item revisions/tombstones,
-  and a monotonic ledger revision protected by the record merge path.
-- [ ] Add explicit list/add/resolve/dismiss and offer/accept/decline transfer CLI
-  operations; transfer remains source-owned until acceptance commits.
-- [ ] Keep `status --follow-up --summary` as a compatibility shorthand and
-  continue emitting `follow_up` as the derived open-obligation boolean.
-- [ ] Treat active effort bindings and legacy `follow_up=true` records as
-  effective open obligations with explicit local clear/transfer paths, without
-  pretending to infer completion from another repository.
-- [ ] Add a `kind: issue` follow-up ref and guidance (`file-issue` skill +
-  `worktree` skill) directing an agent to open a follow-up referencing any
-  issue it files that is closely related to its current worktree's task, so a
-  proactively-filed bug remains this worktree's obligation (open until
-  resolved, explicitly dismissed as unrelated, or transferred) instead of
-  silently dropping out of view once local Git state is clean.
+  and a monotonic ledger revision protected by the record merge path. Landed as
+  `tracking.FollowUpRecord`/`FollowUpRef` + `WorktreeRecord.follow_ups`
+  (YAML-round-tripped, emitted only when non-empty). Revision bumps on every
+  mutation; deletion is a tombstone (state flips to
+  resolved/dismissed/transferred, never a list removal) so history and
+  revision continuity survive -- but the **cross-writer merge-by-highest-
+  revision path itself is not implemented yet** (see the unchecked
+  concurrency item below and Validation Plan's **Concurrency** row).
+- [x] Add explicit list/add/resolve/dismiss ... CLI operations (`follow-ups
+  [id]`, `follow-ups add <summary> [--ref kind:value]...`, `follow-ups
+  resolve <id> [--result-ref <ref>]`, `follow-ups dismiss <id> --reason
+  <text>`). **`offer`/`accept`/`decline` transfer is NOT implemented** --
+  `claim_handoffs.py` itself only has offer/decline/cancel (no `accept`) so
+  there's no existing acceptance machinery to route a follow-up transfer
+  through yet.
+- [x] Keep `status --follow-up --summary` as a compatibility shorthand and
+  continue emitting `follow_up` as the derived open-obligation boolean. The
+  CLI flag itself is unchanged; `tracking.effective_open_follow_up_count`
+  is the new derivation point (itemized open/pending-transfer items, falling
+  back to the legacy boolean only when the ledger is empty -- no double
+  counting). `set_disposition`'s `follow_up=True` path now also reopens a
+  `finalized` owner (closing a related gap: `effort-focus bind`'s automatic
+  `follow_up=True` previously didn't reopen a finalized record at all).
+- [x] Treat active effort bindings ... as effective open obligations. Turns
+  out this was **already correct** pre-existing behavior: `effort-focus
+  bind` already calls `set_disposition(follow_up=True, ...)`, which
+  `effective_open_follow_up_count` picks up via the legacy-boolean fallback
+  -- no new code needed beyond the reopen fix above. Legacy
+  `follow_up=true` records with no itemized entries are handled the same way
+  (one synthetic open item).
+- [x] Add a `kind: issue` follow-up ref and guidance. `FollowUpRefKind`
+  includes `issue` (plus `dispatch-task`/`pull-request`/`file`/`effort`/
+  `resource-claim`/`other`); the `worktree` skill's obligation-gate section
+  now explicitly tells an agent to `follow-ups add "<summary>" --ref
+  issue:<repo>#<n>` for a bug it files related to the current task. The
+  `file-issue` skill itself was **not** touched (cross-repo, aperture-labs-
+  owned) -- that pointer is the follow-up work.
 
 ### Phase 4 - Derive canonical finality once
 - [ ] Add a versioned faceted descriptor that preserves Git state, tracking
@@ -260,21 +325,32 @@ _Verbatim operator request; original spelling and punctuation preserved._
 
 ## Validation Plan
 
-- [ ] **Reopen:** adding a new claim or follow-up to a retained finalized
-  worktree succeeds, changes lifecycle state away from finalized, and
-  immediately removes prune eligibility.
+- [x] **Reopen:** adding a new claim to a retained finalized worktree succeeds,
+  changes lifecycle state away from finalized (to `active`), and immediately
+  removes prune eligibility (already covered by Phase 1's held-claims fix).
+  Follow-up-triggered reopen is not yet testable -- `FollowUpRecord` doesn't
+  exist (Phase 3).
 - [ ] **Reopen history:** reopen output identifies released claims and re-homed
-  child resources that were not restored by reopening.
-- [ ] **Finalize rollback:** a failure after entering `finalizing` restores a
-  mutable stable state, and stale finalizing records have an explicit recovery
-  path.
+  child resources that were not restored by reopening. Not done -- `claims add`
+  reports `reopened: true` but does not enumerate prior cascade-released
+  resources.
+- [x] **Finalize rollback:** a failure after entering `finalizing` restores a
+  mutable stable state (tested directly against `_rollback_finalizing_freeze`
+  and wired into both post-freeze failure paths in `validate_and_finalize`).
+  Stale finalizing records predating this fix, or a crash that occurs before
+  either failure handler runs, still have **no explicit operator-facing
+  recovery path/verb** -- not done.
 - [ ] **Claim-free:** active and at-rest claims both prevent `FINAL`; only
   released and abandoned claims are excluded from the held count, and abandoned
   claims remain visible in audit detail.
-- [ ] **Follow-up list:** multiple open obligations produce the exact count and
-  list; resolving or transferring one changes the count atomically.
-- [ ] **Legacy:** a boolean-only `follow_up=true` record remains blocked and
-  gains a safe explicit representation on its next mutation.
+- [x] **Follow-up list:** multiple open obligations produce the exact count and
+  list; resolving or transferring one changes the count atomically. Covered for
+  add/resolve/dismiss (`test_tracking.py::TestFollowUpLedger`,
+  `test_follow_ups_cmd.py`); no transfer path exists yet to test.
+- [x] **Legacy:** a boolean-only `follow_up=true` record remains blocked
+  (`effective_open_follow_up_count` falls back to it) -- but it does **not**
+  yet "gain a safe explicit representation on its next mutation" (auto-
+  materializing a legacy boolean into an itemized entry is unimplemented).
 - [ ] **Ownership:** resource-claim and dispatch-task references do not transfer,
   settle, release, or complete the referenced object implicitly.
 - [ ] **Git:** open/unmerged pull requests, dirty files, local-only commits, and
@@ -352,4 +428,104 @@ The approved design is the faceted model in [design.md](design.md):
   fall out of the worktree's obligations. Folded into Phase 3 and Phase 5.
 - No further implementation done this session; still Draft, plan not yet
   submitted for the effort's own PR review gate.
+
+### 2026-09-13 - Started execution; closed a safety gap PR #2592 left open
+- Operator said "start it." Status moved **Draft -> Active**. Bound this
+  worktree to the effort at Phase 1
+  (`effort-focus bind ... --slice "Phase 1 - Lock the contracts with failing
+  fixtures"`).
+- While scoping Phase 1's "Git-settled record with held claims" fixture,
+  found that PR #2592 (letting a finalized owner accept a new claim) had
+  opened exactly the gap this effort exists to close: neither
+  `prune.cleanup_disposition` nor `gc.classify_managed_worktree` ever
+  consulted `rec.resources` at all, so a `finalized` record holding a fresh
+  claim was cleanable/reapable regardless. Fixed both (new `held-claims`
+  bucket/reason, gated the same way the existing `follow_up` override is),
+  with regression tests. This is the prune-verdict slice of Phase 1's first
+  bullet and part of Phase 4's "held claims + open follow-ups turn any base
+  state into blocked" invariant -- landed early because it was a live safety
+  gap, not merely a locked failing fixture.
+- Explicitly NOT done this session: the unified closure descriptor (Phase 4),
+  the `FollowUpRecord` ledger (Phase 3), the reopen/freeze/rollback
+  transaction (Phase 2), and the list JSON / mux / Picker parity fixtures
+  (rest of Phase 1). Next slice: either finish Phase 1's remaining fixtures
+  (compatibility, concurrency, inventory) or move to Phase 2's centralized
+  mutation/reopen transaction -- pick up from the Plan checklist above.
+
+### 2026-09-13 - Phase 2: reopen transaction + a second wedge bug closed
+- Operator said "continue." Bound a fresh worktree at Phase 2
+  (`effort-focus bind ... --slice "Phase 2 - Make finalized records
+  resumable"`).
+- Implemented the centralized reopen transaction: `tracking._claim_reopens_owner`
+  decides whether a mutation increases held obligations; `add_resource_claim`
+  calls `reopen_finalized_owner` when it does. Idempotent replays, settling
+  `active -> at-rest`, and adding an already-non-live claim never reopen.
+  Added `WorktreeRecord.last_finalized_at` (preserves the historical
+  finalize timestamp the reopen clears from `completed_at`) with YAML
+  read/write round-trip. `claims add`'s CLI/JSON output now reports
+  `reopened: true/false`.
+- Follow-up-triggered and accepted-inbound-obligation reopen triggers are
+  **not done** -- `FollowUpRecord` is Phase 3 and claim-handoff `accept` isn't
+  implemented yet (`claim_handoffs.py` only has offer/decline/cancel so far).
+- While implementing the freeze invariant checklist item, found a **second
+  live wedge bug**: once `validate_and_finalize` freezes a record to
+  `finalizing`, neither the post-freeze `lock.acquire()` `TimeoutError` path
+  nor the outer `except Exception` cleanup-failure path ever reverted the
+  status -- a lock-timeout or any exception during cleanup left the record
+  permanently stuck at `finalizing` (which `add_resource_claim` hard-rejects,
+  so there was no way back short of manual YAML surgery). Added
+  `finalize._rollback_finalizing_freeze` (captures pre-freeze status, reverts
+  on either failure path, no-ops if a concurrent process already resolved the
+  record) with direct unit tests.
+- **Not done:** a dedicated stale-`finalizing` recovery CLI verb (for a wedge
+  predating this fix, or a crash that occurs before either failure handler
+  runs); the reopen-history requirement (listing prior cascade-released
+  resources in the reopen output); Phase 3-6 entirely.
+- `python tools/run-plugin-tests.py agent-worktrees` -- 516 passed (full suite
+  minus the same two pre-existing, unrelated `test_knowledge_plugins.py`
+  failures noted in the prior entry).
+
+### 2026-09-13 - Phase 3: itemized follow-up ledger + a third pre-existing gap closed
+- Operator said "keep driving." Bound a fresh worktree at Phase 3
+  (`effort-focus bind ... --slice "Phase 3 - Replace the boolean-only
+  follow-up model"`).
+- Added `tracking.FollowUpRecord`/`FollowUpRef` + `WorktreeRecord.follow_ups`
+  (YAML round-tripped, emitted only when non-empty) and the CRUD primitives
+  `add_follow_up`/`resolve_follow_up`/`dismiss_follow_up` +
+  `effective_open_follow_up_count` (itemized open/pending-transfer items,
+  falling back to the legacy boolean only when the ledger is empty -- no
+  double counting). `add_follow_up` reopens a `finalized` owner through the
+  same `reopen_finalized_owner` transaction Phase 2 built.
+- New CLI verb `agent-worktrees follow-ups [id|add|resolve|dismiss]`
+  (`--ref kind:value` repeatable on `add`; kinds include `issue` per the
+  operator's "encourage the agent to claim bugs it files proactively" ask).
+  `offer`/`accept`/`decline` transfer is **not implemented** -- there's no
+  existing acceptance machinery to route through (`claim_handoffs.py` itself
+  only has offer/decline/cancel).
+- Wired `prune.cleanup_disposition`'s existing follow-up gate to
+  `effective_open_follow_up_count` (was the raw `rec.follow_up` boolean) and
+  the two `gc.classify_managed_worktree` call sites in `__main__.py` the same
+  way, so an itemized open follow-up blocks cleanup/GC exactly like the
+  legacy boolean did.
+- **Found and fixed a third pre-existing gap** while implementing the
+  "keep `status --follow-up` as compat" bullet: `effort-focus bind` calls
+  `tracking.set_disposition(follow_up=True, ...)` directly, but
+  `set_disposition` itself never reopened a `finalized` owner -- only the
+  manual `status --follow-up` CLI path had its own explicit pre-check. So
+  binding an effort to an already-finalized worktree set the flag but left
+  `status: finalized` in place. Moved the reopen call into `set_disposition`
+  itself (any `follow_up=True` assertion now reopens consistently), verified
+  active-effort-binding compat was otherwise already correct pre-existing
+  behavior (no new code needed there beyond this fix).
+- Updated `docs/cli-reference.md` (new `follow-ups` row) and the `worktree`
+  skill's obligation-gate section (proactive issue-claiming guidance, tying
+  back to the operator's explicit ask from the prior session).
+- **Not done:** cross-writer merge-by-highest-revision reconciliation for
+  concurrent follow-up mutations (the per-item `revision` field exists but
+  nothing merges by it yet); `offer`/`accept`/`decline` transfer; auto-
+  materializing a legacy boolean into an itemized entry on its next mutation;
+  Phase 4-6 entirely.
+- `python tools/run-plugin-tests.py agent-worktrees` -- 525 passed (full suite
+  minus the same two pre-existing, unrelated `test_knowledge_plugins.py`
+  failures noted in prior entries).
 

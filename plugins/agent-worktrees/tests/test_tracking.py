@@ -11,16 +11,20 @@ from agent_worktrees.effort_focus import ActiveEffort
 from agent_worktrees.tracking import (
     ClaimRef,
     ControllerRelation,
+    FollowUpRef,
     ResourceClaim,
     SessionEntry,
     WorktreeRecord,
     _atomic_write,
     _RecordLock,
     _strip_control_chars,
+    add_follow_up,
     add_resource_claim,
     cap_title,
     create_new_record,
     deregister_session,
+    dismiss_follow_up,
+    effective_open_follow_up_count,
     find_orphaned_children,
     find_paired_record,
     find_worktree_id_by_cwd,
@@ -34,6 +38,7 @@ from agent_worktrees.tracking import (
     parse_claim_ref,
     register_session,
     release_all_resources,
+    resolve_follow_up,
     resolve_worktree_path,
     retire_record,
     save_record,
@@ -2201,6 +2206,21 @@ class TestSetDisposition:
         assert loaded.summary == "work left"
         assert loaded.status_note_at  # stamped
 
+    def test_set_follow_up_true_reopens_finalized_owner(self, tmp_path: Path, monkeypatch):
+        # worktree-finality-and-obligations Phase 3: any caller asserting
+        # follow_up=True (manual `status --follow-up`, or `effort-focus
+        # bind`'s automatic set_disposition(follow_up=True, ...)) reopens a
+        # finalized owner -- not just the itemized ledger path.
+        rec = self._rec(status="finalized", completed_at="2026-09-01T00:00:00")
+        p = tmp_path / "wt.yaml"
+        monkeypatch.setattr("agent_worktrees.tracking.save_record",
+                            lambda record, path=None: save_record(record, p))
+        set_disposition(rec, follow_up=True)
+        loaded = load_record(p)
+        assert loaded.status == "active"
+        assert loaded.completed_at is None
+        assert loaded.last_finalized_at == "2026-09-01T00:00:00"
+
     def test_partial_update_preserves_other_field(self, tmp_path: Path, monkeypatch):
         rec = self._rec(follow_up=True, summary="old")
         p = tmp_path / "wt.yaml"
@@ -2690,9 +2710,12 @@ class TestAddResourceClaim:
 
     def test_finalized_worktree_can_add_claim(self, tmp_path: Path):
         """``finalized`` is not terminal -- a resumed worktree may still take
-        on new outbound obligations (docs/worktree-lifecycle.md)."""
+        on new outbound obligations (docs/worktree-lifecycle.md), and the
+        record atomically reopens to `active` (worktree-finality-and-
+        obligations, Phase 2 reopen transaction)."""
         rec = self._rec(tmp_path)
         rec.status = "finalized"
+        rec.completed_at = "2026-09-01T00:00:00"
 
         add_resource_claim(
             rec,
@@ -2701,6 +2724,62 @@ class TestAddResourceClaim:
         )
 
         assert [claim.ref for claim in rec.resources] == ["host/repo/wt-B"]
+        assert rec.status == "active"
+        assert rec.completed_at is None
+        assert rec.last_finalized_at == "2026-09-01T00:00:00"
+
+    def test_reactivating_a_released_claim_reopens_finalized_owner(
+        self, tmp_path: Path,
+    ):
+        rec = self._rec(tmp_path)
+        add_resource_claim(
+            rec, ResourceClaim(kind="worktree", ref="host/repo/wt-B",
+                                state="released"),
+            save=False,
+        )
+        rec.status = "finalized"
+
+        add_resource_claim(
+            rec, ResourceClaim(kind="worktree", ref="host/repo/wt-B",
+                                state="active"),
+            save=False,
+        )
+
+        assert rec.status == "active"
+        assert rec.resources[0].state == "active"
+
+    def test_idempotent_replay_does_not_reopen_finalized_owner(
+        self, tmp_path: Path,
+    ):
+        rec = self._rec(tmp_path)
+        claim = ResourceClaim(kind="worktree", ref="host/repo/wt-B",
+                               state="active", note="x")
+        add_resource_claim(rec, claim, save=False)
+        rec.status = "finalized"
+
+        # Re-adding the exact same kind/state/note is a no-op replay.
+        add_resource_claim(
+            rec, ResourceClaim(kind="worktree", ref="host/repo/wt-B",
+                                state="active", note="x"),
+            save=False,
+        )
+
+        assert rec.status == "finalized"
+
+    def test_adding_an_already_released_claim_does_not_reopen(
+        self, tmp_path: Path,
+    ):
+        rec = self._rec(tmp_path)
+        rec.status = "finalized"
+
+        # A claim that is not itself live never increases held obligations.
+        add_resource_claim(
+            rec, ResourceClaim(kind="worktree", ref="host/repo/wt-B",
+                                state="released"),
+            save=False,
+        )
+
+        assert rec.status == "finalized"
 
     def test_complete_managed_worktree_rejects_claim(self, tmp_path: Path):
         rec = self._rec(tmp_path)
@@ -2724,3 +2803,91 @@ class TestAddResourceClaim:
         loaded = load_record(tmp_path / "wt-B.yaml")
         assert loaded.owner_ref == "anomalous-potato/test-chamber/wt-A#s1"
         assert loaded.owner_claim_ref.worktree_id == "wt-A"
+
+
+class TestFollowUpLedger:
+    """worktree-finality-and-obligations Phase 3: the itemized follow-up
+    ledger replacing the boolean-only `follow_up` flag."""
+
+    def _rec(self, tmp_path: Path) -> WorktreeRecord:
+        return create_new_record(
+            "wt-A", "worktree/wt-A", str(tmp_path / "wt-A"), "test-chamber",
+            "anomalous-potato", "wsl", tmp_path,
+        )
+
+    def test_add_creates_open_item(self, tmp_path: Path):
+        rec = self._rec(tmp_path)
+        item = add_follow_up(rec, "deploy the merged runtime", save=False)
+        assert item.state == "open"
+        assert item.revision == 1
+        assert rec.follow_ups == [item]
+        assert effective_open_follow_up_count(rec) == 1
+
+    def test_add_with_refs_round_trips_through_yaml(self, tmp_path: Path):
+        rec = self._rec(tmp_path)
+        add_follow_up(
+            rec, "file the bug", refs=[FollowUpRef(kind="issue", ref="org/repo#9")],
+            save=False,
+        )
+        path = tmp_path / "wt-A.yaml"
+        save_record(rec, path)
+        loaded = load_record(path)
+        assert len(loaded.follow_ups) == 1
+        fu = loaded.follow_ups[0]
+        assert fu.summary == "file the bug"
+        assert fu.refs == [FollowUpRef(kind="issue", ref="org/repo#9")]
+
+    def test_resolve_clears_effective_open_count(self, tmp_path: Path):
+        rec = self._rec(tmp_path)
+        item = add_follow_up(rec, "x", save=False)
+        resolved = resolve_follow_up(rec, item.id, result_ref="org/repo#PR", save=False)
+        assert resolved.state == "resolved"
+        assert resolved.result_ref == "org/repo#PR"
+        assert resolved.revision == 2
+        assert effective_open_follow_up_count(rec) == 0
+
+    def test_dismiss_clears_effective_open_count(self, tmp_path: Path):
+        rec = self._rec(tmp_path)
+        item = add_follow_up(rec, "x", save=False)
+        dismissed = dismiss_follow_up(rec, item.id, reason="not needed", save=False)
+        assert dismissed.state == "dismissed"
+        assert dismissed.reason == "not needed"
+        assert effective_open_follow_up_count(rec) == 0
+
+    def test_resolve_unknown_id_is_a_noop(self, tmp_path: Path):
+        rec = self._rec(tmp_path)
+        assert resolve_follow_up(rec, "fu-missing", save=False) is None
+
+    def test_legacy_boolean_counts_as_one_when_ledger_empty(self, tmp_path: Path):
+        rec = self._rec(tmp_path)
+        rec.follow_up = True
+        assert effective_open_follow_up_count(rec) == 1
+
+    def test_legacy_boolean_does_not_double_count_with_items(self, tmp_path: Path):
+        rec = self._rec(tmp_path)
+        rec.follow_up = True
+        add_follow_up(rec, "x", save=False)
+        add_follow_up(rec, "y", save=False)
+        assert effective_open_follow_up_count(rec) == 2
+
+    def test_adding_open_follow_up_reopens_finalized_owner(self, tmp_path: Path):
+        rec = self._rec(tmp_path)
+        rec.status = "finalized"
+        rec.completed_at = "2026-09-01T00:00:00"
+        add_follow_up(rec, "deploy it", save=False)
+        assert rec.status == "active"
+        assert rec.completed_at is None
+        assert rec.last_finalized_at == "2026-09-01T00:00:00"
+
+    def test_add_rejects_finalizing_owner(self, tmp_path: Path):
+        rec = self._rec(tmp_path)
+        rec.status = "finalizing"
+        with pytest.raises(ValueError, match="creator ownership is frozen"):
+            add_follow_up(rec, "x", save=False)
+
+    def test_add_rejects_orphaned_owner(self, tmp_path: Path):
+        rec = self._rec(tmp_path)
+        rec.status = "orphaned"
+        with pytest.raises(ValueError, match="creator ownership is frozen"):
+            add_follow_up(rec, "x", save=False)
+

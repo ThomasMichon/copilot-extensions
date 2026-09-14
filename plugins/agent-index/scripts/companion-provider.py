@@ -92,7 +92,7 @@ def _supports_companion_mode(environment: dict[str, str]) -> bool:
 def _active_environment(request: dict[str, Any]) -> dict[str, str] | None:
     machine = request["machine"].strip().casefold()
     roots = _project_roots(request["activation_scopes"])
-    active: dict[tuple[str, str], dict[str, str]] = {}
+    active: dict[str, dict[str, str]] = {}
 
     for root in roots:
         result = resolve(root)
@@ -130,7 +130,7 @@ def _active_environment(request: dict[str, Any]) -> dict[str, str] | None:
             "AGENT_INDEX_NO_SELFPROVISION": "1",
             "AGENT_INDEX_REPO": repo_root,
         }
-        active[(config, repo_root)] = _augment_environment(request, environment)
+        active[config] = _augment_environment(request, environment)
 
     if not active:
         return None

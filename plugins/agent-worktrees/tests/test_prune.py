@@ -283,7 +283,7 @@ class TestCleanupDisposition:
         d = prune.cleanup_disposition(rec, _info(S.COMPLETED))
         assert d.cleanable is False
         assert d.bucket == "follow-up"
-        assert "follow-ups" in d.reason
+        assert "open follow-up" in d.reason
 
     def test_follow_up_downgrades_merged_pr(self):
         rec = _rec(status="active", prs=[_pr(21, "merged")])
@@ -302,6 +302,75 @@ class TestCleanupDisposition:
     def test_follow_up_no_effect_when_not_flagged(self):
         d = prune.cleanup_disposition(_rec(status="finalized"), _info(S.COMPLETED))
         assert d.cleanable is True and d.bucket == "clean"
+
+    def test_held_claim_downgrades_finalized_to_blocked(self):
+        # worktree-finality-and-obligations: an active outbound resource claim
+        # blocks cleanup even though the worktree's own status is `finalized`
+        # (finalize is not terminal -- a finalized owner can accept a new claim
+        # per tracking.add_resource_claim, and cleanup must not treat
+        # `status == finalized` alone as claim-free).
+        rec = _rec(status="finalized")
+        rec.resources = [
+            tracking.ResourceClaim(kind="codespace", ref="cs-1", state="active")
+        ]
+        d = prune.cleanup_disposition(rec, _info(S.COMPLETED))
+        assert d.cleanable is False
+        assert d.bucket == "held-claims"
+        assert "held resource claim" in d.reason
+
+    def test_at_rest_claim_also_blocks_cleanup(self):
+        # at-rest is still HELD (the work settled but the claim wasn't torn
+        # down); only released/abandoned claims are non-held.
+        rec = _rec(status="finalized")
+        rec.resources = [
+            tracking.ResourceClaim(kind="codespace", ref="cs-1", state="at-rest")
+        ]
+        d = prune.cleanup_disposition(rec, _info(S.COMPLETED))
+        assert d.cleanable is False and d.bucket == "held-claims"
+
+    def test_released_claim_does_not_block_cleanup(self):
+        rec = _rec(status="finalized")
+        rec.resources = [
+            tracking.ResourceClaim(kind="codespace", ref="cs-1", state="released")
+        ]
+        d = prune.cleanup_disposition(rec, _info(S.COMPLETED))
+        assert d.cleanable is True and d.bucket == "clean"
+
+    def test_held_claim_does_not_override_active(self):
+        rec = _rec(status="finalized")
+        rec.resources = [
+            tracking.ResourceClaim(kind="codespace", ref="cs-1", state="active")
+        ]
+        d = prune.cleanup_disposition(rec, _info(S.ACTIVE))
+        assert d.bucket == "active"
+
+    def test_itemized_open_follow_up_downgrades_finalized_to_blocked(self):
+        # worktree-finality-and-obligations Phase 3: an itemized open
+        # follow-up blocks cleanup the same way the legacy boolean did.
+        rec = _rec(status="finalized")
+        rec.follow_ups = [
+            tracking.FollowUpRecord(id="fu-1", summary="deploy it", state="open")
+        ]
+        d = prune.cleanup_disposition(rec, _info(S.COMPLETED))
+        assert d.cleanable is False and d.bucket == "follow-up"
+        assert "1 open follow-up" in d.reason
+
+    def test_resolved_follow_up_item_does_not_block_cleanup(self):
+        rec = _rec(status="finalized")
+        rec.follow_ups = [
+            tracking.FollowUpRecord(id="fu-1", summary="deploy it", state="resolved")
+        ]
+        d = prune.cleanup_disposition(rec, _info(S.COMPLETED))
+        assert d.cleanable is True and d.bucket == "clean"
+
+    def test_pending_transfer_follow_up_item_blocks_cleanup(self):
+        rec = _rec(status="finalized")
+        rec.follow_ups = [
+            tracking.FollowUpRecord(id="fu-1", summary="deploy it",
+                                    state="pending-transfer")
+        ]
+        d = prune.cleanup_disposition(rec, _info(S.COMPLETED))
+        assert d.cleanable is False and d.bucket == "follow-up"
 
 
 # --- citadel paired-worktree BOTH-gate (#957) -------------------------------

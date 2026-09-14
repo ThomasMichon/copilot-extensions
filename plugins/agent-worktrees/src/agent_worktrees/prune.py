@@ -245,7 +245,8 @@ class CleanupDisposition:
 
     cleanable: bool
     bucket: str   # clean | active | unused | conversation | follow-up |
-    #               open-pr | closed-unmerged | dirty | wip | unmerged
+    #               held-claims | open-pr | closed-unmerged | dirty | wip |
+    #               unmerged
     reason: str
 
 
@@ -293,19 +294,40 @@ def cleanup_disposition(
     if v.category == "claimed":
         return CleanupDisposition(False, "claimed", v.reason)
 
+    # worktree-finality-and-obligations (effort): a HELD outbound resource
+    # claim (``active`` or ``at-rest`` -- see ``ResourceClaim.is_live``)
+    # overrides a would-be SAFE verdict, mirroring the follow-up gate below.
+    # Since a finalized owner can now accept a new claim (finalize is not
+    # terminal; see ``tracking.add_resource_claim``), cleanup must not treat
+    # ``status == finalized`` as proof the worktree is claim-free -- only
+    # ``finalize`` itself re-validates and releases at-rest claims. A
+    # ``released``/``abandoned`` claim is not held and does not block.
+    held_claims = [c for c in rec.resources if c.is_live]
+    if held_claims and (
+        rec.status == "finalized" or info.state == S.COMPLETED
+        or v.category == "merged"
+    ):
+        return CleanupDisposition(
+            False, "held-claims",
+            f"{v.reason} · {len(held_claims)} held resource claim(s) pending")
+
     # worktree-status-core: an agent-asserted follow-up overrides a would-be
-    # SAFE verdict. A finalized/merged/completed worktree the agent flagged as
-    # having actionable follow-ups (un-pushed change, undeployed merge, leftover
-    # temp state) is REVIEW -- never auto-pruned SAFE. Only downgrades the
-    # clean/SAFE path; a dirty/wip/open-pr worktree is already non-cleanable, so
-    # the flag adds nothing there.
-    if rec.follow_up and (
+    # SAFE verdict. A finalized/merged/completed worktree with actionable
+    # follow-ups (un-pushed change, undeployed merge, leftover temp state) is
+    # REVIEW -- never auto-pruned SAFE. Only downgrades the clean/SAFE path; a
+    # dirty/wip/open-pr worktree is already non-cleanable, so this adds nothing
+    # there. worktree-finality-and-obligations Phase 3: counts the itemized
+    # `follow_ups` ledger (open/pending-transfer items), falling back to the
+    # legacy boolean when the ledger is empty -- see
+    # `tracking.effective_open_follow_up_count`.
+    open_follow_ups = tracking.effective_open_follow_up_count(rec)
+    if open_follow_ups and (
         rec.status == "finalized" or info.state == S.COMPLETED
         or v.category == "merged"
     ):
         return CleanupDisposition(
             False, "follow-up",
-            f"{v.reason} · agent flagged follow-ups pending")
+            f"{v.reason} · {open_follow_ups} open follow-up(s) pending")
 
     # citadel paired-worktree BOTH-gate (#957): a paired -harness/-knowledge
     # worktree is prunable only once BOTH halves are finalized. When the
