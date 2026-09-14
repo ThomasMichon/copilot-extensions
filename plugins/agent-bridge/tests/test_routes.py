@@ -1927,3 +1927,123 @@ def test_worktree_discovery_crawl_if_empty_no_reentrant_deadlock() -> None:
 
     asyncio.run(_run())
     assert cache.get_all() == {"local": []}
+
+
+def test_crawl_agent_falls_back_when_classify_unsupported() -> None:
+    """worktree-finality-and-obligations (Phase 5): an older agent-worktrees
+    runtime that rejects ``--classify`` must not lose discovery entirely --
+    ``_crawl_agent`` detects the specific "unrecognized arguments" stderr and
+    retries with the legacy (unclassified) args instead of returning []."""
+    import asyncio
+
+    from agent_bridge.routes.worktrees import WorktreeDiscoveryCache
+
+    cache = WorktreeDiscoveryCache(interval=0)
+    agent_cfg = MagicMock()
+    agent_cfg.project = "aw"
+    agent_cfg.host = None
+    resolver = MagicMock()
+
+    calls: list[list[str]] = []
+
+    async def _fake_run_local_ex(project, args=None, *, timeout=None):
+        calls.append(args)
+        if args and "--classify" in args:
+            return None, "aw: error: unrecognized arguments: --classify"
+        return (
+            '{"version": 1, "worktrees": [{"id": "w1", "path": "/w1",'
+            ' "branch": "b", "status": "active"}]}',
+            "",
+        )
+
+    async def _run() -> None:
+        with patch(
+            "agent_bridge.routes.worktrees._run_local_ex",
+            side_effect=_fake_run_local_ex,
+        ):
+            return await cache._crawl_agent("local", agent_cfg, resolver)
+
+    entries = asyncio.run(_run())
+    assert len(calls) == 2  # classify attempt, then the legacy fallback
+    assert "--classify" in calls[0]
+    assert "--classify" not in calls[1]
+    assert len(entries) == 1
+    assert entries[0].id == "w1"
+    assert entries[0].closure is None  # legacy list never carried one
+
+
+def test_crawl_agent_falls_back_when_classify_times_out() -> None:
+    """A classify pass that fails/times out for any OTHER reason (not the
+    specific unsupported-flag stderr) also falls back to the legacy args
+    rather than losing the agent's rows -- e.g. a large/slow target
+    genuinely exceeding the classify budget."""
+    import asyncio
+
+    from agent_bridge.routes.worktrees import WorktreeDiscoveryCache
+
+    cache = WorktreeDiscoveryCache(interval=0)
+    agent_cfg = MagicMock()
+    agent_cfg.project = "aw"
+    agent_cfg.host = None
+    resolver = MagicMock()
+
+    calls: list[list[str]] = []
+
+    async def _fake_run_local_ex(project, args=None, *, timeout=None):
+        calls.append(args)
+        if args and "--classify" in args:
+            return None, ""  # timeout: no stderr, just None
+        return (
+            '{"version": 1, "worktrees": [{"id": "w1", "path": "/w1",'
+            ' "branch": "b", "status": "active"}]}',
+            "",
+        )
+
+    async def _run() -> None:
+        with patch(
+            "agent_bridge.routes.worktrees._run_local_ex",
+            side_effect=_fake_run_local_ex,
+        ):
+            return await cache._crawl_agent("local", agent_cfg, resolver)
+
+    entries = asyncio.run(_run())
+    assert len(calls) == 2
+    assert len(entries) == 1
+    assert entries[0].id == "w1"
+
+
+def test_crawl_agent_uses_classify_budget_and_keeps_closure() -> None:
+    """The happy path: --classify succeeds on the first try (using the longer
+    _CLASSIFY_CMD_TIMEOUT budget) and its closure descriptor survives."""
+    import asyncio
+
+    from agent_bridge.routes import worktrees as wt_routes
+    from agent_bridge.routes.worktrees import WorktreeDiscoveryCache
+
+    cache = WorktreeDiscoveryCache(interval=0)
+    agent_cfg = MagicMock()
+    agent_cfg.project = "aw"
+    agent_cfg.host = None
+    resolver = MagicMock()
+
+    seen_timeouts: list[float | None] = []
+
+    async def _fake_run_local_ex(project, args=None, *, timeout=None):
+        seen_timeouts.append(timeout)
+        return (
+            '{"version": 1, "worktrees": [{"id": "w1", "path": "/w1",'
+            ' "branch": "b", "status": "active",'
+            ' "closure": {"version": 1, "label": "FINAL"}}]}',
+            "",
+        )
+
+    async def _run() -> None:
+        with patch(
+            "agent_bridge.routes.worktrees._run_local_ex",
+            side_effect=_fake_run_local_ex,
+        ):
+            return await cache._crawl_agent("local", agent_cfg, resolver)
+
+    entries = asyncio.run(_run())
+    assert seen_timeouts == [wt_routes._CLASSIFY_CMD_TIMEOUT]
+    assert entries[0].closure == {"version": 1, "label": "FINAL"}

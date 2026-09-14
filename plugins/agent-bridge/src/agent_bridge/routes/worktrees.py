@@ -29,6 +29,12 @@ log = logging.getLogger("agent-bridge")
 router = APIRouter(tags=["worktrees"])
 
 _CMD_TIMEOUT = 30.0
+# Phase-5 (worktree-finality-and-obligations): a longer budget specifically
+# for a `--classify` crawl -- the extra ~5 git calls per worktree can exceed
+# the base _CMD_TIMEOUT on a large/slow target. Mirrors the Picker's own
+# `picker_tui.data_ssh._CLASSIFY_TIMEOUT` (60s) so the two surfaces agree on
+# how patient a classify pass is allowed to be.
+_CLASSIFY_CMD_TIMEOUT = 60.0
 _GOVERNANCE_BACKOFF_SECONDS = 10.0
 
 #: Per-worktree locks serializing the fresh-start spawn (#1683) so two
@@ -273,38 +279,63 @@ class WorktreeDiscoveryCache:
         if not config.project:
             return []
 
-        # worktree-finality-and-obligations (Phase 5): --classify is included
-        # so the crawl carries the canonical closure descriptor (label,
-        # held-claim/follow-up counts, action disposition) through to the
-        # cockpit projection. list --json --classify's own short-TTL result
-        # cache (list-coalescing) absorbs the added git-call cost across the
-        # crawl loop's own polling interval; this is a display read, never a
-        # destructive-action authorization (that always recomputes fresh
-        # immediately before acting, per design.md).
-        _LIST_ARGS = ["list", "--json", "--mux-details", "--classify"]
-
-        if not config.host:
-            # Local
-            raw = await _run_local(config.project, _LIST_ARGS)
-        else:
+        is_local = not config.host
+        host: str | None = None
+        user: str | None = None
+        if not is_local:
             # SSH -- resolve through topology for correct alias/user
             try:
                 target = resolver.resolve(agent_name)
             except (KeyError, ValueError) as exc:
                 log.warning("Cannot resolve agent %s for discovery: %s", agent_name, exc)
                 return []
-
             # If the resolved target is the local machine, run locally
             # instead of SSH (avoids loopback SSH failures)
             if _is_local_target(target.host, resolver):
-                raw = await _run_local(config.project, _LIST_ARGS)
+                is_local = True
             else:
-                raw = await _run_ssh(
-                    host=target.host or config.host,
-                    user=target.user or config.ssh_user,
-                    project=config.project,
-                    args=_LIST_ARGS,
+                host = target.host or config.host
+                user = target.user or config.ssh_user
+
+        async def _run(args: list[str], *, timeout: float | None = None):
+            if is_local:
+                return await _run_local_ex(config.project, args, timeout=timeout)
+            return await _run_ssh_ex(
+                host=host, user=user, project=config.project, args=args,
+                timeout=timeout,
+            )
+
+        # worktree-finality-and-obligations (Phase 5): --classify is included
+        # so the crawl carries the canonical closure descriptor (label,
+        # held-claim/follow-up counts, action disposition) through to the
+        # cockpit projection. Two safety nets, both mirroring the Picker's own
+        # (``picker_tui.data_ssh``) classify handling so a slow/old target
+        # never loses discovery entirely:
+        #   1. a longer, classify-specific timeout budget (the extra ~5 git
+        #      calls per worktree can genuinely exceed the base
+        #      _CMD_TIMEOUT on a large/slow target) -- a timeout here falls
+        #      back to the legacy (unclassified) call rather than dropping
+        #      the whole crawl to [].
+        #   2. an explicit "--classify unrecognized" stderr check -- an older
+        #      agent-worktrees runtime that doesn't support the flag falls
+        #      back the same way, instead of _exec's generic nonzero-exit
+        #      handling silently emptying the cache for that agent.
+        classify_args = ["list", "--json", "--mux-details", "--classify"]
+        legacy_args = ["list", "--json", "--mux-details"]
+
+        raw, stderr = await _run(classify_args, timeout=_CLASSIFY_CMD_TIMEOUT)
+        if raw is None:
+            if stderr and _is_classify_unsupported(stderr):
+                log.info(
+                    "agent %s: --classify unsupported by remote agent-worktrees; "
+                    "falling back to unclassified list", agent_name,
                 )
+            else:
+                log.warning(
+                    "agent %s: classified worktree list failed/timed out; "
+                    "falling back to unclassified list", agent_name,
+                )
+            raw, _stderr = await _run(legacy_args)
 
         if raw is None:
             return []
@@ -338,8 +369,20 @@ class WorktreeDiscoveryCache:
 # -- Subprocess helpers -------------------------------------------------------
 
 
-async def _run_local(project: str, args: list[str] | None = None) -> str | None:
+async def _run_local(
+    project: str, args: list[str] | None = None, *, timeout: float | None = None,
+) -> str | None:
     """Run ``<project> <args>`` locally (defaults to ``list --json``)."""
+    stdout, _stderr = await _run_local_ex(project, args, timeout=timeout)
+    return stdout
+
+
+async def _run_local_ex(
+    project: str, args: list[str] | None = None, *, timeout: float | None = None,
+) -> tuple[str | None, str]:
+    """Like :func:`_run_local`, also returning stderr (empty on success) so a
+    caller can distinguish a timeout/crash from a specific rejected flag
+    (see :func:`_is_classify_unsupported`)."""
     from pathlib import Path
 
     home = Path.home()
@@ -351,7 +394,7 @@ async def _run_local(project: str, args: list[str] | None = None) -> str | None:
         binstub_str = str(binstub)
 
     cmd = [binstub_str, *(args if args is not None else ["list", "--json"])]
-    return await _exec(cmd)
+    return await _exec_ex(cmd, timeout=timeout)
 
 
 def _is_local_target(ssh_host: str | None, resolver: AgentResolver) -> bool:
@@ -394,8 +437,20 @@ def _is_local_target(ssh_host: str | None, resolver: AgentResolver) -> bool:
 
 async def _run_ssh(
     host: str, user: str | None, project: str, args: list[str] | None = None,
+    *, timeout: float | None = None,
 ) -> str | None:
     """Run ``<project> <args>`` on a remote machine via SSH."""
+    stdout, _stderr = await _run_ssh_ex(
+        host=host, user=user, project=project, args=args, timeout=timeout,
+    )
+    return stdout
+
+
+async def _run_ssh_ex(
+    host: str | None, user: str | None, project: str,
+    args: list[str] | None = None, *, timeout: float | None = None,
+) -> tuple[str | None, str]:
+    """Like :func:`_run_ssh`, also returning stderr (empty on success)."""
     ssh_target = f"{user}@{host}" if user else host
     sub = " ".join(shlex.quote(a) for a in (args if args is not None else ["list", "--json"]))
     remote_cmd = f"{shlex.quote(project)} {sub}"
@@ -408,12 +463,32 @@ async def _run_ssh(
         ssh_target,
         remote_cmd,
     ]
-    return await _exec(cmd)
+    return await _exec_ex(cmd, timeout=timeout)
 
 
-async def _exec(cmd: list[str]) -> str | None:
+def _is_classify_unsupported(stderr: str) -> bool:
+    """True if *stderr* is agent-worktrees rejecting an unrecognized
+    ``--classify`` flag (an agent-worktrees runtime older than the
+    worktree-finality-and-obligations closure-descriptor work). Mirrors
+    ``picker_tui.data_ssh._is_classify_unsupported``."""
+    s = stderr or ""
+    return "unrecognized arguments" in s and "--classify" in s
+
+
+async def _exec(cmd: list[str], *, timeout: float | None = None) -> str | None:
     """Execute a command and return stdout, or None on failure."""
+    stdout, _stderr = await _exec_ex(cmd, timeout=timeout)
+    return stdout
+
+
+async def _exec_ex(
+    cmd: list[str], *, timeout: float | None = None,
+) -> tuple[str | None, str]:
+    """Like :func:`_exec`, also returning stderr (empty string on success or
+    when unavailable) so a caller can distinguish a timeout/crash from a
+    specific rejected flag (see :func:`_is_classify_unsupported`)."""
     proc: asyncio.subprocess.Process | None = None
+    eff_timeout = _CMD_TIMEOUT if timeout is None else timeout
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -428,25 +503,26 @@ async def _exec(cmd: list[str]) -> str | None:
             start_new_session=True,
         )
         stdout, stderr = await asyncio.wait_for(
-            proc.communicate(), timeout=_CMD_TIMEOUT,
+            proc.communicate(), timeout=eff_timeout,
         )
+        stderr_text = stderr.decode(errors="replace")
         if proc.returncode != 0:
             log.error(
                 "Command failed (rc=%d): %s\nstderr: %s",
                 proc.returncode, " ".join(cmd),
-                stderr.decode(errors="replace")[:500],
+                stderr_text[:500],
             )
-            return None
-        return stdout.decode()
+            return None, stderr_text
+        return stdout.decode(), stderr_text
     except TimeoutError:
-        log.error("Command timed out after %.0fs: %s", _CMD_TIMEOUT, " ".join(cmd))
+        log.error("Command timed out after %.0fs: %s", eff_timeout, " ".join(cmd))
         _kill_process_tree(proc)
         if proc:
             try:
                 await asyncio.wait_for(proc.communicate(), timeout=5)
             except Exception:
                 pass
-        return None
+        return None, ""
     except asyncio.CancelledError:
         if proc and proc.returncode is None:
             _kill_process_tree(proc)
@@ -457,7 +533,7 @@ async def _exec(cmd: list[str]) -> str | None:
         raise
     except Exception:
         log.exception("Failed to run: %s", " ".join(cmd))
-        return None
+        return None, ""
 
 
 def _kill_process_tree(proc: asyncio.subprocess.Process | None) -> None:

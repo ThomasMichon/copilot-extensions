@@ -326,18 +326,19 @@ _Verbatim operator request; original spelling and punctuation preserved._
 - [x] Make list JSON publish the canonical descriptor and compatibility
   fields. Done in Phase 4 (additive `closure` field alongside the legacy
   `cleanup_bucket`/`state` fields, unchanged).
-- [x] Pass the descriptor through agent-bridge's allow-list projection and any
+- [ ] Pass the descriptor through agent-bridge's allow-list projection and any
   cockpit consumer before treating descriptor absence as a mixed-version case.
-  Landed the agent-bridge half: the worktree-discovery crawl now runs
-  `list --json --mux-details --classify`, and `_WorktreeEntry`/
-  `_parse_worktree_list` thread a raw, OPAQUE `closure` field (absent unless
-  present and a dict) through to `to_dict()`. Deliberately does NOT interpret
-  it (label/final-ness/action) inside agent-bridge itself -- a cross-machine
-  crawl can reach an older/newer agent-worktrees runtime, so only a consumer
-  that knows the current `DESCRIPTOR_VERSION` (via
-  `prune.interpret_descriptor_payload`) may treat it as authoritative; that
-  consumer-side interpretation (a real cockpit) does not exist yet, so this is
-  "pass through," not "trust." **Not done:** the actual cockpit
+  **Split status:** the agent-bridge half is done -- the worktree-discovery
+  crawl now runs `list --json --mux-details --classify` (with a
+  classify-specific timeout budget and an unsupported-flag fallback so an
+  older/slower remote never loses discovery entirely), and
+  `_WorktreeEntry`/`_parse_worktree_list` thread a raw, OPAQUE `closure` field
+  (absent unless present and a dict) through to `to_dict()`. Deliberately does
+  NOT interpret it (label/final-ness/action) inside agent-bridge itself -- a
+  cross-machine crawl can reach an older/newer agent-worktrees runtime, so
+  only a consumer that knows the current `DESCRIPTOR_VERSION` (via
+  `prune.interpret_descriptor_payload`) may treat it as authoritative. **Not
+  done (item stays unchecked until this lands too):** the actual cockpit
   consumer calling `interpret_descriptor_payload` on this field.
 - [ ] Make mux and Picker use the descriptor's exact compact text, marker counts,
   and semantic style token; surface adapters may translate that style token to
