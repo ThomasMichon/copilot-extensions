@@ -3,9 +3,30 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import sys
 from collections.abc import Iterator
+
+#: Envelope schema version for :func:`_json_output`'s versioned JSON mode.
+_JSON_SCHEMA_VERSION = 1
+
+
+def _json_output(data: dict) -> None:
+    """Write a versioned JSON envelope to the real stdout.
+
+    Always writes to ``sys.__stdout__`` so it works inside
+    :func:`stdout_to_stderr` blocks.
+    """
+    envelope = {"version": _JSON_SCHEMA_VERSION, **data}
+    sys.__stdout__.write(json.dumps(envelope, indent=2) + "\n")
+    sys.__stdout__.flush()
+
+
+def _json_error(message: str, exit_code: int = 1) -> int:
+    """Emit a JSON error envelope and return the exit code."""
+    _json_output({"error": message})
+    return exit_code
 
 
 def ensure_utf8_stdio() -> None:

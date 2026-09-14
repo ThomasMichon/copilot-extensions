@@ -12,12 +12,18 @@ from pathlib import Path
 
 from . import config as cfg
 from . import output
-from . import __main__ as core
 from .pr_cli import (
     _classify_pr_operands,
     _infer_active_repo_slug,
     _tracked_pr_head_evidence,
 )
+
+
+def _core():
+    """Lazily resolve ``agent_worktrees.__main__`` -- see ``pr_cli._core``."""
+    from . import __main__ as core
+
+    return core
 
 
 def _pr_merge_usage() -> None:
@@ -455,7 +461,7 @@ def cmd_pr_merge_dispatch(argv: list[str]) -> int:
         repo_cfg = config.default_repo
         prcfg = repo_cfg.pr
         default_branch = repo_cfg.default_branch
-        flow = core._pr_flow_profile(repo_cfg)
+        flow = _core()._pr_flow_profile(repo_cfg)
 
         # --now: perform the direct submitter self-merge (pr-self-merge repos).
         if args.now:

@@ -107,6 +107,7 @@ from . import (
     obligations,
     output,
     permissions,
+    pr_config,
     pr_ops,
     procs,
     profile_assignment,
@@ -1003,24 +1004,11 @@ def _emit_plan(plan: dict) -> None:
 # JSON output helpers -- shared by all --json modes
 # ═══════════════════════════════════════════════════════════════════════════
 
-_JSON_SCHEMA_VERSION = 1
-
-
-def _json_output(data: dict) -> None:
-    """Write a versioned JSON envelope to the real stdout.
-
-    Always writes to ``sys.__stdout__`` so it works inside
-    ``output.stdout_to_stderr()`` blocks.
-    """
-    envelope = {"version": _JSON_SCHEMA_VERSION, **data}
-    sys.__stdout__.write(json.dumps(envelope, indent=2) + "\n")
-    sys.__stdout__.flush()
-
-
-def _json_error(message: str, exit_code: int = 1) -> int:
-    """Emit a JSON error envelope and return the exit code."""
-    _json_output({"error": message})
-    return exit_code
+# Moved to output.py (module-size split); re-exported here since nothing about
+# these needs to be defined in the entry-point module itself.
+_JSON_SCHEMA_VERSION = output._JSON_SCHEMA_VERSION
+_json_output = output._json_output
+_json_error = output._json_error
 
 
 def _sync_status_tag(info: git_ops.WorktreeStateInfo) -> str:
@@ -1046,23 +1034,10 @@ def _sync_status_tag(info: git_ops.WorktreeStateInfo) -> str:
     return ""
 
 
-def _controller_metadata(
-    rec: tracking.WorktreeRecord,
-) -> list[dict[str, object]]:
-    """Normalized controller relations shared by machine-readable surfaces."""
-    return [tracking.controller_relation_to_dict(relation) for relation in rec.controllers]
-
-
-def _controller_findings(
-    rec: tracking.WorktreeRecord,
-) -> list[dict[str, object]]:
-    """Derived terminal-controller findings shared by JSON surfaces."""
-    from . import controller_lineage
-
-    try:
-        return controller_lineage.controller_findings(rec)
-    except Exception:
-        return []
+# Moved to tracking.py (module-size split); re-exported here for existing
+# unqualified call sites in this module and for back-compat test access.
+_controller_metadata = tracking._controller_metadata
+_controller_findings = tracking._controller_findings
 
 
 def _worktree_to_dict(
@@ -6384,254 +6359,17 @@ def _infer_worktree_id(
     return _infer_worktree_id_from_cwd(config)
 
 
-def _worktree_id_from_git(cwd: Path) -> str | None:
-    """Return the git-internal worktree name if CWD is inside a *linked*
-    worktree, else None.
-
-    Git has no notion of a shared "worktree root": ``git worktree add <path>``
-    places a worktree at an arbitrary folder and records its admin data at
-    ``<main-repo>/.git/worktrees/<name>/``. From anywhere inside a linked
-    worktree, ``git rev-parse --git-dir`` therefore resolves to
-    ``<main-repo>/.git/worktrees/<name>`` -- and ``<name>`` is exactly the
-    agent-worktrees ID (we name the git worktree after the ID). The *main*
-    worktree's git-dir is plain ``.git`` (no ``worktrees/`` parent), which
-    yields no id. This is layout-independent, so it survives a ``worktree_root``
-    change (copilot-extensions#59).
-    """
-    try:
-        result = git_ops.git("rev-parse", "--git-dir", cwd=str(cwd), check=False, timeout=10)
-    except Exception:
-        return None
-    if result.returncode != 0:
-        return None
-    git_dir = (result.stdout or "").strip()
-    if not git_dir:
-        return None
-    p = Path(git_dir)
-    if not p.is_absolute():
-        p = (cwd / p).resolve()
-    # A linked worktree's git-dir is ``.../.git/worktrees/<name>``.
-    if p.parent.name == "worktrees" and p.name and p.name != "worktrees":
-        return p.name
-    return None
-
-
-def _linked_worktree_root(cwd: str | Path) -> Path | None:
-    """Return git's actual linked-worktree root, never a configured projection."""
-    candidate = Path(cwd).resolve()
-    if not _worktree_id_from_git(candidate):
-        return None
-    try:
-        result = git_ops.git(
-            "rev-parse",
-            "--show-toplevel",
-            cwd=str(candidate),
-            check=False,
-            timeout=10,
-        )
-    except Exception:
-        return None
-    if result.returncode != 0 or not (result.stdout or "").strip():
-        return None
-    return Path(result.stdout.strip()).resolve()
-
-
-def _worktree_path_for_id(
-    config: cfg.Config,
-    worktree_id: str | None,
-    *,
-    cwd: str | Path,
-) -> str:
-    """Resolve a worktree ID to its authoritative path."""
-    if not worktree_id:
-        return ""
-    linked_root = _linked_worktree_root(cwd)
-    if linked_root is not None and _worktree_id_from_git(linked_root) == worktree_id:
-        return str(linked_root)
-    record = tracking.load_record_by_id(worktree_id)
-    if record is not None and record.worktree_path:
-        return record.worktree_path
-    return str(Path(config.default_repo.worktree_root) / worktree_id)
-
-
-def _adopt_linked_worktree(cwd: str | Path) -> str | None:
-    """Track a linked worktree created by an external session host."""
-    root = _linked_worktree_root(cwd)
-    worktree_id = _worktree_id_from_git(root) if root is not None else None
-    if root is None or not worktree_id or not cfg.active_project():
-        return None
-    try:
-        config = cfg.load_config()
-        anchor = Path(config.default_repo.anchor).resolve()
-        linked_anchor = git_ops.resolve_to_anchor(root).resolve()
-        if linked_anchor != anchor or git_ops._normalize_wt_path(
-            str(root)
-        ) == git_ops._normalize_wt_path(str(anchor)):
-            return None
-        branch = git_ops.current_branch(root)
-        if not branch:
-            return None
-        record, _created = tracking.create_new_record_if_absent(
-            worktree_id=worktree_id,
-            branch=branch,
-            worktree_path=str(root),
-            repo=config.repo_name,
-            machine=config.machine,
-            platform_name=config.platform,
-            tracking_path=cfg.tracking_dir(),
-            interface="cli",
-            origin="user",
-            checkout_managed=False,
-        )
-    except Exception:
-        return None
-    if record.repo != config.repo_name or git_ops._normalize_wt_path(
-        record.worktree_path
-    ) != git_ops._normalize_wt_path(str(root)):
-        return None
-    return worktree_id
-
-
-def _infer_worktree_id_from_worktree_root(config: cfg.Config | None, cwd: Path) -> str | None:
-    """Legacy fallback: derive the ID from the first path component under the
-    configured ``worktree_root``.
-
-    Superseded by git-based + tracked-path resolution in
-    :func:`_infer_worktree_id_from_cwd`; retained only as a last resort. This
-    single-root assumption is exactly what copilot-extensions#59 fixed (it
-    silently failed for worktrees created under a *previous* ``worktree_root``
-    layout), so do not rely on it as the primary path.
-    """
-    try:
-        if config is None:
-            config = cfg.load_config()
-        wt_root = Path(config.default_repo.worktree_root).resolve()
-    except Exception:
-        return None
-
-    try:
-        rel = cwd.relative_to(wt_root)
-    except ValueError:
-        return None
-
-    if not rel.parts:
-        return None  # CWD is exactly worktree_root
-
-    candidate = rel.parts[0]
-
-    # Validate: a tracking YAML should exist for this candidate
-    yaml_path = cfg.tracking_dir() / f"{candidate}.yaml"
-    if yaml_path.exists():
-        return candidate
-
-    # Even without a tracking file, if the directory exists under
-    # worktree_root and has a .git entry it's a valid worktree
-    wt_dir = wt_root / candidate
-    if wt_dir.is_dir() and (wt_dir / ".git").exists():
-        return candidate
-
-    return None
-
-
-def _infer_worktree_id_from_cwd(
-    config: cfg.Config | None = None,
-) -> str | None:
-    """Derive the worktree ID from the current working directory.
-
-    Identity is resolved the way git itself resolves a linked worktree --
-    **independent of any configured ``worktree_root``**. Because git records a
-    worktree at an arbitrary path (there is no shared "root" in git's model),
-    the current worktree is identifiable from anywhere inside it, regardless of
-    where it lives on disk. This keeps inference correct across a
-    ``worktree_root`` layout change: worktrees created under an older root are
-    still resolved (copilot-extensions#59).
-
-    Resolution order (each root-independent; the legacy single-root scan is
-    only a last resort):
-      1. **git's own identity** -- ``git rev-parse --git-dir`` under a linked
-         worktree is ``.../.git/worktrees/<name>``; ``<name>`` is the tracking
-         ID. Authoritative even when the tracking YAML is briefly absent. When
-         no tracking YAML exists at all (a worktree `git worktree add`-ed by an
-         external host -- a GitHub-App/coding-agent session, a hand-run git
-         command, or any environment where agent-worktrees' own sessionStart
-         hook never ran), auto-adopts it on the spot (:func:`_adopt_linked_worktree`)
-         so every caller -- not just the hook -- can bind ownership on first
-         use. A worktree is never "unadoptable" merely because a prior session
-         in a different environment created it without our tooling's help.
-      2. **tracked-path match** -- match CWD against each record's recorded
-         ``worktree_path`` (:func:`tracking.find_worktree_id_by_cwd`,
-         deepest-match wins).
-      3. **legacy ``worktree_root`` prefix scan** -- the pre-fix single-root
-         assumption, kept only for safety.
-    """
-    cwd = Path.cwd().resolve()
-    tdir = cfg.tracking_dir()
-
-    # 1. Ask git. A linked worktree's git-dir names the worktree directly.
-    git_id = _worktree_id_from_git(cwd)
-    if git_id:
-        if (tdir / f"{git_id}.yaml").exists():
-            return git_id
-        # Tracking YAML missing: this may be a linked worktree that was never
-        # created through `agent-worktrees create` -- e.g. a GitHub-App/coding
-        # -agent session, or any external host that ran `git worktree add`
-        # directly. Auto-adopt it now (best-effort) so every caller of this
-        # shared inference (create-pr, pr-status, finalize, push-changes, ...)
-        # can bind ownership on first use, rather than depending on the
-        # sessionStart hook having already run in that environment -- which it
-        # never will when agent-worktrees isn't even installed there. Falls
-        # through to the pre-existing path-match-or-git_id behavior when
-        # adoption isn't possible (no active project, foreign anchor, etc.).
-        adopted_id = _adopt_linked_worktree(cwd)
-        if adopted_id:
-            return adopted_id
-        # Tracking YAML briefly missing: prefer a path match if one exists,
-        # else trust git's authoritative identity.
-        return tracking.find_worktree_id_by_cwd(str(cwd)) or git_id
-
-    # 2. Match CWD against recorded worktree paths (root-independent).
-    path_id = tracking.find_worktree_id_by_cwd(str(cwd))
-    if path_id:
-        return path_id
-
-    # 3. Legacy single-root scan (last resort; the #59 failure mode).
-    return _infer_worktree_id_from_worktree_root(config, cwd)
-
-
-def _resolve_worktree_id(raw_id: str) -> str:
-    """Canonicalize a worktree ID, resolving short suffixes.
-
-    If ``raw_id`` matches a tracking file directly, return as-is.
-    Otherwise, search for tracking files whose stem ends with the
-    given suffix.  Raises ``SystemExit`` on ambiguous or invalid IDs.
-    """
-    import re
-
-    # Reject IDs with path-traversal or glob metacharacters
-    if re.search(r"[/\\]|\.\.", raw_id):
-        output.err(f"Invalid worktree ID: {raw_id}")
-        raise SystemExit(1)
-
-    tdir = cfg.tracking_dir()
-
-    # Exact match -- fast path
-    if (tdir / f"{raw_id}.yaml").exists():
-        return raw_id
-
-    # Suffix match: iterate tracking files whose stems end with raw_id
-    matches = [p.stem for p in tdir.glob("*.yaml") if p.stem.endswith(raw_id)]
-
-    if len(matches) == 1:
-        return matches[0]
-
-    if len(matches) > 1:
-        short_list = ", ".join(sorted(m[-12:] for m in matches))
-        output.err(f"Ambiguous short ID '{raw_id}' matches {len(matches)} worktrees: {short_list}")
-        raise SystemExit(1)
-
-    # No tracking match -- return as-is (caller will fail on missing YAML)
-    return raw_id
-
+# Worktree-identity resolution (git-dir-based ID inference, short-suffix
+# resolution, external-worktree adoption) moved to worktree_identity.py --
+# no dependency on this entry-point module, so sibling CLI modules (pr_cli.py
+# etc.) can import it directly instead of reverse-importing __main__.
+from .worktree_identity import (  # noqa: E402 -- re-export position matches original definition site
+    _adopt_linked_worktree,
+    _infer_worktree_id_from_cwd,
+    _resolve_worktree_id,
+    _worktree_id_from_git,
+    _worktree_path_for_id,
+)
 
 # ═══════════════════════════════════════════════════════════════════════════
 # post-exit -- finalization after Copilot exits
@@ -14289,17 +14027,9 @@ def cmd_reap_shells(args: argparse.Namespace) -> int:
     return 0
 
 
-def _repo_for_record(config, record):
-    """Resolve a record's repository with the legacy/default fallback."""
-    repos = getattr(config, "repos", {})
-    record_repo = getattr(record, "repo", "")
-    repo = repos.get(record_repo) if hasattr(repos, "get") else None
-    if repo is None and (not record_repo or record_repo == getattr(config, "repo_name", None)):
-        try:
-            repo = config.default_repo
-        except (AttributeError, KeyError, ValueError):
-            repo = None
-    return repo
+# Moved to tracking.py (module-size split); re-exported here for existing
+# unqualified call sites and back-compat test access.
+_repo_for_record = tracking._repo_for_record
 
 
 def _remove_managed_worktree(
@@ -19050,28 +18780,10 @@ _GET_KEYS: dict[str, str] = {
 }
 
 
-def _resolve_repo_remote(config: cfg.Config, repo: cfg.RepoConfig) -> str:
-    """Canonical remote URL for the active repo -- the device-independent key.
 
-    Prefers the **registry** remote for this project (curated and consistent
-    across machines, so a shared consumer keys every device the same way), and
-    falls back to the anchor's ``git remote get-url origin`` when the project is
-    not in the repos registry. Returns ``""`` when neither resolves.
-    """
-    from . import repos
-
-    try:
-        entry = repos.find_repo(config.repo_name)
-        if entry and entry.remote:
-            return entry.remote
-        result = git_ops.git("remote", "get-url", "origin", cwd=repo.anchor, check=False)
-        if result.returncode == 0:
-            return result.stdout.strip()
-    except OSError:
-        # anchor may not exist yet (e.g. a freshly-configured project); the
-        # remote is simply unknown rather than an error.
-        pass
-    return ""
+# Moved to pr_config.py (module-size split); re-exported here for existing
+# unqualified call sites and back-compat test access.
+_resolve_repo_remote = pr_config._resolve_repo_remote
 
 
 def _resolve_lease_origin() -> str:
@@ -19095,32 +18807,10 @@ def _resolve_lease_origin() -> str:
         return ""
 
 
-def _pr_flow_profile(repo: cfg.RepoConfig):
-    """Derive this repo's PR-flow profile from its config (pure, no network).
 
-    Wraps :func:`pr_contract.classify_pr_flow` with the repo's ``pr`` binding so
-    every surface (``get pr-profile``, ``pr-status``, ``pr-merge``) reports the
-    same profile: ``direct`` | ``pr-human-merge`` | ``pr-agent-merge`` |
-    ``pr-self-merge``.
-    """
-    from . import pr_contract as pc
-
-    prc = repo.pr
-    return pc.classify_pr_flow(
-        enabled=prc.enabled,
-        required=prc.required,
-        provider=prc.provider,
-        automerge_label=getattr(prc, "automerge_label", ""),
-        reviewer=getattr(prc, "reviewer", ""),
-        review_blocking=getattr(prc, "review_blocking", False),
-        review_latency_hint=getattr(prc, "review_latency_hint", ""),
-        self_approve=getattr(prc, "self_approve", False),
-        merge_actor=getattr(prc, "merge_actor", ""),
-        conflict_retriggers_review=getattr(prc, "conflict_retriggers_review", True),
-        branch_update_strategy=getattr(prc, "branch_update_strategy", "rebase"),
-        merge_strategy=getattr(prc, "merge_strategy", "squash"),
-        prefer_auto_merge=getattr(prc, "prefer_auto_merge", True),
-    )
+# Moved to pr_config.py (module-size split); re-exported here for existing
+# unqualified call sites and back-compat test access.
+_pr_flow_profile = pr_config._pr_flow_profile
 
 
 def _pr_reminder_for(

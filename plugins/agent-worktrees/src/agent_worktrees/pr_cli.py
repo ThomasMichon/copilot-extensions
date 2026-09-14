@@ -6,9 +6,29 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import __main__ as core
 from . import config as cfg
 from . import git_ops, output, providers, tracking
+
+
+def _core():
+    """Lazily resolve ``agent_worktrees.__main__`` -- **never** at module load.
+
+    Cross-module CLI helpers (``_json_output``, ``_resolve_repo_remote``,
+    ``_resolve_worktree_id``, ...) are defined in sibling modules but
+    re-exported onto ``__main__`` so the test suite's ``monkeypatch.setattr(m,
+    "_name", ...)`` convention keeps working uniformly regardless of where a
+    name's real implementation lives. Routing every cross-module call through
+    this accessor (instead of importing the sibling module directly) preserves
+    that convention. It must stay a **deferred**, call-time import: a
+    module-level ``from . import __main__ as core`` here would force a second,
+    independent execution of ``__main__.py`` (under the distinct module name
+    ``agent_worktrees.__main__``, since ``-m agent_worktrees`` already runs it
+    once as ``__main__``) that observes this module's own not-yet-defined late
+    bindings and crashes -- exactly copilot-extensions#2614's regression.
+    """
+    from . import __main__ as core
+
+    return core
 
 
 def add_parsers(sub) -> None:
@@ -75,7 +95,7 @@ def _infer_active_repo_slug(config: cfg.Config) -> str | None:
     positional).
     """
     try:
-        remote = core._resolve_repo_remote(config, config.default_repo)
+        remote = _core()._resolve_repo_remote(config, config.default_repo)
     except Exception:
         return None
     return git_ops.slug_from_url(remote)
@@ -93,12 +113,12 @@ def _tracked_pr_head_evidence(
         authority_endpoint = providers.get_provider(provider).authority_endpoint(api_base)
     except (providers.ProviderError, ValueError, AttributeError):
         return "", ""
-    worktree_id = core._infer_worktree_id_from_cwd(config)
+    worktree_id = _core()._infer_worktree_id_from_cwd(config)
     if not worktree_id:
         return "", ""
     try:
         record = tracking.load_record(
-            cfg.tracking_dir() / f"{core._resolve_worktree_id(worktree_id)}.yaml"
+            cfg.tracking_dir() / f"{_core()._resolve_worktree_id(worktree_id)}.yaml"
         )
     except Exception:
         return "", ""
@@ -155,7 +175,7 @@ def _pr_watch_review_blocking(config, prcfg, args) -> bool:
     permission read, same as that command.
     """
     review_blocking = bool(getattr(prcfg, "review_blocking", False))
-    flow = core._pr_flow_profile(config.default_repo)
+    flow = _core()._pr_flow_profile(config.default_repo)
     from . import pr_contract as pc
     if review_blocking or flow.profile != pc.PROFILE_PR_SELF_MERGE:
         return review_blocking
@@ -538,12 +558,12 @@ def cmd_pr_dispatch(argv: list[str]) -> int:
         output.err(f"Unknown pr subcommand: {verb}")
         _pr_usage()
         return 1
-    parser = core.build_parser()
+    parser = _core().build_parser()
     try:
         args = parser.parse_args([canonical, *argv[1:]])
     except SystemExit as exc:
         return int(exc.code or 0)
-    handler = core.COMMAND_MAP.get(args.command)
+    handler = _core().COMMAND_MAP.get(args.command)
     if not handler:
         _pr_usage()
         return 1
