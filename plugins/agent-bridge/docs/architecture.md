@@ -691,3 +691,28 @@ and `AgentResolver.refresh_provider_resolvers()` in `agent_registry.py`. Provide
 manifests are additive and idempotent; a provider dropped after daemon start is
 picked up on the next scan without a restart. The installer deliberately leaves
 sibling plugin packages and binstubs to their own installers.
+
+### Listing reliability: per-resolver timeout
+
+`AgentResolver.list_agents_async()` (the `agents` CLI/API listing) queries every
+registered namespace resolver concurrently via `asyncio.gather`, since each
+`list()` can be a slow, network-bound subprocess call (`agent-codespaces`
+enumerating CodeSpaces across accounts is documented at 4-10s). Without an
+individual bound, one straggling resolver made the whole listing wait for the
+slowest provider -- observed pushing `agent_dispatch`'s `registered_agents()`
+(a 20s caller-side timeout) past its limit, which surfaced as "could not read
+the local agent registry" and dead-lettered unrelated spawn reservations.
+
+Each resolver's `list()` call is now bounded by
+`AGENT_BRIDGE_NAMESPACE_LIST_RESOLVER_TIMEOUT` (default **8 seconds**; set to
+`0`/`off`/`false` to disable and restore the prior unbounded-wait behavior). A
+resolver that exceeds the bound is dropped from that call's result with a
+warning, exactly like an already-erroring resolver -- not raised, and its own
+short-TTL cache (`AGENT_BRIDGE_NAMESPACE_LIST_TTL`) is left untouched, so the
+next call retries fresh. For `CliNamespaceResolver`, the bound is threaded
+into the underlying `subprocess.run(..., timeout=...)` call so a wedged
+provider's **child process is actually killed** on expiry -- an outer
+`asyncio.wait_for` alone only cancels the awaiting task and cannot stop a
+blocking `subprocess.run` already running in a worker thread, which would
+otherwise keep the process (and thread) alive for its own much longer
+default subprocess timeout.

@@ -75,6 +75,43 @@ async def test_list_uses_cli():
 
 
 @pytest.mark.asyncio
+async def test_list_threads_timeout_into_subprocess_run():
+    # Reliability: AgentResolver.list_agents_async's per-resolver bound must
+    # actually kill a wedged provider process, not merely abandon the await
+    # (asyncio.wait_for alone cannot stop a subprocess.run already running in
+    # a worker thread via asyncio.to_thread -- see agent_registry.py's
+    # _NAMESPACE_LIST_RESOLVER_TIMEOUT_ENV docstring). Confirm the ``timeout``
+    # kwarg to ``list()`` reaches ``subprocess.run`` verbatim, so its own
+    # timeout enforcement (which kills the child process) is what bounds it.
+    fb = _Fallback()
+    payload = json.dumps([{"name": "cs-a", "state": "available"}])
+    with patch("shutil.which", _which), patch(
+        "subprocess.run", return_value=_cp(0, payload)
+    ) as mock_run:
+        await CliNamespaceResolver("codespace", "agent-codespaces", fb).list(
+            timeout=3.5
+        )
+    assert mock_run.call_args.kwargs["timeout"] == 3.5
+
+
+@pytest.mark.asyncio
+async def test_list_timeout_expired_degrades_like_other_subprocess_failures():
+    # subprocess.run(timeout=...) raises TimeoutExpired after already killing
+    # the child process (stdlib guarantee) -- CliNamespaceResolver must treat
+    # that exactly like any other subprocess failure (fall back, not raise).
+    fb = _Fallback()
+    with patch("shutil.which", _which), patch(
+        "subprocess.run",
+        side_effect=subprocess.TimeoutExpired(cmd=["agent-codespaces"], timeout=3.5),
+    ):
+        agents = await CliNamespaceResolver(
+            "codespace", "agent-codespaces", fb
+        ).list(timeout=3.5)
+    assert [a.name for a in agents] == ["fallback-cs"]
+    assert fb.calls == ["list"]
+
+
+@pytest.mark.asyncio
 async def test_list_falls_back_on_unparseable():
     fb = _Fallback()
     with patch("shutil.which", _which), patch("subprocess.run", return_value=_cp(0, "not json")):
