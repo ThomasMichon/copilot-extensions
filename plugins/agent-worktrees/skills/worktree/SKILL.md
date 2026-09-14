@@ -592,6 +592,72 @@ Never auto-purge unused worktrees without asking — a worktree may appear
 "unused" if the session involved only questions, planning, or conversation
 with no commits yet.
 
+### Dirty worktrees: resolve per-worktree, never blanket `--force`
+
+`cleanup` (and `remove-system`) refuse a worktree with uncommitted changes
+**on purpose** — that refusal is the tool protecting real, unlanded work.
+`cleanup --worktree-id <id> --force` (and `remove-system ... --force`) exist
+for a genuine, individually-verified exception, not as a bulk shortcut for a
+backlog of `dirty` worktrees. Treating "dirty" as a synonym for "safe to
+force" throws away the one signal that distinguishes real work from noise —
+and a mode-only or superseded diff in worktree #1 doesn't guarantee the
+same is true of worktree #2 through #23.
+
+For **every** worktree `cleanup` reports as `dirty`, go in individually:
+
+1. **Read the actual diff, including staged and untracked paths.** `DIRTY`
+   covers modified, staged, *and* untracked content (see the Worktree States
+   table below) — `git diff` alone only shows unstaged tracked changes. Run
+   `git status --porcelain` first to see every path, then `git diff HEAD`
+   for the full tracked diff (staged + unstaged), and open each untracked
+   file directly. Distinguish a real change (content not already on the
+   default branch, an unlanded fix) from noise (a stray mode-only flip, a
+   scratch file, a local edit later superseded upstream) — don't rely on
+   `--stat`, which renders a mode-only/rename-only change as `0
+   insertions/deletions`, indistinguishable at a glance from real content.
+2. **Land real work through the repo's own contribution flow — branch on
+   `pr-profile`.** Check `<agent-worktrees catalog argv[0]> get pr-profile`
+   first: a `pr-*` profile means commit, open its PR, get it
+   reviewed/merged (see § PR Workflow above); a **`direct`** profile has no
+   PR flow at all — commit and let `finalize` land the work directly (see
+   § Two-Phase Sign-Off above). Sending a direct-profile repo through PR
+   steps just produces inapplicable instructions. If the diff looks like it
+   duplicates something already on the default branch, confirm with
+   `git diff <default-branch> -- <path>` before writing it off as noise —
+   don't assume.
+3. **Discard confirmed noise explicitly, file by file, matching how it's
+   dirty.** `git checkout -- <path>` only restores the working tree from
+   the index — a **staged** noise change stays staged and the path stays
+   dirty. For a tracked path, discard both index and working tree with
+   `git restore --staged --worktree -- <path>` (or `git checkout HEAD --
+   <path>`, equivalent for this purpose). For **untracked** noise, remove
+   only the reviewed path(s) — `git clean -fd -- <path>` (or plain `rm`) —
+   never a bare `git clean -fd`, which deletes every untracked file and
+   directory in the worktree, including unrelated unreviewed work.
+4. **Re-check state before assuming plain `cleanup --clean` will prune it.**
+   A clean tree does not by itself make a worktree `completed` — it
+   reclassifies to whatever the underlying content actually is: `wip` if it
+   still carries unmerged commits ahead of the default branch (not pruned
+   by plain `cleanup --clean`; that content needs to land first, per step
+   2); `unused` if it now has no commits *and* the session held no
+   conversation turns (needs `--include-unused`); or `conversation-only` if
+   it has no commits but the session *did* hold turns (needs the separate
+   `--include-conversations` flag — `--include-unused` alone does **not**
+   cover this bucket). Confirm with the user per the existing "ask before
+   purging unused" rule above in either case — clearing noise doesn't
+   retroactively make a worktree's conversation/planning history
+   disposable. Only a worktree that reclassifies to `completed`/`gone` is
+   pruned by plain `cleanup --clean` with no extra flag. If `cleanup` still
+   skips a worktree you expected to be clear, that reclassification — not
+   `--force` — is the next thing to check.
+
+If a whole batch of worktrees turns out `dirty` for the **same root
+cause** (e.g. a shared tool stamping every worktree with an identical
+mode-only bit or a stale generated file), that is itself a defect worth
+tracking or fixing at the source — reaping the symptom once, by hand, after
+verifying it's genuinely inert, is reasonable; silently normalizing
+`--force` as the standing remedy for that pattern is not.
+
 ## Worktree States
 
 | Status | Meaning |
