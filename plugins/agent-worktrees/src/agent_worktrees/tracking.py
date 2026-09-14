@@ -1140,6 +1140,48 @@ from .tracking_controller_relations import (
 )
 
 
+def _controller_metadata(
+    rec: WorktreeRecord,
+) -> list[dict[str, object]]:
+    """Normalized controller relations shared by machine-readable surfaces.
+
+    Moved from ``__main__.py`` (module-size split, copilot-extensions#2614):
+    lives alongside ``WorktreeRecord``/``controller_relation_to_dict`` rather
+    than being re-imported back from the CLI entry point by sibling CLI
+    modules (e.g. ``session_tracking_cli.py``).
+    """
+    return [controller_relation_to_dict(relation) for relation in rec.controllers]
+
+
+def _controller_findings(
+    rec: WorktreeRecord,
+) -> list[dict[str, object]]:
+    """Derived terminal-controller findings shared by JSON surfaces."""
+    from . import controller_lineage
+
+    try:
+        return controller_lineage.controller_findings(rec)
+    except Exception:
+        return []
+
+
+def _repo_for_record(config, record):
+    """Resolve a record's repository with the legacy/default fallback.
+
+    Moved from ``__main__.py`` (module-size split, copilot-extensions#2614):
+    a pure ``WorktreeRecord``-shaped helper with no entry-point dependency.
+    """
+    repos = getattr(config, "repos", {})
+    record_repo = getattr(record, "repo", "")
+    repo = repos.get(record_repo) if hasattr(repos, "get") else None
+    if repo is None and (not record_repo or record_repo == getattr(config, "repo_name", None)):
+        try:
+            repo = config.default_repo
+        except (AttributeError, KeyError, ValueError):
+            repo = None
+    return repo
+
+
 def _now_iso() -> str:
     return datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
