@@ -172,6 +172,13 @@ class WorktreeDiscoveryCache:
         # instead of leaving a live _exec_ex subprocess mutating the cache
         # during the remainder of application shutdown.
         self._backfill_tasks: set[asyncio.Task[None]] = set()
+        # Phase-5 follow-up (review): an agent whose remote agent-worktrees
+        # rejects --classify stays that way for the life of the process (it
+        # doesn't get upgraded without a redeploy) -- cache the verdict per
+        # agent so a long-lived bridge daemon doesn't repeat a failed
+        # classify probe on every periodic sweep. Mirrors the Picker's own
+        # per-source `use_classify` caching (picker_tui.data_ssh).
+        self._classify_unsupported: set[str] = set()
 
     def configure(self, *, interval: float) -> None:
         """Update the discovery interval (must be called before start)."""
@@ -366,7 +373,7 @@ class WorktreeDiscoveryCache:
             )
 
         legacy_args = ["list", "--json", "--mux-details"]
-        if not classify:
+        if not classify or agent_name in self._classify_unsupported:
             raw, _stderr = await _run(legacy_args)
             if raw is None:
                 return []
@@ -389,7 +396,10 @@ class WorktreeDiscoveryCache:
         #   2. an explicit "--classify unrecognized" stderr check -- an older
         #      agent-worktrees runtime that doesn't support the flag falls
         #      back the same way, instead of _exec's generic nonzero-exit
-        #      handling silently emptying the cache for that agent.
+        #      handling silently emptying the cache for that agent. The
+        #      verdict is cached per agent (``_classify_unsupported``) so a
+        #      long-lived bridge daemon probes a permanently-old runtime
+        #      exactly once, not on every periodic sweep.
         classify_args = ["list", "--json", "--mux-details", "--classify"]
 
         raw, stderr = await _run(classify_args, timeout=_CLASSIFY_CMD_TIMEOUT)
@@ -397,8 +407,10 @@ class WorktreeDiscoveryCache:
             if stderr and _is_classify_unsupported(stderr):
                 log.info(
                     "agent %s: --classify unsupported by remote agent-worktrees; "
-                    "falling back to unclassified list", agent_name,
+                    "falling back to unclassified list (cached for future crawls)",
+                    agent_name,
                 )
+                self._classify_unsupported.add(agent_name)
             else:
                 log.warning(
                     "agent %s: classified worktree list failed/timed out; "

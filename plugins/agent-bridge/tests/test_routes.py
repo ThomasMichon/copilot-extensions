@@ -2045,6 +2045,47 @@ def test_crawl_agent_falls_back_when_classify_unsupported() -> None:
     assert len(entries) == 1
     assert entries[0].id == "w1"
     assert entries[0].closure is None  # legacy list never carried one
+    assert "local" in cache._classify_unsupported
+
+
+def test_crawl_agent_skips_classify_probe_once_cached_unsupported() -> None:
+    """Follow-up (review): once an agent is known to reject --classify, a
+    later classify=True crawl (periodic sweep) must not repeat the failed
+    probe -- it goes straight to the legacy args, so a long-lived bridge
+    daemon doesn't double its discovery work for a permanently old
+    runtime."""
+    import asyncio
+
+    from agent_bridge.routes.worktrees import WorktreeDiscoveryCache
+
+    cache = WorktreeDiscoveryCache(interval=0)
+    cache._classify_unsupported.add("local")
+    agent_cfg = MagicMock()
+    agent_cfg.project = "aw"
+    agent_cfg.host = None
+    resolver = MagicMock()
+
+    calls: list[list[str]] = []
+
+    async def _fake_run_local_ex(project, args=None, *, timeout=None):
+        calls.append(args)
+        return (
+            '{"version": 1, "worktrees": [{"id": "w1", "path": "/w1",'
+            ' "branch": "b", "status": "active"}]}',
+            "",
+        )
+
+    async def _run() -> None:
+        with patch(
+            "agent_bridge.routes.worktrees._run_local_ex",
+            side_effect=_fake_run_local_ex,
+        ):
+            return await cache._crawl_agent("local", agent_cfg, resolver, classify=True)
+
+    entries = asyncio.run(_run())
+    assert len(calls) == 1, "must not attempt --classify for a cached-unsupported agent"
+    assert "--classify" not in calls[0]
+    assert len(entries) == 1
 
 
 def test_crawl_agent_falls_back_when_classify_times_out() -> None:
