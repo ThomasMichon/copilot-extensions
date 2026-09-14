@@ -342,11 +342,21 @@ _Verbatim operator request; original spelling and punctuation preserved._
   consumer calling `interpret_descriptor_payload` on this field.
 - [ ] Make mux and Picker use the descriptor's exact compact text, marker counts,
   and semantic style token; surface adapters may translate that style token to
-  their native palette without redefining state. **Not done** -- the mux
-  status segment and the Textual Picker still derive their own labels
-  independently of `prune.assemble_closure_descriptor`. This is the largest
-  remaining Phase 5 item (real UI-surface rewiring against golden/parity
-  tests); deliberately deferred rather than rushed in this slice.
+  their native palette without redefining state. **Split status:** the
+  PSMux/TMux status segment (`_render_status_segment`) is now done -- it
+  calls `prune.cleanup_disposition` + `prune.assemble_closure_descriptor` on
+  a record's held claims/open follow-ups and renders the descriptor's own
+  `style`-keyed color (`_DESCRIPTOR_STYLE_BG`) and `compact` text
+  (`C<N>`/`F<N>` markers included), instead of the old raw-state-only
+  `_SEGMENT_STYLE` lookup; a fetch-free (cached) poll now correctly renders
+  `MERGED` rather than `FINAL` for a COMPLETED worktree, matching design.md's
+  destructive-freshness rule. **Not done:** the Textual Picker
+  (`picker_tui/derive.py`/`engine.py`) still derives its own label
+  independently -- its `state` column is a fixed 6-char width with an exact
+  `C_STATE` dict lookup keyed on the bare label, so folding in compact
+  markers needs real column-layout work (a wider column or a new one) plus
+  golden/layout test updates, not just a data-source swap. That's its own
+  focused slice.
 - [ ] Keep legends, filters, maintenance previews, and cleanup selections in
   parity with the same descriptor. **Not done**, same reason as above.
 - [x] Preserve mixed-version fleet safety: absent, unsupported, or newer
@@ -869,4 +879,96 @@ The approved design is the faceted model in [design.md](design.md):
 - `python tools/run-plugin-tests.py agent-worktrees --subsuite-timeout 600` --
   535 passed, the same two pre-existing unrelated
   `test_knowledge_plugins.py` failures noted in every prior entry.
+
+### 2026-09-14 - Phase 5: mux status segment now consumes the closure descriptor
+- Continued from the agent-bridge closure-passthrough slice (PR #2636,
+  merged as squash commit `56a85501c`) via the same worktree (reused after
+  its `finalize`, rebased/reset onto the new `origin/main`).
+- Rewired `_render_status_segment` (the PSMux/TMux status-bar renderer) to
+  call `prune.cleanup_disposition` + `prune.assemble_closure_descriptor` on
+  the worktree's held-claims count and `tracking.effective_open_follow_up_count`
+  -- exactly the same inputs `list --json --classify`'s row builder already
+  uses (Phase 4) -- instead of mapping the raw git `WorktreeState` straight to
+  a label/color via the old `_SEGMENT_STYLE` table. Added
+  `_DESCRIPTOR_STYLE_BG`, a color table keyed by the descriptor's own `style`
+  token (`final`/`merged-blocked`/`active`/base-state-lowercase) rather than
+  the raw state, with a new `merged-blocked` color (orange, colour208)
+  distinct from WIP's amber. The rendered text is the descriptor's `compact`
+  field, so a worktree with a held claim or open follow-up now shows `C<N>`/
+  `F<N>` markers in the status bar too -- previously invisible there entirely.
+  A fetch-free (cached) poll -- the segment's own default -- now correctly
+  reads `MERGED` rather than `FINAL` for a COMPLETED worktree, per
+  design.md's "cached evidence never authorizes FINAL" rule; only `--fetch`
+  can produce a genuine `FINAL`. The CONVO turn-count refinement (session
+  activity folded into `UNUSED`) is applied to the same `WorktreeStateInfo`
+  passed into the descriptor (mirroring `_classify_record`'s existing
+  pattern) so CONVO also gets descriptor treatment, not a special case.
+  A worktree with no tracking record (can't compute claims/follow-ups) keeps
+  the legacy raw-state fallback -- explicitly never FINAL, matching how it
+  already behaved.
+- Added 4 new tests to `test_status_segment.py` (fetched+clean -> FINAL,
+  cached+otherwise-clean -> MERGED not FINAL, COMPLETED+held-claim -> MERGED
+  with a `C1` marker, DIRTY+open-follow-up -> `F1` marker while keeping the
+  DIRTY label) plus a `rec=` override on the existing `_wire` test helper so
+  callers can inject claims/follow-ups.
+- **Explicitly NOT done this session** (scoped out, not silently dropped):
+  the Textual Picker (`picker_tui/derive.py`/`engine.py`). Investigated the
+  wiring point (`_state(w)`/`_bucket_from_raw(w)` in `derive.py`) and found a
+  real layout constraint the mux segment never had: `engine.py`'s `state`
+  table column is a **fixed 6-char width** with an exact `C_STATE` dict
+  lookup keyed on the bare label (`engine.py:310-322`, `("state", "state",
+  6, "l", 4)`) -- folding `compact`'s `C<N>`/`F<N>` markers into that same
+  cell would either overflow or need a wider/new column, which in turn needs
+  golden/layout test updates. That's real UI-surface work, not a
+  data-source swap, so it stays its own slice rather than being rushed here
+  (per the effort's own repeated "deserves its own focused slice" note).
+  Legends/filters/maintenance-preview parity (the next Plan bullet) has the
+  same dependency and is equally unstarted.
+- `python tools/run-plugin-tests.py agent-worktrees -k "status_segment"` --
+  22 passed (18 existing + 4 new).
+- `python tools/run-plugin-tests.py agent-worktrees --subsuite-timeout 600`
+  -- 1 pre-existing unrelated failure
+  (`test_controller_relations.py::test_controller_metadata_is_additive_to_json_surfaces`,
+  an `AttributeError: _all_tracking_dirs` unrelated to this change --
+  confirmed identical on a clean stash of this diff), rest passed.
+- **Review-response fix (PR #2642):** a Copilot-reviewer HIGH finding caught
+  a real gap: `evidence_mode` was `"refreshed"` whenever the CALLER requested
+  `--fetch`, regardless of whether the fetch itself actually succeeded --
+  `git_ops.classify_worktree`'s internal `git fetch` call used `check=False`
+  and silently proceeded on stale local refs on failure, with no signal
+  exposed. Added `WorktreeStateInfo.fetch_failed` (threaded through every
+  return path of `_classify_git_state`, default `False`) and gated the
+  segment's `evidence_mode` on `fetch and not info.fetch_failed`, so a failed
+  fetch attempt (network down, remote unreachable) can no longer report a
+  false `FINAL`. New tests: `test_git_ops.py`'s
+  `TestClassifyGitStateFetchFailed` (successful fetch -> `False`; failed
+  fetch -> `True`, state still resolves; no fetch requested -> always
+  `False`) and `test_status_segment.py`'s
+  `test_fetch_requested_but_failed_still_renders_merged_not_final`.
+- **Second review-response round (PR #2642):** two more real findings, both
+  fixed:
+  - The no-tracking-record fallback path still resolved a COMPLETED state
+    through the legacy `_SEGMENT_STYLE` table (which maps COMPLETED ->
+    FINAL directly), contradicting its own comment claiming "never FINAL:
+    that judgment needs a record." Fixed: COMPLETED with no record now
+    explicitly renders MERGED (using the same `merged-blocked` color), since
+    held claims/open follow-ups are unprovable without a record.
+  - Every prior descriptor test used `plain=True`, so the actual styled
+    (`bg=...`) branch that consumes `descriptor.style`/
+    `_DESCRIPTOR_STYLE_BG` was never exercised -- a color-mapping regression
+    would have passed silently. Added
+    `test_completed_with_held_claim_uses_merged_blocked_color` and
+    `test_completed_and_fetched_and_clean_uses_final_color` (both
+    `plain=False`), plus
+    `test_completed_without_tracking_record_renders_merged_never_final` for
+    the fallback fix.
+  - Also bumped `.github/plugin/marketplace.json`'s top-level
+    `metadata.version` (CONTRIBUTING.md's agent-worktrees versioning table
+    requires it alongside the per-plugin entry; `check-version-bump.py`
+    doesn't enforce this field today -- a real automation gap the reviewer
+    caught manually, worth a follow-up guard someday but out of scope here).
+- `python tools/run-plugin-tests.py agent-worktrees -k "status_segment"` --
+  26 passed (22 + 4 new).
+- `python tools/run-plugin-tests.py agent-worktrees --subsuite-timeout 600`
+  -- same single pre-existing unrelated failure, 584 passed.
 

@@ -254,6 +254,14 @@ class WorktreeStateInfo:
     """The worktree's actual HEAD branch (None if detached or unreadable)."""
     branch_drift: bool = False
     """True when the worktree's HEAD is on a different branch than tracked."""
+    fetch_failed: bool = False
+    """True when ``fetch=True`` was requested but the fetch itself failed
+    (network down, remote unreachable) -- classification still proceeded on
+    the stale local refs, so a destructive-freshness-sensitive caller (e.g.
+    ``prune.assemble_closure_descriptor``) must not treat this as refreshed
+    evidence even though ``fetch=True`` was passed. Always False when
+    ``fetch=False`` (no fetch was attempted) or classification short-
+    circuited before reaching the fetch (GONE/zombie/ACTIVE/UNKNOWN)."""
 
 
 @dataclass
@@ -446,8 +454,17 @@ def _classify_git_state(
     def _g(*args):
         return git(*args, cwd=path, check=False, timeout=_CLASSIFY_GIT_TIMEOUT)
 
+    # worktree-finality-and-obligations (Phase 5 follow-up): a fetch that
+    # fails (network down, remote unreachable) must not be silently treated
+    # as refreshed evidence -- the classification below still proceeds
+    # (offline callers need SOME answer), but every WorktreeStateInfo this
+    # function returns carries the honest ``fetch_failed`` flag so a
+    # destructive-freshness-sensitive caller (e.g. the closure descriptor)
+    # never treats a failed fetch attempt as authoritative current state.
+    fetch_failed = False
     if fetch:
-        _g("fetch", remote, default_branch, "--quiet")
+        fetch_r = _g("fetch", remote, default_branch, "--quiet")
+        fetch_failed = fetch_r.returncode != 0
 
     # Dirty check
     result = _g("status", "--porcelain")
@@ -484,6 +501,7 @@ def _classify_git_state(
         return WorktreeStateInfo(
             state=WorktreeState.ORPHAN, dirty=dirty_count,
             current_branch=actual_branch, branch_drift=drift,
+            fetch_failed=fetch_failed,
         )
 
     # Last commit subject as fallback title
@@ -497,7 +515,9 @@ def _classify_git_state(
             if len(title) > 60:
                 title = title[:57] + "..."
 
-    _drift_fields = dict(current_branch=actual_branch, branch_drift=drift)
+    _drift_fields = dict(
+        current_branch=actual_branch, branch_drift=drift, fetch_failed=fetch_failed,
+    )
 
     if dirty_count > 0:
         return WorktreeStateInfo(
@@ -545,6 +565,7 @@ def _classify_git_state(
         return WorktreeStateInfo(
             state=WorktreeState.ORPHAN, dirty=dirty_count,
             current_branch=actual_branch, branch_drift=drift,
+            fetch_failed=fetch_failed,
         )
     diff_r = _g("diff", "--name-only", merge_base, effective_branch)
     changed_files = [f for f in diff_r.stdout.splitlines() if f.strip()]

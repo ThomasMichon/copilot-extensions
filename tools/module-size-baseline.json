@@ -80,7 +80,7 @@
   "plugins/agent-worktrees/src/agent_worktrees/__main__.py": 28951,
   "plugins/agent-worktrees/src/agent_worktrees/config.py": 2098,
   "plugins/agent-worktrees/src/agent_worktrees/finalize.py": 1926,
-  "plugins/agent-worktrees/src/agent_worktrees/git_ops.py": 1443,
+  "plugins/agent-worktrees/src/agent_worktrees/git_ops.py": 1464,
   "plugins/agent-worktrees/src/agent_worktrees/installer.py": 1727,
   "plugins/agent-worktrees/src/agent_worktrees/picker_tui/data_ssh.py": 2155,
   "plugins/agent-worktrees/src/agent_worktrees/picker_tui/engine.py": 9338,

@@ -7993,6 +7993,30 @@ _SEGMENT_STYLE: dict[git_ops.WorktreeState, tuple[str, str]] = {
     git_ops.WorktreeState.UNKNOWN: ("colour238", "?"),  # dark grey
 }
 
+# worktree-finality-and-obligations (Phase 5): background color per
+# `prune.ClosureDescriptor.style` -- the canonical style token every
+# descriptor-driven surface (list JSON, mux, Picker) shares. Reuses
+# `_SEGMENT_STYLE`'s existing palette for the base states it mirrors 1:1
+# (dirty/wip/unused/convo/orphan/gone/unknown/active), and adds two tokens
+# `_SEGMENT_STYLE` never needed because it never distinguished them:
+# `final` (a *refreshed*, claim-free, follow-up-free COMPLETED -- the exact
+# green FINAL block) vs `merged-blocked` (COMPLETED but not yet safe to prune
+# -- held claims, open follow-ups, cached/fetch-free evidence, or any other
+# live blocker -- rendered amber/orange, distinct from WIP's amber so "work
+# landed but not closed out" never reads as "still being written").
+_DESCRIPTOR_STYLE_BG: dict[str, str] = {
+    "final": "colour034",  # green -- same as legacy FINAL
+    "merged-blocked": "colour208",  # orange -- landed but blocked
+    "active": "colour039",
+    "dirty": "colour160",
+    "wip": "colour178",
+    "unused": "colour244",
+    "convo": "colour037",
+    "orphan": "colour129",
+    "gone": "colour238",
+    "unknown": "colour238",
+}
+
 _SEGMENT_TITLE_MAX = 48
 
 
@@ -8254,19 +8278,68 @@ def _render_status_segment(
             ctx, turns = None, 0
 
     sync = _sync_status_tag(info)
-    state = git_ops.refine_state_with_session(info.state, turns)
+    refined_state = git_ops.refine_state_with_session(info.state, turns)
+    refined_info = (
+        dataclasses.replace(info, state=refined_state)
+        if refined_state != info.state else info
+    )
 
-    if state == git_ops.WorktreeState.CONVO:
-        bg, label = _SEGMENT_STYLE[state]
-        tag = f" {turns}\U0001f4ac"  # turn count + speech-balloon glyph
+    if rec is not None:
+        # worktree-finality-and-obligations (Phase 5): the mux/PSMux status
+        # bar now consumes the same canonical closure descriptor list JSON
+        # already publishes (Phase 4), instead of re-deriving its own
+        # label/color from the raw git state -- so a worktree with a held
+        # claim or an open follow-up renders that fact here too (`C<N>`/
+        # `F<N>` markers), and a COMPLETED worktree is `FINAL` only when
+        # genuinely claim-free/follow-up-free evidence says so, `MERGED`
+        # otherwise. Fetch-free polling (the default) never reports FINAL --
+        # matches design.md's "cached evidence never authorizes FINAL/safe".
+        # A *requested* fetch that itself failed (network down, remote
+        # unreachable -- `info.fetch_failed`) is NOT refreshed evidence
+        # either: classification proceeded on stale local refs, so treating
+        # `fetch=True` alone as authoritative would let a failed fetch attempt
+        # still report FINAL.
+        held_claims = sum(1 for c in rec.resources if c.is_live)
+        open_follow_ups = tracking.effective_open_follow_up_count(rec)
+        disposition = prune.cleanup_disposition(
+            rec, refined_info, turn_count=turns,
+            claimant_alive=_local_claimant_alive,
+            paired_sibling_final=prune.default_paired_sibling_final,
+        )
+        descriptor = prune.assemble_closure_descriptor(
+            rec, refined_info, disposition,
+            held_claims=held_claims, open_follow_ups=open_follow_ups,
+            evidence_mode=(
+                "refreshed" if fetch and not info.fetch_failed else "cached"
+            ),
+        )
+        bg = _DESCRIPTOR_STYLE_BG.get(descriptor.style, "colour238")
+        block_label = descriptor.compact
+        tag = f" {turns}\U0001f4ac" if refined_state == git_ops.WorktreeState.CONVO else sync
     else:
-        bg, label = _SEGMENT_STYLE.get(state, ("colour238", state.value.upper()))
-        tag = sync
+        # No tracking record -- held claims/follow-ups/disposition are
+        # unknowable, so this falls back to the legacy raw-state label. A
+        # COMPLETED worktree renders MERGED here, never FINAL: FINAL is a
+        # claim-free/follow-up-free *proof*, and without a record there is no
+        # evidence to prove it with (#discussion_r4008048471's sibling finding
+        # -- an untracked completed worktree must not read as more settled
+        # than a tracked one ever could without --fetch).
+        if refined_state == git_ops.WorktreeState.CONVO:
+            bg, block_label = _SEGMENT_STYLE[refined_state]
+            tag = f" {turns}\U0001f4ac"
+        elif refined_state == git_ops.WorktreeState.COMPLETED:
+            bg, block_label = _DESCRIPTOR_STYLE_BG["merged-blocked"], "MERGED"
+            tag = sync
+        else:
+            bg, block_label = _SEGMENT_STYLE.get(
+                refined_state, ("colour238", refined_state.value.upper())
+            )
+            tag = sync
 
     if plain:
-        block = f"[{label}{tag}]"
+        block = f"[{block_label}{tag}]"
     else:
-        block = f"#[bg={bg},fg=colour015,bold] {label}{tag} #[default]"
+        block = f"#[bg={bg},fg=colour015,bold] {block_label}{tag} #[default]"
 
     parts: list[str] = []
     if not no_title:
