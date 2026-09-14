@@ -552,6 +552,34 @@ class TestClassifyGitTimeout:
         assert info.state == go.WorktreeState.UNKNOWN
         # Branch metadata from the successful pre-git read is still reported.
         assert info.current_branch == "worktree/x"
+        assert info.fetch_failed is False  # fetch=False was never requested
+
+    def test_classify_worktree_timeout_with_fetch_reports_fetch_failed(
+        self, tmp_path, monkeypatch,
+    ):
+        # worktree-finality-and-obligations Phase 5 follow-up: a timeout
+        # gives no confirmation the requested fetch ever completed (it may
+        # have stalled on the fetch itself or a later git call) -- so
+        # fetch=True must propagate fetch_failed=True through the timeout
+        # path too, not just the explicit nonzero-exit fetch failure.
+        import subprocess
+
+        from agent_worktrees import git_ops as go
+
+        (tmp_path / ".git").mkdir()
+
+        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None):
+            if args[:2] == ("rev-parse", "--abbrev-ref"):
+                return subprocess.CompletedProcess(
+                    ["git", *args], 0, "worktree/x\n", "")
+            raise subprocess.TimeoutExpired(
+                cmd=["git", *args], timeout=timeout or go._CLASSIFY_GIT_TIMEOUT)
+
+        monkeypatch.setattr(go, "git", fake_git)
+
+        info = go.classify_worktree(str(tmp_path), "worktree/x", fetch=True)
+        assert info.state == go.WorktreeState.UNKNOWN
+        assert info.fetch_failed is True
 
 
 class TestClassifyGitProcessCount:

@@ -47,3 +47,18 @@ def test_closure_absent_without_state_info():
     rec = _rec()
     row = cli._worktree_to_dict(rec)
     assert "closure" not in row
+
+
+def test_closure_downgrades_to_cached_when_fetch_failed():
+    # worktree-finality-and-obligations Phase 5 follow-up: a classification
+    # whose (implicitly requested) fetch failed/timed out must not still
+    # report "refreshed" evidence -- that would let a stale/failed --fetch
+    # attempt claim FINAL on out-of-date local refs.
+    rec = _rec()
+    info = git_ops.WorktreeStateInfo(
+        state=git_ops.WorktreeState.COMPLETED, fetch_failed=True,
+    )
+    row = cli._worktree_to_dict(rec, state_info=info)
+    assert row["closure"]["evidence_mode"] == "cached"
+    assert row["closure"]["label"] == "MERGED"
+    assert row["closure"]["closure"] == {"final": False}

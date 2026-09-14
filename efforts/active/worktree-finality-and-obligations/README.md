@@ -971,4 +971,45 @@ The approved design is the faceted model in [design.md](design.md):
   26 passed (22 + 4 new).
 - `python tools/run-plugin-tests.py agent-worktrees --subsuite-timeout 600`
   -- same single pre-existing unrelated failure, 584 passed.
+- **Third review-response round (PR #2642):** while this PR was in review,
+  an unrelated critical bug (#2650, a circular-import crash breaking every
+  `agent-worktrees` CLI invocation) surfaced and was fixed/merged separately
+  as PR #2653 -- see that PR's own history; not part of this effort. Also
+  during this round, an unrelated module-size-split refactor
+  (`agent-worktrees: properly break down the CLI root into smaller
+  modules`, #2657) merged to `main`; this PR's commits were squashed and
+  rebased past both, with each version-bump collision resolved as it came
+  (dev104 through dev109 across several merges racing in from a very active
+  main branch this session).
+  - The reviewer caught 3 more real gaps, all in the `fetch_failed`
+    propagation this effort's own earlier round added: (1) `classify_worktree`'s
+    `subprocess.TimeoutExpired` handler returned `UNKNOWN` without setting
+    `fetch_failed` -- a timeout mid-fetch gives no confirmation the fetch
+    completed, so it must propagate `fetch_failed=fetch` too, not just an
+    explicit nonzero-exit fetch failure. (2) The Phase-4 `_worktree_to_dict`
+    call site (`list --json --classify`) still hardcoded
+    `evidence_mode="refreshed"` unconditionally whenever `state_info` was
+    supplied, never checking `state_info.fetch_failed` -- the exact same
+    false-FINAL risk the status segment's own fix addressed, just at a
+    different call site. Both fixed; new tests
+    `TestClassifyGitStateFetchFailed::test_classify_worktree_timeout_with_fetch_reports_fetch_failed`
+    and `test_closure_descriptor_wiring.py`'s
+    `test_closure_downgrades_to_cached_when_fetch_failed`.
+  - Two documentation nits: `_render_status_segment`'s own docstring still
+    only described the legacy `FINAL`/raw-state contract (no mention of
+    `MERGED` or the `C<N>`/`F<N>` markers) -- updated. The PR description's
+    version-bump and test-count claims had drifted from the actual final
+    values across several rebase rounds -- reconciled.
+- `python tools/run-plugin-tests.py agent-worktrees -k "status_segment or
+  classify_worktree_timeout or closure_descriptor_wiring or
+  ClassifyGitStateFetchFailed"` -- 35 passed.
+- `python tools/run-plugin-tests.py agent-worktrees --subsuite-timeout 600`
+  -- 2 additional pre-existing unrelated failures surfaced by the
+  module-size-split rebase (`test_ahp_command.py::
+  test_direct_backend_refuses_active_hosted_binding` and
+  `::test_ensure_rejects_finalizing_worktree`, both an `IndexError` on an
+  empty output-capture list unrelated to fetch/closure logic -- confirmed
+  identical with and without this round's diff via `git stash`), plus the
+  same single pre-existing `test_controller_relations.py` failure noted in
+  every prior entry.
 

@@ -1218,13 +1218,18 @@ def _worktree_to_dict(
         # descriptor, additive alongside the legacy `cleanup_bucket`/`state`
         # fields above (not yet a replacement -- see the effort's Phase 5).
         # This call site IS the fresh classification path (state_info was
-        # just computed), so it reports refreshed/complete evidence.
+        # just computed), so it reports refreshed/complete evidence --
+        # UNLESS the classification itself flagged a failed/unconfirmed
+        # fetch attempt (state_info.fetch_failed, Phase 5 follow-up), in
+        # which case it downgrades to cached so a failed --classify --fetch
+        # can't still report FINAL on stale local refs.
         d["closure"] = prune.assemble_closure_descriptor(
             rec,
             state_info,
             _disposition,
             held_claims=sum(1 for c in rec.resources if c.is_live),
             open_follow_ups=tracking.effective_open_follow_up_count(rec),
+            evidence_mode="cached" if state_info.fetch_failed else "refreshed",
         ).to_dict()
         d["ff_eligible"] = (
             git_ops.can_fast_forward(state_info)
@@ -8213,20 +8218,33 @@ def _render_status_segment(
     Classifies the worktree's git disposition relative to its upstream
     default branch -- independent of any live session -- and prints::
 
-        <title> #[bg=<color>] <STATE><sync> #[default]
+        <title> #[bg=<color>] <STATE><markers><sync> #[default]
 
     States: ``DIRTY`` (uncommitted changes or commits ahead of upstream),
-    ``FINAL`` (clean, work landed / fast-forwardable to upstream),
-    ``UNUSED`` (clean, no work and no conversation since the fork point),
-    ``CONVO`` (clean, no commits but the session held conversation turns --
-    annotated with the turn count), ``WIP`` (clean, commits ahead whose
-    content is not yet upstream), ``ORPHAN`` (no merge base with upstream).
-    ``<sync>`` is the picker's ``↑ahead``/``↓behind`` tag.
+    ``FINAL`` (COMPLETED, and -- when a tracking record exists --
+    genuinely claim-free/follow-up-free evidence refreshed via a successful
+    ``--fetch``), ``MERGED`` (COMPLETED but not (yet) provably FINAL: no
+    tracking record, a fetch-free/cached poll, a requested ``--fetch`` that
+    itself failed, held claims, or open follow-ups -- see
+    ``prune.assemble_closure_descriptor``), ``UNUSED`` (clean, no work and
+    no conversation since the fork point), ``CONVO`` (clean, no commits but
+    the session held conversation turns -- annotated with the turn count),
+    ``WIP`` (clean, commits ahead whose content is not yet upstream),
+    ``ORPHAN`` (no merge base with upstream). ``<markers>`` is the
+    descriptor's compact `` C<N>``/`` F<N>`` suffix -- held-claim / open-
+    follow-up counts, present on ANY state (not just MERGED) when a
+    tracking record has them. ``<sync>`` is the picker's ``↑ahead``/
+    ``↓behind`` tag.
 
     Fetch-free by default so it is cheap enough to poll on a short
     ``status-interval``; pass ``--fetch`` to refresh behind-counts from the
-    remote.  Prints nothing (exit 0) outside a git worktree so a
-    misconfigured status line never spams errors into the bar.
+    remote AND to make a genuine ``FINAL`` reachable at all (a fetch-free
+    poll can only ever report ``MERGED`` for a completed worktree, per
+    design.md's cached-evidence-never-authorizes-FINAL rule -- and a
+    requested ``--fetch`` that itself fails degrades the same way, never
+    silently upgrading stale local refs to FINAL). Prints nothing (exit 0)
+    outside a git worktree so a misconfigured status line never spams
+    errors into the bar.
     """
     target = str(Path(path).resolve()) if path else os.getcwd()
 

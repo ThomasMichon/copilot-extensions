@@ -422,6 +422,12 @@ def classify_worktree(
         return WorktreeStateInfo(
             state=WorktreeState.UNKNOWN,
             current_branch=actual_branch, branch_drift=drift,
+            # A timeout gives no confirmation the requested fetch (if any)
+            # ever completed -- it may have stalled on the fetch itself or on
+            # a later git call. Either way, the classification is NOT
+            # confirmed refreshed, so a `fetch=True` caller must not treat
+            # this as authoritative current-state evidence.
+            fetch_failed=fetch,
         )
 
 
