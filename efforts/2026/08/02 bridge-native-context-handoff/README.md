@@ -11,9 +11,8 @@ last_reconciled: 2026-09-01
 > the repo that actually owns the `agent-bridge` mechanism. Original
 > frontmatter referenced that repo's `visions/agent-fabric/agent-bridge`
 > and a private downstream-app vision path; updated above to this repo's flat
-> `visions/agent-fabric` and `visions/plugins/agent-bridge`. This is a
-> **done/archived historical
-> record**, migrated verbatim. **A trailing `†` marks a reference to that
+> `visions/agent-fabric` and `visions/plugins/agent-bridge`. This is a **done/archived
+> historical record**, migrated verbatim. **A trailing `†` marks a reference to that
 > private repo's own issue tracker — not resolvable here.**
 
 # bridge-native-context-handoff — Context Awareness + In-Place Handoff for Automated Sessions
@@ -58,7 +57,7 @@ CLI. Today the interactive path lives in the `context-handoff` Copilot extension
 it watches `session.usage_info`, nudges at 55 %/70 %, and — under a mux — spins up
 a successor Copilot in place and retires the old pane. **None of that reaches a
 session that agent-bridge hosts** (a bridge-owned `copilot --acp` child, which
-downstream consumer and bridge-as-agent callers drive). Those sessions run headless,
+the downstream consumer and bridge-as-agent callers drive). Those sessions run headless,
 with no mux pane and no operator to paste a prompt.
 
 But the bridge **controls the ACP session** — it owns the child process, sees its
@@ -84,7 +83,7 @@ Port context-aware in-place handoff from interactive mux-hosted sessions into
 automated agent-bridge sessions. The bridge should generate and carry a
 continuation brief into a successor on the same worktree, expose explicit and
 opt-in automatic triggers, announce the changeover as a first-class event, and
-let downstream consumer follow the successor without presenting a dead session. A
+let the downstream consumer follow the successor without presenting a dead session. A
 prompt sent from the mobile cockpit into a context-saturated session must hand
 off first and then deliver that prompt to the successor.
 
@@ -101,11 +100,11 @@ effort:
   sessions"** and Behavior **"handoff-carries-context-and-announces-the-
   changeover"** (originally recorded against a nested private-repo vision
   path; now `visions/plugins/agent-bridge/README.md` here).
-- **downstream-consumer** already stated **usage/context signals** in transcript
+- **Downstream consumer** already stated **usage/context signals** in transcript
   fidelity. Added: Feature **"in-place session handoff, surfaced not swallowed"**
   and Behavior **"follow-the-handoff-dont-mourn-it"** (recorded against
-  downstream-consumer's own private-repo vision — downstream consumer has no copilot-extensions
-  equivalent; this bullet is historical record only).
+  the downstream consumer's own private-repo vision — it has no
+  copilot-extensions equivalent; this bullet is historical record only).
 
 ## Current State (what already exists — the substrate)
 
@@ -131,7 +130,7 @@ The port is mostly *wiring existing pieces together*, not greenfield.
 - `libs/zdd/` (cutover/breadcrumb/routing) — prior-art spin-down->spin-up
   sequencing (for *daemon* redeploy, not ACP-child handoff).
 
-**downstream-consumer ((downstream consumer service)):**
+**downstream consumer (private service):**
 - `server/core/session_bridge.py::new_session()` **already rolls in place**:
   stops the old bridge session, starts a new one in the *same worktree*, updates
   the context in-place, and emits `session_rolled` + `session_created`
@@ -155,7 +154,7 @@ These are defaults recorded for review; the operator may redirect.
    events). Fallback if the child cannot answer: a bridge-synthesized brief from
    session-side state (first prompt, files modified, turn count).
 2. **Trigger — explicit + opt-in auto.** _(confirmed)_ Expose the handoff as an
-   **explicit operation** (bridge CLI verb + HTTP endpoint + an downstream consumer UI
+   **explicit operation** (bridge CLI verb + HTTP endpoint + a downstream consumer UI
    action) any caller can invoke, **plus** an **opt-in policy** to fire it
    automatically at the `critical` threshold for a session no operator is
    watching. Auto is **off by default**; interactive/observed callers keep
@@ -174,10 +173,10 @@ These are defaults recorded for review; the operator may redirect.
 3. **Changeover notice — a first-class event (contract), open to an ACP rider.**
    _(confirmed)_ A new `session_handoff` event (payload: `rolled_from`,
    `rolled_to`/successor id, worktree id, handoff summary) is part of the
-   **bridge's event contract** and rides the existing SSE/event surface. downstream consumer
-   renders a "handed off — continuing here" seam and follows the successor;
+   **bridge's event contract** and rides the existing SSE/event surface. The
+   downstream consumer renders a "handed off — continuing here" seam and follows the successor;
    bridge-as-agent CLI callers see the changeover in their event stream.
-   `session_rolled` stays for downstream consumer's own roll; the new event is the
+   `session_rolled` stays for the downstream consumer's own roll; the new event is the
    *bridge-originated* changeover. Where a downstream/upstream ACP peer should
    also learn of the changeover, the same notice may additionally be surfaced as
    an **ACP extension rider** (a protocol-level session notification) so the
@@ -190,8 +189,8 @@ These are defaults recorded for review; the operator may redirect.
 5. **Safety — drain before retire.** The retire->spawn follows the existing
    `drain-before-letting-go` behavior: capture the handoff, let the final turn
    settle, then stop the old child and spawn the seeded successor. A failed
-   successor spawn must not orphan the worktree (mirror downstream consumer `new_session()`'s
-   rollback-to-error).
+   successor spawn must not orphan the worktree (mirror the downstream consumer's `new_session()`
+   rollback-to-error behavior).
 
 ## Cross-Repo Ordering
 
@@ -205,7 +204,7 @@ Per the facility cross-repo rule (PR-gated intent before unreviewed push):
    historically landed by direct pushes to `main`, as recorded in the journal.
    Any future follow-up must use the repo's current PR-required
    `pr-self-merge` profile.
-3. **the private facility repo PR (downstream-consumer):** seed the roll with the handoff, surface
+3. **the private facility repo PR (downstream consumer):** seed the roll with the handoff, surface
    per-session context utilization + a handoff affordance, render the changeover
    seam, follow the successor.
 
@@ -267,7 +266,7 @@ Per the facility cross-repo rule (PR-gated intent before unreviewed push):
   same worktree seeded with the brief, records the successor linkage, and emits
   `session_handoff` with both ids. Failure-to-spawn rolls back without orphaning.
   Auto-trigger fires once at `critical` only when opted in.
-- **downstream consumer** (`services/downstream-consumer/tests/`): a `session_handoff` event re-points the
+- **downstream consumer:** a `session_handoff` event re-points the
   UI context to the successor on the same worktree route and renders the seam;
   the successor's transcript opens with the seeded brief.
 - **End-to-end (the primary facility dev host):** drive a bridge session to the critical threshold,
@@ -287,7 +286,7 @@ Per the facility cross-repo rule (PR-gated intent before unreviewed push):
   already tracks context usage + warns "consider handoff" but never acts; downstream consumer
   already rolls in place via `new_session()` but carries no seed). Reconciled both
   visions (agent-bridge: context-aware in-place handoff Feature + carries-context
-  Behavior; downstream-consumer: surfaced-not-swallowed Feature + follow-the-handoff
+  Behavior; downstream consumer: surfaced-not-swallowed Feature + follow-the-handoff
   Behavior). Recorded the design decisions (prompt-the-child handoff generation;
   explicit + opt-in-auto trigger; first-class `session_handoff` changeover event;
   head-repoint continuity; drain-before-retire safety). Next: file umbrella +
@@ -309,7 +308,7 @@ Per the facility cross-repo rule (PR-gated intent before unreviewed push):
   agent-bridge vision + `docs/patterns`, version-bumped, and filed under a
   **sanitized** public coordination issue on `ThomasMichon/copilot-extensions`
   (generic-tool language; no facility/cockpit-product/persona names). Then F/G
-  (#4145†/#4146†) land as downstream-consumer PRs back in the private facility repo.
+  (#4145†/#4146†) land as downstream consumer PRs back in the private facility repo.
 - **2026-08-02** — **Items B, C, D shipped and deployed** (copilot-extensions,
   `direct` push to `main`; sanitized public issue **#112**). Vision-closing:
   advances `visions/plugins/agent-bridge` here (context-aware in-place handoff
@@ -336,7 +335,7 @@ Per the facility cross-repo rule (PR-gated intent before unreviewed push):
   copilot-extensions agent-fabric vision to state context-pressure-*driven*
   auto-handoff, THEN add the opt-in policy flag + `_handle_usage_update()`
   auto-trigger + prompt-triggered handoff in `submit_prompt`. Then F/G
-  (downstream-consumer).
+  (downstream consumer).
 - **2026-08-02 (cont.)** — **Item E/E2 shipped and deployed** (copilot-extensions,
   `direct` push to `main`, agent-bridge **0.4.0-dev209**; sanitized public issue
   **#112**). This is the effort's **one vision-extending** increment, landed in
@@ -360,8 +359,8 @@ Per the facility cross-repo rule (PR-gated intent before unreviewed push):
   full suite green (**1208 passed, 3 skipped**). Deployed zero-downtime on
   the primary facility dev host; dev209 active, config picked up the additive `auto_handoff` field.
   Closed **#4144†**. **Bridge side (A–E) complete. Next = F/G** (#4145†/#4146†),
-  downstream-consumer, landing as PR-gated the private facility repo PRs.
-- **2026-08-02 (cont.)** — **Items F/G (downstream-consumer) implemented.** **F (#4145†):**
+  downstream consumer, landing as PR-gated PRs in the private facility repo.
+- **2026-08-02 (cont.)** — **Items F/G (downstream consumer) implemented.** **F (#4145†):**
   `session_bridge.new_session()` now prefers a brief-carrying in-place handoff via
   the bridge (`bridge_client.handoff_session()` → `POST /sessions/{id}/handoff`),
   so the successor opens *warm*; falls back to a plain cold roll on
@@ -375,7 +374,7 @@ Per the facility cross-repo rule (PR-gated intent before unreviewed push):
   frame it re-points the context to the successor and reconnects on its stream,
   de-duping the twice-emitted seam. Server: 4 new tests + full downstream consumer suite green
   (**241 passed**); ruff + mypy clean. Client: TS typecheck + eslint + build
-  clean. Next: PR-gated the private facility repo PR (Intelligence Dampener), then close
+  clean. Next: a PR-gated private-facility-repo PR (Intelligence Dampener), then close
   #4145†/#4146† and deploy downstream consumer on the primary facility dev host.
 - **2026-08-02 (F/G merged + deployed)** — PR **#4161†** approved by the
   Intelligence Dampener, merge consent granted, merged to master as `fa1ad7abd`.
@@ -390,9 +389,10 @@ Per the facility cross-repo rule (PR-gated intent before unreviewed push):
   automatic in-place handoff end to end.
 
 ### 2026-09-01 — Archived by CAB reconciliation
-- **Disposition: Done / Archived.** PR #4161† shipped and deployed the remaining
-  downstream consumer work, PR #4165† recorded completion, and umbrella #4140† plus
-  sub-issues #4141†-#4146† are closed. The optional end-to-end threshold stretch
+- **Disposition: Done / Archived.** PR #4161† shipped and deployed the
+  remaining downstream-consumer work, PR #4165† recorded completion, and
+  umbrella #4140† plus sub-issues #4141†-#4146† are closed. The optional
+  end-to-end threshold stretch
   does not hold the completed campaign open.
 - Archived under the effort's 2026-08-02 completion date; no intent or live work
   was retired.
