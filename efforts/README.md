@@ -11,7 +11,6 @@ that pattern to this repository.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [Handoff Cutover Lifecycle Journal](active/handoff-cutover-lifecycle-journal/README.md) | Draft | #2457 |
-| [Cleanup TOCTOU Revalidation Hardening](active/cleanup-toctou-revalidation/README.md) | Draft | #2640 |
 | [Handoff Live Cutover](active/handoff-live-cutover/README.md) | Active | #2249† |
 | [Handoff Cutover Reload Robustness](active/handoff-cutover-reload-robustness/README.md) | Active | #5250† |
 | [Context-Handoff Overhaul](active/context-handoff-overhaul/README.md) | Draft | #2594 |
