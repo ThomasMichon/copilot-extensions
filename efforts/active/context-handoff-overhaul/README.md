@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions (the `context-handoff`, `agent-worktrees`, and
   `agent-bridge` plugins)
 - **Branch(es):** `effort/context-handoff-overhaul` (Phase 0, merged #2593),
-  `effort/context-handoff-overhaul-phase1` (Phase 1, PR #2643)
+  `effort/context-handoff-overhaul-phase1` (Phase 1, merged #2643)
 - **Created:** 2026-09-13
 - **Status:** Active
 - **Umbrella issue:** #2594
@@ -185,7 +185,7 @@ Verbatim from the operator:
   `handoff-cutover-reload-robustness` already mitigated). Satisfied by
   construction: `autoForceHandoff` calls the identical `triggerHandoff()`
   used by the CLI/tool paths, which already produces a bash-first seed.
-- [ ] Submitted for review as PR #2643; merge before starting Phase 2.
+- [x] Submitted for review as PR #2643; merged.
 
 ### Phase 2 — Continuity content (Goal 2)
 - [ ] Extend the handoff content schema (`generate_handoff_prompt` /
