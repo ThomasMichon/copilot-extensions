@@ -3014,6 +3014,7 @@ def _handoff_cutover_spawn_result(
         }
     raw_id = getattr(args, "worktree_id", None)
     session_id = getattr(args, "session_id", None)
+    headless = bool(getattr(args, "headless", False))
     rc, resolved = _resolve_handoff_cutover_target(raw_id, session_id)
     if rc != 0:
         return rc, resolved
@@ -3021,8 +3022,15 @@ def _handoff_cutover_spawn_result(
     config = resolved.get("config")
 
     # A live cutover needs a mux session to cut into. Without one, the caller
-    # (extension) must fall back to the store-task-and-reply flow.
+    # (extension) must fall back to the store-task-and-reply flow -- unless
+    # --headless was requested, which explicitly opts out of mux entirely
+    # (context-handoff-overhaul Phase 3 §4.3's non-mux launch primitive).
     anchor_mode = bool(resolved.get("anchor_mode"))
+    if headless and anchor_mode:
+        return 2, {
+            "ok": False,
+            "error": "handoff-cutover --headless does not support anchor-mode cutover",
+        }
 
     mux_session = None
     record = None
@@ -3044,7 +3052,7 @@ def _handoff_cutover_spawn_result(
             }
         work_dir = config.default_repo.anchor
     else:
-        if not sessions.has_mux_session(wt_id):
+        if not headless and not sessions.has_mux_session(wt_id):
             return 3, {
                 "ok": False,
                 "error": f"no mux session wt-{wt_id}; not under mux",
@@ -3148,6 +3156,79 @@ def _handoff_cutover_spawn_result(
     handoff_token = getattr(args, "handoff_token", None)
     if handoff_token:
         env[_SESSION_HANDOFF_TOKEN] = handoff_token
+
+    if headless:
+        # No pane, no mux session, no seed-typing choreography: the seed is
+        # passed as a native ``-i <seed>`` argument directly by
+        # headless_new_session itself (headless has no pane-wrapper argv
+        # mangling to route around).
+        if getattr(args, "dry_run", False):
+            dry_result: dict[str, object] = {
+                "ok": True,
+                "dry_run": True,
+                "headless": True,
+                "work_dir": work_dir,
+                "cmd": [*launch_cmd, "-i", "<seed>"],
+                "seed_len": len(seed),
+            }
+            if selection.assignment is not None:
+                dry_result["profile_assignment"] = profile_assignment.metadata(
+                    selection.assignment)
+            return 0, dry_result
+
+        spawn_event_ctx = {
+            "worktree_id": wt_id, "session_id": session_id, "source": "python",
+            "handoff_token": handoff_token, "old_pane": None,
+            "method": "headless_new_session",
+        }
+        activity.log_event("handoff_successor_spawn_started", **spawn_event_ctx)
+        result = sessions.headless_new_session(wt_id, work_dir, launch_cmd, env, seed=seed)
+        if not result.get("ok"):
+            failure = dict(result, ok=False)
+            failure["error"] = f"failed to spawn headless successor: {result.get('error')}"
+            activity.log_event(
+                "handoff_successor_spawn_failed", error=result.get("error"), **spawn_event_ctx)
+            return 4, failure
+        pid = result.get("pid")
+        activity.log_event(
+            "handoff_cutover_spawn", new_pane=None, pid=pid,
+            seeded=True, seed_ready=True,
+            candidate_session=None, candidate_status="awaiting-session-association",
+            predecessor_copilot_pid=predecessor_pid,
+            predecessor_copilot_start_time=predecessor_start,
+            **spawn_event_ctx,
+        )
+        candidate_session = None
+        if handoff_token and record_path is not None:
+            candidate_session, candidate_status = _wait_for_handoff_candidate(
+                record_path, handoff_token, None,
+            )
+            if not candidate_session:
+                return 4, {
+                    "ok": False,
+                    "headless": True,
+                    "pid": pid,
+                    "candidate_status": candidate_status,
+                    "error": (
+                        "successor did not create a token-associated Copilot "
+                        f"session (status: {candidate_status})"
+                    ),
+                }
+        response: dict[str, object] = {
+            "ok": True,
+            "headless": True,
+            "pid": pid,
+            "seed_len": len(seed),
+            "seeded": True,
+            "seed_ready": True,
+            "seed_method": "interactive-argv",
+        }
+        if candidate_session:
+            response["candidate_session"] = candidate_session
+        if selection.assignment is not None:
+            response["profile_assignment"] = profile_assignment.metadata(selection.assignment)
+        return 0, response
+
     # Keep the multi-word seed OUT of the pane command argv: psmux space-joins
     # that argv before CreateProcess and irreversibly splits it. mux_new_window
     # sends base64 control tokens to the platform wrapper instead; the wrapper
@@ -22773,6 +22854,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Retry mode: refocus an already-live successor pane for this "
         "worktree's latest handoff, otherwise fall back to the ordinary "
         "spawn attempt",
+    )
+    p.add_argument(
+        "--headless",
+        action="store_true",
+        help="Spawn mode: launch the successor as a fully detached background "
+        "process with no mux at all (no pane, no attach target), instead of "
+        "requiring an already-live mux session for this worktree. For hosts "
+        "with no multiplexer present -- e.g. a coordinator-driven fallback "
+        "launch with no human attaching to watch it.",
     )
     p.add_argument(
         "--successor-verified",
