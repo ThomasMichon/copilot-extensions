@@ -38,8 +38,17 @@ log = logging.getLogger(__name__)
 #: mirror generically -- it never learns any single resource plugin's internals,
 #: only the shared obligation vocabulary + the lease store. agent-codespaces
 #: populates it for ``codespace`` (at clean disconnect -> ``at-rest``, at release
-#: -> ``released``); ``container`` is reserved for agent-containers.
-_LEASEABLE_KINDS: frozenset[str] = frozenset({"codespace", "container"})
+#: -> ``released``); ``container`` is reserved for agent-containers. ``task``
+#: (ThomasMichon/copilot-extensions#2584) is populated by
+#: ``agent_dispatch.hibernation_claims`` via :mod:`task_claim_registry`'s 4-tier
+#: origin chain rather than :mod:`lease_config`'s stricter bound-knowledge-repo-
+#: only policy -- see :func:`lease_disposition_of`.
+_LEASEABLE_KINDS: frozenset[str] = frozenset({"codespace", "container", "task"})
+
+#: Kinds within :data:`_LEASEABLE_KINDS` that resolve their lease origin through
+#: :mod:`task_claim_registry`'s 4-tier chain instead of the default
+#: :func:`lease_config.load_lease_settings` (bound-knowledge-repo-only).
+_EXTERNALLY_DISCOVERABLE_KINDS: frozenset[str] = frozenset({"task"})
 
 #: A full GitHub PR URL, e.g. ``https://github.com/owner/repo/pull/123``.
 _GH_PR_URL = re.compile(
@@ -210,10 +219,20 @@ def lease_disposition_of(
     failure, or any error -> ``None`` (spare; the sweep never abandons on an
     unreadable mirror). A present lease with no/``active`` disposition normalizes
     to ``active`` -> also spare.
+
+    ``kind`` in :data:`_EXTERNALLY_DISCOVERABLE_KINDS` (``task``) resolves its
+    lease origin through :mod:`task_claim_registry`'s 4-tier chain instead of
+    the default bound-knowledge-repo-only :func:`lease_config.load_lease_settings`
+    -- see that module's docstring (ThomasMichon/copilot-extensions#2584).
     """
     try:
-        from . import lease_config, lease_store
-        settings = lease_config.load_lease_settings()
+        from . import lease_store
+        if kind in _EXTERNALLY_DISCOVERABLE_KINDS:
+            from . import task_claim_registry
+            settings = task_claim_registry.load_task_claim_settings()
+        else:
+            from . import lease_config
+            settings = lease_config.load_lease_settings()
         snapshot = lease_store.GitLeaseStore(settings).inspect(kind, ref)
     except Exception as exc:  # unconfigured / network / protocol -> spare
         log.debug("lease disposition read for %s/%s degraded: %s", kind, ref, exc)

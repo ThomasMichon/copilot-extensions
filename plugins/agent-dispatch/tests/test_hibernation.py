@@ -283,10 +283,11 @@ def test_run_detach_claim_add_degrades_gracefully_without_agent_worktrees(
 
 def test_release_hibernation_claim_shells_out_to_agent_worktrees(monkeypatch):
     """Unit-level: release_hibernation_claim builds the expected argv and parses
-    a successful JSON reply."""
+    a successful JSON reply, and also best-effort mirrors the disposition
+    externally (#2584 follow-up)."""
     from agent_dispatch import hibernation_claims
 
-    calls = {}
+    calls = []
 
     class _Proc:
         returncode = 0
@@ -294,7 +295,7 @@ def test_release_hibernation_claim_shells_out_to_agent_worktrees(monkeypatch):
         stderr = ""
 
     def fake_run(argv, **k):
-        calls["argv"] = argv
+        calls.append(argv)
         return _Proc()
 
     monkeypatch.setattr(hibernation_claims, "agent_worktrees_launch_prefix", lambda: ["aw"])
@@ -302,13 +303,17 @@ def test_release_hibernation_claim_shells_out_to_agent_worktrees(monkeypatch):
 
     result = hibernation_claims.release_hibernation_claim("t-1")
     assert result == {"worktree_id": "wt-1", "ref": "t-1", "action": "released"}
-    assert calls["argv"] == ["aw", "claims", "release", "t-1", "--json"]
+    assert calls[0] == ["aw", "claims", "release", "t-1", "--json"]
+    assert calls[1] == [
+        "aw", "claims", "mirror-status", "task", "t-1",
+        "--status", "released", "--holder", "agent-dispatch", "--json",
+    ]
 
 
 def test_add_hibernation_claim_shells_out_to_agent_worktrees(monkeypatch):
     from agent_dispatch import hibernation_claims
 
-    calls = {}
+    calls = []
 
     class _Proc:
         returncode = 0
@@ -316,7 +321,7 @@ def test_add_hibernation_claim_shells_out_to_agent_worktrees(monkeypatch):
         stderr = ""
 
     def fake_run(argv, **k):
-        calls["argv"] = argv
+        calls.append(argv)
         return _Proc()
 
     monkeypatch.setattr(hibernation_claims, "agent_worktrees_launch_prefix", lambda: ["aw"])
@@ -324,7 +329,7 @@ def test_add_hibernation_claim_shells_out_to_agent_worktrees(monkeypatch):
 
     result = hibernation_claims.add_hibernation_claim("t-1", note="hibernating: sleep 1")
     assert result["kind"] == "task"
-    assert calls["argv"] == [
+    assert calls[0] == [
         "aw",
         "claims",
         "add",
@@ -334,6 +339,35 @@ def test_add_hibernation_claim_shells_out_to_agent_worktrees(monkeypatch):
         "--note",
         "hibernating: sleep 1",
     ]
+    assert calls[1] == [
+        "aw", "claims", "mirror-status", "task", "t-1",
+        "--status", "active", "--holder", "agent-dispatch", "--json",
+    ]
+
+
+def test_add_hibernation_claim_failure_does_not_mirror(monkeypatch):
+    """The external mirror is only attempted after a successful local claim add
+    -- a failed local journal must not also attempt (and mis-report) a mirror
+    write."""
+    from agent_dispatch import hibernation_claims
+
+    calls = []
+
+    class _Proc:
+        returncode = 1
+        stdout = ""
+        stderr = "boom"
+
+    def fake_run(argv, **k):
+        calls.append(argv)
+        return _Proc()
+
+    monkeypatch.setattr(hibernation_claims, "agent_worktrees_launch_prefix", lambda: ["aw"])
+    monkeypatch.setattr(hibernation_claims.subprocess, "run", fake_run)
+
+    result = hibernation_claims.add_hibernation_claim("t-1")
+    assert result is None
+    assert len(calls) == 1  # only the (failed) claims-add call, no mirror attempt
 
 
 def test_run_detach_suspend_failure_does_not_fail_the_detach(capsys, monkeypatch):
