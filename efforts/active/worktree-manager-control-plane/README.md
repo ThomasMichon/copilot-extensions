@@ -226,6 +226,29 @@ realized in `main`; unchecked items are the remaining delta.
             drives them; agent-worktrees' own `cmd_remux`/`_perform_remux`/
             `remux_bare_copilot` remain untouched as its zero-provider-mode
             fallback (the bundled Picker's standalone Restore action).
+      - [ ] Sub-slice 2c (fixed 2026-09-14): the launcher scripts relocated
+            into `worktree-manager/bin/` dot-source `session-options.ps1`
+            (which itself resolves `psmux-passthrough.conf`) via a
+            `$PSScriptRoot`-relative path — the copy in Sub-slice 2a Step 1
+            omitted these terminal scripts, so Worktree Manager-launched
+            sessions had a silently unconfigured psmux status bar. Copied
+            `session-options.{sh,ps1}`, `apply-mux-keybinds.{sh,ps1}`, and
+            `psmux-passthrough.conf` verbatim into `worktree-manager/bin/`
+            alongside the launcher, with a regression test asserting the
+            sibling files exist and are wired.
+      - [ ] **Sub-slice 3 (direction set 2026-09-14, not yet designed):**
+            split the resident status-monitor's push/observe legs into
+            Worktree Manager — agent-worktrees keeps sole ownership of
+            accumulating/tracking session status; Worktree Manager takes a
+            **push subscriber** that writes accumulated status into Mux
+            (replacing the daemon's own direct `set-option` calls for
+            Worktree-Manager-managed sessions) and a **Mux subscriber** that
+            observes session create/destroy and writes that observation back
+            to agent-worktrees. See
+            [`phase-3b-mux-relocation.md`](phase-3b-mux-relocation.md#sub-slice-3--split-the-resident-status-monitors-pushobserve-legs-into-worktree-manager-direction-set-2026-09-14-not-yet-designed-in-detail)
+            for the recorded direction; the transport, write-back contract,
+            and interaction with the existing per-session `status-updater`
+            fallback still need an ordered plan before implementation starts.
 - [ ] Update the Worktree Manager Picker to select Mux presentation and/or the
       AHP backend independently per launch/resume/create action, rather than
       assuming exactly one of them.
@@ -570,3 +593,34 @@ its issues; the public artifacts stay self-contained and general-purpose.
   (Mux relocation) fully landed except the still-deliberately-deferred
   Sub-slice 2a old-in-plugin-script deletion, and there is still no Picker
   UI wiring for a Worktree Manager-side "Restore" action (CLI-only for now).
+
+- **2026-09-14** — Fixed a live regression (Sub-slice 2c): Worktree Manager
+  was not properly configuring the Mux (psmux) status bar for sessions it
+  launches. Root cause: `launch-session.ps1` dot-sources
+  `session-options.ps1` (which itself resolves `psmux-passthrough.conf`) via
+  a `$PSScriptRoot`-relative path, but Sub-slice 2a Step 1's verbatim copy
+  into `worktree-manager/bin/` only carried `launch-session.{sh,ps1,cmd}` and
+  `pane-wrapper.{sh,ps1}` — not the terminal scripts. The dot-source failure
+  is swallowed (a status-bar tweak must never block a launch), so the gap
+  was silent rather than an error. Copied `session-options.{sh,ps1}`,
+  `apply-mux-keybinds.{sh,ps1}`, and `psmux-passthrough.conf` verbatim from
+  `plugins/agent-worktrees/terminal/` into `worktree-manager/bin/` (hash
+  matched), documented the sibling requirement in `worktree-manager/bin/
+  README.md`, and added a regression test asserting both the dot-source
+  string and the files' presence. `worktree-manager`'s
+  `test_self_install.py` suite passes (11/11).
+
+- **2026-09-14** — Operator direction for a new Sub-slice 3 (not yet
+  designed): migrating the Picker and Mux handling to Worktree Manager is
+  explicitly a **separate concern from the AHP effort**. Going forward,
+  Worktree Manager takes ownership of the Mux-facing legs of the resident
+  status-monitor: agent-worktrees' daemon keeps accumulating/tracking
+  session status (unchanged, sole authority), Worktree Manager owns a new
+  **push subscriber** that writes that status into Mux, and Worktree Manager
+  owns a new **Mux subscriber** that observes session create/destroy and
+  writes the observation back to agent-worktrees. Recorded as direction only
+  in `phase-3b-mux-relocation.md`'s new Sub-slice 3 section — the transport,
+  write-back contract, and relationship to the existing per-session
+  `status-updater` fallback still need an ordered plan, per this effort's
+  own "plan before code" discipline (mirrors how Sub-slices 1/2 each got a
+  reviewed plan doc before implementation started).
