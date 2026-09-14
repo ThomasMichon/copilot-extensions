@@ -297,6 +297,40 @@ call), Worktree Manager owns only *executing* what agent-worktrees tells it to.
    places -- it means share one plan function, not "only one place may
    execute a remux."
 
+### Sub-slice 3 — Split the resident status-monitor's push/observe legs into Worktree Manager (Direction set 2026-09-14; not yet designed in detail)
+
+Today `cmd_status_monitor` (the resident daemon, `__main__.py`) does three
+things in one process: **accumulate/track** each session's status (git
+disposition, PR state, etc. -- the data), **push** that status into each
+live `wt-*` mux session's `@aw_seg`/status-bar vars via `set-option`, and
+(through `sessions.py`'s liveness helpers) **observe** mux session
+create/destroy to drive its own retirement/reconciliation sweeps. Per the
+same resolve/execute split already established for launch (Sub-slice 2a) and
+remux (Sub-slice 2b), this sub-slice relocates the mechanics, not the
+authority:
+
+- **Stays in agent-worktrees:** the resident status-monitor daemon itself,
+  as the sole accumulator/tracker of status data (`classify_daemon`,
+  `monitor_roots`, `session_catalog`, the per-project lease). agent-worktrees
+  remains the single source of truth for "what is a session's status."
+- **Moves to Worktree Manager:** a **push subscriber** that receives
+  status updates from the agent-worktrees daemon and writes them into Mux
+  (replacing the daemon's own direct `set-option` calls for
+  Worktree-Manager-managed sessions), and a **Mux subscriber** that observes
+  session create/destroy directly against the mux server and writes that
+  observation back to agent-worktrees (replacing/supplementing the daemon's
+  own liveness polling for those sessions).
+- **Not yet designed:** the transport between the agent-worktrees daemon and
+  Worktree Manager's push subscriber (a new IPC surface, analogous to
+  `hook_ipc.py`/`classify_daemon`'s `work_coalescing_singleton` channel, or a
+  poll against an existing query verb), the write-back contract shape for
+  Mux-observed create/destroy events, and how this interacts with the
+  existing per-session `status-updater` fallback (Sub-slice 3 should retire
+  or reconcile with it, not run a third parallel status path). This is
+  intentionally recorded as **direction, not an implementation plan** --
+  follow the same ordered-plan-before-code discipline as Sub-slices 1/2
+  before starting code.
+
 
 ## What stays in agent-worktrees (not relocated, ever)
 

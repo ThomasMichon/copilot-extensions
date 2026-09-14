@@ -12,8 +12,27 @@ of the `worktree-manager-control-plane` effort.
   cutover argv), then call `agent-worktrees post-exit` for finalization.
 - `pane-wrapper.sh` / `pane-wrapper.ps1` — wrap the actual mux pane command for
   graceful exit-code handling, initial-prompt injection, and AHP token handoff.
+- `session-options.ps1` / `session-options.sh` — per-session status bar +
+  behaviors that `launch-session.ps1`/`.sh` stamp onto each mux session.
+  `launch-session.ps1` dot-sources `session-options.ps1` via a
+  `$PSScriptRoot`-relative path (`session-options.sh` instead uses a fixed
+  `~/.agent-worktrees/bin/` path, unaffected by relocation), so the Windows
+  script must ship as a sibling of the relocated launcher — omitting it left
+  Worktree Manager-launched sessions with a silently unconfigured psmux status
+  bar (the failure is swallowed, not a launch error).
+- `apply-mux-keybinds.ps1` / `apply-mux-keybinds.sh` — opt-in, server-global
+  mux tuning (keystroke passthrough + `escape-time`), shipped alongside
+  `session-options.*` for parity with agent-worktrees' own deployment; run by
+  the user or a machine-restore flow, never automatically.
+- `psmux-passthrough.conf` — the keystroke-passthrough fragment
+  `session-options.ps1` resolves by the same `$PSScriptRoot`-relative path.
+- `psmux-path.ps1` — Windows psmux binary discovery/compatibility helper,
+  also dot-sourced from `launch-session.ps1` by a `$PSScriptRoot`-relative
+  path; ships as a sibling for the same reason as `session-options.ps1`.
 
-**Migrated verbatim from `plugins/agent-worktrees/bin/`** (proven, tested
+**Migrated verbatim from `plugins/agent-worktrees/bin/`,
+`plugins/agent-worktrees/terminal/`, and `plugins/agent-worktrees/scripts/`**
+(proven, tested
 implementation; the still-shipping copy there remains the resolved target of
 `cmd_launch` until Phase 3b Slice 2's cutover step repoints it — see the linked
 plan for the ordered steps and the "clean cutover" invariant: this becomes the
