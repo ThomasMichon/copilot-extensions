@@ -228,6 +228,7 @@ def test_bound_external_state_config_is_effective(
     assert result["opted_in"] is True
     assert result["source"] == "external-state-root"
     assert Path(result["config"]) == config.resolve()
+    assert Path(result["repo_root"]) == repo.resolve()
 
 
 @pytest.mark.parametrize("state", ["unavailable", "invalid"])
