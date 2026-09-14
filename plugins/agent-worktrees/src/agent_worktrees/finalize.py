@@ -1369,6 +1369,41 @@ def _assert_obligations_settled(
     return True
 
 
+def _rollback_finalizing_freeze(
+    yaml_path, prior_status: str | None, worktree_id: str,
+) -> None:
+    """Restore a mutable stable state after a post-freeze finalize failure.
+
+    worktree-finality-and-obligations (Ph2): once ``record.status`` is frozen
+    to ``finalizing``, a subsequent failure (lock timeout, an exception during
+    cleanup) must not leave the record wedged there permanently -- creator
+    ownership would stay frozen forever (``add_resource_claim`` hard-rejects
+    ``finalizing``) with no path back. Best-effort and defensive: only reverts
+    when the record is still exactly ``finalizing`` (a concurrent process may
+    have already resolved it) and only when a real prior status was captured.
+    """
+    if prior_status is None or not yaml_path.exists():
+        return
+    try:
+        with tracking._RecordLock(yaml_path, require_sidecar=True):
+            record = tracking.load_record(yaml_path)
+            if record.status != "finalizing":
+                return
+            record.status = prior_status
+            tracking.save_record(record, yaml_path)
+        output.warn(
+            f"Restored {worktree_id}'s tracking status to {prior_status!r} "
+            "after a finalize failure (was wedged at 'finalizing')."
+        )
+    except Exception as exc:
+        output.err(
+            f"Could not roll back {worktree_id}'s 'finalizing' freeze after a "
+            f"finalize failure ({exc}); run 'agent-worktrees doctor' or inspect "
+            f"the record manually -- creator ownership is at risk of being "
+            f"stuck."
+        )
+
+
 def _rehome_abandoned_obligations(
     record, worktree_id: str, config, *, handoff_to: str,
 ) -> bool:
@@ -1597,6 +1632,7 @@ def validate_and_finalize(
             + ", ".join(active_handoffs))
         return False
 
+    prior_status: str | None = None
     if yaml_path.exists():
         try:
             with tracking._RecordLock(yaml_path, require_sidecar=True):
@@ -1650,6 +1686,7 @@ def validate_and_finalize(
                     handoff_to=(handoff_to or "").strip(),
                 ):
                     return False
+                prior_status = record.status
                 record.status = "finalizing"
                 tracking.save_record(record, yaml_path)
         except Exception as exc:
@@ -1665,6 +1702,7 @@ def validate_and_finalize(
         lock.acquire()
     except TimeoutError:
         output.err("Timed out waiting for finalization lock.")
+        _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id)
         return False
 
     try:
@@ -1835,6 +1873,7 @@ def validate_and_finalize(
 
     except Exception as e:
         output.err(f"Finalization cleanup failed: {e}")
+        _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id)
         return False
     finally:
         lock.release()

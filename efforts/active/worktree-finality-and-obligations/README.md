@@ -156,26 +156,59 @@ _Verbatim operator request; original spelling and punctuation preserved._
   consumers.
 
 ### Phase 2 - Make finalized records resumable
-- [ ] Centralize claim add/update/remove/settle/release mutations so direct list
-  replacement cannot bypass transition policy.
-- [ ] Keep `finalizing` and `orphaned` hard-reject states. Atomically reopen
-  `finalized -> active` only when a mutation changes the held obligation set:
-  a new/reopened follow-up, a new claim, `released/abandoned ->
-  active/at-rest`, or an accepted inbound obligation. Materializing an
-  already-effective legacy synthetic follow-up is a no-op and does not reopen.
-- [ ] Leave idempotent reads, pure settlement, release, removal, and
-  metadata/heartbeat refreshes free to operate without reopening.
-- [ ] Preserve the finalize freeze invariant: once the record becomes
+- [x] Centralize claim add/update/remove/settle/release mutations so direct list
+  replacement cannot bypass transition policy. Reopening now lives in one
+  place: `tracking.add_resource_claim` computes whether a mutation increases
+  held obligations (`_claim_reopens_owner`) and calls
+  `reopen_finalized_owner`, which every claim-adding caller (`claims add`,
+  future claim-handoff acceptance) already routes through. Claim-add is still
+  the only ledger-mutating claim path -- `settle_resource_claim` and release
+  paths were not changed since they never increase held obligations (see the
+  reopen table below).
+- [x] Keep `finalizing` and `orphaned` hard-reject states (unchanged). Atomically
+  reopen `finalized -> active` only when a mutation changes the held obligation
+  set: a new claim, or `released/abandoned -> active/at-rest` re-added via
+  `add_resource_claim`. **Follow-up and accepted-inbound-obligation reopen
+  triggers are NOT done** -- `FollowUpRecord` doesn't exist yet (Phase 3), and
+  claim-handoff acceptance itself isn't implemented yet (`claim_handoffs.py` is
+  still "Phase 1": offer/decline/cancel only, no `accept`). Materializing an
+  already-effective legacy synthetic follow-up doesn't apply yet for the same
+  reason.
+- [x] Leave idempotent reads, pure settlement, release, removal, and
+  metadata/heartbeat refreshes free to operate without reopening --
+  `_claim_reopens_owner` returns `False` for a same-state replay and for
+  settling `active -> at-rest` (already held, not an increase); neither of
+  those code paths calls `reopen_finalized_owner`.
+- [x] Preserve the finalize freeze invariant: once the record becomes
   `finalizing`, claim/follow-up acquisition remains rejected until finalize
-  commits or rolls back.
-- [ ] Implement finalize rollback and stale-`finalizing` recovery so a failure
+  commits or rolls back (unchanged -- `add_resource_claim` already hard-rejects
+  `finalizing`).
+- [x] Implement finalize rollback and stale-`finalizing` recovery so a failure
   after the freeze restores a mutable stable state instead of wedging the
-  worktree permanently.
-- [ ] Preserve historical finalization timestamps separately from current
-  lifecycle state and re-arm disposition nudges when a worktree reopens.
+  worktree permanently. Found and fixed a **real wedge bug**: neither the
+  post-freeze `lock.acquire()` `TimeoutError` path nor the outer cleanup
+  `except Exception` path reverted `record.status` off `finalizing` on
+  failure, so either failure permanently froze creator ownership (no path
+  back, since `add_resource_claim` hard-rejects `finalizing`). Added
+  `finalize._rollback_finalizing_freeze` (captures the pre-freeze status,
+  reverts it on either failure path, no-ops if a concurrent process already
+  resolved the record) with unit tests. **Not done:** a dedicated operator-
+  facing `stale-finalizing recovery` CLI verb using lock/owner-liveness+age
+  evidence for a wedge that predates this fix or crashes before either catch
+  block runs (e.g. process killed mid-freeze) -- the automatic rollback only
+  covers failures raised *within* `validate_and_finalize` itself.
+- [x] Preserve historical finalization timestamps separately from current
+  lifecycle state and re-arm disposition nudges when a worktree reopens. Added
+  `WorktreeRecord.last_finalized_at` (copied from `completed_at` before it's
+  cleared by the reopen) and clear `status_note_at` on reopen so a stale
+  "nothing left to do" note doesn't linger.
 - [ ] Reopen output and guidance must list prior resources that were released or
   re-homed by the earlier finalize cascade; reopening the worktree does not
-  restore those resources.
+  restore those resources. `claims add`'s CLI output now reports `reopened:
+  true` and prints a one-line notice, but it does not yet enumerate the prior
+  finalize's released/re-homed resources -- that needs `finalize`'s
+  `release_all_resources` cascade to leave a durable trail on the record for
+  a later reopen to read back.
 
 ### Phase 3 - Replace the boolean-only follow-up model
 - [ ] Add a migration-free `FollowUpRecord` list with stable IDs, summary,
@@ -269,14 +302,21 @@ _Verbatim operator request; original spelling and punctuation preserved._
 
 ## Validation Plan
 
-- [ ] **Reopen:** adding a new claim or follow-up to a retained finalized
-  worktree succeeds, changes lifecycle state away from finalized, and
-  immediately removes prune eligibility.
+- [x] **Reopen:** adding a new claim to a retained finalized worktree succeeds,
+  changes lifecycle state away from finalized (to `active`), and immediately
+  removes prune eligibility (already covered by Phase 1's held-claims fix).
+  Follow-up-triggered reopen is not yet testable -- `FollowUpRecord` doesn't
+  exist (Phase 3).
 - [ ] **Reopen history:** reopen output identifies released claims and re-homed
-  child resources that were not restored by reopening.
-- [ ] **Finalize rollback:** a failure after entering `finalizing` restores a
-  mutable stable state, and stale finalizing records have an explicit recovery
-  path.
+  child resources that were not restored by reopening. Not done -- `claims add`
+  reports `reopened: true` but does not enumerate prior cascade-released
+  resources.
+- [x] **Finalize rollback:** a failure after entering `finalizing` restores a
+  mutable stable state (tested directly against `_rollback_finalizing_freeze`
+  and wired into both post-freeze failure paths in `validate_and_finalize`).
+  Stale finalizing records predating this fix, or a crash that occurs before
+  either failure handler runs, still have **no explicit operator-facing
+  recovery path/verb** -- not done.
 - [ ] **Claim-free:** active and at-rest claims both prevent `FINAL`; only
   released and abandoned claims are excluded from the held count, and abandoned
   claims remain visible in audit detail.
@@ -384,4 +424,37 @@ The approved design is the faceted model in [design.md](design.md):
   (rest of Phase 1). Next slice: either finish Phase 1's remaining fixtures
   (compatibility, concurrency, inventory) or move to Phase 2's centralized
   mutation/reopen transaction -- pick up from the Plan checklist above.
+
+### 2026-09-13 - Phase 2: reopen transaction + a second wedge bug closed
+- Operator said "continue." Bound a fresh worktree at Phase 2
+  (`effort-focus bind ... --slice "Phase 2 - Make finalized records
+  resumable"`).
+- Implemented the centralized reopen transaction: `tracking._claim_reopens_owner`
+  decides whether a mutation increases held obligations; `add_resource_claim`
+  calls `reopen_finalized_owner` when it does. Idempotent replays, settling
+  `active -> at-rest`, and adding an already-non-live claim never reopen.
+  Added `WorktreeRecord.last_finalized_at` (preserves the historical
+  finalize timestamp the reopen clears from `completed_at`) with YAML
+  read/write round-trip. `claims add`'s CLI/JSON output now reports
+  `reopened: true/false`.
+- Follow-up-triggered and accepted-inbound-obligation reopen triggers are
+  **not done** -- `FollowUpRecord` is Phase 3 and claim-handoff `accept` isn't
+  implemented yet (`claim_handoffs.py` only has offer/decline/cancel so far).
+- While implementing the freeze invariant checklist item, found a **second
+  live wedge bug**: once `validate_and_finalize` freezes a record to
+  `finalizing`, neither the post-freeze `lock.acquire()` `TimeoutError` path
+  nor the outer `except Exception` cleanup-failure path ever reverted the
+  status -- a lock-timeout or any exception during cleanup left the record
+  permanently stuck at `finalizing` (which `add_resource_claim` hard-rejects,
+  so there was no way back short of manual YAML surgery). Added
+  `finalize._rollback_finalizing_freeze` (captures pre-freeze status, reverts
+  on either failure path, no-ops if a concurrent process already resolved the
+  record) with direct unit tests.
+- **Not done:** a dedicated stale-`finalizing` recovery CLI verb (for a wedge
+  predating this fix, or a crash that occurs before either failure handler
+  runs); the reopen-history requirement (listing prior cascade-released
+  resources in the reopen output); Phase 3-6 entirely.
+- `python tools/run-plugin-tests.py agent-worktrees` -- 516 passed (full suite
+  minus the same two pre-existing, unrelated `test_knowledge_plugins.py`
+  failures noted in the prior entry).
 
