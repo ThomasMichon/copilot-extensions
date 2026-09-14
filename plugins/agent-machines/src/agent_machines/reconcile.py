@@ -106,8 +106,17 @@ def _clean_runtime_environment() -> dict[str, str]:
 
 
 def _runtime_command_runner(argv: list[str], *, timeout: int) -> _resources.RunOutcome:
+    # Same PATHEXT-resolution fix as self_update.default_command_runner: a
+    # bare plugin binstub name (e.g. "agent-machines") is really a `.cmd`
+    # shim on Windows, and CreateProcess (shell=False) does not search
+    # PATHEXT the way cmd.exe does.
+    resolved = argv
+    if argv:
+        binary = shutil.which(argv[0])
+        if binary:
+            resolved = [binary, *argv[1:]]
     proc = subprocess.run(  # noqa: S603 - argv list rooted in the installed payload/binstub
-        argv,
+        resolved,
         capture_output=True,
         encoding="utf-8",
         errors="replace",
