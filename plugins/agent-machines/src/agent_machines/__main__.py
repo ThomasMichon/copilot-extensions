@@ -491,7 +491,9 @@ def _self_update_packages(
     )
 
 
-def _cmd_self_update_run(args: argparse.Namespace) -> int:
+def _resolve_self_update_resources(
+    args: argparse.Namespace,
+) -> tuple[_identity.MachineIdentity, str, dict[str, object]] | None:
     identity = _resolve_machine_identity(args)
     _emit_identity_warnings(identity)
     machine = identity.canonical
@@ -499,7 +501,7 @@ def _cmd_self_update_run(args: argparse.Namespace) -> int:
     resolved = _reconcile.resolve_union(packages, machine, identity.accepted)
     findings = _validator.validate(resolved, machine)
     if _validator.has_errors(findings):
-        if args.json:
+        if getattr(args, "json", False):
             print(
                 json.dumps(
                     {
@@ -515,13 +517,32 @@ def _cmd_self_update_run(args: argparse.Namespace) -> int:
             for finding in findings:
                 if finding.level == "error":
                     print(f"  {finding.code}: {finding.message}", file=sys.stderr)
-        return 1
+        return None
     resolved_resources, _ = _resources.resolve_resources(
         resolved,
         machine,
         _discover.current_platform(),
     )
-    resource = _self_update_state.selected_tiers_from_resolved(resolved_resources).get(args.tier)
+    return (
+        identity,
+        machine,
+        _self_update_state.selected_tiers_from_resolved(resolved_resources),
+    )
+
+
+def _selected_self_update_tiers(args: argparse.Namespace) -> list[str]:
+    selected = getattr(args, "tier", None)
+    if not selected:
+        return sorted(_self_update.TIER_SPECS)
+    return list(dict.fromkeys(selected))
+
+
+def _cmd_self_update_run(args: argparse.Namespace) -> int:
+    resolved_state = _resolve_self_update_resources(args)
+    if resolved_state is None:
+        return 1
+    identity, machine, selected_resources = resolved_state
+    resource = selected_resources.get(args.tier)
     result = _self_update.run_tier(
         args.tier,
         opted_in=_self_update_state.tier_enabled(resource),
@@ -531,7 +552,7 @@ def _cmd_self_update_run(args: argparse.Namespace) -> int:
                 machine,
                 accepted_machines=identity.accepted,
             )
-            if args.tier == _self_update.SWEEP_TIER
+            if args.tier == _self_update_state.SWEEP_TIER
             else None
         ),
     )
@@ -540,6 +561,109 @@ def _cmd_self_update_run(args: argparse.Namespace) -> int:
     else:
         print(_self_update.format_result(result))
     return 0 if result.ok else 2
+
+
+def _cmd_self_update_install(args: argparse.Namespace) -> int:
+    resolved_state = _resolve_self_update_resources(args)
+    if resolved_state is None:
+        return 1
+    _identity, _machine, selected_resources = resolved_state
+    results = []
+    for tier in _selected_self_update_tiers(args):
+        resource = selected_resources.get(tier)
+        if not _self_update_state.tier_enabled(resource):
+            results.append(
+                _self_update.ScheduledTaskReconcileResult(
+                    tier=tier,
+                    desired_state="absent",
+                    status="skipped",
+                    changed=False,
+                    detail=f"tier {tier!r} is not opted in",
+                )
+            )
+            continue
+        results.append(
+            _self_update.reconcile_scheduled_task(
+                tier,
+                desired_present=True,
+                machine=_machine,
+            )
+        )
+    if args.json:
+        payload = {
+            "ok": all(result.ok for result in results),
+            "tiers": [r.to_dict() for r in results],
+        }
+        print(json.dumps(payload, indent=2))
+    else:
+        for result in results:
+            print(f"{result.tier}: {result.status}")
+            print(f"  {result.detail}")
+    return 0 if all(result.ok or result.status == "skipped" for result in results) else 2
+
+
+def _cmd_self_update_status(args: argparse.Namespace) -> int:
+    resolved_state = _resolve_self_update_resources(args)
+    if resolved_state is None:
+        return 1
+    _identity, _machine, selected_resources = resolved_state
+    results = []
+    for tier in _selected_self_update_tiers(args):
+        resource = selected_resources.get(tier)
+        results.append(
+            _self_update.scheduled_task_status(
+                tier,
+                opted_in=_self_update_state.tier_enabled(resource),
+                machine=_machine,
+            )
+        )
+    if args.json:
+        print(
+            json.dumps(
+                {"ok": True, "tiers": [result.to_dict() for result in results]},
+                indent=2,
+            )
+        )
+    else:
+        for result in results:
+            print(
+                f"{result.tier}: opted-in={'yes' if result.opted_in else 'no'}; "
+                f"registered={'yes' if result.registered else 'no'}; "
+                f"matching={'yes' if result.matching else 'no'}"
+            )
+            print(f"  {result.detail}")
+            if result.last_attempt:
+                print(f"  last-attempt: {result.last_attempt}")
+            if result.last_success:
+                print(f"  last-success: {result.last_success}")
+    return 0
+
+
+def _cmd_self_update_uninstall(args: argparse.Namespace) -> int:
+    machine = _resolve_machine_identity(args).canonical
+    results = [
+        _self_update.reconcile_scheduled_task(
+            tier,
+            desired_present=False,
+            machine=machine,
+        )
+        for tier in _selected_self_update_tiers(args)
+    ]
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "ok": all(result.ok for result in results),
+                    "tiers": [r.to_dict() for r in results],
+                },
+                indent=2,
+            )
+        )
+    else:
+        for result in results:
+            print(f"{result.tier}: {result.status}")
+            print(f"  {result.detail}")
+    return 0 if all(result.ok for result in results) else 2
 
 
 def _cmd_todo(args: argparse.Namespace) -> int:
@@ -665,6 +789,29 @@ def _build_parser() -> argparse.ArgumentParser:
     self_update_run.add_argument("--machine", help="override the target machine name")
     self_update_run.add_argument("--json", action="store_true", help="emit JSON")
     self_update_run.set_defaults(func=_cmd_self_update_run)
+    for subcommand, func, help_text in (
+        (
+            "install",
+            _cmd_self_update_install,
+            "Register opted-in self-update Scheduled Tasks.",
+        ),
+        (
+            "status",
+            _cmd_self_update_status,
+            "Inspect self-update opt-in and Scheduled Task state.",
+        ),
+        ("uninstall", _cmd_self_update_uninstall, "Remove self-update Scheduled Tasks."),
+    ):
+        current = self_update_sub.add_parser(subcommand, help=help_text)
+        current.add_argument(
+            "--tier",
+            action="append",
+            choices=sorted(_self_update.TIER_SPECS),
+            help="restrict to one unattended self-update tier (repeatable)",
+        )
+        current.add_argument("--machine", help="override the target machine name")
+        current.add_argument("--json", action="store_true", help="emit JSON")
+        current.set_defaults(func=func)
     playwright = sub.add_parser("provision-playwright-cli")
     playwright.add_argument("--json", action="store_true", help="emit JSON")
     playwright_mode = playwright.add_mutually_exclusive_group()

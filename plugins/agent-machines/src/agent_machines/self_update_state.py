@@ -2,12 +2,47 @@
 
 from __future__ import annotations
 
+import ctypes
 import json
+import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 STATE_VERSION = TASKS_VERSION = 1
+
+WATCHDOG_TIER = "watchdog"
+SWEEP_TIER = "sweep"
+WATCHDOG_STALE_SECONDS = 10 * 60
+SWEEP_STALE_SECONDS = 3 * 60 * 60
+
+
+@dataclass(frozen=True)
+class TierSpec:
+    tier: str
+    stale_seconds: int
+    task_name: str
+    schedule_kind: str
+    schedule_value: int
+
+
+TIER_SPECS: dict[str, TierSpec] = {
+    WATCHDOG_TIER: TierSpec(
+        tier=WATCHDOG_TIER,
+        stale_seconds=WATCHDOG_STALE_SECONDS,
+        task_name="agent-machines-self-update-watchdog",
+        schedule_kind="hourly",
+        schedule_value=1,
+    ),
+    SWEEP_TIER: TierSpec(
+        tier=SWEEP_TIER,
+        stale_seconds=SWEEP_STALE_SECONDS,
+        task_name="agent-machines-self-update-sweep",
+        schedule_kind="daily",
+        schedule_value=1,
+    ),
+}
 
 
 @dataclass
@@ -94,6 +129,97 @@ def task_config(home: Path | None = None) -> dict[str, Any]:
         "schema_version": TASKS_VERSION,
         "tiers": tiers,
     }
+
+
+class _WindowsMutex:
+    WAIT_OBJECT_0 = 0x00000000
+    WAIT_ABANDONED = 0x00000080
+
+    def __init__(self, name: str):
+        self.handle = ctypes.windll.kernel32.CreateMutexW(None, False, name)
+        if not self.handle:
+            raise OSError(f"CreateMutexW failed for {name}")
+        self.acquired = False
+
+    def try_acquire(self) -> str:
+        result = ctypes.windll.kernel32.WaitForSingleObject(self.handle, 0)
+        if result == self.WAIT_OBJECT_0:
+            self.acquired = True
+            return "acquired"
+        if result == self.WAIT_ABANDONED:
+            self.acquired = True
+            return "abandoned"
+        raise RuntimeError("could not acquire self-update state mutex")
+
+    def close(self) -> None:
+        if self.acquired:
+            ctypes.windll.kernel32.ReleaseMutex(self.handle)
+            self.acquired = False
+        if self.handle:
+            ctypes.windll.kernel32.CloseHandle(self.handle)
+            self.handle = None
+
+
+def _with_mutex(name: str):
+    if sys.platform != "win32":
+        return None
+    mutex = _WindowsMutex(name)
+    state = mutex.try_acquire()
+    if state not in {"acquired", "abandoned"}:
+        raise RuntimeError(f"could not acquire {name}")
+    return mutex
+
+
+def write_status(
+    home: Path | None, tier: str, *, attempt: str | None = None, success: str | None = None
+) -> TierStatus:
+    mutex = _with_mutex("Global\\AgentMachinesSelfUpdateStatus")
+    try:
+        root = state_root(home)
+        root.mkdir(parents=True, exist_ok=True)
+        path = status_path(home)
+        payload = load_status(home)
+        tiers = payload.setdefault("tiers", {})
+        current = tiers.setdefault(tier, {})
+        if attempt is not None:
+            current["last_attempt"] = attempt
+        if success is not None:
+            current["last_success"] = success
+        temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        temp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        os.replace(temp, path)
+        return tier_status(home, tier)
+    finally:
+        if mutex is not None:
+            mutex.close()
+
+
+def record_task_config(
+    home: Path | None,
+    tier: str,
+    *,
+    installed: bool,
+    opted_in: bool,
+    attempted_elevation: bool,
+) -> None:
+    mutex = _with_mutex("Global\\AgentMachinesSelfUpdateTaskConfig")
+    try:
+        root = state_root(home)
+        root.mkdir(parents=True, exist_ok=True)
+        path = task_config_path(home)
+        payload = task_config(home)
+        tiers = payload.setdefault("tiers", {})
+        tiers[tier] = {
+            "installed": installed,
+            "opted_in": opted_in,
+            "attempted_elevation": attempted_elevation,
+        }
+        temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        temp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        os.replace(temp, path)
+    finally:
+        if mutex is not None:
+            mutex.close()
 
 
 def selected_tiers_from_resolved(resolved_resources: list[Any]) -> dict[str, Any]:

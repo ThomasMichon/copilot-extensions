@@ -209,11 +209,22 @@ with independent authority and locking.
 | `owner` | no | Override the collision owner label (defaults to the package name). |
 
 `watchdog` is the narrow hourly dtssh-launcher liveness tier; `sweep` is the
-broader daily pull + plugin-reconcile + restore tier. Declaring the resource is
-only the authority-selected opt-in signal. `agent-machines self-update run`
-resolves that signal first and is a clean no-op when the selected tier is
-absent. The actual Windows Scheduled Task registration lands in the later
-installer/reconciliation phase of this effort.
+broader daily pull + plugin-reconcile + restore tier. Declaring the resource
+controls both `agent-machines self-update run` and the Windows Scheduled Task
+presence reconciled by `agent-machines self-update install` and
+`agent-machines restore --apply`:
+
+- `run` resolves the selected tier first and is a clean no-op when it is
+  opted out.
+- `install` resolves the same authority-selected state first and attempts
+  Scheduled Task registration only for tiers whose resolved state is `present`.
+- `restore --apply` treats Scheduled Task presence as ordinary machine drift:
+  a newly opted-in tier is registered (or returns the same explicit
+  elevate-and-retry instruction), and a newly opted-out tier is removed without
+  a separate install/uninstall step.
+
+The created Windows tasks run only when the user is logged on, matching the
+interactive credential/token needs of the dtssh watchdog and restore sweep.
 
 ## Path anchors
 

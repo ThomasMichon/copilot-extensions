@@ -27,52 +27,37 @@ from typing import Any
 
 from agent_procutil import no_window_kwargs
 
+from . import self_update_tasks as _tasks
 from .self_update_state import (
     STATE_VERSION,
-    TierStatus,
-    load_status,
+    TIER_SPECS,
+    WATCHDOG_TIER,
     lock_path,
     mutex_name,
-    state_root,
-    status_path,
-    task_config,
-    task_config_path,
-    tier_status,
+    record_task_config,
+    write_status,
+)
+from .self_update_tasks import (
+    ScheduledTaskReconcileResult,
+    ScheduledTaskSnapshot,
+    ScheduledTaskStatus,
+)
+from .self_update_tasks import (
+    query_scheduled_task as _query_scheduled_task,
+)
+from .self_update_tasks import (
+    reconcile_scheduled_task as _reconcile_scheduled_task,
+)
+from .self_update_tasks import (
+    scheduled_task_status as _scheduled_task_status,
 )
 
-WATCHDOG_TIER = "watchdog"
-SWEEP_TIER = "sweep"
-WATCHDOG_STALE_SECONDS = 10 * 60
-SWEEP_STALE_SECONDS = 3 * 60 * 60
 WATCHDOG_START_TIMEOUT_SECONDS = 40
 LIVE_SESSION_DEFER_STATUSES = {"awaiting-operator", "busy", "idle", "running"}
 
-
-@dataclass(frozen=True)
-class TierSpec:
-    tier: str
-    stale_seconds: int
-    task_name: str
-    schedule_kind: str
-    schedule_value: int
-
-
-TIER_SPECS: dict[str, TierSpec] = {
-    WATCHDOG_TIER: TierSpec(
-        tier=WATCHDOG_TIER,
-        stale_seconds=WATCHDOG_STALE_SECONDS,
-        task_name="agent-machines-self-update-watchdog",
-        schedule_kind="hourly",
-        schedule_value=1,
-    ),
-    SWEEP_TIER: TierSpec(
-        tier=SWEEP_TIER,
-        stale_seconds=SWEEP_STALE_SECONDS,
-        task_name="agent-machines-self-update-sweep",
-        schedule_kind="daily",
-        schedule_value=1,
-    ),
-}
+task_action_arguments = _tasks.task_action_arguments
+task_description = _tasks.task_description
+task_working_directory = _tasks.task_working_directory
 
 
 @dataclass
@@ -182,74 +167,58 @@ def _parse_iso_utc(value: str | None) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
-def write_status(
-    home: Path | None, tier: str, *, attempt: str | None = None, success: str | None = None
-) -> TierStatus:
-    mutex = (
-        _WindowsMutex("Global\\AgentMachinesSelfUpdateStatus")
-        if sys.platform == "win32"
-        else None
-    )
-    if mutex is not None:
-        state = mutex.try_acquire()
-        if state not in {"acquired", "abandoned"}:
-            raise RuntimeError("could not acquire the self-update status lock")
-    try:
-        root = state_root(home)
-        root.mkdir(parents=True, exist_ok=True)
-        path = status_path(home)
-        payload = load_status(home)
-        tiers = payload.setdefault("tiers", {})
-        current = tiers.setdefault(tier, {})
-        if attempt is not None:
-            current["last_attempt"] = attempt
-        if success is not None:
-            current["last_success"] = success
-        temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-        temp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-        os.replace(temp, path)
-        return tier_status(home, tier)
-    finally:
-        if mutex is not None:
-            mutex.release()
-            mutex.close()
-
-def record_task_config(
-    home: Path | None,
+def query_scheduled_task(
     tier: str,
     *,
-    installed: bool,
-    opted_in: bool,
-    attempted_elevation: bool,
-) -> None:
-    mutex = (
-        _WindowsMutex("Global\\AgentMachinesSelfUpdateTaskConfig")
-        if sys.platform == "win32"
-        else None
+    machine: str | None = None,
+    runner: Callable[..., CommandResult] | None = None,
+    home: Path | None = None,
+) -> ScheduledTaskSnapshot:
+    return _query_scheduled_task(
+        tier,
+        machine=machine,
+        runner=runner or default_command_runner,
+        resolve_binary=shutil_which,
+        home=home,
     )
-    if mutex is not None:
-        state = mutex.try_acquire()
-        if state not in {"acquired", "abandoned"}:
-            raise RuntimeError("could not acquire the self-update task-config lock")
-    try:
-        root = state_root(home)
-        root.mkdir(parents=True, exist_ok=True)
-        path = task_config_path(home)
-        payload = task_config(home)
-        tiers = payload.setdefault("tiers", {})
-        tiers[tier] = {
-            "installed": installed,
-            "opted_in": opted_in,
-            "attempted_elevation": attempted_elevation,
-            "updated_at": _iso_utc(_utc_now()),
-        }
-        temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-        temp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-        os.replace(temp, path)
-    finally:
-        if mutex is not None:
-            mutex.release()
-            mutex.close()
+
+
+def reconcile_scheduled_task(
+    tier: str,
+    *,
+    desired_present: bool,
+    machine: str | None = None,
+    runner: Callable[..., CommandResult] | None = None,
+    home: Path | None = None,
+) -> ScheduledTaskReconcileResult:
+    return _reconcile_scheduled_task(
+        tier,
+        desired_present=desired_present,
+        machine=machine,
+        runner=runner or default_command_runner,
+        resolve_binary=shutil_which,
+        record_task_config=record_task_config,
+        home=home,
+    )
+
+
+def scheduled_task_status(
+    tier: str,
+    *,
+    opted_in: bool,
+    machine: str | None = None,
+    runner: Callable[..., CommandResult] | None = None,
+    home: Path | None = None,
+) -> ScheduledTaskStatus:
+    return _scheduled_task_status(
+        tier,
+        opted_in=opted_in,
+        machine=machine,
+        runner=runner or default_command_runner,
+        resolve_binary=shutil_which,
+        home=home,
+    )
+
 
 def _pid_alive(pid: int | None) -> bool:
     if not pid or pid <= 0:
@@ -665,9 +634,7 @@ def _parse_git_counts(output: str) -> tuple[int, int]:
 def fast_forward_repo(
     repo: Path, *, runner: Callable[..., CommandResult] = default_command_runner
 ) -> StepResult:
-    status = runner(
-        ["git", "status", "--porcelain"], cwd=repo, timeout=120
-    )
+    status = runner(["git", "status", "--porcelain"], cwd=repo, timeout=120)
     if status.returncode != 0:
         return StepResult(
             "git-pull", "error", status.output or "git status failed", path=str(repo)
