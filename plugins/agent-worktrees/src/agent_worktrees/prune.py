@@ -356,6 +356,22 @@ def cleanup_disposition(
                 f"{v.reason} · held until BOTH paired worktrees finalized "
                 f"({why})")
 
+    # (#2635-class ordering fix, extended by the cleanup-toctou-revalidation
+    # effort): WIP and un-included conversation-only must be checked BEFORE
+    # the finalized/COMPLETED shortcut below -- a record whose tracking
+    # status is "finalized" (or whose git state reads COMPLETED) can still
+    # gain a committed WIP change or a fresh conversation turn since that
+    # status was set. Trusting the shortcut first would let a stale
+    # "finalized" status silently mask fresh unsafe content, mirroring the
+    # `dirty` ordering bug PR #2635 already fixed one check below. When
+    # `include_conversations` is set, conversation-only content is meant to
+    # be cleanable, so it is intentionally left to fall through to its later
+    # category check rather than being blocked here.
+    if info.state == S.WIP:
+        return CleanupDisposition(False, "wip", v.reason)
+    if v.category == "conversation-only" and not include_conversations:
+        return CleanupDisposition(False, "conversation", v.reason)
+
     # Safety invariant (mirrors _apply_tracking_override in __main__.py): any
     # uncommitted content must never be treated as cleanable via the raw
     # rec.status == "finalized" shortcut below. A worktree finalized earlier
@@ -387,8 +403,6 @@ def cleanup_disposition(
             include_unused or include_conversations, "unused", v.reason)
     if v.category == "conversation-only":
         return CleanupDisposition(include_conversations, "conversation", v.reason)
-    if info.state == S.WIP:
-        return CleanupDisposition(False, "wip", v.reason)
     return CleanupDisposition(False, "unmerged", v.reason)
 
 
