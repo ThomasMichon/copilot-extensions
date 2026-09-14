@@ -2010,11 +2010,26 @@ def derive_execution_leg(record: WorktreeRecord) -> ExecutionLegBinding | None:
     )
 
 
+#: The resident status-monitor calls `load_record` for every registered
+#: worktree on every sweep interval (copilot-extensions#2615): `yaml.safe_load`
+#: always uses PyYAML's pure-Python `SafeLoader`, even when the much faster
+#: libyaml-backed `CSafeLoader` is available, which py-spy profiling showed
+#: accounted for ~86% of the daemon's sampled CPU time. Prefer `CSafeLoader`
+#: where the C extension is present; fall back to the pure-Python loader on a
+#: host without libyaml bindings (e.g. some non-Windows/non-x64 builds).
+_FastSafeLoader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
+
+def _yaml_safe_load(raw: str) -> object:
+    """`yaml.safe_load`, but via the C-accelerated loader when available."""
+    return yaml.load(raw, Loader=_FastSafeLoader)
+
+
 def load_record(path: Path) -> WorktreeRecord:
     """Load a worktree tracking record from a YAML file."""
     raw = _read_text_with_retry(path)
     try:
-        data = yaml.safe_load(raw)
+        data = _yaml_safe_load(raw)
     except yaml.reader.ReaderError:
         # tmichon_microsoft/dotfiles#1789: a stray C0 control char (e.g. BEL)
         # persisted into a
@@ -2025,7 +2040,7 @@ def load_record(path: Path) -> WorktreeRecord:
         repaired = _strip_control_chars(raw)
         if repaired == raw:
             raise
-        data = yaml.safe_load(repaired)
+        data = _yaml_safe_load(repaired)
 
     if not isinstance(data, dict):
         raise yaml.YAMLError("worktree tracking record must be a YAML mapping")
