@@ -26205,7 +26205,9 @@ cmd_pr_merge_dispatch = pr_cli.cmd_pr_merge_dispatch
 _pr_usage = pr_cli._pr_usage
 cmd_pr_research_dispatch = pr_cli.cmd_pr_research_dispatch
 cmd_pr_dispatch = pr_cli.cmd_pr_dispatch
+_all_tracking_dirs = session_tracking_cli._all_tracking_dirs
 _find_tracking_file = session_tracking_cli._find_tracking_file
+_find_tracking_file_exact = session_tracking_cli._find_tracking_file_exact
 _find_tracking_file_by_session = session_tracking_cli._find_tracking_file_by_session
 _relocate_active_project_for_worktree = session_tracking_cli._relocate_active_project_for_worktree
 cmd_list_sessions = session_tracking_cli.cmd_list_sessions
@@ -26216,6 +26218,7 @@ cmd_conclude_disposable = session_tracking_cli.cmd_conclude_disposable
 cmd_link_succession = session_tracking_cli.cmd_link_succession
 cmd_session_transcript = session_tracking_cli.cmd_session_transcript
 cmd_recent_messages = session_tracking_cli.cmd_recent_messages
+terminal_conclusion = session_tracking_cli.terminal_conclusion
 
 COMMAND_MAP = {
     "resolve": cmd_resolve,
