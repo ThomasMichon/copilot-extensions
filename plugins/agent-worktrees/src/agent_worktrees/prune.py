@@ -607,6 +607,47 @@ def assemble_closure_descriptor(
     )
 
 
+def interpret_descriptor_payload(payload: dict | None) -> dict:
+    """Mixed-version fleet safety (Phase 5): interpret a raw closure-descriptor
+    payload from a remote/cached source (e.g. a machine running an older or
+    newer `agent-worktrees`) without trusting fields it may not understand.
+
+    An absent (``None``/non-mapping), malformed, or version-mismatched
+    payload is NEVER final or prune-safe -- it renders as an explicit
+    ``unsupported-descriptor`` review state regardless of what the payload's
+    own ``closure.final``/``action.disposition`` claim, so an out-of-version
+    consumer degrades safely instead of guessing. Only an EXACT
+    ``version == DESCRIPTOR_VERSION`` match is trusted (both an older and a
+    newer version are rejected the same way -- neither side of a version
+    skew can safely interpret the other's shape).
+
+    Returns a normalized, minimal view:
+    ``{"supported": bool, "final": bool, "label": str,
+    "action_disposition": str, "reason": str | None}``.
+    """
+    if not isinstance(payload, dict):
+        return {
+            "supported": False, "final": False, "label": "UNKNOWN",
+            "action_disposition": "blocked", "reason": "unsupported-descriptor",
+        }
+    version = payload.get("version")
+    if version != DESCRIPTOR_VERSION:
+        return {
+            "supported": False, "final": False, "label": "UNKNOWN",
+            "action_disposition": "blocked",
+            "reason": f"unsupported-descriptor:version={version!r}",
+        }
+    closure = payload.get("closure")
+    action = payload.get("action")
+    return {
+        "supported": True,
+        "final": bool((closure or {}).get("final", False)),
+        "label": str(payload.get("label", "UNKNOWN")),
+        "action_disposition": str((action or {}).get("disposition", "blocked")),
+        "reason": None,
+    }
+
+
 def default_paired_sibling_final(
     rec: tracking.WorktreeRecord,
 ) -> bool | None:

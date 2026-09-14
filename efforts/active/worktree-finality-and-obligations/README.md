@@ -301,26 +301,60 @@ _Verbatim operator request; original spelling and punctuation preserved._
   itself -- a caller cannot accidentally treat stale evidence as authorization.
 
 ### Phase 5 - Align every presentation and guidance surface
-- [ ] Make list JSON publish the canonical descriptor and compatibility fields.
+- [x] Make list JSON publish the canonical descriptor and compatibility
+  fields. Done in Phase 4 (additive `closure` field alongside the legacy
+  `cleanup_bucket`/`state` fields, unchanged).
 - [ ] Pass the descriptor through agent-bridge's allow-list projection and any
   cockpit consumer before treating descriptor absence as a mixed-version case.
+  **Not done** -- agent-bridge's worktree projection is untouched.
 - [ ] Make mux and Picker use the descriptor's exact compact text, marker counts,
   and semantic style token; surface adapters may translate that style token to
-  their native palette without redefining state.
+  their native palette without redefining state. **Not done** -- the mux
+  status segment and the Textual Picker still derive their own labels
+  independently of `prune.assemble_closure_descriptor`. This is the largest
+  remaining Phase 5 item (real UI-surface rewiring against golden/parity
+  tests); deliberately deferred rather than rushed in this slice.
 - [ ] Keep legends, filters, maintenance previews, and cleanup selections in
-  parity with the same descriptor.
-- [ ] Preserve mixed-version fleet safety: absent, unsupported, or newer
+  parity with the same descriptor. **Not done**, same reason as above.
+- [x] Preserve mixed-version fleet safety: absent, unsupported, or newer
   descriptor versions render provisional/review and never `FINAL` or
-  prune-eligible.
+  prune-eligible. Landed as `prune.interpret_descriptor_payload`: an exact
+  `version == DESCRIPTOR_VERSION` match is trusted; anything else (missing,
+  malformed, older, or newer) reports `supported: False`,
+  `final: False`, `action_disposition: "blocked"` regardless of what the
+  payload's own fields claim. Not yet CALLED by a real remote/cockpit
+  consumer (there isn't one yet -- see the two unchecked items above); the
+  safety net itself is built and tested ahead of that wiring.
 - [ ] Assemble and truncate compact text in one shared function so parity is
   measured before and after the same width rule, with deterministic priority:
-  base label, blocker markers, then title/detail.
-- [ ] Update lifecycle, conduct, worktree, and cleanup guidance: finalized is
+  base label, blocker markers, then title/detail. **Partially done**:
+  `assemble_closure_descriptor` already assembles `label` + `C<N>`/`F<N>`
+  markers in one place (base label, then blocker markers, matching the
+  priority order), but does NOT yet fold in title/detail or truncate to a
+  width budget -- that needs the mux/Picker wiring above to know what width
+  budget applies.
+- [x] Update lifecycle, conduct, worktree, and cleanup guidance: finalized is
   resumable until pruned; follow-ups are explicit items; cleanup receives and
   reports the exact blocking list.
-- [ ] Update `file-issue` guidance to proactively open a follow-up/claim on any
-  issue the agent files for its current task, so filed bugs stay visible as
-  worktree obligations rather than relying on the agent to remember later.
+  - Fixed the actual stale instruction the effort's own Context section named:
+    `scripts/conduct/worktree-conduct.md` (the deployed postToolUse nudge
+    fragment -- the "It's been N tool calls..." hint every agent sees) said
+    "do not resume work after finalizing." Replaced with the correct
+    "`finalized` is not terminal... resuming work afterward is normal and
+    safe, and reopens the worktree automatically."
+  - Fixed a real reporting gap while doing this: `cmd_cleanup`'s per-worktree
+    skip-reason logic never had a branch for the `held-claims`/`follow-up`
+    buckets, so a worktree blocked by either silently vanished from
+    `cleanup`'s report -- neither listed as skipped nor counted in any
+    summary. Extracted `_cleanup_per_item_skip_reason` (now unit-tested) and
+    added both buckets to it.
+  - `docs/worktree-lifecycle.md` and the `worktree` skill were already
+    correct from Phases 1-3.
+- [x] Update `file-issue` guidance to proactively open a follow-up/claim on any
+  issue the agent files for its current task. Already done in Phase 3 (the
+  `worktree` skill's obligation-gate section); the cross-repo `file-issue`
+  skill itself (aperture-labs-owned) still isn't touched -- unchanged from
+  the Phase 3 note.
 
 ### Phase 6 - Release and prove the lifecycle
 - [ ] Run a fleet inventory/backfill preview for legacy boolean follow-ups,
@@ -385,9 +419,14 @@ _Verbatim operator request; original spelling and punctuation preserved._
 - [ ] **Evidence parity:** the same live worktree rendered through cached,
   fetch-free, and refreshed evidence modes has consistent labels; incomplete
   evidence can only lower confidence, never promote to `FINAL`.
-- [ ] **Cleanup:** cleanup/GC enumerate exact held claims and open follow-ups and
-  never offer a blocked completed worktree as safe; UNUSED, CONVO, and GONE keep
-  their explicit existing action categories.
+- [x] **Cleanup:** `cleanup` now enumerates the exact held-claims/open-follow-up
+  reason per worktree (`cmd_cleanup`'s `_cleanup_per_item_skip_reason`, fixed
+  this phase -- it previously silently dropped both buckets from the report
+  entirely). `gc` already reported them via `classify_managed_worktree`'s
+  `reason` (Phase 1). Neither yet consumes the descriptor's own `action`
+  field directly (see the unchecked Phase 4/5 items) -- they still derive
+  from `CleanupDisposition` directly, just correctly now. UNUSED/CONVO/GONE
+  keep their existing distinct action categories (unchanged).
 - [ ] **Blocker precedence:** an UNUSED, CONVO, GONE, or system record with a
   held claim or open follow-up is `blocked`, never `opt-in` or `record-reap`.
   **Not yet true:** `cleanup_disposition`'s held-claims/follow-up override only
@@ -402,9 +441,14 @@ _Verbatim operator request; original spelling and punctuation preserved._
   `test_incomplete_evidence_never_reports_final_or_safe`). Not yet wired to an
   actual pre-delete recompute call site (`cleanup`/`gc` don't consume the
   descriptor yet -- see the unchecked Phase 4 bullet above).
-- [ ] **Guidance:** no shipped instruction says finalized work cannot be
-  resumed; every close-out path instructs the agent to list and resolve,
-  transfer, settle, or release obligations before finality.
+- [x] **Guidance:** no shipped instruction says finalized work cannot be
+  resumed. Fixed the one that did:
+  `scripts/conduct/worktree-conduct.md`'s "do not resume work after
+  finalizing" (the deployed postToolUse nudge fragment). Every close-out
+  path (`worktree` skill, `docs/worktree-lifecycle.md`, this conduct
+  fragment) now instructs resolving obligations rather than treating
+  finalize as terminal; the "transfer" half (offer/accept/decline) has no
+  shipped path yet since that machinery isn't built (Phase 3 note).
 - [ ] **Regression:** existing ACTIVE, DIRTY, WIP, UNUSED, CONVO, GONE, ORPHAN,
   and UNKNOWN behavior remains stable when no closure blockers exist.
 - [ ] **Concurrency:** stale background record writers preserve every concurrent
@@ -612,4 +656,40 @@ The approved design is the faceted model in [design.md](design.md):
 - `python tools/run-plugin-tests.py agent-worktrees --subsuite-timeout 600` --
   533 passed (full suite minus the same two pre-existing, unrelated
   `test_knowledge_plugins.py` failures).
+
+### 2026-09-14 - Phase 5: guidance fixed at the source + mixed-version safety
+- Operator said "continue." Bound a fresh worktree at Phase 5
+  (`effort-focus bind ... --slice "Phase 5 - Align every presentation and
+  guidance surface"`).
+- Found and fixed the **exact stale instruction the effort's Context section
+  named**: `scripts/conduct/worktree-conduct.md` -- the deployed postToolUse
+  nudge fragment every agent sees ("It's been N tool calls...") -- said "do
+  not resume work after finalizing." Replaced with the correct guidance
+  (finalized is not terminal; resuming reopens automatically) and added the
+  held-claim/follow-up obligation language. Verified against the existing
+  `test_worktree_conduct_fragment_migrated` byte-length cap (1,800 chars;
+  landed at 1,465).
+- While fixing that, found and fixed a **fourth pre-existing gap**:
+  `cmd_cleanup`'s per-worktree skip-reason branch chain had no case for the
+  `held-claims`/`follow-up` buckets, so a worktree blocked by either
+  silently vanished from `cleanup`'s report -- neither listed as skipped nor
+  counted in any summary bucket. Extracted `_cleanup_per_item_skip_reason`
+  (now unit-tested) and added both buckets, matching the existing
+  `claimed`/`open-pr`/`paired-pending` pattern.
+- Added `prune.interpret_descriptor_payload` (mixed-version fleet safety):
+  an exact `version == DESCRIPTOR_VERSION` match is trusted; a missing,
+  malformed, older, OR newer payload reports `supported: False`, `final:
+  False`, `action_disposition: "blocked"` regardless of what its own fields
+  claim. Built and tested ahead of an actual remote/cockpit consumer (none
+  exists yet).
+- Checked off `list --json` publishing (done in Phase 4) and the two
+  guidance bullets; left the largest Phase 5 item -- rewiring the mux status
+  segment and the Textual Picker to consume the descriptor's exact
+  label/style/compact text -- explicitly unstarted. That's real UI-surface
+  work against existing golden/parity tests and deserves its own focused
+  slice rather than being rushed alongside everything else landed today.
+- `python tools/run-plugin-tests.py agent-worktrees --subsuite-timeout 600` --
+  535 passed (full suite minus the same two pre-existing, unrelated
+  `test_knowledge_plugins.py` failures; the previously-observed flaky
+  handoff-cutover test did not recur this run).
 
