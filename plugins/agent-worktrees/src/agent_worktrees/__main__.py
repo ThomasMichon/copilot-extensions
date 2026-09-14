@@ -15196,6 +15196,28 @@ def _cleanup_one(args: argparse.Namespace) -> int:
     return 0 if payload.get("ok") else 1
 
 
+#: `cleanup_disposition` buckets that get their OWN per-item skip line (a
+#: specific, actionable reason worth calling out individually) rather than
+#: folding into the aggregate unused/conversation/dirty/wip summary counters.
+#: worktree-finality-and-obligations Phase 5: `held-claims`/`follow-up` were
+#: previously missing here, so a worktree blocked by either silently vanished
+#: from `cleanup`'s report entirely -- neither listed as skipped nor counted.
+_CLEANUP_PER_ITEM_BUCKETS = frozenset({
+    "claimed", "open-pr", "closed-unmerged", "paired-pending",
+    "held-claims", "follow-up",
+})
+
+
+def _cleanup_per_item_skip_reason(disp: prune.CleanupDisposition) -> str:
+    """The exact per-worktree skip line for `cleanup`'s report, or "" when the
+    bucket instead folds into an aggregate summary counter."""
+    if disp.bucket == "active":
+        return "active Copilot session in use"
+    if disp.bucket in _CLEANUP_PER_ITEM_BUCKETS:
+        return disp.reason
+    return ""
+
+
 def cmd_cleanup(args: argparse.Namespace) -> int:
     if getattr(args, "worktree_id", None):
         return _cleanup_one(args)
@@ -15316,23 +15338,14 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
                 paired_sibling_final=prune.default_paired_sibling_final,
             )
             cleanable = disp.cleanable
-            if disp.bucket == "active":
-                skip_reason = "active Copilot session in use"
-            elif disp.bucket == "claimed":
-                skip_reason = disp.reason
-            elif disp.bucket == "open-pr":
-                skip_reason = disp.reason
-            elif disp.bucket == "closed-unmerged":
-                skip_reason = disp.reason
-            elif disp.bucket == "paired-pending":
-                skip_reason = disp.reason
-            elif disp.bucket == "unused" and not cleanable:
+            skip_reason = _cleanup_per_item_skip_reason(disp)
+            if not skip_reason and disp.bucket == "unused" and not cleanable:
                 unused_count += 1
-            elif disp.bucket == "conversation" and not cleanable:
+            elif not skip_reason and disp.bucket == "conversation" and not cleanable:
                 conversation_count += 1
-            elif disp.bucket == "dirty":
+            elif not skip_reason and disp.bucket == "dirty":
                 dirty_count += 1
-            elif disp.bucket == "wip":
+            elif not skip_reason and disp.bucket == "wip":
                 wip_count += 1
 
         if cleanable:
