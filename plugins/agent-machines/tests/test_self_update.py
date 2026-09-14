@@ -51,6 +51,26 @@ class _FakeMutex:
         self.closed = True
 
 
+def _task_snapshot(
+    tier: str,
+    *,
+    present: bool,
+    matching: bool = True,
+    enabled: bool | None = True,
+):
+    return self_update.ScheduledTaskSnapshot(
+        task_name=self_update.TIER_SPECS[tier].task_name,
+        present=present,
+        enabled=enabled,
+        logon_type="Interactive" if present else None,
+        description=self_update.task_description(tier) if present else None,
+        execute="conhost.exe" if present else None,
+        arguments=self_update.task_action_arguments(tier),
+        working_directory=self_update.task_working_directory(),
+        matching=matching,
+    )
+
+
 def test_manifest_accepts_self_update_resource_and_rejects_bad_tier(tmp_path):
     package = _pkg(
         tmp_path,
@@ -347,3 +367,118 @@ def test_cli_self_update_run_emits_json(monkeypatch, capsys):
     assert rc == 0
     assert payload["tier"] == "watchdog"
     assert payload["status"] == "noop"
+
+
+def test_reconcile_task_registers_new_opt_in(monkeypatch, tmp_path):
+    monkeypatch.setattr(self_update.sys, "platform", "win32")
+    monkeypatch.setattr(self_update, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
+    state = {"present": False}
+
+    def query(tier, *, runner=None, home=None):
+        return _task_snapshot(tier, present=state["present"])
+
+    def register(tier, *, runner=None, home=None):
+        state["present"] = True
+        return self_update.CommandResult(["pwsh"], 0, "", "")
+
+    monkeypatch.setattr(self_update, "query_scheduled_task", query)
+    monkeypatch.setattr(self_update, "register_scheduled_task", register)
+    result = self_update.reconcile_scheduled_task("watchdog", desired_present=True, home=tmp_path)
+    assert result.status == "changed"
+    assert result.changed is True
+    assert result.snapshot is not None and result.snapshot.present is True
+
+
+def test_reconcile_task_defers_to_elevated_install_when_registration_is_denied(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(self_update.sys, "platform", "win32")
+    monkeypatch.setattr(self_update, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
+    monkeypatch.setattr(
+        self_update,
+        "query_scheduled_task",
+        lambda tier, **kwargs: _task_snapshot(tier, present=False, matching=False),
+    )
+    monkeypatch.setattr(
+        self_update,
+        "register_scheduled_task",
+        lambda tier, **kwargs: self_update.CommandResult(["pwsh"], 1, "", "Access is denied."),
+    )
+    result = self_update.reconcile_scheduled_task("watchdog", desired_present=True, home=tmp_path)
+    assert result.status == "deferred"
+    assert result.ok is False
+    assert result.commands == [["agent-machines", "self-update", "install", "--tier", "watchdog"]]
+    assert "run once from an elevated PowerShell" in result.detail
+
+
+def test_reconcile_task_removes_opted_out_task_without_retry_prompt(monkeypatch, tmp_path):
+    monkeypatch.setattr(self_update.sys, "platform", "win32")
+    monkeypatch.setattr(self_update, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
+    monkeypatch.setattr(
+        self_update,
+        "query_scheduled_task",
+        lambda tier, **kwargs: _task_snapshot(tier, present=True, matching=True, enabled=True),
+    )
+    calls: list[str] = []
+
+    def unregister(tier, *, runner=None):
+        calls.append(tier)
+        return self_update.CommandResult(["pwsh"], 0, "", "")
+
+    monkeypatch.setattr(self_update, "unregister_scheduled_task", unregister)
+    result = self_update.reconcile_scheduled_task("sweep", desired_present=False, home=tmp_path)
+    assert result.status == "changed"
+    assert result.changed is True
+    assert calls == ["sweep"]
+    assert "elevated PowerShell" not in result.detail
+
+
+def test_cli_self_update_install_skips_non_opted_in_tier_without_registration(
+    monkeypatch, capsys
+):
+    resource = type("Resource", (), {"desired": {"state": "absent"}})()
+    monkeypatch.setattr(
+        cli,
+        "_resolve_self_update_resources",
+        lambda args: (None, "box-1", {"watchdog": resource}),
+    )
+
+    def fail(*args, **kwargs):
+        raise AssertionError("install should not be attempted for opted-out tiers")
+
+    monkeypatch.setattr(cli._self_update, "reconcile_scheduled_task", fail)
+    rc = cli.main(["self-update", "install", "--tier", "watchdog", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert payload["tiers"][0]["status"] == "skipped"
+    assert "not opted in" in payload["tiers"][0]["detail"]
+
+
+def test_cli_self_update_status_emits_json(monkeypatch, capsys):
+    resource = type("Resource", (), {"desired": {"state": "present"}})()
+    monkeypatch.setattr(
+        cli,
+        "_resolve_self_update_resources",
+        lambda args: (None, "box-1", {"watchdog": resource}),
+    )
+    monkeypatch.setattr(
+        cli._self_update,
+        "scheduled_task_status",
+        lambda tier, opted_in: self_update.ScheduledTaskStatus(
+            tier=tier,
+            opted_in=opted_in,
+            task_name=self_update.TIER_SPECS[tier].task_name,
+            registered=True,
+            enabled=True,
+            matching=True,
+            state="Ready",
+            detail="Scheduled Task is registered",
+            last_attempt="2026-09-14T09:00:00+00:00",
+            last_success="2026-09-14T09:05:00+00:00",
+        ),
+    )
+    rc = cli.main(["self-update", "status", "--tier", "watchdog", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert payload["tiers"][0]["registered"] is True
+    assert payload["tiers"][0]["opted_in"] is True

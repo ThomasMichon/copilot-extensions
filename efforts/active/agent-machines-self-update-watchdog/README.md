@@ -148,13 +148,13 @@ the proposal into an implementable plan.
   machine status surface.
 
 ### Phase 3 - Installer
-- [ ] Add `agent-machines self-update install` / `status` / `uninstall`,
+- [x] Add `agent-machines self-update install` / `status` / `uninstall`,
   registering two genuine Windows Scheduled Tasks (hourly Tier 1, daily
   Tier 2) via the same elevate-or-instruct convention as `agent-dispatch`'s
   installers, scoped to "run only when logged on." `install` first resolves
   the declared per-tier config and refuses to prompt for elevation for a
   tier that resolves to "not opted in."
-- [ ] Make Scheduled Task presence itself a `restore --apply` reconciliation
+- [x] Make Scheduled Task presence itself a `restore --apply` reconciliation
   target: an ordinary apply registers a newly-opted-in tier's task (falling
   back to the same elevate-or-instruct message if unelevated) and removes a
   newly-opted-out tier's task, without a separate elevation prompt for
@@ -178,7 +178,7 @@ the proposal into an implementable plan.
 - [x] Tier 2 never interrupts a live mux/Copilot session or in-flight
   indexing; it defers using the same guard `agent-machines-declarative-control-plane`
   already established.
-- [ ] `self-update install` attempts elevated Scheduled Task registration
+- [x] `self-update install` attempts elevated Scheduled Task registration
   first and prints an explicit re-run-elevated instruction on failure,
   matching `agent-dispatch`'s own installer behavior.
 - [x] A tier resolved as "not opted in" (by state-repo default, local
@@ -190,7 +190,7 @@ the proposal into an implementable plan.
   control plane's existing authority precedence; equal-authority
   contradictions are still a hard validate-time error, not a silent
   last-writer pick.
-- [ ] `restore --apply` registers a newly-opted-in tier's Scheduled Task
+- [x] `restore --apply` registers a newly-opted-in tier's Scheduled Task
   (or reports the elevate-and-retry message) and removes a newly-opted-out
   tier's Scheduled Task without requiring a fresh elevation prompt to
   remove it.
@@ -258,4 +258,20 @@ the proposal into an implementable plan.
   precedence, live-run non-double-drive vs stale-lock reclaim, dirty/diverged
   pull skips, sweep deferral while a live session exists, and plan-surface
   visibility of the recorded timestamps. The full `agent-machines` suite,
+
+### 2026-09-14 - Phase 3 landed
+
+- Added `agent-machines self-update install`, `status`, and `uninstall`, with
+  Windows Scheduled Task registration/removal for the `watchdog` and `sweep`
+  tiers using the same elevate-or-instruct pattern as `agent-dispatch`:
+  already-opted-out tiers are skipped without any registration attempt, while
+  first-time registration emits an explicit elevated retry command.
+- Promoted Scheduled Task presence from a placeholder `self-update` resource to
+  a real `restore --apply` reconciliation target. Newly opted-in tiers now
+  register their task during restore (or defer with the same install retry
+  instruction), and newly opted-out tiers are removed in-place without a new
+  elevation prompt.
+- Added focused unit coverage for task registration, elevation deferral,
+  opted-out install skips, status JSON, and restore-time add/remove behavior
+  without touching any live Scheduled Tasks.
   install-contract check, and version-consistency check passed.

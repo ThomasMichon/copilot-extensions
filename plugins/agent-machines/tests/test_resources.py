@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from agent_machines import resources as R
+from agent_machines import self_update as SU
 from agent_machines.manifest import ManifestError, load_package
 from agent_machines.resources import (
     ResourceContext,
@@ -1460,3 +1461,89 @@ def test_psmux_acceptance_fixture(tmp_path, monkeypatch):
     assert "# >>> agent-worktrees mux keybinds (opt-in) >>>" in text
     assert "unbind-key -a -T root" in text
     assert "set -g paste-detection off" in text
+
+
+def test_self_update_resource_registers_opted_in_task(tmp_path, monkeypatch):
+    pkg = _pkg(tmp_path, "acme/watchdog", [{"type": "self-update", "tier": "watchdog"}])
+    monkeypatch.setattr(
+        "agent_machines.resource_self_update._self_update.reconcile_scheduled_task",
+        lambda tier, **kwargs: SU.ScheduledTaskReconcileResult(
+            tier=tier,
+            desired_state="present",
+            status="changed",
+            changed=True,
+            detail="registered the Scheduled Task",
+        ),
+    )
+    results = apply_resources(
+        [pkg],
+        "box-1",
+        "windows",
+        _ctx(tmp_path, FakeRunner()),
+        dry_run=False,
+    )
+    res = results[0]
+    assert res.type == "self-update"
+    assert res.action == "install"
+    assert res.changed is True
+    assert res.detail == "registered the Scheduled Task"
+
+
+def test_self_update_resource_defers_registration_with_install_retry(tmp_path, monkeypatch):
+    pkg = _pkg(tmp_path, "acme/watchdog", [{"type": "self-update", "tier": "watchdog"}])
+    monkeypatch.setattr(
+        "agent_machines.resource_self_update._self_update.reconcile_scheduled_task",
+        lambda tier, **kwargs: SU.ScheduledTaskReconcileResult(
+            tier=tier,
+            desired_state="present",
+            status="deferred",
+            changed=False,
+            detail=(
+                "Scheduled Task registration needs elevation -- run once from an "
+                "elevated PowerShell to install the Scheduled Task: "
+                "agent-machines self-update install --tier watchdog"
+            ),
+            commands=[["agent-machines", "self-update", "install", "--tier", tier]],
+            attempted_elevation=True,
+        ),
+    )
+    results = apply_resources(
+        [pkg],
+        "box-1",
+        "windows",
+        _ctx(tmp_path, FakeRunner()),
+        dry_run=False,
+    )
+    res = results[0]
+    assert res.status == "deferred"
+    assert res.deferred_reason is not None and "elevated PowerShell" in res.deferred_reason
+    assert res.commands == [["agent-machines", "self-update", "install", "--tier", "watchdog"]]
+
+
+def test_self_update_resource_removes_opted_out_task_without_retry_command(tmp_path, monkeypatch):
+    pkg = _pkg(
+        tmp_path,
+        "acme/watchdog",
+        [{"type": "self-update", "tier": "watchdog", "state": "absent"}],
+    )
+    monkeypatch.setattr(
+        "agent_machines.resource_self_update._self_update.reconcile_scheduled_task",
+        lambda tier, **kwargs: SU.ScheduledTaskReconcileResult(
+            tier=tier,
+            desired_state="absent",
+            status="changed",
+            changed=True,
+            detail="removed the Scheduled Task",
+        ),
+    )
+    results = apply_resources(
+        [pkg],
+        "box-1",
+        "windows",
+        _ctx(tmp_path, FakeRunner()),
+        dry_run=False,
+    )
+    res = results[0]
+    assert res.action == "uninstall"
+    assert res.changed is True
+    assert res.commands == []
