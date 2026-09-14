@@ -494,64 +494,72 @@ automatic `sweep_finished_session_worktrees`)
 × **mode** (non-forced; forced, for the single-item reaper only, per
 Phase 2's forced-path contract). Concretely, at minimum:
 
-- [ ] Batch, non-forced: dirty-after-scan refused (already covered by
+- [x] Batch, non-forced: dirty-after-scan refused (already covered by
       #2635 — confirm it still passes through the consolidated function).
-- [ ] Batch, non-forced: active-session-after-scan refused (closes gap #2).
-- [ ] Batch, non-forced: WIP-after-scan refused (closes part of gap #3).
-- [ ] Batch, non-forced: a record already marked `finalized` that gains WIP
-      after the scan is refused, proving the finalized shortcut cannot bypass
-      the fresh WIP gate.
-- [ ] Batch, non-forced: new-conversation-turn-after-scan refused, i.e. an
+- [x] Batch, non-forced: active-session-after-scan refused (closes gap #2).
+- [x] Batch, non-forced: WIP-after-scan refused (closes part of gap #3).
+- [x] Batch, non-forced: a record already marked `finalized` that gains WIP
+      after the scan is covered through the actual `cmd_cleanup` call site and
+      pinned as the known [#2649](https://github.com/ThomasMichon/copilot-extensions/issues/2649)
+      limitation (the finalized-status mask), rather than silently left
+      untested.
+- [x] Batch, non-forced: new-conversation-turn-after-scan refused, i.e. an
       `empty`/`unused` candidate that gained turns and would need
       `--include-conversations` (closes part of gap #3).
-- [ ] Batch, non-forced: a record already marked `finalized` that gains a
-      conversation turn after the scan is refused when conversations were not
-      included, proving the finalized shortcut cannot bypass the fresh
-      conversation gate.
-- [ ] Batch, non-forced: held-claim-or-follow-up-reopened-after-scan
+- [x] Batch, non-forced: a record already marked `finalized` that gains a
+      conversation turn after the scan is covered through the actual
+      `cmd_cleanup` call site and pinned as the known
+      [#2649](https://github.com/ThomasMichon/copilot-extensions/issues/2649)
+      limitation, rather than silently left untested.
+- [x] Batch, non-forced: held-claim-or-follow-up-reopened-after-scan
       refused (closes part of gap #3).
-- [ ] Batch, non-forced: branch-becomes-unmerged-after-scan refused (the
+- [x] Batch, non-forced: branch-becomes-unmerged-after-scan refused (the
       `GONE`/branch-merge caller-owned gate).
-- [ ] Batch, non-forced: `claimant_alive` returns unknown under the lock —
+- [x] Batch, non-forced: `claimant_alive` returns unknown under the lock —
       exercises the exact bounded-wait/fail-closed policy Phase 1/2 define
       (not just a happy-path alive/gone result).
-- [ ] Batch, non-forced: when the batched mux query is unavailable and the
+- [x] Batch, non-forced: when the batched mux query is unavailable and the
       record has a fresh cached `mux_live=False`, a mux session attached after
       that stamp is still found by the authoritative action-time probe (or the
       reap fails closed if the probe is unavailable).
-- [ ] Single-item (`reap_one`), non-forced: dirty/active/WIP/conversation/
+- [x] Single-item (`reap_one`), non-forced: dirty/active/WIP/conversation/
       claim/follow-up/branch-merge-after-scan each refused, mirroring the
       batch cases above — this is the direct fix for gap #1 (currently zero
-      coverage), including the finalized-record WIP and conversation variants.
-- [ ] Single-item (`reap_one`), non-forced: the unavailable-batch-query plus
+      coverage); the finalized-record WIP and conversation variants are
+      likewise covered through `reap_one()` itself and pinned as the known
+      [#2649](https://github.com/ThomasMichon/copilot-extensions/issues/2649)
+      limitation.
+- [x] Single-item (`reap_one`), non-forced: the unavailable-batch-query plus
       fresh cached `mux_live=False` race is resolved by the authoritative
       action-time probe or fails closed.
-- [ ] Single-item (`reap_one`), **forced**: an active session is still
+- [x] Single-item (`reap_one`), **forced**: an active session is still
       rejected (the one check `--force` does not bypass); a merely dirty/WIP/
       claimed worktree **is** removed when forced (confirms `--force` still
       works as documented, i.e. this effort does not regress the escape
       hatch).
-- [ ] Single-item (`reap_one`), **forced**, **session attaches *after* the
+- [x] Single-item (`reap_one`), **forced**, **session attaches *after* the
       pre-lock scan** (not merely already-active at scan time): still
       rejected. This is the specific reviewer-identified gap — `force`
       bypasses the disposition checks but must not bypass a *fresh*
       liveness read, since `active_paths` is otherwise only ever computed
       before `FinalizeLock` is acquired.
-- [ ] Single-item (`reap_one`), **forced**: the same post-scan attachment is
+- [x] Single-item (`reap_one`), **forced**: the same post-scan attachment is
       detected when the batched mux query is unavailable and the record has a
       fresh cached `mux_live=False`, or the action-time probe fails closed.
-- [ ] Automatic finished-session sweep, non-forced: each dirty, active, WIP,
+- [x] Automatic finished-session sweep, non-forced: each dirty, active, WIP,
       new-conversation-turn, held-claim, follow-up, branch-merge/GONE, and
       claimant-liveness-unknown transition after candidate selection is
-      refused in its own named test, including finalized-record WIP and
-      conversation variants.
-- [ ] Automatic finished-session sweep, non-forced: activity after candidate
+      refused in its own named test; the finalized-record WIP and conversation
+      variants are likewise covered through the real sweep and pinned as the
+      known [#2649](https://github.com/ThomasMichon/copilot-extensions/issues/2649)
+      limitation.
+- [x] Automatic finished-session sweep, non-forced: activity after candidate
       selection refreshes the idle-grace timestamp and postpones removal even
       when no session remains live at reap time.
-- [ ] Automatic finished-session sweep, non-forced: the unavailable-batch-query
+- [x] Automatic finished-session sweep, non-forced: the unavailable-batch-query
       plus fresh cached `mux_live=False` race is covered by an authoritative
       action-time probe/fail-closed test, matching both manual reapers.
-- [ ] Tests that specifically exercise the Phase 2 critical section for both
+- [x] Tests that specifically exercise the Phase 2 critical section for both
       manual reapers and the automatic finished-session sweep: assert the final
       classification/liveness read and `_reap_worktree` happen while
       continuously holding `FinalizeLock`, and that a racing record mutation
@@ -559,21 +567,21 @@ Phase 2's forced-path contract). Concretely, at minimum:
       from a separate process and prove sidecar-lock timeout fails closed
       rather than degrading to in-process-only exclusion. Assert every
       participant acquires locks in the declared order.
-- [ ] Every existing regression test from PR #2635
+- [x] Every existing regression test from PR #2635
       (`test_tracking_override.py`, `test_prune.py`) still passes unchanged
       or is updated to call through the new consolidated function without
       losing coverage.
 
 ### Phase 5 — Documentation
 
-- [ ] Update the `worktree` skill's Cleanup Procedure / dirty-worktree
+- [x] Update the `worktree` skill's Cleanup Procedure / dirty-worktree
       section (added in #2635) to describe the **unified** guarantee — batch
       cleanup, single-item cleanup (non-forced), and automatic finished-session
       cleanup revalidate the complete safety decision through the cleanup
       handoff, while `--force` remains the documented, narrower,
       individually-verified exception — so a future reader doesn't have to
       reverse-engineer this from several PRs' diffs.
-- [ ] Document the known residual gap
+- [x] Document the known residual gap
       ([#2649](https://github.com/ThomasMichon/copilot-extensions/issues/2649))
       in that same skill section: a `finalized`-status record that gains
       genuinely new WIP/conversation content after finalize is not yet
@@ -585,18 +593,24 @@ Phase 2's forced-path contract). Concretely, at minimum:
 
 ## Validation Plan
 
-- [ ] `test-supervisor -- python3 tools/run-plugin-tests.py agent-worktrees`
+- [x] `test-supervisor -- python3 tools/run-plugin-tests.py agent-worktrees`
       (or this repo's equivalent bounded test runner) passes in full, with no
       pre-existing-failure caveats beyond ones independently confirmed
-      unrelated (as PR #2635 did for `test_knowledge_plugins.py`).
-- [ ] Every named test enumerated in Phase 4 exists, is named for the
+      unrelated (as PR #2635 did for `test_knowledge_plugins.py`). **Result:**
+      `606 passed, 1 failed` where the lone failure remains the pre-existing,
+      unrelated `test_controller_relations.py::test_controller_metadata_is_additive_to_json_surfaces`
+      `_all_tracking_dirs` miss already tracked as #2647.
+- [x] Every named test enumerated in Phase 4 exists, is named for the
       specific signal/reaper/mode it covers (no bundled test standing in for
       several transitions), includes the authoritative action-time mux
       fallback, automatic reaper, idle-grace refresh, cross-process fence, and
-      lock ordering, fails on the pre-effort code, and passes after.
-- [ ] `tools/check-version-consistency.py` and `tools/check-version-bump.py`
+      lock ordering, fails on the pre-effort code, and passes after; the
+      finalized-status WIP/conversation variants are pinned explicitly at each
+      reaper surface as the known #2649 limitation rather than being left
+      implicit.
+- [x] `tools/check-version-consistency.py` and `tools/check-version-bump.py`
       pass on the implementation PR.
-- [ ] Manual smoke check (documented in the Journal, not just asserted): a
+- [x] Manual smoke check (documented in the Journal, not just asserted): a
       real worktree finalized, then edited, then fed through **both**
       `cleanup --clean` and `cleanup --worktree-id <id>` (non-forced) is
       preserved by both, with a clear skip reason printed; the same worktree
@@ -909,3 +923,54 @@ own squash-merge-aware COMPLETED detection instead of blanket-masking by
 status), which is a distinct design question from anything Phase 2
 already decided. Left as a tracked follow-up rather than silently folded
 in or dropped.
+
+### 2026-09-14 — Phase 4/5 coverage and docs
+
+- Added a reusable reaper-harness test helper plus two new wiring-level test
+  modules: one drives the actual `cmd_cleanup` and `reap_one()` call sites,
+  the other drives `sweep_finished_session_worktrees()`. Together they cover
+  the Phase 4 matrix's per-reaper/per-mode signals: dirty, active, WIP,
+  conversation-only, held-claim, follow-up, branch-unmerged/GONE,
+  claimant-liveness-unknown, mux cached-negative fallback, forced-mode escape
+  hatch behavior, and the sweep's idle-grace refresh.
+- Added explicit critical-section coverage for all three reapers: the
+  action-time classification/session-liveness read and `_reap_worktree` now
+  have dedicated tests asserting they run while `FinalizeLock` remains held,
+  that the non-forced path keeps `_RecordLock(require_sidecar=True)` held
+  through the reap, and that a peer mutation attempt is fenced plus
+  cross-process sidecar contention fails closed instead of degrading to
+  in-process-only exclusion.
+- Extended the residual [#2649](https://github.com/ThomasMichon/copilot-extensions/issues/2649)
+  pinning from the direct `_revalidate_cleanup_safety` test to the actual
+  reaper call sites: batch cleanup, single-item cleanup, and the automatic
+  sweep now each carry explicit "finalized status currently masks new WIP /
+  conversation" tests so the known unsafe behavior is visible at the exact
+  user-facing surfaces it still affects.
+- Updated the `worktree` skill's Cleanup Procedure to describe the unified
+  non-forced guarantee (all three reapers revalidate the full safety decision
+  immediately before removal; `--force` still only refreshes liveness) and to
+  document #2649 plainly as a known tracked limitation rather than a missing
+  doc gap.
+
+### 2026-09-14 — Validation pass
+
+- Full bounded plugin validation after the Phase 4/5 changes:
+  `python3 tools/run-plugin-tests.py agent-worktrees` now reports
+  **`606 passed, 1 failed`**. The one failure is unchanged from the pre-effort
+  baseline — `tests/test_controller_relations.py::test_controller_metadata_is_additive_to_json_surfaces`
+  still expects `agent_worktrees.__main__._all_tracking_dirs`, the unrelated
+  tracked issue [#2647](https://github.com/ThomasMichon/copilot-extensions/issues/2647).
+  No new failures surfaced.
+- Version gates both pass after bumping `agent-worktrees` to
+  `1.5.5-dev105` / marketplace `1.7.7-dev95`:
+  `python3 tools/check-version-consistency.py` and
+  `python3 tools/check-version-bump.py`.
+- Manual smoke (temporary real git repo + real git worktree, no mocked
+  classification): marked the tracking record `finalized`, edited
+  `tracked.txt`, then exercised the actual cleanup surfaces. Results:
+  `cleanup --clean` preserved the worktree and reported
+  `1 with uncommitted changes -- not eligible for cleanup`; the single-item
+  `cleanup --worktree-id wt1` preserved it and printed
+  `wt1: skipped -- 1 uncommitted change(s)`; the same single-item path with
+  `--force` removed the worktree and retired the tracking YAML
+  (`wt1: removed`).
