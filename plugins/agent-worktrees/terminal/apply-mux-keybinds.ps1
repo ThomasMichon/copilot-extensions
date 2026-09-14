@@ -70,7 +70,8 @@ function Persist-Block {
         }
         # Trim trailing blank lines so repeated runs don't accumulate them.
         while ($lines.Count -gt 0 -and [string]::IsNullOrWhiteSpace($lines[-1])) {
-            $lines = $lines[0..($lines.Count - 2)]
+            if ($lines.Count -eq 1) { $lines = @() }
+            else { $lines = $lines[0..($lines.Count - 2)] }
         }
     }
     $out = @()

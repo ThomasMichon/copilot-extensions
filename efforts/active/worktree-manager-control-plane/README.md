@@ -617,8 +617,20 @@ its issues; the public artifacts stay self-contained and general-purpose.
   `__version__` (`0.1.0-dev36` → `0.1.0-dev37`) so already-installed
   machines actually redeploy the corrected payload (caught by Copilot
   review on [#2666](https://github.com/ThomasMichon/copilot-extensions/pull/2666),
-  which also flagged the initially-missed `psmux-path.ps1` dependency).
-  `worktree-manager`'s `test_self_install.py` suite passes (11/11).
+  which also flagged the initially-missed `psmux-path.ps1` dependency, a
+  drift-guard gap, and a version-consistency gap). Also found and fixed,
+  via the same review round, a genuine pre-existing infinite-loop bug in
+  `apply-mux-keybinds.ps1`'s `Persist-Block` trailing-blank-line trim: when
+  exactly one blank line remains, `$lines[0..($lines.Count - 2)]` evaluates
+  PowerShell's `0..-1` range as two elements instead of shrinking to empty,
+  so the trim loop never terminates. Fixed identically in both the
+  canonical `plugins/agent-worktrees/terminal/apply-mux-keybinds.ps1` and
+  the copied `worktree-manager/bin/apply-mux-keybinds.ps1` (kept
+  byte-identical), with a structural regression test in
+  `test_terminal_decoupling.py` and a byte-identity drift guard in
+  `test_self_install.py`. `worktree-manager`'s `test_self_install.py` suite
+  passes (12/12); `agent-worktrees`' `test_terminal_decoupling.py` passes
+  (14/14).
 
 - **2026-09-14** — Operator direction for a new Sub-slice 3 (not yet
   designed): migrating the Picker and Mux handling to Worktree Manager is

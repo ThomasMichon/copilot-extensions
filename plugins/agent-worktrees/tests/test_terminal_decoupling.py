@@ -159,6 +159,24 @@ def test_psmux_keybind_script_holds_only_server_global_bits():
     assert "NoPersist" in text
 
 
+def test_psmux_keybind_trailing_blank_trim_never_infinite_loops_on_a_single_line():
+    """``Persist-Block``'s trailing-blank-line trim used
+    ``$lines[0..($lines.Count - 2)]`` unconditionally. When exactly one
+    trailing blank line remains (``$lines.Count -eq 1``), PowerShell's
+    ``0..-1`` range yields *two* elements (indices ``0`` and ``-1``, both the
+    same lone element) instead of an empty array, so ``$lines`` never shrinks
+    and the trim loop hangs forever -- a real, reproducible infinite loop on
+    a config with exactly one blank line before the managed block. The
+    Worktree Manager copy of this script carries the identical logic, so the
+    guard must hold structurally in both places, not just at runtime on one
+    machine's config."""
+    text = _KEYBINDS_PS.read_text(encoding="utf-8")
+    assert "if ($lines.Count -eq 1) { $lines = @() }" in text, (
+        "the single-remaining-blank-line case must be special-cased before "
+        "slicing with $lines.Count - 2, or the trim loop can hang forever"
+    )
+
+
 def test_psmux_launcher_applies_session_options():
     text = _LAUNCHER_PS.read_text(encoding="utf-8")
     assert "session-options.ps1" in text, "launcher must dot-source the options script"
