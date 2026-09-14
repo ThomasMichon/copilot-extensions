@@ -2763,11 +2763,47 @@ def _spawn_detached_waiter(spec: Any) -> dict:
     return {"pid": proc.pid, "argv": argv}
 
 
+def _suspend_for_detached_wait(args: argparse.Namespace, spec: Any) -> dict | None:
+    """Atomically suspend ``spec.task_id`` once its detached waiter is live.
+
+    Closes the gap where ``run --detach`` handed a wait off to a cheap
+    detached process, but the caller's own ``agent-dispatch suspend`` call --
+    a second, separate step the task prompt merely *asks* workers to
+    remember -- was skipped or never reached before the session tore down.
+    That left tasks stuck ``started`` (implying a live agent is actively
+    working) for as long as the external wait ran, sometimes indefinitely
+    once the detached waiter itself died with nothing to notice.
+
+    Returns ``None`` when no ``--task`` was given (a plain untracked wait --
+    nothing to suspend). Never raises: a failure to suspend must not be
+    treated as a failure to detach (the wait is already safely handed off by
+    the time this runs), so any error is folded into the returned dict for
+    the caller to see rather than propagated.
+    """
+    if not spec.task_id:
+        return None
+    worker_id = _resolve_owner(args, verb="run --detach")
+    if worker_id is None:
+        return {"error": "could not resolve the owning worker for suspend"}
+    reason = f"hibernating: {' '.join(spec.command)}"
+    try:
+        with _client(args) as c:
+            task = c.suspend(spec.task_id, worker_id, reason=reason)
+    except DispatchError as exc:
+        return {"error": str(exc), "worker_id": worker_id}
+    return {"status": task.get("status"), "worker_id": worker_id}
+
+
 def _cmd_run(args: argparse.Namespace) -> int:
     """Hand a blocking wait to the layer (*hibernate-the-wait*): run ``-- <cmd>``
     to completion, then resume the worktree-affinitied worker via agent-bridge.
     With ``--detach`` the wait runs in a detached process so the worker can be
-    torn down (costing nothing) while it waits."""
+    torn down (costing nothing) while it waits. When ``--task`` is also given,
+    a successful detach atomically suspends that task (see
+    :func:`_suspend_for_detached_wait`) so ``started`` never outlives the
+    session that was actually doing the work -- closing the gap where a
+    worker hibernates but forgets (or never gets to) call ``suspend``
+    separately before its session tears down."""
     from . import bridge
     from .hibernation import RunSpec, run_and_resume
 
@@ -2793,11 +2829,13 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     if args.detach:
         handle = _spawn_detached_waiter(spec)
+        suspended = _suspend_for_detached_wait(args, spec)
         return _emit(
             {
                 "detached": True,
                 "resume_worktree": spec.resume_worktree,
                 "command": list(spec.command),
+                "suspended": suspended,
                 **handle,
             }
         )
@@ -4714,13 +4752,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="the worker (worktree handle) to resume when the wait resolves "
         "(agent-bridge routes to whichever session is live then)",
     )
-    rnp.add_argument("--task", metavar="ID", help="task id, folded into the resume nudge")
+    rnp.add_argument(
+        "--task",
+        metavar="ID",
+        help="task id, folded into the resume nudge; with --detach, also the "
+        "task atomically suspended once the detached waiter is confirmed live",
+    )
     rnp.add_argument("--message", help="override the resume nudge text")
     rnp.add_argument(
         "--detach",
         action="store_true",
         help="run the wait in a detached process that outlives this one, so the "
         "kicking worker can be torn down while it waits (true hibernation)",
+    )
+    rnp.add_argument(
+        "--machine",
+        help="override the resolved machine identity (for --detach --task's "
+        "suspend call; default: resolved from the CWD worktree)",
+    )
+    rnp.add_argument(
+        "--worktree",
+        help="override the resolved worktree identity (for --detach --task's "
+        "suspend call; default: resolved from the CWD worktree)",
     )
     rnp.add_argument(
         "command",
