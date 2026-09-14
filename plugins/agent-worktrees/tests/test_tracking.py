@@ -2690,9 +2690,12 @@ class TestAddResourceClaim:
 
     def test_finalized_worktree_can_add_claim(self, tmp_path: Path):
         """``finalized`` is not terminal -- a resumed worktree may still take
-        on new outbound obligations (docs/worktree-lifecycle.md)."""
+        on new outbound obligations (docs/worktree-lifecycle.md), and the
+        record atomically reopens to `active` (worktree-finality-and-
+        obligations, Phase 2 reopen transaction)."""
         rec = self._rec(tmp_path)
         rec.status = "finalized"
+        rec.completed_at = "2026-09-01T00:00:00"
 
         add_resource_claim(
             rec,
@@ -2701,6 +2704,62 @@ class TestAddResourceClaim:
         )
 
         assert [claim.ref for claim in rec.resources] == ["host/repo/wt-B"]
+        assert rec.status == "active"
+        assert rec.completed_at is None
+        assert rec.last_finalized_at == "2026-09-01T00:00:00"
+
+    def test_reactivating_a_released_claim_reopens_finalized_owner(
+        self, tmp_path: Path,
+    ):
+        rec = self._rec(tmp_path)
+        add_resource_claim(
+            rec, ResourceClaim(kind="worktree", ref="host/repo/wt-B",
+                                state="released"),
+            save=False,
+        )
+        rec.status = "finalized"
+
+        add_resource_claim(
+            rec, ResourceClaim(kind="worktree", ref="host/repo/wt-B",
+                                state="active"),
+            save=False,
+        )
+
+        assert rec.status == "active"
+        assert rec.resources[0].state == "active"
+
+    def test_idempotent_replay_does_not_reopen_finalized_owner(
+        self, tmp_path: Path,
+    ):
+        rec = self._rec(tmp_path)
+        claim = ResourceClaim(kind="worktree", ref="host/repo/wt-B",
+                               state="active", note="x")
+        add_resource_claim(rec, claim, save=False)
+        rec.status = "finalized"
+
+        # Re-adding the exact same kind/state/note is a no-op replay.
+        add_resource_claim(
+            rec, ResourceClaim(kind="worktree", ref="host/repo/wt-B",
+                                state="active", note="x"),
+            save=False,
+        )
+
+        assert rec.status == "finalized"
+
+    def test_adding_an_already_released_claim_does_not_reopen(
+        self, tmp_path: Path,
+    ):
+        rec = self._rec(tmp_path)
+        rec.status = "finalized"
+
+        # A claim that is not itself live never increases held obligations.
+        add_resource_claim(
+            rec, ResourceClaim(kind="worktree", ref="host/repo/wt-B",
+                                state="released"),
+            save=False,
+        )
+
+        assert rec.status == "finalized"
 
     def test_complete_managed_worktree_rejects_claim(self, tmp_path: Path):
         rec = self._rec(tmp_path)

@@ -12064,6 +12064,7 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
                 return _json_error(msg)
             output.err(msg)
             return 1
+        was_finalized = rec.status == "finalized"
         claim = tracking.ResourceClaim(
             kind=kind,
             ref=ref,
@@ -12072,11 +12073,17 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
             note=getattr(args, "note", "") or "",
         )
         tracking.add_resource_claim(rec, claim, save=False)
+        reopened = was_finalized and rec.status == "active"
         tracking.save_record(rec, rec_path)
     if args.json:
-        _json_output({"worktree_id": wt_id, "kind": kind, "ref": ref, "state": obligations.ACTIVE})
+        _json_output({
+            "worktree_id": wt_id, "kind": kind, "ref": ref,
+            "state": obligations.ACTIVE, "reopened": reopened,
+        })
         return 0
     print(f"added outbound claim {kind}:{ref} on {wt_id}")
+    if reopened:
+        print(f"  reopened {wt_id}: finalized -> active (new held claim)")
     return 0
 
 
