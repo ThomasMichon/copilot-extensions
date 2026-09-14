@@ -34,6 +34,7 @@ _LOCK_POLL_SECONDS = 0.1
 _WINDOWS_REPARSE_POINT = 0x400
 _COMMAND_TIMEOUT_SECONDS = 600.0
 _TRUST_TIMEOUT_SECONDS = 30.0
+_WINDOWS_TRUST_SCOPE_VERSION = 2
 _LAYOUT_VERSION_LEGACY = 1
 _LAYOUT_VERSION_COMPACT = 2
 _CELL_DIRS = {
@@ -447,6 +448,10 @@ def _cell_key(receipt: Mapping[str, Any]) -> str:
     }
     if receipt["schema_version"] == RECEIPT_SCHEMA_VERSION:
         identity["schema_version"] = RECEIPT_SCHEMA_VERSION
+        if "windows_trust_scope_version" in receipt:
+            identity["windows_trust_scope_version"] = receipt[
+                "windows_trust_scope_version"
+            ]
     return _canonical_digest(identity)[:40]
 
 
@@ -1111,6 +1116,13 @@ class ManagedRuntimeMaterializer:
                     "content_digest": content_digest,
                     "authority_digest": authority_digest,
                     "toolchain_digest": toolchain_digest,
+                    **(
+                        {
+                            "windows_trust_scope_version": _WINDOWS_TRUST_SCOPE_VERSION
+                        }
+                        if policy.windows
+                        else {}
+                    ),
                 }
             )
             cell = _cell_path(
@@ -1130,6 +1142,13 @@ class ManagedRuntimeMaterializer:
                     list(_windows_trust_files(policy.base_python))
                     if policy.windows
                     else []
+                ),
+                **(
+                    {
+                        "windows_trust_scope_version": _WINDOWS_TRUST_SCOPE_VERSION
+                    }
+                    if policy.windows
+                    else {}
                 ),
                 "snapshot": snapshot,
                 "ownership": {
@@ -1324,6 +1343,15 @@ class ManagedRuntimeMaterializer:
                         "content_digest": runtime.content_digest,
                         "authority_digest": authority_digest,
                         "toolchain_digest": toolchain_digest,
+                        **(
+                            {
+                                "windows_trust_scope_version": expected.get(
+                                    "windows_trust_scope_version", 1
+                                )
+                            }
+                            if policy.windows
+                            else {}
+                        ),
                     }
                 )
                 cell = _cell_path(
@@ -1355,6 +1383,9 @@ class ManagedRuntimeMaterializer:
                         "imports": declaration["imports"],
                         "windows_trust_files": (
                             list(_windows_trust_files(policy.base_python)) if policy.windows else []
+                        ),
+                        "windows_trust_scope_version": (
+                            _WINDOWS_TRUST_SCOPE_VERSION if policy.windows else None
                         ),
                     }.items()
                 ):

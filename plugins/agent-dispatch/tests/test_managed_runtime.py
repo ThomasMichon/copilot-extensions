@@ -20,6 +20,7 @@ from agent_dispatch.managed_runtime import (
     ManagedRuntimePolicy,
     ManagedRuntimeMaterializer,
     RECEIPT_NAME,
+    _cell_key,
     _is_reparse,
     _layout_version,
     _python_path,
@@ -743,7 +744,8 @@ def test_windows_trust_manifest_excludes_unsigned_tcl_binaries(tmp_path):
     result = ManagedRuntimeMaterializer(
         policy,
         runner=FakeRunner(windows=True),
-        trust_verifier=lambda path: "tcl" not in str(path),
+        trust_verifier=lambda path: path.name
+        not in {"ix84.dll", "x86_64-w64-mingw32-nmakehlp.exe"},
     ).materialize(_registration(plugin))[0]
 
     receipt = _receipt(result.cell)
@@ -758,6 +760,54 @@ def test_windows_trust_manifest_excludes_unsigned_tcl_binaries(tmp_path):
         "vcruntime140.dll",
     }
     assert (_cell_runtime_dir(result.cell) / "tcl" / "tix8.4.3" / "ix84.dll").is_file()
+
+
+def test_windows_trust_scope_change_rebuilds_alongside_prior_cells(tmp_path):
+    plugin = _project(tmp_path)
+    policy = _policy(tmp_path, windows=True)
+    runner = FakeRunner(windows=True)
+    materializer = ManagedRuntimeMaterializer(
+        policy,
+        runner=runner,
+        trust_verifier=lambda _path: True,
+    )
+    current = materializer.materialize(_registration(plugin))[0]
+    receipt = _receipt(current.cell)
+    legacy_receipt = dict(receipt)
+    legacy_receipt.pop("windows_trust_scope_version")
+    legacy_receipt["windows_trust_files"] = sorted(
+        {
+            *receipt["windows_trust_files"],
+            "tcl/nmake/x86_64-w64-mingw32-nmakehlp.exe",
+            "tcl/tix8.4.3/ix84.dll",
+        },
+        key=str.casefold,
+    )
+    legacy_key = _cell_key(
+        {
+            "schema_version": legacy_receipt["schema_version"],
+            "name": legacy_receipt["name"],
+            "version": legacy_receipt["version"],
+            "profile": legacy_receipt["profile"],
+            "content_digest": legacy_receipt["content_digest"],
+            "authority_digest": legacy_receipt["authority_digest"],
+            "toolchain_digest": legacy_receipt["toolchain_digest"],
+        }
+    )
+    legacy_cell = current.cell.parent / legacy_key
+    shutil.copytree(current.cell, legacy_cell)
+    (legacy_cell / RECEIPT_NAME).write_text(
+        json.dumps(legacy_receipt, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    shutil.rmtree(current.cell)
+
+    rebuilt = materializer.materialize(_registration(plugin))[0]
+
+    assert rebuilt.cell != legacy_cell
+    assert rebuilt.cell.is_dir()
+    assert legacy_cell.is_dir()
+    assert runner.install_count == 2
 
 
 def test_windows_untrusted_core_runtime_file_still_fails(tmp_path):
