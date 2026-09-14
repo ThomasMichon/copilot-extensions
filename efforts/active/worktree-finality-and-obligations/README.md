@@ -129,6 +129,28 @@ _Verbatim operator request; original spelling and punctuation preserved._
 > And for the agent, we should encourage the agent to claim bugs it files
 > proactively, when they are related to the task at hand.
 
+**2026-09-14 follow-up** (verbatim):
+
+> I had a thought: what if worktrees can claim Copilot sessions? The
+> sessionStart hook, if a worktree is on CWD, should open a claim from the
+> worktree to that session. Then a session should end in three ways:
+> 1. The user requests finalization, which implies the user is done with the
+> worktree and also the current session. Gets a little complicated when the
+> user starts another turn, but that can be handled with a user-prompt-submit
+> hook.
+> 2. The user requests a handoff and the handoff is performed. Again, implies
+> the user is done with the session. Can be re-claimed using a hook for user
+> prompt submit, again.
+> 3. The user manually uses /clear . Presumably, the sessionEnd hook kicks in
+> for the old session, whereas /new leaves the old session dangling.
+> When the user requests to finalize a worktree and there are open, claimed
+> sessions besides the current one, the agent can mention this (and the
+> session ids) to the user and ask if the user wants to ignore them, or sweep
+> for follow-ups.
+> By doing this, we can ensure that every session which gets started in a
+> worktree gets tracked, gets handled in the correct order in normal course of
+> business, and gets dealt with in the case of mishap.
+
 ## Plan
 
 ### Phase 1 - Lock the contracts with failing fixtures
@@ -382,8 +404,75 @@ _Verbatim operator request; original spelling and punctuation preserved._
   extending this plan before implementation when necessary.
 - [ ] Keep fixtures synthetic and independent of any adopting worktree registry.
 
+### Phase 8 - Session-claim lifecycle (proposed 2026-09-14; NOT YET REVIEWED/BUILT)
+
+Operator idea (see the dated Request above): a worktree should hold a claim on
+every Copilot session that opens inside it, not just track `sessions:` as
+descriptive metadata (the current model -- see `tracking.SessionEntry` /
+`register_session`/`deregister_session`). Making the relationship a first-class
+**claim** means the existing obligation machinery (held-claims blocks
+cleanup/finalize, the closure descriptor's blocker set, `claims sweep`'s
+never-wedge reclaim) applies to *session occupancy* the same way it already
+applies to a borrowed CodeSpace or a cross-repo worktree -- closing the
+`inbound-obligation` blocker code Phase 4 reserved but never wired.
+
+Grounding (confirmed before proposing, not assumed):
+- `sessionStart`/`sessionEnd` hooks already exist and already call
+  `register_session`/`deregister_session` (`hooks.json`); a claim-open/claim-
+  settle call would ride the same hook, not a new one.
+- A command-based `userPromptSubmitted` hook genuinely exists on current
+  Copilot CLI hosts (`docs/architecture.md` § the `additionalContext`
+  resume-robustness note) -- its *text* output is discarded by the host, but
+  it runs with real side effects, which is all a re-claim needs. No new host
+  hook type is required, but `agent-worktrees` has **never registered one**
+  (`hooks.json` has no `userPromptSubmit` entry today) -- this is new
+  plumbing, not a rewire of something existing.
+- `/clear` vs `/new` semantics (does `/new` truly leave no `sessionEnd`?) are
+  **operator-asserted, not yet independently confirmed** against the current
+  CLI host -- confirm before relying on it, since building a reclaim path on a
+  wrong assumption here would misfire.
+
+Plan (not started):
+- [ ] Add a `session` `ResourceClaim` kind (alongside
+  `worktree|codespace|container|ssh|workdir|pr`) that a worktree holds on its
+  own live Copilot session id -- outbound, not a second `sessions:` list.
+- [ ] `sessionStart` opens/refreshes the claim (active) for the current
+  session id when CWD resolves to a tracked worktree.
+- [ ] Settle-on-finalize: a successful `finalize` settles (not releases) the
+  *current* session's claim as part of its existing cascade, mirroring how it
+  already settles the parent's claim on this worktree.
+- [ ] Settle-on-handoff: the handoff-cutover lifecycle (already tracks
+  predecessor/successor sessions) settles the predecessor's session claim on
+  successful cutover -- reuse that machinery rather than re-deriving handoff
+  completion here.
+- [ ] `sessionEnd` releases the claim outright (a clean process exit, not just
+  "safe").
+- [ ] A `userPromptSubmitted` hook: if a new prompt arrives on a session whose
+  claim was just settled/released (finalize completed, or handoff cut over),
+  reopen it -- this is the mechanism that resolves the "user starts another
+  turn after finalizing" case the operator flagged, and composes with the
+  existing `reopen_finalized_owner` transaction (Phase 2) rather than
+  duplicating it.
+- [ ] `finalize` gains an advisory (not hard-blocking) check: if OTHER live
+  session claims exist on this worktree besides the current one, name them
+  (session ids) and ask the operator whether to ignore or sweep for
+  follow-ups, rather than silently finalizing out from under a second live
+  session or silently ignoring it.
+- [ ] Reuse (not duplicate) the existing `claims sweep` never-wedge reclaim for
+  a session claim whose process is confirmed gone -- a crashed/killed session
+  must not wedge finalize forever, same invariant as every other claim kind.
+- [ ] Confirm the `/clear`-vs-`/new` assumption above against the current host
+  before relying on it for the reclaim path; degrade to "leave it active,
+  surface it at finalize time" if unconfirmed, per the never-fabricate-a-
+  verdict discipline the claim ledger already follows elsewhere.
+
 ## Validation Plan
 
+- [ ] **Session-claim lifecycle** (Phase 8, proposed): a worktree's own live
+  Copilot session is a held claim; it settles on finalize, settles on a
+  successful handoff cutover, releases on `sessionEnd`, and reopens on a
+  `userPromptSubmitted` event after a premature settle; `finalize` names any
+  OTHER live session claims and asks before proceeding. Not started.
 - [x] **Reopen:** adding a new claim to a retained finalized worktree succeeds,
   changes lifecycle state away from finalized (to `active`), and immediately
   removes prune eligibility (already covered by Phase 1's held-claims fix).
@@ -692,4 +781,43 @@ The approved design is the faceted model in [design.md](design.md):
   535 passed (full suite minus the same two pre-existing, unrelated
   `test_knowledge_plugins.py` failures; the previously-observed flaky
   handoff-cutover test did not recur this run).
+
+### 2026-09-14 - Session-claim lifecycle proposed (Phase 8); a false alarm resolved
+- Operator flagged that my Phase 5 conduct-fragment rewrite may have
+  misread the original "do not resume work after finalizing" line's intent
+  -- it was meant to mean "avoid extra chatty turns after finalizing so the
+  worktree doesn't render as CONVO," not "don't take further action."
+  Investigated before changing anything further: `git_ops.classify_worktree`
+  sets `COMPLETED` (never `UNUSED`) whenever the worktree has commits, and
+  `refine_state_with_session` only ever upgrades `UNUSED` to `CONVO`. Since
+  `finalize` requires content already on the default branch, a finalized
+  worktree always has commits, so it can **never** classify as `CONVO`
+  regardless of conversation turns before or after. Operator confirmed this
+  resolves it ("never mind") -- the Phase 5 wording stands as landed; no
+  further conduct-fragment change made.
+- Operator then proposed a substantial new mechanic: a worktree should hold
+  a **claim on its own live Copilot session** (not just track `sessions:` as
+  descriptive metadata), so the existing obligation machinery -- held-claims
+  blocks cleanup/finalize, the closure descriptor's blocker set, the
+  never-wedge reclaim sweep -- applies to session occupancy the same way it
+  already applies to a borrowed CodeSpace. Three termination paths (finalize
+  / handoff / `/clear`) plus a `userPromptSubmitted`-triggered re-claim for
+  the "user keeps talking after finalize" edge case, plus an advisory (not
+  hard-blocking) finalize-time check naming any other live session claims.
+- Captured as a new **Phase 8** in the Plan (proposed, not started) --
+  grounded against real code before writing it up: confirmed
+  `sessionStart`/`sessionEnd` hooks and `register_session`/`deregister_session`
+  already exist as the wiring point; confirmed a command-based
+  `userPromptSubmitted` hook genuinely exists on current Copilot CLI hosts
+  (`docs/architecture.md`'s resume-robustness note) even though
+  `agent-worktrees` has never registered one; and flagged the `/clear`-vs-
+  `/new` sessionEnd-firing assumption as operator-asserted but **not yet
+  independently confirmed** -- a Phase 8 plan item, not a built fact.
+- Deliberately **not implemented** this session -- this is new plumbing (a
+  new claim kind, two new hook registrations, an advisory finalize check),
+  and the effort's own review-gate discipline is "propose before you do":
+  land the plan/design first (this entry + the Phase 8 plan section),
+  implement in a dedicated future slice after it's had a chance to be
+  reviewed rather than rushing it in alongside five other phases in one
+  session.
 
