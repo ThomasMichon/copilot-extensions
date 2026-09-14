@@ -592,6 +592,46 @@ Never auto-purge unused worktrees without asking — a worktree may appear
 "unused" if the session involved only questions, planning, or conversation
 with no commits yet.
 
+### Dirty worktrees: resolve per-worktree, never blanket `--force`
+
+`cleanup` (and `remove-system`) refuse a worktree with uncommitted changes
+**on purpose** — that refusal is the tool protecting real, unlanded work.
+`cleanup --worktree-id <id> --force` (and `remove-system ... --force`) exist
+for a genuine, individually-verified exception, not as a bulk shortcut for a
+backlog of `dirty` worktrees. Treating "dirty" as a synonym for "safe to
+force" throws away the one signal that distinguishes real work from noise —
+and a mode-only or superseded diff in worktree #1 doesn't guarantee the
+same is true of worktree #2 through #23.
+
+For **every** worktree `cleanup` reports as `dirty`, go in individually:
+
+1. **Read the actual diff** — `git status --porcelain` then `git diff`
+   (not just `--stat`, which hides mode-only/rename-only changes as `0
+   insertions/deletions` that look identical to real content edits). Tell
+   apart a real change (content not already on the default branch, an
+   unlanded fix) from noise (a stray mode-only flip, a scratch file, a
+   local edit later superseded upstream).
+2. **Land real work through the repo's own contribution flow** — commit,
+   open its PR, get it reviewed/merged per that repo's `pr-profile` (see
+   § PR Workflow above). If the diff looks like it duplicates something
+   already on the default branch, confirm with
+   `git diff <default-branch> -- <path>` before writing it off as noise —
+   don't assume.
+3. **Discard confirmed noise explicitly, file by file** —
+   `git checkout -- <path>` / `git clean -fd`, reviewed per file, inside
+   that worktree. This is a deliberate, inspected discard, not a blanket
+   force-remove of the whole worktree.
+4. **Only then run plain `cleanup --clean`** (no `--force`) — with a clean
+   tree it prunes normally. If it still refuses, something wasn't actually
+   resolved; re-check rather than reaching for `--force`.
+
+If a whole batch of worktrees turns out `dirty` for the **same root
+cause** (e.g. a shared tool stamping every worktree with an identical
+mode-only bit or a stale generated file), that is itself a defect worth
+tracking or fixing at the source — reaping the symptom once, by hand, after
+verifying it's genuinely inert, is reasonable; silently normalizing
+`--force` as the standing remedy for that pattern is not.
+
 ## Worktree States
 
 | Status | Meaning |
