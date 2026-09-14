@@ -659,7 +659,19 @@ class _NotFound:
 _AGENT_NOT_FOUND = _NotFound()
 
 
-def registered_agent(name: str, *, timeout: float = 8.0) -> dict | _NotFound | None:
+class _Unsupported:
+    """Sentinel: the installed agent-bridge CLI does not recognize
+    ``agent-show`` (argparse rejects it, exit 2) -- version skew, since
+    agent-bridge and agent-dispatch are independently-updated plugins and an
+    agent-dispatch update can land before its paired agent-bridge one.
+    Distinct from a genuine indeterminate failure: callers must fall back to
+    the full listing here, not treat every local allocation as unreadable."""
+
+
+_AGENT_SHOW_UNSUPPORTED = _Unsupported()
+
+
+def registered_agent(name: str, *, timeout: float = 8.0) -> dict | _NotFound | _Unsupported | None:
     """Best-effort single-agent record via agent-bridge's fast ``agent-show``
     lookup -- a static/topology-only lookup that never enumerates namespace
     resolvers (CodeSpaces, containers), unlike :func:`registered_agents`.
@@ -670,17 +682,20 @@ def registered_agent(name: str, *, timeout: float = 8.0) -> dict | _NotFound | N
     - :data:`_AGENT_NOT_FOUND` when the registry was read successfully and
       confirmed no such agent (``agent-show`` exits 1) -- a legitimate,
       non-error outcome;
+    - :data:`_AGENT_SHOW_UNSUPPORTED` when the installed agent-bridge CLI
+      doesn't recognize ``agent-show`` yet (argparse exit 2) -- version skew;
+      callers should fall back to :func:`registered_agents`, not treat this
+      as indeterminate;
     - ``None`` (indeterminate) when the registry could not be read at all
       (bridge CLI absent, spawn error, timeout, crash, unparseable output).
 
     Cannot resolve a namespace-prefixed name (``codespace:foo``,
     ``container:bar``) -- ``agent-show`` deliberately does not enumerate
     namespace resolvers, which is exactly the latency this fast path exists
-    to avoid. agent-dispatch's own callers (headless supervise-lane agents,
-    spawn preflight) always name a plain local/SSH-topology agent, never a
-    namespace-prefixed one, so this covers every real caller; a caller that
-    genuinely needs a namespace-resolved agent's metadata should use
-    :func:`registered_agents` instead.
+    to avoid. Callers needing a namespace-resolved agent, or one this
+    returned :data:`_AGENT_SHOW_UNSUPPORTED` for, should use
+    :func:`registered_agents` (or the ``_resolve_agent_record`` wrapper below,
+    which does this automatically).
     """
     exe = _agent_bridge_launch_prefix()
     if exe is None:
@@ -693,6 +708,8 @@ def registered_agent(name: str, *, timeout: float = 8.0) -> dict | _NotFound | N
         )
     except (subprocess.SubprocessError, OSError):
         return None
+    if proc.returncode == 2 and "agent-show" in (proc.stderr or ""):
+        return _AGENT_SHOW_UNSUPPORTED
     if proc.returncode == 1:
         return _AGENT_NOT_FOUND
     if proc.returncode != 0:
@@ -707,11 +724,43 @@ def registered_agent(name: str, *, timeout: float = 8.0) -> dict | _NotFound | N
     return data if isinstance(data, dict) else None
 
 
+def _resolve_agent_record(
+    name: str, *, timeout: float, fallback_timeout: float = 20.0,
+) -> dict | _NotFound | None:
+    """Resolve one agent's record, preferring the fast single-agent lookup
+    and transparently falling back to the full listing when the fast path
+    can't answer for this ``name``:
+
+    - a namespace-prefixed name (``codespace:foo``) -- ``agent-show`` never
+      enumerates namespace resolvers, so it can never resolve one;
+    - :data:`_AGENT_SHOW_UNSUPPORTED` -- the installed agent-bridge CLI
+      predates ``agent-show`` (version skew across independently-updated
+      plugins).
+
+    ``fallback_timeout`` is deliberately more generous than ``timeout``: the
+    full listing legitimately waits on namespace-resolver enumeration, which
+    the fast path exists specifically to avoid.
+    """
+    if ":" not in name:
+        row = registered_agent(name, timeout=timeout)
+        if row is not _AGENT_SHOW_UNSUPPORTED:
+            return row
+    rows = registered_agents(timeout=max(timeout, fallback_timeout))
+    if rows is None:
+        return None
+    for row in rows:
+        if row.get("name") == name:
+            return row
+    return _AGENT_NOT_FOUND
+
+
 def agent_is_registered(name: str, *, timeout: float = 8.0) -> bool | None:
-    """Best-effort "is ``name`` a registered local agent?" via the fast
-    single-agent path. Returns ``None`` (indeterminate) when the registry
-    could not be read at all -- see :func:`registered_agent`."""
-    row = registered_agent(name, timeout=timeout)
+    """Best-effort "is ``name`` a registered agent?" -- prefers the fast
+    single-agent path, falling back to the full listing for namespace-
+    prefixed names or an agent-bridge CLI that predates ``agent-show`` (see
+    :func:`_resolve_agent_record`). Returns ``None`` (indeterminate) when the
+    registry could not be read at all."""
+    row = _resolve_agent_record(name, timeout=timeout)
     if row is None:
         return None
     return row is not _AGENT_NOT_FOUND
@@ -735,18 +784,19 @@ def registered_agent_project(
     timeout: float = 8.0,
     strict: bool = False,
 ) -> str | None:
-    """Return a registered local agent's explicit project, when available.
+    """Return a registered agent's explicit project, when available.
 
-    Uses the fast single-agent lookup (:func:`registered_agent`), which
-    resolves purely from static/topology config and never enumerates
-    namespace resolvers -- agent-dispatch's own callers always name a plain
-    local/SSH-topology agent, never a namespace-prefixed one, so this fast
-    path covers every real caller (see that function's docstring for the
-    namespace-prefixed-name caveat). ``timeout`` defaults to 8s (was 20s):
-    with no namespace enumeration to wait out, a much shorter bound is
-    sufficient and further reduces worst-case latency under load.
+    Prefers the fast single-agent lookup, which resolves purely from static/
+    topology config and never enumerates namespace resolvers -- but
+    transparently falls back to the full listing for a namespace-prefixed
+    name or an agent-bridge CLI predating ``agent-show`` (see
+    :func:`_resolve_agent_record`), so this remains correct for every caller,
+    not just the common plain-local-agent case. ``timeout`` defaults to 8s
+    (was 20s): the fast path has no namespace-enumeration latency to size
+    for; a fallback to the full listing uses a more generous timeout of its
+    own regardless.
     """
-    row = registered_agent(agent, timeout=timeout)
+    row = _resolve_agent_record(agent, timeout=timeout)
     if row is None:
         if strict:
             raise BridgeUnavailable(
@@ -784,10 +834,13 @@ def preflight_headless_agent(
     yields no warning -- the preflight never blocks a lane and never cries wolf on
     ignorance. For a fleet lane (``pool`` set) the body spawns on each remote pool
     host, so each is probed over SSH; otherwise the local registry is probed via
-    the fast single-agent path (:func:`agent_is_registered`), which never
-    enumerates namespace/CodeSpace/container resolvers for this one known name
-    -- ``local_timeout`` defaults to 8s accordingly (was 20s, sized for the
-    full listing this no longer calls).
+    the fast single-agent path (:func:`agent_is_registered`), which skips
+    namespace/CodeSpace/container enumeration for the common case (a plain
+    local/SSH-topology name) and transparently falls back to the full listing
+    for a namespace-prefixed name or version-skewed agent-bridge CLI -- see
+    :func:`_resolve_agent_record`. ``local_timeout`` defaults to 8s
+    accordingly (was 20s, sized for the full listing this no longer calls in
+    the common case).
     """
     checks: list[tuple[str, set[str] | None]] = []
     if pool:
