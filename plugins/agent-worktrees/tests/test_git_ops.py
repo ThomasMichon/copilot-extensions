@@ -552,6 +552,35 @@ class TestClassifyGitTimeout:
         assert info.state == go.WorktreeState.UNKNOWN
         # Branch metadata from the successful pre-git read is still reported.
         assert info.current_branch == "worktree/x"
+        assert info.fetch_failed is False  # fetch=False was never requested
+
+    def test_classify_worktree_timeout_with_fetch_reports_fetch_failed(
+        self, tmp_path, monkeypatch,
+    ):
+        # worktree-finality-and-obligations Phase 5 follow-up: a timeout
+        # gives no confirmation the requested fetch ever completed (it may
+        # have stalled on the fetch itself or a later git call) -- so
+        # fetch=True must propagate fetch_failed=True through the timeout
+        # path too, not just the explicit nonzero-exit fetch failure.
+        import subprocess
+
+        from agent_worktrees import git_ops as go
+
+        (tmp_path / ".git").mkdir()
+
+        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None):
+            if args[:2] == ("rev-parse", "--abbrev-ref"):
+                return subprocess.CompletedProcess(
+                    ["git", *args], 0, "worktree/x\n", "")
+            raise subprocess.TimeoutExpired(
+                cmd=["git", *args], timeout=timeout or go._CLASSIFY_GIT_TIMEOUT)
+
+        monkeypatch.setattr(go, "git", fake_git)
+
+        info = go.classify_worktree(str(tmp_path), "worktree/x", fetch=True)
+        assert info.state == go.WorktreeState.UNKNOWN
+        assert info.fetch_requested is True
+        assert info.fetch_failed is True
 
 
 class TestClassifyGitProcessCount:
@@ -664,3 +693,69 @@ class TestClassifyGitProcessCount:
         assert info.state == WorktreeState.COMPLETED
         assert (info.ahead, info.behind) == (2, 0)
         assert "merge-base" not in [call[0] for call in calls]
+
+
+class TestClassifyGitStateFetchFailed:
+    """worktree-finality-and-obligations Phase 5 follow-up: a requested fetch
+    that itself fails must be reported honestly (fetch_failed=True), not
+    silently treated as refreshed evidence, even though classification still
+    proceeds on the stale local refs (#discussion_r4008048471)."""
+
+    @staticmethod
+    def _run(monkeypatch, *, fetch_returncode, responses):
+        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None):
+            if args[:1] == ("fetch",):
+                return types.SimpleNamespace(
+                    returncode=fetch_returncode, stdout="", stderr="",
+                )
+            return responses(args)
+
+        monkeypatch.setattr(go, "git", fake_git)
+        return go._classify_git_state(
+            Path("."),
+            "worktree/x",
+            "origin/main",
+            fetch=True,
+            remote="origin",
+            default_branch="main",
+            actual_branch="worktree/x",
+            drift=False,
+        )
+
+    def _clean_completed_responses(self, args):
+        if args[:1] == ("status",):
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+        if args[:1] == ("rev-list",):
+            return types.SimpleNamespace(returncode=0, stdout="0 0\n", stderr="")
+        if args[:2] == ("--no-pager", "reflog"):
+            return types.SimpleNamespace(
+                returncode=0, stdout="commit: init\n", stderr="",
+            )
+        raise AssertionError(f"unexpected git call: {args}")
+
+    def test_successful_fetch_reports_fetch_failed_false(self, monkeypatch):
+        info = self._run(
+            monkeypatch, fetch_returncode=0,
+            responses=self._clean_completed_responses,
+        )
+        assert info.state == WorktreeState.COMPLETED
+        assert info.fetch_requested is True
+        assert info.fetch_failed is False
+
+    def test_failed_fetch_reports_fetch_failed_true(self, monkeypatch):
+        info = self._run(
+            monkeypatch, fetch_returncode=1,
+            responses=self._clean_completed_responses,
+        )
+        # Classification still proceeds on stale local refs...
+        assert info.state == WorktreeState.COMPLETED
+        # ...but the caller is told the fetch itself failed.
+        assert info.fetch_requested is True
+        assert info.fetch_failed is True
+
+    def test_no_fetch_requested_always_reports_false(self, monkeypatch):
+        info, _calls = TestClassifyGitProcessCount._run(
+            monkeypatch, self._clean_completed_responses,
+        )
+        assert info.fetch_requested is False
+        assert info.fetch_failed is False
