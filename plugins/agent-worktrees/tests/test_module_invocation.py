@@ -43,7 +43,15 @@ def test_help_does_not_crash_on_circular_import():
 
 def test_pr_watch_usage_does_not_crash_on_circular_import():
     # pr_cli-backed verb: the exact command family whose module split
-    # introduced the circular import in the first place.
-    result = _run_module("pr-watch")
+    # introduced the circular import in the first place. `pr-watch` is a
+    # project-requiring command, so without --project (and no CWD-resolvable
+    # project) main() bounces to cmd_help_unrouted() BEFORE ever reaching
+    # pr_cli dispatch -- that would pass even if the dispatch itself still
+    # crashed. Supply an explicit --project (its no-argument usage path
+    # doesn't need a real registry entry) so this actually exercises the
+    # pr_cli module split.
+    result = _run_module("--project", "test-chamber", "pr-watch")
     assert "partially initialized module" not in result.stderr
     assert "circular import" not in result.stderr
+    assert "Traceback" not in result.stderr
+    assert "pr-watch <wait|cursor>" in result.stdout + result.stderr
