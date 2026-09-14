@@ -1968,6 +1968,62 @@ def _cmd_service(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _cmd_agent_show(args: argparse.Namespace) -> None:
+    """Show one registered agent by name -- a fast path that never enumerates
+    namespace/CodeSpace/container providers.
+
+    Backs ``agent_dispatch``'s single-agent existence/project checks (spawn
+    preflight, headless-lane resolution), which previously always called
+    ``agent-bridge agents`` (the full listing) even though they only ever
+    care about one name. That full listing awaits every registered namespace
+    resolver (CodeSpaces enumeration across accounts, container queries) --
+    genuinely useful for the interactive ``agents`` listing, but wasted,
+    latency-risking work for a caller checking a single, almost-always local
+    or SSH-topology agent name. This command instead calls the static/
+    topology-only lookup (``AgentResolver.get_agent_config``), which never
+    touches a namespace resolver. It intentionally does **not** resolve a
+    namespace-prefixed name (``codespace:foo``, ``container:bar``) -- that
+    would require enumerating (or targeting) that one provider, which is
+    exactly the latency this command exists to avoid; a caller that
+    specifically needs a namespace-resolved agent's metadata should still use
+    ``agents`` (or ``agents --json`` filtered client-side).
+    """
+    client = _get_client()
+    from .client import BridgeClientError
+
+    try:
+        agent = client.get_agent(args.name)
+    except BridgeClientError as exc:
+        if exc.status == 404:
+            agent = {}
+        else:
+            raise
+    if not agent:
+        if args.json:
+            _json_out(None)
+        else:
+            print(f"(no such agent: {args.name!r})")
+        raise SystemExit(1)
+    if args.json:
+        _json_out(agent)
+    else:
+        display = agent.get("display_name", "") or agent.get("name", "")
+        print(display)
+        if agent.get("name") and agent.get("name") != display:
+            print(f"  Name:     {agent['name']}")
+        aliases = agent.get("aliases") or []
+        if aliases:
+            print(f"  Aliases:  {', '.join(aliases)}")
+        target_type = agent.get("target_type", "")
+        if target_type:
+            print(f"  Type:     {target_type}")
+        host = agent.get("host", "")
+        if host:
+            print(f"  Host:     {host}")
+        if agent.get("managed"):
+            print(f"  Managed:  {agent['managed']}")
+
+
 def _cmd_agents(args: argparse.Namespace) -> None:
     """List registered agents."""
     client = _get_client()
@@ -5836,6 +5892,14 @@ def build_parser() -> argparse.ArgumentParser:
     token_p.set_defaults(func=_cmd_token)
 
     # -- Client commands --
+
+    agent_show_p = sub.add_parser(
+        "agent-show",
+        help="Show one registered agent by name (fast path -- static/topology "
+             "lookup only, never enumerates namespace/CodeSpace/container providers)",
+    )
+    agent_show_p.add_argument("name", help="Agent name to look up")
+    agent_show_p.set_defaults(func=_cmd_agent_show)
 
     agents_p = sub.add_parser("agents", help="List registered agents")
     agents_p.add_argument(

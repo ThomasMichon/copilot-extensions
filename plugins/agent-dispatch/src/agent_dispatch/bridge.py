@@ -625,6 +625,12 @@ def registered_agents(*, timeout: float = 20.0) -> list[dict] | None:
     which upstream callers may then dead-letter a spawn reservation on -- this
     is defense-in-depth headroom, not a substitute for the bridge-side caching
     fix.
+
+    Prefer :func:`registered_agent` when only a single, known agent name needs
+    checking (the common case: spawn preflight, headless-lane resolution) --
+    it never enumerates namespace resolvers at all, so it is not subject to
+    CodeSpace/container latency in the first place. Use this full listing only
+    when the actual set of *all* registered agents is needed.
     """
     exe = _agent_bridge_launch_prefix()
     if exe is None:
@@ -642,6 +648,75 @@ def registered_agents(*, timeout: float = 20.0) -> list[dict] | None:
     return parse_agents(proc.stdout)
 
 
+class _NotFound:
+    """Sentinel: ``agent-show`` positively confirmed no such agent -- distinct
+    from ``None`` (indeterminate: bridge absent, timeout, crash, unparseable).
+    A caller that raises on indeterminate must not also raise on a
+    legitimately-absent agent; keeping these two outcomes distinguishable is
+    the whole point of this sentinel."""
+
+
+_AGENT_NOT_FOUND = _NotFound()
+
+
+def registered_agent(name: str, *, timeout: float = 8.0) -> dict | _NotFound | None:
+    """Best-effort single-agent record via agent-bridge's fast ``agent-show``
+    lookup -- a static/topology-only lookup that never enumerates namespace
+    resolvers (CodeSpaces, containers), unlike :func:`registered_agents`.
+
+    Returns:
+    - a ``dict`` record when ``name`` is a registered (non-namespace-prefixed)
+      agent;
+    - :data:`_AGENT_NOT_FOUND` when the registry was read successfully and
+      confirmed no such agent (``agent-show`` exits 1) -- a legitimate,
+      non-error outcome;
+    - ``None`` (indeterminate) when the registry could not be read at all
+      (bridge CLI absent, spawn error, timeout, crash, unparseable output).
+
+    Cannot resolve a namespace-prefixed name (``codespace:foo``,
+    ``container:bar``) -- ``agent-show`` deliberately does not enumerate
+    namespace resolvers, which is exactly the latency this fast path exists
+    to avoid. agent-dispatch's own callers (headless supervise-lane agents,
+    spawn preflight) always name a plain local/SSH-topology agent, never a
+    namespace-prefixed one, so this covers every real caller; a caller that
+    genuinely needs a namespace-resolved agent's metadata should use
+    :func:`registered_agents` instead.
+    """
+    exe = _agent_bridge_launch_prefix()
+    if exe is None:
+        return None
+    try:
+        proc = subprocess.run(  # noqa: S603 -- fixed argv, exe resolved above
+            [*exe, "--json", "agent-show", name],
+            check=False, capture_output=True, text=True, timeout=timeout,
+            **no_window_kwargs(),
+        )
+    except (subprocess.SubprocessError, OSError):
+        return None
+    if proc.returncode == 1:
+        return _AGENT_NOT_FOUND
+    if proc.returncode != 0:
+        return None
+    text = (proc.stdout or "").strip()
+    if not text or text == "null":
+        return _AGENT_NOT_FOUND
+    try:
+        data = json.loads(text)
+    except (ValueError, TypeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def agent_is_registered(name: str, *, timeout: float = 8.0) -> bool | None:
+    """Best-effort "is ``name`` a registered local agent?" via the fast
+    single-agent path. Returns ``None`` (indeterminate) when the registry
+    could not be read at all -- see :func:`registered_agent`."""
+    row = registered_agent(name, timeout=timeout)
+    if row is None:
+        return None
+    return row is not _AGENT_NOT_FOUND
+
+
 def registered_agent_names(*, timeout: float = 20.0) -> set[str] | None:
     """Best-effort set of names registered with the local agent-bridge."""
     rows = registered_agents(timeout=timeout)
@@ -657,30 +732,38 @@ def registered_agent_names(*, timeout: float = 20.0) -> set[str] | None:
 def registered_agent_project(
     agent: str,
     *,
-    timeout: float = 20.0,
+    timeout: float = 8.0,
     strict: bool = False,
 ) -> str | None:
-    """Return a registered local agent's explicit project, when available."""
-    rows = registered_agents(timeout=timeout)
-    if rows is None:
+    """Return a registered local agent's explicit project, when available.
+
+    Uses the fast single-agent lookup (:func:`registered_agent`), which
+    resolves purely from static/topology config and never enumerates
+    namespace resolvers -- agent-dispatch's own callers always name a plain
+    local/SSH-topology agent, never a namespace-prefixed one, so this fast
+    path covers every real caller (see that function's docstring for the
+    namespace-prefixed-name caveat). ``timeout`` defaults to 8s (was 20s):
+    with no namespace enumeration to wait out, a much shorter bound is
+    sufficient and further reduces worst-case latency under load.
+    """
+    row = registered_agent(agent, timeout=timeout)
+    if row is None:
         if strict:
             raise BridgeUnavailable(
                 f"could not read the local agent registry while resolving {agent!r}"
             )
         return None
-    for row in rows:
-        if row.get("name") != agent:
-            continue
-        project = row.get("project")
-        return project if isinstance(project, str) and project else None
-    return None
+    if row is _AGENT_NOT_FOUND:
+        return None
+    project = row.get("project")
+    return project if isinstance(project, str) and project else None
 
 
 def preflight_headless_agent(
     agent: str,
     *,
     pool: Sequence[str] | None = None,
-    local_timeout: float = 20.0,
+    local_timeout: float = 8.0,
     remote_timeout: float = 15.0,
 ) -> list[str]:
     """Best-effort check that ``agent`` is a registered agent-bridge agent on the
@@ -700,7 +783,11 @@ def preflight_headless_agent(
     absent, host unreachable, timeout, unparseable) that host is INDETERMINATE and
     yields no warning -- the preflight never blocks a lane and never cries wolf on
     ignorance. For a fleet lane (``pool`` set) the body spawns on each remote pool
-    host, so each is probed over SSH; otherwise the local registry is probed.
+    host, so each is probed over SSH; otherwise the local registry is probed via
+    the fast single-agent path (:func:`agent_is_registered`), which never
+    enumerates namespace/CodeSpace/container resolvers for this one known name
+    -- ``local_timeout`` defaults to 8s accordingly (was 20s, sized for the
+    full listing this no longer calls).
     """
     checks: list[tuple[str, set[str] | None]] = []
     if pool:
@@ -714,7 +801,9 @@ def preflight_headless_agent(
                 (h, embody.remote_registered_agent_names(h, timeout=remote_timeout))
             )
     else:
-        checks.append(("this host", registered_agent_names(timeout=local_timeout)))
+        state = agent_is_registered(agent, timeout=local_timeout)
+        names = None if state is None else ({agent} if state else set())
+        checks.append(("this host", names))
     warnings: list[str] = []
     for where, names in checks:
         if names is not None and agent not in names:
