@@ -246,6 +246,20 @@ rather than binding to private implementation details.
 
 ### Phase 7 — Converge with native hosts and migrate consumers
 
+> **Scoping note (2026-09-13):** this phase's native-host-proxy leg (agent-bridge
+> dialing *out* to a real `copilotd`/native AHP host as a client, then federating
+> or proxying its sessions) is architecturally independent of Phases 1-6, which
+> build the *ingress* side (agent-bridge as an AHP *host* for external clients).
+> Ingress and egress are orthogonal capabilities that both land under the same
+> "protocol-neutral domain state" core in the target architecture
+> ([compatibility-baseline.md](compatibility-baseline.md#target-internal-architecture)),
+> but dialing an external native host does not require this bridge's own AHP
+> host kernel to exist first. Consider pulling the native-host-proxy leg forward
+> as an earlier, smaller, parallel slice rather than strictly serializing it
+> after Phase 6, if a concrete consumer needs it sooner (see the 2026-09-13
+> journal entry below for the motivating case and a convergence note with
+> `worktree-manager`'s existing hand-rolled `AhpController`).
+
 - [ ] Probe released native AHP hosts and classify baseline behavior, exact
       named capabilities, optional state, and `x-` extensions before delegating
       a local primitive.
@@ -317,6 +331,47 @@ policy, version decision, and exception ledger live in
 [`plugins/agent-bridge/tests/fixtures/ahp/v0.8.0/`](../../../plugins/agent-bridge/tests/fixtures/ahp/v0.8.0/).
 
 ## Journal
+
+### 2026-09-13 — Confirmed no built-in remote-subagent path in CAR; propose decoupling the native-host-proxy leg
+
+- Motivating question, from a separate CPU/process-architecture audit session:
+  can a Copilot CLI agent already create-and-pilot *another* Copilot CLI
+  session as a sub-agent, over AHP, ACP, or A2A, without agent-bridge?
+- Checked `github/copilot-agent-runtime` source directly. `--fleet`/`/fleet`
+  (parallel subagent orchestration) is generated straight off the native Rust
+  runtime's `SessionFleetApi` -- local, in-process subagent spawning within one
+  CLI session only. Nothing in CAR wires a subagent to a remote AHP host or an
+  ACP peer. Confirms there is no built-in CAR mechanism for this; the control
+  layer has to be provided by us, as this effort already assumes.
+- Checked agent-bridge's own provider/target registry
+  (`agent_registry.py`/`admin_resolver.py`): today's only target types are
+  `local`, `ssh`, `codespace`, `container`. No `ahp` target exists yet, so
+  agent-bridge cannot currently dispatch to a `copilotd`-hosted session at all
+  -- confirming the "native-host proxy" leg in the target architecture
+  (compatibility-baseline.md) is a real, currently-unbuilt gap, not already
+  covered by another provider.
+- A parallel non-Copilot project, [`a2a-wrapper`](https://github.com/shashikanth-gs/a2a-wrapper),
+  exposes Copilot CLI as an A2A *server* so an external A2A controller can drive
+  it -- one-directional, and not a substitute: it does not give Copilot CLI its
+  own A2A client leg either, so it does not close this gap.
+- **Proposal, agreed with the operator:** AHP-host (Phases 1-6, ingress) and
+  AHP-client/native-host-proxy (Phase 7, egress) are orthogonal goals, and
+  since AHP is an open, versioned protocol, agent-bridge does not need to wait
+  on `copilotd`/CAR changes to be a legitimate AHP *host* itself -- only work
+  that depends on `copilotd`'s own internals (e.g. closing the
+  materialization-vs-activation gap recorded in the superseded
+  `dotfiles`/`agent-host-protocol-convergence` journal) requires diving into
+  CAR and pushing changes upstream there. See the scoping note added to Phase 7
+  above proposing the native-host-proxy leg run as an earlier, decoupled slice
+  rather than strictly after Phase 6.
+- **Convergence note for a follow-up pass:** `worktree-manager` already carries
+  a hand-rolled AHP JSON-RPC client, `AhpController`
+  (`worktree-manager/src/worktree_manager/ahp_provider.py`), built for Phase 3b
+  mux-relocation/AHP-provider work in the `worktree-manager-control-plane`
+  effort. When the native-host-proxy leg is scoped, it should converge on (or
+  explicitly supersede) that existing client rather than agent-bridge growing a
+  second, independent hand-rolled AHP JSON-RPC implementation -- one dial-out
+  AHP client for the whole harness, not two.
 
 ### 2026-08-31 — Compatibility-foundation reconciliation
 
