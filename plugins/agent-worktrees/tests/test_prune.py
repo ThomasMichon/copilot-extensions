@@ -602,3 +602,136 @@ class TestCleanupDispositionClaimed:
         d = prune.cleanup_disposition(rec, _info(S.COMPLETED),
                                       claimant_alive=lambda ref: False)
         assert d.cleanable is True and d.bucket == "clean"
+
+
+# --- assemble_closure_descriptor (worktree-finality-and-obligations Phase 4) -
+
+class TestClosureDescriptor:
+    def _final_inputs(self):
+        rec = _rec(status="finalized")
+        info = _info(S.COMPLETED)
+        disposition = prune.cleanup_disposition(rec, info)
+        return rec, info, disposition
+
+    def test_clean_completed_worktree_is_final(self):
+        rec, info, disposition = self._final_inputs()
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=0, open_follow_ups=0)
+        assert d.final is True
+        assert d.label == "FINAL"
+        assert d.compact == "FINAL"
+        assert d.action_disposition == "safe"
+        assert d.blockers == []
+        assert d.version == prune.DESCRIPTOR_VERSION
+
+    def test_held_claim_downgrades_completed_to_merged(self):
+        rec = _rec(status="finalized")
+        rec.resources = [
+            tracking.ResourceClaim(kind="codespace", ref="cs-1", state="active")
+        ]
+        info = _info(S.COMPLETED)
+        disposition = prune.cleanup_disposition(rec, info)
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=1, open_follow_ups=0)
+        assert d.final is False
+        assert d.label == "MERGED"
+        assert d.compact == "MERGED C1"
+        assert d.action_disposition == "blocked"
+        assert {"code": "held-claims", "count": 1} in d.blockers
+
+    def test_open_follow_up_downgrades_completed_to_merged(self):
+        rec = _rec(status="finalized")
+        rec.follow_ups = [
+            tracking.FollowUpRecord(id="fu-1", summary="x", state="open")
+        ]
+        info = _info(S.COMPLETED)
+        disposition = prune.cleanup_disposition(rec, info)
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=0, open_follow_ups=1)
+        assert d.final is False
+        assert d.label == "MERGED"
+        assert d.compact == "MERGED F1"
+        assert {"code": "open-follow-ups", "count": 1} in d.blockers
+
+    def test_both_blockers_produce_both_markers(self):
+        rec = _rec(status="finalized")
+        info = _info(S.COMPLETED)
+        disposition = prune.cleanup_disposition(rec, info)
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=2, open_follow_ups=3)
+        assert d.compact == "MERGED C2 F3"
+        assert d.final is False
+
+    def test_cached_evidence_never_reports_final_or_safe(self):
+        rec, info, disposition = self._final_inputs()
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=0, open_follow_ups=0,
+            evidence_mode="cached", evidence_complete=True)
+        assert d.final is False
+        assert d.label == "MERGED"
+        assert d.action_disposition == "blocked"
+
+    def test_incomplete_evidence_never_reports_final_or_safe(self):
+        rec, info, disposition = self._final_inputs()
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=0, open_follow_ups=0,
+            evidence_mode="refreshed", evidence_complete=False)
+        assert d.final is False
+        assert d.action_disposition == "blocked"
+
+    def test_active_worktree_never_final_even_if_otherwise_clean(self):
+        rec = _rec(status="active")
+        info = _info(S.ACTIVE)
+        disposition = prune.cleanup_disposition(rec, info)
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=0, open_follow_ups=0)
+        assert d.final is False
+        assert d.label == "ACTIVE"
+        assert d.style == "active"
+
+    def test_non_completed_base_states_preserve_their_label(self):
+        for state, expected in (
+            (S.DIRTY, "DIRTY"), (S.WIP, "WIP"), (S.UNUSED, "UNUSED"),
+            (S.ORPHAN, "ORPHAN"), (S.CONVO, "CONVO"),
+        ):
+            rec = _rec(status="active")
+            info = _info(state, dirty=(1 if state == S.DIRTY else 0))
+            disposition = prune.cleanup_disposition(rec, info, turn_count=1)
+            d = prune.assemble_closure_descriptor(
+                rec, info, disposition, held_claims=0, open_follow_ups=0)
+            assert d.label == expected, state
+
+    def test_finalizing_status_surfaces_as_a_blocker(self):
+        rec = _rec(status="finalizing")
+        info = _info(S.COMPLETED)
+        disposition = prune.cleanup_disposition(rec, info)
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=0, open_follow_ups=0)
+        assert {"code": "finalizing", "count": 1} in d.blockers
+        assert d.final is False
+
+    def test_all_emitted_blocker_codes_are_in_the_closed_set(self):
+        rec = _rec(status="finalized")
+        rec.resources = [
+            tracking.ResourceClaim(kind="codespace", ref="cs-1", state="active")
+        ]
+        rec.follow_ups = [
+            tracking.FollowUpRecord(id="fu-1", summary="x", state="open")
+        ]
+        info = _info(S.COMPLETED)
+        disposition = prune.cleanup_disposition(rec, info)
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=1, open_follow_ups=1)
+        for blocker in d.blockers:
+            assert blocker["code"] in prune.BLOCKER_CODES
+
+    def test_to_dict_shape(self):
+        rec, info, disposition = self._final_inputs()
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=0, open_follow_ups=0)
+        payload = d.to_dict()
+        assert payload["closure"] == {"final": True}
+        assert payload["action"] == {"disposition": "safe", "bucket": "clean"}
+        assert payload["claims"] == {"held": 0}
+        assert payload["follow_ups"] == {"open": 0}
+

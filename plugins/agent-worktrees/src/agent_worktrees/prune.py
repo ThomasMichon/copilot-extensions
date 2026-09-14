@@ -371,6 +371,242 @@ def cleanup_disposition(
     return CleanupDisposition(False, "unmerged", v.reason)
 
 
+# ── Canonical closure descriptor (worktree-finality-and-obligations, Phase 4) ─
+
+#: Descriptor schema version. Bump on any incompatible shape change; older
+#: consumers must treat an unrecognized version as provisional, never FINAL.
+DESCRIPTOR_VERSION = 1
+
+#: The closed blocker-code vocabulary (design.md). A future code requires a
+#: version bump. NOTE: this module only ever emits a SUBSET of this set (the
+#: codes it can actually derive from `assess`/`cleanup_disposition` -- see
+#: `assemble_closure_descriptor`'s docstring for what's not yet wired).
+BLOCKER_CODES = frozenset({
+    "held-claims", "open-follow-ups", "open-pr", "closed-unmerged", "unmerged",
+    "dirty", "wip", "claimed-live", "paired-pending", "active-effort",
+    "inbound-obligation", "unverified-squash", "live-session", "finalizing",
+    "checkout-missing", "prune-review-required", "incomplete-evidence",
+    "unsupported-descriptor",
+})
+
+_BASE_STATE_LABELS: dict[git_ops.WorktreeState, str] = {
+    git_ops.WorktreeState.ACTIVE: "ACTIVE",
+    git_ops.WorktreeState.DIRTY: "DIRTY",
+    git_ops.WorktreeState.WIP: "WIP",
+    git_ops.WorktreeState.UNUSED: "UNUSED",
+    git_ops.WorktreeState.CONVO: "CONVO",
+    git_ops.WorktreeState.GONE: "GONE",
+    git_ops.WorktreeState.ORPHAN: "ORPHAN",
+    git_ops.WorktreeState.UNKNOWN: "UNKNOWN",
+}
+
+#: cleanup_disposition bucket -> the single blocker code it maps to (a bucket
+#: not listed here contributes no bucket-derived blocker of its own; held
+#: claims / open follow-ups are still added independently below by count).
+_BUCKET_TO_BLOCKER: dict[str, str] = {
+    "follow-up": "open-follow-ups",
+    "held-claims": "held-claims",
+    "open-pr": "open-pr",
+    "closed-unmerged": "closed-unmerged",
+    "unmerged": "unmerged",
+    "dirty": "dirty",
+    "wip": "wip",
+    "claimed": "claimed-live",
+    "paired-pending": "paired-pending",
+}
+
+#: cleanup_disposition bucket -> graded action disposition (design.md's
+#: `unsafe > blocked > opt-in/record-reap > safe` precedence). ``gone`` /
+#: managed-record-reap buckets aren't produced by `cleanup_disposition`
+#: itself (its own docstring: GONE is handled by the caller), so
+#: `record-reap` is not reachable from this mapping yet.
+_BUCKET_TO_ACTION_DISPOSITION: dict[str, str] = {
+    "clean": "safe",
+    "active": "unsafe",
+    "unused": "opt-in",
+    "conversation": "opt-in",
+    "follow-up": "blocked",
+    "held-claims": "blocked",
+    "open-pr": "blocked",
+    "closed-unmerged": "blocked",
+    "dirty": "unsafe",
+    "wip": "unsafe",
+    "unmerged": "unsafe",
+    "claimed": "blocked",
+    "paired-pending": "blocked",
+}
+
+
+@dataclass
+class ClosureDescriptor:
+    """The one canonical closure/display descriptor (design.md).
+
+    Preserves Git settlement, held-claim count, and open-follow-up count as
+    INDEPENDENT facts (never re-derived per surface); ``closure.final`` and
+    ``action`` are computed FROM them, not stored opinions. ``evidence_mode``
+    /``evidence_complete`` carry provenance: only a ``refreshed`` +
+    ``complete`` descriptor may report a *current* FINAL or a ``safe`` action
+    -- a cached/fetch-free descriptor is downgraded defensively (see
+    :func:`assemble_closure_descriptor`).
+    """
+
+    version: int
+    computed_at: str
+    evidence_mode: str
+    evidence_complete: bool
+    base_state: str
+    label: str
+    style: str
+    compact: str
+    git: dict
+    claims: dict
+    follow_ups: dict
+    blockers: list[dict]
+    final: bool
+    action_disposition: str
+    action_bucket: str
+
+    def to_dict(self) -> dict:
+        return {
+            "version": self.version,
+            "computed_at": self.computed_at,
+            "evidence_mode": self.evidence_mode,
+            "evidence_complete": self.evidence_complete,
+            "base_state": self.base_state,
+            "label": self.label,
+            "style": self.style,
+            "compact": self.compact,
+            "git": self.git,
+            "claims": self.claims,
+            "follow_ups": self.follow_ups,
+            "blockers": self.blockers,
+            "closure": {"final": self.final},
+            "action": {
+                "disposition": self.action_disposition,
+                "bucket": self.action_bucket,
+            },
+        }
+
+
+def assemble_closure_descriptor(
+    rec: tracking.WorktreeRecord,
+    info: git_ops.WorktreeStateInfo,
+    disposition: CleanupDisposition,
+    *,
+    held_claims: int,
+    open_follow_ups: int,
+    evidence_mode: str = "refreshed",
+    evidence_complete: bool = True,
+    now: str | None = None,
+) -> ClosureDescriptor:
+    """Assemble the canonical closure descriptor from already-computed facts.
+
+    Pure -- no I/O; the caller supplies fresh (or cached) ``info``/
+    ``disposition``/counts. ``FINAL`` requires ALL of: ``evidence_mode ==
+    "refreshed"`` and ``evidence_complete``, Git upstream-complete (git state
+    ``completed`` or the disposition bucket is already ``clean``), zero held
+    claims, zero open follow-ups, no other blocker, and the worktree is not
+    live (``ACTIVE`` has display precedence -- see design.md). A cached or
+    fetch-free descriptor NEVER reports FINAL or a ``safe`` action, even if
+    the underlying facts would otherwise qualify -- destructive authorization
+    always requires a fresh recomputation immediately before acting.
+
+    ``rec.status == "finalizing"`` is surfaced as an explicit ``finalizing``
+    blocker so a wedged record self-reports rather than rendering as
+    blocked-for-no-visible-reason.
+
+    **Not yet wired** (tracked in the effort, not silently omitted): the
+    ``active-effort``, ``inbound-obligation``, ``unverified-squash``,
+    ``live-session``, ``checkout-missing``, ``prune-review-required``,
+    ``incomplete-evidence``, and ``unsupported-descriptor`` blocker codes: a
+    caller can still append them itself (this function only owns what it can
+    derive from `assess`/`cleanup_disposition`'s existing output), and a GONE
+    worktree/managed-record-reap disposition isn't handled here (mirrors
+    `cleanup_disposition` itself, which defers GONE to its caller).
+    """
+    S = git_ops.WorktreeState
+    upstream_complete = (
+        disposition.bucket == "clean" or info.state == S.COMPLETED
+    )
+
+    blockers: list[dict] = []
+    if rec.status == "finalizing":
+        blockers.append({"code": "finalizing", "count": 1})
+    bucket_code = _BUCKET_TO_BLOCKER.get(disposition.bucket)
+    if bucket_code:
+        count = (
+            held_claims if bucket_code == "held-claims"
+            else open_follow_ups if bucket_code == "open-follow-ups"
+            else 1
+        )
+        blockers.append({"code": bucket_code, "count": count})
+    if held_claims and bucket_code != "held-claims":
+        blockers.append({"code": "held-claims", "count": held_claims})
+    if open_follow_ups and bucket_code != "open-follow-ups":
+        blockers.append({"code": "open-follow-ups", "count": open_follow_ups})
+
+    fresh_and_complete = evidence_mode == "refreshed" and evidence_complete
+    final = (
+        fresh_and_complete
+        and upstream_complete
+        and held_claims == 0
+        and open_follow_ups == 0
+        and not blockers
+        and info.state != S.ACTIVE
+    )
+
+    base_label = _BASE_STATE_LABELS.get(info.state, "UNKNOWN")
+    if info.state == S.COMPLETED:
+        label = "FINAL" if final else "MERGED"
+    else:
+        label = base_label
+
+    if final:
+        style = "final"
+    elif info.state == S.ACTIVE:
+        style = "active"
+    elif label == "MERGED":
+        style = "merged-blocked"
+    else:
+        style = base_label.lower()
+
+    compact_parts = [label]
+    if held_claims:
+        compact_parts.append(f"C{held_claims}")
+    if open_follow_ups:
+        compact_parts.append(f"F{open_follow_ups}")
+    compact = " ".join(compact_parts)
+
+    action_disposition = _BUCKET_TO_ACTION_DISPOSITION.get(
+        disposition.bucket, "blocked")
+    if action_disposition == "safe" and not fresh_and_complete:
+        # Cached/fetch-free evidence never authorizes a destructive action,
+        # even when the underlying facts look clean.
+        action_disposition = "blocked"
+
+    return ClosureDescriptor(
+        version=DESCRIPTOR_VERSION,
+        computed_at=now or tracking._now_iso(),
+        evidence_mode=evidence_mode,
+        evidence_complete=evidence_complete,
+        base_state=base_label,
+        label=label,
+        style=style,
+        compact=compact,
+        git={
+            "upstream_complete": upstream_complete,
+            "dirty": info.dirty,
+            "ahead": info.ahead,
+        },
+        claims={"held": held_claims},
+        follow_ups={"open": open_follow_ups},
+        blockers=blockers,
+        final=final,
+        action_disposition=action_disposition,
+        action_bucket=disposition.bucket,
+    )
+
+
 def default_paired_sibling_final(
     rec: tracking.WorktreeRecord,
 ) -> bool | None:
