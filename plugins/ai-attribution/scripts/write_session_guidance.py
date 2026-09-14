@@ -7,6 +7,7 @@ result to the session-scoped file used by the static pointer projection.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -15,13 +16,31 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 _SESSION_IDENTIFIER = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,127})$")
 _MAX_INPUT_BYTES = 64 * 1024
 _GUIDANCE_MAX_BYTES = 4 * 1024
 _SUBPROCESS_TIMEOUT_S = 10.0
+_GIT_SUBPROCESS_TIMEOUT_S = 5.0
 _GUIDANCE_HEADER = "# AI attribution session guidance\n\n"
+
+#: The full policy computation (spawn a fresh shell interpreter to run
+#: emit-policy.*, which itself shells out to git and reads config files) costs
+#: real per-session subprocess-spawn overhead for a result that is stable per
+#: repository, not per session -- see copilot-extensions#2619's sibling
+#: investigation. Cache the computed guidance per repo root, invalidated by a
+#: bounded TTL rather than by replicating emit-policy's own config-precedence
+#: resolution here (which would risk drifting out of sync with it). A cache
+#: read/write failure of any kind always falls through to a full recompute; a
+#: stale-but-unexpired cache is the only risk this introduces, bounded by the
+#: TTL below.
+_CACHE_FORMAT_VERSION = 1
+_CACHE_TTL_SECONDS = int(os.environ.get("AI_ATTRIBUTION_CACHE_TTL_SECONDS", "3600"))
+#: Escape hatch for an operator (or a future setup/refresh skill step) who
+#: knows policy/config changed and does not want to wait out the TTL.
+_FORCE_REFRESH_ENV = "AI_ATTRIBUTION_FORCE_REFRESH"
 
 
 def _read_bounded_stdin() -> bytes:
@@ -80,6 +99,94 @@ def _run_contributor(root: Path, payload: bytes) -> str:
     return _additional_context(completed.stdout)
 
 
+def _repo_cache_key(cwd: str) -> str:
+    """A stable per-repository cache key, keyed by the git toplevel when one
+    can be resolved (grouping every subdirectory of the same repo onto one
+    cache entry), falling back to the raw ``cwd`` string otherwise. The git
+    call here is a single cheap process (typically well under 100ms), not the
+    full emit-policy shell-script invocation this cache exists to avoid."""
+    root = cwd
+    try:
+        completed = subprocess.run(
+            ["git", "-C", cwd, "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_SUBPROCESS_TIMEOUT_S,
+            check=False,
+        )
+        if completed.returncode == 0:
+            candidate = completed.stdout.strip()
+            if candidate:
+                root = candidate
+    except (OSError, subprocess.SubprocessError):
+        pass
+    digest = hashlib.sha256(root.encode("utf-8", "surrogateescape")).hexdigest()
+    return digest[:16]
+
+
+def _cache_dir(home: Path) -> Path:
+    return home / ".copilot" / "ai-attribution-cache"
+
+
+def _read_cached_guidance(home: Path, cwd: str) -> str | None:
+    try:
+        path = _cache_dir(home) / f"{_repo_cache_key(cwd)}.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or data.get("version") != _CACHE_FORMAT_VERSION:
+        return None
+    computed_at = data.get("computed_at")
+    guidance = data.get("guidance")
+    if not isinstance(computed_at, (int, float)) or not isinstance(guidance, str):
+        return None
+    if time.time() - computed_at > _CACHE_TTL_SECONDS:
+        return None
+    return guidance
+
+
+def _write_cached_guidance(home: Path, cwd: str, guidance: str) -> None:
+    try:
+        directory = _cache_dir(home)
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"{_repo_cache_key(cwd)}.json"
+        data = {
+            "version": _CACHE_FORMAT_VERSION,
+            "computed_at": time.time(),
+            "guidance": guidance,
+        }
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=directory,
+            prefix=".ai-attribution-cache.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            json.dump(data, handle)
+        os.replace(temporary, path)
+    except OSError:
+        pass
+
+
+def _run_contributor_cached(root: Path, payload: bytes, *, home: Path, cwd: str | None) -> str:
+    """`_run_contributor`, but reused from a per-repository cache when one is
+    fresh, so a session whose repository and config haven't changed since the
+    last computation skips the (much costlier) shell-script invocation
+    entirely. Never used when ``cwd`` is absent/invalid, or when the operator
+    has set the force-refresh escape hatch."""
+    force_refresh = bool(os.environ.get(_FORCE_REFRESH_ENV))
+    if cwd and not force_refresh:
+        cached = _read_cached_guidance(home, cwd)
+        if cached is not None:
+            return cached
+    guidance = _run_contributor(root, payload)
+    if cwd and guidance:
+        _write_cached_guidance(home, cwd, guidance)
+    return guidance
+
+
 def _is_link_or_reparse(path: Path) -> bool:
     try:
         metadata = path.lstat()
@@ -101,7 +208,9 @@ def write_session_guidance(payload: dict, *, home: Path | None = None) -> bool:
         return False
 
     raw_payload = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-    guidance = _run_contributor(_plugin_root(), raw_payload)
+    payload_cwd = payload.get("cwd")
+    cwd = payload_cwd if isinstance(payload_cwd, str) and payload_cwd else None
+    guidance = _run_contributor_cached(_plugin_root(), raw_payload, home=home, cwd=cwd)
     if guidance:
         content = _GUIDANCE_HEADER + guidance + "\n"
     else:

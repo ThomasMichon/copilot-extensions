@@ -19,7 +19,7 @@ resilient safety boundary through the exact-session dynamic-guidance pattern.
 
 | Entry point | When it applies | Result |
 |-------------|-----------------|--------|
-| `sessionStart` hook | Every session whose launch payload names a valid session and git repository | Writes the generic publication-safety kernel, operator tightening, host-qualified local remote hint, and additive target-repo contribution-guide paths to the exact session file; emits `{}`. |
+| `sessionStart` hook | Every session whose launch payload names a valid session and git repository | Writes the generic publication-safety kernel, operator tightening, host-qualified local remote hint, and additive target-repo contribution-guide paths to the exact session file; emits `{}`. The underlying policy computation is cached per repository (bounded TTL) so a session in an already-seen, unchanged repository skips re-spawning it. |
 | checked-in instruction projections | Every adopting repository | Preserve a static publication-safety fallback and a load-before-action pointer to the exact-session guidance file. |
 | `ai-attribution` skill | Preparing or auditing code, issues, pull requests, comments, releases, docs, or other published artifacts | Walks through audience and ownership classification, disclosure placement, public writing, sanitization, and live post-publication verification. |
 | `ai-attribution-setup` skill | Adopting or repairing the plugin in a repository | Idempotently reconciles the marked always-on fallback, configures host-qualified operator policy, and validates hook-less launch paths. |
@@ -132,6 +132,14 @@ grammar, keys, precedence, authority boundaries, and diagnostics.
   public forge account as `owned_account=<host>/<account>` in operator scope; do
   not place it in target-repo config. Still verify ownership before using the
   disclosure-only own-repo exception.
+- **Guidance looks stale after a config/ownership change:** the computed
+  policy is cached per repository for up to
+  `AI_ATTRIBUTION_CACHE_TTL_SECONDS` (default 3600s) under
+  `~/.copilot/ai-attribution-cache/`, so the hook doesn't re-spawn the full
+  policy computation on every session start for an answer that hasn't
+  changed. Delete that cache directory, or set
+  `AI_ATTRIBUTION_FORCE_REFRESH=1` for one session, to force an immediate
+  recompute.
 
 Run the plugin suite and high-signal lint from the repository root:
 
