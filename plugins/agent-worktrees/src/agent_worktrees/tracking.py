@@ -681,6 +681,12 @@ class WorktreeRecord:
     follow_up: bool = False
     summary: str = ""
     status_note_at: str | None = None
+    # worktree-finality-and-obligations: the most recent timestamp this record
+    # was `finalized` before being atomically reopened (a new/reactivated held
+    # claim arrived after finalize). Preserves the historical fact "this was
+    # finalized as of X" once `completed_at` is cleared by the reopen -- see
+    # `reopen_finalized_owner`. Never set except by a reopen transition.
+    last_finalized_at: str | None = None
     # One worktree-local pointer to the canonical effort and declared slice.
     # It is identity, not a second responsibility flag: an open binding derives
     # the existing follow_up/summary status core. Absent keeps legacy YAML
@@ -2450,6 +2456,8 @@ def load_record(path: Path) -> WorktreeRecord:
         title_asserted=bool(data.get("title_asserted", False)),
         status_note_at=(str(data["status_note_at"])
                         if data.get("status_note_at") else None),
+        last_finalized_at=(str(data["last_finalized_at"])
+                        if data.get("last_finalized_at") else None),
         mux_live=(bool(data["mux_live"])
                   if data.get("mux_live") is not None else None),
         mux_live_at=(str(mux_live_at_raw) if mux_live_at_raw else None),
@@ -2764,6 +2772,8 @@ def _save_record_unlocked(
         content += "title_asserted: true\n"
     if record.status_note_at:
         content += f"status_note_at: {record.status_note_at}\n"
+    if record.last_finalized_at:
+        content += f"last_finalized_at: {record.last_finalized_at}\n"
     if record.active_effort is not None:
         content += yaml.safe_dump(
             {"active_effort": record.active_effort.to_dict()},
@@ -4339,6 +4349,50 @@ def claim_handoff_reservation(
         return "unverified-handoff-registry"
 
 
+def reopen_finalized_owner(record: WorktreeRecord, *, reason: str) -> bool:
+    """Atomically reopen a `finalized` record to `active` (Ph2, reopen txn).
+
+    Called only when a mutation actually **increases** the held-obligation set
+    (a new/reactivated live claim, or -- once Phase 3 lands -- a new/reopened
+    follow-up). Idempotent replays, pure settlement/release, and metadata
+    refreshes never call this (see the design table in
+    `efforts/active/worktree-finality-and-obligations/design.md` § "Finalized
+    reopening"). No-op (returns ``False``) unless ``record.status ==
+    "finalized"`` -- `finalizing`/`orphaned` remain hard-reject states enforced
+    by the caller before this is ever reached.
+
+    Preserves the historical fact "this was finalized as of X" in
+    ``last_finalized_at`` rather than destroying it, and re-arms the
+    disposition-nudge overlay (clears ``status_note_at`` so a stale "nothing
+    left to do" note doesn't linger on a record that just reopened).
+    """
+    if record.status != "finalized":
+        return False
+    if record.completed_at:
+        record.last_finalized_at = record.completed_at
+    update_status(record, "active", save=False)
+    record.status_note_at = None
+    return True
+
+
+def _claim_reopens_owner(record: WorktreeRecord, claim: ResourceClaim) -> bool:
+    """Would journaling ``claim`` onto ``record`` increase its held claims?
+
+    True for a brand-new live (``active``/``at-rest``) claim, or an existing
+    claim's disposition moving from a non-held state (``released``/
+    ``abandoned``) to a held one. False for an idempotent replay (same
+    kind/state/note) and for a mutation that only *decreases* or preserves
+    held-ness (e.g. settling ``active -> at-rest``, or adding an already
+    released/abandoned claim).
+    """
+    if not claim.is_live:
+        return False
+    existing = next((c for c in record.resources if c.ref == claim.ref), None)
+    if existing is None:
+        return True
+    return not existing.is_live
+
+
 def add_resource_claim(
     record: WorktreeRecord,
     claim: ResourceClaim,
@@ -4357,6 +4411,11 @@ def add_resource_claim(
     docs/worktree-lifecycle.md "Finalized is not terminal"). Only
     ``finalizing`` (the in-flight finalize RMW window) and ``orphaned`` (a
     genuinely broken/abandoned record) freeze creator ownership.
+
+    When this mutation actually increases the held-obligation set on a
+    currently-``finalized`` record, it is atomically reopened to ``active``
+    (see :func:`reopen_finalized_owner`) -- an idempotent replay or a
+    non-increasing change (e.g. re-adding an already-released claim) does not.
     """
     if (
         record.status in {"finalizing", "orphaned"}
@@ -4368,6 +4427,7 @@ def add_resource_claim(
         raise ValueError(
             f"owner worktree {record.worktree_id} is {record.status}; "
             "creator ownership is frozen")
+    reopens = _claim_reopens_owner(record, claim)
     for existing in record.resources:
         if existing.ref == claim.ref:
             reservation = claim_handoff_reservation(record, existing)
@@ -4388,10 +4448,15 @@ def add_resource_claim(
                 existing.note = claim.note
             if claim.created_at:
                 existing.created_at = claim.created_at
+            if reopens:
+                reopen_finalized_owner(
+                    record, reason=f"reactivated claim {claim.ref}")
             if save:
                 save_record(record)
             return existing
     record.resources.append(claim)
+    if reopens:
+        reopen_finalized_owner(record, reason=f"new claim {claim.ref}")
     if save:
         save_record(record)
     return claim
