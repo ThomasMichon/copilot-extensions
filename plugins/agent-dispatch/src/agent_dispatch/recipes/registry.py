@@ -129,11 +129,13 @@ _RESOLUTION_CLAUSE = (
 _SUSPEND_CLAUSE = (
     "You may reach a natural checkpoint where you are waiting on something outside "
     "your control (an update to the change, a review, a build). At such a point, "
-    "record your progress and suspend rather than busy-waiting: hand the wait to "
-    "the layer with `agent-dispatch run --detach --resume <your-worktree> -- "
-    "<blocking-wait-command>`, which tears your session down while a cheap waiter "
-    "owns the wait and resumes you -- with your context intact -- when the world "
-    "moves."
+    "hand the wait to the layer with `agent-dispatch run --detach --resume "
+    "<your-worktree> --task <this-task-id> -- <blocking-wait-command>`. Always "
+    "pass `--task` here: it atomically suspends this task the moment the detached "
+    "waiter is confirmed live, so status stops implying you're still actively "
+    "working it (do not also call `agent-dispatch suspend` separately -- that step "
+    "is now folded into `run --detach`). A cheap waiter then owns the wait and "
+    "resumes you -- with your context intact -- when the world moves."
 )
 
 
