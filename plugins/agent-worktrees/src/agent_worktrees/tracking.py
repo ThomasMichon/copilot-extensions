@@ -1390,7 +1390,7 @@ def load_record(path: Path) -> WorktreeRecord:
     try:
         data = _yaml_safe_load(raw)
     except yaml.reader.ReaderError:
-        # tmichon_microsoft/dotfiles#1789: a stray C0 control char (e.g. BEL)
+        # alice_example/dotfiles#1789: a stray C0 control char (e.g. BEL)
         # persisted into a
         # value makes the YAML reader raise on every load, wedging all future
         # disposition writes. Self-heal by stripping the illegal control chars
@@ -2882,7 +2882,7 @@ def update_status(
 #: LF (\x0a) and CR (\x0d) are legitimate YAML stream characters and are kept;
 #: the rest (BEL \x07, etc.) are illegal in a YAML scalar and, once persisted,
 #: make ``yaml.safe_load`` raise a ``ReaderError`` on EVERY subsequent read --
-#: wedging all future disposition writes (tmichon_microsoft/dotfiles#1789). A
+#: wedging all future disposition writes (alice_example/dotfiles#1789). A
 #: stray BEL is easy to
 #: introduce from a caller (e.g. PowerShell renders a literal backtick-a ``` `a ```
 #: as \x07), so sanitize defensively on write and self-heal on read.

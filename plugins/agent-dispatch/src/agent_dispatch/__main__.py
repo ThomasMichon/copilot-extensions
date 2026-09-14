@@ -2487,7 +2487,7 @@ def _cmd_mcp(args: argparse.Namespace) -> int:
 
 #: The `agent-worktrees` worktree-root naming convention observed throughout
 #: this harness: `<project-repo-name>.worktrees/<machine>-<os>-<timestamp>-<hex>`
-#: (e.g. `dotfiles.worktrees\tmichon-cloud1-win-20260910-171507-5474`). A
+#: (e.g. `dotfiles.worktrees\alice-cloud1-win-20260910-171507-5474`). A
 #: worktree checkout's own directory name is per-session/per-machine and is
 #: never a stable repo identity.
 _WORKTREE_PARENT_SUFFIX = ".worktrees"
