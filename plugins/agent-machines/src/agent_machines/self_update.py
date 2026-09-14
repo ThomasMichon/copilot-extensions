@@ -21,28 +21,18 @@ agent-machines state root.
 from __future__ import annotations
 
 import ctypes
-
 import dataclasses
-
 import json
-
 import os
-
 import subprocess
-
 import sys
-
 import time
-
+from collections.abc import Callable
 from contextlib import AbstractContextManager
-
 from dataclasses import dataclass, field
-
 from datetime import UTC, datetime
-
 from pathlib import Path
-
-from typing import Any, Callable
+from typing import Any
 
 from agent_procutil import no_window_kwargs
 
@@ -698,11 +688,9 @@ class TierLock(AbstractContextManager["TierLock"]):
             self.reclaimed = record.get("pid") not in (None, self.pid)
 
         self.started_at = _iso_utc(current)
-
-        assert self.started_at is not None
-
+        if self.started_at is None:
+            raise RuntimeError("could not encode the lock start timestamp")
         _write_lock_record(path, self.tier, self.pid, self.started_at)
-
         return True, "acquired"
 
     def release(self) -> None:
@@ -1182,9 +1170,8 @@ def run_tier(
 
     try:
         attempted_at = _iso_utc(_utc_now())
-
-        assert attempted_at is not None
-
+        if attempted_at is None:
+            raise RuntimeError("could not encode the attempt timestamp")
         write_status(home, tier, attempt=attempted_at)
 
         if tier == WATCHDOG_TIER:
@@ -1206,7 +1193,7 @@ def run_tier(
                     detail=defer,
                     lock_reclaimed=lock.reclaimed,
                     attempted_at=attempted_at,
-                    steps=steps + [StepResult("pre-mutation", "deferred", defer)],
+                    steps=[*steps, StepResult("pre-mutation", "deferred", defer)],
                 )
 
             plugin_refresh = runner(
@@ -1244,7 +1231,7 @@ def run_tier(
                     detail=defer,
                     lock_reclaimed=lock.reclaimed,
                     attempted_at=attempted_at,
-                    steps=steps + [StepResult("pre-restore", "deferred", defer)],
+                    steps=[*steps, StepResult("pre-restore", "deferred", defer)],
                 )
 
             restore_cmd = [

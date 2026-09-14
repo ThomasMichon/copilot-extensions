@@ -12,10 +12,10 @@ resolved package union, including authority metadata.
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import hashlib
 import json
-import copy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -161,19 +161,23 @@ def effective_state_hash(
         for key, spec in sorted(pkg.manage.items()):
             if key == "copilot.settings" or key.startswith("copilot.settings."):
                 continue
-            non_settings_manage.append({
+            non_settings_manage.append(
+                {
+                    "package": pkg.name,
+                    "source_repo": pkg.source_repo,
+                    "key": key,
+                    "spec": _without_declaration_authority(spec),
+                }
+            )
+        package_metadata.append(
+            {
                 "package": pkg.name,
                 "source_repo": pkg.source_repo,
-                "key": key,
-                "spec": _without_declaration_authority(spec),
-            })
-        package_metadata.append({
-            "package": pkg.name,
-            "source_repo": pkg.source_repo,
-            "exclude": pkg.exclude,
-            "aliases": pkg.aliases,
-            "bootstrap_floor": pkg.bootstrap_floor,
-        })
+                "exclude": pkg.exclude,
+                "aliases": pkg.aliases,
+                "bootstrap_floor": pkg.bootstrap_floor,
+            }
+        )
     payload = {
         "settings": _settings_operations(resolved),
         "manage": non_settings_manage,
@@ -327,9 +331,7 @@ class RestoreResult:
 
     @property
     def ok(self) -> bool:
-        return all(r.ok for r in self.resource_results) and all(
-            r.ok for r in self.module_results
-        )
+        return all(r.ok for r in self.resource_results) and all(r.ok for r in self.module_results)
 
 
 class RestoreValidationError(RuntimeError):
@@ -394,8 +396,12 @@ def restore(
 
 
 _SURFACE_ONLY_NAMES = {
-    "copilot.settings", "copilot.permissions", "copilot.trustedFolders",
-    "settings", "permissions", "trustedFolders",
+    "copilot.settings",
+    "copilot.permissions",
+    "copilot.trustedFolders",
+    "settings",
+    "permissions",
+    "trustedFolders",
 }
 
 

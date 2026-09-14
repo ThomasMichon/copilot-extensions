@@ -1,21 +1,15 @@
 from __future__ import annotations
 
 import json
-
 from datetime import UTC, datetime, timedelta
-
 from pathlib import Path
 
 import pytest
 
 from agent_machines import __main__ as cli
-
 from agent_machines import self_update
-
 from agent_machines.manifest import ManifestError, load_package
-
 from agent_machines.reconcile import plan
-
 from agent_machines.resources import resolve_resources
 
 from ._helpers import base_package, write_package
