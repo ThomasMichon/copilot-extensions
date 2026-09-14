@@ -212,8 +212,8 @@ with independent authority and locking.
 broader daily pull + plugin-reconcile + restore tier. Declaring the resource is
 only the authority-selected opt-in signal. `agent-machines self-update run`
 resolves that signal first and is a clean no-op when the selected tier is
-absent. The actual Windows Scheduled Task registration lands through
-`agent-machines self-update install` and the restore reconciler.
+absent. The actual Windows Scheduled Task registration lands in the later
+installer/reconciliation phase of this effort.
 
 ## Path anchors
 

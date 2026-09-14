@@ -23,6 +23,7 @@ from typing import Any
 from . import modules as _modules
 from . import resources as _resources
 from . import self_update as _self_update
+from . import self_update_state as _self_update_state
 from . import validator as _validator
 from .authority import (
     AUTHORITY_MODE_OPAQUE_ADDITIVE,
@@ -245,7 +246,7 @@ def plan(
             "authority_decisions": res.authority_decisions,
         }
         if res.type == "self-update":
-            observed = _self_update.observed_plan_fields(res.id)
+            observed = _self_update_state.observed_plan_fields(res.id)
             entry["observed"] = observed
             entry["summary"] = _self_update.format_plan_summary(
                 entry["summary"],

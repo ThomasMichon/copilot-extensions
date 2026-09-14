@@ -21,19 +21,31 @@ import time
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from agent_procutil import no_window_kwargs
 
-STATE_VERSION = TASKS_VERSION = 1
+from .self_update_state import (
+    STATE_VERSION,
+    TierStatus,
+    load_status,
+    lock_path,
+    mutex_name,
+    state_root,
+    status_path,
+    task_config,
+    task_config_path,
+    tier_status,
+)
+
 WATCHDOG_TIER = "watchdog"
 SWEEP_TIER = "sweep"
 WATCHDOG_STALE_SECONDS = 10 * 60
 SWEEP_STALE_SECONDS = 3 * 60 * 60
 WATCHDOG_START_TIMEOUT_SECONDS = 40
-LIVE_SESSION_DEFER_STATUSES = {"busy", "running", "idle"}
+LIVE_SESSION_DEFER_STATUSES = {"awaiting-operator", "busy", "idle", "running"}
 
 
 @dataclass(frozen=True)
@@ -76,18 +88,6 @@ class CommandResult:
             part.rstrip() for part in (self.stdout, self.stderr) if part and part.strip()
         ).strip()
         return text
-
-
-@dataclass
-class TierStatus:
-    last_attempt: str | None = None
-    last_success: str | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "last_attempt": self.last_attempt,
-            "last_success": self.last_success,
-        }
 
 
 @dataclass
@@ -163,7 +163,7 @@ class LockSnapshot:
 
 
 def _utc_now() -> datetime:
-    return datetime.now(UTC)
+    return datetime.now(timezone.utc)
 
 
 def _iso_utc(moment: datetime | None) -> str | None:
@@ -178,102 +178,41 @@ def _parse_iso_utc(value: str | None) -> datetime | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)
-
-
-def state_root(home: Path | None = None) -> Path:
-    base = home if home is not None else Path.home()
-    return base / ".agent-machines" / "self-update"
-
-
-def status_path(home: Path | None = None) -> Path:
-    return state_root(home) / "status.json"
-
-
-def task_config_path(home: Path | None = None) -> Path:
-    return state_root(home) / "tasks.json"
-
-
-def lock_path(tier: str, home: Path | None = None) -> Path:
-    return state_root(home) / f"{tier}.lock.json"
-
-
-def mutex_name(tier: str) -> str:
-    return f"Global\\AgentMachinesSelfUpdate_{tier}"
-
-
-def load_status(home: Path | None = None) -> dict[str, Any]:
-    path = status_path(home)
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {"schema_version": STATE_VERSION, "tiers": {}}
-    if not isinstance(raw, dict):
-        return {"schema_version": STATE_VERSION, "tiers": {}}
-    tiers = raw.get("tiers")
-    if not isinstance(tiers, dict):
-        tiers = {}
-    return {
-        "schema_version": STATE_VERSION,
-        "tiers": tiers,
-    }
-
-
-def tier_status(home: Path | None, tier: str) -> TierStatus:
-    tiers = load_status(home).get("tiers", {})
-    current = tiers.get(tier, {})
-    if not isinstance(current, dict):
-        current = {}
-    return TierStatus(
-        last_attempt=current.get("last_attempt"),
-        last_success=current.get("last_success"),
-    )
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def write_status(
     home: Path | None, tier: str, *, attempt: str | None = None, success: str | None = None
 ) -> TierStatus:
-    root = state_root(home)
-    root.mkdir(parents=True, exist_ok=True)
-    path = status_path(home)
-    payload = load_status(home)
-    tiers = payload.setdefault("tiers", {})
-    current = tiers.setdefault(tier, {})
-    if attempt is not None:
-        current["last_attempt"] = attempt
-    if success is not None:
-        current["last_success"] = success
-    temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    temp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    os.replace(temp, path)
-    return tier_status(home, tier)
-
-
-def observed_plan_fields(tier: str, home: Path | None = None) -> dict[str, Any]:
-    status = tier_status(home, tier)
-    return {
-        "last_attempt": status.last_attempt,
-        "last_success": status.last_success,
-    }
-
-
-def task_config(home: Path | None = None) -> dict[str, Any]:
-    path = task_config_path(home)
+    mutex = (
+        _WindowsMutex("Global\\AgentMachinesSelfUpdateStatus")
+        if sys.platform == "win32"
+        else None
+    )
+    if mutex is not None:
+        state = mutex.try_acquire()
+        if state not in {"acquired", "abandoned"}:
+            raise RuntimeError("could not acquire the self-update status lock")
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {"schema_version": TASKS_VERSION, "tiers": {}}
-    if not isinstance(raw, dict):
-        return {"schema_version": TASKS_VERSION, "tiers": {}}
-    tiers = raw.get("tiers")
-    if not isinstance(tiers, dict):
-        tiers = {}
-    return {
-        "schema_version": TASKS_VERSION,
-        "tiers": tiers,
-    }
-
+        root = state_root(home)
+        root.mkdir(parents=True, exist_ok=True)
+        path = status_path(home)
+        payload = load_status(home)
+        tiers = payload.setdefault("tiers", {})
+        current = tiers.setdefault(tier, {})
+        if attempt is not None:
+            current["last_attempt"] = attempt
+        if success is not None:
+            current["last_success"] = success
+        temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        temp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        os.replace(temp, path)
+        return tier_status(home, tier)
+    finally:
+        if mutex is not None:
+            mutex.release()
+            mutex.close()
 
 def record_task_config(
     home: Path | None,
@@ -283,37 +222,34 @@ def record_task_config(
     opted_in: bool,
     attempted_elevation: bool,
 ) -> None:
-    root = state_root(home)
-    root.mkdir(parents=True, exist_ok=True)
-    path = task_config_path(home)
-    payload = task_config(home)
-    tiers = payload.setdefault("tiers", {})
-    tiers[tier] = {
-        "installed": installed,
-        "opted_in": opted_in,
-        "attempted_elevation": attempted_elevation,
-        "updated_at": _iso_utc(_utc_now()),
-    }
-    temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    temp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    os.replace(temp, path)
-
-
-def selected_tiers_from_resolved(resolved_resources: list[Any]) -> dict[str, Any]:
-    selected: dict[str, Any] = {}
-    for resource in resolved_resources:
-        if getattr(resource, "type", "") != "self-update":
-            continue
-        selected[str(getattr(resource, "id", ""))] = resource
-    return selected
-
-
-def tier_enabled(resource: Any | None) -> bool:
-    if resource is None:
-        return False
-    desired = getattr(resource, "desired", {}) or {}
-    return str(desired.get("state", "present")) != "absent"
-
+    mutex = (
+        _WindowsMutex("Global\\AgentMachinesSelfUpdateTaskConfig")
+        if sys.platform == "win32"
+        else None
+    )
+    if mutex is not None:
+        state = mutex.try_acquire()
+        if state not in {"acquired", "abandoned"}:
+            raise RuntimeError("could not acquire the self-update task-config lock")
+    try:
+        root = state_root(home)
+        root.mkdir(parents=True, exist_ok=True)
+        path = task_config_path(home)
+        payload = task_config(home)
+        tiers = payload.setdefault("tiers", {})
+        tiers[tier] = {
+            "installed": installed,
+            "opted_in": opted_in,
+            "attempted_elevation": attempted_elevation,
+            "updated_at": _iso_utc(_utc_now()),
+        }
+        temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        temp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        os.replace(temp, path)
+    finally:
+        if mutex is not None:
+            mutex.release()
+            mutex.close()
 
 def _pid_alive(pid: int | None) -> bool:
     if not pid or pid <= 0:
@@ -542,7 +478,7 @@ def default_command_runner(
 
 
 def default_launcher_starter(config: DtsshConfig) -> bool:
-    pwsh = shutil_which("pwsh") or shutil_which("powershell")
+    pwsh = shutil_which("pwsh")
     system_root = os.environ.get("SystemRoot", r"C:\Windows")
     conhost = Path(system_root) / "System32" / "conhost.exe"
     if pwsh is None or not conhost.is_file():
@@ -580,7 +516,7 @@ def default_launcher_starter(config: DtsshConfig) -> bool:
 
 
 def default_process_lister() -> list[dict[str, Any]]:
-    pwsh = shutil_which("pwsh") or shutil_which("powershell")
+    pwsh = shutil_which("pwsh")
     if pwsh is None:
         raise RuntimeError("pwsh is required to inspect dtssh launcher liveness")
     script = (
@@ -607,7 +543,16 @@ def default_process_lister() -> list[dict[str, Any]]:
 
 def default_worktree_lister() -> list[dict[str, Any]]:
     result = default_command_runner(
-        ["agent-worktrees", "list", "--json", "--fresh", "--tracking-status", "active"],
+        [
+            "agent-worktrees",
+            "-p",
+            "copilot-extensions",
+            "list",
+            "--json",
+            "--fresh",
+            "--tracking-status",
+            "active",
+        ],
         timeout=300,
     )
     if result.returncode != 0:
@@ -721,7 +666,7 @@ def fast_forward_repo(
     repo: Path, *, runner: Callable[..., CommandResult] = default_command_runner
 ) -> StepResult:
     status = runner(
-        ["git", "status", "--porcelain", "--untracked-files=no"], cwd=repo, timeout=120
+        ["git", "status", "--porcelain"], cwd=repo, timeout=120
     )
     if status.returncode != 0:
         return StepResult(
@@ -810,13 +755,7 @@ def live_session_deferral_reason(
         return f"cannot safely determine live worktree state: {exc}"
     for worktree in worktrees:
         live_rest = str(worktree.get("live_rest") or "").casefold()
-        live_session_ids = worktree.get("live_session_ids")
-        binding = worktree.get("reciprocal_relation", {}).get("binding", {}).get("state")
-        if (
-            live_rest in LIVE_SESSION_DEFER_STATUSES
-            or (isinstance(live_session_ids, list) and bool(live_session_ids))
-            or binding in {"bound-here", "bound-elsewhere"}
-        ):
+        if live_rest in LIVE_SESSION_DEFER_STATUSES:
             label = worktree.get("title") or worktree.get("summary") or worktree.get("id")
             return f"live session is active in worktree {label}"
     return None
@@ -826,6 +765,7 @@ def run_tier(
     tier: str,
     *,
     opted_in: bool,
+    machine: str | None = None,
     discovered_repos: list[Any] | None = None,
     runner: Callable[..., CommandResult] = default_command_runner,
     process_lister: Callable[[], list[dict[str, Any]]] = default_process_lister,
@@ -870,7 +810,6 @@ def run_tier(
                 launcher_starter=launcher_starter,
             )
         else:
-            steps = list(sweep_repo_paths(discovered_repos or [], runner=runner))
             defer = live_session_deferral_reason(worktree_lister=worktree_lister)
             if defer is not None:
                 return RunResult(
@@ -880,26 +819,16 @@ def run_tier(
                     detail=defer,
                     lock_reclaimed=lock.reclaimed,
                     attempted_at=attempted_at,
-                    steps=[*steps, StepResult("pre-mutation", "deferred", defer)],
+                    steps=[StepResult("pre-mutation", "deferred", defer)],
                 )
-            plugin_refresh = runner(
-                ["agent-worktrees", "reconcile-plugins", "--apply", "--with-payload-refresh"],
-                timeout=3600,
-            )
-            steps.append(
-                StepResult(
-                    "reconcile-plugins",
-                    "changed" if plugin_refresh.returncode == 0 else "error",
-                    plugin_refresh.output or "reconciled plugin payloads and runtimes",
-                    command=plugin_refresh.argv,
-                )
-            )
-            if plugin_refresh.returncode != 0:
+            steps = list(sweep_repo_paths(discovered_repos or [], runner=runner))
+            pull_errors = [step for step in steps if step.status == "error"]
+            if pull_errors:
                 return RunResult(
                     tier=tier,
                     status="error",
                     opted_in=True,
-                    detail=plugin_refresh.output or "agent-worktrees reconcile-plugins failed",
+                    detail=pull_errors[0].detail or "repository pull failed",
                     lock_reclaimed=lock.reclaimed,
                     attempted_at=attempted_at,
                     steps=steps,
@@ -915,6 +844,54 @@ def run_tier(
                     attempted_at=attempted_at,
                     steps=[*steps, StepResult("pre-restore", "deferred", defer)],
                 )
+            repo_names = [
+                getattr(repo, "name", "")
+                for repo in (discovered_repos or [])
+                if getattr(repo, "name", "")
+            ]
+            if not repo_names:
+                repo_names = ["copilot-extensions"]
+            for repo_name in sorted(set(repo_names)):
+                plugin_refresh = runner(
+                    [
+                        "agent-worktrees",
+                        "-p",
+                        repo_name,
+                        "reconcile-plugins",
+                        "--apply",
+                        "--with-payload-refresh",
+                    ],
+                    timeout=3600,
+                )
+                steps.append(
+                    StepResult(
+                        f"reconcile-plugins:{repo_name}",
+                        "changed" if plugin_refresh.returncode == 0 else "error",
+                        plugin_refresh.output or "reconciled plugin payloads and runtimes",
+                        command=plugin_refresh.argv,
+                    )
+                )
+                if plugin_refresh.returncode != 0:
+                    return RunResult(
+                        tier=tier,
+                        status="error",
+                        opted_in=True,
+                        detail=plugin_refresh.output or "agent-worktrees reconcile-plugins failed",
+                        lock_reclaimed=lock.reclaimed,
+                        attempted_at=attempted_at,
+                        steps=steps,
+                    )
+                defer = live_session_deferral_reason(worktree_lister=worktree_lister)
+                if defer is not None:
+                    return RunResult(
+                        tier=tier,
+                        status="deferred",
+                        opted_in=True,
+                        detail=defer,
+                        lock_reclaimed=lock.reclaimed,
+                        attempted_at=attempted_at,
+                        steps=[*steps, StepResult("pre-restore", "deferred", defer)],
+                    )
             restore_cmd = [
                 sys.executable,
                 "-m",
@@ -923,6 +900,8 @@ def run_tier(
                 "--apply",
                 "--all-projects",
             ]
+            if machine:
+                restore_cmd.extend(["--machine", machine])
             restore_result = runner(restore_cmd, timeout=7200)
             steps.append(
                 StepResult(

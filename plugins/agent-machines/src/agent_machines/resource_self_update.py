@@ -24,6 +24,9 @@ class SelfUpdateResourceHandler(ResourceHandler):
     def display_id(self, decl: dict[str, Any]) -> str:
         return str(decl.get("tier"))
 
+    def applies_on(self, decl: dict[str, Any], plat: str) -> bool:
+        return super().applies_on(decl, plat) and plat == "windows"
+
     def merge(
         self, members: list[ResourceContribution]
     ) -> tuple[dict[str, Any], list[ResourceFinding], list[dict[str, Any]]]:
@@ -61,7 +64,7 @@ class SelfUpdateResourceHandler(ResourceHandler):
             dry_run,
             "skip",
             skipped_reason=(
-                "self-update task reconciliation is installer-owned; use "
-                "`agent-machines self-update install`"
+                "self-update task reconciliation lands in the installer phase; "
+                "this phase records only the opt-in signal"
             ),
         )

@@ -28,6 +28,7 @@ from . import playwright_cli as _playwright_cli
 from . import reconcile as _reconcile
 from . import resources as _resources
 from . import self_update as _self_update
+from . import self_update_state as _self_update_state
 from . import validator as _validator
 from .manifest import ManifestError, RequirementPackage
 from .surfaces._common import SurfaceStateError
@@ -67,9 +68,7 @@ def _collect_reconcile_packages(
         if candidate is not None:
             repo_name, repo_path = candidate
             if not repo_path.is_dir():
-                raise ManifestError(
-                    f"registered repo {repo_name!r} is unavailable at {repo_path}"
-                )
+                raise ManifestError(f"registered repo {repo_name!r} is unavailable at {repo_path}")
             repo_anchor = repo_path
         else:
             repo_path = Path(selector).expanduser()
@@ -80,9 +79,7 @@ def _collect_reconcile_packages(
             try:
                 repo_name, repo_path, repo_anchor = _layout.resolve_cwd_repo(repo_path)
             except _layout.NotGitRepositoryError as exc:
-                raise ManifestError(
-                    f"repo path {selector!r} is not a Git repository"
-                ) from exc
+                raise ManifestError(f"repo path {selector!r} is not a Git repository") from exc
     else:
         repo_name, repo_path, repo_anchor = _layout.resolve_cwd_repo()
         project_repos = _discover.project_scope_repos(
@@ -136,9 +133,7 @@ def _resolve_machine_identity(args: argparse.Namespace) -> _identity.MachineIden
             if candidate.is_dir():
                 topology_repos.append(candidate)
     else:
-        topology_repos.extend(
-            candidate.path for candidate in _discover.candidate_repos()
-        )
+        topology_repos.extend(candidate.path for candidate in _discover.candidate_repos())
         try:
             topology_repos.append(_layout.resolve_cwd_repo()[1])
         except _layout.NotGitRepositoryError:
@@ -174,13 +169,18 @@ def _cmd_discover(args: argparse.Namespace) -> int:
                 accepted_machines=identity.accepted,
             )
         ]
-        print(json.dumps({
-            "machine": identity.canonical,
-            "machine_raw": identity.raw,
-            "machine_aliases": list(identity.accepted),
-            "machine_identity_warnings": list(identity.warnings),
-            "repos": out,
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "machine": identity.canonical,
+                    "machine_raw": identity.raw,
+                    "machine_aliases": list(identity.accepted),
+                    "machine_identity_warnings": list(identity.warnings),
+                    "repos": out,
+                },
+                indent=2,
+            )
+        )
         return 0
     _emit_identity_warnings(identity)
     return _discover._main(
@@ -200,14 +200,19 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     )
     ok = all(report.ok for report in reports)
     if args.json:
-        print(json.dumps({
-            "machine": machine,
-            "machine_raw": identity.raw,
-            "machine_aliases": list(identity.accepted),
-            "machine_identity_warnings": list(identity.warnings),
-            "ok": ok,
-            "repos": [report.to_dict() for report in reports],
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "machine": machine,
+                    "machine_raw": identity.raw,
+                    "machine_aliases": list(identity.accepted),
+                    "machine_identity_warnings": list(identity.warnings),
+                    "ok": ok,
+                    "repos": [report.to_dict() for report in reports],
+                },
+                indent=2,
+            )
+        )
         return 0 if ok else 1
 
     print(f"doctor for {machine}")
@@ -334,8 +339,9 @@ def _print_authority_decisions(decisions: list[dict[str, object]]) -> None:
     for decision in decisions:
         identity = decision["identity"]
         if isinstance(identity, dict):
-            key = ":".join([str(identity.get("type", ""))]
-                           + [str(item) for item in identity.get("key", [])])
+            key = ":".join(
+                [str(identity.get("type", ""))] + [str(item) for item in identity.get("key", [])]
+            )
             label = f"{key}.{identity.get('field', '')}"
         else:
             label = str(identity)
@@ -347,10 +353,7 @@ def _print_authority_decisions(decisions: list[dict[str, object]]) -> None:
             f"{item['source_repo']}:{item['package']}@{item['authority']}"
             for item in decision.get("superseded", [])
         )
-        print(
-            f"  authority {decision['domain']} {label}: "
-            f"{selected} supersedes {superseded}"
-        )
+        print(f"  authority {decision['domain']} {label}: {selected} supersedes {superseded}")
 
 
 def _cmd_restore(args: argparse.Namespace) -> int:
@@ -518,13 +521,18 @@ def _cmd_self_update_run(args: argparse.Namespace) -> int:
         machine,
         _discover.current_platform(),
     )
-    resource = _self_update.selected_tiers_from_resolved(resolved_resources).get(args.tier)
+    resource = _self_update_state.selected_tiers_from_resolved(resolved_resources).get(args.tier)
     result = _self_update.run_tier(
         args.tier,
-        opted_in=_self_update.tier_enabled(resource),
-        discovered_repos=_discover.discover(
-            machine,
-            accepted_machines=identity.accepted,
+        opted_in=_self_update_state.tier_enabled(resource),
+        machine=machine,
+        discovered_repos=(
+            _discover.discover(
+                machine,
+                accepted_machines=identity.accepted,
+            )
+            if args.tier == _self_update.SWEEP_TIER
+            else None
         ),
     )
     if args.json:
@@ -606,8 +614,8 @@ def _build_parser() -> argparse.ArgumentParser:
         scope.add_argument(
             "--repo",
             help="reconcile exactly one registered repo name or repository path "
-                 "(default: adopted project containing CWD plus its required "
-                 "supplemental repositories)",
+            "(default: adopted project containing CWD plus its required "
+            "supplemental repositories)",
         )
         scope.add_argument(
             "--all-projects",
@@ -622,12 +630,21 @@ def _build_parser() -> argparse.ArgumentParser:
     add("installer-readiness", _cmd_installer_readiness)
     restore = add("restore", _cmd_restore)
     add_reconcile_scope(restore)
-    restore.add_argument("--apply", action="store_true",
-                         help="make changes (default is a dry-run preview)")
-    restore.add_argument("--only", action="append", metavar="NAME",
-                         help="restrict to named surfaces/modules (repeatable)")
-    restore.add_argument("--verbose", "-v", action="store_true",
-                         help="show each module's captured output (shown by default in a dry-run)")
+    restore.add_argument(
+        "--apply", action="store_true", help="make changes (default is a dry-run preview)"
+    )
+    restore.add_argument(
+        "--only",
+        action="append",
+        metavar="NAME",
+        help="restrict to named surfaces/modules (repeatable)",
+    )
+    restore.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="show each module's captured output (shown by default in a dry-run)",
+    )
     self_update = sub.add_parser(
         "self-update",
         help="Run or manage unattended self-update tiers.",
