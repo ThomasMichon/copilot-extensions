@@ -175,3 +175,11 @@ class TestRevalidateBeforeReap:
                                                 repo=self._repo(), active_paths=set())
         assert out is original
         assert reason is None
+
+    def test_empty_path_skips_revalidation(self):
+        rec = dataclasses.replace(_rec("finalized"), worktree_path="")
+        original = _info(git_ops.WorktreeState.COMPLETED)
+        out, reason = m._revalidate_before_reap(rec, original,
+                                                repo=self._repo(), active_paths=set())
+        assert out is original
+        assert reason is None

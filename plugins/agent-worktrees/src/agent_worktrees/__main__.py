@@ -15431,12 +15431,9 @@ def _revalidate_before_reap(
         active_paths=active_paths,
     )
     fresh_info = _apply_tracking_override(latest, fresh_info)
-    if fresh_info.dirty > 0 or fresh_info.state in (
-        git_ops.WorktreeState.DIRTY,
-        git_ops.WorktreeState.ACTIVE,
-    ):
-        if fresh_info.state == git_ops.WorktreeState.ACTIVE:
-            return None, "worktree became active since the initial scan"
+    if fresh_info.state == git_ops.WorktreeState.ACTIVE:
+        return None, "worktree became active since the initial scan"
+    if fresh_info.state == git_ops.WorktreeState.DIRTY or fresh_info.dirty > 0:
         return None, "worktree became dirty since the initial scan"
     return fresh_info, None
 
@@ -15651,8 +15648,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
             )
             if revalidated is None:
                 output.warn(
-                    f"Skipping {rec.worktree_id}: "
-                    f"{revalidate_reason or 'worktree became dirty/active since the initial scan'}"
+                    f"Skipping {rec.worktree_id}: {revalidate_reason}"
                 )
                 continue
             info = revalidated
