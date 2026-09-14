@@ -7,17 +7,6 @@ _command="agent-vault"
 _self_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
 _payload_root="$(CDPATH= cd -- "$_self_dir/.." && pwd -P)"
 
-if [ -n "${COPILOT_PLUGIN_ROOT:-}" ]; then
-    _context_root="$(CDPATH= cd -- "$COPILOT_PLUGIN_ROOT" 2>/dev/null && pwd -P)" || {
-        printf '[%s] invalid COPILOT_PLUGIN_ROOT: %s\n' "$_command" "$COPILOT_PLUGIN_ROOT" >&2
-        exit 126
-    }
-    if [ "$_context_root" != "$_payload_root" ]; then
-        printf '[%s] payload context mismatch: shim=%s context=%s\n' \
-            "$_command" "$_payload_root" "$_context_root" >&2
-        exit 126
-    fi
-fi
 if [ ! -f "$_payload_root/plugin.json" ]; then
     printf '[%s] payload root is not a plugin: %s\n' "$_command" "$_payload_root" >&2
     exit 126

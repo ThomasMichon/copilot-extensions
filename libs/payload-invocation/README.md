@@ -13,7 +13,6 @@ global command found through `PATH`.
 Generated shims:
 
 - derive and validate the payload from their own file location;
-- reject a conflicting `COPILOT_PLUGIN_ROOT`;
 - leave a replaceable payload working directory before provisioning or launch;
 - resolve the runtime only through the payload's canonical runtime resolver;
 - preserve caller arguments and child exit status;

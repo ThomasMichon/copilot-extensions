@@ -2179,7 +2179,16 @@ def test_multi_command_shim_dispatches_its_own_module(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX shim test")
-def test_posix_shim_rejects_conflicting_payload_context(tmp_path: Path) -> None:
+def test_posix_shim_ignores_a_different_plugins_copilot_plugin_root(
+    tmp_path: Path,
+) -> None:
+    """A caller plugin's own ``COPILOT_PLUGIN_ROOT`` must never block a
+    cross-plugin subprocess invocation of a *different* plugin's shim -- e.g.
+    a picker running under one plugin shelling out to another's CLI. The shim
+    derives its payload strictly from its own file location and no longer
+    consults ``COPILOT_PLUGIN_ROOT`` at all (copilot-extensions #2650 fallout:
+    that check produced a false-positive "payload context mismatch" for every
+    such legitimate cross-plugin call)."""
     manifest = _manifest(tmp_path)
     generator.process_manifest(manifest, check=False)
     plugin = manifest.parent
@@ -2195,8 +2204,7 @@ def test_posix_shim_rejects_conflicting_payload_context(tmp_path: Path) -> None:
         text=True,
         check=False,
     )
-    assert result.returncode == 126
-    assert "payload context mismatch" in result.stderr
+    assert "payload context mismatch" not in result.stderr
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX shim test")
@@ -2293,13 +2301,9 @@ def test_windows_templates_preserve_context_and_release_payload_cwd(
     powershell = next(
         content for path, content in generated.items() if path.suffix == ".ps1"
     )
-    cmd = next(
-        content for path, content in generated.items() if path.suffix == ".cmd"
-    )
     assert "[IO.Directory]::SetCurrentDirectory($_outside)" in powershell
     assert "StartsWith($_payloadPrefix" in powershell
     assert "[IO.FileShare]::None" in powershell
-    assert "if not defined COPILOT_PLUGIN_ROOT" in cmd
 
 
 @pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh is not installed")

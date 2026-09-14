@@ -4,17 +4,6 @@ $env:PYTHONUTF8 = '1'
 $_command = 'prepare-session-log'
 $_payloadRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 
-if ($env:COPILOT_PLUGIN_ROOT) {
-    try { $_contextRoot = (Resolve-Path $env:COPILOT_PLUGIN_ROOT).Path }
-    catch {
-        [Console]::Error.WriteLine("[$_command] invalid COPILOT_PLUGIN_ROOT: $($env:COPILOT_PLUGIN_ROOT)")
-        exit 126
-    }
-    if (-not [StringComparer]::OrdinalIgnoreCase.Equals($_contextRoot, $_payloadRoot)) {
-        [Console]::Error.WriteLine("[$_command] payload context mismatch: shim=$_payloadRoot context=$_contextRoot")
-        exit 126
-    }
-}
 if (-not (Test-Path -LiteralPath (Join-Path $_payloadRoot 'plugin.json'))) {
     [Console]::Error.WriteLine("[$_command] payload root is not a plugin: $_payloadRoot")
     exit 126
