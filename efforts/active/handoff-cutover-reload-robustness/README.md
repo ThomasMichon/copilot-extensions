@@ -18,7 +18,7 @@ visions:
 - **Repo:** copilot-extensions (migrated 2026-09-13 from a private facility repo, which
   originally hosted this as effort home + tracking) — the `agent-worktrees` +
   `context-handoff` plugins and the Copilot CLI runtime.
-- **Branch(es):** `worktree/the-dev-host-wsl-20260820-093527-de5f`
+- **Branch(es):** _historical source branch omitted (private identifier)_
 - **Created:** 2026-08-20
 - **Status:** Active — **Sub B (bash-first seed) shipped & deployed** (context-handoff
   `0.1.0-dev36`, the primary facility dev host), the effective fix, now **covered by unit tests + a

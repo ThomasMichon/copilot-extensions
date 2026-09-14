@@ -147,7 +147,7 @@ Verbatim from the operator:
 - [x] Migrate the three related private-facility-repo effort docs into this
   repo (separate PR, this-repo#2593 — the private repo's own issue for this
   migration is not public).
-- [ ] File the umbrella issue + sub-issues for Phases 1-5 below.
+- [x] File the umbrella issue + sub-issues for Phases 1-5 below.
   - Filed: umbrella #2594; sub-issues #2595 (force tier), #2596 (continuity
     content), #2597 (coordinator fallback), #2598 (configurability), #2599
     (lineage/diagnostics coordination).

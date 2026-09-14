@@ -10,12 +10,9 @@ last_reconciled: 2026-09-01
 > on 2026-09-13, as part of reconciling handoff/cutover effort tracking into
 > the repo that actually owns the `agent-bridge` mechanism. Original
 > frontmatter referenced that repo's `visions/agent-fabric/agent-bridge`
-> and `visions/agent-fabric/neuron-forge`; updated above to this repo's flat
-> `visions/agent-fabric` and `visions/plugins/agent-bridge` (there is no
-> copilot-extensions equivalent for the Neuron Forge side — NF is an
-> app hosted in that private facility, and this effort's NF-wiring portion
-> remains a legitimate artifact of that private repo even though the
-> mechanism it drove lives here). This is a **done/archived historical
+> and a private downstream-app vision path; updated above to this repo's flat
+> `visions/agent-fabric` and `visions/plugins/agent-bridge`. This is a
+> **done/archived historical
 > record**, migrated verbatim. **A trailing `†` marks a reference to that
 > private repo's own issue tracker — not resolvable here.**
 
@@ -23,16 +20,16 @@ last_reconciled: 2026-09-01
 
 - **Slug:** `bridge-native-context-handoff`
 - **Repo:** copilot-extensions (migrated 2026-09-13 from a private facility
-  repo, which originally hosted this as effort home + **neuron-forge**
+  repo, which originally hosted this as effort home + downstream-app
   wiring) — the `agent-bridge` plugin, which owns the runtime
-- **Branch:** `worktree/the-dev-host-wsl-20260801-185734-00fa`
+- **Branch:** _historical source branch omitted (private identifier)_
 - **Created:** 2026-08-01
 - **Status:** **Done / Archived (completed 2026-08-02)** — all items A–G shipped
   and deployed; all issues closed.
   Bridge side (A–E) is agent-bridge 0.4.0-dev209 on the primary facility dev host (primitive,
   `session_handoff` event, control surface, opt-in context-pressure auto-handoff
-  + prompt-triggered roll). NF side (F/G) landed via PR #4161† and is deployed on
-  the primary facility dev host (Neuron Forge v0.2.1): seeded in-place roll with cold-roll fallback,
+  + prompt-triggered roll). Downstream-consumer side (F/G) landed via PR #4161† and is deployed on
+  the primary facility dev host (downstream consumer v0.2.1): seeded in-place roll with cold-roll fallback,
   changeover surfaced as a legible seam, and the consumer follows a
   bridge-initiated handoff. End-to-end threshold validation on the primary facility dev host remains
   as optional stretch verification.
@@ -42,14 +39,14 @@ last_reconciled: 2026-09-01
   #4142† (C — `session_handoff` event) ·
   #4143† (D — control surface) ·
   #4144† (E/E2 — auto + prompt-triggered) ·
-  #4145† (F — NF seed the roll) ·
-  #4146† (G — NF surface + seam)
+  #4145† (F — downstream consumer seed the roll) ·
+  #4146† (G — downstream consumer surface + seam)
 - **Sibling effort:** [`handoff-live-cutover`](../../../active/handoff-live-cutover/README.md)
   — the **interactive-CLI / mux** live cutover (same north star, different
   substrate). This effort is its **automated / bridge-hosted ACP** analogue.
 - **Related efforts (historical, from the source repo — not present in this
   checkout):** `live-session-messaging` (SDK `session.send` injection, prior
-  art) · `neuron-forge-telemetry` · `agent-bridge-zero-downtime-deploy` (its
+  art) · `downstream-consumer-telemetry` · `agent-bridge-zero-downtime-deploy` (its
   `zdd` drain/cutover primitives were prior art for spin-down/spin-up
   sequencing).
 
@@ -61,7 +58,7 @@ CLI. Today the interactive path lives in the `context-handoff` Copilot extension
 it watches `session.usage_info`, nudges at 55 %/70 %, and — under a mux — spins up
 a successor Copilot in place and retires the old pane. **None of that reaches a
 session that agent-bridge hosts** (a bridge-owned `copilot --acp` child, which
-Neuron Forge and bridge-as-agent callers drive). Those sessions run headless,
+downstream consumer and bridge-as-agent callers drive). Those sessions run headless,
 with no mux pane and no operator to paste a prompt.
 
 But the bridge **controls the ACP session** — it owns the child process, sees its
@@ -74,7 +71,7 @@ two halves of the interactive system into the runtime:
 2. **In-place handoff** — when context gets large, the session produces a
    continuation brief, the bridge **retires the ACP child and spawns a successor
    in the same worktree seeded with that brief**, and **announces the changeover
-   on the session's event surface** so every caller (the Neuron Forge cockpit, a
+   on the session's event surface** so every caller (the downstream consumer UI, a
    bridge-as-agent host, a CLI reader) is informed and follows the baton in place.
 
 **North star:** a bridge-hosted session that hands off and keeps going —
@@ -87,7 +84,7 @@ Port context-aware in-place handoff from interactive mux-hosted sessions into
 automated agent-bridge sessions. The bridge should generate and carry a
 continuation brief into a successor on the same worktree, expose explicit and
 opt-in automatic triggers, announce the changeover as a first-class event, and
-let Neuron Forge follow the successor without presenting a dead session. A
+let downstream consumer follow the successor without presenting a dead session. A
 prompt sent from the mobile cockpit into a context-saturated session must hand
 off first and then deliver that prompt to the successor.
 
@@ -104,10 +101,10 @@ effort:
   sessions"** and Behavior **"handoff-carries-context-and-announces-the-
   changeover"** (originally recorded against a nested private-repo vision
   path; now `visions/plugins/agent-bridge/README.md` here).
-- **neuron-forge** already stated **usage/context signals** in transcript
+- **downstream-consumer** already stated **usage/context signals** in transcript
   fidelity. Added: Feature **"in-place session handoff, surfaced not swallowed"**
   and Behavior **"follow-the-handoff-dont-mourn-it"** (recorded against
-  neuron-forge's own private-repo vision — NF has no copilot-extensions
+  downstream-consumer's own private-repo vision — downstream consumer has no copilot-extensions
   equivalent; this bullet is historical record only).
 
 ## Current State (what already exists — the substrate)
@@ -134,7 +131,7 @@ The port is mostly *wiring existing pieces together*, not greenfield.
 - `libs/zdd/` (cutover/breadcrumb/routing) — prior-art spin-down->spin-up
   sequencing (for *daemon* redeploy, not ACP-child handoff).
 
-**neuron-forge (`services/neuron-forge/`):**
+**downstream-consumer ((downstream consumer service)):**
 - `server/core/session_bridge.py::new_session()` **already rolls in place**:
   stops the old bridge session, starts a new one in the *same worktree*, updates
   the context in-place, and emits `session_rolled` + `session_created`
@@ -158,12 +155,12 @@ These are defaults recorded for review; the operator may redirect.
    events). Fallback if the child cannot answer: a bridge-synthesized brief from
    session-side state (first prompt, files modified, turn count).
 2. **Trigger — explicit + opt-in auto.** _(confirmed)_ Expose the handoff as an
-   **explicit operation** (bridge CLI verb + HTTP endpoint + an NF cockpit
+   **explicit operation** (bridge CLI verb + HTTP endpoint + an downstream consumer UI
    action) any caller can invoke, **plus** an **opt-in policy** to fire it
    automatically at the `critical` threshold for a session no operator is
    watching. Auto is **off by default**; interactive/observed callers keep
    control.
-   - **Mobile is the forcing function.** On a phone (the NF cockpit through the
+   - **Mobile is the forcing function.** On a phone (the downstream consumer UI through the
      gateway) there are **no slash commands and no manual session creation** —
      no `/new`, no `/clear`, no `/handoff`. The *only* way an operator on mobile
      continues past a full context window is a handoff that the runtime performs
@@ -177,10 +174,10 @@ These are defaults recorded for review; the operator may redirect.
 3. **Changeover notice — a first-class event (contract), open to an ACP rider.**
    _(confirmed)_ A new `session_handoff` event (payload: `rolled_from`,
    `rolled_to`/successor id, worktree id, handoff summary) is part of the
-   **bridge's event contract** and rides the existing SSE/event surface. NF
+   **bridge's event contract** and rides the existing SSE/event surface. downstream consumer
    renders a "handed off — continuing here" seam and follows the successor;
    bridge-as-agent CLI callers see the changeover in their event stream.
-   `session_rolled` stays for NF's own roll; the new event is the
+   `session_rolled` stays for downstream consumer's own roll; the new event is the
    *bridge-originated* changeover. Where a downstream/upstream ACP peer should
    also learn of the changeover, the same notice may additionally be surfaced as
    an **ACP extension rider** (a protocol-level session notification) so the
@@ -193,7 +190,7 @@ These are defaults recorded for review; the operator may redirect.
 5. **Safety — drain before retire.** The retire->spawn follows the existing
    `drain-before-letting-go` behavior: capture the handoff, let the final turn
    settle, then stop the old child and spawn the seeded successor. A failed
-   successor spawn must not orphan the worktree (mirror NF `new_session()`'s
+   successor spawn must not orphan the worktree (mirror downstream consumer `new_session()`'s
    rollback-to-error).
 
 ## Cross-Repo Ordering
@@ -208,7 +205,7 @@ Per the facility cross-repo rule (PR-gated intent before unreviewed push):
    historically landed by direct pushes to `main`, as recorded in the journal.
    Any future follow-up must use the repo's current PR-required
    `pr-self-merge` profile.
-3. **the private facility repo PR (neuron-forge):** seed the roll with the handoff, surface
+3. **the private facility repo PR (downstream-consumer):** seed the roll with the handoff, surface
    per-session context utilization + a handoff affordance, render the changeover
    seam, follow the successor.
 
@@ -247,13 +244,13 @@ Per the facility cross-repo rule (PR-gated intent before unreviewed push):
       successor — ignores `unwatched_only` (sender is explicitly asking). The
       mobile "continue by sending the next message" path. 8 tests in
       `test_auto_handoff.py`; deployed the primary facility dev host._
-- [x] **F (#4145†) — NF: seed the roll** (the private facility repo). _Done. `session_bridge.new_session()`
+- [x] **F (#4145†) — downstream consumer: seed the roll** (the private facility repo). _Done. `session_bridge.new_session()`
       now prefers a brief-carrying in-place handoff (via the bridge's
       `POST /sessions/{id}/handoff`) so the successor opens *warm*, with a plain
       cold-roll fallback when the session is ineligible (mid-turn / single-checkout
       agent / spawn failure) — the operator's "new session" request never fails.
       `bridge_client.handoff_session()` + `BridgeHandoffUnavailableError`; 3 tests._
-- [x] **G (#4146†) — NF: surface context + changeover** (the private facility repo). _Done.
+- [x] **G (#4146†) — downstream consumer: surface context + changeover** (the private facility repo). _Done.
       Per-session context-utilization already renders (`ctx N%` in the status bar);
       added a "hand off" (↻) composer action that triggers the seeded roll — the
       essential mobile path (no /new or /clear on phones). Renders the
@@ -270,7 +267,7 @@ Per the facility cross-repo rule (PR-gated intent before unreviewed push):
   same worktree seeded with the brief, records the successor linkage, and emits
   `session_handoff` with both ids. Failure-to-spawn rolls back without orphaning.
   Auto-trigger fires once at `critical` only when opted in.
-- **NF** (`services/neuron-forge/tests/`): a `session_handoff` event re-points the
+- **downstream consumer** (`services/downstream-consumer/tests/`): a `session_handoff` event re-points the
   UI context to the successor on the same worktree route and renders the seam;
   the successor's transcript opens with the seeded brief.
 - **End-to-end (the primary facility dev host):** drive a bridge session to the critical threshold,
@@ -281,16 +278,16 @@ Per the facility cross-repo rule (PR-gated intent before unreviewed push):
 
 | Machine | Role in this effort | Reached via |
 |---------|---------------------|-------------|
-| the primary facility dev host | Primary dev + bridge/NF host for e2e validation | local (this worktree) |
+| the primary facility dev host | Primary dev + bridge/downstream consumer host for e2e validation | local (this worktree) |
 | a secondary facility host | Secondary bridge host (fleet validation, stretch) | agent-bridge / SSH alias |
 
 ## Journal
 
 - **2026-08-01** — Effort opened. Mapped the substrate on both sides (agent-bridge
-  already tracks context usage + warns "consider handoff" but never acts; NF
+  already tracks context usage + warns "consider handoff" but never acts; downstream consumer
   already rolls in place via `new_session()` but carries no seed). Reconciled both
   visions (agent-bridge: context-aware in-place handoff Feature + carries-context
-  Behavior; neuron-forge: surfaced-not-swallowed Feature + follow-the-handoff
+  Behavior; downstream-consumer: surfaced-not-swallowed Feature + follow-the-handoff
   Behavior). Recorded the design decisions (prompt-the-child handoff generation;
   explicit + opt-in-auto trigger; first-class `session_handoff` changeover event;
   head-repoint continuity; drain-before-retire safety). Next: file umbrella +
@@ -312,7 +309,7 @@ Per the facility cross-repo rule (PR-gated intent before unreviewed push):
   agent-bridge vision + `docs/patterns`, version-bumped, and filed under a
   **sanitized** public coordination issue on `ThomasMichon/copilot-extensions`
   (generic-tool language; no facility/cockpit-product/persona names). Then F/G
-  (#4145†/#4146†) land as neuron-forge PRs back in the private facility repo.
+  (#4145†/#4146†) land as downstream-consumer PRs back in the private facility repo.
 - **2026-08-02** — **Items B, C, D shipped and deployed** (copilot-extensions,
   `direct` push to `main`; sanitized public issue **#112**). Vision-closing:
   advances `visions/plugins/agent-bridge` here (context-aware in-place handoff
@@ -339,7 +336,7 @@ Per the facility cross-repo rule (PR-gated intent before unreviewed push):
   copilot-extensions agent-fabric vision to state context-pressure-*driven*
   auto-handoff, THEN add the opt-in policy flag + `_handle_usage_update()`
   auto-trigger + prompt-triggered handoff in `submit_prompt`. Then F/G
-  (neuron-forge).
+  (downstream-consumer).
 - **2026-08-02 (cont.)** — **Item E/E2 shipped and deployed** (copilot-extensions,
   `direct` push to `main`, agent-bridge **0.4.0-dev209**; sanitized public issue
   **#112**). This is the effort's **one vision-extending** increment, landed in
@@ -363,8 +360,8 @@ Per the facility cross-repo rule (PR-gated intent before unreviewed push):
   full suite green (**1208 passed, 3 skipped**). Deployed zero-downtime on
   the primary facility dev host; dev209 active, config picked up the additive `auto_handoff` field.
   Closed **#4144†**. **Bridge side (A–E) complete. Next = F/G** (#4145†/#4146†),
-  neuron-forge, landing as PR-gated the private facility repo PRs.
-- **2026-08-02 (cont.)** — **Items F/G (neuron-forge) implemented.** **F (#4145†):**
+  downstream-consumer, landing as PR-gated the private facility repo PRs.
+- **2026-08-02 (cont.)** — **Items F/G (downstream-consumer) implemented.** **F (#4145†):**
   `session_bridge.new_session()` now prefers a brief-carrying in-place handoff via
   the bridge (`bridge_client.handoff_session()` → `POST /sessions/{id}/handoff`),
   so the successor opens *warm*; falls back to a plain cold roll on
@@ -376,13 +373,13 @@ Per the facility cross-repo rule (PR-gated intent before unreviewed push):
   "↻ Handed off — continuing here" transcript seam (never an error); and the SSE
   consumer now **follows a bridge-initiated handoff** — on a `session_handoff`
   frame it re-points the context to the successor and reconnects on its stream,
-  de-duping the twice-emitted seam. Server: 4 new tests + full NF suite green
+  de-duping the twice-emitted seam. Server: 4 new tests + full downstream consumer suite green
   (**241 passed**); ruff + mypy clean. Client: TS typecheck + eslint + build
   clean. Next: PR-gated the private facility repo PR (Intelligence Dampener), then close
-  #4145†/#4146† and deploy NF on the primary facility dev host.
+  #4145†/#4146† and deploy downstream consumer on the primary facility dev host.
 - **2026-08-02 (F/G merged + deployed)** — PR **#4161†** approved by the
   Intelligence Dampener, merge consent granted, merged to master as `fa1ad7abd`.
-  **Neuron Forge deployed on the primary facility dev host** (v0.2.1, healthy on :8090); verified
+  **downstream consumer deployed on the primary facility dev host** (v0.2.1, healthy on :8090); verified
   the deployed server (`session_bridge.py` / `bridge_client.py`) and the built
   client JS both carry the F/G changes. Closed **#4145†**, **#4146†**, and the
   umbrella **#4140†** — every sub-issue (#4141†–#4146†) resolved. **Effort complete:**
@@ -394,7 +391,7 @@ Per the facility cross-repo rule (PR-gated intent before unreviewed push):
 
 ### 2026-09-01 — Archived by CAB reconciliation
 - **Disposition: Done / Archived.** PR #4161† shipped and deployed the remaining
-  Neuron Forge work, PR #4165† recorded completion, and umbrella #4140† plus
+  downstream consumer work, PR #4165† recorded completion, and umbrella #4140† plus
   sub-issues #4141†-#4146† are closed. The optional end-to-end threshold stretch
   does not hold the completed campaign open.
 - Archived under the effort's 2026-08-02 completion date; no intent or live work

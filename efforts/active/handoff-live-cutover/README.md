@@ -21,7 +21,7 @@ visions:
 - **Repo:** copilot-extensions (migrated 2026-09-13 from a private facility repo, which
   originally hosted this as facility wiring) — the `context-handoff` +
   `agent-worktrees` plugins
-- **Branch(es):** `worktree/the-dev-host-win-20260710-131157-54ed`
+- **Branch(es):** _historical source branch omitted (private identifier)_
 - **Created:** 2026-07-10
 - **Status:** Active — core complete (MVP + Phase 5 live cutover / continue_handoff / agent-dispatch consume); only tmux/fleet stretch validation remains (#2261†/#2262†).
   The automatic live-cutover handoff works end-to-end on psmux/Windows:
@@ -79,9 +79,9 @@ automatically, preserving interactive CLI state.**
 | Machine | Role in this effort | Reached via |
 |---------|---------------------|-------------|
 | The primary facility dev host (Windows) | Primary dev/build host; where the operator is; psmux path is validated here | local |
-| The primary facility dev host (WSL) / another facility host / a secondary facility host | tmux-path validation; coordinator verification | `facility-ssh` |
-| a third facility host | Coordinator verification (tunnel-only) | `facility-ssh` (tunnel) |
-| _(published)_ copilot-extensions | Code home for `context-handoff` + `agent-worktrees` (GitHub owner repo) | `working-cross-repo`; VEI mirror on the private facility's tracker |
+| WSL/Linux validation hosts | tmux-path validation; coordinator verification | SSH |
+| Additional validation host | Coordinator verification (tunnel-only) | SSH tunnel |
+| _(published)_ copilot-extensions | Code home for `context-handoff` + `agent-worktrees` (GitHub owner repo) | Public repo + historical private mirror |
 
 ## Context
 
@@ -113,7 +113,7 @@ Two things remain from the old world, and one thing is genuinely new:
 
 3. **Live auto-cutover (the new capability).** The subject of this effort.
 
-### Prior art (VEI) — and why this design supersedes it
+### Prior art (source-repo) — and why this design supersedes it
 
 A **2026-era attempt at exactly this** exists and is instructive:
 
@@ -256,7 +256,7 @@ Resolved with the operator up front:
 
 ### Phase 0 — Effort + tracking + design sign-off
 - [ ] Author this effort README (done).
-- [ ] File the umbrella issue + sub-issues (VEI-dedupe first).
+- [ ] File the umbrella issue + sub-issues (source-repo dedupe first).
 - [x] Confirm design with the operator (locked 2026-07-10).
 
 ### Phase 1 — Facility wiring polish (low-risk, mostly cleanup)

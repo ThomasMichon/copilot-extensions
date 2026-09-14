@@ -67,7 +67,7 @@ Part of the [handoff-live-cutover effort](README.md).
     fix held — no silent file fallback. This is also the first time task-mode
     storage has ever worked on Windows.
   - **Successor spawned + operator cut over.** A fresh Copilot booted in a **new
-    window `@20` / pane `%22`** of the *same* `wt-the-dev-host-win-20260710-131157-54ed`
+    window `@20` / pane `%22`** of the *same* `historical-source-worktree`
     psmux session; window `@20` became active (operator now watching the successor).
   - **Old session retired cleanly.** The originating session `5a848431` (its resume
     id matches the task `dedup_key handoff-5a848431-…`) exited at agent-stop via the
