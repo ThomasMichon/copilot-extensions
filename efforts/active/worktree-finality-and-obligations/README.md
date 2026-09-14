@@ -252,28 +252,53 @@ _Verbatim operator request; original spelling and punctuation preserved._
   owned) -- that pointer is the follow-up work.
 
 ### Phase 4 - Derive canonical finality once
-- [ ] Add a versioned faceted descriptor that preserves Git state, tracking
+- [x] Add a versioned faceted descriptor that preserves Git state, tracking
   lifecycle, held-claim count, open-follow-up count, live blockers, and cleanup
   assessment as independent facts, plus evidence provenance, freshness, and
-  completeness.
-- [ ] Define `FINAL` as the conjunction of clean/upstream Git state, zero held
-  claims, zero open follow-ups, and no definitive cleanup blocker.
-- [ ] Render Git-settled but blocked worktrees as `MERGED`, with compact claim
-  and follow-up counts, rather than `FINAL`.
-- [ ] Define held claims as `active | at-rest`; `released | abandoned` remain
-  non-held, with abandoned claims retained as visible audit history.
+  completeness. Landed as `prune.ClosureDescriptor` /
+  `assemble_closure_descriptor` (version 1): a pure function over
+  already-computed facts (git `WorktreeStateInfo`, `CleanupDisposition`, held-
+  claim count, open-follow-up count), never a second mutable store.
+- [x] Define `FINAL` as the conjunction of clean/upstream Git state, zero held
+  claims, zero open follow-ups, and no definitive cleanup blocker -- plus
+  `evidence_mode == "refreshed" and evidence_complete` (a cached/fetch-free
+  descriptor never reports current `FINAL`, even when otherwise qualified) and
+  "not live" (`ACTIVE` has display precedence, matching design.md).
+- [x] Render Git-settled but blocked worktrees as `MERGED`, with compact claim
+  (`C<N>`) and follow-up (`F<N>`) markers, rather than `FINAL`. Only the git
+  `completed` state gets the MERGED/FINAL treatment; every other base state
+  (`ACTIVE`/`DIRTY`/`WIP`/`UNUSED`/`CONVO`/`ORPHAN`/`UNKNOWN`) keeps its own
+  label regardless of blockers, per design.md's presentation rules.
+- [x] Define held claims as `active | at-rest`; `released | abandoned` remain
+  non-held. (Already true since Phase 1/2's `ResourceClaim.is_live`; the
+  descriptor just reads that count -- abandoned-claim audit visibility is
+  unchanged, pre-existing behavior.)
 - [ ] Make finalize reject active claims, then release at-rest claims under the
   finalizing freeze before committing finalized status. Give legacy/GC close-out
   an explicit preview/apply reconciliation command rather than silently
-  releasing current-version claims.
-- [ ] Separate completed-worktree closure from other cleanup categories:
+  releasing current-version claims. **Not done this phase** -- `finalize.py`'s
+  existing obligation gate (pre-dates this effort) already rejects active
+  claims and releases at-rest ones under the freeze; the explicit
+  preview/apply reconciliation command for legacy/GC close-out is unbuilt.
+- [x] Separate completed-worktree closure from other cleanup categories:
   `FINAL` is the strict completed-and-safe proof, while UNUSED, CONVO, GONE, and
-  system-record reap retain their own opt-in/action dispositions.
+  system-record reap retain their own opt-in/action dispositions (unchanged --
+  `_BUCKET_TO_ACTION_DISPOSITION` maps `unused`/`conversation` to `opt-in`
+  distinctly from `clean` -> `safe`; GONE/record-reap are explicitly **not**
+  handled by this descriptor yet, matching `cleanup_disposition`'s own
+  docstring that GONE is the caller's concern).
 - [ ] Make cleanup and GC consume the descriptor's graded action disposition and
-  exact blockers instead of maintaining a parallel verdict.
-- [ ] Recompute refreshed, complete evidence under the record/finalization lock
+  exact blockers instead of maintaining a parallel verdict. **Not done** --
+  `cleanup`/`gc` still consume `CleanupDisposition` directly; only `list --json
+  --classify` publishes the descriptor so far (additive, alongside the legacy
+  fields). Switching cleanup/GC's own decision logic over is Phase 5 work
+  (avoids two behavior changes landing in one PR).
+- [x] Recompute refreshed, complete evidence under the record/finalization lock
   immediately before any prune/delete action; cached or fetch-free descriptors
-  are never destructive authorization.
+  are never destructive authorization. Enforced structurally: any
+  `evidence_mode != "refreshed"` (or incomplete) descriptor downgrades a would-
+  be `safe` action disposition to `blocked` inside `assemble_closure_descriptor`
+  itself -- a caller cannot accidentally treat stale evidence as authorization.
 
 ### Phase 5 - Align every presentation and guidance surface
 - [ ] Make list JSON publish the canonical descriptor and compatibility fields.
@@ -365,8 +390,18 @@ _Verbatim operator request; original spelling and punctuation preserved._
   their explicit existing action categories.
 - [ ] **Blocker precedence:** an UNUSED, CONVO, GONE, or system record with a
   held claim or open follow-up is `blocked`, never `opt-in` or `record-reap`.
-- [ ] **Destructive freshness:** cached/fetch-free evidence never authorizes
-  deletion; the immediately-preceding refreshed recomputation must still be safe.
+  **Not yet true:** `cleanup_disposition`'s held-claims/follow-up override only
+  fires when the record is `finalized`/git-`completed`/`merged`; an
+  UNUSED/CONVO record with a held claim does not currently get forced to
+  `blocked`. Left unchecked deliberately.
+- [x] **Destructive freshness:** cached/fetch-free evidence never authorizes
+  deletion; the immediately-preceding refreshed recomputation must still be
+  safe. Enforced in `assemble_closure_descriptor` (a non-`refreshed`/incomplete
+  descriptor downgrades `safe` to `blocked`) with direct tests
+  (`test_cached_evidence_never_reports_final_or_safe`,
+  `test_incomplete_evidence_never_reports_final_or_safe`). Not yet wired to an
+  actual pre-delete recompute call site (`cleanup`/`gc` don't consume the
+  descriptor yet -- see the unchecked Phase 4 bullet above).
 - [ ] **Guidance:** no shipped instruction says finalized work cannot be
   resumed; every close-out path instructs the agent to list and resolve,
   transfer, settle, or release obligations before finality.
@@ -378,8 +413,14 @@ _Verbatim operator request; original spelling and punctuation preserved._
   unsupported descriptor version, is provisional and never prune-safe.
 - [ ] **Bridge:** agent-bridge and its cockpit preserve the descriptor and do
   not drop rows into a permanent provisional state.
-- [ ] **Explained blockers:** every `blocked` or `unsafe` disposition carries at
-  least one blocker from the closed code set.
+- [x] **Explained blockers:** every `blocked` or `unsafe` disposition carries at
+  least one blocker from the closed code set (`prune.BLOCKER_CODES`) --
+  `test_all_emitted_blocker_codes_are_in_the_closed_set`. Only the subset this
+  descriptor can currently derive is emitted; the still-unwired codes
+  (`active-effort`, `inbound-obligation`, `unverified-squash`, `live-session`,
+  `checkout-missing`, `prune-review-required`, `incomplete-evidence`,
+  `unsupported-descriptor`) are named in `assemble_closure_descriptor`'s
+  docstring as not yet produced.
 
 ## Proposal
 
@@ -528,4 +569,47 @@ The approved design is the faceted model in [design.md](design.md):
 - `python tools/run-plugin-tests.py agent-worktrees` -- 525 passed (full suite
   minus the same two pre-existing, unrelated `test_knowledge_plugins.py`
   failures noted in prior entries).
+
+### 2026-09-13 - Phase 4: the canonical closure descriptor
+- Operator said "keep going" (and separately: route any handoff through the
+  manual prompt path, not `trigger_handoff`, which is currently broken --
+  noted for this session, not an effort concern). Bound a fresh worktree at
+  Phase 4 (`effort-focus bind ... --slice "Phase 4 - Derive canonical
+  finality once"`).
+- Added `prune.ClosureDescriptor` / `assemble_closure_descriptor` (version 1):
+  a pure function combining already-computed facts (git `WorktreeStateInfo`,
+  `CleanupDisposition`, held-claim count, open-follow-up count) into the one
+  canonical descriptor design.md specifies -- `label`/`style`/`compact`
+  (`FINAL`/`MERGED` + `C<N>`/`F<N>` markers), `closure.final`, and a graded
+  `action.disposition` (`safe`/`opt-in`/`blocked`/`unsafe`), all derived, never
+  stored. `FINAL` requires refreshed+complete evidence, upstream-complete Git,
+  zero held claims, zero open follow-ups, and not live -- a cached/fetch-free
+  descriptor structurally cannot report `FINAL` or a `safe` action even when
+  the underlying facts would otherwise qualify.
+- Wired it into `list --json --classify`'s existing row-builder as an
+  additive `closure` field (alongside the legacy `cleanup_bucket`/`state`
+  fields, which are unchanged) -- the first real consumer, proving the
+  descriptor is actually assembleable from live data rather than a paper
+  design.
+- **Not done this phase** (all explicitly named in the Plan/Validation Plan
+  above, not silently dropped): `cleanup`/`gc` still consume
+  `CleanupDisposition` directly, not the descriptor's action disposition
+  (deliberately deferred to Phase 5 so this PR is one behavior change, not
+  two); the GONE/managed-record-reap disposition path; the
+  `active-effort`/`inbound-obligation`/`unverified-squash`/`live-session`/
+  `checkout-missing`/`prune-review-required`/`incomplete-evidence`/
+  `unsupported-descriptor` blocker codes; the UNUSED/CONVO+held-claim
+  precedence rule (`cleanup_disposition`'s own held-claims override doesn't
+  fire for those base states yet); the legacy/GC explicit preview/apply
+  reconciliation command; Phase 5's mux/Picker/agent-bridge consumption and
+  Phase 6's fleet migration.
+- Observed one apparently-flaky, unrelated test
+  (`test_handoff_cutover.py::TestPaneWrapperInitialPrompt::
+  test_wrapper_appends_native_interactive_prompt`) fail once in a full-suite
+  run; reproduced green in isolation both with and without this change's
+  diff -- not investigated further as out of scope (pane/subprocess timing,
+  nothing in the touched files).
+- `python tools/run-plugin-tests.py agent-worktrees --subsuite-timeout 600` --
+  533 passed (full suite minus the same two pre-existing, unrelated
+  `test_knowledge_plugins.py` failures).
 

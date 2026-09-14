@@ -1128,13 +1128,26 @@ def _worktree_to_dict(
             if session_ctx is not None
             else 0
         )
-        d["cleanup_bucket"] = prune.cleanup_disposition(
+        _disposition = prune.cleanup_disposition(
             rec,
             state_info,
             turn_count=_turns,
             claimant_alive=_local_claimant_alive,
             paired_sibling_final=prune.default_paired_sibling_final,
-        ).bucket
+        )
+        d["cleanup_bucket"] = _disposition.bucket
+        # worktree-finality-and-obligations Phase 4: the canonical closure
+        # descriptor, additive alongside the legacy `cleanup_bucket`/`state`
+        # fields above (not yet a replacement -- see the effort's Phase 5).
+        # This call site IS the fresh classification path (state_info was
+        # just computed), so it reports refreshed/complete evidence.
+        d["closure"] = prune.assemble_closure_descriptor(
+            rec,
+            state_info,
+            _disposition,
+            held_claims=sum(1 for c in rec.resources if c.is_live),
+            open_follow_ups=tracking.effective_open_follow_up_count(rec),
+        ).to_dict()
         d["ff_eligible"] = (
             git_ops.can_fast_forward(state_info)
             and state_info.state != git_ops.WorktreeState.ACTIVE
