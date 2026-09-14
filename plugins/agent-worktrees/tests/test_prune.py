@@ -241,6 +241,25 @@ class TestCleanupDisposition:
         d = prune.cleanup_disposition(_rec(status="finalized"), _info(S.COMPLETED))
         assert d.cleanable is True and d.bucket == "clean"
 
+    def test_finalized_but_dirty_is_never_cleanable(self):
+        # A worktree finalized earlier and modified afterward: rec.status is
+        # still "finalized" (finalize doesn't get re-run on every edit), but
+        # the working tree now carries real, unlanded content. The raw
+        # rec.status == "finalized" shortcut must not treat this as cleanable
+        # -- that would let plain `cleanup --clean` delete unlanded work with
+        # no `--force` at all.
+        d = prune.cleanup_disposition(_rec(status="finalized"),
+                                      _info(S.DIRTY, dirty=1))
+        assert d.cleanable is False and d.bucket == "dirty"
+
+    def test_finalized_orphan_with_dirty_is_never_cleanable(self):
+        # git_ops._classify_git_state can report ORPHAN (no merge base) while
+        # still carrying a nonzero dirty count -- the dirty count, not just
+        # state == DIRTY, is what must gate cleanability.
+        d = prune.cleanup_disposition(_rec(status="finalized"),
+                                      _info(S.ORPHAN, dirty=2))
+        assert d.cleanable is False and d.bucket == "dirty"
+
     def test_empty_needs_include_unused(self):
         rec = _rec(status="unused")
         d0 = prune.cleanup_disposition(rec, _info(S.UNUSED), turn_count=0)

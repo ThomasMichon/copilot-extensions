@@ -350,6 +350,18 @@ def cleanup_disposition(
                 f"{v.reason} · held until BOTH paired worktrees finalized "
                 f"({why})")
 
+    # Safety invariant (mirrors _apply_tracking_override in __main__.py): any
+    # uncommitted content -- info.dirty > 0 -- must never be treated as
+    # cleanable via the raw rec.status == "finalized" shortcut below. A
+    # worktree finalized earlier and modified afterward still carries a
+    # tracking status of "finalized", but that status describes work already
+    # verified safe on the default branch at finalize time -- it says nothing
+    # about content added since. Checking info.dirty directly (not just
+    # info.state == DIRTY) is required because an ORPHAN classification (no
+    # merge base) can still carry a nonzero dirty count.
+    if info.dirty > 0:
+        return CleanupDisposition(False, "dirty", v.reason)
+
     if rec.status == "finalized" or info.state == S.COMPLETED:
         return CleanupDisposition(True, "clean", v.reason)
 
@@ -364,8 +376,9 @@ def cleanup_disposition(
             include_unused or include_conversations, "unused", v.reason)
     if v.category == "conversation-only":
         return CleanupDisposition(include_conversations, "conversation", v.reason)
-    if info.state == S.DIRTY:
-        return CleanupDisposition(False, "dirty", v.reason)
+    # info.state == S.DIRTY is unreachable here (the early info.dirty > 0
+    # guard above always catches it first, since DIRTY is only ever assigned
+    # alongside a nonzero dirty count -- see git_ops._classify_git_state).
     if info.state == S.WIP:
         return CleanupDisposition(False, "wip", v.reason)
     return CleanupDisposition(False, "unmerged", v.reason)

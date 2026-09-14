@@ -32,8 +32,8 @@ def _rec(status: str):
     )
 
 
-def _info(state, *, ahead=0, behind=0):
-    return git_ops.WorktreeStateInfo(state=state, ahead=ahead, behind=behind)
+def _info(state, *, ahead=0, behind=0, dirty=0):
+    return git_ops.WorktreeStateInfo(state=state, ahead=ahead, behind=behind, dirty=dirty)
 
 
 class TestApplyTrackingOverride:
@@ -84,9 +84,19 @@ class TestApplyTrackingOverride:
         # -- masking it to COMPLETED would let plain `cleanup --clean` delete
         # it with no `--force` at all.
         for status in ("finalized", "complete", "completed"):
-            info = _info(git_ops.WorktreeState.DIRTY)
+            info = _info(git_ops.WorktreeState.DIRTY, dirty=1)
             out = m._apply_tracking_override(_rec(status), info)
             assert out.state == git_ops.WorktreeState.DIRTY, status
+
+    def test_finalized_orphan_with_dirty_never_masked(self):
+        # git_ops._classify_git_state can report ORPHAN (no merge base) while
+        # still carrying a nonzero dirty count. The override must key off
+        # info.dirty, not just state == DIRTY, or an orphaned-but-modified
+        # finalized worktree would still get masked to COMPLETED.
+        for status in ("finalized", "complete", "completed"):
+            info = _info(git_ops.WorktreeState.ORPHAN, dirty=2)
+            out = m._apply_tracking_override(_rec(status), info)
+            assert out.state == git_ops.WorktreeState.ORPHAN, status
 
     def test_active_status_is_untouched(self):
         info = _info(git_ops.WorktreeState.ACTIVE, ahead=2, behind=1)

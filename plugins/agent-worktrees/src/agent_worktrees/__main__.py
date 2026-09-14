@@ -539,19 +539,24 @@ def _apply_tracking_override(
     (the bb68/ca29 status-tracking bug -- a muxed/lock-held session rendered
     FINAL). Liveness wins over the durable finalize status.
 
-    A **DIRTY** worktree is never masked either: uncommitted working-tree
-    changes made *after* finalization are new, real, unlanded content that the
-    stale ``finalized``/``complete``/``completed`` tracking status knows
-    nothing about -- unlike the two corrected cases above, this isn't a
-    classifier misreading already-landed work, it's genuinely unlanded work
-    the classifier read correctly. Masking it to COMPLETED would let plain
-    ``cleanup --clean`` delete it with no ``--force`` at all.
+    A worktree with **any uncommitted content** (``info.dirty > 0`` -- this
+    covers both the ``DIRTY`` state and an ``ORPHAN`` classification that also
+    carries a nonzero ``dirty`` count, e.g. no merge base *and* a modified
+    working tree) is never masked either: uncommitted working-tree changes
+    made *after* finalization are new, real, unlanded content that the stale
+    ``finalized``/``complete``/``completed`` tracking status knows nothing
+    about -- unlike the two corrected cases above, this isn't a classifier
+    misreading already-landed work, it's genuinely unlanded work the
+    classifier read correctly. Masking it to COMPLETED would let plain
+    ``cleanup --clean`` delete it with no ``--force`` at all. Checking the
+    ``dirty`` count directly (not just ``state == DIRTY``) is required
+    because ``_classify_git_state`` can return ``ORPHAN`` while still
+    reporting a nonzero ``dirty`` count.
     """
     if rec.status in ("finalized", "complete", "completed"):
-        if info.state not in (
+        if info.dirty == 0 and info.state not in (
             git_ops.WorktreeState.GONE,
             git_ops.WorktreeState.ACTIVE,
-            git_ops.WorktreeState.DIRTY,
         ):
             return dataclasses.replace(info, state=git_ops.WorktreeState.COMPLETED)
     return info
