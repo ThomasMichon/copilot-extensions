@@ -22,6 +22,16 @@ phase or pull request is progress, not the effort completion gate.>
 - **Required confirmations:** <safety, approval, or administrative gates; "none"
   when none>
 
+### Outstanding Background Flows & External State
+<Never silently drop these -- list each as resumable (how the successor picks
+it back up) or as an explicit open item if it cannot be resumed. Write "none"
+only when genuinely none exist; do not omit the section.>
+- **Background flows:** <active watches, polls, `manage_schedule` entries,
+  long-running async shells/commands the predecessor started>
+- **External state owned by this session:** <open PRs awaiting review/merge,
+  held claims/leases/dispatch tasks, peer-agent conversations or delegated
+  work still in flight>
+
 ### Completion Gates
 - **Current handoff:** <Complete the deferred handoff task only when this relay
   leg reaches its stated goal, or after another effort-backed baton is stored.>
@@ -62,6 +72,16 @@ key decisions, so they aren't re-litigated.>
 1. <Immediate next action — begin here after consuming the handoff>
 2. <Additional slice or phase already authorized by the original request>
 3. <Continue listing known actionable work; do not stop at the latest milestone>
+
+### Outstanding Background Flows & External State
+<Never silently drop these -- list each as resumable (how the successor picks
+it back up) or as an explicit open item if it cannot be resumed. Write "none"
+only when genuinely none exist; do not omit the section.>
+- **Background flows:** <active watches, polls, `manage_schedule` entries,
+  long-running async shells/commands the predecessor started>
+- **External state owned by this session:** <open PRs awaiting review/merge,
+  held claims/leases/dispatch tasks, peer-agent conversations or delegated
+  work still in flight>
 
 ### Completion Gates
 - **Current handoff:** <Complete the deferred handoff task only when this relay
