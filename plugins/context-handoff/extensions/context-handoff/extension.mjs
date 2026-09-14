@@ -54,6 +54,10 @@ import {
   triggerHandoff,
 } from "./handoff-core.mjs";
 import { loadContextHandoffConfig } from "./config.mjs";
+import {
+  FORCE_TIER_DENY_FEEDBACK,
+  isReadOnlyPermissionRequest,
+} from "./force-tier.mjs";
 import { contextPressure, formatContextUsage } from "./thresholds.mjs";
 
 // --- State ---
@@ -71,6 +75,12 @@ const state = {
   handoffGenerated: false,
   pendingHandoff: null,
   firstUserPrompt: null,          // first user message (for topic bias)
+  // Force tier (Goal 1): once true, an auto-handoff has been drafted/stored/
+  // triggered without waiting for the agent, and onPermissionRequest below
+  // denies further mutating tool calls for the remainder of the session
+  // (reset only on a successful compaction, mirroring the soft/hard resets).
+  forceTriggered: false,
+  blockMutatingTools: false,
   // Context window tracking (from session.usage_info events)
   currentTokens: 0,
   tokenLimit: 0,
@@ -220,10 +230,91 @@ function formatHandoffMarkdown(handoffData, scope) {
   return lines.join("\n");
 }
 
+// --- Force tier (Goal 1) ---
+//
+// The force threshold is the last chance to capture a handoff before the
+// runtime's own auto-compaction (~80%) destroys the conversation state a
+// handoff needs to describe. Crossing it must not wait for the agent: this
+// auto-drafts a handoff from whatever facts collectHandoffData/
+// formatHandoffMarkdown can gather right now (the same auto-formatter the
+// generate_handoff_prompt tool's caller would otherwise compose prose from),
+// stores + triggers it via the same handoff-core.mjs path the CLI/tools use
+// (so it is bash-first-seed-compatible, never routing through
+// consume_handoff-as-first-tool-call on the successor -- see
+// handoff-cutover-reload-robustness), and denies further mutating tool calls
+// via onPermissionRequest below (the only tool-call gate this runtime still
+// honors; the SDK's newer `hooks.onPreToolUse` hard-fails here, see the
+// "SDK hook callbacks are no longer supported" note further down). The
+// read-only/mutating classification itself lives in force-tier.mjs so it is
+// unit-testable without the live SDK connection.
+
+async function onPermissionRequest(request, invocation) {
+  if (state.blockMutatingTools && !isReadOnlyPermissionRequest(request)) {
+    return { kind: "reject", feedback: FORCE_TIER_DENY_FEEDBACK };
+  }
+  return approveAll(request, invocation);
+}
+
+// Auto-draft, store, and trigger a handoff without agent involvement. Fire-
+// and-forget from the session.usage_info handler (below); reports its own
+// outcome via session.log/session.send rather than being awaited there.
+async function autoForceHandoff(sid, cwd) {
+  let markdown;
+  try {
+    const { data } = collectHandoffData(sid);
+    markdown = formatHandoffMarkdown(data, null);
+  } catch (error) {
+    session.log(
+      `[Context Handoff] Force-tier auto-draft failed: ${error.message}. ` +
+      "No handoff was stored; manual continuation is required.",
+      { level: "error" },
+    );
+    return;
+  }
+  let result;
+  try {
+    result = await triggerHandoff({
+      promptText: markdown,
+      sid,
+      cwd,
+      title: "Force-threshold auto-handoff",
+    });
+  } catch (error) {
+    session.log(
+      `[Context Handoff] Force-tier auto-trigger threw: ${error.message}. ` +
+      "The draft above was not stored; manual continuation is required.",
+      { level: "error" },
+    );
+    return;
+  }
+  if (!result.ok) {
+    session.log(
+      `[Context Handoff] Force-tier auto-handoff failed: ` +
+      `${result.error || result.reason || "unknown failure"}. ` +
+      "Manual continuation is required -- invoke the context-handoff skill.",
+      { level: "error" },
+    );
+    return;
+  }
+  session.log(
+    `[Context Handoff] Force-tier handoff stored (${result.stored.storage}: ` +
+    `${result.stored.id}) and triggered. ` +
+    (result.pickup?.pickedUp
+      ? `Pickup acknowledged via ${result.pickup.via.join(", ")}.`
+      : "No pickup signal arrived within the wait window."),
+    { level: "warning" },
+  );
+  if (!result.pickup?.pickedUp && result.manualInstructions) {
+    session.send(result.manualInstructions).catch((e) =>
+      session.log(`[Context Handoff] Force-tier manual-instructions send failed: ${e.message}`, { level: "warning" })
+    );
+  }
+}
+
 // --- Extension ---
 
 const session = await joinSession({
-  onPermissionRequest: approveAll,
+  onPermissionRequest,
 
   tools: [
     {
@@ -898,6 +989,30 @@ session.on("session.usage_info", (event) => {
   );
   const usage = formatContextUsage(d.currentTokens, d.tokenLimit);
 
+  // Force tier: crossing it auto-drafts/stores/triggers a handoff and blocks
+  // further mutating tool calls, without waiting for the agent. Checked first
+  // and sets handoffGenerated so the soft/hard branches below (which guard on
+  // !state.handoffGenerated) naturally stand down once forced.
+  if (pressure.force && !state.forceTriggered && !state.handoffGenerated) {
+    state.forceTriggered = true;
+    state.blockMutatingTools = true;
+    state.handoffGenerated = true;
+    state.hardReminderSent = true;
+    state.softReminderSent = true;
+    state.hardLogShown = true;
+    state.softLogShown = true;
+    session.log(
+      `[Context Handoff] 🛑 Force threshold reached (${pressure.forcePercent}%, ` +
+      `${Math.round(pressure.forceThreshold).toLocaleString()} tokens; ` +
+      `current ${usage.tokens}). Auto-generating and triggering a handoff now. ` +
+      "Further mutating tool calls are denied for the remainder of this session.",
+      { level: "error" },
+    );
+    autoForceHandoff(state.sessionId, state.cwd || process.cwd()).catch((error) =>
+      session.log(`[Context Handoff] Force-tier handler threw: ${error.message}`, { level: "error" })
+    );
+  }
+
   // Queue an agent-facing nudge once per threshold, delivered on the next
   // idle via session.send() (see the session.idle handler above). This is the
   // agent-visible counterpart to the user-visible logs below.
@@ -973,6 +1088,16 @@ session.on("session.compaction_complete", (event) => {
     state.hardReminderSent = false;
     state.softLogShown = false;
     state.hardLogShown = false;
+    // Also lift the force-tier tool block: compaction is itself a corrective
+    // action, and the operator may deliberately keep working in this session
+    // (e.g. the auto-triggered successor was ignored/cancelled) rather than
+    // switching to the handed-off one -- a permanent block with no recovery
+    // path would trap them. forceTriggered stays true (it is a once-only
+    // guard so the same crossing can't auto-handoff twice); a *later*
+    // crossing of the force threshold after this reset is intentionally
+    // suppressed too, since handoffGenerated (set when force first fired)
+    // is never cleared here -- one auto-handoff per session is the contract.
+    state.blockMutatingTools = false;
     session.log(
       `[Context Handoff] Compaction complete. ` +
       `${d.tokensRemoved?.toLocaleString() ?? "?"} tokens removed, ` +

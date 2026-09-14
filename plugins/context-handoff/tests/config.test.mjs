@@ -30,16 +30,16 @@ function withRepository(fn) {
 test("parses configured threshold percentages", () => {
   assert.deepEqual(
     parseThresholdConfig(
-      "thresholds:\n  soft_percent: 65\n  hard_percent: 75\n",
+      "thresholds:\n  soft_percent: 65\n  hard_percent: 75\n  force_percent: 78\n",
     ),
-    { softPercent: 65, hardPercent: 75 },
+    { softPercent: 65, hardPercent: 75, forcePercent: 78 },
   );
 });
 
 test("partial configuration inherits portable defaults", () => {
   assert.deepEqual(
     parseThresholdConfig("thresholds:\n  soft_percent: 60\n"),
-    { softPercent: 60, hardPercent: 70 },
+    { softPercent: 60, hardPercent: 70, forcePercent: 79 },
   );
 });
 
@@ -75,7 +75,7 @@ test("discovers config from a nested directory in a git worktree", () => {
     const loaded = loadContextHandoffConfig(nested);
     assert.deepEqual(
       loaded.thresholds,
-      { softPercent: 65, hardPercent: 75 },
+      { softPercent: 65, hardPercent: 75, forcePercent: 79 },
     );
     assert.equal(loaded.warning, null);
   });
@@ -92,7 +92,7 @@ test("invalid repository config warns and uses defaults", () => {
     const loaded = loadContextHandoffConfig(root);
     assert.deepEqual(
       loaded.thresholds,
-      { softPercent: 55, hardPercent: 70 },
+      { softPercent: 55, hardPercent: 70, forcePercent: 79 },
     );
     assert.match(loaded.warning, /using defaults/);
   });

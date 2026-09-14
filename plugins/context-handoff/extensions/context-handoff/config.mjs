@@ -45,16 +45,20 @@ export function parseThresholdConfig(text, source = CONFIG_RELATIVE_PATH) {
     }
 
     const match = rawLine.match(
-      /^  +(soft_percent|hard_percent):\s*(\d+(?:\.\d+)?)\s*(?:#.*)?$/,
+      /^  +(soft_percent|hard_percent|force_percent):\s*(\d+(?:\.\d+)?)\s*(?:#.*)?$/,
     );
     if (!inThresholds || !match) {
       throw new Error(
-        `${source}:${lineNumber}: expected thresholds.soft_percent or ` +
-        "thresholds.hard_percent",
+        `${source}:${lineNumber}: expected thresholds.soft_percent, ` +
+        "thresholds.hard_percent, or thresholds.force_percent",
       );
     }
 
-    const key = match[1] === "soft_percent" ? "softPercent" : "hardPercent";
+    const key = match[1] === "soft_percent"
+      ? "softPercent"
+      : match[1] === "hard_percent"
+        ? "hardPercent"
+        : "forcePercent";
     if (Object.hasOwn(configured, key)) {
       throw new Error(`${source}:${lineNumber}: duplicate ${match[1]}`);
     }
@@ -111,7 +115,8 @@ export function loadContextHandoffConfig(startDir) {
       configPath,
       warning:
         `Invalid ${CONFIG_RELATIVE_PATH}; using defaults ` +
-        `(${DEFAULT_THRESHOLDS.softPercent}%/${DEFAULT_THRESHOLDS.hardPercent}%): ` +
+        `(${DEFAULT_THRESHOLDS.softPercent}%/${DEFAULT_THRESHOLDS.hardPercent}%/` +
+        `${DEFAULT_THRESHOLDS.forcePercent}%): ` +
         describeError(error),
     };
   }

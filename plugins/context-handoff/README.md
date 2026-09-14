@@ -14,7 +14,7 @@ This plugin ships four cooperating payload pieces:
 | Piece | Type | Role |
 |-------|------|------|
 | **continuity guidance hook** | Declarative `sessionStart` hook | Writes the full owner-marked continuity contract to the exact session folder and emits only `{}` |
-| **context-handoff extension** | Copilot CLI session extension (`extension.mjs`) | Monitors `session.usage_info` for exact token counts; applies percentage-based soft/hard thresholds (55% / 70% by default) with optional repository overrides, delivered on the next idle; provides `generate_handoff_prompt`, `save_handoff_prompt`, `consume_handoff`, and `trigger_handoff` tools plus **`/handoff-continue`**, **`/consume-handoff`**, and the compatibility **`/resume-handoff`** alias |
+| **context-handoff extension** | Copilot CLI session extension (`extension.mjs`) | Monitors `session.usage_info` for exact token counts; applies percentage-based soft/hard/**force** thresholds (55% / 70% / 79% by default) with optional repository overrides, delivered on the next idle; the force tier auto-drafts/stores/triggers a handoff itself and denies further mutating tool calls (see § Thresholds); provides `generate_handoff_prompt`, `save_handoff_prompt`, `consume_handoff`, and `trigger_handoff` tools plus **`/handoff-continue`**, **`/consume-handoff`**, and the compatibility **`/resume-handoff`** alias |
 | **context-handoff skill** | Skill | Owns the `/handoff` workflow: compose the continuation prompt from the extension's structured facts and the agent's live context, decide when to store it, and decide whether to ask or trigger |
 | **payload-local fallback CLI** | Node script (`handoff-cli.mjs`) | Extension-free facts, save, trigger, task/file consume, `check-heads` auditing, and a safe `retry-cutover` remediation for a superseded session. Invoked by exact verified plugin-root-relative path; it has no PATH binstub or install/runtime step and shares `handoff-core.mjs` with the extension |
 
@@ -340,16 +340,19 @@ predecessor and successor ids.
 |-----------|----------|
 | 55% of window | Soft reminder: compose/store a baton at the next clean boundary and trigger directly if work still remains |
 | 70% of window | Urgent reminder: preserve the baton now and trigger directly; compaction remains at ~80% |
+| 79% of window | **Force tier:** the extension does it *for* the agent -- auto-drafts a handoff from whatever session facts are available, stores and triggers it via the same path `save_handoff_prompt`/`trigger_handoff` use, and denies further mutating tool calls (read-only inspection still allowed) for the rest of the session. This is the last chance to capture state before the runtime's own auto-compaction (~80%) destroys it -- it does not wait for the agent to act. Lifted only by a successful compaction (the operator may then keep working in the same session instead of switching to the handed-off one); at most one auto-handoff per session |
 
-An owning repository may override either percentage in
+An owning repository may override any of the three percentages in
 `.context-handoff/config.yaml`:
 
 ```yaml
 thresholds:
   soft_percent: 65
   hard_percent: 75
+  force_percent: 78
 ```
 
-Invalid config produces a visible warning and uses the 55% / 70% defaults. If
-the runtime does not report a window size, the extension reports utilization as
-unknown and does not invent an absolute threshold.
+Invalid config produces a visible warning and uses the 55% / 70% / 79%
+defaults. If the runtime does not report a window size, the extension reports
+utilization as unknown and does not invent an absolute threshold (the force
+tier, like soft/hard, never fires in that case either).
