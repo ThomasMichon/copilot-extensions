@@ -1236,24 +1236,38 @@ def _remedy(
     entry_class: str,
     owner: str | None = None,
 ) -> str:
+    prunable = entry_class in _PRUNABLE_ENTRY_CLASSES
+    prune_hint = (
+        " (or run `agent-worktrees doctor --fix --prune-pivots` to remove "
+        "this stale copy once the plugin's current manifest is confirmed "
+        "active elsewhere)"
+        if prunable
+        else ""
+    )
     if entry_class == "managed-plugin" and owner:
         return (
             f"Re-enable or reinstall {owner}, then reopen the Picker to refresh "
-            f"{entry}; agent-worktrees will not remove it."
+            f"{entry}{prune_hint}."
         )
     if entry_class == "legacy-plugin":
         return (
             f"Re-enable or update {owner or 'the contributing plugin'} and reopen "
-            f"the Picker so {entry} is rewritten with current attribution."
+            f"the Picker so {entry} is rewritten with current attribution"
+            f"{prune_hint}."
         )
     if entry_class == "operator":
         return (
             f"Fix the operator-owned manifest at {entry}; "
             "agent-worktrees will not remove it."
         )
+    if entry_class == "unknown-legacy":
+        return (
+            f"Fix or remove the unrecognized legacy manifest at {entry} if no "
+            f"longer intended{prune_hint}."
+        )
     return (
-        f"Fix or remove the unrecognized legacy manifest at {entry} if no "
-        "longer intended; agent-worktrees will not remove it."
+        f"Fix or remove the unrecognized manifest at {entry} if no longer "
+        "intended; agent-worktrees will not remove it (it may be hand-edited)."
     )
 
 
@@ -1968,6 +1982,104 @@ def warn_pivot_findings(report: PivotRegistryReport) -> None:
             REGISTRY_NAME,
             batch.suppressed,
         )
+
+
+#: Findings a plugin's own runtime produced (never operator-authored) whose
+#: entry is provably superseded: either its content no longer matches the
+#: plugin's live template ("identity-mismatch"/"invalid-entry"/
+#: "missing-target"), or another entry already claims its identity
+#: ("duplicate"). In every case the plugin's correct, current manifest already
+#: exists elsewhere in the registry, so removing the stale file loses no
+#: reachable state -- it accumulates purely because ``_materialize_active_
+#: pivots`` never overwrites or deletes an existing file (see its docstring).
+_PRUNABLE_REASONS = frozenset(
+    {"duplicate", "identity-mismatch", "missing-target", "invalid-entry"}
+)
+
+#: Entry classes that are always plugin-generated, never hand-authored by an
+#: operator. ``"operator"`` (schema_version absent) and ``"unknown"``
+#: (unparseable JSON/UTF-8, which may be a hand-edit gone wrong) are
+#: deliberately excluded: those files may carry content only a human can
+#: judge, and their own remedy text promises "agent-worktrees will not
+#: remove it" -- pruning must not silently break that promise.
+_PRUNABLE_ENTRY_CLASSES = frozenset(
+    {"managed-plugin", "legacy-plugin", "unknown-legacy"}
+)
+
+
+def prunable_findings(report: PivotRegistryReport) -> list[Finding]:
+    """The subset of ``report.findings`` safe to auto-remove.
+
+    Always a strict subset of the *inactive* findings: never an operator-owned
+    or unparseable-class entry, and never an indeterminate/advisory finding
+    (those need a human, not automation).
+    """
+    return [
+        finding
+        for finding in report.findings
+        if finding.status == "inactive"
+        and finding.reason in _PRUNABLE_REASONS
+        and report.entry_classes.get(finding.entry) in _PRUNABLE_ENTRY_CLASSES
+    ]
+
+
+def prune_stale_entries(
+    report: PivotRegistryReport,
+    *,
+    base: str | os.PathLike[str] | None = None,
+    apply: bool = False,
+) -> list[dict[str, object]]:
+    """Remove pivot manifest files that :func:`prunable_findings` proved stale.
+
+    Dry-run by default (``apply=False``): returns the plan (one dict per
+    candidate, with ``removed`` always ``False``) without touching disk.
+    ``doctor --fix --prune-pivots`` is the only caller that passes
+    ``apply=True`` -- this is deliberately not part of plain ``--fix``, since
+    every one of these findings' own remedy text otherwise promises
+    "agent-worktrees will not remove it"; pruning is an explicit,
+    separately-opted-into escalation of that promise, not its default.
+
+    Each candidate is re-resolved against the live pivots directory
+    immediately before deletion (defends against a manifest outside the
+    registry root, e.g. a stale finding computed against a different
+    ``base``) and a missing file is treated as already-removed, not an error.
+    """
+    directory = pivots_dir(base)
+    try:
+        registry_root = directory.resolve(strict=False)
+    except OSError:
+        registry_root = directory
+    results: list[dict[str, object]] = []
+    for finding in prunable_findings(report):
+        entry_path = Path(finding.entry)
+        outcome: dict[str, object] = {
+            "entry": str(entry_path),
+            "reason": finding.reason,
+            "owner": finding.owner,
+            "removed": False,
+        }
+        try:
+            resolved = entry_path.resolve(strict=False)
+        except OSError as exc:
+            outcome["error"] = str(exc)
+            results.append(outcome)
+            continue
+        if resolved.parent != registry_root:
+            outcome["error"] = "entry is outside the pivots registry directory"
+            results.append(outcome)
+            continue
+        if not apply:
+            results.append(outcome)
+            continue
+        try:
+            resolved.unlink()
+            outcome["removed"] = True
+        except FileNotFoundError:
+            outcome["removed"] = True  # already gone -- not an error
+        except OSError as exc:
+            outcome["error"] = str(exc)
+        results.append(outcome)
+    return results
 
 
 def ensure_pivots(

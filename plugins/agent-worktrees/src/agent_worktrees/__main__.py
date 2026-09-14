@@ -24040,6 +24040,18 @@ def build_parser() -> argparse.ArgumentParser:
         "rows (destructive; guarded by age/lock/current/"
         "registered).",
     )
+    sp.add_argument(
+        "--prune-pivots",
+        action="store_true",
+        dest="prune_pivots",
+        help="With --fix, also delete stale Picker pivot manifest "
+        "files (duplicate/identity-mismatch/missing-target/"
+        "invalid-entry) once a live, correct manifest for the "
+        "same plugin already exists elsewhere in the registry "
+        "(destructive; never touches an operator-authored or "
+        "indeterminate manifest -- explicit opt-in, off by "
+        "default even with --fix).",
+    )
     sp.add_argument("--json", action="store_true", help="Emit the health report as JSON.")
     sp.add_argument(
         "--projection-budget",
@@ -25184,12 +25196,15 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     worktree whose head was orphaned by a handoff whose successor never
     registered). ``--gc-sessions`` (with ``--fix``) additionally removes empty
     session-state shells and purges their orphaned ``session-store.db`` rows.
-    ``--json`` emits the report.
+    ``--prune-pivots`` (with ``--fix``) additionally deletes stale Picker pivot
+    manifest files that ``prunable_findings`` proved superseded (never an
+    operator-authored or indeterminate one). ``--json`` emits the report.
     """
     from . import health
 
     apply = getattr(args, "fix", False)
     do_gc = getattr(args, "gc_sessions", False)
+    do_prune_pivots = getattr(args, "prune_pivots", False)
     json_mode = getattr(args, "json", False)
     projection_budget = getattr(args, "projection_budget", 256)
 
@@ -25347,6 +25362,13 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     from .picker_tui import pivots as pivot_registry
 
     pivot_report = pivot_registry.scan_pivot_registry(materialize=False)
+    pivot_pruned: list[dict[str, object]] = []
+    if apply and do_prune_pivots:
+        pivot_pruned = pivot_registry.prune_stale_entries(pivot_report, apply=True)
+        if any(item.get("removed") for item in pivot_pruned):
+            # Re-scan so the report reflects post-prune reality (findings for
+            # the files just removed must not still be listed as present).
+            pivot_report = pivot_registry.scan_pivot_registry(materialize=False)
     config_d_report = (
         config_dropins.scan_config_dropin_registry(
             cfg.default_config_path().parent / "config.d",
@@ -25409,7 +25431,14 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         },
         "bare_orphans": {"count": len(bare_orphans), "items": bare_orphans},
         "runtime_lag": runtime_lag,
-        "pivots": pivot_report.to_dict(),
+        "pivots": {
+            **pivot_report.to_dict(),
+            "pruned": {
+                "found": sum(1 for item in pivot_pruned),
+                "removed": sum(1 for item in pivot_pruned if item.get("removed")),
+                "items": pivot_pruned,
+            },
+        },
         "config_d": config_d_report.to_dict(),
     }
 
@@ -25417,11 +25446,18 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         _json_output(report)
         return 0
 
-    _render_doctor_report(report, applied=apply, gc_applied=(apply and do_gc))
+    _render_doctor_report(
+        report,
+        applied=apply,
+        gc_applied=(apply and do_gc),
+        prune_pivots_applied=(apply and do_prune_pivots),
+    )
     return 0
 
 
-def _render_doctor_report(report: dict, *, applied: bool, gc_applied: bool) -> None:
+def _render_doctor_report(
+    report: dict, *, applied: bool, gc_applied: bool, prune_pivots_applied: bool = False
+) -> None:
     chk = "\u2713"
     print(f"Worktree/session doctor ({'fix' if applied else 'report-only'})")
     if not report.get("project_health_available", True):
@@ -25589,6 +25625,20 @@ def _render_doctor_report(report: dict, *, applied: bool, gc_applied: bool) -> N
         print("  \u2713 Runtime services match installed payload")
 
     _render_dropin_registry_report("Picker pivots", report.get("pivots") or {})
+    pruned = (report.get("pivots") or {}).get("pruned") or {}
+    if pruned.get("found"):
+        removed = pruned.get("removed", 0)
+        found = pruned.get("found", 0)
+        if prune_pivots_applied:
+            print(f"      pruned {removed}/{found} stale pivot manifest(s)")
+            for item in pruned.get("items", []):
+                if not item.get("removed"):
+                    print(f"        - kept {item['entry']}: {item.get('error', 'not removed')}")
+        else:
+            print(
+                f"      {found} pivot finding(s) are prunable -- "
+                "run `doctor --fix --prune-pivots` to remove them"
+            )
     _render_dropin_registry_report("Project config.d", report.get("config_d") or {})
 
 
