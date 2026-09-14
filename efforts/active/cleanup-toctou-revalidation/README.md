@@ -573,6 +573,15 @@ Phase 2's forced-path contract). Concretely, at minimum:
       handoff, while `--force` remains the documented, narrower,
       individually-verified exception — so a future reader doesn't have to
       reverse-engineer this from several PRs' diffs.
+- [ ] Document the known residual gap
+      ([#2649](https://github.com/ThomasMichon/copilot-extensions/issues/2649))
+      in that same skill section: a `finalized`-status record that gains
+      genuinely new WIP/conversation content after finalize is not yet
+      caught by this effort's revalidation, because
+      `_apply_tracking_override` masks it to `COMPLETED` before
+      `cleanup_disposition` runs. State plainly that this is a known,
+      tracked limitation, not an oversight the reader needs to
+      rediscover.
 
 ## Validation Plan
 
@@ -865,3 +874,38 @@ Phase 3 complete. Phase 4 (the full named signal × reaper × mode regression
 matrix) and Phase 5 (skill docs) remain — substantial enough in their own
 right (≈30 named tests) to warrant their own dedicated pass/PR(s), continuing
 this effort rather than closing it here.
+
+### 2026-09-14 — Phase 3 follow-up: residual gap found while pinning tests
+
+While replacing the (now-removed) `_revalidate_before_reap` tests with
+`TestRevalidateCleanupSafety`, a genuine, previously-unrecognized gap
+surfaced: `_apply_tracking_override` masks ANY non-dirty/GONE/ACTIVE fresh
+git state to `COMPLETED` for a `finalized`-status record — including WIP
+and UNUSED-with-turns — **before** `cleanup_disposition` ever runs. It
+does this deliberately, to correct a real squash-merge artifact (a
+finalized branch that still reads "ahead" of upstream even though its
+content already landed), but it cannot distinguish that from genuinely
+new commits/turns made *after* finalize, which present identically.
+
+**Consequence:** the Phase 2/3 fix to `cleanup_disposition`'s WIP/
+conversation-only ordering (mirroring #2635's `dirty` fix) is real and
+correct for records whose git state isn't first collapsed by the
+override — but for a `finalized`-status record specifically, the
+override already converts WIP/conversation-only to COMPLETED
+independently of, and prior to, that ordering fix, so the fix alone does
+not close the finalized-record case the original Context section
+described. This was not caught during Phase 1/2 because those phases
+traced `cleanup_disposition`'s own internal ordering without also tracing
+what `_apply_tracking_override` does to `info.state` immediately
+beforehand.
+
+Filed as [#2649](https://github.com/ThomasMichon/copilot-extensions/issues/2649),
+with a pinning test (`test_finalized_status_currently_masks_new_wip_gap`)
+documenting today's actual (unsafe) behavior. Not fixed in this effort's
+Phase 3 PR — a real fix needs a way to distinguish "already-known-squashed
+WIP at finalize time" from "new WIP since finalize" (e.g. a branch-tip
+fingerprint recorded at finalize time, or relying on `classify_worktree`'s
+own squash-merge-aware COMPLETED detection instead of blanket-masking by
+status), which is a distinct design question from anything Phase 2
+already decided. Left as a tracked follow-up rather than silently folded
+in or dropped.
