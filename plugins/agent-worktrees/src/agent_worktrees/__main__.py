@@ -1128,13 +1128,26 @@ def _worktree_to_dict(
             if session_ctx is not None
             else 0
         )
-        d["cleanup_bucket"] = prune.cleanup_disposition(
+        _disposition = prune.cleanup_disposition(
             rec,
             state_info,
             turn_count=_turns,
             claimant_alive=_local_claimant_alive,
             paired_sibling_final=prune.default_paired_sibling_final,
-        ).bucket
+        )
+        d["cleanup_bucket"] = _disposition.bucket
+        # worktree-finality-and-obligations Phase 4: the canonical closure
+        # descriptor, additive alongside the legacy `cleanup_bucket`/`state`
+        # fields above (not yet a replacement -- see the effort's Phase 5).
+        # This call site IS the fresh classification path (state_info was
+        # just computed), so it reports refreshed/complete evidence.
+        d["closure"] = prune.assemble_closure_descriptor(
+            rec,
+            state_info,
+            _disposition,
+            held_claims=sum(1 for c in rec.resources if c.is_live),
+            open_follow_ups=tracking.effective_open_follow_up_count(rec),
+        ).to_dict()
         d["ff_eligible"] = (
             git_ops.can_fast_forward(state_info)
             and state_info.state != git_ops.WorktreeState.ACTIVE
@@ -12198,7 +12211,7 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
     owner-ref path is for a call-site whose cwd is not the borrowing worktree
     (e.g. agent-codespaces journaling a CodeSpace claim from the daemon's cwd).
     """
-    valid_kinds = {"worktree", "codespace", "container", "ssh", "workdir", "pr"}
+    valid_kinds = {"worktree", "codespace", "container", "ssh", "workdir", "pr", "task"}
     if kind not in valid_kinds:
         msg = (
             f"claims add: unknown kind {kind!r} (expected one of {', '.join(sorted(valid_kinds))})"
@@ -15183,6 +15196,28 @@ def _cleanup_one(args: argparse.Namespace) -> int:
     return 0 if payload.get("ok") else 1
 
 
+#: `cleanup_disposition` buckets that get their OWN per-item skip line (a
+#: specific, actionable reason worth calling out individually) rather than
+#: folding into the aggregate unused/conversation/dirty/wip summary counters.
+#: worktree-finality-and-obligations Phase 5: `held-claims`/`follow-up` were
+#: previously missing here, so a worktree blocked by either silently vanished
+#: from `cleanup`'s report entirely -- neither listed as skipped nor counted.
+_CLEANUP_PER_ITEM_BUCKETS = frozenset({
+    "claimed", "open-pr", "closed-unmerged", "paired-pending",
+    "held-claims", "follow-up",
+})
+
+
+def _cleanup_per_item_skip_reason(disp: prune.CleanupDisposition) -> str:
+    """The exact per-worktree skip line for `cleanup`'s report, or "" when the
+    bucket instead folds into an aggregate summary counter."""
+    if disp.bucket == "active":
+        return "active Copilot session in use"
+    if disp.bucket in _CLEANUP_PER_ITEM_BUCKETS:
+        return disp.reason
+    return ""
+
+
 def cmd_cleanup(args: argparse.Namespace) -> int:
     if getattr(args, "worktree_id", None):
         return _cleanup_one(args)
@@ -15303,23 +15338,14 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
                 paired_sibling_final=prune.default_paired_sibling_final,
             )
             cleanable = disp.cleanable
-            if disp.bucket == "active":
-                skip_reason = "active Copilot session in use"
-            elif disp.bucket == "claimed":
-                skip_reason = disp.reason
-            elif disp.bucket == "open-pr":
-                skip_reason = disp.reason
-            elif disp.bucket == "closed-unmerged":
-                skip_reason = disp.reason
-            elif disp.bucket == "paired-pending":
-                skip_reason = disp.reason
-            elif disp.bucket == "unused" and not cleanable:
+            skip_reason = _cleanup_per_item_skip_reason(disp)
+            if not skip_reason and disp.bucket == "unused" and not cleanable:
                 unused_count += 1
-            elif disp.bucket == "conversation" and not cleanable:
+            elif not skip_reason and disp.bucket == "conversation" and not cleanable:
                 conversation_count += 1
-            elif disp.bucket == "dirty":
+            elif not skip_reason and disp.bucket == "dirty":
                 dirty_count += 1
-            elif disp.bucket == "wip":
+            elif not skip_reason and disp.bucket == "wip":
                 wip_count += 1
 
         if cleanable:

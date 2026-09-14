@@ -275,7 +275,7 @@ def _blocked_readiness():
 
 @pytest.mark.parametrize(
     "kind",
-    ["worktree", "codespace", "container", "ssh", "workdir", "pr"],
+    ["worktree", "codespace", "container", "ssh", "workdir", "pr", "task"],
 )
 def test_claims_add_rejects_unready_coordination_without_mutation(
     kind,

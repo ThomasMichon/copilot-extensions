@@ -2034,6 +2034,54 @@ def _cmd_list(args: argparse.Namespace) -> int:
     return _emit(tracking.enrich_tasks(_enrich(tasks)))
 
 
+def _cmd_doctor(args: argparse.Namespace) -> int:
+    """Diagnose held/suspended tasks (Boundary I / #2577): distinguish a
+    confirmed-orphaned task -- its expected worktree provably gone -- from
+    ordinary in-flight work or merely ambiguous liveness, and (with
+    ``--repair``) unbind + re-queue only the confirmed-orphaned ones. See
+    :mod:`agent_dispatch.doctor` for the full design rationale."""
+    repo = _scope_repo(args)
+    if not repo:
+        print(_REPO_UNRESOLVED, file=sys.stderr)
+        return 2
+    from . import doctor
+
+    with _client(args) as c:
+        tasks = c.list(
+            repo=repo,
+            status=",".join(doctor.EXAMINED_STATUSES),
+            label=args.label,
+            limit=args.limit,
+        )
+        diagnoses = [
+            doctor.diagnose(
+                t,
+                stale_lease_grace_seconds=args.stale_lease_seconds,
+                # An explicit, call-time module-attribute lookup (not
+                # diagnose's own default parameter, which -- like any Python
+                # default -- binds once at def-time): this is what makes
+                # `monkeypatch.setattr(doctor, "resolve_worktree", ...)`
+                # actually take effect for callers of this CLI wrapper.
+                resolve=doctor.resolve_worktree,
+            )
+            for t in tasks
+        ]
+        repairs = None
+        if args.repair:
+            repairs = [
+                doctor.repair(d, c, reason=f"agent-dispatch doctor: {d.detail}")
+                for d in diagnoses
+                if d.verdict == doctor.REPAIRABLE_VERDICT
+            ]
+    payload = {
+        "examined": len(diagnoses),
+        "diagnoses": [d.as_dict() for d in diagnoses],
+    }
+    if repairs is not None:
+        payload["repaired"] = repairs
+    return _emit(payload)
+
+
 #: The picker Tasks-pivot **board** groups, in the operator's priority order:
 #: what needs your attention first (a task blocked awaiting your steer), then the
 #: pickable/in-flight lifecycle, then recently-finished tasks. The tuple index is
@@ -2764,7 +2812,10 @@ def _spawn_detached_waiter(spec: Any) -> dict:
 
 
 def _suspend_for_detached_wait(args: argparse.Namespace, spec: Any) -> dict | None:
-    """Atomically suspend ``spec.task_id`` once its detached waiter is live.
+    """Atomically suspend ``spec.task_id`` once its detached waiter is live, and
+    journal a ``task``-kind agent-worktrees claim on the current worktree so
+    it cannot be finalized out from under the still-open task (Boundary I /
+    ThomasMichon/copilot-extensions#2584).
 
     Closes the gap where ``run --detach`` handed a wait off to a cheap
     detached process, but the caller's own ``agent-dispatch suspend`` call --
@@ -2772,26 +2823,33 @@ def _suspend_for_detached_wait(args: argparse.Namespace, spec: Any) -> dict | No
     remember -- was skipped or never reached before the session tore down.
     That left tasks stuck ``started`` (implying a live agent is actively
     working) for as long as the external wait ran, sometimes indefinitely
-    once the detached waiter itself died with nothing to notice.
+    once the detached waiter itself died with nothing to notice. Separately,
+    without the claim, a worktree-lifecycle sweep that only checks for a
+    *live session* (correctly absent here -- that's the whole point of
+    hibernation) could still reclaim the worktree the suspended task expects
+    to resume in.
 
     Returns ``None`` when no ``--task`` was given (a plain untracked wait --
-    nothing to suspend). Never raises: a failure to suspend must not be
-    treated as a failure to detach (the wait is already safely handed off by
-    the time this runs), so any error is folded into the returned dict for
-    the caller to see rather than propagated.
+    nothing to suspend or claim). Never raises: neither the suspend nor the
+    claim is allowed to fail the overall detach (the wait is already safely
+    handed off by the time this runs), so any error is folded into the
+    returned dict for the caller to see rather than propagated.
     """
     if not spec.task_id:
         return None
+    from . import hibernation_claims
+
+    reason = f"hibernating: {' '.join(spec.command)}"
+    claim = hibernation_claims.add_hibernation_claim(spec.task_id, note=reason)
     worker_id = _resolve_owner(args, verb="run --detach")
     if worker_id is None:
-        return {"error": "could not resolve the owning worker for suspend"}
-    reason = f"hibernating: {' '.join(spec.command)}"
+        return {"error": "could not resolve the owning worker for suspend", "claim": claim}
     try:
         with _client(args) as c:
             task = c.suspend(spec.task_id, worker_id, reason=reason)
     except DispatchError as exc:
-        return {"error": str(exc), "worker_id": worker_id}
-    return {"status": task.get("status"), "worker_id": worker_id}
+        return {"error": str(exc), "worker_id": worker_id, "claim": claim}
+    return {"status": task.get("status"), "worker_id": worker_id, "claim": claim}
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
@@ -2849,6 +2907,15 @@ def _cmd_run(args: argparse.Namespace) -> int:
             return 127
 
     report = run_and_resume(spec, runner=runner, resumer=bridge.send_nudge)
+    if spec.task_id:
+        # This is the foreground path: for a detached wait, it's the re-exec'd
+        # child running here (see detached_run_argv), reached exactly once the
+        # wait resolves -- the right moment to retire the claim
+        # _suspend_for_detached_wait journaled, regardless of the wait's
+        # outcome or whether the resume nudge itself succeeded.
+        from . import hibernation_claims
+
+        report["claim_released"] = hibernation_claims.release_hibernation_claim(spec.task_id)
     return _emit(report)
 
 
@@ -3745,6 +3812,36 @@ def build_parser() -> argparse.ArgumentParser:
         "default: this machine's local coordinator",
     )
     p.set_defaults(func=_cmd_list)
+
+    p = sub.add_parser(
+        "doctor",
+        help="diagnose held/suspended tasks: distinguish a confirmed-orphaned "
+        "task (its worktree provably gone) from ordinary in-flight work or "
+        "merely ambiguous liveness, and (with --repair) unbind + re-queue "
+        "only the confirmed-orphaned ones",
+    )
+    p.add_argument(
+        "--repo", help="lane to examine (local name or remote URL); default: calling repo"
+    )
+    p.add_argument("--label", help="only examine tasks carrying this label")
+    p.add_argument("--limit", type=int, default=200)
+    p.add_argument(
+        "--stale-lease-seconds",
+        type=float,
+        default=3600.0,
+        help="how long a 'started' task's lease may sit expired with no "
+        "reported activity before flagging it stale_lease (advisory only, "
+        "never auto-repaired; default: 3600 == agent_dispatch.doctor."
+        "DEFAULT_STALE_LEASE_GRACE_SECONDS)",
+    )
+    p.add_argument(
+        "--repair",
+        action="store_true",
+        help="unbind + re-queue every task diagnosed orphaned_worktree_gone "
+        "(fails its stale reservation, then releases/yields the task back "
+        "to queued); every other diagnosis is left untouched",
+    )
+    p.set_defaults(func=_cmd_doctor)
 
     p = sub.add_parser(
         "inbox",

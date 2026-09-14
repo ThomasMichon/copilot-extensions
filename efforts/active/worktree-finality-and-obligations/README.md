@@ -252,50 +252,109 @@ _Verbatim operator request; original spelling and punctuation preserved._
   owned) -- that pointer is the follow-up work.
 
 ### Phase 4 - Derive canonical finality once
-- [ ] Add a versioned faceted descriptor that preserves Git state, tracking
+- [x] Add a versioned faceted descriptor that preserves Git state, tracking
   lifecycle, held-claim count, open-follow-up count, live blockers, and cleanup
   assessment as independent facts, plus evidence provenance, freshness, and
-  completeness.
-- [ ] Define `FINAL` as the conjunction of clean/upstream Git state, zero held
-  claims, zero open follow-ups, and no definitive cleanup blocker.
-- [ ] Render Git-settled but blocked worktrees as `MERGED`, with compact claim
-  and follow-up counts, rather than `FINAL`.
-- [ ] Define held claims as `active | at-rest`; `released | abandoned` remain
-  non-held, with abandoned claims retained as visible audit history.
+  completeness. Landed as `prune.ClosureDescriptor` /
+  `assemble_closure_descriptor` (version 1): a pure function over
+  already-computed facts (git `WorktreeStateInfo`, `CleanupDisposition`, held-
+  claim count, open-follow-up count), never a second mutable store.
+- [x] Define `FINAL` as the conjunction of clean/upstream Git state, zero held
+  claims, zero open follow-ups, and no definitive cleanup blocker -- plus
+  `evidence_mode == "refreshed" and evidence_complete` (a cached/fetch-free
+  descriptor never reports current `FINAL`, even when otherwise qualified) and
+  "not live" (`ACTIVE` has display precedence, matching design.md).
+- [x] Render Git-settled but blocked worktrees as `MERGED`, with compact claim
+  (`C<N>`) and follow-up (`F<N>`) markers, rather than `FINAL`. Only the git
+  `completed` state gets the MERGED/FINAL treatment; every other base state
+  (`ACTIVE`/`DIRTY`/`WIP`/`UNUSED`/`CONVO`/`ORPHAN`/`UNKNOWN`) keeps its own
+  label regardless of blockers, per design.md's presentation rules.
+- [x] Define held claims as `active | at-rest`; `released | abandoned` remain
+  non-held. (Already true since Phase 1/2's `ResourceClaim.is_live`; the
+  descriptor just reads that count -- abandoned-claim audit visibility is
+  unchanged, pre-existing behavior.)
 - [ ] Make finalize reject active claims, then release at-rest claims under the
   finalizing freeze before committing finalized status. Give legacy/GC close-out
   an explicit preview/apply reconciliation command rather than silently
-  releasing current-version claims.
-- [ ] Separate completed-worktree closure from other cleanup categories:
+  releasing current-version claims. **Not done this phase** -- `finalize.py`'s
+  existing obligation gate (pre-dates this effort) already rejects active
+  claims and releases at-rest ones under the freeze; the explicit
+  preview/apply reconciliation command for legacy/GC close-out is unbuilt.
+- [x] Separate completed-worktree closure from other cleanup categories:
   `FINAL` is the strict completed-and-safe proof, while UNUSED, CONVO, GONE, and
-  system-record reap retain their own opt-in/action dispositions.
+  system-record reap retain their own opt-in/action dispositions (unchanged --
+  `_BUCKET_TO_ACTION_DISPOSITION` maps `unused`/`conversation` to `opt-in`
+  distinctly from `clean` -> `safe`; GONE/record-reap are explicitly **not**
+  handled by this descriptor yet, matching `cleanup_disposition`'s own
+  docstring that GONE is the caller's concern).
 - [ ] Make cleanup and GC consume the descriptor's graded action disposition and
-  exact blockers instead of maintaining a parallel verdict.
-- [ ] Recompute refreshed, complete evidence under the record/finalization lock
+  exact blockers instead of maintaining a parallel verdict. **Not done** --
+  `cleanup`/`gc` still consume `CleanupDisposition` directly; only `list --json
+  --classify` publishes the descriptor so far (additive, alongside the legacy
+  fields). Switching cleanup/GC's own decision logic over is Phase 5 work
+  (avoids two behavior changes landing in one PR).
+- [x] Recompute refreshed, complete evidence under the record/finalization lock
   immediately before any prune/delete action; cached or fetch-free descriptors
-  are never destructive authorization.
+  are never destructive authorization. Enforced structurally: any
+  `evidence_mode != "refreshed"` (or incomplete) descriptor downgrades a would-
+  be `safe` action disposition to `blocked` inside `assemble_closure_descriptor`
+  itself -- a caller cannot accidentally treat stale evidence as authorization.
 
 ### Phase 5 - Align every presentation and guidance surface
-- [ ] Make list JSON publish the canonical descriptor and compatibility fields.
+- [x] Make list JSON publish the canonical descriptor and compatibility
+  fields. Done in Phase 4 (additive `closure` field alongside the legacy
+  `cleanup_bucket`/`state` fields, unchanged).
 - [ ] Pass the descriptor through agent-bridge's allow-list projection and any
   cockpit consumer before treating descriptor absence as a mixed-version case.
+  **Not done** -- agent-bridge's worktree projection is untouched.
 - [ ] Make mux and Picker use the descriptor's exact compact text, marker counts,
   and semantic style token; surface adapters may translate that style token to
-  their native palette without redefining state.
+  their native palette without redefining state. **Not done** -- the mux
+  status segment and the Textual Picker still derive their own labels
+  independently of `prune.assemble_closure_descriptor`. This is the largest
+  remaining Phase 5 item (real UI-surface rewiring against golden/parity
+  tests); deliberately deferred rather than rushed in this slice.
 - [ ] Keep legends, filters, maintenance previews, and cleanup selections in
-  parity with the same descriptor.
-- [ ] Preserve mixed-version fleet safety: absent, unsupported, or newer
+  parity with the same descriptor. **Not done**, same reason as above.
+- [x] Preserve mixed-version fleet safety: absent, unsupported, or newer
   descriptor versions render provisional/review and never `FINAL` or
-  prune-eligible.
+  prune-eligible. Landed as `prune.interpret_descriptor_payload`: an exact
+  `version == DESCRIPTOR_VERSION` match is trusted; anything else (missing,
+  malformed, older, or newer) reports `supported: False`,
+  `final: False`, `action_disposition: "blocked"` regardless of what the
+  payload's own fields claim. Not yet CALLED by a real remote/cockpit
+  consumer (there isn't one yet -- see the two unchecked items above); the
+  safety net itself is built and tested ahead of that wiring.
 - [ ] Assemble and truncate compact text in one shared function so parity is
   measured before and after the same width rule, with deterministic priority:
-  base label, blocker markers, then title/detail.
-- [ ] Update lifecycle, conduct, worktree, and cleanup guidance: finalized is
+  base label, blocker markers, then title/detail. **Partially done**:
+  `assemble_closure_descriptor` already assembles `label` + `C<N>`/`F<N>`
+  markers in one place (base label, then blocker markers, matching the
+  priority order), but does NOT yet fold in title/detail or truncate to a
+  width budget -- that needs the mux/Picker wiring above to know what width
+  budget applies.
+- [x] Update lifecycle, conduct, worktree, and cleanup guidance: finalized is
   resumable until pruned; follow-ups are explicit items; cleanup receives and
   reports the exact blocking list.
-- [ ] Update `file-issue` guidance to proactively open a follow-up/claim on any
-  issue the agent files for its current task, so filed bugs stay visible as
-  worktree obligations rather than relying on the agent to remember later.
+  - Fixed the actual stale instruction the effort's own Context section named:
+    `scripts/conduct/worktree-conduct.md` (the deployed postToolUse nudge
+    fragment -- the "It's been N tool calls..." hint every agent sees) said
+    "do not resume work after finalizing." Replaced with the correct
+    "`finalized` is not terminal... resuming work afterward is normal and
+    safe, and reopens the worktree automatically."
+  - Fixed a real reporting gap while doing this: `cmd_cleanup`'s per-worktree
+    skip-reason logic never had a branch for the `held-claims`/`follow-up`
+    buckets, so a worktree blocked by either silently vanished from
+    `cleanup`'s report -- neither listed as skipped nor counted in any
+    summary. Extracted `_cleanup_per_item_skip_reason` (now unit-tested) and
+    added both buckets to it.
+  - `docs/worktree-lifecycle.md` and the `worktree` skill were already
+    correct from Phases 1-3.
+- [x] Update `file-issue` guidance to proactively open a follow-up/claim on any
+  issue the agent files for its current task. Already done in Phase 3 (the
+  `worktree` skill's obligation-gate section); the cross-repo `file-issue`
+  skill itself (aperture-labs-owned) still isn't touched -- unchanged from
+  the Phase 3 note.
 
 ### Phase 6 - Release and prove the lifecycle
 - [ ] Run a fleet inventory/backfill preview for legacy boolean follow-ups,
@@ -360,16 +419,36 @@ _Verbatim operator request; original spelling and punctuation preserved._
 - [ ] **Evidence parity:** the same live worktree rendered through cached,
   fetch-free, and refreshed evidence modes has consistent labels; incomplete
   evidence can only lower confidence, never promote to `FINAL`.
-- [ ] **Cleanup:** cleanup/GC enumerate exact held claims and open follow-ups and
-  never offer a blocked completed worktree as safe; UNUSED, CONVO, and GONE keep
-  their explicit existing action categories.
+- [x] **Cleanup:** `cleanup` now enumerates the exact held-claims/open-follow-up
+  reason per worktree (`cmd_cleanup`'s `_cleanup_per_item_skip_reason`, fixed
+  this phase -- it previously silently dropped both buckets from the report
+  entirely). `gc` already reported them via `classify_managed_worktree`'s
+  `reason` (Phase 1). Neither yet consumes the descriptor's own `action`
+  field directly (see the unchecked Phase 4/5 items) -- they still derive
+  from `CleanupDisposition` directly, just correctly now. UNUSED/CONVO/GONE
+  keep their existing distinct action categories (unchanged).
 - [ ] **Blocker precedence:** an UNUSED, CONVO, GONE, or system record with a
   held claim or open follow-up is `blocked`, never `opt-in` or `record-reap`.
-- [ ] **Destructive freshness:** cached/fetch-free evidence never authorizes
-  deletion; the immediately-preceding refreshed recomputation must still be safe.
-- [ ] **Guidance:** no shipped instruction says finalized work cannot be
-  resumed; every close-out path instructs the agent to list and resolve,
-  transfer, settle, or release obligations before finality.
+  **Not yet true:** `cleanup_disposition`'s held-claims/follow-up override only
+  fires when the record is `finalized`/git-`completed`/`merged`; an
+  UNUSED/CONVO record with a held claim does not currently get forced to
+  `blocked`. Left unchecked deliberately.
+- [x] **Destructive freshness:** cached/fetch-free evidence never authorizes
+  deletion; the immediately-preceding refreshed recomputation must still be
+  safe. Enforced in `assemble_closure_descriptor` (a non-`refreshed`/incomplete
+  descriptor downgrades `safe` to `blocked`) with direct tests
+  (`test_cached_evidence_never_reports_final_or_safe`,
+  `test_incomplete_evidence_never_reports_final_or_safe`). Not yet wired to an
+  actual pre-delete recompute call site (`cleanup`/`gc` don't consume the
+  descriptor yet -- see the unchecked Phase 4 bullet above).
+- [x] **Guidance:** no shipped instruction says finalized work cannot be
+  resumed. Fixed the one that did:
+  `scripts/conduct/worktree-conduct.md`'s "do not resume work after
+  finalizing" (the deployed postToolUse nudge fragment). Every close-out
+  path (`worktree` skill, `docs/worktree-lifecycle.md`, this conduct
+  fragment) now instructs resolving obligations rather than treating
+  finalize as terminal; the "transfer" half (offer/accept/decline) has no
+  shipped path yet since that machinery isn't built (Phase 3 note).
 - [ ] **Regression:** existing ACTIVE, DIRTY, WIP, UNUSED, CONVO, GONE, ORPHAN,
   and UNKNOWN behavior remains stable when no closure blockers exist.
 - [ ] **Concurrency:** stale background record writers preserve every concurrent
@@ -378,8 +457,14 @@ _Verbatim operator request; original spelling and punctuation preserved._
   unsupported descriptor version, is provisional and never prune-safe.
 - [ ] **Bridge:** agent-bridge and its cockpit preserve the descriptor and do
   not drop rows into a permanent provisional state.
-- [ ] **Explained blockers:** every `blocked` or `unsafe` disposition carries at
-  least one blocker from the closed code set.
+- [x] **Explained blockers:** every `blocked` or `unsafe` disposition carries at
+  least one blocker from the closed code set (`prune.BLOCKER_CODES`) --
+  `test_all_emitted_blocker_codes_are_in_the_closed_set`. Only the subset this
+  descriptor can currently derive is emitted; the still-unwired codes
+  (`active-effort`, `inbound-obligation`, `unverified-squash`, `live-session`,
+  `checkout-missing`, `prune-review-required`, `incomplete-evidence`,
+  `unsupported-descriptor`) are named in `assemble_closure_descriptor`'s
+  docstring as not yet produced.
 
 ## Proposal
 
@@ -528,4 +613,83 @@ The approved design is the faceted model in [design.md](design.md):
 - `python tools/run-plugin-tests.py agent-worktrees` -- 525 passed (full suite
   minus the same two pre-existing, unrelated `test_knowledge_plugins.py`
   failures noted in prior entries).
+
+### 2026-09-13 - Phase 4: the canonical closure descriptor
+- Operator said "keep going" (and separately: route any handoff through the
+  manual prompt path, not `trigger_handoff`, which is currently broken --
+  noted for this session, not an effort concern). Bound a fresh worktree at
+  Phase 4 (`effort-focus bind ... --slice "Phase 4 - Derive canonical
+  finality once"`).
+- Added `prune.ClosureDescriptor` / `assemble_closure_descriptor` (version 1):
+  a pure function combining already-computed facts (git `WorktreeStateInfo`,
+  `CleanupDisposition`, held-claim count, open-follow-up count) into the one
+  canonical descriptor design.md specifies -- `label`/`style`/`compact`
+  (`FINAL`/`MERGED` + `C<N>`/`F<N>` markers), `closure.final`, and a graded
+  `action.disposition` (`safe`/`opt-in`/`blocked`/`unsafe`), all derived, never
+  stored. `FINAL` requires refreshed+complete evidence, upstream-complete Git,
+  zero held claims, zero open follow-ups, and not live -- a cached/fetch-free
+  descriptor structurally cannot report `FINAL` or a `safe` action even when
+  the underlying facts would otherwise qualify.
+- Wired it into `list --json --classify`'s existing row-builder as an
+  additive `closure` field (alongside the legacy `cleanup_bucket`/`state`
+  fields, which are unchanged) -- the first real consumer, proving the
+  descriptor is actually assembleable from live data rather than a paper
+  design.
+- **Not done this phase** (all explicitly named in the Plan/Validation Plan
+  above, not silently dropped): `cleanup`/`gc` still consume
+  `CleanupDisposition` directly, not the descriptor's action disposition
+  (deliberately deferred to Phase 5 so this PR is one behavior change, not
+  two); the GONE/managed-record-reap disposition path; the
+  `active-effort`/`inbound-obligation`/`unverified-squash`/`live-session`/
+  `checkout-missing`/`prune-review-required`/`incomplete-evidence`/
+  `unsupported-descriptor` blocker codes; the UNUSED/CONVO+held-claim
+  precedence rule (`cleanup_disposition`'s own held-claims override doesn't
+  fire for those base states yet); the legacy/GC explicit preview/apply
+  reconciliation command; Phase 5's mux/Picker/agent-bridge consumption and
+  Phase 6's fleet migration.
+- Observed one apparently-flaky, unrelated test
+  (`test_handoff_cutover.py::TestPaneWrapperInitialPrompt::
+  test_wrapper_appends_native_interactive_prompt`) fail once in a full-suite
+  run; reproduced green in isolation both with and without this change's
+  diff -- not investigated further as out of scope (pane/subprocess timing,
+  nothing in the touched files).
+- `python tools/run-plugin-tests.py agent-worktrees --subsuite-timeout 600` --
+  533 passed (full suite minus the same two pre-existing, unrelated
+  `test_knowledge_plugins.py` failures).
+
+### 2026-09-14 - Phase 5: guidance fixed at the source + mixed-version safety
+- Operator said "continue." Bound a fresh worktree at Phase 5
+  (`effort-focus bind ... --slice "Phase 5 - Align every presentation and
+  guidance surface"`).
+- Found and fixed the **exact stale instruction the effort's Context section
+  named**: `scripts/conduct/worktree-conduct.md` -- the deployed postToolUse
+  nudge fragment every agent sees ("It's been N tool calls...") -- said "do
+  not resume work after finalizing." Replaced with the correct guidance
+  (finalized is not terminal; resuming reopens automatically) and added the
+  held-claim/follow-up obligation language. Verified against the existing
+  `test_worktree_conduct_fragment_migrated` byte-length cap (1,800 chars;
+  landed at 1,465).
+- While fixing that, found and fixed a **fourth pre-existing gap**:
+  `cmd_cleanup`'s per-worktree skip-reason branch chain had no case for the
+  `held-claims`/`follow-up` buckets, so a worktree blocked by either
+  silently vanished from `cleanup`'s report -- neither listed as skipped nor
+  counted in any summary bucket. Extracted `_cleanup_per_item_skip_reason`
+  (now unit-tested) and added both buckets, matching the existing
+  `claimed`/`open-pr`/`paired-pending` pattern.
+- Added `prune.interpret_descriptor_payload` (mixed-version fleet safety):
+  an exact `version == DESCRIPTOR_VERSION` match is trusted; a missing,
+  malformed, older, OR newer payload reports `supported: False`, `final:
+  False`, `action_disposition: "blocked"` regardless of what its own fields
+  claim. Built and tested ahead of an actual remote/cockpit consumer (none
+  exists yet).
+- Checked off `list --json` publishing (done in Phase 4) and the two
+  guidance bullets; left the largest Phase 5 item -- rewiring the mux status
+  segment and the Textual Picker to consume the descriptor's exact
+  label/style/compact text -- explicitly unstarted. That's real UI-surface
+  work against existing golden/parity tests and deserves its own focused
+  slice rather than being rushed alongside everything else landed today.
+- `python tools/run-plugin-tests.py agent-worktrees --subsuite-timeout 600` --
+  535 passed (full suite minus the same two pre-existing, unrelated
+  `test_knowledge_plugins.py` failures; the previously-observed flaky
+  handoff-cutover test did not recur this run).
 
