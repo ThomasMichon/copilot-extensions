@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from agent_machines import __main__ as cli
-from agent_machines import self_update, self_update_tasks
+from agent_machines import self_update, self_update_state, self_update_tasks
 from agent_machines.manifest import ManifestError, load_package
 from agent_machines.reconcile import plan
 from agent_machines.resources import resolve_resources
@@ -137,6 +137,7 @@ def test_lock_refuses_live_owner_without_double_drive(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     monkeypatch.setattr(self_update, "_WindowsMutex", lambda _name: _FakeMutex("timeout"))
+    monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("timeout"))
     monkeypatch.setattr(self_update.sys, "platform", "win32")
     lock = self_update.TierLock(tier="watchdog", home=tmp_path)
     acquired, detail = lock.acquire()
@@ -162,6 +163,7 @@ def test_lock_reclaims_dead_owner_only_after_stale_window(tmp_path, monkeypatch)
         encoding="utf-8",
     )
     monkeypatch.setattr(self_update, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
+    monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(self_update.sys, "platform", "win32")
     lock = self_update.TierLock(
         tier="watchdog",
@@ -195,6 +197,7 @@ def test_lock_refuses_recent_dead_owner(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     monkeypatch.setattr(self_update, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
+    monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(self_update.sys, "platform", "win32")
     lock = self_update.TierLock(
         tier="watchdog",
@@ -275,6 +278,7 @@ def test_fast_forward_repo_skips_dirty_and_diverged(tmp_path):
 def test_sweep_defers_when_live_session_is_present(tmp_path, monkeypatch):
     monkeypatch.setattr(self_update.sys, "platform", "win32")
     monkeypatch.setattr(self_update, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
+    monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     repo = type("Repo", (), {"path": tmp_path / "repo"})
     repo.path.mkdir()
 
@@ -372,6 +376,7 @@ def test_cli_self_update_run_emits_json(monkeypatch, capsys):
 def test_reconcile_task_registers_new_opt_in(monkeypatch, tmp_path):
     monkeypatch.setattr(self_update.sys, "platform", "win32")
     monkeypatch.setattr(self_update, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
+    monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     state = {"present": False}
 
     def query(tier, *, machine=None, runner=None, resolve_binary=None, home=None):
@@ -394,6 +399,7 @@ def test_reconcile_task_defers_to_elevated_install_when_registration_is_denied(
 ):
     monkeypatch.setattr(self_update.sys, "platform", "win32")
     monkeypatch.setattr(self_update, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
+    monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(
         self_update_tasks,
         "query_scheduled_task",
