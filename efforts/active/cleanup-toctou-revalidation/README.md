@@ -183,6 +183,43 @@ duplicate or fight an existing mechanism:
       active-session rejection) versus what only the non-forced path
       re-checks (the full consolidated disposition) — as two named
       contracts, not one blended description.
+- [ ] **The forced path's active-session check must itself be a fresh,
+      under-lock liveness read — not the pre-lock `active_paths`
+      snapshot.** `reap_one` computes `active_paths` *before* acquiring
+      `FinalizeLock` and, when `force=True`, skips the non-forced
+      revalidation entirely; if the active-session rejection it *does* keep
+      still consults that stale pre-lock snapshot, a session attaching
+      between the scan and the lock is invisible even in forced mode, and
+      `--force` can terminate a session it was never meant to touch. Both
+      the forced and non-forced contracts refresh liveness under the lock;
+      only the *disposition* (dirty/WIP/claims/etc.) differs between them.
+- [ ] **Acknowledge and design for the residual TOCTOU window explicitly —
+      revalidating "right before" the reap does not make check-and-delete
+      indivisible.** `FinalizeLock` serializes this tool's own
+      finalization/cleanup instances against each other; it does not fence
+      out an external edit, a session/mux attaching, or a claim/record
+      write landing in the gap between the final fresh read and the
+      `_reap_worktree` call itself. Two acceptable outcomes, to be decided
+      here rather than left implicit:
+      1. **Shrink the window to one held critical section** — perform the
+         final classification/liveness read and the `_reap_worktree` call
+         as a single, uninterrupted sequence while continuously holding
+         `FinalizeLock` (no intervening I/O, no re-entrant call that could
+         yield), so the only remaining gap is the unavoidable OS-level
+         instant between the last read syscall and the delete syscall —
+         and **explicitly document that a true fence against arbitrary
+         external actors (an editor, a directly-invoked git command) is out
+         of scope** unless a further mechanism (e.g., marking the worktree
+         read-only for the duration of the critical section) is
+         deliberately adopted as a stretch goal.
+      2. **Or** adopt that further fencing mechanism if the residual risk
+         from (1) is judged unacceptable, and specify exactly what it is
+         (a lease/generation token re-checked at the syscall boundary, a
+         transient read-only permission flip, etc.) with its own cost/
+         complexity tradeoff spelled out.
+      Either way, the plan must say which was chosen and why, rather than
+      implying "revalidate right before reap" already closes the race to
+      zero.
 
 ### Phase 3 — Wire both call sites through it
 
@@ -230,6 +267,18 @@ Phase 2's forced-path contract). Concretely, at minimum:
       claimed worktree **is** removed when forced (confirms `--force` still
       works as documented, i.e. this effort does not regress the escape
       hatch).
+- [ ] Single-item (`reap_one`), **forced**, **session attaches *after* the
+      pre-lock scan** (not merely already-active at scan time): still
+      rejected. This is the specific reviewer-identified gap — `force`
+      bypasses the disposition checks but must not bypass a *fresh*
+      liveness read, since `active_paths` is otherwise only ever computed
+      before `FinalizeLock` is acquired.
+- [ ] A test that specifically exercises "shrink the window to one held
+      critical section" (Phase 2): assert the final classification/liveness
+      read and the `_reap_worktree` call happen while continuously holding
+      `FinalizeLock`, with no intervening I/O or re-entrant call between
+      them — the closest this design gets to closing the check-to-delete
+      gap, and the one thing that must be verified rather than assumed.
 - [ ] Every existing regression test from PR #2635
       (`test_tracking_override.py`, `test_prune.py`) still passes unchanged
       or is updated to call through the new consolidated function without
@@ -317,3 +366,22 @@ consolidation/wiring changes land before the plan clears review._
   policy required) — flagged by the reviewer as a "previously missed"
   finding in code unchanged since the prior round, but a genuine gap in the
   plan's own signal inventory.
+
+### 2026-09-14 — Review round 3
+
+- Named the fundamental limit explicitly rather than leaving it implicit:
+  "revalidate right before the reap" does not make check-and-delete
+  indivisible. `FinalizeLock` only serializes this tool's own instances
+  against each other; an external edit, session attach, or claim write can
+  still land in the gap between the final fresh read and the delete
+  syscall. Phase 2 now requires a stated decision — shrink the window to a
+  single held critical section (documenting the residual OS-level gap as
+  out of scope) or adopt further fencing (a lease/generation token, a
+  transient read-only flip) — rather than implying the race closes to zero.
+- The forced (`reap_one --force`) path's active-session rejection must
+  itself refresh liveness under the lock, not reuse the pre-lock
+  `active_paths` snapshot — otherwise `--force` can still terminate a
+  session that attached *after* the scan, which is exactly the race the
+  non-forced path is being fixed to avoid. Added as its own Phase 2 design
+  point and Phase 4 test (distinct from "forced still rejects an
+  already-active session," which was already covered).
