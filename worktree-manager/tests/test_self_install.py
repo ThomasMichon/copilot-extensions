@@ -138,7 +138,60 @@ def test_relocated_launchers_resolve_pane_wrappers_from_their_own_bin():
     assert 'RUNTIME_DIR="${AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT:-}"' in sh
     assert 'AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR' in sh
     assert '$RuntimeDir = $env:AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT' in ps1
+
+
+def test_relocated_launcher_ships_the_mux_status_bar_scripts_it_needs():
+    """``launch-session.ps1`` dot-sources ``session-options.ps1`` and
+    ``psmux-path.ps1`` (and ``session-options.ps1`` in turn resolves
+    ``psmux-passthrough.conf``) via ``$PSScriptRoot``-relative paths, so all
+    must be deployed as siblings of the relocated launcher. Omitting them
+    left Worktree Manager-launched sessions with a silently unconfigured
+    psmux status bar (the failure is swallowed, not a launch error) once
+    ``launch-session.ps1`` moved out of ``plugins/agent-worktrees/bin/``."""
+    root = Path(__file__).resolve().parents[1] / "bin"
+    ps1 = (root / "launch-session.ps1").read_text(encoding="utf-8")
+    assert "$script:AwSessionOptions = Join-Path $PSScriptRoot 'session-options.ps1'" in ps1
+    assert "$pathHelper = Join-Path $PSScriptRoot 'psmux-path.ps1'" in ps1
+    for name in (
+        "session-options.ps1",
+        "session-options.sh",
+        "apply-mux-keybinds.ps1",
+        "apply-mux-keybinds.sh",
+        "psmux-passthrough.conf",
+        "psmux-path.ps1",
+    ):
+        assert (root / name).is_file(), f"missing {name} beside the relocated launcher"
+    session_options_ps1 = (root / "session-options.ps1").read_text(encoding="utf-8")
+    assert "Join-Path $PSScriptRoot 'psmux-passthrough.conf'" in session_options_ps1
     assert '$env:AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR' in ps1
+
+
+def test_copied_mux_status_bar_helpers_match_their_canonical_source():
+    """Unlike ``launch-session.*``/``pane-wrapper.*`` (which the Phase 3b
+    Slice 2 migration deliberately allows to diverge as agent-worktrees' own
+    copy settles into a legacy fallback), the terminal/helper scripts this
+    sub-slice added are not being relocated away from agent-worktrees -- they
+    are shipped in parity with agent-worktrees' own deployment
+    (``scripts/install.{sh,ps1}``) and must stay byte-identical. A silent
+    edit to only one copy would reintroduce exactly the kind of unnoticed
+    status-bar drift this sub-slice fixed."""
+    repo_root = Path(__file__).resolve().parents[2]
+    wm_bin = repo_root / "worktree-manager" / "bin"
+    aw_terminal = repo_root / "plugins" / "agent-worktrees" / "terminal"
+    aw_scripts = repo_root / "plugins" / "agent-worktrees" / "scripts"
+    pairs = [
+        (wm_bin / "session-options.ps1", aw_terminal / "session-options.ps1"),
+        (wm_bin / "session-options.sh", aw_terminal / "session-options.sh"),
+        (wm_bin / "apply-mux-keybinds.ps1", aw_terminal / "apply-mux-keybinds.ps1"),
+        (wm_bin / "apply-mux-keybinds.sh", aw_terminal / "apply-mux-keybinds.sh"),
+        (wm_bin / "psmux-passthrough.conf", aw_terminal / "psmux-passthrough.conf"),
+        (wm_bin / "psmux-path.ps1", aw_scripts / "psmux-path.ps1"),
+    ]
+    for copy, canonical in pairs:
+        assert copy.read_bytes() == canonical.read_bytes(), (
+            f"{copy} has drifted from its canonical source {canonical}; "
+            "re-sync both copies verbatim"
+        )
 
 
 def test_self_install_command_dry_run(capsys):
