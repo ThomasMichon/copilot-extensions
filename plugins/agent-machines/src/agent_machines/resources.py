@@ -34,13 +34,14 @@ A requirement package declares resources under a top-level ``resources:`` list::
           url = "https://example.invalid/pypi/simple/"
           default = true
 
-Five kinds are fully handled: ``package`` (winget/apt/pipx/uv-tool/pip),
+Six kinds are fully handled: ``package`` (winget/apt/pipx/uv-tool/pip),
 ``file`` (whole-file *enforce*/*ensure-present* plus a *managed-block* strategy
 that owns only a marked block inside an otherwise user-owned file),
 ``registry`` (Windows registry values, via ``reg.exe``), and ``feature``
 (Windows optional features/capabilities via DISM and Linux/WSL units via
 ``systemctl``, selected by a ``manager`` field), plus ``power-setting`` (Windows
-power-scheme AC/DC values via ``powercfg``). Adding a type is a new
+power-scheme AC/DC values via ``powercfg``), and ``self-update`` (machine-local
+opt-in for unattended ``watchdog`` / ``sweep`` tiers). Adding a type is a new
 ``ResourceHandler`` subclass registered in :data:`HANDLERS` -- nothing else in
 the engine changes.
 
@@ -154,6 +155,12 @@ class ResolvedResource:
                 f"{source}={self.desired[source]}"
                 for source in ("ac", "dc")
                 if source in self.desired
+            )
+        if self.type == "self-update":
+            return (
+                "enabled"
+                if self.desired.get("state", "present") == "present"
+                else "disabled"
             )
         return self.desired.get("state", "present")
 
@@ -1682,6 +1689,58 @@ class PowerSettingResourceHandler(ResourceHandler):
         )
 
 
+class SelfUpdateResourceHandler(ResourceHandler):
+    TYPE = "self-update"
+
+    def identity(self, decl: dict[str, Any]) -> tuple:
+        return (self.TYPE, str(decl.get("tier")))
+
+    def display_id(self, decl: dict[str, Any]) -> str:
+        return str(decl.get("tier"))
+
+    def merge(
+        self, members: list[ResourceContribution]
+    ) -> tuple[dict[str, Any], list[ResourceFinding], list[dict[str, Any]]]:
+        findings: list[ResourceFinding] = []
+        decisions: list[dict[str, Any]] = []
+        ident = self.identity(members[0].declaration)
+        state, selected, _, conflict, decision, info = _select_field(
+            members,
+            ident,
+            "state",
+            lambda member: str(member.declaration.get("state", "present")),
+        )
+        if conflict:
+            findings.append(
+                ResourceFinding(
+                    "error",
+                    "resource-conflict",
+                    f"self-update tier '{ident[1]}' is declared both present and "
+                    f"absent across packages: "
+                    f"{', '.join(sorted(member.owner for member in selected))}.",
+                )
+            )
+        if decision:
+            decisions.append(decision)
+            findings.append(info)
+        return {"tier": ident[1], "state": state}, findings, decisions
+
+    def apply(
+        self, resolved: ResolvedResource, ctx: ResourceContext, dry_run: bool
+    ) -> ResourceResult:
+        return ResourceResult(
+            self.TYPE,
+            resolved.id,
+            False,
+            dry_run,
+            "skip",
+            skipped_reason=(
+                "self-update task reconciliation is installer-owned; use "
+                "`agent-machines self-update install`"
+            ),
+        )
+
+
 # --------------------------------------------------------------------------- #
 # Package-manager table (argv templates + detect parsers)
 # --------------------------------------------------------------------------- #
@@ -1830,6 +1889,7 @@ HANDLERS: dict[str, ResourceHandler] = {
     "registry": RegistryResourceHandler(),
     "feature": FeatureResourceHandler(),
     "power-setting": PowerSettingResourceHandler(),
+    "self-update": SelfUpdateResourceHandler(),
 }
 
 

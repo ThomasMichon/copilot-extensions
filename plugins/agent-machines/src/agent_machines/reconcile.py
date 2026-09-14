@@ -22,6 +22,7 @@ from typing import Any
 
 from . import modules as _modules
 from . import resources as _resources
+from . import self_update as _self_update
 from . import validator as _validator
 from .authority import (
     AUTHORITY_MODE_OPAQUE_ADDITIVE,
@@ -229,8 +230,9 @@ def plan(
         for pkg, mod in _modules.resolve_modules(resolved, machine, plat)
     ]
     resolved_resources, _ = _resources.resolve_resources(resolved, machine, plat)
-    resource_list = [
-        {
+    resource_list = []
+    for res in resolved_resources:
+        entry = {
             "type": res.type,
             "id": res.id,
             "summary": res.summary(),
@@ -238,8 +240,14 @@ def plan(
             "contributor_details": res.contributor_details,
             "authority_decisions": res.authority_decisions,
         }
-        for res in resolved_resources
-    ]
+        if res.type == "self-update":
+            observed = _self_update.observed_plan_fields(res.id)
+            entry["observed"] = observed
+            entry["summary"] = _self_update.format_plan_summary(
+                entry["summary"],
+                observed,
+            )
+        resource_list.append(entry)
     authority_decisions = sort_decisions(
         _validator.settings_authority_decisions(resolved)
         + [

@@ -8,6 +8,7 @@ Verbs:
 * ``plan``     -- read-only restore plan (managed surfaces + drift key)
 * ``validate`` -- run the conflict validator over the package union
 * ``restore``  -- converge the machine (``--dry-run`` prints the plan; apply lands in #4006)
+* ``self-update`` -- run unattended watchdog / sweep tiers
 * ``provision-playwright-cli`` -- converge the machine-local Playwright CLI workspace
 * ``capture`` / ``prune`` -- harvest / GC verbs (issue #4006)
 """
@@ -25,6 +26,8 @@ from . import identity as _identity
 from . import layout as _layout
 from . import playwright_cli as _playwright_cli
 from . import reconcile as _reconcile
+from . import resources as _resources
+from . import self_update as _self_update
 from . import validator as _validator
 from .manifest import ManifestError, RequirementPackage
 from .surfaces._common import SurfaceStateError
@@ -474,6 +477,63 @@ def _cmd_restore(args: argparse.Namespace) -> int:
     return 0 if result.ok else 2
 
 
+def _self_update_packages(
+    machine: str,
+    accepted_machines: tuple[str, ...] | None = None,
+) -> list[RequirementPackage]:
+    return (
+        _collect_all_packages(machine, accepted_machines)
+        if accepted_machines is not None
+        else _collect_all_packages(machine)
+    )
+
+
+def _cmd_self_update_run(args: argparse.Namespace) -> int:
+    identity = _resolve_machine_identity(args)
+    _emit_identity_warnings(identity)
+    machine = identity.canonical
+    packages = _self_update_packages(machine, identity.accepted)
+    resolved = _reconcile.resolve_union(packages, machine, identity.accepted)
+    findings = _validator.validate(resolved, machine)
+    if _validator.has_errors(findings):
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "error": "validator reported errors",
+                        "findings": [f.__dict__ for f in findings],
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            print("self-update refused: validator reported errors:", file=sys.stderr)
+            for finding in findings:
+                if finding.level == "error":
+                    print(f"  {finding.code}: {finding.message}", file=sys.stderr)
+        return 1
+    resolved_resources, _ = _resources.resolve_resources(
+        resolved,
+        machine,
+        _discover.current_platform(),
+    )
+    resource = _self_update.selected_tiers_from_resolved(resolved_resources).get(args.tier)
+    result = _self_update.run_tier(
+        args.tier,
+        opted_in=_self_update.tier_enabled(resource),
+        discovered_repos=_discover.discover(
+            machine,
+            accepted_machines=identity.accepted,
+        ),
+    )
+    if args.json:
+        print(json.dumps(result.to_dict(), indent=2))
+    else:
+        print(_self_update.format_result(result))
+    return 0 if result.ok else 2
+
+
 def _cmd_todo(args: argparse.Namespace) -> int:
     print(f"'{args.verb}' is delivered by the surfaces package (issue #4006)", file=sys.stderr)
     return 2
@@ -568,6 +628,26 @@ def _build_parser() -> argparse.ArgumentParser:
                          help="restrict to named surfaces/modules (repeatable)")
     restore.add_argument("--verbose", "-v", action="store_true",
                          help="show each module's captured output (shown by default in a dry-run)")
+    self_update = sub.add_parser(
+        "self-update",
+        help="Run or manage unattended self-update tiers.",
+    )
+    self_update.add_argument("--machine", help="override the target machine name")
+    self_update.add_argument("--json", action="store_true", help="emit JSON")
+    self_update_sub = self_update.add_subparsers(dest="self_update_command")
+    self_update_run = self_update_sub.add_parser(
+        "run",
+        help="Run one unattended self-update tier now.",
+    )
+    self_update_run.add_argument(
+        "--tier",
+        required=True,
+        choices=sorted(_self_update.TIER_SPECS),
+        help="the unattended self-update tier to run",
+    )
+    self_update_run.add_argument("--machine", help="override the target machine name")
+    self_update_run.add_argument("--json", action="store_true", help="emit JSON")
+    self_update_run.set_defaults(func=_cmd_self_update_run)
     playwright = sub.add_parser("provision-playwright-cli")
     playwright.add_argument("--json", action="store_true", help="emit JSON")
     playwright_mode = playwright.add_mutually_exclusive_group()
