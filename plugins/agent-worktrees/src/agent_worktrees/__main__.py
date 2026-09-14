@@ -14104,6 +14104,7 @@ def sweep_managed_worktrees(
             has_live_session=has_live_session,
             idle_secs=idle_secs,
             min_idle_secs=min_idle_secs,
+            held_claims=sum(1 for c in rec.resources if c.is_live),
         )
         if verdict.action == "skip":
             result["skipped"].append({"id": rec.worktree_id, "reason": verdict.reason})
@@ -14184,6 +14185,7 @@ def sweep_managed_worktrees(
                 has_live_session=fresh_norm in fresh_ctx.active_sessions,
                 idle_secs=fresh_idle,
                 min_idle_secs=min_idle_secs,
+                held_claims=sum(1 for c in current.resources if c.is_live),
             )
             if fresh_verdict.action == "skip":
                 result["skipped"].append(
