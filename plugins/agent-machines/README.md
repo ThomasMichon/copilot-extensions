@@ -38,8 +38,8 @@ actions) and per-machine data stay in the consuming repo.
   runtime** only; it never applies machine state.
 - **Declarative resources.** Beyond Copilot settings, a package can declare typed
   `resources:` -- package-manager packages, config files (whole-file or a marked
-  `managed-block`), Windows registry values, OS features, and Windows power
-  settings -- that the
+  `managed-block`), Windows registry values, OS features, Windows power
+  settings, and machine-local self-update opt-ins -- that the
   engine installs/pins/writes itself (with cross-package collision detection),
   instead of hiding them in per-repo scripts. See
   [`docs/resources.md`](docs/resources.md).
@@ -238,6 +238,8 @@ agent-machines restore --repo myrepo    # another single repo
 agent-machines restore --only ssh       # preview one surface/module
 agent-machines restore --only ssh --apply
 agent-machines restore --json           # structured plan/surface/module result
+agent-machines self-update run --tier watchdog
+agent-machines self-update run --tier sweep --json
 agent-machines provision-playwright-cli # preview user-home package/skill changes
 agent-machines provision-playwright-cli --apply
 agent-machines provision-playwright-cli --json

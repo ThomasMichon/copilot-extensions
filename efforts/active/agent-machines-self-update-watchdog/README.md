@@ -128,23 +128,23 @@ the proposal into an implementable plan.
 - [x] File the public tracking issue and this effort doc.
 
 ### Phase 2 - Tier implementation
-- [ ] Add a `self-update` resource type (per-tier enabled/disabled) to the
+- [x] Add a `self-update` resource type (per-tier enabled/disabled) to the
   declarative control plane, resolved through its existing authority
   precedence (state-repo-declared default, local machine-level override).
-- [ ] Add `agent-machines self-update run --tier watchdog` (Tier 1: dtssh
+- [x] Add `agent-machines self-update run --tier watchdog` (Tier 1: dtssh
   launcher liveness check-and-start only; no state mutation beyond starting
   the launcher process).
-- [ ] Add `agent-machines self-update run --tier sweep` (Tier 2: fast-forward
+- [x] Add `agent-machines self-update run --tier sweep` (Tier 2: fast-forward
   `dotfiles`/harness pull, `agent-worktrees reconcile-plugins --apply
   --with-payload-refresh`, `agent-machines restore --apply --all-projects`),
   reusing the existing live-session deferral guard for any disruptive step.
-- [ ] Both `run` entry points resolve the tier's config first and exit
+- [x] Both `run` entry points resolve the tier's config first and exit
   as a clean no-op if the resolved state is "not opted in" (covers a
   Scheduled Task that fires after an operator has since opted out but
   before the next `restore --apply` removed it).
-- [ ] Add the tier-scoped named lock (PID + timestamp, staleness-bounded
+- [x] Add the tier-scoped named lock (PID + timestamp, staleness-bounded
   reclaim per tier as designed above).
-- [ ] Record per-tier last-attempt/last-success status into the existing
+- [x] Record per-tier last-attempt/last-success status into the existing
   machine status surface.
 
 ### Phase 3 - Installer
@@ -170,22 +170,22 @@ the proposal into an implementable plan.
 
 ## Validation Plan
 
-- [ ] A stuck prior Tier-1 or Tier-2 run's lock is reclaimed only once both
+- [x] A stuck prior Tier-1 or Tier-2 run's lock is reclaimed only once both
   its recorded PID is dead and its tier-specific staleness bound has
   elapsed; a live prior run's lock is never double-driven.
-- [ ] A diverged or dirty anchor checkout causes Tier 2's pull step to skip
+- [x] A diverged or dirty anchor checkout causes Tier 2's pull step to skip
   with a loud warning rather than force-reset or force-pull.
-- [ ] Tier 2 never interrupts a live mux/Copilot session or in-flight
+- [x] Tier 2 never interrupts a live mux/Copilot session or in-flight
   indexing; it defers using the same guard `agent-machines-declarative-control-plane`
   already established.
 - [ ] `self-update install` attempts elevated Scheduled Task registration
   first and prints an explicit re-run-elevated instruction on failure,
   matching `agent-dispatch`'s own installer behavior.
-- [ ] A tier resolved as "not opted in" (by state-repo default, local
+- [x] A tier resolved as "not opted in" (by state-repo default, local
   override, or their combination) is never registered by `install` and is
   never prompted for elevation; a `run` invocation for a since-opted-out
   tier is a clean no-op rather than performing its steps.
-- [ ] A local machine-level opt-in/opt-out declaration overrides a
+- [x] A local machine-level opt-in/opt-out declaration overrides a
   conflicting state-repo-declared default for that machine, matching the
   control plane's existing authority precedence; equal-authority
   contradictions are still a hard validate-time error, not a silent
@@ -194,9 +194,9 @@ the proposal into an implementable plan.
   (or reports the elevate-and-retry message) and removes a newly-opted-out
   tier's Scheduled Task without requiring a fresh elevation prompt to
   remove it.
-- [ ] Tier 1 and Tier 2 use independent locks and neither tier's run blocks
+- [x] Tier 1 and Tier 2 use independent locks and neither tier's run blocks
   the other's scheduled tick from starting.
-- [ ] The recorded last-attempt/last-success status is visible through the
+- [x] The recorded last-attempt/last-success status is visible through the
   existing machine status surface without an SSH round-trip.
 
 ## Non-goals
@@ -238,3 +238,24 @@ the proposal into an implementable plan.
   the ordinary path that both registers a newly-opted-in tier and removes a
   newly-opted-out one, so opting out does not require a person to
   separately remember to run an uninstall command.
+
+### 2026-09-14 - Phase 2 landed
+
+- Added the `self-update` declarative resource type with tier-scoped
+  authority selection, so a shared default and a more-specific local machine
+  declaration resolve through the same schema-v4 precedence used by the rest
+  of `agent-machines`.
+- Added `agent-machines self-update run --tier watchdog|sweep`. `watchdog`
+  resolves the installed dtssh launcher config, checks whether the launcher
+  process is alive, and starts only the launcher when it is missing. `sweep`
+  performs fast-forward-only pulls for discovered adopted repos, then gates
+  the disruptive plugin refresh and machine restore steps on the existing
+  live-session deferral boundary.
+- Added independent named per-tier locks with PID/timestamp state,
+  staleness-bounded reclaim, and per-tier last-attempt / last-success status
+  recorded into the existing plan/status surface.
+- Validation added focused unit coverage for opt-in no-op behavior, authority
+  precedence, live-run non-double-drive vs stale-lock reclaim, dirty/diverged
+  pull skips, sweep deferral while a live session exists, and plan-surface
+  visibility of the recorded timestamps. The full `agent-machines` suite,
+  install-contract check, and version-consistency check passed.
