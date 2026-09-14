@@ -2034,6 +2034,54 @@ def _cmd_list(args: argparse.Namespace) -> int:
     return _emit(tracking.enrich_tasks(_enrich(tasks)))
 
 
+def _cmd_doctor(args: argparse.Namespace) -> int:
+    """Diagnose held/suspended tasks (Boundary I / #2577): distinguish a
+    confirmed-orphaned task -- its expected worktree provably gone -- from
+    ordinary in-flight work or merely ambiguous liveness, and (with
+    ``--repair``) unbind + re-queue only the confirmed-orphaned ones. See
+    :mod:`agent_dispatch.doctor` for the full design rationale."""
+    repo = _scope_repo(args)
+    if not repo:
+        print(_REPO_UNRESOLVED, file=sys.stderr)
+        return 2
+    from . import doctor
+
+    with _client(args) as c:
+        tasks = c.list(
+            repo=repo,
+            status=",".join(doctor.EXAMINED_STATUSES),
+            label=args.label,
+            limit=args.limit,
+        )
+        diagnoses = [
+            doctor.diagnose(
+                t,
+                stale_lease_grace_seconds=args.stale_lease_seconds,
+                # An explicit, call-time module-attribute lookup (not
+                # diagnose's own default parameter, which -- like any Python
+                # default -- binds once at def-time): this is what makes
+                # `monkeypatch.setattr(doctor, "resolve_worktree", ...)`
+                # actually take effect for callers of this CLI wrapper.
+                resolve=doctor.resolve_worktree,
+            )
+            for t in tasks
+        ]
+        repairs = None
+        if args.repair:
+            repairs = [
+                doctor.repair(d, c, reason=f"agent-dispatch doctor: {d.detail}")
+                for d in diagnoses
+                if d.verdict == doctor.REPAIRABLE_VERDICT
+            ]
+    payload = {
+        "examined": len(diagnoses),
+        "diagnoses": [d.as_dict() for d in diagnoses],
+    }
+    if repairs is not None:
+        payload["repaired"] = repairs
+    return _emit(payload)
+
+
 #: The picker Tasks-pivot **board** groups, in the operator's priority order:
 #: what needs your attention first (a task blocked awaiting your steer), then the
 #: pickable/in-flight lifecycle, then recently-finished tasks. The tuple index is
@@ -3764,6 +3812,36 @@ def build_parser() -> argparse.ArgumentParser:
         "default: this machine's local coordinator",
     )
     p.set_defaults(func=_cmd_list)
+
+    p = sub.add_parser(
+        "doctor",
+        help="diagnose held/suspended tasks: distinguish a confirmed-orphaned "
+        "task (its worktree provably gone) from ordinary in-flight work or "
+        "merely ambiguous liveness, and (with --repair) unbind + re-queue "
+        "only the confirmed-orphaned ones",
+    )
+    p.add_argument(
+        "--repo", help="lane to examine (local name or remote URL); default: calling repo"
+    )
+    p.add_argument("--label", help="only examine tasks carrying this label")
+    p.add_argument("--limit", type=int, default=200)
+    p.add_argument(
+        "--stale-lease-seconds",
+        type=float,
+        default=3600.0,
+        help="how long a 'started' task's lease may sit expired with no "
+        "reported activity before flagging it stale_lease (advisory only, "
+        "never auto-repaired; default: 3600 == agent_dispatch.doctor."
+        "DEFAULT_STALE_LEASE_GRACE_SECONDS)",
+    )
+    p.add_argument(
+        "--repair",
+        action="store_true",
+        help="unbind + re-queue every task diagnosed orphaned_worktree_gone "
+        "(fails its stale reservation, then releases/yields the task back "
+        "to queued); every other diagnosis is left untouched",
+    )
+    p.set_defaults(func=_cmd_doctor)
 
     p = sub.add_parser(
         "inbox",
