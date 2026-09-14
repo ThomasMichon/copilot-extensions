@@ -3,9 +3,10 @@
 - **Slug:** `context-handoff-overhaul`
 - **Repo:** copilot-extensions (the `context-handoff`, `agent-worktrees`, and
   `agent-bridge` plugins)
-- **Branch(es):** `effort/context-handoff-overhaul`
+- **Branch(es):** `effort/context-handoff-overhaul` (Phase 0, merged #2593),
+  `effort/context-handoff-overhaul-phase1` (Phase 1+)
 - **Created:** 2026-09-13
-- **Status:** Draft
+- **Status:** Active
 - **Umbrella issue:** #2594
 - **Sub-issues:** #2595 · #2596 · #2597 · #2598 · #2599
 
@@ -151,18 +152,39 @@ Verbatim from the operator:
   - Filed: umbrella #2594; sub-issues #2595 (force tier), #2596 (continuity
     content), #2597 (coordinator fallback), #2598 (configurability), #2599
     (lineage/diagnostics coordination).
-- [ ] Submit this effort for review (PR, auto-merge) before executing Phase 1.
+- [x] Submit this effort for review (PR, auto-merge) before executing Phase 1
+  (merged as #2593, along with an unrelated bundled module-size-baseline fix
+  needed to unblock CI for this and every other PR — tracked separately as
+  issue #2614).
 
 ### Phase 1 — Force-tier (Goal 1)
-- [ ] Add a third (`force`) threshold tier to `thresholds.mjs` alongside the
+- [x] Add a third (`force`) threshold tier to `thresholds.mjs` alongside the
   existing soft/hard tiers; keep percentages configurable, not hard-coded.
-- [ ] On crossing `force`: auto-finalize handoff content from whatever draft
+  Default 79% (preserves the same pre-compaction margin the old hard-tier
+  ceiling guaranteed); configurable via `.context-handoff/config.yaml`'s new
+  `force_percent` key.
+- [x] On crossing `force`: auto-finalize handoff content from whatever draft
   exists, auto-call the bash-first seed path (per
   `handoff-cutover-reload-robustness`), and block further mutating tool calls
-  for the remainder of the turn.
-- [ ] Ensure the force path never routes through `consume_handoff`-as-first-
+  for the remainder of the turn. Implemented as `autoForceHandoff()` in
+  `extension.mjs`: reuses `collectHandoffData`/`formatHandoffMarkdown` (no
+  LLM composition needed) and calls `handoff-core.mjs`'s `triggerHandoff`
+  directly (in-process, not a tool call) -- the same store/trigger path
+  `save_handoff_prompt`/`trigger_handoff` use. Tool-call blocking reuses
+  `onPermissionRequest` (the only tool-call gate this runtime still honors --
+  the SDK's newer `hooks.onPreToolUse` hard-fails here per the file's own
+  "SDK hook callbacks are no longer supported" note) with a read-only
+  allowlist (kind `read`/`url` always; `shell`/`mcp` only when the SDK's own
+  per-request `readOnly` signal says so) extracted to the unit-tested
+  `force-tier.mjs`. Lifted only by a successful compaction, so the operator
+  can keep working in the same session if they decline the auto-triggered
+  successor; at most one auto-handoff per session (`state.handoffGenerated`
+  never resets).
+- [x] Ensure the force path never routes through `consume_handoff`-as-first-
   tool-call on the successor side (the exact race
-  `handoff-cutover-reload-robustness` already mitigated).
+  `handoff-cutover-reload-robustness` already mitigated). Satisfied by
+  construction: `autoForceHandoff` calls the identical `triggerHandoff()`
+  used by the CLI/tool paths, which already produces a bash-first seed.
 
 ### Phase 2 — Continuity content (Goal 2)
 - [ ] Extend the handoff content schema (`generate_handoff_prompt` /
@@ -212,7 +234,12 @@ Verbatim from the operator:
 
 - [ ] Force-tier: a live session artificially pushed past the force threshold
   auto-hands-off without further mutating tool calls landing after the
-  threshold crossing.
+  threshold crossing. (Unit-level coverage landed: `thresholds.test.mjs`
+  covers the new tier's math/validation, `force-tier.test.mjs` covers the
+  read-only/mutating classification. Still open: an actual live-session
+  run -- no local harness exercises the real `@github/copilot-sdk`
+  connection `extension.mjs` needs, so this needs a real session or a
+  clean-room scenario, not just unit tests, before checking this off.)
 - [ ] Continuity content: a handoff seed for a session with an active
   background watch/poll/scheduled-prompt demonstrably carries a resumable
   reference to it, verified in the successor.
@@ -258,3 +285,39 @@ gate land._
   coordinator instead, per the `envisioning` skill's extend-before-regenerate
   bias).
 - Next: file the umbrella issue + sub-issues, submit this effort for review.
+
+### 2026-09-14 — Phase 0 PR merged; starting Phase 1
+- PR #2593 (Phase 0 kickoff) merged after a review round and CI stabilization.
+  Verifying/landing it surfaced and fixed a bundled, unrelated problem: the
+  repo-wide module-size-baseline split (10 modules, tracked as #2614) that
+  had been mechanically extracted into sibling modules without carrying
+  their re-exports, breaking `agent-worktrees`/`worktree-manager` tests and
+  the `agent_worktrees.__main__`/`tracking` test-facing attribute surface;
+  also found and resolved a version-bump merge conflict against `main`
+  (`agent-dispatch` had independently bumped past this branch's bump) and a
+  CI trigger anomaly (the `pull_request` synchronize webhook silently
+  stopped firing under heavy repo-wide Actions load; worked around via
+  `workflow_dispatch` for interim validation until a fresh push re-triggered
+  it normally).
+- Continuing on a fresh branch (`effort/context-handoff-overhaul-phase1`,
+  based on post-merge `main`) since the Phase 0 branch was merged and its
+  remote ref deleted. Starting Phase 1 (force-tier).
+- Implemented Phase 1 (force-tier): a third `force` threshold (79% default)
+  in `thresholds.mjs`/`config.mjs`; `extension.mjs` auto-drafts, stores, and
+  triggers a handoff on crossing it (reusing `collectHandoffData`/
+  `formatHandoffMarkdown` and `handoff-core.mjs`'s `triggerHandoff` directly,
+  in-process -- no LLM composition or tool call needed) and denies further
+  mutating tool calls via `onPermissionRequest` (confirmed via the installed
+  SDK's `.d.ts` that this -- not the newer `hooks.onPreToolUse`, which this
+  runtime hard-fails on -- is the live tool-call gate); the read-only/
+  mutating classification (kind `read`/`url` always read-only; `shell`/`mcp`
+  deferring to the SDK's own per-request `readOnly` signal) was pulled into
+  a new `force-tier.mjs` specifically so it's unit-testable without the live
+  SDK connection. Added `force-tier.test.mjs` and extended
+  `thresholds.test.mjs`/`config.test.mjs` for the new tier; all 75 existing +
+  new plugin unit tests pass. Bumped `context-handoff` to 0.1.1-dev20.
+- Known gap: no local harness can exercise the real `@github/copilot-sdk`
+  connection to validate this against an actual live session -- only unit
+  tests of the pure logic exist so far. Left the Validation Plan's force-tier
+  item unchecked pending that.
+
