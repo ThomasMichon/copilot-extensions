@@ -61,19 +61,25 @@ _NAMESPACE_LIST_DEFAULT_TTL = 12.0
 _NAMESPACE_LIST_OFF = frozenset({"0", "off", "false", "no"})
 
 #: Bound on how long any single namespace resolver's ``list()`` may run
-#: inside :meth:`AgentRegistry.list_agents_async` before it is treated as
-#: failed for this call (a cache miss still completes in the background and
-#: populates the resolver's own TTL cache for the next call). Without this,
-#: one straggling provider (a slow CodeSpaces API response, an unreachable
-#: SSH host enumeration, etc.) makes ``asyncio.gather`` wait for the slowest
-#: resolver, which can push the whole ``agents`` listing past callers'
-#: read timeouts -- observed causing ``agent_dispatch``'s
-#: ``registered_agents()`` (20s timeout) to intermittently fail with
-#: "could not read the local agent registry", which then dead-letters
-#: spawn reservations that depend on resolving a purely *local* agent name
-#: having nothing to do with the slow resolver. Override via
-#: ``AGENT_BRIDGE_NAMESPACE_LIST_RESOLVER_TIMEOUT`` (``0``/``off``/``false``
-#: disables the bound, restoring the prior unbounded-wait behavior).
+#: inside :meth:`AgentResolver.list_agents_async` before it is treated as
+#: failed for this call. Without this, one straggling provider (a slow
+#: CodeSpaces API response, an unreachable SSH host enumeration, etc.) makes
+#: ``asyncio.gather`` wait for the slowest resolver, which can push the whole
+#: ``agents`` listing past callers' read timeouts -- observed causing
+#: ``agent_dispatch``'s ``registered_agents()`` (20s timeout) to
+#: intermittently fail with "could not read the local agent registry", which
+#: then dead-letters spawn reservations that depend on resolving a purely
+#: *local* agent name having nothing to do with the slow resolver. A timeout
+#: here does **not** merely abandon a resolver's in-flight ``list()`` and
+#: move on: for ``CliNamespaceResolver`` this timeout is also threaded into
+#: the underlying ``subprocess.run(..., timeout=...)`` (see
+#: :meth:`CliNamespaceResolver.list`), so the child process is actually
+#: killed on expiry rather than left running for its own much longer default
+#: subprocess timeout; the resolver's short-TTL cache is left untouched
+#: either way, so the next call retries fresh rather than serving a stale
+#: hit. Override via ``AGENT_BRIDGE_NAMESPACE_LIST_RESOLVER_TIMEOUT``
+#: (``0``/``off``/``false`` disables the bound, restoring the prior
+#: unbounded-wait behavior).
 _NAMESPACE_LIST_RESOLVER_TIMEOUT_ENV = "AGENT_BRIDGE_NAMESPACE_LIST_RESOLVER_TIMEOUT"
 _NAMESPACE_LIST_RESOLVER_DEFAULT_TIMEOUT = 8.0
 
@@ -469,13 +475,30 @@ class CliNamespaceResolver(NamespaceResolver):
                 kwargs = {}
         return await fn(*args, **kwargs)
 
-    async def list(self) -> list[NamespaceAgentInfo]:
+    async def list(self, *, timeout: float | None = None) -> list[NamespaceAgentInfo]:
+        """Enumerate this namespace's agents.
+
+        ``timeout`` (optional) bounds the underlying ``namespace-list``
+        subprocess directly (passed through to :meth:`_run`, ultimately
+        ``subprocess.run(..., timeout=...)``), so a slow provider's *process*
+        is actually killed on expiry -- not merely abandoned. This matters
+        because an outer ``asyncio.wait_for`` around this coroutine (as
+        :meth:`AgentRegistry.list_agents_async` uses) only cancels the
+        *awaiting task*; it cannot stop a ``subprocess.run`` already running
+        in a worker thread via ``asyncio.to_thread``, which would otherwise
+        keep the child process (and the thread blocked on it) alive until
+        its own much longer default timeout. Passing ``timeout`` here closes
+        that gap for the common case (a real subprocess); resolvers with no
+        underlying process to kill can ignore ``timeout`` and rely on the
+        caller's ``asyncio.wait_for`` alone.
+        """
         ttl = _namespace_list_ttl()
         if ttl > 0 and self._list_cache is not None:
             stamped_at, cached = self._list_cache
             if (time.monotonic() - stamped_at) <= ttl:
                 return cached
-        res = await self._run(["namespace-list"])
+        run_kwargs = {} if timeout is None else {"timeout": timeout}
+        res = await self._run(["namespace-list"], **run_kwargs)
         if res is not None and res[0] == 0:
             try:
                 agents = [NamespaceAgentInfo(**d) for d in json.loads(res[1])]
@@ -2804,6 +2827,22 @@ class AgentResolver:
         call's result with a warning, not raised, and its own short-TTL cache
         is untouched (the in-flight call is cancelled, so a fresh attempt is
         made next call, not served a stale hit).
+
+        The bound is applied two ways together, not just an outer
+        ``asyncio.wait_for``: a resolver whose ``list()`` accepts a
+        ``timeout`` keyword (``CliNamespaceResolver`` does) receives it
+        directly, so it can thread the bound into its own
+        ``subprocess.run(..., timeout=...)`` and actually kill a slow child
+        process on expiry. ``asyncio.wait_for`` alone cannot do that: it only
+        cancels the awaiting *task*, and a blocking subprocess call already
+        running in a worker thread via ``asyncio.to_thread`` keeps running
+        (and the child process keeps running) regardless of that
+        cancellation -- it would otherwise leak a subprocess (and a blocked
+        thread) per timeout instead of bounding one. ``asyncio.wait_for``
+        remains as an outer safety net for resolvers that do not accept
+        ``timeout`` (no process to kill, so cancellation-only is sufficient)
+        and as defense-in-depth if a resolver's own bound is somehow not
+        honored.
         """
         self.refresh_provider_resolvers()
         result = self.list_agents()
@@ -2812,7 +2851,16 @@ class AgentResolver:
         resolver_timeout = _namespace_list_resolver_timeout()
 
         async def _bounded_list(prefix: str) -> Any:
-            coro = self._namespace_resolvers[prefix].list()
+            resolver = self._namespace_resolvers[prefix]
+            list_kwargs: dict[str, Any] = {}
+            if resolver_timeout > 0:
+                try:
+                    params = inspect.signature(resolver.list).parameters
+                except (TypeError, ValueError):
+                    params = {}
+                if "timeout" in params:
+                    list_kwargs["timeout"] = resolver_timeout
+            coro = resolver.list(**list_kwargs)
             if resolver_timeout <= 0:
                 return await coro
             return await asyncio.wait_for(coro, timeout=resolver_timeout)
