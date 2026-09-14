@@ -28,6 +28,7 @@ from .sessions_pane_retire import (
     _mux_pane_process_tree,
     _mux_pane_session_name,
     _retire_failed_successor,
+    mux_retire_pane,  # noqa: F401 -- re-export for callers (e.g. pane_reaper, __main__)
 )
 
 try:  # libyaml (C) is dramatically faster; the one sanctioned sweep uses it.

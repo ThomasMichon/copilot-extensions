@@ -7073,7 +7073,10 @@ class MsgViewScreen(ModalScreen[None]):
 from .steering import (
     PivotCardScreen,
     PivotFormScreen,
+    ResetConfirmScreen,  # noqa: F401 -- re-export for tests
+    SteerButtonRow,  # noqa: F401 -- re-export for tests
     SubmitErrorScreen,
+    _AutoExpandTextArea,  # noqa: F401 -- re-export for tests
     _normalize_form_fields,
     _steer_draft_path,
 )
