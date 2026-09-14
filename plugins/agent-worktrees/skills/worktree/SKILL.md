@@ -592,6 +592,34 @@ Never auto-purge unused worktrees without asking — a worktree may appear
 "unused" if the session involved only questions, planning, or conversation
 with no commits yet.
 
+### Fresh safety revalidation before removal
+
+The three **non-forced** cleanup reapers all re-check safety from fresh state
+at the action moment, not just at scan time: batch
+`cleanup --clean`, single-item `cleanup --worktree-id <id>`, and the automatic
+finished-session sweep each reacquire `FinalizeLock`, reload the tracking
+record, rebuild worktree-local liveness, re-classify git state, re-derive
+conversation turns, and re-run the complete cleanup disposition immediately
+before the reap. For a missing worktree directory, the branch-merged proof is
+also re-run under that same lock. Non-forced cleanup then keeps the
+per-record `_RecordLock(require_sidecar=True)` held through `_reap_worktree`,
+so the tool's own record writers (claim/follow-up/session-registration
+mutations) cannot slip a conflicting change into the final read→delete window.
+
+This is a **fail-closed, in-tool writer fence**, not a universal filesystem
+lock: arbitrary external edits or raw git commands outside agent-worktrees can
+still race the local delete. `cleanup --worktree-id <id> --force` remains the
+documented, narrower exception: it still refreshes liveness under `FinalizeLock`
+and refuses an active/hosted session, but it deliberately bypasses the full
+dirty/WIP/claim/follow-up/branch-merge disposition.
+
+**Known limitation (#2649):** a record whose tracking `status` is already
+`finalized` can still mask genuinely new WIP or conversation-only content added
+*after* finalize, because `_apply_tracking_override` currently collapses that
+fresh state to `COMPLETED` before `cleanup_disposition` sees it. The tests pin
+that behavior so it cannot silently drift, but the limitation itself remains
+tracked and unfixed here.
+
 ### Dirty worktrees: resolve per-worktree, never blanket `--force`
 
 `cleanup` (and `remove-system`) refuse a worktree with uncommitted changes
