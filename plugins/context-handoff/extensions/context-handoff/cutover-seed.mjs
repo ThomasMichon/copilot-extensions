@@ -52,6 +52,29 @@ export const CONTINUATION_DIRECTIVE =
   "remains unresolved unless responsibility is explicitly transferred to a named " +
   "tracked objective.";
 
+// Goal 2's "handoff mandate": perpetuation across handoffs (CONTINUATION_
+// DIRECTIVE above) plus fresh-session awareness that the mechanism exists at
+// all. This is deliberately a SHARED CODE-LEVEL constant, not prose re-typed
+// into a template -- it is carried on every stored/consumed handoff brief
+// (see handoff-core.mjs's formatConsumeResult/buildResumePrompt) AND
+// delivered on the first turn of a session that did NOT start from a
+// handoff (see extension.mjs's first-turn awareness nudge), so a brand-new
+// session learns the mechanism exists without needing to hit a pressure
+// threshold or an explicit skill trigger phrase first.
+export const HANDOFF_MECHANISM_AWARENESS =
+  "This worktree has a context-handoff mechanism available from turn one, " +
+  "whether or not this session began from a handoff. Context-window pressure " +
+  "is never a reason to truncate diligence, rush a task, or leave work " +
+  "unfinished -- it is only a reason to hand off. As usage climbs, the " +
+  "extension nudges toward preparing a handoff and, if ignored, forces one " +
+  "before auto-compaction destroys the conversation. Invoke the " +
+  "context-handoff skill for the full mechanics: generating and storing a " +
+  "continuation baton, triggering pickup, and resuming one left by a " +
+  "predecessor. A worktree may chain many handoffs in succession until the " +
+  "overall objective is done -- each successor should expect to hand off " +
+  "again rather than treat its own context window as the objective's " +
+  "boundary.";
+
 export function recoveryLocatorFor(kind, id) {
   if (kind !== "task" && kind !== "file") {
     throw new Error(`unsupported handoff recovery kind: ${kind}`);

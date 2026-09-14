@@ -49,6 +49,16 @@ For a worktree-level cutover mismatch between the head-session ledger and a
 control plane's current sweep target, use the dedicated
 `diagnosing-handoff-cutover` skill.
 
+## Every session knows this exists
+
+This is not a mechanism a session opts into only once it feels context
+pressure or the user says a trigger phrase. The extension delivers a one-time
+awareness message on THIS session's first turn -- whether or not it began
+from a handoff -- stating plainly that the mechanism exists and that context
+pressure is never a reason to rush, truncate diligence, or leave work
+unfinished. Treat that awareness as standing permission to work as thoroughly
+as a task deserves: you can always hand off instead of cutting corners.
+
 ## Continuity contract
 
 A handoff transfers **active responsibility for the original objective**. It is
@@ -288,6 +298,7 @@ Compose the appropriate shape and pass it to `save_handoff_prompt` as
 ### Active Effort
 ### Next Slice
 ### Immediate Session Delta
+### Outstanding Background Flows & External State
 ### Completion Gates
 ### Re-Handoff Instructions
 
@@ -297,6 +308,7 @@ Compose the appropriate shape and pass it to `save_handoff_prompt` as
 ### Direction & Motivation
 ### Progress
 ### Successor Work Roster
+### Outstanding Background Flows & External State
 ### Completion Gates
 ### Re-Handoff Instructions
 ### Gotchas
@@ -304,6 +316,11 @@ Compose the appropriate shape and pass it to `save_handoff_prompt` as
 
 ## Rules
 
+- Every session has this mechanism available from turn one, whether or not it
+  began from a handoff -- the extension delivers a one-time awareness message
+  on the first turn so this is never gated behind a pressure threshold or an
+  explicit trigger phrase. Context pressure is never a reason to truncate
+  diligence; it is only a reason to hand off.
 - The seed is a **locator**, not the handoff. Never inline the full markdown in
   it.
 - The stored brief may be long. Preserve fidelity there; optimize the seed and
@@ -317,3 +334,9 @@ Compose the appropriate shape and pass it to `save_handoff_prompt` as
   genuine crossroads, an error, a design contradiction, or a confirmation-gated
   destructive step does -- and even those close with a handoff naming the
   blocker, not a silent stop.
+- Never silently drop outstanding background flows (watches, polls,
+  `manage_schedule` entries, long-running commands) or external state this
+  session owns (open PRs, held claims/leases, peer-agent coordination). Always
+  carry each forward in the handoff's **Outstanding Background Flows &
+  External State** section as either resumable (state how) or an explicit
+  open item -- write "none" only when genuinely none exist.

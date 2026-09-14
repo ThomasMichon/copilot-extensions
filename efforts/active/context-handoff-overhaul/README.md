@@ -4,7 +4,8 @@
 - **Repo:** copilot-extensions (the `context-handoff`, `agent-worktrees`, and
   `agent-bridge` plugins)
 - **Branch(es):** `effort/context-handoff-overhaul` (Phase 0, merged #2593),
-  `effort/context-handoff-overhaul-phase1` (Phase 1, merged #2643)
+  `effort/context-handoff-overhaul-phase1` (Phase 1, merged #2643),
+  `effort/context-handoff-overhaul-phase2` (Phase 2, in review)
 - **Created:** 2026-09-13
 - **Status:** Active
 - **Umbrella issue:** #2594
@@ -188,16 +189,31 @@ Verbatim from the operator:
 - [x] Submitted for review as PR #2643; merged.
 
 ### Phase 2 — Continuity content (Goal 2)
-- [ ] Extend the handoff content schema (`generate_handoff_prompt` /
+- [x] Extend the handoff content schema (`generate_handoff_prompt` /
   `save_handoff_prompt`) with an explicit, named class for outstanding
   background flows (watches, polls, scheduled/recurring prompts) and external
   state the predecessor was responsible for (open PRs, held claims/leases,
   peer-agent coordination) — never silently dropped, always either resumable
-  or surfaced as an explicit open item.
-- [ ] Make the "handoff mandate" (perpetuation + fresh-session awareness) a
+  or surfaced as an explicit open item. Implemented as a new "Outstanding
+  Background Flows & External State" section in both handoff-template.md
+  shapes, enforced via `generate_handoff_prompt`'s returned instructions and
+  the skill's Rules; the force-tier auto-draft path (no agent composition)
+  emits an explicit not-captured open item instead of silently omitting the
+  section.
+- [x] Make the "handoff mandate" (perpetuation + fresh-session awareness) a
   standing, explicitly-carried element of every seed — not incidental prose.
-- [ ] Update the `context-handoff` skill so a freshly-started (non-handoff)
-  session is told the mechanism exists from its first turn.
+  Added `HANDOFF_MECHANISM_AWARENESS` (`cutover-seed.mjs`, alongside the
+  existing `CONTINUATION_DIRECTIVE`) covering both aspects in one shared
+  constant; threaded into every delivered brief (`formatConsumeResult`,
+  `buildResumePrompt`) and delivered once, on a session's first turn,
+  regardless of whether that session began from a handoff (extension.mjs's
+  `awarenessNudgeSent`/`pendingAwareness` first-turn nudge on `user.message`,
+  queued and sent on the next `session.idle`).
+- [x] Update the `context-handoff` skill so a freshly-started (non-handoff)
+  session is told the mechanism exists from its first turn. Added an "Every
+  session knows this exists" section near the top of SKILL.md, pointing at
+  the extension's first-turn nudge as the structural (not prose-only)
+  guarantee.
 
 ### Phase 3 — Host-agnostic reliability (Challenge 3)
 - [ ] Confirm `agent-worktrees handoff-cutover` supports a genuinely headless
@@ -243,7 +259,13 @@ Verbatim from the operator:
   clean-room scenario, not just unit tests, before checking this off.)
 - [ ] Continuity content: a handoff seed for a session with an active
   background watch/poll/scheduled-prompt demonstrably carries a resumable
-  reference to it, verified in the successor.
+  reference to it, verified in the successor. (Unit-level coverage landed:
+  `guidance.test.mjs` covers the schema section's presence in both template
+  shapes, the shared `HANDOFF_MECHANISM_AWARENESS` constant's content and its
+  wiring into every delivered brief, and the extension's first-turn nudge
+  logic. Still open: an actual live session with a real background flow --
+  same real-`@github/copilot-sdk`-connection gap as the Phase 1 item above,
+  needs a real session or a clean-room scenario before checking this off.)
 - [ ] Host-agnostic reliability: a handoff requested with no reachable
   mux/bridge host still produces a running successor within a bounded window
   via the coordinator fallback (or an unambiguous manual recipe if the
@@ -321,4 +343,33 @@ gate land._
   connection to validate this against an actual live session -- only unit
   tests of the pure logic exist so far. Left the Validation Plan's force-tier
   item unchecked pending that.
+
+### 2026-09-14 — Phase 2 (continuity content)
+- Resumed via handoff. Along the way, `consume_handoff`/`handoff-cli.mjs
+  consume` spuriously `ETIMEDOUT` picking up this handoff; root-caused it
+  (not this effort's scope, but blocking) to `agent-dispatch consume`'s
+  identity/repo resolution shelling out to `agent-worktrees get` twice, each
+  costing 6.5-9.5s on this machine -- filed and corrected
+  copilot-extensions#2660 with the measured evidence after an initial
+  (wrong) "just raise the timeout" filing.
+- Implemented Phase 2's three checklist items on a fresh
+  `effort/context-handoff-overhaul-phase2` branch (based on post-merge
+  `main`): the "Outstanding Background Flows & External State" schema
+  section (both `handoff-template.md` shapes, `generate_handoff_prompt`'s
+  returned instructions, the skill's Rules, and an explicit not-captured
+  open item in the force-tier auto-draft path since it has no agent
+  composition step to discover this data); a shared
+  `HANDOFF_MECHANISM_AWARENESS` constant (`cutover-seed.mjs`) carrying both
+  perpetuation-across-handoffs and fresh-session-awareness, threaded into
+  every delivered brief and delivered once on a session's first turn via a
+  new `awarenessNudgeSent`/`pendingAwareness` nudge in `extension.mjs`
+  regardless of handoff origin; and an explicit "Every session knows this
+  exists" section near the top of SKILL.md. Extended `guidance.test.mjs`
+  with coverage for all three; all 78 existing + new plugin unit tests pass
+  (2 pre-existing skips unrelated to this change). Bumped `context-handoff`
+  to 0.1.1-dev21.
+- Same known gap as Phase 1: no local harness exercises a real live session,
+  so the Validation Plan's continuity-content item stays unchecked pending
+  a real-session or clean-room run; unit coverage for the schema/constant/
+  wiring is in place.
 

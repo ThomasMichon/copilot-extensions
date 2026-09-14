@@ -25,6 +25,7 @@ import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import {
   CONTINUATION_DIRECTIVE,
+  HANDOFF_MECHANISM_AWARENESS,
   leadFrom,
   buildCutoverSeed,
 } from "./cutover-seed.mjs";
@@ -1409,6 +1410,8 @@ export function formatConsumeResult(
     "",
     CONTINUATION_DIRECTIVE,
     "",
+    HANDOFF_MECHANISM_AWARENESS,
+    "",
     "---",
     "",
     result.payload || "(The handoff payload was empty.)",
@@ -1426,6 +1429,8 @@ export function buildResumePrompt(
       ? `Keep agent-dispatch task ${deferredTaskId} owned. Only after the handoff objective's completion gate is met run: agent-dispatch complete ${deferredTaskId}`
       : null,
     CONTINUATION_DIRECTIVE,
+    "",
+    HANDOFF_MECHANISM_AWARENESS,
     "",
     "---",
     "",

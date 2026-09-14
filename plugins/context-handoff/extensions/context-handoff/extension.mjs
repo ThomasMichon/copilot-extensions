@@ -53,6 +53,7 @@ import {
   storeHandoff,
   triggerHandoff,
 } from "./handoff-core.mjs";
+import { HANDOFF_MECHANISM_AWARENESS } from "./cutover-seed.mjs";
 import { loadContextHandoffConfig } from "./config.mjs";
 import {
   FORCE_TIER_DENY_FEEDBACK,
@@ -75,6 +76,11 @@ const state = {
   handoffGenerated: false,
   pendingHandoff: null,
   firstUserPrompt: null,          // first user message (for topic bias)
+  // Goal 2/3: fresh-session awareness. Delivered once, on the first user
+  // turn, regardless of whether this session began from a handoff -- so the
+  // mechanism's existence is never gated behind a pressure threshold or an
+  // explicit skill trigger phrase (see HANDOFF_MECHANISM_AWARENESS).
+  awarenessNudgeSent: false,
   // Force tier (Goal 1): once true, an auto-handoff has been drafted/stored/
   // triggered without waiting for the agent, and onPermissionRequest below
   // denies further mutating tool calls for the remainder of the session
@@ -227,6 +233,20 @@ function formatHandoffMarkdown(handoffData, scope) {
     lines.push(`## Next Steps`, handoffData.agentNextSteps, "");
   }
 
+  // This formatter has no agent composition step (force-tier auto-drafts
+  // without the agent), so it cannot discover background flows/external
+  // state itself. Per the schema, that must be an explicit open item, never
+  // a silent omission (see the skill's Outstanding Background Flows rule).
+  lines.push(
+    "## Outstanding Background Flows & External State",
+    "Not captured -- this handoff was auto-drafted by the force tier without " +
+      "agent composition. The successor MUST ask the user (or check the " +
+      "worktree/dispatch/PR state directly) for any active watches, polls, " +
+      "scheduled prompts, open PRs, held claims/leases, or peer-agent " +
+      "coordination this session may have owned before assuming there are none.",
+    "",
+  );
+
   return lines.join("\n");
 }
 
@@ -325,7 +345,10 @@ const session = await joinSession({
         "and key tool invocations. Compose the compact effort-backed shape " +
         "when a valid open active effort exists; otherwise compose the full " +
         "standalone shape. In either mode, preserve the parent completion gate " +
-        "rather than treating the latest completed phase as the objective.",
+        "rather than treating the latest completed phase as the objective, and " +
+        "carry forward any outstanding background flows (watches, polls, " +
+        "scheduled prompts) or external state (open PRs, held claims/leases, " +
+        "peer-agent coordination) this session owns -- never silently drop them.",
       skipPermission: true,
       parameters: {
         type: "object",
@@ -397,6 +420,12 @@ const session = await joinSession({
             "   entire effort.",
             "   If the parent objective truly has no actionable work left, do not",
             "   create a handoff merely to report that fact; finish instead.",
+            "   Include an 'Outstanding Background Flows & External State'",
+            "   section: never silently drop active watches/polls/scheduled",
+            "   prompts, open PRs, held claims/leases/dispatch tasks, or",
+            "   peer-agent coordination this session owns -- carry each forward",
+            "   as resumable or as an explicit open item; write \"none\" only",
+            "   when genuinely none exist.",
             "2. Call save_handoff_prompt with the composed markdown as `prompt_text`",
             "   (and an optional short `title`). It stores the handoff — as an",
             "   agent-dispatch task when a coordinator is reachable, else a",
@@ -868,6 +897,13 @@ session.on("user.message", (event) => {
   if (!state.firstUserPrompt && event.data?.content) {
     state.firstUserPrompt = event.data.content;
   }
+  // Fresh-session awareness (Goal 2/3): queue once, on the very first turn,
+  // regardless of whether this turn is an ordinary user prompt or a handoff
+  // seed being injected -- delivered on the next idle boundary below.
+  if (!state.awarenessNudgeSent) {
+    state.awarenessNudgeSent = true;
+    pendingAwareness = true;
+  }
 });
 
 // File / tool-invocation tracking (replaces onPostToolUse's bookkeeping).
@@ -942,28 +978,40 @@ session.on("tool.execution_complete", (event) => {
 // on compaction). session.send() inside an idle handler does not loop: the
 // queue is cleared before sending and the guard flags prevent re-queueing.
 let pendingNudge = null;  // null | "soft" | "hard"
+// Fresh-session awareness (Goal 2/3): queued from the first user.message
+// event above, delivered alongside (or instead of) a pressure nudge on the
+// next idle boundary -- never gated behind a pressure threshold.
+let pendingAwareness = false;
 
 session.on("session.idle", () => {
-  if (!pendingNudge) return;
-  const level = pendingNudge;
-  pendingNudge = null;
-  const usage = formatContextUsage(state.currentTokens, state.tokenLimit);
-  // The nudge JUST hands the agent to the context-handoff skill. Under context
-  // pressure, that skill should compose/save and then trigger_handoff directly
-  // without asking. The ask-first branch is only for turn-end follow-up handoffs.
-  const msg = level === "hard"
-    ? `[Context Handoff -- automated] Context utilization is ${usage.utilization} ` +
-      `(${usage.tokens}). ` +
-      `The configured hard threshold was reached; auto-compaction still triggers ` +
-      `at ~80%. Invoke the context-handoff skill now to preserve continuity ` +
-      `before context is lost. Compose/store the baton and then call ` +
-      `trigger_handoff directly; do not pause to ask the user first.`
-    : `[Context Handoff -- automated] Context utilization is ${usage.utilization} ` +
-      `(${usage.tokens}). ` +
-      `The configured soft threshold was reached. Invoke the context-handoff skill ` +
-      `at the next clean boundary so you can compose/store a baton early and, if ` +
-      `work still remains, trigger_handoff directly before the window gets tighter.`;
-  session.send(msg).catch((e) =>
+  const messages = [];
+  if (pendingAwareness) {
+    pendingAwareness = false;
+    messages.push(`[Context Handoff] ${HANDOFF_MECHANISM_AWARENESS}`);
+  }
+  if (pendingNudge) {
+    const level = pendingNudge;
+    pendingNudge = null;
+    const usage = formatContextUsage(state.currentTokens, state.tokenLimit);
+    // The nudge JUST hands the agent to the context-handoff skill. Under context
+    // pressure, that skill should compose/save and then trigger_handoff directly
+    // without asking. The ask-first branch is only for turn-end follow-up handoffs.
+    const msg = level === "hard"
+      ? `[Context Handoff -- automated] Context utilization is ${usage.utilization} ` +
+        `(${usage.tokens}). ` +
+        `The configured hard threshold was reached; auto-compaction still triggers ` +
+        `at ~80%. Invoke the context-handoff skill now to preserve continuity ` +
+        `before context is lost. Compose/store the baton and then call ` +
+        `trigger_handoff directly; do not pause to ask the user first.`
+      : `[Context Handoff -- automated] Context utilization is ${usage.utilization} ` +
+        `(${usage.tokens}). ` +
+        `The configured soft threshold was reached. Invoke the context-handoff skill ` +
+        `at the next clean boundary so you can compose/store a baton early and, if ` +
+        `work still remains, trigger_handoff directly before the window gets tighter.`;
+    messages.push(msg);
+  }
+  if (messages.length === 0) return;
+  session.send(messages.join("\n\n")).catch((e) =>
     session.log(`[Context Handoff] nudge send failed: ${e.message}`, { level: "warning" })
   );
 });
