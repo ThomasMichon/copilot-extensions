@@ -26,9 +26,13 @@ of the `worktree-manager-control-plane` effort.
   the user or a machine-restore flow, never automatically.
 - `psmux-passthrough.conf` — the keystroke-passthrough fragment
   `session-options.ps1` resolves by the same `$PSScriptRoot`-relative path.
+- `psmux-path.ps1` — Windows psmux binary discovery/compatibility helper,
+  also dot-sourced from `launch-session.ps1` by a `$PSScriptRoot`-relative
+  path; ships as a sibling for the same reason as `session-options.ps1`.
 
-**Migrated verbatim from `plugins/agent-worktrees/bin/` and
-`plugins/agent-worktrees/terminal/`** (proven, tested
+**Migrated verbatim from `plugins/agent-worktrees/bin/`,
+`plugins/agent-worktrees/terminal/`, and `plugins/agent-worktrees/scripts/`**
+(proven, tested
 implementation; the still-shipping copy there remains the resolved target of
 `cmd_launch` until Phase 3b Slice 2's cutover step repoints it — see the linked
 plan for the ordered steps and the "clean cutover" invariant: this becomes the

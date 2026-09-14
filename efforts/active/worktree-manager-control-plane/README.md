@@ -226,16 +226,20 @@ realized in `main`; unchecked items are the remaining delta.
             drives them; agent-worktrees' own `cmd_remux`/`_perform_remux`/
             `remux_bare_copilot` remain untouched as its zero-provider-mode
             fallback (the bundled Picker's standalone Restore action).
-      - [ ] Sub-slice 2c (fixed 2026-09-14): the launcher scripts relocated
+      - [x] Sub-slice 2c (fixed 2026-09-14): the launcher scripts relocated
             into `worktree-manager/bin/` dot-source `session-options.ps1`
-            (which itself resolves `psmux-passthrough.conf`) via a
-            `$PSScriptRoot`-relative path — the copy in Sub-slice 2a Step 1
-            omitted these terminal scripts, so Worktree Manager-launched
-            sessions had a silently unconfigured psmux status bar. Copied
-            `session-options.{sh,ps1}`, `apply-mux-keybinds.{sh,ps1}`, and
-            `psmux-passthrough.conf` verbatim into `worktree-manager/bin/`
-            alongside the launcher, with a regression test asserting the
-            sibling files exist and are wired.
+            and `psmux-path.ps1` (which itself resolves
+            `psmux-passthrough.conf`) via a `$PSScriptRoot`-relative path —
+            the copy in Sub-slice 2a Step 1 omitted these terminal/helper
+            scripts, so Worktree Manager-launched sessions had a silently
+            unconfigured psmux status bar. Copied
+            `session-options.{sh,ps1}`, `apply-mux-keybinds.{sh,ps1}`,
+            `psmux-passthrough.conf`, and `psmux-path.ps1` verbatim into
+            `worktree-manager/bin/` alongside the launcher, with a
+            regression test asserting the sibling files exist and are
+            wired, and bumped `__version__` (`0.1.0-dev36` →
+            `0.1.0-dev37`) so already-installed machines actually redeploy
+            the corrected payload.
       - [ ] **Sub-slice 3 (direction set 2026-09-14, not yet designed):**
             split the resident status-monitor's push/observe legs into
             Worktree Manager — agent-worktrees keeps sole ownership of
@@ -597,18 +601,24 @@ its issues; the public artifacts stay self-contained and general-purpose.
 - **2026-09-14** — Fixed a live regression (Sub-slice 2c): Worktree Manager
   was not properly configuring the Mux (psmux) status bar for sessions it
   launches. Root cause: `launch-session.ps1` dot-sources
-  `session-options.ps1` (which itself resolves `psmux-passthrough.conf`) via
-  a `$PSScriptRoot`-relative path, but Sub-slice 2a Step 1's verbatim copy
-  into `worktree-manager/bin/` only carried `launch-session.{sh,ps1,cmd}` and
-  `pane-wrapper.{sh,ps1}` — not the terminal scripts. The dot-source failure
-  is swallowed (a status-bar tweak must never block a launch), so the gap
-  was silent rather than an error. Copied `session-options.{sh,ps1}`,
-  `apply-mux-keybinds.{sh,ps1}`, and `psmux-passthrough.conf` verbatim from
-  `plugins/agent-worktrees/terminal/` into `worktree-manager/bin/` (hash
-  matched), documented the sibling requirement in `worktree-manager/bin/
-  README.md`, and added a regression test asserting both the dot-source
-  string and the files' presence. `worktree-manager`'s
-  `test_self_install.py` suite passes (11/11).
+  `session-options.ps1` and `psmux-path.ps1` (and `session-options.ps1`
+  itself resolves `psmux-passthrough.conf`) via `$PSScriptRoot`-relative
+  paths, but Sub-slice 2a Step 1's verbatim copy into
+  `worktree-manager/bin/` only carried `launch-session.{sh,ps1,cmd}` and
+  `pane-wrapper.{sh,ps1}` — not the terminal/helper scripts. The dot-source
+  failure is swallowed (a status-bar tweak must never block a launch), so
+  the gap was silent rather than an error. Copied
+  `session-options.{sh,ps1}`, `apply-mux-keybinds.{sh,ps1}`,
+  `psmux-passthrough.conf`, and `psmux-path.ps1` verbatim from
+  `plugins/agent-worktrees/terminal/` and `plugins/agent-worktrees/scripts/`
+  into `worktree-manager/bin/` (hash matched), documented the sibling
+  requirement in `worktree-manager/bin/README.md`, added a regression test
+  asserting the dot-source strings and files' presence, and bumped
+  `__version__` (`0.1.0-dev36` → `0.1.0-dev37`) so already-installed
+  machines actually redeploy the corrected payload (caught by Copilot
+  review on [#2666](https://github.com/ThomasMichon/copilot-extensions/pull/2666),
+  which also flagged the initially-missed `psmux-path.ps1` dependency).
+  `worktree-manager`'s `test_self_install.py` suite passes (11/11).
 
 - **2026-09-14** — Operator direction for a new Sub-slice 3 (not yet
   designed): migrating the Picker and Mux handling to Worktree Manager is

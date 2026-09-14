@@ -141,22 +141,24 @@ def test_relocated_launchers_resolve_pane_wrappers_from_their_own_bin():
 
 
 def test_relocated_launcher_ships_the_mux_status_bar_scripts_it_needs():
-    """``launch-session.ps1`` dot-sources ``session-options.ps1`` (and that
-    script in turn resolves ``psmux-passthrough.conf``) via a
-    ``$PSScriptRoot``-relative path, so both must be deployed as siblings of
-    the relocated launcher. Omitting them left Worktree Manager-launched
-    sessions with a silently unconfigured psmux status bar (the failure is
-    swallowed, not a launch error) once ``launch-session.ps1`` moved out of
-    ``plugins/agent-worktrees/bin/``."""
+    """``launch-session.ps1`` dot-sources ``session-options.ps1`` and
+    ``psmux-path.ps1`` (and ``session-options.ps1`` in turn resolves
+    ``psmux-passthrough.conf``) via ``$PSScriptRoot``-relative paths, so all
+    must be deployed as siblings of the relocated launcher. Omitting them
+    left Worktree Manager-launched sessions with a silently unconfigured
+    psmux status bar (the failure is swallowed, not a launch error) once
+    ``launch-session.ps1`` moved out of ``plugins/agent-worktrees/bin/``."""
     root = Path(__file__).resolve().parents[1] / "bin"
     ps1 = (root / "launch-session.ps1").read_text(encoding="utf-8")
     assert "$script:AwSessionOptions = Join-Path $PSScriptRoot 'session-options.ps1'" in ps1
+    assert "$pathHelper = Join-Path $PSScriptRoot 'psmux-path.ps1'" in ps1
     for name in (
         "session-options.ps1",
         "session-options.sh",
         "apply-mux-keybinds.ps1",
         "apply-mux-keybinds.sh",
         "psmux-passthrough.conf",
+        "psmux-path.ps1",
     ):
         assert (root / name).is_file(), f"missing {name} beside the relocated launcher"
     session_options_ps1 = (root / "session-options.ps1").read_text(encoding="utf-8")
