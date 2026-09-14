@@ -369,9 +369,14 @@ def _pr_is_terminal(pr: PRRecord) -> bool:
 # ---------------------------------------------------------------------------
 
 # The kinds of outbound resource a worktree can own and claim. ``worktree`` is
-# a cross-repo worktree it spun up; the others are placeholders the ledger view
-# already understands so later phases can journal them without a schema change.
-ResourceKind = Literal["worktree", "codespace", "container", "ssh", "workdir", "pr"]
+# a cross-repo worktree it spun up; ``task`` is an external, task-queue-owned
+# obligation (e.g. an agent-dispatch task suspended mid-flight, expecting to
+# resume in this exact worktree later) -- deliberately left unresolved by the
+# sweep (see sweep.py's per-kind handling: no branch = permanently ``spare``),
+# since only the owning task system can know when it is genuinely done; the
+# rest are placeholders the ledger view already understands so later phases
+# can journal them without a schema change.
+ResourceKind = Literal["worktree", "codespace", "container", "ssh", "workdir", "pr", "task"]
 
 # Claim disposition (resource-obligation-settlement): "active" while unsettled
 # work still rides on the resource, "at-rest" once that work is safe (merged /

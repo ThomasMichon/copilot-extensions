@@ -134,6 +134,12 @@ def test_run_foreground_executes_then_nudges(capsys, monkeypatch):
         "agent_dispatch.bridge.send_nudge",
         lambda wt, msg, **k: nudged.update(wt=wt, msg=msg) or True,
     )
+    # No agent-worktrees CLI in this test env -- the claim-release call must
+    # degrade gracefully rather than share the patched subprocess.run above
+    # (which fakes the *wait command's* process, not agent-worktrees').
+    monkeypatch.setattr(
+        "agent_dispatch.hibernation_claims.agent_worktrees_launch_prefix", lambda: None
+    )
     rc = _cmd_run(_args(["run", "--resume", "m/wt-1", "--task", "t-1", "--", "sleep", "1"]))
     assert rc == 0
     out = json.loads(capsys.readouterr().out)
@@ -141,6 +147,7 @@ def test_run_foreground_executes_then_nudges(capsys, monkeypatch):
     assert out["resumed"] is True
     assert ran["cmd"] == ["sleep", "1"]
     assert nudged["wt"] == "m/wt-1"
+    assert out["claim_released"] is None  # no agent-worktrees CLI -- degraded, not fatal
 
 
 def test_run_requires_a_command(capsys):
@@ -200,7 +207,7 @@ class _FakeSuspendClient:
 
 
 def test_run_detach_with_task_suspends_atomically(capsys, monkeypatch):
-    from agent_dispatch import identity
+    from agent_dispatch import hibernation_claims, identity
 
     monkeypatch.setattr(
         "agent_dispatch.__main__._spawn_detached_waiter",
@@ -209,6 +216,13 @@ def test_run_detach_with_task_suspends_atomically(capsys, monkeypatch):
     fake = _FakeSuspendClient()
     monkeypatch.setattr("agent_dispatch.__main__._client", lambda args: fake)
     monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt-1"))
+    claimed = {}
+
+    def fake_add_claim(task_id, **k):
+        claimed["call"] = (task_id, k)
+        return {"state": "active"}
+
+    monkeypatch.setattr(hibernation_claims, "add_hibernation_claim", fake_add_claim)
 
     rc = _cmd_run(
         _args(
@@ -229,9 +243,96 @@ def test_run_detach_with_task_suspends_atomically(capsys, monkeypatch):
     assert rc == 0
     out = json.loads(capsys.readouterr().out)
     assert out["detached"] is True
-    assert out["suspended"] == {"status": "suspended", "worker_id": "m/wt-1"}
+    assert out["suspended"] == {
+        "status": "suspended",
+        "worker_id": "m/wt-1",
+        "claim": {"state": "active"},
+    }
     assert fake.calls == [
         ("t-1", "m/wt-1", "hibernating: agent-worktrees pr-watch 42")
+    ]
+    # the claim is journaled for the task, independent of who resolves as owner
+    assert claimed["call"][0] == "t-1"
+    assert claimed["call"][1]["note"] == "hibernating: agent-worktrees pr-watch 42"
+
+
+def test_run_detach_claim_add_degrades_gracefully_without_agent_worktrees(
+    capsys, monkeypatch
+):
+    """No agent-worktrees CLI on this host -- suspend still proceeds; the
+    claim is simply ``None`` (defense in depth, not a precondition)."""
+    from agent_dispatch import hibernation_claims, identity
+
+    monkeypatch.setattr(
+        "agent_dispatch.__main__._spawn_detached_waiter",
+        lambda spec: {"pid": 1, "argv": []},
+    )
+    fake = _FakeSuspendClient()
+    monkeypatch.setattr("agent_dispatch.__main__._client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt-1"))
+    monkeypatch.setattr(hibernation_claims, "agent_worktrees_launch_prefix", lambda: None)
+
+    rc = _cmd_run(
+        _args(["run", "--detach", "--resume", "m/wt-1", "--task", "t-1", "--", "sleep", "1"])
+    )
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["suspended"]["status"] == "suspended"
+    assert out["suspended"]["claim"] is None
+
+
+def test_release_hibernation_claim_shells_out_to_agent_worktrees(monkeypatch):
+    """Unit-level: release_hibernation_claim builds the expected argv and parses
+    a successful JSON reply."""
+    from agent_dispatch import hibernation_claims
+
+    calls = {}
+
+    class _Proc:
+        returncode = 0
+        stdout = '{"worktree_id": "wt-1", "ref": "t-1", "action": "released"}'
+        stderr = ""
+
+    def fake_run(argv, **k):
+        calls["argv"] = argv
+        return _Proc()
+
+    monkeypatch.setattr(hibernation_claims, "agent_worktrees_launch_prefix", lambda: ["aw"])
+    monkeypatch.setattr(hibernation_claims.subprocess, "run", fake_run)
+
+    result = hibernation_claims.release_hibernation_claim("t-1")
+    assert result == {"worktree_id": "wt-1", "ref": "t-1", "action": "released"}
+    assert calls["argv"] == ["aw", "claims", "release", "t-1", "--json"]
+
+
+def test_add_hibernation_claim_shells_out_to_agent_worktrees(monkeypatch):
+    from agent_dispatch import hibernation_claims
+
+    calls = {}
+
+    class _Proc:
+        returncode = 0
+        stdout = '{"worktree_id": "wt-1", "ref": "t-1", "kind": "task", "state": "active"}'
+        stderr = ""
+
+    def fake_run(argv, **k):
+        calls["argv"] = argv
+        return _Proc()
+
+    monkeypatch.setattr(hibernation_claims, "agent_worktrees_launch_prefix", lambda: ["aw"])
+    monkeypatch.setattr(hibernation_claims.subprocess, "run", fake_run)
+
+    result = hibernation_claims.add_hibernation_claim("t-1", note="hibernating: sleep 1")
+    assert result["kind"] == "task"
+    assert calls["argv"] == [
+        "aw",
+        "claims",
+        "add",
+        "task",
+        "t-1",
+        "--json",
+        "--note",
+        "hibernating: sleep 1",
     ]
 
 

@@ -2764,7 +2764,10 @@ def _spawn_detached_waiter(spec: Any) -> dict:
 
 
 def _suspend_for_detached_wait(args: argparse.Namespace, spec: Any) -> dict | None:
-    """Atomically suspend ``spec.task_id`` once its detached waiter is live.
+    """Atomically suspend ``spec.task_id`` once its detached waiter is live, and
+    journal a ``task``-kind agent-worktrees claim on the current worktree so
+    it cannot be finalized out from under the still-open task (Boundary I /
+    ThomasMichon/copilot-extensions#2584).
 
     Closes the gap where ``run --detach`` handed a wait off to a cheap
     detached process, but the caller's own ``agent-dispatch suspend`` call --
@@ -2772,26 +2775,33 @@ def _suspend_for_detached_wait(args: argparse.Namespace, spec: Any) -> dict | No
     remember -- was skipped or never reached before the session tore down.
     That left tasks stuck ``started`` (implying a live agent is actively
     working) for as long as the external wait ran, sometimes indefinitely
-    once the detached waiter itself died with nothing to notice.
+    once the detached waiter itself died with nothing to notice. Separately,
+    without the claim, a worktree-lifecycle sweep that only checks for a
+    *live session* (correctly absent here -- that's the whole point of
+    hibernation) could still reclaim the worktree the suspended task expects
+    to resume in.
 
     Returns ``None`` when no ``--task`` was given (a plain untracked wait --
-    nothing to suspend). Never raises: a failure to suspend must not be
-    treated as a failure to detach (the wait is already safely handed off by
-    the time this runs), so any error is folded into the returned dict for
-    the caller to see rather than propagated.
+    nothing to suspend or claim). Never raises: neither the suspend nor the
+    claim is allowed to fail the overall detach (the wait is already safely
+    handed off by the time this runs), so any error is folded into the
+    returned dict for the caller to see rather than propagated.
     """
     if not spec.task_id:
         return None
+    from . import hibernation_claims
+
+    reason = f"hibernating: {' '.join(spec.command)}"
+    claim = hibernation_claims.add_hibernation_claim(spec.task_id, note=reason)
     worker_id = _resolve_owner(args, verb="run --detach")
     if worker_id is None:
-        return {"error": "could not resolve the owning worker for suspend"}
-    reason = f"hibernating: {' '.join(spec.command)}"
+        return {"error": "could not resolve the owning worker for suspend", "claim": claim}
     try:
         with _client(args) as c:
             task = c.suspend(spec.task_id, worker_id, reason=reason)
     except DispatchError as exc:
-        return {"error": str(exc), "worker_id": worker_id}
-    return {"status": task.get("status"), "worker_id": worker_id}
+        return {"error": str(exc), "worker_id": worker_id, "claim": claim}
+    return {"status": task.get("status"), "worker_id": worker_id, "claim": claim}
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
@@ -2849,6 +2859,15 @@ def _cmd_run(args: argparse.Namespace) -> int:
             return 127
 
     report = run_and_resume(spec, runner=runner, resumer=bridge.send_nudge)
+    if spec.task_id:
+        # This is the foreground path: for a detached wait, it's the re-exec'd
+        # child running here (see detached_run_argv), reached exactly once the
+        # wait resolves -- the right moment to retire the claim
+        # _suspend_for_detached_wait journaled, regardless of the wait's
+        # outcome or whether the resume nudge itself succeeded.
+        from . import hibernation_claims
+
+        report["claim_released"] = hibernation_claims.release_hibernation_claim(spec.task_id)
     return _emit(report)
 
 
