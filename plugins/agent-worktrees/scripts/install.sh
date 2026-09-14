@@ -664,9 +664,17 @@ _bootstrap_python() {
 }
 
 _payload_hash() {
-    # Cheap payload fingerprint for the completion marker (#935): sha256 of
-    # pyproject.toml + the vendored-lib version set. Detects a dev-checkout that
-    # changed the payload WITHOUT bumping the version. Empty on any error.
+    # Payload fingerprint for the completion marker (#935, hardened #2609):
+    # sha256 of pyproject.toml + the vendored-lib manifests + every actual
+    # source file under src/ (this plugin's own package) and libs/*/src/ (its
+    # vendored path-dependencies). #2609: hashing only the manifests missed
+    # any content change that didn't also bump the version string or touch a
+    # dependency list -- exactly a plugin bug fix landing in .py source with
+    # no pyproject.toml edit -- so `update`/`update --force` reported
+    # "already at latest" and left the venv silently stale even though the
+    # marketplace payload had genuinely changed. Deterministic (sorted
+    # relative paths) and content-based. Empty on any error, which the
+    # completion-marker check already treats as "unknown, force a rebuild".
     local __parts=""
     if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then __parts="$(cat "$PLUGIN_DIR/pyproject.toml")"; fi
     if [[ -d "$PLUGIN_DIR/libs" ]]; then
@@ -675,6 +683,20 @@ _payload_hash() {
             __parts="$__parts"$'\n'"$(cat "$__f")"
         done < <(find "$PLUGIN_DIR/libs" -name pyproject.toml 2>/dev/null | sort)
     fi
+    local __src_roots=("$PLUGIN_DIR/src")
+    if [[ -d "$PLUGIN_DIR/libs" ]]; then
+        local __libdir
+        while IFS= read -r __libdir; do
+            [[ -d "$__libdir/src" ]] && __src_roots+=("$__libdir/src")
+        done < <(find "$PLUGIN_DIR/libs" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
+    fi
+    local __root
+    for __root in "${__src_roots[@]}"; do
+        [[ -d "$__root" ]] || continue
+        while IFS= read -r __f; do
+            __parts="$__parts"$'\n'"${__f#"$PLUGIN_DIR"}"$'\n'"$(cat "$__f" 2>/dev/null)"
+        done < <(find "$__root" -type f ! -name '*.pyc' ! -name '*.pyo' ! -path '*/__pycache__/*' 2>/dev/null | sort)
+    done
     printf '%s' "$__parts" | sha256sum 2>/dev/null | awk '{print $1}' || true
 }
 

@@ -1119,8 +1119,19 @@ function Get-BootstrapPython {
 }
 
 function Get-PayloadHash {
-    <# Cheap payload fingerprint for the completion marker (#935): sha256 of
-       pyproject.toml + the vendored-lib version set. Never throws -> '' on error. #>
+    <# Payload fingerprint for the completion marker (#935, hardened #2609):
+       sha256 of pyproject.toml + the vendored-lib manifests + every actual
+       source file under src/ (this plugin's own package) and libs/*/src/
+       (its vendored path-dependencies). #2609: hashing only the manifests
+       missed any content change that didn't also bump the version string or
+       touch a dependency list -- exactly a plugin bug fix landing in .py
+       source with no pyproject.toml edit -- so `update`/`update --force`
+       reported "already at latest" and left the venv silently stale even
+       though the marketplace payload had genuinely changed. Deterministic
+       (sorted relative paths) and content-based (not size/mtime, which a
+       checkout/clone can rewrite without changing bytes). Never throws -> ''
+       on error, which Test-SlotAlreadyComplete already treats as "unknown,
+       force a rebuild" -- so a hashing failure fails toward correctness. #>
     try {
         $parts = @()
         $pp = Join-Path $PluginDir 'pyproject.toml'
@@ -1129,6 +1140,23 @@ function Get-PayloadHash {
         if (Test-Path $libs) {
             Get-ChildItem $libs -Recurse -Filter 'pyproject.toml' -ErrorAction SilentlyContinue |
                 Sort-Object FullName | ForEach-Object { $parts += (Get-Content $_.FullName -Raw) }
+        }
+        $sourceRoots = @(Join-Path $PluginDir 'src')
+        if (Test-Path $libs) {
+            Get-ChildItem $libs -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+                $candidate = Join-Path $_.FullName 'src'
+                if (Test-Path $candidate) { $sourceRoots += $candidate }
+            }
+        }
+        foreach ($root in $sourceRoots) {
+            if (-not (Test-Path $root)) { continue }
+            Get-ChildItem $root -Recurse -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Extension -notin @('.pyc', '.pyo') -and $_.Name -ne '__pycache__' } |
+                Sort-Object FullName | ForEach-Object {
+                    $rel = $_.FullName.Substring($PluginDir.ToString().Length).Replace('\', '/')
+                    $parts += $rel
+                    $parts += (Get-Content $_.FullName -Raw -ErrorAction SilentlyContinue)
+                }
         }
         $joined = [string]::Join("`n", $parts)
         $sha = [System.Security.Cryptography.SHA256]::Create()
