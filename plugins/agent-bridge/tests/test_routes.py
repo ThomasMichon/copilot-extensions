@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -1184,6 +1185,43 @@ class TestWorktreeRoutes:
         assert d["follow_up"] is False
         assert d["summary"] is None
         assert d["live_intent"] is None
+
+    def test_parse_worktree_list_reads_closure_descriptor(self) -> None:
+        """worktree-finality-and-obligations (Phase 5): _parse_worktree_list
+        threads the raw ``closure`` descriptor from ``list --json --classify``
+        opaquely (this route does not interpret version/final-ness -- that's
+        the cockpit consumer's job via ``prune.interpret_descriptor_payload``,
+        since a cross-machine crawl may reach a different agent-worktrees
+        version)."""
+        from agent_bridge.routes import worktrees as wt_routes
+
+        closure = {
+            "version": 1,
+            "label": "FINAL",
+            "closure": {"final": True},
+            "action": {"disposition": "safe", "bucket": "clean"},
+        }
+        raw = json.dumps({
+            "version": 1,
+            "worktrees": [{
+                "id": "w1", "path": "/w1", "branch": "b", "status": "active",
+                "closure": closure,
+            }],
+        })
+        e = wt_routes._parse_worktree_list(raw, "test-agent")[0]
+        assert e.closure == closure
+        assert e.to_dict()["closure"] == closure
+
+    def test_parse_worktree_list_closure_absent_when_not_classified(self) -> None:
+        """Absent when the crawl didn't run --classify (or hit an older
+        runtime) -- the cockpit falls back to legacy fields, never guesses."""
+        from agent_bridge.routes import worktrees as wt_routes
+
+        raw = ('{"version": 1, "worktrees": [{"id": "w1", "path": "/w1",'
+               ' "branch": "b", "status": "active"}]}')
+        e = wt_routes._parse_worktree_list(raw, "test-agent")[0]
+        assert e.closure is None
+        assert e.to_dict()["closure"] is None
 
     def test_resume_worktree_with_no_session_404s(self, client) -> None:
         self._seed_worktree("test-agent", "anomalous-potato-wsl-20250101-160000-empty")

@@ -84,6 +84,16 @@ class _WorktreeEntry:
     live_intent: str | None = None
     live_intent_at: str | None = None
     live_intent_idle: bool = False
+    # worktree-finality-and-obligations (Phase 5): the canonical closure
+    # descriptor (``prune.assemble_closure_descriptor``'s ``to_dict()``
+    # shape), surfaced raw/opaque from ``agent-worktrees list --json
+    # --classify``. This route intentionally does NOT interpret it (label,
+    # final-ness, action disposition) -- a cross-machine crawl may reach an
+    # older/newer agent-worktrees runtime, so only the consumer that knows
+    # the current ``DESCRIPTOR_VERSION`` (e.g. via
+    # ``prune.interpret_descriptor_payload``) may treat it as authoritative.
+    # Absent on an older runtime or when git classification wasn't run.
+    closure: dict[str, Any] | None = None
 
     def interactive_cli_state(self) -> str:
         """Classify interactive-CLI ownership from mux liveness.
@@ -130,6 +140,7 @@ class _WorktreeEntry:
             "live_intent": self.live_intent,
             "live_intent_at": self.live_intent_at,
             "live_intent_idle": self.live_intent_idle,
+            "closure": self.closure,
         }
 
 
@@ -262,9 +273,19 @@ class WorktreeDiscoveryCache:
         if not config.project:
             return []
 
+        # worktree-finality-and-obligations (Phase 5): --classify is included
+        # so the crawl carries the canonical closure descriptor (label,
+        # held-claim/follow-up counts, action disposition) through to the
+        # cockpit projection. list --json --classify's own short-TTL result
+        # cache (list-coalescing) absorbs the added git-call cost across the
+        # crawl loop's own polling interval; this is a display read, never a
+        # destructive-action authorization (that always recomputes fresh
+        # immediately before acting, per design.md).
+        _LIST_ARGS = ["list", "--json", "--mux-details", "--classify"]
+
         if not config.host:
             # Local
-            raw = await _run_local(config.project, ["list", "--json", "--mux-details"])
+            raw = await _run_local(config.project, _LIST_ARGS)
         else:
             # SSH -- resolve through topology for correct alias/user
             try:
@@ -276,13 +297,13 @@ class WorktreeDiscoveryCache:
             # If the resolved target is the local machine, run locally
             # instead of SSH (avoids loopback SSH failures)
             if _is_local_target(target.host, resolver):
-                raw = await _run_local(config.project, ["list", "--json", "--mux-details"])
+                raw = await _run_local(config.project, _LIST_ARGS)
             else:
                 raw = await _run_ssh(
                     host=target.host or config.host,
                     user=target.user or config.ssh_user,
                     project=config.project,
-                    args=["list", "--json", "--mux-details"],
+                    args=_LIST_ARGS,
                 )
 
         if raw is None:
@@ -506,6 +527,10 @@ def _parse_worktree_list(raw: str, agent_name: str) -> list[_WorktreeEntry]:
             live_intent=w.get("live_intent"),
             live_intent_at=w.get("live_intent_at"),
             live_intent_idle=bool(w.get("live_intent_idle", False)),
+            # worktree-finality-and-obligations (Phase 5): raw/opaque passthrough
+            # -- absent unless the crawl ran with --classify and the remote's
+            # agent-worktrees emits it.
+            closure=w.get("closure") if isinstance(w.get("closure"), dict) else None,
         ))
     return entries
 

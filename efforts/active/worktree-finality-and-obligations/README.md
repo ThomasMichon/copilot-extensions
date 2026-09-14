@@ -326,9 +326,19 @@ _Verbatim operator request; original spelling and punctuation preserved._
 - [x] Make list JSON publish the canonical descriptor and compatibility
   fields. Done in Phase 4 (additive `closure` field alongside the legacy
   `cleanup_bucket`/`state` fields, unchanged).
-- [ ] Pass the descriptor through agent-bridge's allow-list projection and any
+- [x] Pass the descriptor through agent-bridge's allow-list projection and any
   cockpit consumer before treating descriptor absence as a mixed-version case.
-  **Not done** -- agent-bridge's worktree projection is untouched.
+  Landed the agent-bridge half: the worktree-discovery crawl now runs
+  `list --json --mux-details --classify`, and `_WorktreeEntry`/
+  `_parse_worktree_list` thread a raw, OPAQUE `closure` field (absent unless
+  present and a dict) through to `to_dict()`. Deliberately does NOT interpret
+  it (label/final-ness/action) inside agent-bridge itself -- a cross-machine
+  crawl can reach an older/newer agent-worktrees runtime, so only a consumer
+  that knows the current `DESCRIPTOR_VERSION` (via
+  `prune.interpret_descriptor_payload`) may treat it as authoritative; that
+  consumer-side interpretation (a real cockpit) does not exist yet, so this is
+  "pass through," not "trust." **Not done:** the actual cockpit
+  consumer calling `interpret_descriptor_payload` on this field.
 - [ ] Make mux and Picker use the descriptor's exact compact text, marker counts,
   and semantic style token; surface adapters may translate that style token to
   their native palette without redefining state. **Not done** -- the mux
@@ -820,4 +830,42 @@ The approved design is the faceted model in [design.md](design.md):
   implement in a dedicated future slice after it's had a chance to be
   reviewed rather than rushing it in alongside five other phases in one
   session.
+
+### 2026-09-14 - Phase 5: agent-bridge closure-descriptor passthrough
+- Resumed via a stranded/dormant worktree (the prior session's handoff never
+  reached a live successor -- confirmed via `agent-worktrees head-session`
+  showing `head_session: null` and no on-disk changes beyond the merged PR
+  #2624 base). Rebased it onto current `main` and continued Phase 5 from the
+  Plan checklist rather than treating the stuck handoff as this effort's
+  concern.
+- Picked the smallest well-bounded Phase 5 item left: "pass the descriptor
+  through agent-bridge's allow-list projection." Added `--classify` to the
+  worktree-discovery crawl's `list --json` invocation (local + SSH) and
+  threaded a raw `closure` field through `_WorktreeEntry`/
+  `_parse_worktree_list`/`to_dict()`. Deliberately opaque/pass-through only --
+  agent-bridge does not interpret label/final-ness/action-disposition itself,
+  since a cross-machine crawl can reach a different agent-worktrees version;
+  only a future cockpit consumer calling `prune.interpret_descriptor_payload`
+  may trust it. This mirrors how agent-bridge already treats agent-worktrees
+  as an external subprocess dependency everywhere else in this file (never a
+  direct Python import), so the change intentionally does not duplicate
+  `interpret_descriptor_payload`'s logic inline.
+- Added `test_parse_worktree_list_reads_closure_descriptor` and
+  `..._closure_absent_when_not_classified` to `test_routes.py`.
+- **Not done this session:** the mux status segment and Textual Picker
+  rewiring (still the largest Phase 5 item, unchanged from prior entries);
+  legends/filters/maintenance parity; the shared compact-text
+  assemble+truncate function; the actual cockpit consumer that calls
+  `interpret_descriptor_payload` on this newly-passed-through field. Next
+  slice: either the mux/Picker rewiring (`picker_tui/derive.py`'s `_state`/
+  `_bucket_from_raw` and the PSMux/TMux status segment both independently
+  derive labels today) or Phase 6/7/8.
+- `python tools/run-plugin-tests.py agent-bridge` -- 235/235 passed on the
+  targeted `-k "worktree or routes"` slice; full suite 589 passed, 2 pre-
+  existing unrelated `test_bootstrap_check_reconcile_opt_in.py` failures
+  (confirmed identical on a clean stash, a Windows `sh`-script timing issue,
+  nothing touched by this change).
+- `python tools/run-plugin-tests.py agent-worktrees --subsuite-timeout 600` --
+  535 passed, the same two pre-existing unrelated
+  `test_knowledge_plugins.py` failures noted in every prior entry.
 
