@@ -458,14 +458,14 @@ duplicate or fight an existing mechanism:
 
 ### Phase 3 — Wire all three reaper call sites through it
 
-- [ ] Route `cmd_cleanup`'s batch loop through the consolidated function
+- [x] Route `cmd_cleanup`'s batch loop through the consolidated function
       (replacing today's narrower `_revalidate_before_reap` call).
-- [ ] Route `reap_one` (`cleanup --worktree-id <id>`) through the *same*
+- [x] Route `reap_one` (`cleanup --worktree-id <id>`) through the *same*
       function for its **non-forced** path — this is the actual fix for gap
       #1; it must not gain its own parallel implementation. Its **forced**
       path keeps the narrower, separately-specified contract from Phase 2
       (active-session rejection only) — force stays force.
-- [ ] Route `sweep_finished_session_worktrees` (the no-daemon/picker/
+- [x] Route `sweep_finished_session_worktrees` (the no-daemon/picker/
       session-end auto-clean path) through the same consolidated function
       too — it builds candidates pre-lock and reaps under the lock with no
       fresh safety decision today, the identical race being fixed
@@ -475,9 +475,13 @@ duplicate or fight an existing mechanism:
       concept, a narrower record shape) make full reuse awkward, that's a
       Phase 2 design input, not a reason to leave it out — resolve the shape
       during design, don't scope it out by default.
-- [ ] Remove the now-superseded `_revalidate_before_reap` (or fold it into
+- [x] Remove the now-superseded `_revalidate_before_reap` (or fold it into
       the new function) so there is exactly one non-forced revalidation code
       path left, not two that can drift apart again.
+
+**Implemented** in `_revalidate_cleanup_safety` (`__main__.py`), replacing
+`_revalidate_before_reap` entirely — see the 2026-09-14 Phase 3 Journal
+entry for the concrete shape and the two upstream bugs fixed alongside it.
 
 ### Phase 4 — Regression coverage
 
@@ -569,6 +573,15 @@ Phase 2's forced-path contract). Concretely, at minimum:
       handoff, while `--force` remains the documented, narrower,
       individually-verified exception — so a future reader doesn't have to
       reverse-engineer this from several PRs' diffs.
+- [ ] Document the known residual gap
+      ([#2649](https://github.com/ThomasMichon/copilot-extensions/issues/2649))
+      in that same skill section: a `finalized`-status record that gains
+      genuinely new WIP/conversation content after finalize is not yet
+      caught by this effort's revalidation, because
+      `_apply_tracking_override` masks it to `COMPLETED` before
+      `cleanup_disposition` runs. State plainly that this is a known,
+      tracked limitation, not an oversight the reader needs to
+      rediscover.
 
 ## Validation Plan
 
@@ -818,3 +831,81 @@ decisions folded into Phase 2's checkboxes above; summarized here:
   out of scope, to be documented plainly in Phase 5.
 
 Proceeding to Phase 3 (wiring) in a follow-on PR.
+
+### 2026-09-14 — Phase 3: wiring implemented
+
+Implemented exactly the Phase 2 design; no design changes. Summary:
+
+- Added `_revalidate_cleanup_safety(wt_id, *, repo, tracking_path,
+  force=False, include_unused=False, include_conversations=False, reap=None)`
+  returning a `RevalidationResult(cleanable, reason, bucket, record, info,
+  failures, warnings, reaped)`. It reloads the record fresh from disk,
+  rebuilds a single-worktree `active_paths`, re-classifies git state, and —
+  non-forced only — runs the full `cleanup_disposition` and re-proves the
+  `GONE`/branch-merge gate itself. When a `reap` callback is supplied and
+  the decision is cleanable, it is invoked while a non-forced call still
+  holds `tracking._RecordLock(require_sidecar=True)` (fail-closed on
+  contention), so the fresh read and the delete are one uninterrupted,
+  lock-held sequence. Forced mode shares the same liveness-read path but
+  skips `cleanup_disposition` and doesn't take `_RecordLock`.
+- Wired all three call sites: `cmd_cleanup`'s batch loop, `reap_one`'s
+  non-forced path (forced keeps its pre-lock fast-reject UX checks but the
+  authoritative decision now goes through the same function too, with
+  `force=True`), and `sweep_finished_session_worktrees`'s Pass 2 — which
+  also re-derives its idle-grace timestamp at reap time from fresh mux
+  activity/tracking timestamps before calling the revalidator, so a resume
+  between Pass 1 (candidate selection) and Pass 2 (reap) postpones removal.
+- Fixed `cleanup_disposition`'s WIP/conversation-only ordering bug and
+  `_build_active_paths`'s stale-negative-cache fallback in their own
+  functions, per the Phase 2 decision, so every caller benefits.
+- Removed `_revalidate_before_reap` entirely — one non-forced revalidation
+  path now exists.
+- Updated `test_auto_clean.py`'s `_sweep` test helper to mock
+  `tracking.load_record`/`tracking._RecordLock` (the revalidator reloads
+  fresh from disk under the lock, which the old helper didn't anticipate).
+- Full `agent-worktrees` suite: 583 passed, 1 pre-existing unrelated failure
+  (`test_controller_relations.py`'s `_all_tracking_dirs` reference, confirmed
+  to fail identically on an unmodified checkout — filed as #2647, not part
+  of this effort).
+- Bumped `agent-worktrees` to `1.5.5-dev104` (`plugin.json`/`pyproject.toml`/
+  `marketplace.json`), verified via `check-version-consistency.py`.
+
+Phase 3 complete. Phase 4 (the full named signal × reaper × mode regression
+matrix) and Phase 5 (skill docs) remain — substantial enough in their own
+right (≈30 named tests) to warrant their own dedicated pass/PR(s), continuing
+this effort rather than closing it here.
+
+### 2026-09-14 — Phase 3 follow-up: residual gap found while pinning tests
+
+While replacing the (now-removed) `_revalidate_before_reap` tests with
+`TestRevalidateCleanupSafety`, a genuine, previously-unrecognized gap
+surfaced: `_apply_tracking_override` masks ANY non-dirty/GONE/ACTIVE fresh
+git state to `COMPLETED` for a `finalized`-status record — including WIP
+and UNUSED-with-turns — **before** `cleanup_disposition` ever runs. It
+does this deliberately, to correct a real squash-merge artifact (a
+finalized branch that still reads "ahead" of upstream even though its
+content already landed), but it cannot distinguish that from genuinely
+new commits/turns made *after* finalize, which present identically.
+
+**Consequence:** the Phase 2/3 fix to `cleanup_disposition`'s WIP/
+conversation-only ordering (mirroring #2635's `dirty` fix) is real and
+correct for records whose git state isn't first collapsed by the
+override — but for a `finalized`-status record specifically, the
+override already converts WIP/conversation-only to COMPLETED
+independently of, and prior to, that ordering fix, so the fix alone does
+not close the finalized-record case the original Context section
+described. This was not caught during Phase 1/2 because those phases
+traced `cleanup_disposition`'s own internal ordering without also tracing
+what `_apply_tracking_override` does to `info.state` immediately
+beforehand.
+
+Filed as [#2649](https://github.com/ThomasMichon/copilot-extensions/issues/2649),
+with a pinning test (`test_finalized_status_currently_masks_new_wip_gap`)
+documenting today's actual (unsafe) behavior. Not fixed in this effort's
+Phase 3 PR — a real fix needs a way to distinguish "already-known-squashed
+WIP at finalize time" from "new WIP since finalize" (e.g. a branch-tip
+fingerprint recorded at finalize time, or relying on `classify_worktree`'s
+own squash-merge-aware COMPLETED detection instead of blanket-masking by
+status), which is a distinct design question from anything Phase 2
+already decided. Left as a tracked follow-up rather than silently folded
+in or dropped.

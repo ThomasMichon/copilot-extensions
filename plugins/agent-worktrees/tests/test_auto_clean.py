@@ -54,6 +54,19 @@ class _FakeLock:
         return None
 
 
+class _FakeRecordLock:
+    """No-op stand-in for ``tracking._RecordLock`` (context manager)."""
+
+    def __init__(self, *a, **k):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
 def _sweep(records, *, dry_run=True, mux=None, activity=None, now=None,
            active_sessions=None, turn_count=None, min_idle_secs=None,
            branch_merged=True, reaped=None):
@@ -69,15 +82,33 @@ def _sweep(records, *, dry_run=True, mux=None, activity=None, now=None,
     config = types.SimpleNamespace(default_repo=repo, repo_name="repo")
     ctx = types.SimpleNamespace(active_sessions=(active_sessions or set()),
                                 turn_count=(turn_count or {}))
+    by_id = {r.worktree_id: r for r in records}
 
     def _fake_reap(rec, info, r, tp):
         if reaped is not None:
             reaped.append(rec.worktree_id)
         return (0, [])
 
+    def _fake_load_record(path):
+        return by_id[Path(path).stem]
+
+    real_exists = Path.exists
+
+    def _fake_exists(self):
+        # yaml tracking-record paths under the fake tracking dir "exist" (the
+        # test never writes real YAML files); everything else (worktree dirs)
+        # keeps real filesystem behavior so git-state still resolves from
+        # `status` alone, per this helper's docstring.
+        if self.parent == Path("/tmp") and self.suffix == ".yaml":
+            return True
+        return real_exists(self)
+
     with patch("agent_worktrees.config.load_config", return_value=config), \
          patch("agent_worktrees.config.tracking_dir", return_value=Path("/tmp")), \
          patch("agent_worktrees.tracking.list_records", return_value=records), \
+         patch("agent_worktrees.tracking.load_record", side_effect=_fake_load_record), \
+         patch("agent_worktrees.tracking._RecordLock", _FakeRecordLock), \
+         patch("pathlib.Path.exists", _fake_exists), \
          patch("agent_worktrees.sessions._list_mux_sessions",
                return_value=(mux or {})), \
          patch("agent_worktrees.sessions._mux_session_activity",
@@ -85,6 +116,8 @@ def _sweep(records, *, dry_run=True, mux=None, activity=None, now=None,
          patch("agent_worktrees.sessions.scan_sessions_fast", return_value=ctx), \
          patch("agent_worktrees.__main__._build_active_paths", return_value=set()), \
          patch("agent_worktrees.__main__._normalize_path", side_effect=lambda p: p), \
+         patch("agent_worktrees.__main__._hosted_session_blocks_cleanup",
+               return_value=False), \
          patch("agent_worktrees.git_ops.is_branch_merged", return_value=branch_merged), \
          patch("agent_worktrees.git_ops.prune_worktrees", return_value=None), \
          patch("agent_worktrees.__main__._reap_worktree", side_effect=_fake_reap), \
