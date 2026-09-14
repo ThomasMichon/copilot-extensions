@@ -12198,7 +12198,7 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
     owner-ref path is for a call-site whose cwd is not the borrowing worktree
     (e.g. agent-codespaces journaling a CodeSpace claim from the daemon's cwd).
     """
-    valid_kinds = {"worktree", "codespace", "container", "ssh", "workdir", "pr"}
+    valid_kinds = {"worktree", "codespace", "container", "ssh", "workdir", "pr", "task"}
     if kind not in valid_kinds:
         msg = (
             f"claims add: unknown kind {kind!r} (expected one of {', '.join(sorted(valid_kinds))})"
