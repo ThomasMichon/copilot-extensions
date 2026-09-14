@@ -817,6 +817,48 @@ class TestNamespaceResolvers:
         assert elapsed < 0.35
 
     @pytest.mark.asyncio
+    async def test_list_agents_async_bounds_one_straggling_resolver(self, monkeypatch):
+        # Reliability: a single resolver that hangs far longer than the
+        # others (a slow CodeSpaces API call, an unreachable SSH host, etc.)
+        # must not make the whole listing wait for it -- observed in
+        # production causing agent_dispatch's registered_agents() (20s
+        # timeout) to intermittently fail with "could not read the local
+        # agent registry" for agents having nothing to do with the slow
+        # resolver, which then dead-lettered unrelated spawn reservations.
+        import asyncio
+
+        monkeypatch.setenv("AGENT_BRIDGE_NAMESPACE_LIST_RESOLVER_TIMEOUT", "0.05")
+
+        class _SlowResolver:
+            @property
+            def prefix(self) -> str:
+                return "hangs"
+
+            async def list(self):
+                await asyncio.sleep(5.0)
+                return [NamespaceAgentInfo(name="hangs-agent")]  # pragma: no cover
+
+            async def resolve(self, name):  # pragma: no cover - unused here
+                raise NotImplementedError
+
+            async def ensure_ready(self, name):  # pragma: no cover - unused
+                raise NotImplementedError
+
+        resolver = AgentResolver({}, {})
+        resolver.register_namespace_resolver(_SlowResolver())
+        resolver.register_namespace_resolver(_MockResolver("fast"))
+
+        start = asyncio.get_event_loop().time()
+        agents = await resolver.list_agents_async()
+        elapsed = asyncio.get_event_loop().time() - start
+
+        names = {a["name"] for a in agents}
+        assert "fast:test-agent" in names
+        assert not any(n.startswith("hangs:") for n in names)
+        # Bounded by the 0.05s per-resolver timeout, not the 5s sleep.
+        assert elapsed < 1.0
+
+    @pytest.mark.asyncio
     async def test_list_agents_async_one_namespace_failure_does_not_block_others(self):
         class _FailingResolver:
             @property
