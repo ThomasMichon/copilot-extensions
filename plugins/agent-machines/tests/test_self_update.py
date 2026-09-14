@@ -424,6 +424,50 @@ def test_reconcile_task_registers_new_opt_in(monkeypatch, tmp_path):
     assert result.snapshot is not None and result.snapshot.present is True
 
 
+def test_register_scheduled_task_hourly_uses_native_repetition_parameters():
+    """Regression: mutating $trigger.Repetition.Interval post-hoc does not
+    persist through Register-ScheduledTask (Get-ScheduledTask reads back an
+    empty Repetition on the live CIM object), so the hourly watchdog task
+    registers but never matches its own expected definition. Repetition must
+    be supplied via New-ScheduledTaskTrigger's own -RepetitionInterval /
+    -RepetitionDuration parameters instead."""
+    captured: dict[str, list[str]] = {}
+
+    def fake_runner(argv, *, timeout=300):
+        captured["argv"] = argv
+        return self_update.CommandResult(argv, 0, "", "")
+
+    self_update_tasks.register_scheduled_task(
+        "watchdog",
+        runner=fake_runner,
+        resolve_binary=lambda name: f"/usr/bin/{name}",
+        home=Path("/home/tmichon"),
+    )
+    script = captured["argv"][-1]
+    assert "-RepetitionInterval (New-TimeSpan -Hours 1)" in script
+    assert "-RepetitionDuration (New-TimeSpan -Days 3650)" in script
+    assert "$trigger.Repetition.Interval" not in script
+    assert "$trigger.Repetition.Duration" not in script
+
+
+def test_register_scheduled_task_daily_has_no_repetition_parameters():
+    captured: dict[str, list[str]] = {}
+
+    def fake_runner(argv, *, timeout=300):
+        captured["argv"] = argv
+        return self_update.CommandResult(argv, 0, "", "")
+
+    self_update_tasks.register_scheduled_task(
+        "sweep",
+        runner=fake_runner,
+        resolve_binary=lambda name: f"/usr/bin/{name}",
+        home=Path("/home/tmichon"),
+    )
+    script = captured["argv"][-1]
+    assert "-Daily -At '3:00AM' -DaysInterval 1" in script
+    assert "-RepetitionInterval" not in script
+
+
 def test_reconcile_task_defers_to_elevated_install_when_registration_is_denied(
     monkeypatch, tmp_path
 ):
