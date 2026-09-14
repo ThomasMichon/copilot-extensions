@@ -735,3 +735,64 @@ class TestClosureDescriptor:
         assert payload["claims"] == {"held": 0}
         assert payload["follow_ups"] == {"open": 0}
 
+
+# --- interpret_descriptor_payload (mixed-version fleet safety, Phase 5) -----
+
+class TestInterpretDescriptorPayload:
+    def _final_payload(self):
+        rec = _rec(status="finalized")
+        info = _info(S.COMPLETED)
+        disposition = prune.cleanup_disposition(rec, info)
+        return prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=0, open_follow_ups=0).to_dict()
+
+    def test_matching_version_trusted(self):
+        payload = self._final_payload()
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is True
+        assert interpreted["final"] is True
+        assert interpreted["label"] == "FINAL"
+        assert interpreted["action_disposition"] == "safe"
+        assert interpreted["reason"] is None
+
+    def test_missing_payload_is_never_final(self):
+        interpreted = prune.interpret_descriptor_payload(None)
+        assert interpreted["supported"] is False
+        assert interpreted["final"] is False
+        assert interpreted["action_disposition"] == "blocked"
+        assert interpreted["reason"] == "unsupported-descriptor"
+
+    def test_malformed_payload_is_never_final(self):
+        interpreted = prune.interpret_descriptor_payload("not-a-dict")  # type: ignore[arg-type]
+        assert interpreted["supported"] is False
+        assert interpreted["final"] is False
+
+    def test_older_version_is_never_trusted(self):
+        payload = self._final_payload()
+        payload["version"] = 0
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+        assert interpreted["final"] is False
+        assert "unsupported-descriptor" in interpreted["reason"]
+
+    def test_newer_version_is_never_trusted(self):
+        payload = self._final_payload()
+        payload["version"] = prune.DESCRIPTOR_VERSION + 1
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+        assert interpreted["final"] is False
+
+    def test_a_blocked_payload_reports_blocked_not_final(self):
+        rec = _rec(status="finalized")
+        rec.resources = [
+            tracking.ResourceClaim(kind="codespace", ref="cs-1", state="active")
+        ]
+        info = _info(S.COMPLETED)
+        disposition = prune.cleanup_disposition(rec, info)
+        payload = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=1, open_follow_ups=0).to_dict()
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is True
+        assert interpreted["final"] is False
+        assert interpreted["action_disposition"] == "blocked"
+
