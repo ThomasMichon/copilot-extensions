@@ -266,19 +266,25 @@ def cleanup_disposition(
     needs a git branch-merged check the caller owns.  Everything else flows
     from :func:`assess`.
 
-    Safety invariant: a ``finalized`` worktree (or one git proves COMPLETED) is
-    always cleanable -- its work is at minimum pushed to the remote feature
-    branch, so removing the local copy loses nothing.  This preserves the
-    long-standing default and avoids over-preserving on a *stale* local PR
-    state (use ``--reconcile-prs`` / live reconcile to refine those).
+    Safety invariant: a ``finalized`` worktree (or one git proves COMPLETED)
+    is cleanable **provided its working tree carries no uncommitted content**
+    (``info.dirty == 0``) -- at that point its work is at minimum pushed to
+    the remote feature branch, so removing the local copy loses nothing. This
+    preserves the long-standing default and avoids over-preserving on a
+    *stale* local PR state (use ``--reconcile-prs`` / live reconcile to
+    refine those). A worktree finalized earlier and modified afterward
+    (``info.dirty > 0``, whether classified ``DIRTY`` or an ``ORPHAN`` that
+    still carries a dirty count) is excluded from this shortcut regardless of
+    ``rec.status`` -- see the ``info.dirty > 0`` guard below.
 
-    The **one exception** is an IN-FLIGHT claimed resource (agent-fabric
-    `claimed-resource-not-reclaimed`): when ``claimant_alive`` is injected and
-    the claimant is alive / not-confirmed-gone, a still-in-flight resource is
-    spared because its owner may still be using it. A FINISHED claimed resource
-    (finalized / merged / git-COMPLETED) is NOT spared -- it is collectable even
-    under a live claimant, so a host kept open for days does not
-    pin its merged children.
+    Beyond the dirty exclusion, the other exception is an IN-FLIGHT claimed
+    resource (agent-fabric `claimed-resource-not-reclaimed`): when
+    ``claimant_alive`` is injected and the claimant is alive /
+    not-confirmed-gone, a still-in-flight resource is spared because its
+    owner may still be using it. A FINISHED claimed resource (finalized /
+    merged / git-COMPLETED) is NOT spared -- it is collectable even under a
+    live claimant, so a host kept open for days does not pin its merged
+    children.
     """
     v = assess(rec, info, turn_count=turn_count, claimant_alive=claimant_alive)
     S = git_ops.WorktreeState
@@ -350,6 +356,23 @@ def cleanup_disposition(
                 f"{v.reason} · held until BOTH paired worktrees finalized "
                 f"({why})")
 
+    # Safety invariant (mirrors _apply_tracking_override in __main__.py): any
+    # uncommitted content must never be treated as cleanable via the raw
+    # rec.status == "finalized" shortcut below. A worktree finalized earlier
+    # and modified afterward still carries a tracking status of "finalized",
+    # but that status describes work already verified safe on the default
+    # branch at finalize time -- it says nothing about content added since.
+    # Checked two ways so neither a missing count nor a stale state label
+    # slips through: info.state == S.DIRTY is kept as an explicit fallback
+    # because some callers (e.g. __main__._classify_from_cache) reconstruct
+    # a WorktreeStateInfo from a cached git_state string without
+    # repopulating `dirty`, so state == DIRTY, dirty == 0 can reach here;
+    # info.dirty > 0 is needed separately because an ORPHAN classification
+    # (no merge base) can also carry a nonzero dirty count with state !=
+    # DIRTY. Neither check alone covers both gaps.
+    if info.state == S.DIRTY or info.dirty > 0:
+        return CleanupDisposition(False, "dirty", v.reason)
+
     if rec.status == "finalized" or info.state == S.COMPLETED:
         return CleanupDisposition(True, "clean", v.reason)
 
@@ -364,8 +387,6 @@ def cleanup_disposition(
             include_unused or include_conversations, "unused", v.reason)
     if v.category == "conversation-only":
         return CleanupDisposition(include_conversations, "conversation", v.reason)
-    if info.state == S.DIRTY:
-        return CleanupDisposition(False, "dirty", v.reason)
     if info.state == S.WIP:
         return CleanupDisposition(False, "wip", v.reason)
     return CleanupDisposition(False, "unmerged", v.reason)

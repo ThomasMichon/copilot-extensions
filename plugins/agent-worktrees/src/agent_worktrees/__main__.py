@@ -538,9 +538,38 @@ def _apply_tracking_override(
     live, and hiding it behind COMPLETED strands the row with no lifecycle verb
     (the bb68/ca29 status-tracking bug -- a muxed/lock-held session rendered
     FINAL). Liveness wins over the durable finalize status.
+
+    A worktree with **any uncommitted content** is never masked either --
+    checked two ways so neither a missing count nor a stale state label can
+    slip through:
+
+    - ``info.state == DIRTY`` (the direct classifier's own read), kept as an
+      explicit fallback because some callers reconstruct a
+      ``WorktreeStateInfo`` from a **cached** ``git_state`` string (e.g.
+      ``_classify_from_cache``) without repopulating ``dirty`` -- that path
+      can hand this function ``state == DIRTY, dirty == 0``, and checking
+      only the count would miss it.
+    - ``info.dirty > 0`` (the count directly), needed because
+      ``_classify_git_state`` can also return ``ORPHAN`` (no merge base)
+      while still reporting a nonzero ``dirty`` count -- state-matching
+      alone would miss *that* case.
+
+    Uncommitted working-tree changes made *after* finalization are new, real,
+    unlanded content that the stale ``finalized``/``complete``/``completed``
+    tracking status knows nothing about -- unlike the two corrected cases
+    above, this isn't a classifier misreading already-landed work, it's
+    genuinely unlanded work. Masking it to COMPLETED would let plain
+    ``cleanup --clean`` delete it with no ``--force`` at all.
     """
     if rec.status in ("finalized", "complete", "completed"):
-        if info.state not in (git_ops.WorktreeState.GONE, git_ops.WorktreeState.ACTIVE,):
+        if (
+            info.state != git_ops.WorktreeState.DIRTY
+            and info.dirty == 0
+            and info.state not in (
+                git_ops.WorktreeState.GONE,
+                git_ops.WorktreeState.ACTIVE,
+            )
+        ):
             return dataclasses.replace(info, state=git_ops.WorktreeState.COMPLETED)
     return info
 
@@ -15368,6 +15397,47 @@ def _cleanup_per_item_skip_reason(disp: prune.CleanupDisposition) -> str:
     return ""
 
 
+def _revalidate_before_reap(
+    latest: tracking.WorktreeRecord,
+    info: git_ops.WorktreeStateInfo,
+    *,
+    repo,
+    active_paths: set[str],
+) -> tuple[git_ops.WorktreeStateInfo | None, str | None]:
+    """Re-check a worktree's git state right before deleting it.
+
+    `cmd_cleanup` builds its `to_clean` set from a snapshot taken *before* the
+    finalization lock is acquired -- so a worktree can pick up real,
+    uncommitted edits (an editor left open, another process, the operator) in
+    the gap between that scan and the actual reap. Trusting the stale `info`
+    across that gap would let plain `cleanup --clean` delete content that
+    became dirty after it was scanned. This re-classifies fresh, under the
+    lock, right before the caller reaps -- a cheap local git read, no network
+    fetch -- and returns ``(None, reason)`` if the worktree is no longer safe
+    to reap (now dirty, or a session has since attached to it), or
+    ``(reclassified_info, None)`` when it's still safe.
+
+    A worktree with no on-disk path (already gone) skips revalidation and is
+    returned unchanged -- there's nothing left to re-check.
+    """
+    if not latest.worktree_path or not Path(latest.worktree_path).exists():
+        return info, None
+    fresh_info = git_ops.classify_worktree(
+        latest.worktree_path,
+        latest.branch,
+        fetch=False,
+        remote=repo.remote,
+        default_branch=repo.default_branch,
+        active_paths=active_paths,
+    )
+    fresh_info = _apply_tracking_override(latest, fresh_info)
+    if fresh_info.state == git_ops.WorktreeState.ACTIVE:
+        return None, "worktree became active since the initial scan"
+    if fresh_info.state == git_ops.WorktreeState.DIRTY or fresh_info.dirty > 0:
+        return None, "worktree became dirty since the initial scan"
+    return fresh_info, None
+
+
 def cmd_cleanup(args: argparse.Namespace) -> int:
     if getattr(args, "worktree_id", None):
         return _cleanup_one(args)
@@ -15571,6 +15641,17 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
                         f"Skipping {rec.worktree_id}: active hosted Copilot session in use"
                     )
                     continue
+            else:
+                latest = rec
+            revalidated, revalidate_reason = _revalidate_before_reap(
+                latest, info, repo=repo, active_paths=active_paths,
+            )
+            if revalidated is None:
+                output.warn(
+                    f"Skipping {rec.worktree_id}: {revalidate_reason}"
+                )
+                continue
+            info = revalidated
             print(f"Cleaning {rec.worktree_id} ({info.state.value})...")
             f, warns = _reap_worktree(rec, info, repo, tracking_path)
             for w in warns:
