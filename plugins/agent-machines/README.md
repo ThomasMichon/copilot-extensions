@@ -38,8 +38,8 @@ actions) and per-machine data stay in the consuming repo.
   runtime** only; it never applies machine state.
 - **Declarative resources.** Beyond Copilot settings, a package can declare typed
   `resources:` -- package-manager packages, config files (whole-file or a marked
-  `managed-block`), Windows registry values, OS features, and Windows power
-  settings -- that the
+  `managed-block`), Windows registry values, OS features, Windows power
+  settings, and machine-local self-update opt-ins / Scheduled Tasks -- that the
   engine installs/pins/writes itself (with cross-package collision detection),
   instead of hiding them in per-repo scripts. See
   [`docs/resources.md`](docs/resources.md).
@@ -238,6 +238,11 @@ agent-machines restore --repo myrepo    # another single repo
 agent-machines restore --only ssh       # preview one surface/module
 agent-machines restore --only ssh --apply
 agent-machines restore --json           # structured plan/surface/module result
+agent-machines self-update install      # register opted-in Scheduled Tasks
+agent-machines self-update status       # show opt-in + task presence
+agent-machines self-update uninstall    # remove registered self-update tasks
+agent-machines self-update run --tier watchdog
+agent-machines self-update run --tier sweep --json
 agent-machines provision-playwright-cli # preview user-home package/skill changes
 agent-machines provision-playwright-cli --apply
 agent-machines provision-playwright-cli --json
@@ -256,6 +261,10 @@ broadening scope.
 `restore` defaults to a dry-run. `--apply` writes changes. `--only` filters by
 logical surface (`settings`, `permissions`, `trustedFolders`) or module name.
 Module stdout is shown by default in dry-runs, hidden during apply unless
+requested. `self-update install` resolves the declarative `self-update`
+resources first and only attempts Scheduled Task registration for tiers whose
+resolved state is `present`; `restore --apply` reconciles the same task
+presence declaratively, including removing tasks that have since been opted out.
 `--verbose`, and always present in `--json`.
 
 ## Playwright CLI provisioning

@@ -150,6 +150,79 @@ def test_parent_dead_probe_still_reaps():
     assert [p["pid"] for p in reap] == [320]
 
 
+def test_ancestor_chain_walks_past_a_stacked_intermediate_launcher():
+    """A launcher's immediate parent can itself be another (alive) launcher-
+    shell node whose OWN parent has died -- the exact shape of an
+    agent-worktrees.ps1 -> python -> python -> pwsh stack whose top-level
+    console closed. The immediate-parent-only check would wrongly spare pid
+    330 forever; walking the full chain must find the break at 332. (331 is
+    itself a launcher-shell node with the same broken chain, so it reaps too.)
+    """
+    procs = [
+        _p(330, ppid=331),
+        {"pid": 331, "ppid": 332, "name": "pwsh.exe", "cmdline": _LAUNCH_CMD,
+         "create_epoch": OLD, "session_id": 1},
+    ]
+    reap, skipped = cli.select_orphan_launcher_shells(
+        procs, now=NOW, idle_grace_secs=3600.0, self_pid=424242,
+        pid_alive=lambda pid: pid == 331)  # 332 (the real root) is dead
+    assert {p["pid"] for p in reap} == {330, 331}
+    assert 330 not in _reasons(skipped)
+
+
+def test_ancestor_chain_spares_when_every_hop_is_alive():
+    """Same shape as above, but the true root (332) is genuinely alive --
+    must still be spared, not just because the immediate parent (331) is."""
+    procs = [
+        _p(340, ppid=341),
+        {"pid": 341, "ppid": 342, "name": "pwsh.exe", "cmdline": _LAUNCH_CMD,
+         "create_epoch": OLD, "session_id": 1},
+    ]
+    reap, skipped = cli.select_orphan_launcher_shells(
+        procs, now=NOW, idle_grace_secs=3600.0, self_pid=424242,
+        pid_alive=lambda pid: pid in (341, 342))
+    assert reap == []
+    assert _reasons(skipped)[340] == "parent-alive"
+
+
+def test_ancestor_chain_stops_at_the_edge_of_the_snapshot():
+    """A real root beyond anything enumerated (e.g. WindowsTerminal.exe,
+    never a launcher/witness image) can't be verified further -- that must
+    mean "assume alive", not "assume dead", matching the conservative
+    never-over-reap stance. (352 is genuinely alive per the real-system
+    probe; it simply has no node in our snapshot, so its own parent can't be
+    walked any further.)"""
+    procs = [
+        _p(350, ppid=351),
+        {"pid": 351, "ppid": 352, "name": "pwsh.exe", "cmdline": _LAUNCH_CMD,
+         "create_epoch": OLD, "session_id": 1},
+        # 352 (the real terminal) is intentionally NOT enumerated at all.
+    ]
+    reap, skipped = cli.select_orphan_launcher_shells(
+        procs, now=NOW, idle_grace_secs=3600.0, self_pid=424242,
+        pid_alive=lambda pid: pid in (351, 352))  # both genuinely alive
+    assert reap == []
+    assert _reasons(skipped)[350] == "parent-alive"
+    assert _reasons(skipped)[351] == "parent-alive"
+
+
+def test_ancestor_chain_intact_pure_predicate_matches_snapshot_fallback():
+    by_pid = {301: {"pid": 301, "ppid": 1}}
+    assert cli._ancestor_chain_intact(301, by_pid, None) is True
+    assert cli._ancestor_chain_intact(999, by_pid, None) is False
+
+
+def test_ancestor_chain_intact_walks_with_real_probe():
+    by_pid = {
+        331: {"pid": 331, "ppid": 332},
+    }
+    assert cli._ancestor_chain_intact(331, by_pid, lambda pid: pid == 331) is False
+    assert (
+        cli._ancestor_chain_intact(331, by_pid, lambda pid: pid in (331, 332))
+        is True
+    )
+
+
 def test_service_session_zero_is_spared():
     procs = [_p(400, sid=0)]
     reap, skipped = _select(procs)
@@ -250,9 +323,10 @@ def test_reaper_unavailable_when_enumeration_none(monkeypatch):
 
 # ── Enumeration must surface the witnesses the veto depends on ──────────────
 
-def test_windows_enumeration_queries_witness_images(monkeypatch):
-    """The live-descendant veto is only as good as the snapshot feeding it: if
-    the process query omits the mux/Copilot images, the veto is dead code."""
+def test_windows_enumeration_queries_every_process(monkeypatch):
+    """The parent-alive check now walks the ancestor chain past launcher/
+    witness images to the real console host, so enumeration must not filter
+    by name at all -- a name-scoped query can never see that root."""
     seen: dict = {}
 
     class _Res:
@@ -265,9 +339,10 @@ def test_windows_enumeration_queries_witness_images(monkeypatch):
     monkeypatch.setattr(cli.subprocess, "run", _run)
     cli._enumerate_launcher_shells_windows()
     query = seen["cmd"][-1]
+    assert "-Filter" not in query
     for image in ("pwsh.exe", "python.exe", "psmux.exe", "tmux.exe",
                   "copilot.exe", "node.exe"):
-        assert f"Name='{image}'" in query
+        assert f"Name='{image}'" not in query
 
 
 def test_posix_enumeration_keeps_witness_images():

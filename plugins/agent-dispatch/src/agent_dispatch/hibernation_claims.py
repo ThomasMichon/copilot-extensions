@@ -28,6 +28,38 @@ import subprocess
 from .procutil import agent_worktrees_launch_prefix, no_window_kwargs
 
 
+def _mirror_task_claim_status(
+    task_id: str, status: str, *, timeout: float = 15.0
+) -> None:
+    """Best-effort mirror of this task claim's disposition onto agent-worktrees'
+    cross-machine ``task_claim_registry`` (ThomasMichon/copilot-extensions#2584).
+
+    Same-machine journaling (:func:`add_hibernation_claim` /
+    :func:`release_hibernation_claim`) already blocks *this* machine's own
+    finalize sweep. This additionally mirrors the disposition onto a
+    4-tier-resolved external store (a bound knowledge repo's remote, this
+    project's own remote, or a local/machine-local fallback) so a reclaim
+    sweep running anywhere else that resolves the same store can see this
+    task's status too. Failure is silent and non-fatal -- the caller's own
+    same-machine claim add/release already carries the real obligation.
+    """
+    prefix = agent_worktrees_launch_prefix()
+    if prefix is None:
+        return
+    try:
+        subprocess.run(  # noqa: S603 -- fixed argv, launcher resolved locally
+            [*prefix, "claims", "mirror-status", "task", task_id,
+             "--status", status, "--holder", "agent-dispatch", "--json"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            **no_window_kwargs(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
 def add_hibernation_claim(
     task_id: str, *, note: str | None = None, timeout: float = 15.0
 ) -> dict | None:
@@ -39,6 +71,9 @@ def add_hibernation_claim(
     suspending/hibernating rather than block on it -- the claim is defense in
     depth, not a precondition. Release the matching claim with
     :func:`release_hibernation_claim` once the task resumes.
+
+    Also best-effort mirrors the claim as ``active`` onto the cross-machine
+    discovery store (see :func:`_mirror_task_claim_status`).
     """
     prefix = agent_worktrees_launch_prefix()
     if prefix is None:
@@ -60,6 +95,7 @@ def add_hibernation_claim(
         return None
     if result.returncode != 0 or not isinstance(payload, dict):
         return None
+    _mirror_task_claim_status(task_id, "active", timeout=timeout)
     return payload
 
 
@@ -72,6 +108,9 @@ def release_hibernation_claim(task_id: str, *, timeout: float = 15.0) -> dict | 
     blocked *this* worktree's own finalize, and a worktree that never gets
     finalized is a cheap, safe failure mode compared to one reclaimed too
     early.
+
+    Also best-effort mirrors the claim as ``released`` onto the cross-machine
+    discovery store (see :func:`_mirror_task_claim_status`).
     """
     prefix = agent_worktrees_launch_prefix()
     if prefix is None:
@@ -90,4 +129,5 @@ def release_hibernation_claim(task_id: str, *, timeout: float = 15.0) -> dict | 
         return None
     if result.returncode != 0 or not isinstance(payload, dict):
         return None
+    _mirror_task_claim_status(task_id, "released", timeout=timeout)
     return payload

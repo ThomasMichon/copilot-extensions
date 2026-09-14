@@ -8,6 +8,7 @@ Verbs:
 * ``plan``     -- read-only restore plan (managed surfaces + drift key)
 * ``validate`` -- run the conflict validator over the package union
 * ``restore``  -- converge the machine (``--dry-run`` prints the plan; apply lands in #4006)
+* ``self-update`` -- run unattended watchdog / sweep tiers
 * ``provision-playwright-cli`` -- converge the machine-local Playwright CLI workspace
 * ``capture`` / ``prune`` -- harvest / GC verbs (issue #4006)
 """
@@ -25,6 +26,9 @@ from . import identity as _identity
 from . import layout as _layout
 from . import playwright_cli as _playwright_cli
 from . import reconcile as _reconcile
+from . import resources as _resources
+from . import self_update as _self_update
+from . import self_update_state as _self_update_state
 from . import validator as _validator
 from .manifest import ManifestError, RequirementPackage
 from .surfaces._common import SurfaceStateError
@@ -64,9 +68,7 @@ def _collect_reconcile_packages(
         if candidate is not None:
             repo_name, repo_path = candidate
             if not repo_path.is_dir():
-                raise ManifestError(
-                    f"registered repo {repo_name!r} is unavailable at {repo_path}"
-                )
+                raise ManifestError(f"registered repo {repo_name!r} is unavailable at {repo_path}")
             repo_anchor = repo_path
         else:
             repo_path = Path(selector).expanduser()
@@ -77,9 +79,7 @@ def _collect_reconcile_packages(
             try:
                 repo_name, repo_path, repo_anchor = _layout.resolve_cwd_repo(repo_path)
             except _layout.NotGitRepositoryError as exc:
-                raise ManifestError(
-                    f"repo path {selector!r} is not a Git repository"
-                ) from exc
+                raise ManifestError(f"repo path {selector!r} is not a Git repository") from exc
     else:
         repo_name, repo_path, repo_anchor = _layout.resolve_cwd_repo()
         project_repos = _discover.project_scope_repos(
@@ -133,9 +133,7 @@ def _resolve_machine_identity(args: argparse.Namespace) -> _identity.MachineIden
             if candidate.is_dir():
                 topology_repos.append(candidate)
     else:
-        topology_repos.extend(
-            candidate.path for candidate in _discover.candidate_repos()
-        )
+        topology_repos.extend(candidate.path for candidate in _discover.candidate_repos())
         try:
             topology_repos.append(_layout.resolve_cwd_repo()[1])
         except _layout.NotGitRepositoryError:
@@ -171,13 +169,18 @@ def _cmd_discover(args: argparse.Namespace) -> int:
                 accepted_machines=identity.accepted,
             )
         ]
-        print(json.dumps({
-            "machine": identity.canonical,
-            "machine_raw": identity.raw,
-            "machine_aliases": list(identity.accepted),
-            "machine_identity_warnings": list(identity.warnings),
-            "repos": out,
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "machine": identity.canonical,
+                    "machine_raw": identity.raw,
+                    "machine_aliases": list(identity.accepted),
+                    "machine_identity_warnings": list(identity.warnings),
+                    "repos": out,
+                },
+                indent=2,
+            )
+        )
         return 0
     _emit_identity_warnings(identity)
     return _discover._main(
@@ -197,14 +200,19 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     )
     ok = all(report.ok for report in reports)
     if args.json:
-        print(json.dumps({
-            "machine": machine,
-            "machine_raw": identity.raw,
-            "machine_aliases": list(identity.accepted),
-            "machine_identity_warnings": list(identity.warnings),
-            "ok": ok,
-            "repos": [report.to_dict() for report in reports],
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "machine": machine,
+                    "machine_raw": identity.raw,
+                    "machine_aliases": list(identity.accepted),
+                    "machine_identity_warnings": list(identity.warnings),
+                    "ok": ok,
+                    "repos": [report.to_dict() for report in reports],
+                },
+                indent=2,
+            )
+        )
         return 0 if ok else 1
 
     print(f"doctor for {machine}")
@@ -331,8 +339,9 @@ def _print_authority_decisions(decisions: list[dict[str, object]]) -> None:
     for decision in decisions:
         identity = decision["identity"]
         if isinstance(identity, dict):
-            key = ":".join([str(identity.get("type", ""))]
-                           + [str(item) for item in identity.get("key", [])])
+            key = ":".join(
+                [str(identity.get("type", ""))] + [str(item) for item in identity.get("key", [])]
+            )
             label = f"{key}.{identity.get('field', '')}"
         else:
             label = str(identity)
@@ -344,10 +353,7 @@ def _print_authority_decisions(decisions: list[dict[str, object]]) -> None:
             f"{item['source_repo']}:{item['package']}@{item['authority']}"
             for item in decision.get("superseded", [])
         )
-        print(
-            f"  authority {decision['domain']} {label}: "
-            f"{selected} supersedes {superseded}"
-        )
+        print(f"  authority {decision['domain']} {label}: {selected} supersedes {superseded}")
 
 
 def _cmd_restore(args: argparse.Namespace) -> int:
@@ -474,6 +480,192 @@ def _cmd_restore(args: argparse.Namespace) -> int:
     return 0 if result.ok else 2
 
 
+def _self_update_packages(
+    machine: str,
+    accepted_machines: tuple[str, ...] | None = None,
+) -> list[RequirementPackage]:
+    return (
+        _collect_all_packages(machine, accepted_machines)
+        if accepted_machines is not None
+        else _collect_all_packages(machine)
+    )
+
+
+def _resolve_self_update_resources(
+    args: argparse.Namespace,
+) -> tuple[_identity.MachineIdentity, str, dict[str, object]] | None:
+    identity = _resolve_machine_identity(args)
+    _emit_identity_warnings(identity)
+    machine = identity.canonical
+    packages = _self_update_packages(machine, identity.accepted)
+    resolved = _reconcile.resolve_union(packages, machine, identity.accepted)
+    findings = _validator.validate(resolved, machine)
+    if _validator.has_errors(findings):
+        if getattr(args, "json", False):
+            print(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "error": "validator reported errors",
+                        "findings": [f.__dict__ for f in findings],
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            print("self-update refused: validator reported errors:", file=sys.stderr)
+            for finding in findings:
+                if finding.level == "error":
+                    print(f"  {finding.code}: {finding.message}", file=sys.stderr)
+        return None
+    resolved_resources, _ = _resources.resolve_resources(
+        resolved,
+        machine,
+        _discover.current_platform(),
+    )
+    return (
+        identity,
+        machine,
+        _self_update_state.selected_tiers_from_resolved(resolved_resources),
+    )
+
+
+def _selected_self_update_tiers(args: argparse.Namespace) -> list[str]:
+    selected = getattr(args, "tier", None)
+    if not selected:
+        return sorted(_self_update.TIER_SPECS)
+    return list(dict.fromkeys(selected))
+
+
+def _cmd_self_update_run(args: argparse.Namespace) -> int:
+    resolved_state = _resolve_self_update_resources(args)
+    if resolved_state is None:
+        return 1
+    identity, machine, selected_resources = resolved_state
+    resource = selected_resources.get(args.tier)
+    result = _self_update.run_tier(
+        args.tier,
+        opted_in=_self_update_state.tier_enabled(resource),
+        machine=machine,
+        discovered_repos=(
+            _discover.discover(
+                machine,
+                accepted_machines=identity.accepted,
+            )
+            if args.tier == _self_update_state.SWEEP_TIER
+            else None
+        ),
+    )
+    if args.json:
+        print(json.dumps(result.to_dict(), indent=2))
+    else:
+        print(_self_update.format_result(result))
+    return 0 if result.ok else 2
+
+
+def _cmd_self_update_install(args: argparse.Namespace) -> int:
+    resolved_state = _resolve_self_update_resources(args)
+    if resolved_state is None:
+        return 1
+    _identity, _machine, selected_resources = resolved_state
+    results = []
+    for tier in _selected_self_update_tiers(args):
+        resource = selected_resources.get(tier)
+        if not _self_update_state.tier_enabled(resource):
+            results.append(
+                _self_update.ScheduledTaskReconcileResult(
+                    tier=tier,
+                    desired_state="absent",
+                    status="skipped",
+                    changed=False,
+                    detail=f"tier {tier!r} is not opted in",
+                )
+            )
+            continue
+        results.append(
+            _self_update.reconcile_scheduled_task(
+                tier,
+                desired_present=True,
+                machine=_machine,
+            )
+        )
+    if args.json:
+        payload = {
+            "ok": all(result.ok for result in results),
+            "tiers": [r.to_dict() for r in results],
+        }
+        print(json.dumps(payload, indent=2))
+    else:
+        for result in results:
+            print(f"{result.tier}: {result.status}")
+            print(f"  {result.detail}")
+    return 0 if all(result.ok or result.status == "skipped" for result in results) else 2
+
+
+def _cmd_self_update_status(args: argparse.Namespace) -> int:
+    resolved_state = _resolve_self_update_resources(args)
+    if resolved_state is None:
+        return 1
+    _identity, _machine, selected_resources = resolved_state
+    results = []
+    for tier in _selected_self_update_tiers(args):
+        resource = selected_resources.get(tier)
+        results.append(
+            _self_update.scheduled_task_status(
+                tier,
+                opted_in=_self_update_state.tier_enabled(resource),
+                machine=_machine,
+            )
+        )
+    if args.json:
+        print(
+            json.dumps(
+                {"ok": True, "tiers": [result.to_dict() for result in results]},
+                indent=2,
+            )
+        )
+    else:
+        for result in results:
+            print(
+                f"{result.tier}: opted-in={'yes' if result.opted_in else 'no'}; "
+                f"registered={'yes' if result.registered else 'no'}; "
+                f"matching={'yes' if result.matching else 'no'}"
+            )
+            print(f"  {result.detail}")
+            if result.last_attempt:
+                print(f"  last-attempt: {result.last_attempt}")
+            if result.last_success:
+                print(f"  last-success: {result.last_success}")
+    return 0
+
+
+def _cmd_self_update_uninstall(args: argparse.Namespace) -> int:
+    machine = _resolve_machine_identity(args).canonical
+    results = [
+        _self_update.reconcile_scheduled_task(
+            tier,
+            desired_present=False,
+            machine=machine,
+        )
+        for tier in _selected_self_update_tiers(args)
+    ]
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "ok": all(result.ok for result in results),
+                    "tiers": [r.to_dict() for r in results],
+                },
+                indent=2,
+            )
+        )
+    else:
+        for result in results:
+            print(f"{result.tier}: {result.status}")
+            print(f"  {result.detail}")
+    return 0 if all(result.ok for result in results) else 2
+
+
 def _cmd_todo(args: argparse.Namespace) -> int:
     print(f"'{args.verb}' is delivered by the surfaces package (issue #4006)", file=sys.stderr)
     return 2
@@ -546,8 +738,8 @@ def _build_parser() -> argparse.ArgumentParser:
         scope.add_argument(
             "--repo",
             help="reconcile exactly one registered repo name or repository path "
-                 "(default: adopted project containing CWD plus its required "
-                 "supplemental repositories)",
+            "(default: adopted project containing CWD plus its required "
+            "supplemental repositories)",
         )
         scope.add_argument(
             "--all-projects",
@@ -562,12 +754,64 @@ def _build_parser() -> argparse.ArgumentParser:
     add("installer-readiness", _cmd_installer_readiness)
     restore = add("restore", _cmd_restore)
     add_reconcile_scope(restore)
-    restore.add_argument("--apply", action="store_true",
-                         help="make changes (default is a dry-run preview)")
-    restore.add_argument("--only", action="append", metavar="NAME",
-                         help="restrict to named surfaces/modules (repeatable)")
-    restore.add_argument("--verbose", "-v", action="store_true",
-                         help="show each module's captured output (shown by default in a dry-run)")
+    restore.add_argument(
+        "--apply", action="store_true", help="make changes (default is a dry-run preview)"
+    )
+    restore.add_argument(
+        "--only",
+        action="append",
+        metavar="NAME",
+        help="restrict to named surfaces/modules (repeatable)",
+    )
+    restore.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="show each module's captured output (shown by default in a dry-run)",
+    )
+    self_update = sub.add_parser(
+        "self-update",
+        help="Run or manage unattended self-update tiers.",
+    )
+    self_update.add_argument("--machine", help="override the target machine name")
+    self_update.add_argument("--json", action="store_true", help="emit JSON")
+    self_update_sub = self_update.add_subparsers(dest="self_update_command")
+    self_update_run = self_update_sub.add_parser(
+        "run",
+        help="Run one unattended self-update tier now.",
+    )
+    self_update_run.add_argument(
+        "--tier",
+        required=True,
+        choices=sorted(_self_update.TIER_SPECS),
+        help="the unattended self-update tier to run",
+    )
+    self_update_run.add_argument("--machine", help="override the target machine name")
+    self_update_run.add_argument("--json", action="store_true", help="emit JSON")
+    self_update_run.set_defaults(func=_cmd_self_update_run)
+    for subcommand, func, help_text in (
+        (
+            "install",
+            _cmd_self_update_install,
+            "Register opted-in self-update Scheduled Tasks.",
+        ),
+        (
+            "status",
+            _cmd_self_update_status,
+            "Inspect self-update opt-in and Scheduled Task state.",
+        ),
+        ("uninstall", _cmd_self_update_uninstall, "Remove self-update Scheduled Tasks."),
+    ):
+        current = self_update_sub.add_parser(subcommand, help=help_text)
+        current.add_argument(
+            "--tier",
+            action="append",
+            choices=sorted(_self_update.TIER_SPECS),
+            help="restrict to one unattended self-update tier (repeatable)",
+        )
+        current.add_argument("--machine", help="override the target machine name")
+        current.add_argument("--json", action="store_true", help="emit JSON")
+        current.set_defaults(func=func)
     playwright = sub.add_parser("provision-playwright-cli")
     playwright.add_argument("--json", action="store_true", help="emit JSON")
     playwright_mode = playwright.add_mutually_exclusive_group()

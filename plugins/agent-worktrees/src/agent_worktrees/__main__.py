@@ -141,6 +141,41 @@ def _env_set(new_name: str, value: str) -> None:
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+def _fire_launch_resolution_watchdog() -> None:
+    """Self-terminate a hung bare-launch invocation (copilot-extensions #<TBD>).
+
+    The pre-handoff resolution in ``cmd_launch`` (project/config resolution,
+    filesystem probes, an optional git call for the recovery anchor) has been
+    observed to survive its hosting console being closed mid-call and hang
+    indefinitely at near-zero CPU rather than exit -- a known CPython-on-
+    Windows interaction where the installed console-control handler reports
+    the close "handled" and returns immediately even though the blocked
+    native call (e.g. a git subprocess wait) is never actually interrupted, so
+    the process never gets a chance to notice and exit on its own. Whatever
+    the trigger, nothing downstream can be trusted to notice a stall here, so
+    this watchdog guarantees a hard ceiling: ``os._exit`` bypasses the stuck
+    call entirely rather than trying to unwind through it.
+    """
+    try:
+        sys.stderr.write(
+            "[agent-worktrees] bare-launch resolution exceeded "
+            f"{_LAUNCH_RESOLUTION_TIMEOUT_SECS}s -- self-terminating a likely "
+            "hang instead of blocking forever.\n"
+        )
+        sys.stderr.flush()
+    except Exception:
+        pass
+    os._exit(1)
+
+
+# How long cmd_launch's pre-handoff resolution (before it hands the console off
+# to launch-session / the direct fallback, where a long or indefinite wait is
+# expected and healthy) may run before the watchdog above assumes it is stuck.
+# Generous for a cold git call on a slow disk/network, nowhere close to a
+# human-perceptible delay for the normal case.
+_LAUNCH_RESOLUTION_TIMEOUT_SECS = 60.0
+
+
 def cmd_launch(argv: list[str]) -> int:
     """Default action: exec into launch-session.sh with passthrough args.
 
@@ -158,101 +193,120 @@ def cmd_launch(argv: list[str]) -> int:
         else:
             passthrough.append(arg)
 
-    launch_project = cfg.active_project()
-    launcher_args = ["--project", launch_project, *passthrough] if launch_project else passthrough
-
-    # Resolve launch support from the same validated runtime root that entered
-    # this Python process. An explicit cell must never fall back to legacy.
-    from . import registry_paths
-
-    context = registry_paths.installation_context()
-    inst_dir = (
-        Path(context["pluginRoot"])
-        if context is not None
-        else cfg.install_dir()
+    # Bounds the resolution below (never the handoff itself, which cancels
+    # this before blocking on the child/session -- see the docstring above).
+    # The `finally` is the safety net: cancel unconditionally on EVERY exit
+    # path (normal return, sys.exit, or an unexpected exception raised
+    # anywhere below) -- an explicit .cancel() at a specific handoff point is
+    # a documentation aid, never the only thing standing between a failure
+    # here and a real, unmocked timer left armed in the background.
+    _watchdog = threading.Timer(
+        _LAUNCH_RESOLUTION_TIMEOUT_SECS, _fire_launch_resolution_watchdog
     )
-    if context is not None:
-        _env_set("AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT", str(inst_dir))
-        try:
-            _env_set(
-                "AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR",
-                cfg.load_config(project=launch_project).default_repo.anchor,
-            )
-        except (OSError, RuntimeError, ValueError):
-            os.environ.pop("AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR", None)
-    plat = cfg.detect_platform()
-    legacy_name = "launch-session.cmd" if plat == "windows" else "launch-session.sh"
-    # Temporary deviation from efforts/active/worktree-manager-control-plane/
-    # phase-3b-mux-relocation.md Sub-slice 2a Step 2: the in-plugin
-    # launch-session/pane-wrapper files are deliberately NOT deleted yet, and
-    # are an ACTIVE fallback tier here (not just inert rollback files) until
-    # the relocated Worktree Manager path is proven live on real hardware.
-    # Try each candidate bin dir in order (relocated Worktree Manager, then
-    # the in-plugin scripts) and use the FIRST one whose script actually
-    # exists -- a "usable" relocated install (its Python module runs and
-    # reports a compatible version) does not by itself guarantee its bin/
-    # payload copy completed, so a partial deploy there must still fall
-    # through to the in-plugin tier rather than jumping straight to the new
-    # direct, non-mux path.
-    launch_bin = None
-    for candidate in (_usable_worktree_manager_launcher_dir(), inst_dir / "bin"):
-        if candidate is not None and (candidate / legacy_name).exists():
-            launch_bin = candidate
-            break
-    if launch_bin is None:
-        output.warn(
-            "No launch-session script found (neither the relocated "
-            "Worktree Manager launcher nor the in-plugin fallback); "
-            "launching Copilot directly without mux."
+    _watchdog.daemon = True
+    _watchdog.start()
+    try:
+        launch_project = cfg.active_project()
+        launcher_args = (
+            ["--project", launch_project, *passthrough] if launch_project else passthrough
         )
-        return _run_direct_launch_fallback(launch_project, passthrough)
 
-    if plat == "windows":
-        launch_script = launch_bin / "launch-session.cmd"
-    else:
-        launch_script = launch_bin / "launch-session.sh"
+        # Resolve launch support from the same validated runtime root that
+        # entered this Python process. An explicit cell must never fall back
+        # to legacy.
+        from . import registry_paths
 
-    if plat == "windows":
-        # Two launch shapes on Windows (copilot-extensions #102 -- launcher
-        # depth):
-        #   * ACP / --stdio: keep the cmd.exe -> .cmd shim. The .cmd forwards
-        #     stdin verbatim, which a stdio MCP server requires
-        #     (docs/patterns/cross-platform-parity.md); dropping it risks
-        #     corrupting the JSON-RPC channel.
-        #   * Interactive: hand off straight to `pwsh -File launch-session.ps1`,
-        #     dropping the cmd.exe shim entirely -- one fewer resident process
-        #     per worktree session. The .cmd's only extra job (native recovery
-        #     when the venv is broken) is unreachable here anyway: reaching
-        #     cmd_launch means Python already ran, so the venv is healthy.
-        is_stdio = "--stdio" in passthrough or "--acp" in passthrough
-        ps1 = launch_script.with_name("launch-session.ps1")
-        if is_stdio or not ps1.exists():
-            argv = ["cmd.exe", "/c", str(launch_script), *launcher_args]
-        else:
-            argv = ["pwsh.exe", "-NoProfile", "-NoLogo", "-File", str(ps1), *launcher_args]
-        # Popen + wait (never os.exec on Windows, which has no true exec and
-        # would detach the child from the console): hold the console and catch
-        # KeyboardInterrupt (Ctrl+C) so the child (launch-session.ps1) can finish
-        # its try/finally handoff check + post-exit finalization instead of being
-        # killed mid-cleanup.
-        proc = subprocess.Popen(argv)
-        try:
-            rc = proc.wait()
-        except KeyboardInterrupt:
-            # Ctrl+C was sent to the entire console process group.
-            # The child (pwsh -> copilot, or cmd.exe -> pwsh -> copilot in
-            # stdio mode) received it too. Wait for the child to finish its
-            # cleanup (handoff check, post-exit finalization) rather than
-            # killing it.
+        context = registry_paths.installation_context()
+        inst_dir = (
+            Path(context["pluginRoot"])
+            if context is not None
+            else cfg.install_dir()
+        )
+        if context is not None:
+            _env_set("AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT", str(inst_dir))
             try:
-                rc = proc.wait(timeout=30)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                rc = 130  # 128 + SIGINT(2)
-        sys.exit(rc)
-    else:
-        os.execvp("bash", ["bash", str(launch_script), *launcher_args])
-    return 1  # unreachable -- os.execvp replaces process
+                _env_set(
+                    "AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR",
+                    cfg.load_config(project=launch_project).default_repo.anchor,
+                )
+            except (OSError, RuntimeError, ValueError):
+                os.environ.pop("AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR", None)
+        plat = cfg.detect_platform()
+        legacy_name = "launch-session.cmd" if plat == "windows" else "launch-session.sh"
+        # Temporary deviation from efforts/active/worktree-manager-control-plane/
+        # phase-3b-mux-relocation.md Sub-slice 2a Step 2: the in-plugin
+        # launch-session/pane-wrapper files are deliberately NOT deleted yet,
+        # and are an ACTIVE fallback tier here (not just inert rollback
+        # files) until the relocated Worktree Manager path is proven live on
+        # real hardware. Try each candidate bin dir in order (relocated
+        # Worktree Manager, then the in-plugin scripts) and use the FIRST one
+        # whose script actually exists -- a "usable" relocated install (its
+        # Python module runs and reports a compatible version) does not by
+        # itself guarantee its bin/payload copy completed, so a partial
+        # deploy there must still fall through to the in-plugin tier rather
+        # than jumping straight to the new direct, non-mux path.
+        launch_bin = None
+        for candidate in (_usable_worktree_manager_launcher_dir(), inst_dir / "bin"):
+            if candidate is not None and (candidate / legacy_name).exists():
+                launch_bin = candidate
+                break
+        if launch_bin is None:
+            output.warn(
+                "No launch-session script found (neither the relocated "
+                "Worktree Manager launcher nor the in-plugin fallback); "
+                "launching Copilot directly without mux."
+            )
+            return _run_direct_launch_fallback(launch_project, passthrough)
+
+        if plat == "windows":
+            launch_script = launch_bin / "launch-session.cmd"
+        else:
+            launch_script = launch_bin / "launch-session.sh"
+
+        if plat == "windows":
+            # Two launch shapes on Windows (copilot-extensions #102 -- launcher
+            # depth):
+            #   * ACP / --stdio: keep the cmd.exe -> .cmd shim. The .cmd forwards
+            #     stdin verbatim, which a stdio MCP server requires
+            #     (docs/patterns/cross-platform-parity.md); dropping it risks
+            #     corrupting the JSON-RPC channel.
+            #   * Interactive: hand off straight to `pwsh -File launch-session.ps1`,
+            #     dropping the cmd.exe shim entirely -- one fewer resident process
+            #     per worktree session. The .cmd's only extra job (native recovery
+            #     when the venv is broken) is unreachable here anyway: reaching
+            #     cmd_launch means Python already ran, so the venv is healthy.
+            is_stdio = "--stdio" in passthrough or "--acp" in passthrough
+            ps1 = launch_script.with_name("launch-session.ps1")
+            if is_stdio or not ps1.exists():
+                argv = ["cmd.exe", "/c", str(launch_script), *launcher_args]
+            else:
+                argv = ["pwsh.exe", "-NoProfile", "-NoLogo", "-File", str(ps1), *launcher_args]
+            # Popen + wait (never os.exec on Windows, which has no true exec and
+            # would detach the child from the console): hold the console and catch
+            # KeyboardInterrupt (Ctrl+C) so the child (launch-session.ps1) can finish
+            # its try/finally handoff check + post-exit finalization instead of being
+            # killed mid-cleanup.
+            proc = subprocess.Popen(argv)
+            _watchdog.cancel()  # resolution is done -- the wait below is expected
+            try:
+                rc = proc.wait()
+            except KeyboardInterrupt:
+                # Ctrl+C was sent to the entire console process group.
+                # The child (pwsh -> copilot, or cmd.exe -> pwsh -> copilot in
+                # stdio mode) received it too. Wait for the child to finish its
+                # cleanup (handoff check, post-exit finalization) rather than
+                # killing it.
+                try:
+                    rc = proc.wait(timeout=30)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    rc = 130  # 128 + SIGINT(2)
+            sys.exit(rc)
+        else:
+            os.execvp("bash", ["bash", str(launch_script), *launcher_args])
+        return 1  # unreachable -- os.execvp replaces process
+    finally:
+        _watchdog.cancel()
 
 
 def _age_str(started_at: str) -> str:
@@ -11784,6 +11838,17 @@ def cmd_claims(args: argparse.Namespace) -> int:
         return _claims_settle(args, target[1])
     if target and target[0] == "sweep":
         return _claims_sweep(args)
+    if target and target[0] == "mirror-status":
+        if len(target) < 3:
+            msg = (
+                "claims mirror-status: usage 'mirror-status <kind> <ref> "
+                "--status <disposition>'"
+            )
+            if args.json:
+                return _json_error(msg, 2)
+            output.err(msg)
+            return 2
+        return _claims_mirror_status(args, target[1], target[2])
     if target and target[0] == "cleanup":
         return _claims_cleanup(args)
     if target and target[0] == "orphans":
@@ -12302,6 +12367,46 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
     if reopened:
         print(f"  reopened {wt_id}: finalized -> active (new held claim)")
     return 0
+
+
+def _claims_mirror_status(args: argparse.Namespace, kind: str, ref: str) -> int:
+    """Mirror a claim's disposition onto its cross-machine discovery store.
+
+    Only ``task`` is currently backed by a mirror
+    (:mod:`task_claim_registry`'s 4-tier origin chain,
+    ThomasMichon/copilot-extensions#2584) -- ``codespace``/``container`` are
+    mirrored directly by their owning plugins via ``agent-worktrees lease
+    renew --disposition`` instead, since they hold a real fencing token from
+    their own ``lease acquire``. Best-effort: the caller (e.g.
+    ``agent_dispatch.hibernation_claims``) treats a failure as non-fatal.
+    """
+    status = getattr(args, "status", None)
+    if not status:
+        msg = "claims mirror-status: --status is required"
+        if args.json:
+            return _json_error(msg, 2)
+        output.err(msg)
+        return 2
+    if kind != "task":
+        msg = (
+            f"claims mirror-status: unsupported kind {kind!r} "
+            "(only 'task' is externally mirrored today)"
+        )
+        if args.json:
+            return _json_error(msg, 2)
+        output.err(msg)
+        return 2
+    from . import task_claim_registry
+    holder = getattr(args, "claim_holder", None) or "agent-dispatch"
+    ok = task_claim_registry.set_task_claim_status(ref, status, holder=holder)
+    if args.json:
+        _json_output({"kind": kind, "ref": ref, "status": status, "mirrored": ok})
+        return 0 if ok else 1
+    if ok:
+        print(f"mirrored {kind}:{ref} disposition -> {status}")
+        return 0
+    output.err(f"claims mirror-status: failed to mirror {kind}:{ref} -> {status}")
+    return 1
 
 
 def _claims_release(args: argparse.Namespace, ref: str) -> int:
@@ -13758,6 +13863,49 @@ _LIVE_DESCENDANT_IMAGES = frozenset(
 )
 
 
+def _ancestor_chain_intact(
+    ppid: int,
+    by_pid: dict[int, dict],
+    pid_alive: Callable[[int], bool] | None,
+) -> bool:
+    """Whether ``ppid`` and every ancestor above it, as far as verifiable, is
+    still alive -- i.e. whether the process whose parent is ``ppid`` is
+    genuinely parented rather than an orphan whose immediate parent happens to
+    still be a live (but itself orphaned/stuck) intermediate node.
+
+    Walking past the immediate parent matters for exactly the launcher-shell
+    chains this reaper targets: ``agent-worktrees.ps1 -> python -> python ->
+    pwsh launch-session.ps1`` stacks several of *this reaper's own* process
+    names on top of each other, so an intermediate hop's parent can be dead
+    even while the immediate parent (one level down) is still alive.
+
+    Without a real ``pid_alive`` probe (pure/test mode), this degrades to the
+    original single-hop snapshot-membership check: a filtered snapshot cannot
+    distinguish "not enumerated" from "dead" for anything beyond one hop, so
+    walking further would misclassify a live-but-unenumerated terminal as
+    dead. With a real probe, walking continues past the immediate parent as
+    long as each hop it can still see in ``by_pid`` is confirmed alive,
+    stopping (and assuming intact) the moment it runs off the edge of what
+    was enumerated -- never the moment it merely can't verify further.
+    """
+    if pid_alive is None:
+        return ppid in by_pid
+    cur = ppid
+    guard = 0
+    while cur > 0 and guard < 128:
+        if not bool(pid_alive(cur)):
+            return False
+        node = by_pid.get(cur)
+        if node is None:
+            return True  # edge of the snapshot; alive so far, can't see further
+        next_ppid = int(node.get("ppid", -1) or -1)
+        if next_ppid <= 0 or next_ppid == cur:
+            return True  # reached the top of a fully-verified chain
+        cur = next_ppid
+        guard += 1
+    return True
+
+
 def select_orphan_launcher_shells(
     procs: list[dict],
     *,
@@ -13841,9 +13989,7 @@ def select_orphan_launcher_shells(
             skipped.append({"pid": pid, "reason": "live-descendant"})  # (3)
             continue
         ppid = int(p.get("ppid", -1) or -1)
-        parent_alive = (
-            ppid in by_pid if pid_alive is None else (ppid > 0 and bool(pid_alive(ppid)))
-        )
+        parent_alive = _ancestor_chain_intact(ppid, by_pid, pid_alive)
         if ppid > 0 and parent_alive:
             skipped.append({"pid": pid, "reason": "parent-alive"})  # (5)
             continue
@@ -13873,13 +14019,15 @@ def _enumerate_launcher_shells() -> list[dict] | None:
 
 
 def _enumerate_launcher_shells_windows() -> list[dict] | None:
-    names = sorted(
-        n for n in (_LAUNCHER_SHELL_NAMES | _LIVE_DESCENDANT_IMAGES) if n.endswith(".exe")
-    )
-    where = " OR ".join(f"Name='{n}'" for n in names)
+    # No -Filter: candidate selection (name + positive command-line signature)
+    # happens in select_orphan_launcher_shells, but the parent-alive check
+    # needs to walk the FULL ancestor chain up to the real console host
+    # (Windows Terminal/conhost/explorer/etc.) -- a filtered snapshot that
+    # only ever contains launcher/witness images can't see past them, so a
+    # stacked chain's true root (a dead terminal) would look unverifiable
+    # rather than confirmed-dead. See _ancestor_chain_intact.
     ps = (
-        "Get-CimInstance Win32_Process -Filter "
-        f'"{where}" | '
+        "Get-CimInstance Win32_Process | "
         "Select-Object ProcessId,ParentProcessId,Name,CommandLine,SessionId,"
         "@{n='Create';e={try{([DateTimeOffset]$_.CreationDate)"
         ".ToUnixTimeSeconds()}catch{$null}}} | ConvertTo-Json -Compress -Depth 3"
@@ -13938,8 +14086,11 @@ def _enumerate_launcher_shells_posix() -> list[dict] | None:
             comm = (entry / "comm").read_text(errors="ignore").strip().lower()
         except OSError:
             continue
-        if comm not in _LAUNCHER_SHELL_NAMES and comm not in _LIVE_DESCENDANT_IMAGES:
-            continue
+        # No name filter here: candidate selection (name + positive command-
+        # line signature) happens in select_orphan_launcher_shells, but the
+        # parent-alive check needs to walk the full ancestor chain up to the
+        # real controlling terminal/session leader, not just launcher/witness
+        # images. See _ancestor_chain_intact.
         try:
             cmdline = (
                 (entry / "cmdline")
@@ -22782,6 +22933,19 @@ def build_parser() -> argparse.ArgumentParser:
         "orphaned resources (default: dry-run preview only)",
     )
     p.add_argument("--note", default="", help="with add: an optional human label for the claim")
+    p.add_argument(
+        "--status",
+        default=None,
+        help="with mirror-status: the disposition to mirror onto the "
+        "claim's cross-machine discovery store (e.g. active|at-rest|released)",
+    )
+    p.add_argument(
+        "--holder",
+        default=None,
+        dest="claim_holder",
+        help="with mirror-status: an opaque holder identity for the mirrored "
+        "lease (default: 'agent-dispatch')",
+    )
     p.add_argument(
         "--released",
         action="store_true",

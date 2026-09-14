@@ -206,13 +206,21 @@ for it. This complements, rather than duplicates,
 *unreachable-machine-maintenance-handoff*: that feature is the fallback for
 when a machine cannot be reached at all; this feature is the default posture
 for a machine that *can* be reached but simply has nothing driving it forward
-between sessions. Self-convergence is driven by the **platform's own
-scheduler** (a genuine OS-level scheduled task, not a fabric daemon whose own
-liveness would just relocate the same problem one layer down), registered
-through a **one-time, explicit, operator-approved elevation** — the same
-convention already used to register a durable fabric service — so that
-afterward the platform's own restart/retry guarantees are the reliability
-backstop, not another long-lived process the fabric must also keep alive.
+between sessions. Whether a machine registers this at all is **declared
+config, not an unconditional default**: an operator or mesh opts a machine
+into self-convergence the same way any other declarative resource is
+selected — a shared default may be declared once, with a more specific
+local declaration free to override it — and only a machine whose resolved
+config says "opted in" ever attempts registration. Self-convergence is
+driven by the **platform's own scheduler** (a genuine OS-level scheduled
+task, not a fabric daemon whose own liveness would just relocate the same
+problem one layer down), registered through a **one-time, explicit,
+operator-approved elevation** — the same convention already used to
+register a durable fabric service — so that afterward the platform's own
+restart/retry guarantees are the reliability backstop, not another
+long-lived process the fabric must also keep alive. Opting back out removes
+the registration through the fabric's own ordinary convergence, not a
+second bespoke uninstall path.
 
 Self-convergence work is **tiered by risk and cadence**, not run as a single
 undifferentiated job: a narrow, cheap, frequent tier watches only the small

@@ -42,9 +42,9 @@ elevated, rather than silently degrading forever.
 
 Add a first-class `agent-machines` subcommand family that performs two
 independently-scheduled, independently-locked tiers of unattended
-self-convergence, registered through the same one-time elevated opt-in
-convention `agent-dispatch` already uses, with explicit reentrancy guarding
-and an inspectable last-run signal.
+self-convergence, registered only when a declared config opts the machine in,
+through the same one-time elevated convention `agent-dispatch` already uses,
+with explicit reentrancy guarding and an inspectable last-run signal.
 
 ## Design decisions (resolving the proposal's open questions)
 
@@ -73,11 +73,34 @@ the proposal into an implementable plan.
   other interactive-identity operation in this mesh (dtssh, the
   `agent-dispatch` coordinator/supervisor) — these operations need the
   operator's own credentials/tokens, not a service account.
-- **Opt-in UX:** a single `agent-machines self-update install` command the
-  operator runs themselves once (during onboarding or whenever they choose
-  to adopt it); it attempts elevated registration and prints an explicit
-  "re-run this elevated" message on failure. No agent session ever attempts
-  a silent/automatic elevation.
+- **Opt-in scope: declared config, not a bare command invocation.** Whether
+  self-update is enabled at all — and per tier — is a declared setting
+  resolved through the **same authority precedence** `agent-machines`
+  already uses for every other resource: a state-repo-declared package can
+  supply an organization/mesh-wide default (e.g. "opt in Tier 1 fleet-wide"),
+  and an explicit local machine-level declaration overrides it (opt a
+  specific machine in or out regardless of the shared default). This is
+  deliberately modeled as a declarative resource in the existing control
+  plane (`agent-machines-declarative-control-plane`) rather than a parallel
+  bespoke config file — `plan`/`validate`/`restore` already resolve and
+  report authority-selected desired state, and self-update's enabled/disabled
+  flag per tier is just one more resource in that graph. `self-update
+  install` still performs the actual one-time interactive elevation to
+  register the Scheduled Task(s), but it first resolves this declared
+  config and refuses to prompt for elevation at all if the resolved value is
+  "not opted in" — config gates whether registration is even attempted;
+  elevation remains the mechanism for the registration step itself once
+  config says yes. If a later `restore --apply` observes the resolved config
+  flipped to disabled, it removes the previously-registered Scheduled
+  Task(s) as an ordinary drift-reconciliation apply (no elevation needed to
+  delete a task the operator's own account registered).
+- **Opt-in UX:** given the above, `agent-machines self-update install` is
+  the one-time interactive command an operator runs after opting in via
+  config (or during onboarding, once the shared default already opts them
+  in) — it resolves config, attempts elevated registration, and prints an
+  explicit "re-run this elevated" message on failure. No agent session ever
+  attempts a silent/automatic elevation, and no session ever opts a machine
+  in on the operator's behalf by editing local config unasked.
 - **Tier 2 cadence:** daily. Twice-daily was considered but rejected for the
   first slice — daily already resolves the motivating pain (multi-day
   unattended drift) without doubling governed-feed network load and
@@ -105,23 +128,37 @@ the proposal into an implementable plan.
 - [x] File the public tracking issue and this effort doc.
 
 ### Phase 2 - Tier implementation
-- [ ] Add `agent-machines self-update run --tier watchdog` (Tier 1: dtssh
+- [x] Add a `self-update` resource type (per-tier enabled/disabled) to the
+  declarative control plane, resolved through its existing authority
+  precedence (state-repo-declared default, local machine-level override).
+- [x] Add `agent-machines self-update run --tier watchdog` (Tier 1: dtssh
   launcher liveness check-and-start only; no state mutation beyond starting
   the launcher process).
-- [ ] Add `agent-machines self-update run --tier sweep` (Tier 2: fast-forward
+- [x] Add `agent-machines self-update run --tier sweep` (Tier 2: fast-forward
   `dotfiles`/harness pull, `agent-worktrees reconcile-plugins --apply
   --with-payload-refresh`, `agent-machines restore --apply --all-projects`),
   reusing the existing live-session deferral guard for any disruptive step.
-- [ ] Add the tier-scoped named lock (PID + timestamp, staleness-bounded
+- [x] Both `run` entry points resolve the tier's config first and exit
+  as a clean no-op if the resolved state is "not opted in" (covers a
+  Scheduled Task that fires after an operator has since opted out but
+  before the next `restore --apply` removed it).
+- [x] Add the tier-scoped named lock (PID + timestamp, staleness-bounded
   reclaim per tier as designed above).
-- [ ] Record per-tier last-attempt/last-success status into the existing
+- [x] Record per-tier last-attempt/last-success status into the existing
   machine status surface.
 
 ### Phase 3 - Installer
-- [ ] Add `agent-machines self-update install` / `status` / `uninstall`,
+- [x] Add `agent-machines self-update install` / `status` / `uninstall`,
   registering two genuine Windows Scheduled Tasks (hourly Tier 1, daily
   Tier 2) via the same elevate-or-instruct convention as `agent-dispatch`'s
-  installers, scoped to "run only when logged on."
+  installers, scoped to "run only when logged on." `install` first resolves
+  the declared per-tier config and refuses to prompt for elevation for a
+  tier that resolves to "not opted in."
+- [x] Make Scheduled Task presence itself a `restore --apply` reconciliation
+  target: an ordinary apply registers a newly-opted-in tier's task (falling
+  back to the same elevate-or-instruct message if unelevated) and removes a
+  newly-opted-out tier's task, without a separate elevation prompt for
+  removal.
 
 ### Phase 4 - Validation and rollout
 - [ ] Cover lock acquisition/staleness-reclaim, fast-forward-only pull
@@ -133,20 +170,33 @@ the proposal into an implementable plan.
 
 ## Validation Plan
 
-- [ ] A stuck prior Tier-1 or Tier-2 run's lock is reclaimed only once both
+- [x] A stuck prior Tier-1 or Tier-2 run's lock is reclaimed only once both
   its recorded PID is dead and its tier-specific staleness bound has
   elapsed; a live prior run's lock is never double-driven.
-- [ ] A diverged or dirty anchor checkout causes Tier 2's pull step to skip
+- [x] A diverged or dirty anchor checkout causes Tier 2's pull step to skip
   with a loud warning rather than force-reset or force-pull.
-- [ ] Tier 2 never interrupts a live mux/Copilot session or in-flight
+- [x] Tier 2 never interrupts a live mux/Copilot session or in-flight
   indexing; it defers using the same guard `agent-machines-declarative-control-plane`
   already established.
-- [ ] `self-update install` attempts elevated Scheduled Task registration
+- [x] `self-update install` attempts elevated Scheduled Task registration
   first and prints an explicit re-run-elevated instruction on failure,
   matching `agent-dispatch`'s own installer behavior.
-- [ ] Tier 1 and Tier 2 use independent locks and neither tier's run blocks
+- [x] A tier resolved as "not opted in" (by state-repo default, local
+  override, or their combination) is never registered by `install` and is
+  never prompted for elevation; a `run` invocation for a since-opted-out
+  tier is a clean no-op rather than performing its steps.
+- [x] A local machine-level opt-in/opt-out declaration overrides a
+  conflicting state-repo-declared default for that machine, matching the
+  control plane's existing authority precedence; equal-authority
+  contradictions are still a hard validate-time error, not a silent
+  last-writer pick.
+- [x] `restore --apply` registers a newly-opted-in tier's Scheduled Task
+  (or reports the elevate-and-retry message) and removes a newly-opted-out
+  tier's Scheduled Task without requiring a fresh elevation prompt to
+  remove it.
+- [x] Tier 1 and Tier 2 use independent locks and neither tier's run blocks
   the other's scheduled tick from starting.
-- [ ] The recorded last-attempt/last-success status is visible through the
+- [x] The recorded last-attempt/last-success status is visible through the
   existing machine status surface without an SSH round-trip.
 
 ## Non-goals
@@ -172,3 +222,56 @@ the proposal into an implementable plan.
   logon scope, opt-in UX, Tier 2 cadence, status placement) with explicit
   reasoning so Phase 2 can start from a concrete plan rather than an open
   design space.
+
+### 2026-09-14 - Opt-in gated by declarative config, not a bare command
+
+- Operator steer: registration must be **opt-in via config**, resolved from
+  a state-repo-declared default with an explicit local machine-level
+  override taking precedence — not solely gated by "the operator happened
+  to run the install command."
+- Revised the design to model per-tier enabled/disabled as a declarative
+  resource in the existing `agent-machines-declarative-control-plane`
+  authority model (reusing its precedence, validation, and drift reporting
+  rather than a parallel config mechanism). `install`/`run` now resolve this
+  config first: a not-opted-in tier is never registered, never prompted for
+  elevation, and a stray `run` is a clean no-op. `restore --apply` becomes
+  the ordinary path that both registers a newly-opted-in tier and removes a
+  newly-opted-out one, so opting out does not require a person to
+  separately remember to run an uninstall command.
+
+### 2026-09-14 - Phase 2 landed
+
+- Added the `self-update` declarative resource type with tier-scoped
+  authority selection, so a shared default and a more-specific local machine
+  declaration resolve through the same schema-v4 precedence used by the rest
+  of `agent-machines`.
+- Added `agent-machines self-update run --tier watchdog|sweep`. `watchdog`
+  resolves the installed dtssh launcher config, checks whether the launcher
+  process is alive, and starts only the launcher when it is missing. `sweep`
+  performs fast-forward-only pulls for discovered adopted repos, then gates
+  the disruptive plugin refresh and machine restore steps on the existing
+  live-session deferral boundary.
+- Added independent named per-tier locks with PID/timestamp state,
+  staleness-bounded reclaim, and per-tier last-attempt / last-success status
+  recorded into the existing plan/status surface.
+- Validation added focused unit coverage for opt-in no-op behavior, authority
+  precedence, live-run non-double-drive vs stale-lock reclaim, dirty/diverged
+  pull skips, sweep deferral while a live session exists, and plan-surface
+  visibility of the recorded timestamps. The full `agent-machines` suite,
+
+### 2026-09-14 - Phase 3 landed
+
+- Added `agent-machines self-update install`, `status`, and `uninstall`, with
+  Windows Scheduled Task registration/removal for the `watchdog` and `sweep`
+  tiers using the same elevate-or-instruct pattern as `agent-dispatch`:
+  already-opted-out tiers are skipped without any registration attempt, while
+  first-time registration emits an explicit elevated retry command.
+- Promoted Scheduled Task presence from a placeholder `self-update` resource to
+  a real `restore --apply` reconciliation target. Newly opted-in tiers now
+  register their task during restore (or defer with the same install retry
+  instruction), and newly opted-out tiers are removed in-place without a new
+  elevation prompt.
+- Added focused unit coverage for task registration, elevation deferral,
+  opted-out install skips, status JSON, and restore-time add/remove behavior
+  without touching any live Scheduled Tasks.
+  install-contract check, and version-consistency check passed.
