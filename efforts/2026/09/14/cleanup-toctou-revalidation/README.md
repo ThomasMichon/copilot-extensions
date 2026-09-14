@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** single working branch, one participant
 - **Created:** 2026-09-14
-- **Status:** Active <!-- Draft | Active | Blocked | Done -->
+- **Status:** Done <!-- Draft | Active | Blocked | Done -->
 - **Vision:** [`visions/plugins/agent-worktrees/README.md`](../../../visions/plugins/agent-worktrees/README.md) §
   `contribution-aware-lifecycle` ("...prove content safe before cleanup") and
   [`docs/patterns/ephemeral-process-reaping.md`](../../../docs/patterns/ephemeral-process-reaping.md)
@@ -974,3 +974,17 @@ in or dropped.
   `wt1: skipped -- 1 uncommitted change(s)`; the same single-item path with
   `--force` removed the worktree and retired the tracking YAML
   (`wt1: removed`).
+
+### 2026-09-14 — Closing the effort
+
+All five phases are merged to `main` (PRs #2643, #2644, #2645, #2648, #2652).
+Every Plan and Validation Plan checkbox is resolved; the one known residual
+gap ([#2649](https://github.com/ThomasMichon/copilot-extensions/issues/2649))
+is deliberately left open and tracked, not silently folded in, per the
+Phase 3/4 Journal entries above. `cleanup --clean`, `cleanup --worktree-id`
+(forced and non-forced), and the automatic `sweep_finished_session_worktrees`
+now all revalidate the complete safety decision through one canonical
+function immediately before deletion, closing the three original TOCTOU gaps
+and the four review findings that sharpened them. Durable truth (the unified
+guarantee and the #2649 limitation) is promoted into the `worktree` skill's
+Cleanup Procedure. Status set to Done; archiving now.
