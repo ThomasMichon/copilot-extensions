@@ -45,10 +45,16 @@ _PLUGIN_SRC_DIR = _PLUGIN_DIR / "src"
 
 
 class RetentionHarness:
-    def __init__(self, tmp_path):
+    def __init__(self, tmp_path, *, windows: bool = False):
         self.plugin = _project(tmp_path)
-        self.policy = _policy(tmp_path)
-        self.materializer = ManagedRuntimeMaterializer(self.policy, runner=FakeRunner())
+        self.policy = _policy(tmp_path, windows=windows)
+        materializer_kwargs = {"runner": FakeRunner(windows=windows)}
+        if windows:
+            materializer_kwargs["trust_verifier"] = lambda _path: True
+        self.materializer = ManagedRuntimeMaterializer(
+            self.policy,
+            **materializer_kwargs,
+        )
         self.state = tmp_path / "supervisor"
         self.tokens = {os.getpid(): "supervisor", 100: "child"}
         self.retention = self.make_retention()
@@ -184,6 +190,20 @@ def test_managed_retention_foreign_environment_cannot_withdraw_selection(retenti
     h.retention.forget(snapshot.to_dict()["registration"]["id"], h.state.with_name("foreign"))
     h.make_retention(domain="b" * 64).forget(snapshot.to_dict()["registration"]["id"], h.state)
     assert h.retention.cleanup().deleted == ()
+
+
+def test_managed_retention_reclaims_windows_cells_with_trust_scope_version(tmp_path):
+    h = RetentionHarness(tmp_path, windows=True)
+    snapshot = h.generation("1")
+
+    assert json.loads((snapshot.runtimes[0].receipt).read_text(encoding="utf-8"))[
+        "windows_trust_scope_version"
+    ] == 2
+
+    h.tokens.clear()
+    result = h.retention.cleanup()
+
+    assert result.deleted == (snapshot.runtimes[0].cell,)
 
 
 def test_managed_retention_count_and_age_bounds_do_not_count_protected_cells(retention_harness):

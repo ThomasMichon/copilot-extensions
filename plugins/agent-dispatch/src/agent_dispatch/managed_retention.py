@@ -174,11 +174,19 @@ def _inspect_cell(root: Path, cell: Path, authority: dict | None = None) -> dict
     }
     if schema == 2:
         keys.add("ownership")
+    allowed_keys = {frozenset(keys), frozenset(keys - {"layout_version"})}
+    if schema == 2:
+        keys_with_trust_scope = set(keys)
+        keys_with_trust_scope.add("windows_trust_scope_version")
+        allowed_keys |= {
+            frozenset(keys_with_trust_scope),
+            frozenset(keys_with_trust_scope - {"layout_version"}),
+        }
     receipt_keys = set(receipt)
     if (
         type(schema) is not int
         or schema not in (1, 2)
-        or (receipt_keys != keys and receipt_keys != keys - {"layout_version"})
+        or frozenset(receipt_keys) not in allowed_keys
         or any(
             not _digest(receipt[key])
             for key in ("content_digest", "authority_digest", "toolchain_digest", "cell_digest")
@@ -190,6 +198,10 @@ def _inspect_cell(root: Path, cell: Path, authority: dict | None = None) -> dict
         or not isinstance(receipt["snapshot"], dict)
         or not isinstance(receipt["imports"], list)
         or not isinstance(receipt["windows_trust_files"], list)
+        or (
+            "windows_trust_scope_version" in receipt
+            and type(receipt["windows_trust_scope_version"]) is not int
+        )
         or _cell_key(receipt) != cell.name
     ):
         raise ManagedRuntimeError("managed retention cell receipt is invalid or mismatched")

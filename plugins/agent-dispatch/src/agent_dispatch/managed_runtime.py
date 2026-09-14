@@ -34,6 +34,8 @@ _LOCK_POLL_SECONDS = 0.1
 _WINDOWS_REPARSE_POINT = 0x400
 _COMMAND_TIMEOUT_SECONDS = 600.0
 _TRUST_TIMEOUT_SECONDS = 30.0
+_WINDOWS_TRUST_SCOPE_VERSION = 2
+_WINDOWS_TRUST_SUFFIXES = frozenset({".dll", ".exe", ".pyd"})
 _LAYOUT_VERSION_LEGACY = 1
 _LAYOUT_VERSION_COMPACT = 2
 _CELL_DIRS = {
@@ -447,6 +449,10 @@ def _cell_key(receipt: Mapping[str, Any]) -> str:
     }
     if receipt["schema_version"] == RECEIPT_SCHEMA_VERSION:
         identity["schema_version"] = RECEIPT_SCHEMA_VERSION
+        if "windows_trust_scope_version" in receipt:
+            identity["windows_trust_scope_version"] = receipt[
+                "windows_trust_scope_version"
+            ]
     return _canonical_digest(identity)[:40]
 
 
@@ -711,8 +717,6 @@ def _windows_runtime_sources(base_python: Path) -> tuple[list[Path], list[Path]]
     if base / "Lib" not in directories:
         raise ManagedRuntimeError("trusted Windows base Python is missing its standard library")
     return unique_files, directories
-
-
 def _windows_runtime_digest(base_python: Path) -> str:
     files, directories = _windows_runtime_sources(base_python)
     digest = hashlib.sha256()
@@ -786,37 +790,23 @@ def _copy_windows_runtime(
 
 
 def _windows_trust_files(base_python: Path) -> tuple[str, ...]:
-    files, directories = _windows_runtime_sources(base_python)
+    files, _directories = _windows_runtime_sources(base_python)
     base = base_python.parent
     trust_files = [
         path.relative_to(base).as_posix()
         for path in files
-        if path.suffix.casefold() in {".exe", ".dll"}
+        if path.suffix.casefold() in _WINDOWS_TRUST_SUFFIXES
     ]
-    for directory in directories:
-        for current, child_dirs, child_files in os.walk(
-            directory, topdown=True, followlinks=False
-        ):
-            current_path = Path(current)
-            relative = current_path.relative_to(base).as_posix()
-            if relative == "Lib":
-                child_dirs[:] = [
-                    name
-                    for name in child_dirs
-                    if name not in {"site-packages", "__pycache__"}
-                ]
-            else:
-                child_dirs[:] = [
-                    name for name in child_dirs if name != "__pycache__"
-                ]
-            child_dirs.sort()
-            child_files.sort()
-            trust_files.extend(
-                (current_path / name).relative_to(base).as_posix()
-                for name in child_files
-                if not name.endswith((".pyc", ".pyo"))
-                and Path(name).suffix.casefold() in {".exe", ".dll"}
-            )
+    # Keep copy/digest broad for stdlib + tkinter support, but only require
+    # signatures for the top-level runtime files and direct DLLs/extension
+    # modules CPython signs on a stock python.org install.
+    dlls_dir = base / "DLLs"
+    if dlls_dir.is_dir():
+        trust_files.extend(
+            child.relative_to(base).as_posix()
+            for child in sorted(dlls_dir.iterdir(), key=lambda path: path.name.casefold())
+            if child.is_file() and child.suffix.casefold() in _WINDOWS_TRUST_SUFFIXES
+        )
     return tuple(sorted(set(trust_files), key=str.casefold))
 
 
@@ -1108,17 +1098,18 @@ class ManagedRuntimeMaterializer:
                     "snapshot": snapshot,
                 }
             )
-            cell_key = _cell_key(
-                {
-                    "schema_version": RECEIPT_SCHEMA_VERSION,
-                    "name": runtime["name"],
-                    "version": runtime["version"],
-                    "profile": runtime["profile"],
-                    "content_digest": content_digest,
-                    "authority_digest": authority_digest,
-                    "toolchain_digest": toolchain_digest,
-                }
-            )
+            cell_identity = {
+                "schema_version": RECEIPT_SCHEMA_VERSION,
+                "name": runtime["name"],
+                "version": runtime["version"],
+                "profile": runtime["profile"],
+                "content_digest": content_digest,
+                "authority_digest": authority_digest,
+                "toolchain_digest": toolchain_digest,
+            }
+            if policy.windows:
+                cell_identity["windows_trust_scope_version"] = _WINDOWS_TRUST_SCOPE_VERSION
+            cell_key = _cell_key(cell_identity)
             cell = _cell_path(
                 root, plugin_identity, cell_key, layout_version=layout_version
             )
@@ -1145,6 +1136,8 @@ class ManagedRuntimeMaterializer:
                     "windows": policy.windows,
                 },
             }
+            if policy.windows:
+                expected["windows_trust_scope_version"] = _WINDOWS_TRUST_SCOPE_VERSION
             if cell.exists():
                 ready = self._ready(cell, expected, root=root, policy=policy)
                 if ready is not None:
@@ -1321,17 +1314,20 @@ class ManagedRuntimeMaterializer:
                 if type(schema) is not int or schema not in (1, RECEIPT_SCHEMA_VERSION):
                     raise ManagedRuntimeError("selected managed runtime receipt version is invalid")
                 layout_version = _layout_version(expected)
-                cell_key = _cell_key(
-                    {
-                        "schema_version": schema,
-                        "name": declaration["name"],
-                        "version": declaration["version"],
-                        "profile": declaration["profile"],
-                        "content_digest": runtime.content_digest,
-                        "authority_digest": authority_digest,
-                        "toolchain_digest": toolchain_digest,
-                    }
-                )
+                cell_identity = {
+                    "schema_version": schema,
+                    "name": declaration["name"],
+                    "version": declaration["version"],
+                    "profile": declaration["profile"],
+                    "content_digest": runtime.content_digest,
+                    "authority_digest": authority_digest,
+                    "toolchain_digest": toolchain_digest,
+                }
+                if policy.windows:
+                    cell_identity["windows_trust_scope_version"] = expected.get(
+                        "windows_trust_scope_version", 1
+                    )
+                cell_key = _cell_key(cell_identity)
                 cell = _cell_path(
                     root, plugin_identity, cell_key, layout_version=layout_version
                 )
@@ -1348,22 +1344,22 @@ class ManagedRuntimeMaterializer:
                     "windows": policy.windows,
                 }:
                     raise ManagedRuntimeError("selected managed runtime ownership is inconsistent")
-                if any(
-                    expected.get(key) != value
-                    for key, value in {
-                        "schema_version": schema,
-                        "name": declaration["name"],
-                        "version": declaration["version"],
-                        "profile": declaration["profile"],
-                        "content_digest": runtime.content_digest,
-                        "authority_digest": authority_digest,
-                        "toolchain_digest": toolchain_digest,
-                        "imports": declaration["imports"],
-                        "windows_trust_files": (
-                            list(_windows_trust_files(policy.base_python)) if policy.windows else []
-                        ),
-                    }.items()
-                ):
+                expected_fields = {
+                    "schema_version": schema,
+                    "name": declaration["name"],
+                    "version": declaration["version"],
+                    "profile": declaration["profile"],
+                    "content_digest": runtime.content_digest,
+                    "authority_digest": authority_digest,
+                    "toolchain_digest": toolchain_digest,
+                    "imports": declaration["imports"],
+                    "windows_trust_files": (
+                        list(_windows_trust_files(policy.base_python)) if policy.windows else []
+                    ),
+                }
+                if policy.windows:
+                    expected_fields["windows_trust_scope_version"] = _WINDOWS_TRUST_SCOPE_VERSION
+                if any(expected.get(key) != value for key, value in expected_fields.items()):
                     raise ManagedRuntimeError("selected managed runtime authority is inconsistent")
                 if _canonical_digest(
                     {
