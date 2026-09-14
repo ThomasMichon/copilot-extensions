@@ -131,6 +131,13 @@ apply; never copy their procedures into this skill.
    Complete authentication, hosted-resource lifecycle, SSH, synchronization, or
    other phases through their owners after the underlying runtime exists.
 
+6. **Offer the self-update watchdog, don't assume it.**
+   Once the runtime and declared state converge, surface (do not silently
+   enable) `agent-machines-setup`'s unattended maintenance-schedule option --
+   opt-in `self-update` tiers that keep a reachable, logged-in machine
+   converging between sessions. Only declare/install it when the operator
+   confirms; a full setup pass is not implicit consent.
+
 ## Human Gates
 
 Stop for explicit operator action or confirmation when required by the owning
