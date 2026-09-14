@@ -227,7 +227,7 @@ duplicate or fight an existing mechanism:
 
 ### Phase 2 — Design the consolidated revalidation function
 
-- [ ] Design one function (tentatively `_revalidate_cleanup_safety`,
+- [x] Design one function (tentatively `_revalidate_cleanup_safety`,
       replacing `_revalidate_before_reap`) that, given a worktree id, does
       **all** of: reload the tracking record fresh, re-classify git state
       fresh (`classify_worktree`, no fetch), refresh the liveness signal(s)
@@ -236,7 +236,20 @@ duplicate or fight an existing mechanism:
       run the **complete** `cleanup_disposition` against all of that —
       returning the fresh record, classification, disposition, and reason
       rather than a narrowed dirty/active-only check.
-- [ ] **"Re-run `cleanup_disposition`" is necessary but not yet sufficient
+      **Decision:** signature
+      `_revalidate_cleanup_safety(wt_id: str, *, repo: cfg.RepoConfig,
+      force: bool = False) -> RevalidationResult`, taking only the id (not a
+      pre-lock record/info) so it cannot accidentally read anything but
+      fresh state. Callers acquire `FinalizeLock` (and, for non-forced, the
+      per-record lock — see the lock-order decision below) *before* calling
+      it, and it is the **sole** place any of the three reapers touches
+      `cleanup_disposition`/`classify_worktree`/`resolve_claimant_alive` once
+      the lock is held. It builds a **single-worktree** `active_paths` via
+      `_build_active_paths([rec], session_ctx)` scoped to just this record
+      (not a fleet rescan), matching Phase 1's confirmation that this is
+      already how `reap_one` computes it today — only the *timing* (under
+      lock vs. before it) changes.
+- [x] **"Re-run `cleanup_disposition`" is necessary but not yet sufficient
       by itself — its internal ordering has the same class of bug PR #2635
       fixed for `dirty`, but for `WIP`/`conversation-only`.**
       `cleanup_disposition`'s `rec.status == "finalized" or info.state ==
@@ -248,7 +261,16 @@ duplicate or fight an existing mechanism:
       of the finalized shortcut (mirroring #2635's fix) or otherwise ensure
       the consolidated function checks them before trusting that shortcut —
       "call `cleanup_disposition` again" is not sufficient on its own.
-- [ ] `_build_active_paths` has its own stale-cache fallback, independent of
+      **Decision:** fix `cleanup_disposition` itself (`prune.py`), not just
+      its caller — move the `info.state == S.WIP` and the `empty`/
+      `conversation-only` category checks (currently reached only after the
+      `rec.status == "finalized" or info.state == COMPLETED` shortcut) ahead
+      of that shortcut, mirroring exactly how `#2635` already moved the
+      `info.dirty` check ahead of it. This benefits every caller of
+      `cleanup_disposition`, not only the revalidator, and keeps there being
+      one ordering fix rather than a second one duplicated inside the new
+      function.
+- [x] `_build_active_paths` has its own stale-cache fallback, independent of
       *when* it's called: when the batched mux query is unavailable, it
       treats a cached `mux_live=False` as authoritative and skips the
       `has_mux_session` fallback check — so a session attached after that
@@ -256,7 +278,18 @@ duplicate or fight an existing mechanism:
       `_build_active_paths`. The liveness refresh this design adds must
       either fix that fallback or use a different, authoritative action-time
       probe instead of relying on `_build_active_paths` as-is.
-- [ ] **The function's return contract must include the fresh record and
+      **Decision:** fix the fallback in `_build_active_paths` itself
+      (`__main__.py:415`-`430`) — when the batched `mux_sessions` query is
+      unavailable, always fall through to the authoritative
+      `sessions.has_mux_session(rec.worktree_id)` probe regardless of
+      whether `_fresh_mux_live_hint` returns `True`, `False`, or `None`; a
+      fresh `True` hint can still short-circuit the OR (already correct),
+      but a fresh `False` must no longer skip the fallback probe. This is a
+      one-line change (drop the `hint is None` guard on the `elif`) that
+      fixes the signal for every caller, including callers unrelated to
+      this effort's under-lock revalidation — no separate probe needed in
+      the new function.
+- [x] **The function's return contract must include the fresh record and
       classification, not only the disposition/reason.** Today's callers
       still pass the *pre-lock* record/`info` objects into `_reap_worktree`
       after revalidating — if the revalidator's fresh state isn't threaded
@@ -265,18 +298,45 @@ duplicate or fight an existing mechanism:
       decision. Make "the reap acts on the revalidated record and
       classification" part of the contract, not just "the decision was
       fresh."
-- [ ] Decide explicitly between "recompute everything fresh" (this function
+      **Decision:** `RevalidationResult` is a dataclass
+      `(cleanable: bool, reason: str, bucket: str, record:
+      tracking.WorktreeRecord | None, info: git_ops.WorktreeStateInfo |
+      None)` — `record`/`info` populated only when `cleanable`. Every call
+      site's `_reap_worktree(rec, info, ...)` is updated to use
+      `result.record`/`result.info`, never the pre-lock objects, closing
+      the "fresh decision, stale delete" gap named in the plan.
+- [x] Decide explicitly between "recompute everything fresh" (this function
       re-decides from scratch) vs. "fail closed on any detected drift"
       (compare a fingerprint of relevant inputs at scan vs. reap time, abort
       on any difference without re-deciding) for inputs that are cheap to
       re-derive locally — the reviewer's review comment left both as
       acceptable; Phase 1's findings on per-signal re-derivation cost should
       settle this per-signal, not necessarily uniformly.
-- [ ] Explicitly scope what stays out: this function must not perform a
+      **Decision:** recompute everything fresh for every signal Phase 1
+      classified as cheap-local (git state, record fields, turn count,
+      paired-sibling, `active_paths`) — a fingerprint/diff approach adds a
+      second code path (compute-then-compare) for no savings when the
+      underlying read is already cheap and local. `claimant_alive` is the
+      one signal that is *not* uniformly cheap (bounded 8 s SSH for a
+      cross-machine owner); it is still recomputed fresh rather than
+      fingerprinted, because a fingerprint of "was it alive at scan time"
+      is exactly the stale read this effort exists to eliminate — the cost
+      is accepted (see the Phase 1 finding above) rather than designed
+      around, since it is bounded and only paid once per reap candidate,
+      already under the lock in today's non-forced `reap_one` path.
+- [x] Explicitly scope what stays out: this function must not perform a
       network PR reconciliation under the lock (that's `--reconcile-prs`'s
       job, at scan time) — confirm this constraint is testable, not just
       assumed.
-- [ ] `prune.cleanup_disposition` deliberately excludes `GONE` — the
+      **Decision:** `_revalidate_cleanup_safety` never calls
+      `prune.reconcile_and_persist_best_effort` or any PR-provider lookup;
+      it reads `rec.prs` as already reconciled at scan time (or not
+      reconciled at all, in which case a stale `open` fails safe toward
+      "don't reap"). Testable via a unit test that patches the PR-provider
+      lookup to raise/track-calls and asserts it is never invoked from
+      inside the revalidator or from within the `FinalizeLock` critical
+      section (Phase 4).
+- [x] `prune.cleanup_disposition` deliberately excludes `GONE` — the
       branch-merged-content proof for a missing worktree directory is owned
       by the **caller** (today, both the batch and single-item paths perform
       that proof *before* the lock, and `_revalidate_before_reap` skips
@@ -285,7 +345,12 @@ duplicate or fight an existing mechanism:
       proof and before the reap — the consolidated function must fold this
       caller-owned gate into the under-lock decision too, not just the
       signals `cleanup_disposition` itself already covers.
-- [ ] **Define the forced-path contract explicitly and separately from the
+      **Decision:** `_revalidate_cleanup_safety` re-checks
+      `git_ops.is_branch_merged(rec.branch, upstream, cwd=repo.anchor)`
+      itself, under the lock, whenever the fresh classification comes back
+      `GONE` — this is a local git ref comparison (no fetch), not a network
+      PR lookup, so it doesn't conflict with the "stays out" scope above.
+- [x] **Define the forced-path contract explicitly and separately from the
       full revalidation.** `reap_one --force` is meant to remain an
       individually-verified escape hatch (per the `worktree` skill's
       documented `--force` semantics from #2635), not a second thing this
@@ -294,7 +359,23 @@ duplicate or fight an existing mechanism:
       active-session rejection) versus what only the non-forced path
       re-checks (the full consolidated disposition) — as two named
       contracts, not one blended description.
-- [ ] **The forced path's active-session check must itself be a fresh,
+      **Decision — two named contracts:**
+      **Non-forced contract:** `_revalidate_cleanup_safety(wt_id,
+      force=False)` reloads the record, reclassifies git state, refreshes
+      `active_paths`/`_hosted_session_blocks_cleanup`, re-derives
+      `turn_count`, calls `claimant_alive`/`paired_sibling_final`, and runs
+      the (ordering-fixed) `cleanup_disposition` in full; any non-cleanable
+      verdict aborts the reap with `result.reason`.
+      **Forced contract:** `_revalidate_cleanup_safety(wt_id, force=True)`
+      skips `cleanup_disposition` entirely (dirty/WIP/claims/follow-ups/
+      branch-merge are NOT re-checked — `--force` still means "override
+      the disposition") but still refreshes liveness under the lock and
+      rejects on `ACTIVE` state or a true `_hosted_session_blocks_cleanup`
+      — the *one* check `--force` has never bypassed, per the `worktree`
+      skill. This is the same shape `reap_one` has today, just with the
+      liveness refresh moved under the lock (see next item) instead of
+      reusing the pre-lock snapshot.
+- [x] **The forced path's active-session check must itself be a fresh,
       under-lock liveness read — not the pre-lock `active_paths`
       snapshot.** `reap_one` computes `active_paths` *before* acquiring
       `FinalizeLock` and, when `force=True`, skips the non-forced
@@ -304,7 +385,14 @@ duplicate or fight an existing mechanism:
       `--force` can terminate a session it was never meant to touch. Both
       the forced and non-forced contracts refresh liveness under the lock;
       only the *disposition* (dirty/WIP/claims/etc.) differs between them.
-- [ ] **Acknowledge and design for the residual TOCTOU window explicitly —
+      **Decision:** confirmed by the contract above —
+      `_revalidate_cleanup_safety` computes its own fresh, single-worktree
+      `active_paths` and calls `classify_worktree` itself in **both**
+      `force` branches, before the `if force` fork that decides whether to
+      also run `cleanup_disposition`. There is exactly one liveness-read
+      code path inside the function, shared by both contracts; only the
+      disposition call is conditional on `force`.
+- [x] **Acknowledge and design for the residual TOCTOU window explicitly —
       revalidating "right before" the reap does not make check-and-delete
       indivisible, and "hold `FinalizeLock` throughout" is necessary but not
       sufficient.** `FinalizeLock` serializes this tool's own
@@ -342,6 +430,31 @@ duplicate or fight an existing mechanism:
       Either way, the plan must say which was chosen and why, rather than
       implying "hold `FinalizeLock` across the final read and the reap"
       already closes the race against every writer to zero.
+      **Decision: Option 1(b).** `_revalidate_cleanup_safety`'s
+      non-forced contract, in addition to holding `FinalizeLock`
+      throughout, opens `tracking._RecordLock(yaml_path,
+      require_sidecar=True)` for the fresh-read-through-reap window and
+      keeps it held until `_reap_worktree` returns — `require_sidecar=True`
+      means it **raises `TimeoutError`** (fail closed, skip that
+      worktree with a "revalidation lock contended" reason) rather than
+      degrading to the in-process-only lock, unlike the default critical-
+      writer mode. This works because `tracking.py`'s own docstring already
+      establishes that every RMW writer this effort cares about (resource
+      claims, follow-ups, session registration's `mark_resumed`, etc.) goes
+      through the *same* `_RecordLock` sidecar for its own short RMW window
+      — so holding it for the revalidate-then-reap window fences those
+      writers out for free, with **no new lock primitive and no explicit
+      lock-order table to maintain**, at the cost of an explicit, small
+      **lock-order constraint**: `FinalizeLock` is acquired first (already
+      true today), `_RecordLock` second, and no other code path may acquire
+      them in the reverse order — verified by Phase 4's lock-ordering test.
+      A true external fence (an editor, a bare `git` command run outside
+      the tool) remains explicitly out of scope, same as before — this
+      closes the race against the tool's own writers, not against arbitrary
+      external actors, and the Journal/Phase 5 docs must say so plainly.
+      **Forced mode does not take `_RecordLock`** (matching its narrower
+      contract of "only the fresh liveness read, no disposition re-check"),
+      since it isn't gated on the same set of writer-mutable fields.
 
 ### Phase 3 — Wire all three reaper call sites through it
 
@@ -669,3 +782,39 @@ posed. Full detail folded into Phase 1's checkboxes above; summarized here:
 Phase 1 complete. Proceeding to Phase 2's design in a follow-on session/PR
 per the plan's own sequencing (no consolidation/wiring changes land before
 the design is settled).
+
+### 2026-09-14 — Phase 2: design settled
+
+Design-only (no wiring changes yet — Phase 3 lands those). Concrete
+decisions folded into Phase 2's checkboxes above; summarized here:
+
+- New function `_revalidate_cleanup_safety(wt_id, *, repo, force=False) ->
+  RevalidationResult`, called with only an id so it can't accidentally
+  consume stale caller state; returns the fresh `record`/`info` alongside
+  the disposition so every reaper acts on what was actually revalidated,
+  not the pre-lock objects.
+- Two bugs get fixed **in their owning function**, benefiting every caller,
+  not just the new revalidator: (1) `cleanup_disposition`'s `WIP`/
+  `empty`/`conversation-only` branches move ahead of the
+  finalized/COMPLETED shortcut, mirroring #2635's `dirty` fix; (2)
+  `_build_active_paths`'s stale-cache fallback always falls through to
+  `has_mux_session` when the batched mux query is unavailable, regardless
+  of a fresh cached `False` hint.
+- `claimant_alive`'s existing bounded (8 s)/fail-closed tri-state policy is
+  kept as-is and paid fresh under the lock for the non-forced path — no new
+  policy needed, cost accepted rather than engineered around.
+- Forced vs. non-forced are two named contracts sharing one liveness-read
+  code path (fixing the forced-path's stale-`active_paths` gap) but
+  diverging on whether `cleanup_disposition` runs at all — force never
+  re-checks dirty/WIP/claims/follow-ups/branch-merge, only liveness.
+- The residual-TOCTOU question resolves to **Option 1(b)**: the non-forced
+  contract holds `tracking._RecordLock(yaml_path, require_sidecar=True)`
+  (fail-closed on contention) across the fresh-read-through-reap window, in
+  addition to `FinalizeLock` — reusing the sidecar lock every other RMW
+  writer in this codebase already takes, rather than inventing a new
+  primitive or a CAS/generation token. Lock order is `FinalizeLock` then
+  `_RecordLock`, verified by a Phase 4 test. A true external fence (an
+  editor, a bare `git` command outside the tool) stays explicitly
+  out of scope, to be documented plainly in Phase 5.
+
+Proceeding to Phase 3 (wiring) in a follow-on PR.
