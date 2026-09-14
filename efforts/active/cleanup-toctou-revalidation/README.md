@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** single working branch, one participant
 - **Created:** 2026-09-14
-- **Status:** Draft <!-- Draft | Active | Blocked | Done -->
+- **Status:** Active <!-- Draft | Active | Blocked | Done -->
 - **Vision:** [`visions/plugins/agent-worktrees/README.md`](../../../visions/plugins/agent-worktrees/README.md) §
   `contribution-aware-lifecycle` ("...prove content safe before cleanup") and
   [`docs/patterns/ephemeral-process-reaping.md`](../../../docs/patterns/ephemeral-process-reaping.md)
@@ -144,34 +144,86 @@ rather than expand that PR further.)
 Before consolidating anything, map what already exists so the fix doesn't
 duplicate or fight an existing mechanism:
 
-- [ ] Enumerate every signal `cleanup_disposition` currently consults
+- [x] Enumerate every signal `cleanup_disposition` currently consults
       (`info.state`/`info.dirty`, `rec.status`, `turn_count`, held resource
       claims via the injected `claimant_alive` probe, itemized follow-ups,
       paired-sibling finality, PR state via `assess`) and, for each, whether
       it can be **cheaply re-derived locally** (no network) at reap time, or
       requires a network/remote round-trip that should stay scan-time-only
       by design or needs an explicit bounded-wait policy under the lock.
-- [ ] **`claimant_alive`** (`resolve_claimant_alive`) specifically: this probe
+      **Findings (see Journal):** all signals are cheap-local (a fresh
+      `git_ops.classify_worktree(fetch=False, ...)` call, a fresh
+      `tracking.load_record`, or a plain record-field read) **except**
+      `claimant_alive`, which is cheap only for a same-machine owner and
+      degrades to a bounded (8 s) SSH round-trip for a cross-machine owner.
+      PR state (`rec.prs`/`assess`'s PR-aware branch) is the one signal that
+      must **stay scan-time-only**: it is populated by `reconcile_and_persist_best_effort`
+      calling out to the PR provider, and Phase 2 explicitly must not add a
+      network reconciliation under the lock.
+- [x] **`claimant_alive`** (`resolve_claimant_alive`) specifically: this probe
       can perform a **cross-machine SSH check** and intentionally returns
       *unknown* on failure — it is not a cheap local read like the others.
       Decide and document an explicit under-lock policy for it: a bounded
       timeout, and whether "unknown" fails closed (treat as still-live, don't
       reap) or is otherwise handled — the design must not silently drop this
       gate, and must not let the lifecycle lock block indefinitely on remote
-      I/O.
-- [ ] Trace exactly how `_hosted_session_blocks_cleanup(latest)` (already
+      I/O. **Findings (see Journal):** `claimant.py` already bounds the
+      remote path to `_REMOTE_TIMEOUT = 8.0` seconds and the tri-state
+      contract (`True`/`False`/`None`) already fails closed — `assess()`
+      only lets a resource fall through to its content verdict when
+      `claimant_alive(...)` returns `False` (confirmed gone); `True` *or*
+      `None` (unconfirmed) both spare it. So the policy exists today; the
+      open design question Phase 2 must settle is narrower than "invent a
+      policy" — it's "do we hold `FinalizeLock` for up to 8 s of SSH I/O per
+      candidate," since today's `reap_one` non-forced path already calls
+      `cleanup_disposition` (and therefore `resolve_claimant_alive`)
+      pre-lock, so wiring the *consolidated* revalidation to call it again
+      under the lock is what would newly introduce that cost.
+- [x] Trace exactly how `_hosted_session_blocks_cleanup(latest)` (already
       called under the lock today, in both `cmd_cleanup` and presumably
       `reap_one`) relates to `active_paths`/mux-session liveness — are these
       the *same* liveness signal read two different ways, or genuinely
       independent? Document the answer; don't build a second, divergent
-      liveness check if one already exists under the lock.
-- [ ] Confirm `reap_one`'s current shape precisely, **including its `force`
+      liveness check if one already exists under the lock. **Findings (see
+      Journal):** genuinely independent. `_hosted_session_blocks_cleanup`
+      (`__main__.py:377`) only looks at record fields — `session_backend_opaque`,
+      `execution_leg_opaque`, and `tracking.derive_execution_leg(record).state
+      in {"active", "unknown"}` — none of which involve `active_paths`, mux,
+      or lock files. It covers **hosted**/cloud-backend Copilot sessions that
+      leave no local mux/lock trace. `active_paths` (`_build_active_paths`,
+      `__main__.py:388`) instead covers local lock-file sessions, batched
+      tmux/psmux mux sessions, cached `mux_live`/`bound_live` hints, and
+      bridge-lock liveness. Both signals are already consulted (the former
+      fresh, under the lock, in `reap_one`/`cmd_cleanup`; the latter only
+      pre-lock today) — the consolidated function needs **both**, not a
+      merged/replaced single check.
+- [x] Confirm `reap_one`'s current shape precisely, **including its `force`
       path**: `reap_one` deliberately bypasses `cleanup_disposition` when
       `force=True`, while still rejecting an active session — the skill
       documents `--force` as an individually-verified exception, not
       something this effort should remove or weaken. Document the forced and
       non-forced contracts **separately** so Phase 2's design doesn't
-      conflate them.
+      conflate them. **Findings (see Journal):** confirmed exactly as
+      described, with one added precision — the *initial* ACTIVE check
+      (`info.state == git_ops.WorktreeState.ACTIVE`, `__main__.py:13580`) is
+      shared by **both** forced and non-forced paths and runs **before** the
+      lock, against the pre-lock `active_paths` snapshot built at
+      `__main__.py:13558`. **Non-forced:** additionally calls
+      `prune.cleanup_disposition` pre-lock (`__main__.py:13612`); under the
+      lock it only re-checks `_hosted_session_blocks_cleanup(latest)`
+      (`__main__.py:13641`) — no fresh git reclassification, no fresh
+      `active_paths`, no fresh `claimant_alive`/held-claims/follow-up/branch-merge
+      recheck. This is gap #1: zero revalidation of the actual disposition.
+      **Forced:** skips `cleanup_disposition` entirely (the `if not force:`
+      guard at `__main__.py:13595`); still subject to the same pre-lock
+      ACTIVE check and the same under-lock fresh `_hosted_session_blocks_cleanup`
+      check as the non-forced path — so `--force` today bypasses only the
+      *disposition* (dirty/WIP/claims/etc.), never the active-session
+      rejection, matching the documented contract. The gap specific to
+      forced mode: the *initial* ACTIVE check it does share is still
+      evaluated against the stale pre-lock `active_paths`, so a session that
+      attaches between the scan and the lock is invisible to `--force` too
+      (Phase 2/4's dedicated forced-attach-after-scan case).
 
 ### Phase 2 — Design the consolidated revalidation function
 
@@ -547,3 +599,73 @@ clears review._
 - Added action-time idle-grace revalidation for the automatic sweep so a
   post-selection resume cannot be hidden merely because no session remains
   live at the final check.
+
+### 2026-09-14 — Phase 1: investigation findings
+
+Read-only pass over the real code (no changes yet); confirms the plan's
+findings against current line numbers and settles the open questions Phase 1
+posed. Full detail folded into Phase 1's checkboxes above; summarized here:
+
+- **Signal inventory settled.** Every `cleanup_disposition` input
+  (`prune.py:253`) is cheap-local — `info.state`/`info.dirty` from a fresh
+  `git_ops.classify_worktree(fetch=False, ...)`, `rec.status`/held
+  claims/follow-ups from a fresh `tracking.load_record`, `turn_count` from
+  `sessions.scan_sessions_fast`, and `default_paired_sibling_final`
+  (`prune.py:672`, confirmed no I/O) — **except** `claimant_alive`
+  (`claimant.py:216`), which is cheap only same-machine and is a bounded
+  (`_REMOTE_TIMEOUT = 8.0`, `claimant.py:44`) SSH round-trip cross-machine.
+  PR state must stay scan-time-only (network reconcile, not re-derivable
+  under the lock by design).
+- **`claimant_alive`'s bounded/fail-closed policy already exists** — the
+  tri-state contract (`True`/`False`/`None`) already treats `None`
+  (unconfirmed/timeout) as "spare, don't reap" (`prune.py:135`, `assess()`).
+  Phase 2's real design question isn't inventing a policy; it's whether the
+  consolidated revalidation accepts up to 8 s of held-lock SSH latency per
+  candidate, since today only `reap_one`'s pre-lock `cleanup_disposition`
+  call pays that cost, not any current under-lock check.
+- **`_hosted_session_blocks_cleanup` vs. `active_paths` are independent
+  signals, not the same one read twice.** The former (`__main__.py:377`)
+  reads only record fields (`session_backend_opaque`,
+  `execution_leg_opaque`, `tracking.derive_execution_leg(...).state`) for
+  **hosted**/cloud-backend sessions; the latter (`_build_active_paths`,
+  `__main__.py:388`) covers local lock-file sessions, batched mux/tmux,
+  cached `mux_live`/`bound_live` hints, and bridge-lock liveness. The
+  consolidated function needs both, not a merge.
+- **`reap_one`'s exact shape confirmed** (`__main__.py:13506`): the initial
+  ACTIVE check (`__main__.py:13580`) runs pre-lock against the pre-lock
+  `active_paths` built at `__main__.py:13558`, and is shared by forced and
+  non-forced. Non-forced additionally runs `cleanup_disposition` pre-lock
+  (`__main__.py:13612`); under the lock (`__main__.py:13631`) it re-checks
+  only `_hosted_session_blocks_cleanup(latest)` (`__main__.py:13641`) — no
+  fresh git reclassification, `active_paths`, `claimant_alive`, held-claims,
+  follow-up, or branch-merge recheck. This is gap #1 exactly as scoped: zero
+  revalidation of the disposition itself. Forced mode skips
+  `cleanup_disposition` (`__main__.py:13595`) but shares the same pre-lock
+  ACTIVE check and the same fresh under-lock `_hosted_session_blocks_cleanup`
+  check — so `--force` bypasses only the disposition, matching the
+  documented contract, but its shared ACTIVE check is still stale
+  pre-lock `active_paths`, confirming the forced-attach-after-scan gap
+  Phase 2/4 already call out.
+- **Additionally confirmed while tracing the above** (not new findings —
+  cross-checking the plan's Context section against real line numbers):
+  `_revalidate_before_reap` (`__main__.py:15400`, called from `cmd_cleanup`
+  at `__main__.py:15646`) only re-checks ACTIVE/DIRTY, is handed the
+  `active_paths` snapshot built pre-lock at `__main__.py:15483` (never
+  rebuilt under the lock), and `cleanup_disposition`'s finalized-shortcut
+  (`prune.py`, `rec.status == "finalized" or info.state == COMPLETED`) runs
+  before its `WIP`/`empty`/`conversation-only` branches, reproducing the
+  #2635-class ordering bug for those two signals. `sweep_finished_session_worktrees`
+  (`__main__.py:14690`) builds its entire candidate set — including its
+  `cleanup_disposition` call — in a read-only Pass 1 before ever acquiring
+  `FinalizeLock` (`__main__.py:14819`), then reaps every candidate in Pass 2
+  with **no revalidation at all**, the starkest instance of the same race.
+  `_build_active_paths`'s stale-cache fallback (`__main__.py:415`-`430`) is
+  confirmed: when the batched mux query is unavailable, a fresh
+  (`_fresh_mux_live_hint` within its 600 s TTL) but cached `False` is
+  trusted outright — the `has_mux_session` fallback probe only runs when
+  the hint is `None` (absent/stale), not when it is a confirmed-fresh
+  `False`.
+
+Phase 1 complete. Proceeding to Phase 2's design in a follow-on session/PR
+per the plan's own sequencing (no consolidation/wiring changes land before
+the design is settled).
