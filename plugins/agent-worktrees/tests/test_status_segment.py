@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -41,7 +42,16 @@ def _wire(monkeypatch, target, *, state, turns, rec=None):
         rec = _record(worktree_path=target)
     monkeypatch.setattr(m, "_detect_upstream_branch", lambda *a, **k: "master")
     monkeypatch.setattr(m, "_find_record_for_path", lambda _p: rec)
-    monkeypatch.setattr(m.git_ops, "classify_worktree", lambda *a, **k: info)
+    # Reflect the real classify_worktree contract: fetch_requested mirrors
+    # whether THIS call actually passed fetch=True, so a test's --fetch flag
+    # (ns.fetch) genuinely drives evidence_mode the same way it would for
+    # the real implementation, instead of always defaulting to False.
+    monkeypatch.setattr(
+        m.git_ops, "classify_worktree",
+        lambda *a, fetch=False, **k: dataclasses.replace(
+            info, fetch_requested=fetch,
+        ),
+    )
     monkeypatch.setattr(m, "_apply_tracking_override", lambda r, i: i)
     ctx = sessions.SessionContext()
     if turns:
@@ -138,7 +148,8 @@ def test_fetch_requested_but_failed_still_renders_merged_not_final(monkeypatch, 
     # though the caller asked for --fetch (#discussion_r4008048471).
     target = str(Path("wt-fetch-failed").resolve())
     info = git_ops.WorktreeStateInfo(
-        state=git_ops.WorktreeState.COMPLETED, fetch_failed=True,
+        state=git_ops.WorktreeState.COMPLETED,
+        fetch_requested=True, fetch_failed=True,
     )
     rec = _record(worktree_path=target)
     monkeypatch.setattr(m, "_detect_upstream_branch", lambda *a, **k: "master")

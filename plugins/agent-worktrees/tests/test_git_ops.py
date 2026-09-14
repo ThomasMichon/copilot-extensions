@@ -579,6 +579,7 @@ class TestClassifyGitTimeout:
 
         info = go.classify_worktree(str(tmp_path), "worktree/x", fetch=True)
         assert info.state == go.WorktreeState.UNKNOWN
+        assert info.fetch_requested is True
         assert info.fetch_failed is True
 
 
@@ -738,6 +739,7 @@ class TestClassifyGitStateFetchFailed:
             responses=self._clean_completed_responses,
         )
         assert info.state == WorktreeState.COMPLETED
+        assert info.fetch_requested is True
         assert info.fetch_failed is False
 
     def test_failed_fetch_reports_fetch_failed_true(self, monkeypatch):
@@ -748,10 +750,12 @@ class TestClassifyGitStateFetchFailed:
         # Classification still proceeds on stale local refs...
         assert info.state == WorktreeState.COMPLETED
         # ...but the caller is told the fetch itself failed.
+        assert info.fetch_requested is True
         assert info.fetch_failed is True
 
     def test_no_fetch_requested_always_reports_false(self, monkeypatch):
         info, _calls = TestClassifyGitProcessCount._run(
             monkeypatch, self._clean_completed_responses,
         )
+        assert info.fetch_requested is False
         assert info.fetch_failed is False

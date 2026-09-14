@@ -1012,4 +1012,23 @@ The approved design is the faceted model in [design.md](design.md):
   identical with and without this round's diff via `git stash`), plus the
   same single pre-existing `test_controller_relations.py` failure noted in
   every prior entry.
+- **Fourth review-response round (PR #2642):** the reviewer's persistence
+  paid off -- caught that the third round's `fetch_failed` fix was still
+  incomplete: `fetch_failed` alone stays `False` whenever no fetch was ever
+  attempted (every actual current caller of `classify_worktree` for `list
+  --json --classify` passes `fetch=False`), so both `assemble_closure_descriptor`
+  call sites still reported `"refreshed"` for an ordinary fetch-free
+  classification. Added `WorktreeStateInfo.fetch_requested` (mirrors
+  `fetch_failed`'s propagation through every `_classify_git_state` return
+  path and the timeout handler) and changed both call sites (the mux
+  segment and the Phase-4 `_worktree_to_dict`) to gate `evidence_mode` on
+  `fetch_requested and not fetch_failed`, not `fetch_failed` alone. Updated
+  existing tests whose fixtures had encoded the old (buggy) assumption, and
+  added `test_closure_downgrades_to_cached_when_no_fetch_requested` --
+  exactly the real-world case (`list --json --classify` with no `--fetch`)
+  the finding named.
+- `python tools/run-plugin-tests.py agent-worktrees -k "status_segment or
+  closure_descriptor_wiring or FetchFailed"` -- 34 passed.
+- `python tools/run-plugin-tests.py agent-worktrees --subsuite-timeout 600`
+  -- same pre-existing failures as the prior round, no new ones.
 

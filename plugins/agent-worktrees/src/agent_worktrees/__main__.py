@@ -1217,19 +1217,24 @@ def _worktree_to_dict(
         # worktree-finality-and-obligations Phase 4: the canonical closure
         # descriptor, additive alongside the legacy `cleanup_bucket`/`state`
         # fields above (not yet a replacement -- see the effort's Phase 5).
-        # This call site IS the fresh classification path (state_info was
-        # just computed), so it reports refreshed/complete evidence --
-        # UNLESS the classification itself flagged a failed/unconfirmed
-        # fetch attempt (state_info.fetch_failed, Phase 5 follow-up), in
-        # which case it downgrades to cached so a failed --classify --fetch
-        # can't still report FINAL on stale local refs.
+        # "refreshed" requires a fetch to have both been requested AND
+        # succeeded (`state_info.fetch_requested and not
+        # state_info.fetch_failed`, Phase 5 follow-up) -- `fetch_failed`
+        # alone is insufficient, since it stays False when no fetch was ever
+        # attempted (every current caller here classifies with
+        # `fetch=False`), which would otherwise let an ordinary fetch-free
+        # `list --json --classify` masquerade as refreshed evidence.
         d["closure"] = prune.assemble_closure_descriptor(
             rec,
             state_info,
             _disposition,
             held_claims=sum(1 for c in rec.resources if c.is_live),
             open_follow_ups=tracking.effective_open_follow_up_count(rec),
-            evidence_mode="cached" if state_info.fetch_failed else "refreshed",
+            evidence_mode=(
+                "refreshed"
+                if state_info.fetch_requested and not state_info.fetch_failed
+                else "cached"
+            ),
         ).to_dict()
         d["ff_eligible"] = (
             git_ops.can_fast_forward(state_info)
@@ -8312,11 +8317,12 @@ def _render_status_segment(
         # genuinely claim-free/follow-up-free evidence says so, `MERGED`
         # otherwise. Fetch-free polling (the default) never reports FINAL --
         # matches design.md's "cached evidence never authorizes FINAL/safe".
-        # A *requested* fetch that itself failed (network down, remote
-        # unreachable -- `info.fetch_failed`) is NOT refreshed evidence
-        # either: classification proceeded on stale local refs, so treating
-        # `fetch=True` alone as authoritative would let a failed fetch attempt
-        # still report FINAL.
+        # "refreshed" requires the fetch to have both been REQUESTED and
+        # actually attempted (`info.fetch_requested`) and succeeded (not
+        # `info.fetch_failed`) -- a requested fetch that failed (network
+        # down, remote unreachable) or a classification that short-circuited
+        # before ever reaching the fetch step must not be treated as
+        # authoritative current-state evidence either.
         held_claims = sum(1 for c in rec.resources if c.is_live)
         open_follow_ups = tracking.effective_open_follow_up_count(rec)
         disposition = prune.cleanup_disposition(
@@ -8328,7 +8334,7 @@ def _render_status_segment(
             rec, refined_info, disposition,
             held_claims=held_claims, open_follow_ups=open_follow_ups,
             evidence_mode=(
-                "refreshed" if fetch and not info.fetch_failed else "cached"
+                "refreshed" if info.fetch_requested and not info.fetch_failed else "cached"
             ),
         )
         bg = _DESCRIPTOR_STYLE_BG.get(descriptor.style, "colour238")
