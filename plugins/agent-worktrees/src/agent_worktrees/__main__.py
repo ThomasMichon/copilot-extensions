@@ -11785,6 +11785,17 @@ def cmd_claims(args: argparse.Namespace) -> int:
         return _claims_settle(args, target[1])
     if target and target[0] == "sweep":
         return _claims_sweep(args)
+    if target and target[0] == "mirror-status":
+        if len(target) < 3:
+            msg = (
+                "claims mirror-status: usage 'mirror-status <kind> <ref> "
+                "--status <disposition>'"
+            )
+            if args.json:
+                return _json_error(msg, 2)
+            output.err(msg)
+            return 2
+        return _claims_mirror_status(args, target[1], target[2])
     if target and target[0] == "cleanup":
         return _claims_cleanup(args)
     if target and target[0] == "orphans":
@@ -12303,6 +12314,46 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
     if reopened:
         print(f"  reopened {wt_id}: finalized -> active (new held claim)")
     return 0
+
+
+def _claims_mirror_status(args: argparse.Namespace, kind: str, ref: str) -> int:
+    """Mirror a claim's disposition onto its cross-machine discovery store.
+
+    Only ``task`` is currently backed by a mirror
+    (:mod:`task_claim_registry`'s 4-tier origin chain,
+    ThomasMichon/copilot-extensions#2584) -- ``codespace``/``container`` are
+    mirrored directly by their owning plugins via ``agent-worktrees lease
+    renew --disposition`` instead, since they hold a real fencing token from
+    their own ``lease acquire``. Best-effort: the caller (e.g.
+    ``agent_dispatch.hibernation_claims``) treats a failure as non-fatal.
+    """
+    status = getattr(args, "status", None)
+    if not status:
+        msg = "claims mirror-status: --status is required"
+        if args.json:
+            return _json_error(msg, 2)
+        output.err(msg)
+        return 2
+    if kind != "task":
+        msg = (
+            f"claims mirror-status: unsupported kind {kind!r} "
+            "(only 'task' is externally mirrored today)"
+        )
+        if args.json:
+            return _json_error(msg, 2)
+        output.err(msg)
+        return 2
+    from . import task_claim_registry
+    holder = getattr(args, "claim_holder", None) or "agent-dispatch"
+    ok = task_claim_registry.set_task_claim_status(ref, status, holder=holder)
+    if args.json:
+        _json_output({"kind": kind, "ref": ref, "status": status, "mirrored": ok})
+        return 0 if ok else 1
+    if ok:
+        print(f"mirrored {kind}:{ref} disposition -> {status}")
+        return 0
+    output.err(f"claims mirror-status: failed to mirror {kind}:{ref} -> {status}")
+    return 1
 
 
 def _claims_release(args: argparse.Namespace, ref: str) -> int:
@@ -22781,6 +22832,19 @@ def build_parser() -> argparse.ArgumentParser:
         "orphaned resources (default: dry-run preview only)",
     )
     p.add_argument("--note", default="", help="with add: an optional human label for the claim")
+    p.add_argument(
+        "--status",
+        default=None,
+        help="with mirror-status: the disposition to mirror onto the "
+        "claim's cross-machine discovery store (e.g. active|at-rest|released)",
+    )
+    p.add_argument(
+        "--holder",
+        default=None,
+        dest="claim_holder",
+        help="with mirror-status: an opaque holder identity for the mirrored "
+        "lease (default: 'agent-dispatch')",
+    )
     p.add_argument(
         "--released",
         action="store_true",
