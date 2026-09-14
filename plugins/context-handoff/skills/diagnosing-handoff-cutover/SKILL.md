@@ -77,7 +77,7 @@ Look for:
    node $ch retry-cutover --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
    ```
 
-   This shells to `agent-worktrees handoff-cutover --retry --session-id <sid> --json`.
+   This shells to `agent-worktrees handoff-cutover --retry --session-id <sid> --json`. <!-- marketplace-isolation: allow agent-worktrees-management -->
    It positively confirms whether the latest handoff already has a live
    successor pane. If one exists, it **refocuses** that pane instead of
    spawning anything new; only when no live successor exists does it fall back

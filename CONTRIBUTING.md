@@ -55,11 +55,16 @@ copilot-extensions finalize          # clean up the worktree
   `pr/<slug>` head; it will NOT land on `main`).
 - **Merge is deliberately manual.** No auto-merge label is bound (the repo's
   `pr-self-merge` profile authorizes the submitter to merge directly): open the
-  PR, give Copilot's review a bounded window (order of minutes, not hours) to
-  land, then squash-merge it yourself with `pr-merge <#> --now` (equivalent to
-  a plain `gh pr merge <#> --squash --delete-branch`, but it resolves the
-  right account and squashes uniformly). (0 approvals are required by policy —
-  a solo owner can't approve their own PR, and Copilot's review is advisory.)
+  PR, give Copilot's review a bounded window of **about 5 minutes** (order of
+  minutes, not hours) to land, then squash-merge it yourself with `pr-merge <#>
+  --now` (equivalent to a plain `gh pr merge <#> --squash --delete-branch`, but
+  it resolves the right account and squashes uniformly). (0 approvals are
+  required by policy — a solo owner can't approve their own PR, and Copilot's
+  review is advisory.) **As the repo's maintainer, self-merge after that ~5
+  minute window regardless of whether a review has posted yet** -- address any
+  findings that *did* land in time, but do not extend the wait chasing a
+  verdict that may never come; a review arriving after merge can still be
+  addressed in a follow-up commit/PR.
 - **There is no verdict to wait for.** Copilot's review is always a
   non-blocking comment, never a required approval, no matter how many
   findings it reports or how many rounds you go through. Address genuinely
@@ -68,6 +73,14 @@ copilot-extensions finalize          # clean up the worktree
   approval or a zero-finding pass that may never come. If a PR has had a
   review and nothing has happened since, that is a stuck PR: merge it or
   explicitly abandon it, don't leave it idle.
+- **Do not comment `@copilot review` (or similar) to request a fresh pass.**
+  An `@copilot` mention on GitHub does not nudge the `copilot-pull-request-reviewer`
+  bot -- it delegates a task to the separate Copilot **cloud coding agent**,
+  which will start pushing its own commits directly to your PR branch (it can
+  and will act on open review findings, which may or may not be what you
+  want, and consumes its own credit budget independent of your session).
+  The review bot already re-runs automatically on every push; if you want a
+  fresh verdict, just push a commit.
 - **Never** `git push origin main` or `push-changes` direct-to-`main`; both the
   tooling and the branch policy reject it. Break-glass (a genuine recovery)
   means temporarily relaxing the ruleset — not routing around it.

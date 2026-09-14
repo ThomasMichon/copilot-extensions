@@ -645,8 +645,11 @@ opt-in, pressure changes nothing and the session behaves exactly as before.
   fabric's venue providers (agent-codespaces / agent-containers) are thin,
   symmetric SSH transports over one agent-bridge dispatch core, so a dispatched
   agent is the same in a CodeSpace or a local container. Further per-plugin leaves
-  live under `visions/plugins/<name>/` as authored (e.g. a future
-  `visions/plugins/agent-bridge/`).
+  live under `visions/plugins/<name>/` as authored (e.g.
+  [`visions/plugins/agent-bridge/`](../plugins/agent-bridge/README.md) and
+  [`visions/plugins/context-handoff/`](../plugins/context-handoff/README.md) —
+  the policy owner for continuing an agent's work across a context-window
+  boundary, host-agnostically).
 - Reality docs: [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/harness-runbook.md`](../../docs/harness-runbook.md) · each plugin's
   `docs/`.

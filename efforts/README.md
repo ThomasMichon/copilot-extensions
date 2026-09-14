@@ -11,6 +11,9 @@ that pattern to this repository.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [Handoff Cutover Lifecycle Journal](active/handoff-cutover-lifecycle-journal/README.md) | Draft | #2457 |
+| [Handoff Live Cutover](active/handoff-live-cutover/README.md) | Active | #2249† |
+| [Handoff Cutover Reload Robustness](active/handoff-cutover-reload-robustness/README.md) | Active | #5250† |
+| [Context-Handoff Overhaul](active/context-handoff-overhaul/README.md) | Draft | #2594 |
 | [Custom Context Aggregator Retirement](active/custom-context-aggregator-retirement/README.md) | Draft | #2173 |
 | [Role-Aware Fork PR Flow](active/role-aware-fork-pr-flow/README.md) | Active | See effort |
 | [SessionStart Static/Dynamic Content Conformance](active/sessionstart-static-dynamic-conformance/README.md) | Active | #2256 |
