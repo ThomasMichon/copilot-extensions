@@ -245,7 +245,8 @@ class CleanupDisposition:
 
     cleanable: bool
     bucket: str   # clean | active | unused | conversation | follow-up |
-    #               open-pr | closed-unmerged | dirty | wip | unmerged
+    #               held-claims | open-pr | closed-unmerged | dirty | wip |
+    #               unmerged
     reason: str
 
 
@@ -292,6 +293,23 @@ def cleanup_disposition(
     # collected even under a live claimant.
     if v.category == "claimed":
         return CleanupDisposition(False, "claimed", v.reason)
+
+    # worktree-finality-and-obligations (effort): a HELD outbound resource
+    # claim (``active`` or ``at-rest`` -- see ``ResourceClaim.is_live``)
+    # overrides a would-be SAFE verdict, mirroring the follow-up gate below.
+    # Since a finalized owner can now accept a new claim (finalize is not
+    # terminal; see ``tracking.add_resource_claim``), cleanup must not treat
+    # ``status == finalized`` as proof the worktree is claim-free -- only
+    # ``finalize`` itself re-validates and releases at-rest claims. A
+    # ``released``/``abandoned`` claim is not held and does not block.
+    held_claims = [c for c in rec.resources if c.is_live]
+    if held_claims and (
+        rec.status == "finalized" or info.state == S.COMPLETED
+        or v.category == "merged"
+    ):
+        return CleanupDisposition(
+            False, "held-claims",
+            f"{v.reason} · {len(held_claims)} held resource claim(s) pending")
 
     # worktree-status-core: an agent-asserted follow-up overrides a would-be
     # SAFE verdict. A finalized/merged/completed worktree the agent flagged as

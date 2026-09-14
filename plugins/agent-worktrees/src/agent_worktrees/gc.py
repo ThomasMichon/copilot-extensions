@@ -181,21 +181,30 @@ def classify_managed_worktree(
     has_live_session: bool,
     idle_secs: float | None,
     min_idle_secs: float = MANAGED_GC_GRACE_SECS,
+    held_claims: int = 0,
 ) -> ManagedVerdict:
     """Decide whether one managed (system/bridge) worktree may be GC'd.
 
     Eligibility (all required): the worktree is **FINAL or UNUSED** (its work is
     done or never happened), has **no active process** (no live mux session, no
     attached terminal client, no live Copilot session), carries **no follow-up
-    flag**, and has been **idle past the grace window**. Anything else -- a
-    dirty/WIP tree, a live session, an attached client, a follow-up mark, or a
-    still-fresh worktree -- is spared. Pure/inspectable: takes only facts, does
-    no I/O.
+    flag and no held resource claim**, and has been **idle past the grace
+    window**. Anything else -- a dirty/WIP tree, a live session, an attached
+    client, a follow-up mark, a held claim, or a still-fresh worktree -- is
+    spared. Pure/inspectable: takes only facts, does no I/O.
+
+    ``held_claims`` defaults to 0 for callers that haven't wired the claim
+    ledger; a positive count (``active``/``at-rest`` -- see
+    ``ResourceClaim.is_live``) spares the worktree the same way ``follow_up``
+    does, since ``status == finalized`` no longer proves claim-free (finalize
+    is not terminal -- see the worktree-finality-and-obligations effort).
     """
     if kind not in MANAGED_KINDS:
         return ManagedVerdict(worktree_id, "skip", "not-managed")
     if follow_up:
         return ManagedVerdict(worktree_id, "skip", "follow-up")
+    if held_claims:
+        return ManagedVerdict(worktree_id, "skip", "held-claims")
     if attached:
         return ManagedVerdict(worktree_id, "skip", "attached")
     if has_live_mux:

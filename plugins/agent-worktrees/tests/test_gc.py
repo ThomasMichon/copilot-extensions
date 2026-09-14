@@ -238,6 +238,10 @@ def test_managed_follow_up_is_spared():
     assert _managed(follow_up=True).reason == "follow-up"
 
 
+def test_managed_held_claim_is_spared():
+    assert _managed(held_claims=1).reason == "held-claims"
+
+
 def test_managed_attached_is_spared():
     assert _managed(attached=True).reason == "attached"
 
