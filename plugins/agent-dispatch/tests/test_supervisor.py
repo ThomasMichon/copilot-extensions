@@ -3145,7 +3145,7 @@ def test_make_headless_spawn_resolves_allocation_project_lazily(monkeypatch):
     assert calls == []
     assert spawn.allocation_project_for({"id": "task-1"}) == "review-harness"
     assert calls == [
-        ("review-worker", {"timeout": 30.0, "strict": True}),
+        ("review-worker", {"strict": True}),
     ]
 
 

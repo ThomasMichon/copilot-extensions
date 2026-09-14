@@ -716,3 +716,29 @@ provider's **child process is actually killed** on expiry -- an outer
 blocking `subprocess.run` already running in a worker thread, which would
 otherwise keep the process (and thread) alive for its own much longer
 default subprocess timeout.
+
+### Fast single-agent lookup: skipping enumeration entirely
+
+The per-resolver timeout above bounds the worst case, but most callers never
+needed the full listing (and its namespace enumeration) in the first place:
+`agent_dispatch`'s spawn preflight and headless-lane resolution only ever
+check whether *one specific, known* agent name is registered. `agent-show
+<name>` (client: `BridgeClient.get_agent`, route: `GET /api/v1/agents/{name}`)
+answers that from static/topology config alone (`AgentResolver.
+get_agent_config`) and **never touches a namespace resolver at all** -- no
+CodeSpaces/container enumeration, no per-resolver timeout to wait out. It
+cannot resolve a namespace-prefixed name (`codespace:foo`, `container:bar`);
+`agent_dispatch`'s callers most commonly name a plain local/SSH-topology
+agent (the common case this fast path covers), but `--headless-agent` is
+user-configurable and can legitimately be namespace-prefixed. `agent_dispatch`'s
+`bridge._resolve_agent_record()` handles this transparently: it detects a
+namespace-prefixed name (or an older agent-bridge CLI that predates
+`agent-show`, a version-skew concern since these are independently-updated
+plugins) and falls back to the full `agents` listing for that one name,
+rather than misreporting it as unregistered. `agent_is_registered()` /
+`registered_agent_project()` build on this wrapper, with a much shorter
+default timeout (8s, was 20s) for the common plain-name case since there is
+no namespace enumeration latency to size for there. The full `agents` listing
+(and its per-resolver timeout) remains the right tool when the actual set of *all*
+registered agents is needed (the interactive `agents` command, `--all-projects`
+fleet catalogs, etc.).

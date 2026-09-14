@@ -585,7 +585,7 @@ def make_headless_spawn(
     spawn.allocation_driver = "agent-dispatch"
     spawn.allocation_interface = "acp"
     spawn.allocation_project_for = lambda _task: (
-        bridge.registered_agent_project(agent, timeout=30.0, strict=True) or ""
+        bridge.registered_agent_project(agent, strict=True) or ""
     )
     return spawn
 
