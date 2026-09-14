@@ -276,9 +276,15 @@ def register_scheduled_task(
     spec = TIER_SPECS[tier]
     task_name = spec.task_name
     schedule_script = (
-        "$trigger = New-ScheduledTaskTrigger -Once -At ((Get-Date).Date.AddMinutes(5)); "
-        "$trigger.Repetition.Interval = (New-TimeSpan -Hours 1); "
-        "$trigger.Repetition.Duration = (New-TimeSpan -Days 3650)"
+        # Set repetition via New-ScheduledTaskTrigger's own -RepetitionInterval/
+        # -RepetitionDuration parameters, not by mutating $trigger.Repetition
+        # afterward: Get-ScheduledTask's CIM Repetition property is not a live
+        # reference, so a post-hoc property assignment silently fails to
+        # persist (Repetition.Interval/Duration read back empty after
+        # registration, and the task never reports as 'matching').
+        "$trigger = New-ScheduledTaskTrigger -Once -At ((Get-Date).Date.AddMinutes(5)) "
+        "-RepetitionInterval (New-TimeSpan -Hours 1) "
+        "-RepetitionDuration (New-TimeSpan -Days 3650)"
         if spec.schedule_kind == "hourly"
         else "$trigger = New-ScheduledTaskTrigger -Daily -At '3:00AM' -DaysInterval 1"
     )
