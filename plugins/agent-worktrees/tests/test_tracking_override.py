@@ -137,9 +137,10 @@ class TestRevalidateBeforeReap:
         rec = dataclasses.replace(rec, worktree_path=str(wt))
         fresh = _info(git_ops.WorktreeState.UNUSED)
         monkeypatch.setattr(git_ops, "classify_worktree", lambda *a, **k: fresh)
-        out = m._revalidate_before_reap(rec, _info(git_ops.WorktreeState.COMPLETED),
-                                        repo=self._repo(), active_paths=set())
+        out, reason = m._revalidate_before_reap(rec, _info(git_ops.WorktreeState.COMPLETED),
+                                                repo=self._repo(), active_paths=set())
         assert out is not None
+        assert reason is None
         assert out.state == git_ops.WorktreeState.COMPLETED  # override applied
 
     def test_became_dirty_since_scan_is_not_reaped(self, tmp_path, monkeypatch):
@@ -149,9 +150,10 @@ class TestRevalidateBeforeReap:
         rec = dataclasses.replace(rec, worktree_path=str(wt))
         fresh = _info(git_ops.WorktreeState.DIRTY, dirty=1)
         monkeypatch.setattr(git_ops, "classify_worktree", lambda *a, **k: fresh)
-        out = m._revalidate_before_reap(rec, _info(git_ops.WorktreeState.COMPLETED),
-                                        repo=self._repo(), active_paths=set())
+        out, reason = m._revalidate_before_reap(rec, _info(git_ops.WorktreeState.COMPLETED),
+                                                repo=self._repo(), active_paths=set())
         assert out is None
+        assert reason == "worktree became dirty since the initial scan"
 
     def test_became_active_since_scan_is_not_reaped(self, tmp_path, monkeypatch):
         wt = tmp_path / "wt1"
@@ -160,14 +162,16 @@ class TestRevalidateBeforeReap:
         rec = dataclasses.replace(rec, worktree_path=str(wt))
         fresh = _info(git_ops.WorktreeState.ACTIVE)
         monkeypatch.setattr(git_ops, "classify_worktree", lambda *a, **k: fresh)
-        out = m._revalidate_before_reap(rec, _info(git_ops.WorktreeState.COMPLETED),
-                                        repo=self._repo(), active_paths=set())
+        out, reason = m._revalidate_before_reap(rec, _info(git_ops.WorktreeState.COMPLETED),
+                                                repo=self._repo(), active_paths=set())
         assert out is None
+        assert reason == "worktree became active since the initial scan"
 
     def test_missing_path_skips_revalidation(self, tmp_path):
         rec = _rec("finalized")
         rec = dataclasses.replace(rec, worktree_path=str(tmp_path / "gone"))
         original = _info(git_ops.WorktreeState.COMPLETED)
-        out = m._revalidate_before_reap(rec, original,
-                                        repo=self._repo(), active_paths=set())
+        out, reason = m._revalidate_before_reap(rec, original,
+                                                repo=self._repo(), active_paths=set())
         assert out is original
+        assert reason is None

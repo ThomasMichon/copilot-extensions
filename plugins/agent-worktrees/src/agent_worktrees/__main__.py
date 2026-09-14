@@ -15403,7 +15403,7 @@ def _revalidate_before_reap(
     *,
     repo,
     active_paths: set[str],
-) -> git_ops.WorktreeStateInfo | None:
+) -> tuple[git_ops.WorktreeStateInfo | None, str | None]:
     """Re-check a worktree's git state right before deleting it.
 
     `cmd_cleanup` builds its `to_clean` set from a snapshot taken *before* the
@@ -15413,15 +15413,15 @@ def _revalidate_before_reap(
     across that gap would let plain `cleanup --clean` delete content that
     became dirty after it was scanned. This re-classifies fresh, under the
     lock, right before the caller reaps -- a cheap local git read, no network
-    fetch -- and returns ``None`` if the worktree is no longer safe to reap
-    (now dirty, or a session has since attached to it), or the freshly
-    reclassified ``info`` when it's still safe.
+    fetch -- and returns ``(None, reason)`` if the worktree is no longer safe
+    to reap (now dirty, or a session has since attached to it), or
+    ``(reclassified_info, None)`` when it's still safe.
 
     A worktree with no on-disk path (already gone) skips revalidation and is
     returned unchanged -- there's nothing left to re-check.
     """
     if not latest.worktree_path or not Path(latest.worktree_path).exists():
-        return info
+        return info, None
     fresh_info = git_ops.classify_worktree(
         latest.worktree_path,
         latest.branch,
@@ -15435,8 +15435,10 @@ def _revalidate_before_reap(
         git_ops.WorktreeState.DIRTY,
         git_ops.WorktreeState.ACTIVE,
     ):
-        return None
-    return fresh_info
+        if fresh_info.state == git_ops.WorktreeState.ACTIVE:
+            return None, "worktree became active since the initial scan"
+        return None, "worktree became dirty since the initial scan"
+    return fresh_info, None
 
 
 def cmd_cleanup(args: argparse.Namespace) -> int:
@@ -15644,13 +15646,13 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
                     continue
             else:
                 latest = rec
-            revalidated = _revalidate_before_reap(
+            revalidated, revalidate_reason = _revalidate_before_reap(
                 latest, info, repo=repo, active_paths=active_paths,
             )
             if revalidated is None:
                 output.warn(
-                    f"Skipping {rec.worktree_id}: became dirty/active "
-                    f"since the initial scan"
+                    f"Skipping {rec.worktree_id}: "
+                    f"{revalidate_reason or 'worktree became dirty/active since the initial scan'}"
                 )
                 continue
             info = revalidated
