@@ -283,7 +283,7 @@ class TestCleanupDisposition:
         d = prune.cleanup_disposition(rec, _info(S.COMPLETED))
         assert d.cleanable is False
         assert d.bucket == "follow-up"
-        assert "follow-ups" in d.reason
+        assert "open follow-up" in d.reason
 
     def test_follow_up_downgrades_merged_pr(self):
         rec = _rec(status="active", prs=[_pr(21, "merged")])
@@ -343,6 +343,34 @@ class TestCleanupDisposition:
         ]
         d = prune.cleanup_disposition(rec, _info(S.ACTIVE))
         assert d.bucket == "active"
+
+    def test_itemized_open_follow_up_downgrades_finalized_to_blocked(self):
+        # worktree-finality-and-obligations Phase 3: an itemized open
+        # follow-up blocks cleanup the same way the legacy boolean did.
+        rec = _rec(status="finalized")
+        rec.follow_ups = [
+            tracking.FollowUpRecord(id="fu-1", summary="deploy it", state="open")
+        ]
+        d = prune.cleanup_disposition(rec, _info(S.COMPLETED))
+        assert d.cleanable is False and d.bucket == "follow-up"
+        assert "1 open follow-up" in d.reason
+
+    def test_resolved_follow_up_item_does_not_block_cleanup(self):
+        rec = _rec(status="finalized")
+        rec.follow_ups = [
+            tracking.FollowUpRecord(id="fu-1", summary="deploy it", state="resolved")
+        ]
+        d = prune.cleanup_disposition(rec, _info(S.COMPLETED))
+        assert d.cleanable is True and d.bucket == "clean"
+
+    def test_pending_transfer_follow_up_item_blocks_cleanup(self):
+        rec = _rec(status="finalized")
+        rec.follow_ups = [
+            tracking.FollowUpRecord(id="fu-1", summary="deploy it",
+                                    state="pending-transfer")
+        ]
+        d = prune.cleanup_disposition(rec, _info(S.COMPLETED))
+        assert d.cleanable is False and d.bucket == "follow-up"
 
 
 # --- citadel paired-worktree BOTH-gate (#957) -------------------------------
