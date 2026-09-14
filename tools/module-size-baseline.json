@@ -18,7 +18,7 @@
   "plugins/agent-bridge/src/agent_bridge/remote_operations.py": 1230,
   "plugins/agent-bridge/src/agent_bridge/result_snapshot.py": 1099,
   "plugins/agent-bridge/src/agent_bridge/routes/sessions.py": 1669,
-  "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py": 1401,
+  "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py": 1423,
   "plugins/agent-bridge/src/agent_bridge/session_host/spawner.py": 1028,
   "plugins/agent-bridge/src/agent_bridge/session_manager.py": 6721,
   "plugins/agent-bridge/src/agent_bridge/transport.py": 1257,

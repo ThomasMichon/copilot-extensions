@@ -1966,6 +1966,44 @@ def test_crawl_if_empty_never_blocks_on_classify_budget() -> None:
     assert True in seen_classify, "backfill task must still request --classify"
 
 
+def test_stop_cancels_pending_classify_backfill() -> None:
+    """worktree-finality-and-obligations (Phase 5): ``stop()`` must cancel and
+    await any in-flight classify-backfill task (not just the periodic
+    ``_task``) -- otherwise a backfill scheduled by an on-demand request can
+    keep running (and mutating the cache) past application shutdown
+    (#discussion_r4004943069)."""
+    import asyncio
+
+    from agent_bridge.routes.worktrees import WorktreeDiscoveryCache
+
+    cache = WorktreeDiscoveryCache(interval=0)
+    agent_cfg = MagicMock()
+    agent_cfg.project = "aw"
+    agent_cfg.worktree_discovery = True
+    agent_cfg.host = None
+    resolver = MagicMock()
+    resolver.agents = {"local": agent_cfg}
+    cache._resolver = resolver
+
+    started = asyncio.Event()
+
+    async def _hanging_crawl_agent(name, config, res, *, classify=True):
+        if classify:
+            started.set()
+            await asyncio.sleep(10)  # would outlive the test if not cancelled
+        return []
+
+    async def _run() -> None:
+        with patch.object(cache, "_crawl_agent", side_effect=_hanging_crawl_agent):
+            await asyncio.wait_for(cache.crawl_if_empty(), timeout=5)
+            assert len(cache._backfill_tasks) == 1
+            await asyncio.wait_for(started.wait(), timeout=5)
+            await asyncio.wait_for(cache.stop(), timeout=5)
+            assert len(cache._backfill_tasks) == 0
+
+    asyncio.run(_run())
+
+
 def test_crawl_agent_falls_back_when_classify_unsupported() -> None:
     """worktree-finality-and-obligations (Phase 5): an older agent-worktrees
     runtime that rejects ``--classify`` must not lose discovery entirely --

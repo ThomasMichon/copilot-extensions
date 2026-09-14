@@ -166,6 +166,12 @@ class WorktreeDiscoveryCache:
         self._resolver: AgentResolver | None = None
         self._crawl_lock = asyncio.Lock()
         self._governance: LoopGovernance | None = None
+        # worktree-finality-and-obligations (Phase 5): the classify-backfill
+        # tasks crawl_if_empty() spawns must obey the same daemon lifecycle as
+        # the periodic loop -- retained here so stop() can cancel/await them
+        # instead of leaving a live _exec_ex subprocess mutating the cache
+        # during the remainder of application shutdown.
+        self._backfill_tasks: set[asyncio.Task[None]] = set()
 
     def configure(self, *, interval: float) -> None:
         """Update the discovery interval (must be called before start)."""
@@ -198,6 +204,18 @@ class WorktreeDiscoveryCache:
                 await self._task
             except asyncio.CancelledError:
                 pass
+        # Cancel/await any in-flight classify backfills too -- same shutdown
+        # discipline as the periodic loop above (#discussion_r4004943069).
+        pending = [t for t in self._backfill_tasks if not t.done()]
+        for task in pending:
+            task.cancel()
+        for task in pending:
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                log.exception("Worktree classify backfill raised during shutdown")
 
     def get_all(self) -> dict[str, list[_WorktreeEntry]]:
         return dict(self._cache)
@@ -216,6 +234,8 @@ class WorktreeDiscoveryCache:
         budget plus a legacy fallback). A classify pass is kicked off as a
         fire-and-forget background backfill immediately after, so the
         closure descriptor still populates without blocking this response.
+        The task is tracked in ``_backfill_tasks`` so :meth:`stop` can
+        cancel/await it instead of leaving it running past shutdown.
         """
         if self._cache or not self._resolver:
             return
@@ -223,9 +243,11 @@ class WorktreeDiscoveryCache:
             if self._cache:
                 return
             await self._do_crawl(self._resolver, classify=False)
-        asyncio.create_task(
+        task = asyncio.create_task(
             self._backfill_classify(self._resolver), name="worktree-classify-backfill",
         )
+        self._backfill_tasks.add(task)
+        task.add_done_callback(self._backfill_tasks.discard)
 
     async def _backfill_classify(self, resolver: AgentResolver) -> None:
         """Fire-and-forget classify backfill after the fast first paint.
