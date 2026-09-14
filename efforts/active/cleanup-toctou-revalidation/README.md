@@ -25,12 +25,12 @@ round of reactive per-finding patches.
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| lambda-core (facility machine) | Sole driver — investigation, design, implementation, tests | copilot-extensions worktree on lambda-core |
+| Implementer | Sole driver — investigation, design, implementation, tests | a copilot-extensions worktree |
 
 ## Coordination
 
 - **Topology:** single participant, single working branch (no delegation needed at this scope).
-- **Host (owns PRs):** lambda-core.
+- **Host (owns PRs):** Implementer.
 - **Delegates:** none.
 - **Handoff:** n/a.
 
@@ -75,8 +75,7 @@ expanding an already five-round PR further:
 
 Filed as umbrella issue
 [#2640](https://github.com/ThomasMichon/copilot-extensions/issues/2640).
-Cross-repo originating report (facility-private context, not canonical here):
-aperture-labs (Gitea) issue #7014.
+Originating report: a private downstream tracker (not canonical here).
 
 ### Why this earns a real design pass, not another quick patch
 
@@ -144,6 +143,15 @@ duplicate or fight an existing mechanism:
       network PR reconciliation under the lock (that's `--reconcile-prs`'s
       job, at scan time) — confirm this constraint is testable, not just
       assumed.
+- [ ] `prune.cleanup_disposition` deliberately excludes `GONE` — the
+      branch-merged-content proof for a missing worktree directory is owned
+      by the **caller** (today, both the batch and single-item paths perform
+      that proof *before* the lock, and `_revalidate_before_reap` skips
+      revalidation entirely for a missing path). A worktree's branch can
+      become unmerged relative to the default branch *after* that pre-lock
+      proof and before the reap — the consolidated function must fold this
+      caller-owned gate into the under-lock decision too, not just the
+      signals `cleanup_disposition` itself already covers.
 
 ### Phase 3 — Wire both call sites through it
 
@@ -165,6 +173,10 @@ duplicate or fight an existing mechanism:
       not covered at all today).
 - [ ] `reap_one` refuses a worktree that became dirty/active/claimed/WIP
       after its own scan (closes gap #1 — not covered at all today).
+- [ ] A `GONE`-classified worktree whose branch was merged at scan time but
+      becomes unmerged (diverges from the default branch) before the reap is
+      refused, closing the caller-owned branch-merge gate identified in
+      Phase 2.
 - [ ] Every existing regression test from PR #2635
       (`test_tracking_override.py`, `test_prune.py`) still passes unchanged
       or is updated to call through the new consolidated function without
@@ -209,10 +221,10 @@ consolidation/wiring changes land before the plan clears review._
   to defer three review findings (single-worktree revalidation gap, stale
   `active_paths` snapshot, partial dirty/active-only safety recheck) to a
   tracked follow-up rather than expand that PR further.
-- Filed umbrella issue #2640 in this repo (copilot-extensions' own
-  convention: GitHub issues are the discrete tracking token here, not the
-  facility's Gitea instance — aperture-labs issue #7014 is the originating
-  cross-repo report, not canonical for this repo's work).
+- Filed umbrella issue #2640 in this repo (this repo's own convention: GitHub
+  issues are the discrete tracking token here — a private downstream tracker
+  holds the originating cross-repo report, not canonical for this repo's
+  work).
 - Framed the fix as one consolidation (a single canonical revalidation
   function used by both `cmd_cleanup`'s batch loop and `reap_one`) rather
   than three independent patches, since the root cause of gap #1 is
