@@ -266,19 +266,25 @@ def cleanup_disposition(
     needs a git branch-merged check the caller owns.  Everything else flows
     from :func:`assess`.
 
-    Safety invariant: a ``finalized`` worktree (or one git proves COMPLETED) is
-    always cleanable -- its work is at minimum pushed to the remote feature
-    branch, so removing the local copy loses nothing.  This preserves the
-    long-standing default and avoids over-preserving on a *stale* local PR
-    state (use ``--reconcile-prs`` / live reconcile to refine those).
+    Safety invariant: a ``finalized`` worktree (or one git proves COMPLETED)
+    is cleanable **provided its working tree carries no uncommitted content**
+    (``info.dirty == 0``) -- at that point its work is at minimum pushed to
+    the remote feature branch, so removing the local copy loses nothing. This
+    preserves the long-standing default and avoids over-preserving on a
+    *stale* local PR state (use ``--reconcile-prs`` / live reconcile to
+    refine those). A worktree finalized earlier and modified afterward
+    (``info.dirty > 0``, whether classified ``DIRTY`` or an ``ORPHAN`` that
+    still carries a dirty count) is excluded from this shortcut regardless of
+    ``rec.status`` -- see the ``info.dirty > 0`` guard below.
 
-    The **one exception** is an IN-FLIGHT claimed resource (agent-fabric
-    `claimed-resource-not-reclaimed`): when ``claimant_alive`` is injected and
-    the claimant is alive / not-confirmed-gone, a still-in-flight resource is
-    spared because its owner may still be using it. A FINISHED claimed resource
-    (finalized / merged / git-COMPLETED) is NOT spared -- it is collectable even
-    under a live claimant, so a host kept open for days does not
-    pin its merged children.
+    Beyond the dirty exclusion, the other exception is an IN-FLIGHT claimed
+    resource (agent-fabric `claimed-resource-not-reclaimed`): when
+    ``claimant_alive`` is injected and the claimant is alive /
+    not-confirmed-gone, a still-in-flight resource is spared because its
+    owner may still be using it. A FINISHED claimed resource (finalized /
+    merged / git-COMPLETED) is NOT spared -- it is collectable even under a
+    live claimant, so a host kept open for days does not pin its merged
+    children.
     """
     v = assess(rec, info, turn_count=turn_count, claimant_alive=claimant_alive)
     S = git_ops.WorktreeState
