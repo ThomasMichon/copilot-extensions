@@ -1373,3 +1373,109 @@ def test_cmd_launch_direct_fallback_runs_post_exit_and_preserves_env(
     assert child["env"]["WORKTREE_NO_MUX"] == "1"
     assert child["env"]["WORKTREE_VERBOSE"] == "1"
     assert child["env"]["COPILOT_TEST_ENV"] == "1"
+
+
+# ── Bare-launch resolution watchdog (a hung pre-handoff resolution must never
+# survive indefinitely -- see _fire_launch_resolution_watchdog's docstring) ──
+
+
+class _FakeWatchdogTimer:
+    """Records instantiation + start/cancel without ever actually firing."""
+
+    instances: list["_FakeWatchdogTimer"] = []
+
+    def __init__(self, interval, function):
+        self.interval = interval
+        self.function = function
+        self.daemon = False
+        self.started = False
+        self.cancelled = False
+        type(self).instances.append(self)
+
+    def start(self):
+        self.started = True
+
+    def cancel(self):
+        self.cancelled = True
+
+
+def test_cmd_launch_cancels_watchdog_before_windows_popen_handoff(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        m, "_usable_worktree_manager_launcher_dir", lambda: _win_launch_dir(tmp_path) / "bin"
+    )
+    monkeypatch.setattr(m.cfg, "detect_platform", lambda: "windows")
+    captured: list[list[str]] = []
+    monkeypatch.setattr(m.subprocess, "Popen", _fake_popen(captured))
+    _FakeWatchdogTimer.instances = []
+    monkeypatch.setattr(m.threading, "Timer", _FakeWatchdogTimer)
+
+    with pytest.raises(SystemExit) as exc:
+        m.cmd_launch([])
+
+    assert exc.value.code == 0
+    assert len(_FakeWatchdogTimer.instances) == 1
+    timer = _FakeWatchdogTimer.instances[0]
+    assert timer.interval == m._LAUNCH_RESOLUTION_TIMEOUT_SECS
+    assert timer.function is m._fire_launch_resolution_watchdog
+    assert timer.daemon is True
+    assert timer.started is True
+    # Cancelled once the child is spawned -- the subsequent proc.wait() is the
+    # expected, legitimate long/indefinite block, not something to watchdog.
+    assert timer.cancelled is True
+
+
+def test_cmd_launch_cancels_watchdog_before_direct_fallback(monkeypatch, tmp_path):
+    cell_runtime = tmp_path / "cell" / "plugins" / "agent-worktrees"
+    cell_runtime.mkdir(parents=True)
+    monkeypatch.setattr(m.cfg, "_ACTIVE_PROJECT", "example")
+    monkeypatch.setattr(m.cfg, "detect_platform", lambda: "linux")
+    monkeypatch.setattr(
+        registry_paths, "installation_context", lambda: {"pluginRoot": str(cell_runtime)}
+    )
+    monkeypatch.setattr(
+        cfg,
+        "load_config",
+        lambda **_kwargs: cfg.Config(
+            srcroot=str(tmp_path),
+            machine="test",
+            platform="linux",
+            repo_name="example",
+            repos={
+                "example": cfg.RepoConfig(
+                    anchor=str(tmp_path / "anchor"),
+                    worktree_root=str(tmp_path / "worktrees"),
+                )
+            },
+        ),
+    )
+    monkeypatch.setattr(m, "_usable_worktree_manager_launcher_dir", lambda: None)
+    monkeypatch.setattr(m, "_run_direct_launch_fallback", lambda *a, **k: 0)
+    _FakeWatchdogTimer.instances = []
+    monkeypatch.setattr(m.threading, "Timer", _FakeWatchdogTimer)
+
+    rc = m.cmd_launch([])
+
+    assert rc == 0
+    assert len(_FakeWatchdogTimer.instances) == 1
+    assert _FakeWatchdogTimer.instances[0].cancelled is True
+
+
+def test_launch_resolution_watchdog_self_terminates(monkeypatch):
+    """The watchdog callback itself must reach for the hard exit -- nothing
+    softer, since the whole point is bypassing a stuck blocking call that
+    ordinary control flow (exceptions, signals) cannot interrupt."""
+    calls: list[int] = []
+    monkeypatch.setattr(m.os, "_exit", lambda code: calls.append(code))
+
+    m._fire_launch_resolution_watchdog()
+
+    assert calls == [1]
+
+
+def test_launch_resolution_timeout_is_generous_but_bounded():
+    """A sanity bound on the constant itself: long enough to never trip on a
+    normal cold git/config resolution, short enough that a genuine hang is
+    still caught in a human-relevant timeframe."""
+    assert 10.0 <= m._LAUNCH_RESOLUTION_TIMEOUT_SECS <= 300.0
