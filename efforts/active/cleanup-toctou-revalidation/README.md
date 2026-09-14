@@ -5,7 +5,13 @@
 - **Branch(es):** single working branch, one participant
 - **Created:** 2026-09-14
 - **Status:** Draft <!-- Draft | Active | Blocked | Done -->
-- **Vision:** none — correctness/robustness hardening of an existing mechanism, not a new capability
+- **Vision:** [`visions/plugins/agent-worktrees/README.md`](../../../visions/plugins/agent-worktrees/README.md) §
+  `contribution-aware-lifecycle` ("...prove content safe before cleanup") and
+  [`docs/patterns/ephemeral-process-reaping.md`](../../../docs/patterns/ephemeral-process-reaping.md)
+  ("corroborate before acting" — require an authoritative, fresh observation
+  before tearing anything down). This effort is vision-closing: it makes the
+  actual cleanup-reaper behavior match both standing statements, which today
+  it only partially does.
 - **Umbrella issue:** #2640
 - **Sub-issues:** _to be filed once the Plan below is reviewed and phases are ready to claim_
 
@@ -73,6 +79,38 @@ expanding an already five-round PR further:
    held-claims/follow-up/paired-sibling gates in `cleanup_disposition`) — but
    none of them are re-checked today, only dirty/active are.
 
+This effort's own review (rounds 3–4, on the plan itself) surfaced four more
+concrete findings that sharpen the above rather than replace it — folded in
+as explicit Plan items rather than re-litigated in prose here:
+
+- `cleanup_disposition`'s `rec.status == "finalized" or info.state ==
+  COMPLETED` shortcut runs **before** its `WIP` and `conversation-only`
+  branches — so even a full "re-run cleanup_disposition" does not, by
+  itself, catch a finalized record that gained a committed WIP change or
+  fresh conversation turns after the scan. This needs the same kind of
+  ordering fix PR #2635 already made for `dirty` (moving that gate ahead of
+  the finalized shortcut), extended to `WIP`/`conversation-only`.
+- `_build_active_paths` itself has a stale-cache fallback: when the batched
+  mux query is unavailable, it treats a cached `mux_live=False` as
+  authoritative and skips the `has_mux_session` fallback check — so a
+  session attached after that false stamp is still invisible, independent
+  of when `active_paths` is (re)built.
+- Other record mutators — session registration, claim/follow-up writes —
+  use a **per-record lock**, not `FinalizeLock`. "Hold `FinalizeLock`
+  across the final read and the reap" (Phase 2's Option 1) only fences
+  against this tool's *other* finalization/cleanup instances; it does not
+  fence against those writers, which can still change safety inputs after
+  the final read. Closing that gap needs either those writers to also
+  honor `FinalizeLock`, or a target-record lock/CAS with an explicitly
+  defined lock order.
+- There is a **third** ordinary reaper beyond the two originally scoped
+  here: `sweep_finished_session_worktrees` builds its candidates before
+  `FinalizeLock` and calls `_reap_worktree` under the lock with no fresh
+  safety decision — the same stale check-to-delete race, in the
+  no-daemon/picker/session-end auto-clean path. In scope alongside the
+  batch and single-item paths below; "two call sites" throughout this
+  document should be read as **three**.
+
 Filed as umbrella issue
 [#2640](https://github.com/ThomasMichon/copilot-extensions/issues/2640).
 Originating report: a private downstream tracker (not canonical here).
@@ -81,13 +119,14 @@ Originating report: a private downstream tracker (not canonical here).
 
 The pattern so far has been: fix the symptom the reviewer just found, in the
 exact spot it was found. That produced a working batch-path fix, but it also
-produced the very gaps this effort exists to close — `reap_one` never got the
-fix because it's a *second, separate* call site that happens to reimplement
-the same "check then act" shape. Patching gap-by-gap in-place risks a fourth
-and fifth gap surfacing the same way. The fix that actually closes the class
-of bug is **one canonical, single-sourced safety recheck**, called from every
-site that reaps a worktree — so there is no second call site left to drift
-out of sync.
+produced the very gaps this effort exists to close — `reap_one` (and, per the
+findings above, `sweep_finished_session_worktrees`) never got the fix because
+each is a *separate* call site that happens to reimplement the same "check
+then act" shape. Patching gap-by-gap in-place risks a fourth and fifth gap
+surfacing the same way — as this very plan's own review rounds just
+demonstrated. The fix that actually closes the class of bug is **one
+canonical, single-sourced safety recheck**, called from every site that reaps
+a worktree — so there is no other call site left to drift out of sync.
 
 ## Request
 
@@ -145,6 +184,26 @@ duplicate or fight an existing mechanism:
       run the **complete** `cleanup_disposition` against all of that —
       returning `(disposition, reason)` rather than a narrowed
       dirty/active-only check.
+- [ ] **"Re-run `cleanup_disposition`" is necessary but not yet sufficient
+      by itself — its internal ordering has the same class of bug PR #2635
+      fixed for `dirty`, but for `WIP`/`conversation-only`.**
+      `cleanup_disposition`'s `rec.status == "finalized" or info.state ==
+      COMPLETED` shortcut runs *before* its `WIP` and `conversation-only`
+      branches, so a finalized record that gains a committed WIP change or
+      fresh conversation turns after the scan is still returned cleanable —
+      exactly the bug #2635 fixed for `dirty`/`info.dirty`, recurring for
+      two more signals. This design must either reorder those gates ahead
+      of the finalized shortcut (mirroring #2635's fix) or otherwise ensure
+      the consolidated function checks them before trusting that shortcut —
+      "call `cleanup_disposition` again" is not sufficient on its own.
+- [ ] `_build_active_paths` has its own stale-cache fallback, independent of
+      *when* it's called: when the batched mux query is unavailable, it
+      treats a cached `mux_live=False` as authoritative and skips the
+      `has_mux_session` fallback check — so a session attached after that
+      false cache stamp is invisible even to a freshly-called
+      `_build_active_paths`. The liveness refresh this design adds must
+      either fix that fallback or use a different, authoritative action-time
+      probe instead of relying on `_build_active_paths` as-is.
 - [ ] **The function's return contract must include the fresh record and
       classification, not only the disposition/reason.** Today's callers
       still pass the *pre-lock* record/`info` objects into `_reap_worktree`
@@ -195,33 +254,41 @@ duplicate or fight an existing mechanism:
       only the *disposition* (dirty/WIP/claims/etc.) differs between them.
 - [ ] **Acknowledge and design for the residual TOCTOU window explicitly —
       revalidating "right before" the reap does not make check-and-delete
-      indivisible.** `FinalizeLock` serializes this tool's own
-      finalization/cleanup instances against each other; it does not fence
-      out an external edit, a session/mux attaching, or a claim/record
-      write landing in the gap between the final fresh read and the
-      `_reap_worktree` call itself. Two acceptable outcomes, to be decided
-      here rather than left implicit:
-      1. **Shrink the window to one held critical section** — perform the
+      indivisible, and "hold `FinalizeLock` throughout" is necessary but not
+      sufficient.** `FinalizeLock` serializes this tool's own
+      finalization/cleanup instances against each other; it does **not**
+      fence out an external edit, or the tool's **own other writers** —
+      session registration and claim/follow-up mutations use a *per-record*
+      lock (not `FinalizeLock`), so they can still change safety inputs
+      after the final read and before `_reap_worktree`, even while
+      `FinalizeLock` is held throughout the critical section. Two acceptable
+      outcomes, to be decided here rather than left implicit:
+      1. **Shrink the window to one held critical section, and make it
+         actually exclusive against this tool's own writers** — perform the
          final classification/liveness read and the `_reap_worktree` call
          as a single, uninterrupted sequence while continuously holding
-         `FinalizeLock` (no intervening I/O, no re-entrant call that could
-         yield), so the only remaining gap is the unavoidable OS-level
-         instant between the last read syscall and the delete syscall —
-         and **explicitly document that a true fence against arbitrary
-         external actors (an editor, a directly-invoked git command) is out
-         of scope** unless a further mechanism (e.g., marking the worktree
-         read-only for the duration of the critical section) is
-         deliberately adopted as a stretch goal.
-      2. **Or** adopt that further fencing mechanism if the residual risk
-         from (1) is judged unacceptable, and specify exactly what it is
-         (a lease/generation token re-checked at the syscall boundary, a
-         transient read-only permission flip, etc.) with its own cost/
+         `FinalizeLock`, **and** either (a) make session-registration and
+         claim/follow-up writers also acquire `FinalizeLock` (or a
+         compatible lock, with an explicitly defined lock order to avoid
+         deadlock with existing per-record-lock callers), or (b) use a
+         target-record lock/CAS (a generation token bumped by every writer,
+         checked immediately before the reap) so a write racing the
+         critical section is detected even without a shared lock. Whichever
+         of (a)/(b) is chosen, **explicitly document that a true fence
+         against arbitrary *external* actors (an editor, a directly-invoked
+         git command outside this tool entirely) remains out of scope**
+         unless a further mechanism (e.g., marking the worktree read-only
+         for the duration of the critical section) is deliberately adopted
+         as a stretch goal.
+      2. **Or** adopt that further external-fencing mechanism if the
+         residual risk from (1) is judged unacceptable even for in-tool
+         writers, and specify exactly what it is, with its own cost/
          complexity tradeoff spelled out.
       Either way, the plan must say which was chosen and why, rather than
-      implying "revalidate right before reap" already closes the race to
-      zero.
+      implying "hold `FinalizeLock` across the final read and the reap"
+      already closes the race against every writer to zero.
 
-### Phase 3 — Wire both call sites through it
+### Phase 3 — Wire all three reaper call sites through it
 
 - [ ] Route `cmd_cleanup`'s batch loop through the consolidated function
       (replacing today's narrower `_revalidate_before_reap` call).
@@ -230,6 +297,14 @@ duplicate or fight an existing mechanism:
       #1; it must not gain its own parallel implementation. Its **forced**
       path keeps the narrower, separately-specified contract from Phase 2
       (active-session rejection only) — force stays force.
+- [ ] Route `sweep_finished_session_worktrees` (the no-daemon/picker/
+      session-end auto-clean path) through the same consolidated function
+      too — it builds candidates pre-lock and reaps under the lock with no
+      fresh safety decision today, the identical race being fixed
+      elsewhere. If this reaper's constraints (e.g. no `force` concept, a
+      narrower record shape) make full reuse awkward, that's a Phase 2
+      design input, not a reason to leave it out — resolve the shape during
+      design, don't scope it out by default.
 - [ ] Remove the now-superseded `_revalidate_before_reap` (or fold it into
       the new function) so there is exactly one non-forced revalidation code
       path left, not two that can drift apart again.
@@ -314,11 +389,15 @@ Phase 2's forced-path contract). Concretely, at minimum:
 
 ## Proposal
 
-_Pending — this README is the proposal; submit as a PR per the repo's effort
-review-gate (auto-merge enabled) and await approval before starting Phase 1
-implementation work. Investigation work in Phase 1 that is purely read-only
-(no code changes) may begin in parallel with review if useful, but no
-consolidation/wiring changes land before the plan clears review._
+_Pending — this README is the proposal; submitted as PR #2641 per the repo's
+effort review-gate. This repo has no auto-merge label (`CONTRIBUTING.md`):
+the submitter gives Copilot's advisory review a bounded ~5-minute window per
+round, addresses what genuinely lands in that window, and then squash-merges
+manually with `pr-merge ... --now` regardless of whether a further review has
+posted — there is no required approval to wait for. Investigation work in
+Phase 1 that is purely read-only (no code changes) may begin in parallel with
+review if useful, but no consolidation/wiring changes land before the plan
+clears review._
 
 ## Journal
 
@@ -385,3 +464,36 @@ consolidation/wiring changes land before the plan clears review._
   non-forced path is being fixed to avoid. Added as its own Phase 2 design
   point and Phase 4 test (distinct from "forced still rejects an
   already-active session," which was already covered).
+
+### 2026-09-14 — Review round 4 (final planning round)
+
+- A **third** ordinary reaper, `sweep_finished_session_worktrees`, was
+  identified with the same stale check-to-delete shape as the two originally
+  scoped — added to Phase 1/3's inventory and call-site list; "two call
+  sites" throughout this document means three.
+- `cleanup_disposition`'s finalized-shortcut ordering bug (fixed for `dirty`
+  in #2635) still applies to `WIP`/`conversation-only` — "re-run
+  `cleanup_disposition`" alone does not close those two signals; Phase 2 now
+  requires the ordering fix (or an equivalent pre-gate) explicitly.
+- `_build_active_paths` has its own stale-cache fallback (a cached
+  `mux_live=False` is trusted without a `has_mux_session` cross-check) —
+  independent of when the function is called. Phase 2 now requires fixing
+  this fallback or using a different authoritative probe.
+- Corrected Option 1's claim: holding `FinalizeLock` throughout the critical
+  section only fences this tool's own finalization/cleanup instances, not
+  its own session-registration/claim-mutation writers (which use a
+  per-record lock). Phase 2 now requires either those writers to also honor
+  a shared lock (with an explicit lock order) or a target-record lock/CAS,
+  in addition to the previously-noted true-external-fencing scope decision.
+- Linked the effort to the two standing statements it makes concrete —
+  `visions/plugins/agent-worktrees/README.md`'s `contribution-aware-lifecycle`
+  ("prove content safe before cleanup") and
+  `docs/patterns/ephemeral-process-reaping.md`'s "corroborate before acting"
+  — replacing the initial "Vision: none."
+- Corrected the Proposal section: this repo's `CONTRIBUTING.md` documents a
+  manual `pr-merge ... --now` flow with a bounded ~5-minute advisory-review
+  window per round, not an auto-merge label. Per that policy, this effort
+  plan stops chasing further review rounds here and proceeds to merge —
+  remaining design refinements (if any) belong to Phase 1's investigation,
+  which will re-derive and settle them against the real code rather than a
+  plan document's prose.
