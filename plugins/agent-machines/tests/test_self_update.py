@@ -427,6 +427,7 @@ def test_reconcile_task_removes_opted_out_task_without_retry_prompt(monkeypatch,
     monkeypatch.setattr(self_update.sys, "platform", "win32")
     monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
     monkeypatch.setattr(self_update, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
+    monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(
         self_update_tasks,
         "query_scheduled_task",
