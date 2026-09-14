@@ -67,7 +67,7 @@ async def test_worktree_discovery_rechecks_before_cache_update_and_discards_infl
     cache._governance = governance
     resolver = _resolver()
 
-    async def fake_crawl_agent(name, config, resolver_obj):
+    async def fake_crawl_agent(name, config, resolver_obj, *, classify=True):
         return [
             _WorktreeEntry(
                 id="wt-1",
@@ -100,7 +100,7 @@ async def test_worktree_discovery_proceeds_when_iteration_and_pre_mutation_check
     cache._governance = governance
     resolver = _resolver()
 
-    async def fake_crawl_agent(name, config, resolver_obj):
+    async def fake_crawl_agent(name, config, resolver_obj, *, classify=True):
         return [
             _WorktreeEntry(
                 id="wt-1",

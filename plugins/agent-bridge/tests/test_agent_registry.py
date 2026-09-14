@@ -2267,7 +2267,7 @@ class TestWorktreeDiscoveryEligibility:
         cache = WorktreeDiscoveryCache()
         crawled: list[str] = []
 
-        async def fake_crawl_agent(agent_name, config, resolver):
+        async def fake_crawl_agent(agent_name, config, resolver, *, classify=True):
             crawled.append(agent_name)
             return []
 
