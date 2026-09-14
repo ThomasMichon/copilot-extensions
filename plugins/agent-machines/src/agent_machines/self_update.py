@@ -3,7 +3,7 @@ Two independently scheduled tiers keep a logged-in Windows machine converging
 without an interactive Copilot session:
 * ``watchdog``: ensure the dtssh host launcher watchdog is running.
 * ``sweep``: fast-forward adopted repos, refresh plugin payloads/runtimes, then
-  run the full machine restore.
+  run the maintenance-safe machine restore subset.
 The tiers resolve opt-in from declarative ``self-update`` resources, use one
 named lock each, and record last-attempt / last-success timestamps under the
 agent-machines state root.
@@ -777,17 +777,6 @@ def run_tier(
                 launcher_starter=launcher_starter,
             )
         else:
-            defer = live_session_deferral_reason(worktree_lister=worktree_lister)
-            if defer is not None:
-                return RunResult(
-                    tier=tier,
-                    status="deferred",
-                    opted_in=True,
-                    detail=defer,
-                    lock_reclaimed=lock.reclaimed,
-                    attempted_at=attempted_at,
-                    steps=[StepResult("pre-mutation", "deferred", defer)],
-                )
             steps = list(sweep_repo_paths(discovered_repos or [], runner=runner))
             pull_errors = [step for step in steps if step.status == "error"]
             if pull_errors:
@@ -799,17 +788,6 @@ def run_tier(
                     lock_reclaimed=lock.reclaimed,
                     attempted_at=attempted_at,
                     steps=steps,
-                )
-            defer = live_session_deferral_reason(worktree_lister=worktree_lister)
-            if defer is not None:
-                return RunResult(
-                    tier=tier,
-                    status="deferred",
-                    opted_in=True,
-                    detail=defer,
-                    lock_reclaimed=lock.reclaimed,
-                    attempted_at=attempted_at,
-                    steps=[*steps, StepResult("pre-restore", "deferred", defer)],
                 )
             repo_names = [
                 getattr(repo, "name", "")
@@ -848,17 +826,6 @@ def run_tier(
                         attempted_at=attempted_at,
                         steps=steps,
                     )
-                defer = live_session_deferral_reason(worktree_lister=worktree_lister)
-                if defer is not None:
-                    return RunResult(
-                        tier=tier,
-                        status="deferred",
-                        opted_in=True,
-                        detail=defer,
-                        lock_reclaimed=lock.reclaimed,
-                        attempted_at=attempted_at,
-                        steps=[*steps, StepResult("pre-restore", "deferred", defer)],
-                    )
             restore_cmd = [
                 sys.executable,
                 "-m",
@@ -866,6 +833,7 @@ def run_tier(
                 "restore",
                 "--apply",
                 "--all-projects",
+                "--maintenance-safe",
             ]
             if machine:
                 restore_cmd.extend(["--machine", machine])
