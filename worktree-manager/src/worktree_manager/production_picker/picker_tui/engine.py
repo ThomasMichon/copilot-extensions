@@ -7079,6 +7079,7 @@ from .steering import (
     _AutoExpandTextArea,  # noqa: F401 -- re-export for tests
     _normalize_form_fields,
     _steer_draft_path,
+    _STEER_DRAFTS_ENV,  # noqa: F401 -- re-export for tests
 )
 
 

@@ -1131,6 +1131,7 @@ from .tracking_controller_relations import (
     _normalize_controller_ref,
     _valid_relation_session_id,
     _validate_controller_relation_set,
+    derive_legacy_controller_relations,  # noqa: F401 -- re-export for callers (e.g. __main__)
 )
 
 
