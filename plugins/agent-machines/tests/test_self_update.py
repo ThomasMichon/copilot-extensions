@@ -427,7 +427,7 @@ def test_reconcile_task_removes_opted_out_task_without_retry_prompt(monkeypatch,
     )
     calls: list[str] = []
 
-    def unregister(tier, *, runner=None, resolve_binary=None):
+    def unregister(tier, *, runner=None, resolve_binary=None, machine=None):
         calls.append(tier)
         return self_update.CommandResult(["pwsh"], 0, "", "")
 
