@@ -177,6 +177,10 @@ Verbatim from the operator:
   session is told the mechanism exists from its first turn.
 
 ### Phase 3 — Host-agnostic reliability (Challenge 3)
+- [ ] Confirm `agent-worktrees handoff-cutover` supports a genuinely headless
+  (no-mux) invocation, or build a non-mux launch primitive if it doesn't --
+  open question flagged in `redesign.md` §4.3; must resolve before the
+  coordinator fallback below can rely on it.
 - [ ] Extend `agent-dispatch`'s coordinator to reconcile an unclaimed
   `proposed`/`handoff` task past a bounded window into a fallback headless
   successor launch, per `redesign.md` §4.3 (reusing already-supervised

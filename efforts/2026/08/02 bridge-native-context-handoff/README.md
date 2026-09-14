@@ -299,7 +299,7 @@ Per the facility cross-repo rule (PR-gated intent before unreviewed push):
   new work item **E2** (hand off on a prompt into an already-critical session,
   then deliver the prompt to the successor). Next: file issues, open intent PR.
 - **2026-08-01 (cont.)** — Intent PR **#4147†** (effort + both vision
-  reconciliations) approved by the Intelligence Dampener, consent applied,
+  reconciliations) approved by the the private repo's automated reviewer, consent applied,
   **merged** to master; worktree reconciled forward. Filed umbrella **#4140†** +
   sub-issues **#4141†–#4146†**. Planning/intent phase complete. **Next phase =
   implementation**, starting in `copilot-extensions` (owner/public repo): item B
@@ -374,10 +374,10 @@ Per the facility cross-repo rule (PR-gated intent before unreviewed push):
   frame it re-points the context to the successor and reconnects on its stream,
   de-duping the twice-emitted seam. Server: 4 new tests + full downstream consumer suite green
   (**241 passed**); ruff + mypy clean. Client: TS typecheck + eslint + build
-  clean. Next: a PR-gated private-facility-repo PR (Intelligence Dampener), then close
+  clean. Next: a PR-gated private-facility-repo PR (the private repo's automated reviewer), then close
   #4145†/#4146† and deploy downstream consumer on the primary facility dev host.
 - **2026-08-02 (F/G merged + deployed)** — PR **#4161†** approved by the
-  Intelligence Dampener, merge consent granted, merged to master as `fa1ad7abd`.
+  the private repo's automated reviewer, merge consent granted, merged to master as `fa1ad7abd`.
   **downstream consumer deployed on the primary facility dev host** (v0.2.1, healthy on :8090); verified
   the deployed server (`session_bridge.py` / `bridge_client.py`) and the built
   client JS both carry the F/G changes. Closed **#4145†**, **#4146†**, and the

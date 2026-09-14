@@ -81,19 +81,23 @@ Two design choices in the cutover make the race near-certain to fire:
   the successor** (so the model re-issues the still-`proposed`, idempotent call on
   a live extension instance) is the whole recovery.
 
-### Reproductions (both the primary facility dev host WSL, 2026-08-20)
+### Reproductions (both on the primary facility dev host's WSL, 2026-08-20)
 
-| Worktree | Successor session | Hung | Request (task) | Doomed instance → survivor | Recovery |
-|----------|-------------------|------|----------------|----------------------------|----------|
-| `…-ef44` | `4704507c` (pane `%26`) | ~8 h | `cca97548` (`e1300b71…`) at 08:36:38Z | inst `4033295` torn down → `4033594` | operator killed old pane `%24`; session re-driven; retry `3890c1fe` done 16:32:46Z (0.9 s) |
-| `…-9a22` | `1d76a88c` (pane `%28`) | ~32 m | `d8b1951d` (`2614d2a9…`) at 16:35:54Z | inst `796120` exited → `796599` (spawned *after* the request) | operator spammed Esc + "retry the handoff"; retry `fda5022a` done 17:07:21Z; retire `%20` `method=hard`, `gone` 17:07:29Z |
+| Worktree | Hung | Recovery |
+|----------|------|----------|
+| incident 1 | ~8 h | operator killed the old pane; the successor session was re-driven, and the still-`proposed`, idempotent handoff call completed in under a second once a live extension instance picked it up |
+| incident 2 | ~32 m | operator retried the handoff after the successor appeared stuck; the retry completed and the predecessor pane was retired cleanly shortly after |
+
+_(Raw session/pane/task identifiers from the private incident record are
+omitted here as operational noise with no public value; both are on file
+in the private tracker.)_
 
 ## Request
 
-> agent-codespaces … Active the primary facility dev host wsl agent ef44 just spent 8 hours stuck
-> on a consume_handoff tool call. … We need to make this more robust. … 9a22 is
-> now actively stuck in this same situation. … File issues, then drive fixes for
-> them, using an effort to catalog the issues.
+> An agent on a private facility host was stuck for 8 hours on a
+> `consume_handoff` tool call, followed shortly by a second worktree stuck the
+> same way. We need to make this more robust. File issues, then drive fixes
+> for them, using an effort to catalog the issues.
 
 ## Plan
 

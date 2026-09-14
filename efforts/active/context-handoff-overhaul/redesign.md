@@ -149,6 +149,15 @@ already hardened. This reuses an already-supervised, already-running
 component instead of inventing a new one, in keeping with the
 `envisioning` skill's "extend before you regenerate" bias.
 
+**Open question, not yet resolved:** `agent-worktrees handoff-cutover` today
+assumes a live mux session to spawn a new pane/window into — it is not
+verified to work as a genuinely headless launch with no mux present at all
+(the no-host case this section is meant to cover). Phase 3's implementation
+work must confirm `handoff-cutover` (or a headless variant of it) actually
+supports a mux-less invocation before the coordinator can rely on it as a
+fallback; if it can't, the coordinator's fallback path needs its own
+non-mux launch primitive rather than reusing this command as-is.
+
 `userPromptSubmitted` hook option (raised separately during this effort's
 kickoff investigation): usable as a cheap, deterministic "a real prompt
 reached the successor" signal — grep the submitted prompt for the expected
