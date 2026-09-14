@@ -107,19 +107,32 @@ duplicate or fight an existing mechanism:
 
 - [ ] Enumerate every signal `cleanup_disposition` currently consults
       (`info.state`/`info.dirty`, `rec.status`, `turn_count`, held resource
-      claims, itemized follow-ups, paired-sibling finality, PR state via
-      `assess`) and, for each, whether it can be **cheaply re-derived
-      locally** (no network) at reap time, or requires a network round-trip
-      (PR reconciliation) that should stay scan-time-only by design.
+      claims via the injected `claimant_alive` probe, itemized follow-ups,
+      paired-sibling finality, PR state via `assess`) and, for each, whether
+      it can be **cheaply re-derived locally** (no network) at reap time, or
+      requires a network/remote round-trip that should stay scan-time-only
+      by design or needs an explicit bounded-wait policy under the lock.
+- [ ] **`claimant_alive`** (`resolve_claimant_alive`) specifically: this probe
+      can perform a **cross-machine SSH check** and intentionally returns
+      *unknown* on failure — it is not a cheap local read like the others.
+      Decide and document an explicit under-lock policy for it: a bounded
+      timeout, and whether "unknown" fails closed (treat as still-live, don't
+      reap) or is otherwise handled — the design must not silently drop this
+      gate, and must not let the lifecycle lock block indefinitely on remote
+      I/O.
 - [ ] Trace exactly how `_hosted_session_blocks_cleanup(latest)` (already
       called under the lock today, in both `cmd_cleanup` and presumably
       `reap_one`) relates to `active_paths`/mux-session liveness — are these
       the *same* liveness signal read two different ways, or genuinely
       independent? Document the answer; don't build a second, divergent
       liveness check if one already exists under the lock.
-- [ ] Confirm `reap_one`'s current shape precisely (what it checks today,
-      what `_reap_worktree` requires as input) so the consolidated function's
-      call-site contract fits both callers without forcing an awkward shim.
+- [ ] Confirm `reap_one`'s current shape precisely, **including its `force`
+      path**: `reap_one` deliberately bypasses `cleanup_disposition` when
+      `force=True`, while still rejecting an active session — the skill
+      documents `--force` as an individually-verified exception, not
+      something this effort should remove or weaken. Document the forced and
+      non-forced contracts **separately** so Phase 2's design doesn't
+      conflate them.
 
 ### Phase 2 — Design the consolidated revalidation function
 
@@ -132,6 +145,15 @@ duplicate or fight an existing mechanism:
       run the **complete** `cleanup_disposition` against all of that —
       returning `(disposition, reason)` rather than a narrowed
       dirty/active-only check.
+- [ ] **The function's return contract must include the fresh record and
+      classification, not only the disposition/reason.** Today's callers
+      still pass the *pre-lock* record/`info` objects into `_reap_worktree`
+      after revalidating — if the revalidator's fresh state isn't threaded
+      through as what actually gets reaped, the delete can act on stale
+      path, branch, or lifecycle metadata even after a correct fresh
+      decision. Make "the reap acts on the revalidated record and
+      classification" part of the contract, not just "the decision was
+      fresh."
 - [ ] Decide explicitly between "recompute everything fresh" (this function
       re-decides from scratch) vs. "fail closed on any detected drift"
       (compare a fingerprint of relevant inputs at scan vs. reap time, abort
@@ -152,31 +174,62 @@ duplicate or fight an existing mechanism:
       proof and before the reap — the consolidated function must fold this
       caller-owned gate into the under-lock decision too, not just the
       signals `cleanup_disposition` itself already covers.
+- [ ] **Define the forced-path contract explicitly and separately from the
+      full revalidation.** `reap_one --force` is meant to remain an
+      individually-verified escape hatch (per the `worktree` skill's
+      documented `--force` semantics from #2635), not a second thing this
+      consolidation silently removes or changes. Specify precisely what a
+      forced reap still re-checks under the lock (at minimum: the existing
+      active-session rejection) versus what only the non-forced path
+      re-checks (the full consolidated disposition) — as two named
+      contracts, not one blended description.
 
 ### Phase 3 — Wire both call sites through it
 
 - [ ] Route `cmd_cleanup`'s batch loop through the consolidated function
       (replacing today's narrower `_revalidate_before_reap` call).
 - [ ] Route `reap_one` (`cleanup --worktree-id <id>`) through the *same*
-      function — this is the actual fix for gap #1; it must not gain its own
-      parallel implementation.
+      function for its **non-forced** path — this is the actual fix for gap
+      #1; it must not gain its own parallel implementation. Its **forced**
+      path keeps the narrower, separately-specified contract from Phase 2
+      (active-session rejection only) — force stays force.
 - [ ] Remove the now-superseded `_revalidate_before_reap` (or fold it into
-      the new function) so there is exactly one revalidation code path left,
-      not two that can drift apart again.
+      the new function) so there is exactly one non-forced revalidation code
+      path left, not two that can drift apart again.
 
 ### Phase 4 — Regression coverage
 
-- [ ] A session attaching to a worktree *after* the initial scan is caught
-      (closes gap #2 — currently only covered as a scan-time case).
-- [ ] A worktree gaining a committed WIP change, a fresh conversation turn,
-      or a held claim/follow-up *after* the scan is caught (closes gap #3 —
-      not covered at all today).
-- [ ] `reap_one` refuses a worktree that became dirty/active/claimed/WIP
-      after its own scan (closes gap #1 — not covered at all today).
-- [ ] A `GONE`-classified worktree whose branch was merged at scan time but
-      becomes unmerged (diverges from the default branch) before the reap is
-      refused, closing the caller-owned branch-merge gate identified in
-      Phase 2.
+Each bullet below is **one named test per signal, per reaper, per mode** —
+not a bundled scenario covering several transitions at once. The full matrix
+crosses: **signal** (dirty, WIP, new conversation turn, held claim,
+follow-up, active session, branch-merge/GONE, claimant-liveness-unknown)
+× **reaper** (batch `cleanup --clean`, single `cleanup --worktree-id`)
+× **mode** (non-forced; forced, for the single-item reaper only, per
+Phase 2's forced-path contract). Concretely, at minimum:
+
+- [ ] Batch, non-forced: dirty-after-scan refused (already covered by
+      #2635 — confirm it still passes through the consolidated function).
+- [ ] Batch, non-forced: active-session-after-scan refused (closes gap #2).
+- [ ] Batch, non-forced: WIP-after-scan refused (closes part of gap #3).
+- [ ] Batch, non-forced: new-conversation-turn-after-scan refused, i.e. an
+      `empty`/`unused` candidate that gained turns and would need
+      `--include-conversations` (closes part of gap #3).
+- [ ] Batch, non-forced: held-claim-or-follow-up-reopened-after-scan
+      refused (closes part of gap #3).
+- [ ] Batch, non-forced: branch-becomes-unmerged-after-scan refused (the
+      `GONE`/branch-merge caller-owned gate).
+- [ ] Batch, non-forced: `claimant_alive` returns unknown under the lock —
+      exercises the exact bounded-wait/fail-closed policy Phase 1/2 define
+      (not just a happy-path alive/gone result).
+- [ ] Single-item (`reap_one`), non-forced: dirty/active/WIP/conversation/
+      claim/follow-up/branch-merge-after-scan each refused, mirroring the
+      batch cases above — this is the direct fix for gap #1 (currently zero
+      coverage).
+- [ ] Single-item (`reap_one`), **forced**: an active session is still
+      rejected (the one check `--force` does not bypass); a merely dirty/WIP/
+      claimed worktree **is** removed when forced (confirms `--force` still
+      works as documented, i.e. this effort does not regress the escape
+      hatch).
 - [ ] Every existing regression test from PR #2635
       (`test_tracking_override.py`, `test_prune.py`) still passes unchanged
       or is updated to call through the new consolidated function without
@@ -186,9 +239,11 @@ duplicate or fight an existing mechanism:
 
 - [ ] Update the `worktree` skill's Cleanup Procedure / dirty-worktree
       section (added in #2635) to describe the **unified** guarantee — both
-      `cleanup --clean` and `cleanup --worktree-id` revalidate the complete
-      safety decision under the lock — so a future reader doesn't have to
-      reverse-engineer this from two PRs' diffs.
+      `cleanup --clean` and `cleanup --worktree-id` (non-forced) revalidate
+      the complete safety decision under the lock, while `--force` remains
+      the documented, narrower, individually-verified exception — so a
+      future reader doesn't have to reverse-engineer this from two PRs'
+      diffs.
 
 ## Validation Plan
 
@@ -196,14 +251,17 @@ duplicate or fight an existing mechanism:
       (or this repo's equivalent bounded test runner) passes in full, with no
       pre-existing-failure caveats beyond ones independently confirmed
       unrelated (as PR #2635 did for `test_knowledge_plugins.py`).
-- [ ] Each of the four Phase 4 regression scenarios has a named, passing test
-      that fails on the pre-effort code and passes after.
+- [ ] Every named test enumerated in Phase 4 exists, is named for the
+      specific signal/reaper/mode it covers (no bundled test standing in for
+      several transitions), fails on the pre-effort code, and passes after.
 - [ ] `tools/check-version-consistency.py` and `tools/check-version-bump.py`
       pass on the implementation PR.
 - [ ] Manual smoke check (documented in the Journal, not just asserted): a
       real worktree finalized, then edited, then fed through **both**
-      `cleanup --clean` and `cleanup --worktree-id <id>` is preserved by
-      both, with a clear skip reason printed.
+      `cleanup --clean` and `cleanup --worktree-id <id>` (non-forced) is
+      preserved by both, with a clear skip reason printed; the same worktree
+      fed through `cleanup --worktree-id <id> --force` is removed, confirming
+      the forced escape hatch still works as documented.
 
 ## Proposal
 
@@ -230,3 +288,32 @@ consolidation/wiring changes land before the plan clears review._
   than three independent patches, since the root cause of gap #1 is
   precisely that two call sites reimplement the same check-then-act shape
   and only one got fixed.
+
+### 2026-09-14 — Review round 1
+
+- Public-safe participant identity: replaced a private machine identity in
+  Participants/Coordination and genericized the cross-repo tracker reference
+  (Context + Journal) to avoid naming private infrastructure in this public
+  effort.
+- Added the `GONE`/branch-merge caller-owned gate (excluded by
+  `cleanup_disposition` itself, currently proven pre-lock by both callers)
+  as an explicit Phase 2 design requirement and Phase 4 regression case.
+
+### 2026-09-14 — Review round 2
+
+- Phase 2's return contract now requires the revalidator's fresh record and
+  classification to be what `_reap_worktree` actually acts on, not just an
+  informational disposition alongside the stale pre-lock objects.
+- Split the forced (`reap_one --force`) and non-forced contracts explicitly
+  throughout Phases 1/2/3/4 and the Validation Plan's manual smoke check —
+  `--force` remains the documented, narrower, individually-verified
+  exception (active-session rejection only); it is not silently absorbed
+  into the full consolidated revalidation.
+- Rewrote Phase 4 and the Validation Plan as a named signal × reaper × mode
+  matrix instead of four bundled scenario bullets, so no implementation can
+  claim completion by testing one representative per bundle.
+- Added the `claimant_alive` cross-machine-probe signal to Phase 1's
+  inventory and Phase 2's design (explicit bounded-timeout / fail-closed
+  policy required) — flagged by the reviewer as a "previously missed"
+  finding in code unchanged since the prior round, but a genuine gap in the
+  plan's own signal inventory.
