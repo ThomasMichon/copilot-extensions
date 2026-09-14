@@ -75,6 +75,19 @@ class TestApplyTrackingOverride:
         out = m._apply_tracking_override(_rec("finalized"), info)
         assert out.state == git_ops.WorktreeState.GONE
 
+    def test_finalized_dirty_worktree_never_masked(self):
+        # A worktree finalized earlier and then modified afterward carries
+        # real, unlanded uncommitted changes the stale finalized/complete/
+        # completed status knows nothing about. Unlike the zero-commit and
+        # squash-merged cases above (already-landed work misread by the raw
+        # classifier), DIRTY here is a correct read of genuinely new content
+        # -- masking it to COMPLETED would let plain `cleanup --clean` delete
+        # it with no `--force` at all.
+        for status in ("finalized", "complete", "completed"):
+            info = _info(git_ops.WorktreeState.DIRTY)
+            out = m._apply_tracking_override(_rec(status), info)
+            assert out.state == git_ops.WorktreeState.DIRTY, status
+
     def test_active_status_is_untouched(self):
         info = _info(git_ops.WorktreeState.ACTIVE, ahead=2, behind=1)
         out = m._apply_tracking_override(_rec("active"), info)

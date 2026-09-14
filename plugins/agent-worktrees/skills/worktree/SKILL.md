@@ -639,14 +639,17 @@ For **every** worktree `cleanup` reports as `dirty`, go in individually:
    reclassifies to whatever the underlying content actually is: `wip` if it
    still carries unmerged commits ahead of the default branch (not pruned
    by plain `cleanup --clean`; that content needs to land first, per step
-   2), or `unused` if it now has no commits at all (needs
-   `--include-unused`, and confirm with the user per the existing "ask
-   before purging unused" rule above — clearing noise doesn't retroactively
-   make a worktree's conversation/planning history disposable). Only a
-   worktree that reclassifies to `completed`/`gone` is pruned by plain
-   `cleanup --clean` with no extra flag. If `cleanup` still skips a
-   worktree you expected to be clear, that reclassification — not `--force`
-   — is the next thing to check.
+   2); `unused` if it now has no commits *and* the session held no
+   conversation turns (needs `--include-unused`); or `conversation-only` if
+   it has no commits but the session *did* hold turns (needs the separate
+   `--include-conversations` flag — `--include-unused` alone does **not**
+   cover this bucket). Confirm with the user per the existing "ask before
+   purging unused" rule above in either case — clearing noise doesn't
+   retroactively make a worktree's conversation/planning history
+   disposable. Only a worktree that reclassifies to `completed`/`gone` is
+   pruned by plain `cleanup --clean` with no extra flag. If `cleanup` still
+   skips a worktree you expected to be clear, that reclassification — not
+   `--force` — is the next thing to check.
 
 If a whole batch of worktrees turns out `dirty` for the **same root
 cause** (e.g. a shared tool stamping every worktree with an identical

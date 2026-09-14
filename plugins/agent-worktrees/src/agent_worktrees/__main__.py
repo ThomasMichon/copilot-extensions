@@ -538,9 +538,21 @@ def _apply_tracking_override(
     live, and hiding it behind COMPLETED strands the row with no lifecycle verb
     (the bb68/ca29 status-tracking bug -- a muxed/lock-held session rendered
     FINAL). Liveness wins over the durable finalize status.
+
+    A **DIRTY** worktree is never masked either: uncommitted working-tree
+    changes made *after* finalization are new, real, unlanded content that the
+    stale ``finalized``/``complete``/``completed`` tracking status knows
+    nothing about -- unlike the two corrected cases above, this isn't a
+    classifier misreading already-landed work, it's genuinely unlanded work
+    the classifier read correctly. Masking it to COMPLETED would let plain
+    ``cleanup --clean`` delete it with no ``--force`` at all.
     """
     if rec.status in ("finalized", "complete", "completed"):
-        if info.state not in (git_ops.WorktreeState.GONE, git_ops.WorktreeState.ACTIVE,):
+        if info.state not in (
+            git_ops.WorktreeState.GONE,
+            git_ops.WorktreeState.ACTIVE,
+            git_ops.WorktreeState.DIRTY,
+        ):
             return dataclasses.replace(info, state=git_ops.WorktreeState.COMPLETED)
     return info
 
