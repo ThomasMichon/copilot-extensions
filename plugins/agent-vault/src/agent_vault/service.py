@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import logging
+import logging.handlers
 import os
 import signal
 import subprocess
@@ -1285,19 +1285,11 @@ def main() -> None:
     log.setLevel(level)
 
     try:
-        # Rotate to bound growth (disk-write-discipline audit finding,
-        # aperture-labs#7018) -- this ran unrotated at a hardcoded DEBUG
-        # level regardless of --verbose.
-        from logging.handlers import RotatingFileHandler
-
-        fh = RotatingFileHandler(
-            str(LOG_FILE), maxBytes=5 * 1024 * 1024, backupCount=3,
-            encoding="utf-8",
-        )
+        fh = logging.handlers.RotatingFileHandler(
+            str(LOG_FILE), maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8")
         fh.setLevel(level)
         fh.setFormatter(logging.Formatter(
-            "%(asctime)s %(name)s [%(levelname)s] %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S"))
+            "%(asctime)s %(name)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
         logging.getLogger().addHandler(fh)
         log.debug("Log file: %s", LOG_FILE)
     except Exception as exc:
