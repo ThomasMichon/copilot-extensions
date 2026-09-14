@@ -61,7 +61,12 @@ def test_posix_catalog_uses_exact_payload_command(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX catalog test")
-def test_catalog_rejects_conflicting_payload_context(tmp_path: Path) -> None:
+def test_catalog_ignores_a_different_plugins_copilot_plugin_root(
+    tmp_path: Path,
+) -> None:
+    """A different plugin's COPILOT_PLUGIN_ROOT must never suppress this
+    plugin's own catalog -- see payload-invocation's own equivalent fix
+    (copilot-extensions #2650 fallout)."""
     env = _env()
     env["COPILOT_PLUGIN_ROOT"] = str(PLUGIN.parent)
     result = subprocess.run(
@@ -72,7 +77,8 @@ def test_catalog_rejects_conflicting_payload_context(tmp_path: Path) -> None:
         env=env,
         cwd=_repo(tmp_path),
     )
-    assert json.loads(result.stdout) == {}
+    envelope = json.loads(result.stdout)
+    assert envelope.get("additionalContext")
 
 
 def test_powershell_catalog_declares_same_schema_and_command() -> None:
@@ -81,7 +87,6 @@ def test_powershell_catalog_declares_same_schema_and_command() -> None:
     )
     assert "copilot-extensions.session-command-catalog" in source
     assert "bin\\agent-index.ps1" in source
-    assert "COPILOT_PLUGIN_ROOT" in source
 
 
 @pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh is not installed")
