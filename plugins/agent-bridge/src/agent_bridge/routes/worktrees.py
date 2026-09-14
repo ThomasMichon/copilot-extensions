@@ -207,13 +207,39 @@ class WorktreeDiscoveryCache:
 
         Uses the crawl lock to prevent concurrent callers from stampeding
         multiple crawls simultaneously.
+
+        worktree-finality-and-obligations (Phase 5): this FIRST, blocking
+        crawl never attempts ``--classify`` -- it mirrors the Picker's own
+        fast-then-classify two-phase pattern (``picker_tui.data_ssh``) so a
+        slow or old target never turns "no cache yet" into an ~90s stall for
+        whichever request happens to arrive first (classify's own timeout
+        budget plus a legacy fallback). A classify pass is kicked off as a
+        fire-and-forget background backfill immediately after, so the
+        closure descriptor still populates without blocking this response.
         """
         if self._cache or not self._resolver:
             return
         async with self._crawl_lock:
             if self._cache:
                 return
-            await self._do_crawl(self._resolver)
+            await self._do_crawl(self._resolver, classify=False)
+        asyncio.create_task(
+            self._backfill_classify(self._resolver), name="worktree-classify-backfill",
+        )
+
+    async def _backfill_classify(self, resolver: AgentResolver) -> None:
+        """Fire-and-forget classify backfill after the fast first paint.
+
+        Best-effort: any failure just leaves the cache at its unclassified
+        (no ``closure``) state until the next successful crawl.
+        """
+        try:
+            if self._crawl_lock.locked():
+                return
+            async with self._crawl_lock:
+                await self._do_crawl(resolver, classify=True)
+        except Exception:
+            log.exception("Worktree classify backfill failed")
 
     async def crawl(self, resolver: AgentResolver) -> None:
         """Crawl all eligible agents -- **single-flight**.
@@ -237,13 +263,16 @@ class WorktreeDiscoveryCache:
             async with self._crawl_lock:
                 return
         async with self._crawl_lock:
-            await self._do_crawl(resolver)
+            await self._do_crawl(resolver, classify=True)
 
-    async def _do_crawl(self, resolver: AgentResolver) -> None:
+    async def _do_crawl(self, resolver: AgentResolver, *, classify: bool = True) -> None:
         """Crawl all eligible agents concurrently (the actual work).
 
         Callers hold ``_crawl_lock`` around this, so at most one crawl's worth of
-        ``list`` subprocesses is ever in flight.
+        ``list`` subprocesses is ever in flight. ``classify=False`` is the fast,
+        bounded first-paint pass (:meth:`crawl_if_empty`); ``classify=True`` is
+        the periodic loop and the background backfill, both of which can afford
+        the longer classify budget without blocking a synchronous caller.
         """
         eligible = [
             (name, cfg) for name, cfg in resolver.agents.items()
@@ -253,7 +282,8 @@ class WorktreeDiscoveryCache:
             return
 
         results = await asyncio.gather(
-            *(self._crawl_agent(name, cfg, resolver) for name, cfg in eligible),
+            *(self._crawl_agent(name, cfg, resolver, classify=classify)
+              for name, cfg in eligible),
             return_exceptions=True,
         )
         result = self._governance.recheck("pre-mutation:update-worktree-cache") if self._governance else None
@@ -274,8 +304,16 @@ class WorktreeDiscoveryCache:
         agent_name: str,
         config: AgentConfig,
         resolver: AgentResolver,
+        *,
+        classify: bool = True,
     ) -> list[_WorktreeEntry]:
-        """List worktrees for a single agent via subprocess or SSH."""
+        """List worktrees for a single agent via subprocess or SSH.
+
+        ``classify=False`` skips ``--classify`` entirely (a single legacy call
+        bounded by the base ``_CMD_TIMEOUT``) -- used for the fast, blocking
+        first-paint crawl (:meth:`WorktreeDiscoveryCache.crawl_if_empty`) so a
+        synchronous caller is never exposed to the longer classify budget.
+        """
         if not config.project:
             return []
 
@@ -305,6 +343,13 @@ class WorktreeDiscoveryCache:
                 timeout=timeout,
             )
 
+        legacy_args = ["list", "--json", "--mux-details"]
+        if not classify:
+            raw, _stderr = await _run(legacy_args)
+            if raw is None:
+                return []
+            return _parse_worktree_list(raw, agent_name)
+
         # worktree-finality-and-obligations (Phase 5): --classify is included
         # so the crawl carries the canonical closure descriptor (label,
         # held-claim/follow-up counts, action disposition) through to the
@@ -315,13 +360,15 @@ class WorktreeDiscoveryCache:
         #      calls per worktree can genuinely exceed the base
         #      _CMD_TIMEOUT on a large/slow target) -- a timeout here falls
         #      back to the legacy (unclassified) call rather than dropping
-        #      the whole crawl to [].
+        #      the whole crawl to []. Only reachable from the periodic loop
+        #      or the background backfill (never the blocking first paint --
+        #      see ``classify=False`` above), so this budget never stalls a
+        #      synchronous caller.
         #   2. an explicit "--classify unrecognized" stderr check -- an older
         #      agent-worktrees runtime that doesn't support the flag falls
         #      back the same way, instead of _exec's generic nonzero-exit
         #      handling silently emptying the cache for that agent.
         classify_args = ["list", "--json", "--mux-details", "--classify"]
-        legacy_args = ["list", "--json", "--mux-details"]
 
         raw, stderr = await _run(classify_args, timeout=_CLASSIFY_CMD_TIMEOUT)
         if raw is None:

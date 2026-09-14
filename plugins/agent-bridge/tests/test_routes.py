@@ -1881,7 +1881,7 @@ def test_worktree_discovery_crawl_is_single_flight() -> None:
 
     calls = {"n": 0}
 
-    async def _slow_crawl_agent(name, config, res):
+    async def _slow_crawl_agent(name, config, res, *, classify=True):
         calls["n"] += 1
         await asyncio.sleep(0.2)  # simulate a slow / stuck `list`
         return []
@@ -1918,7 +1918,7 @@ def test_worktree_discovery_crawl_if_empty_no_reentrant_deadlock() -> None:
     resolver.agents = {"local": agent_cfg}
     cache._resolver = resolver
 
-    async def _crawl_agent(name, config, res):
+    async def _crawl_agent(name, config, res, *, classify=True):
         return []
 
     async def _run() -> None:
@@ -1927,6 +1927,43 @@ def test_worktree_discovery_crawl_if_empty_no_reentrant_deadlock() -> None:
 
     asyncio.run(_run())
     assert cache.get_all() == {"local": []}
+
+
+def test_crawl_if_empty_never_blocks_on_classify_budget() -> None:
+    """worktree-finality-and-obligations (Phase 5): the FIRST, blocking crawl
+    (``crawl_if_empty``) must never expose a synchronous caller to the longer
+    classify timeout budget -- it always calls ``_crawl_agent`` with
+    ``classify=False`` and backfills the descriptor via a separate
+    fire-and-forget task, so a slow/old target can only stall the first
+    response by the base (legacy) timeout, never classify's extended one."""
+    import asyncio
+
+    from agent_bridge.routes.worktrees import WorktreeDiscoveryCache
+
+    cache = WorktreeDiscoveryCache(interval=0)
+    agent_cfg = MagicMock()
+    agent_cfg.project = "aw"
+    agent_cfg.worktree_discovery = True
+    agent_cfg.host = None
+    resolver = MagicMock()
+    resolver.agents = {"local": agent_cfg}
+    cache._resolver = resolver
+
+    seen_classify: list[bool] = []
+
+    async def _fake_crawl_agent(name, config, res, *, classify=True):
+        seen_classify.append(classify)
+        return []
+
+    async def _run() -> None:
+        with patch.object(cache, "_crawl_agent", side_effect=_fake_crawl_agent):
+            await asyncio.wait_for(cache.crawl_if_empty(), timeout=5)
+            # Let the fire-and-forget backfill task get scheduled/run too.
+            await asyncio.sleep(0.05)
+
+    asyncio.run(_run())
+    assert seen_classify[0] is False, "first-paint crawl must skip --classify"
+    assert True in seen_classify, "backfill task must still request --classify"
 
 
 def test_crawl_agent_falls_back_when_classify_unsupported() -> None:
