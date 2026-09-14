@@ -704,6 +704,98 @@ def test_native_committed_settings_override_claude_local_conflicts(tmp_path: Pat
     assert summary["count"] == 0
 
 
+def test_harness_committed_marketplace_collision_still_allows_opt_in_override(
+    tmp_path: Path,
+):
+    """A knowledge-repo marketplace redeclaration that merely collides with the
+    harness's own *committed* marketplace name (no operator/native override
+    involved) must not block that marketplace's `name@...` enabledPlugins
+    overrides -- the harness's committed marketplace definition unambiguously
+    wins, and the plugin's own opt-in `false` -> knowledge `true` override
+    logic should still apply undisturbed.
+    """
+    harness = tmp_path / "harness"
+    knowledge = tmp_path / "knowledge"
+    harness.mkdir()
+    knowledge.mkdir()
+    _write_settings(
+        harness,
+        {
+            "extraKnownMarketplaces": {
+                "mine": {"source": {"source": "directory", "path": "./.ai"}}
+            },
+            "enabledPlugins": {"skill@mine": False},
+        },
+    )
+    _write_settings(
+        knowledge,
+        {
+            "extraKnownMarketplaces": {
+                "mine": {"source": {"source": "github", "repo": "stale/redeclare"}}
+            },
+            "enabledPlugins": {"skill@mine": True},
+        },
+    )
+
+    summary = kp.compose(harness, knowledge)
+    overlay = _read_overlay(harness)
+
+    assert overlay["enabledPlugins"]["skill@mine"] is True
+    assert "mine" not in overlay.get("extraKnownMarketplaces", {})
+    assert summary["conflicts"] == {"marketplaces": [], "enabled_plugins": []}
+    assert summary["harness_owned_marketplaces"] == ["mine"]
+    assert summary["enabled_plugins"] == ["skill@mine"]
+
+
+def test_operator_local_marketplace_collision_still_blocks_override(
+    tmp_path: Path,
+):
+    """Unlike a purely committed-tier collision, a collision where the
+    operator's own local/native settings.local.json also redefines the
+    marketplace remains a genuine, unresolved conflict and must still block
+    that marketplace's enabledPlugins overrides.
+    """
+    harness = tmp_path / "harness"
+    knowledge = tmp_path / "knowledge"
+    harness.mkdir()
+    knowledge.mkdir()
+    _write_settings(
+        harness,
+        {
+            "extraKnownMarketplaces": {
+                "mine": {"source": {"source": "directory", "path": "./.ai"}}
+            },
+            "enabledPlugins": {"skill@mine": False},
+        },
+    )
+    _write_settings(
+        harness,
+        {
+            "extraKnownMarketplaces": {
+                "mine": {"source": {"source": "github", "repo": "operator/override"}}
+            },
+        },
+        local=True,
+    )
+    _write_settings(
+        knowledge,
+        {
+            "extraKnownMarketplaces": {
+                "mine": {"source": {"source": "github", "repo": "stale/redeclare"}}
+            },
+            "enabledPlugins": {"skill@mine": True},
+        },
+    )
+
+    summary = kp.compose(harness, knowledge)
+    overlay = _read_overlay(harness)
+
+    assert "skill@mine" not in overlay.get("enabledPlugins", {})
+    assert summary["conflicts"]["marketplaces"] == ["mine"]
+    assert summary["conflicts"]["enabled_plugins"] == ["skill@mine"]
+    assert summary["harness_owned_marketplaces"] == []
+
+
 def test_unpaired_resolution_is_successful_noop_without_writing(
     tmp_path: Path, monkeypatch
 ):

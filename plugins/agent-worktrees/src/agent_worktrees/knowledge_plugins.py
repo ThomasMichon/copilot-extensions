@@ -156,6 +156,37 @@ def _read_harness_settings(
     )
 
 
+def _read_harness_committed_marketplaces(repo_dir: Path) -> dict[str, dict]:
+    """Read only the harness's committed (non-local) marketplace declarations.
+
+    Used to tell apart a knowledge-repo marketplace-name collision that is
+    purely with the harness's own *committed* definition (well-defined: the
+    committed value always wins, and this must not gate ``name@...``
+    enabledPlugins overrides for that marketplace) from one where an
+    operator's own local/native override also participates (genuinely
+    ambiguous, so it must still gate plugin overrides). Malformed committed
+    settings are treated as absent here; ``_read_harness_settings`` already
+    surfaces that as a hard error elsewhere in the same compose pass.
+    """
+    marketplaces: dict[str, dict] = {}
+    for rel in SETTINGS_RELS:
+        if rel[-1] == "settings.local.json":
+            continue
+        path = repo_dir.joinpath(*rel)
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        raw_marketplaces = data.get("extraKnownMarketplaces")
+        if isinstance(raw_marketplaces, dict):
+            for name, definition in raw_marketplaces.items():
+                if isinstance(definition, dict):
+                    marketplaces[name] = definition
+    return marketplaces
+
+
 def _normalized_checkout_path(path: Path) -> str:
     return os.path.normcase(os.path.normpath(str(path.resolve())))
 
@@ -590,6 +621,8 @@ def _compose_locked(
 
     candidates: dict[str, dict] = {}
     conflicting_marketplaces: list[str] = []
+    harness_owned_marketplaces: set[str] = set()
+    harness_committed_marketplaces = _read_harness_committed_marketplaces(harness)
     for name, definition in sorted(desired_marketplaces.items()):
         if name in local_names and name in marketplaces:
             if not markerless_legacy or name not in proven_legacy_names:
@@ -599,8 +632,20 @@ def _compose_locked(
         if base_definition is None:
             candidates[name] = definition
         elif base_definition != definition:
-            # The generic harness base remains authoritative on name collision.
-            conflicting_marketplaces.append(name)
+            committed_definition = harness_committed_marketplaces.get(name)
+            if committed_definition is not None and committed_definition == base_definition:
+                # The collision is purely with the harness's own *committed*
+                # marketplace declaration -- e.g. the harness's own local
+                # in-repo marketplace, incidentally redeclared elsewhere
+                # (differently) by the knowledge repo. No operator/native
+                # override participated, so resolution is well-defined (the
+                # harness's committed value always wins): don't cascade this
+                # into blocking `name@...` enabledPlugins overrides below,
+                # unlike a genuine ambiguous collision.
+                harness_owned_marketplaces.add(name)
+            else:
+                # The generic harness base remains authoritative on name collision.
+                conflicting_marketplaces.append(name)
 
     managed_marketplaces: dict[str, dict] = {}
     for name, definition in candidates.items():
@@ -694,6 +739,7 @@ def _compose_locked(
             "marketplaces": sorted(set(conflicting_marketplaces)),
             "enabled_plugins": sorted(set(conflicting_enabled)),
         },
+        "harness_owned_marketplaces": sorted(harness_owned_marketplaces),
     }
 
 
