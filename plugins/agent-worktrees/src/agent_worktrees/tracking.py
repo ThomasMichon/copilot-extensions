@@ -1131,7 +1131,12 @@ from .tracking_controller_relations import (
     _normalize_controller_ref,
     _valid_relation_session_id,
     _validate_controller_relation_set,
+    backfill_legacy_controller_relations,  # noqa: F401 -- re-export for tests
+    controller_relation_to_dict,  # noqa: F401 -- re-export for tests
     derive_legacy_controller_relations,  # noqa: F401 -- re-export for callers (e.g. __main__)
+    end_controller_relation,  # noqa: F401 -- re-export for tests
+    remove_controller_relation,  # noqa: F401 -- re-export for tests
+    set_controller_relation,  # noqa: F401 -- re-export for tests
 )
 
 
