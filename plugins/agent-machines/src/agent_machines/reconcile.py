@@ -12,16 +12,18 @@ resolved package union, including authority metadata.
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import hashlib
 import json
-import copy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from . import modules as _modules
 from . import resources as _resources
+from . import self_update as _self_update
+from . import self_update_state as _self_update_state
 from . import validator as _validator
 from .authority import (
     AUTHORITY_MODE_OPAQUE_ADDITIVE,
@@ -160,19 +162,23 @@ def effective_state_hash(
         for key, spec in sorted(pkg.manage.items()):
             if key == "copilot.settings" or key.startswith("copilot.settings."):
                 continue
-            non_settings_manage.append({
+            non_settings_manage.append(
+                {
+                    "package": pkg.name,
+                    "source_repo": pkg.source_repo,
+                    "key": key,
+                    "spec": _without_declaration_authority(spec),
+                }
+            )
+        package_metadata.append(
+            {
                 "package": pkg.name,
                 "source_repo": pkg.source_repo,
-                "key": key,
-                "spec": _without_declaration_authority(spec),
-            })
-        package_metadata.append({
-            "package": pkg.name,
-            "source_repo": pkg.source_repo,
-            "exclude": pkg.exclude,
-            "aliases": pkg.aliases,
-            "bootstrap_floor": pkg.bootstrap_floor,
-        })
+                "exclude": pkg.exclude,
+                "aliases": pkg.aliases,
+                "bootstrap_floor": pkg.bootstrap_floor,
+            }
+        )
     payload = {
         "settings": _settings_operations(resolved),
         "manage": non_settings_manage,
@@ -229,8 +235,9 @@ def plan(
         for pkg, mod in _modules.resolve_modules(resolved, machine, plat)
     ]
     resolved_resources, _ = _resources.resolve_resources(resolved, machine, plat)
-    resource_list = [
-        {
+    resource_list = []
+    for res in resolved_resources:
+        entry = {
             "type": res.type,
             "id": res.id,
             "summary": res.summary(),
@@ -238,8 +245,14 @@ def plan(
             "contributor_details": res.contributor_details,
             "authority_decisions": res.authority_decisions,
         }
-        for res in resolved_resources
-    ]
+        if res.type == "self-update":
+            observed = _self_update_state.observed_plan_fields(res.id)
+            entry["observed"] = observed
+            entry["summary"] = _self_update.format_plan_summary(
+                entry["summary"],
+                observed,
+            )
+        resource_list.append(entry)
     authority_decisions = sort_decisions(
         _validator.settings_authority_decisions(resolved)
         + [
@@ -319,9 +332,7 @@ class RestoreResult:
 
     @property
     def ok(self) -> bool:
-        return all(r.ok for r in self.resource_results) and all(
-            r.ok for r in self.module_results
-        )
+        return all(r.ok for r in self.resource_results) and all(r.ok for r in self.module_results)
 
 
 class RestoreValidationError(RuntimeError):
@@ -386,8 +397,12 @@ def restore(
 
 
 _SURFACE_ONLY_NAMES = {
-    "copilot.settings", "copilot.permissions", "copilot.trustedFolders",
-    "settings", "permissions", "trustedFolders",
+    "copilot.settings",
+    "copilot.permissions",
+    "copilot.trustedFolders",
+    "settings",
+    "permissions",
+    "trustedFolders",
 }
 
 

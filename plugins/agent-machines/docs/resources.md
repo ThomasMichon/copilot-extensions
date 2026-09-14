@@ -29,6 +29,9 @@ resources:
     strategy: ensure-present    # enforce | ensure-present
     content: |
       set -g mouse on
+  - type: self-update
+    tier: watchdog              # watchdog | sweep
+    state: present              # present (default) | absent
 ```
 
 ## Resource types
@@ -190,6 +193,28 @@ sees drift and retries. A failed query or post-apply mismatch is an error rather
 than a success-shaped fallback. `state` is not supported: power settings are
 always declarations of desired AC/DC indexes.
 
+### `self-update`
+
+Declare machine-local opt-in for one unattended `agent-machines self-update`
+tier. Identity is `tier`, so `watchdog` and `sweep` are independent resources
+with independent authority and locking.
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `type` | yes | `self-update` |
+| `tier` | yes | `watchdog` or `sweep`. |
+| `state` | no | `present` (opted in; default) or `absent` (opted out). |
+| `platforms` | no | Restrict to a subset of `windows` / `linux` / `wsl`. |
+| `gate` | no | Restrict to specific machines (defaults to the package gate). |
+| `owner` | no | Override the collision owner label (defaults to the package name). |
+
+`watchdog` is the narrow hourly dtssh-launcher liveness tier; `sweep` is the
+broader daily pull + plugin-reconcile + restore tier. Declaring the resource is
+only the authority-selected opt-in signal. `agent-machines self-update run`
+resolves that signal first and is a clean no-op when the selected tier is
+absent. The actual Windows Scheduled Task registration lands in the later
+installer/reconciliation phase of this effort.
+
 ## Path anchors
 
 | Anchor | Resolves to |
@@ -226,6 +251,7 @@ compatibility data from lower-authority declarations remain effective:
 | registry conflicting `value` or `value_type` | highest field authority wins; equal-highest disagreement errors |
 | feature `present` + `absent` | highest authority wins; equal-highest disagreement errors |
 | power setting conflicting `ac` or `dc` value | highest authority for that power source wins; equal-highest disagreement errors |
+| self-update `present` + `absent` | highest authority wins; equal-highest disagreement errors |
 
 File `format` and `content` are selected from declarations participating in the
 winning strategy (`enforce` when present, otherwise `ensure-present`), so
