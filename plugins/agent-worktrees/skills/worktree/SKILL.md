@@ -298,6 +298,17 @@ borrowed CodeSpace/container, or a bridge session it brought into being -- the
 is `block`), refusing *before* any destructive step so the worktree stays intact.
 The error lists each unsettled obligation. Resolve it -- don't bypass:
 
+> **Itemize what you're leaving open -- don't just flip a flag.** Paused
+> mid-effort, mid-bug, or mid-task series? Name it explicitly:
+> `<agent-worktrees catalog argv[0]> follow-ups add "<summary>" --ref
+> effort:<slug>` (or `--ref issue:<repo>#<n>` for a bug you filed that's
+> related to the current task -- claim it proactively rather than letting it
+> drift unattached). An open follow-up item blocks `cleanup`/`gc` the same way
+> a held claim does, and only resolves when you `follow-ups resolve <id>` or
+> `dismiss <id> --reason <text>` -- the operator, not an idle timer, decides
+> when it's really done. `status --follow-up --summary "..."` remains a
+> shorthand for the boolean-only legacy case.
+
 - **A cross-repo worktree you created** -- finalize *it* first; its finalize
   flips this worktree's claim to `at-rest` automatically (no manual step).
 - **A borrowed CodeSpace/container** -- merge or move its work off-box, then

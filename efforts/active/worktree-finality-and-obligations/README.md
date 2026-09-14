@@ -211,22 +211,45 @@ _Verbatim operator request; original spelling and punctuation preserved._
   a later reopen to read back.
 
 ### Phase 3 - Replace the boolean-only follow-up model
-- [ ] Add a migration-free `FollowUpRecord` list with stable IDs, summary,
+- [x] Add a migration-free `FollowUpRecord` list with stable IDs, summary,
   state, timestamps, typed objective references, per-item revisions/tombstones,
-  and a monotonic ledger revision protected by the record merge path.
-- [ ] Add explicit list/add/resolve/dismiss and offer/accept/decline transfer CLI
-  operations; transfer remains source-owned until acceptance commits.
-- [ ] Keep `status --follow-up --summary` as a compatibility shorthand and
-  continue emitting `follow_up` as the derived open-obligation boolean.
-- [ ] Treat active effort bindings and legacy `follow_up=true` records as
-  effective open obligations with explicit local clear/transfer paths, without
-  pretending to infer completion from another repository.
-- [ ] Add a `kind: issue` follow-up ref and guidance (`file-issue` skill +
-  `worktree` skill) directing an agent to open a follow-up referencing any
-  issue it files that is closely related to its current worktree's task, so a
-  proactively-filed bug remains this worktree's obligation (open until
-  resolved, explicitly dismissed as unrelated, or transferred) instead of
-  silently dropping out of view once local Git state is clean.
+  and a monotonic ledger revision protected by the record merge path. Landed as
+  `tracking.FollowUpRecord`/`FollowUpRef` + `WorktreeRecord.follow_ups`
+  (YAML-round-tripped, emitted only when non-empty). Revision bumps on every
+  mutation; deletion is a tombstone (state flips to
+  resolved/dismissed/transferred, never a list removal) so history and
+  revision continuity survive -- but the **cross-writer merge-by-highest-
+  revision path itself is not implemented yet** (see the unchecked
+  concurrency item below and Validation Plan's **Concurrency** row).
+- [x] Add explicit list/add/resolve/dismiss ... CLI operations (`follow-ups
+  [id]`, `follow-ups add <summary> [--ref kind:value]...`, `follow-ups
+  resolve <id> [--result-ref <ref>]`, `follow-ups dismiss <id> --reason
+  <text>`). **`offer`/`accept`/`decline` transfer is NOT implemented** --
+  `claim_handoffs.py` itself only has offer/decline/cancel (no `accept`) so
+  there's no existing acceptance machinery to route a follow-up transfer
+  through yet.
+- [x] Keep `status --follow-up --summary` as a compatibility shorthand and
+  continue emitting `follow_up` as the derived open-obligation boolean. The
+  CLI flag itself is unchanged; `tracking.effective_open_follow_up_count`
+  is the new derivation point (itemized open/pending-transfer items, falling
+  back to the legacy boolean only when the ledger is empty -- no double
+  counting). `set_disposition`'s `follow_up=True` path now also reopens a
+  `finalized` owner (closing a related gap: `effort-focus bind`'s automatic
+  `follow_up=True` previously didn't reopen a finalized record at all).
+- [x] Treat active effort bindings ... as effective open obligations. Turns
+  out this was **already correct** pre-existing behavior: `effort-focus
+  bind` already calls `set_disposition(follow_up=True, ...)`, which
+  `effective_open_follow_up_count` picks up via the legacy-boolean fallback
+  -- no new code needed beyond the reopen fix above. Legacy
+  `follow_up=true` records with no itemized entries are handled the same way
+  (one synthetic open item).
+- [x] Add a `kind: issue` follow-up ref and guidance. `FollowUpRefKind`
+  includes `issue` (plus `dispatch-task`/`pull-request`/`file`/`effort`/
+  `resource-claim`/`other`); the `worktree` skill's obligation-gate section
+  now explicitly tells an agent to `follow-ups add "<summary>" --ref
+  issue:<repo>#<n>` for a bug it files related to the current task. The
+  `file-issue` skill itself was **not** touched (cross-repo, aperture-labs-
+  owned) -- that pointer is the follow-up work.
 
 ### Phase 4 - Derive canonical finality once
 - [ ] Add a versioned faceted descriptor that preserves Git state, tracking
@@ -320,10 +343,14 @@ _Verbatim operator request; original spelling and punctuation preserved._
 - [ ] **Claim-free:** active and at-rest claims both prevent `FINAL`; only
   released and abandoned claims are excluded from the held count, and abandoned
   claims remain visible in audit detail.
-- [ ] **Follow-up list:** multiple open obligations produce the exact count and
-  list; resolving or transferring one changes the count atomically.
-- [ ] **Legacy:** a boolean-only `follow_up=true` record remains blocked and
-  gains a safe explicit representation on its next mutation.
+- [x] **Follow-up list:** multiple open obligations produce the exact count and
+  list; resolving or transferring one changes the count atomically. Covered for
+  add/resolve/dismiss (`test_tracking.py::TestFollowUpLedger`,
+  `test_follow_ups_cmd.py`); no transfer path exists yet to test.
+- [x] **Legacy:** a boolean-only `follow_up=true` record remains blocked
+  (`effective_open_follow_up_count` falls back to it) -- but it does **not**
+  yet "gain a safe explicit representation on its next mutation" (auto-
+  materializing a legacy boolean into an itemized entry is unimplemented).
 - [ ] **Ownership:** resource-claim and dispatch-task references do not transfer,
   settle, release, or complete the referenced object implicitly.
 - [ ] **Git:** open/unmerged pull requests, dirty files, local-only commits, and
@@ -457,4 +484,48 @@ The approved design is the faceted model in [design.md](design.md):
 - `python tools/run-plugin-tests.py agent-worktrees` -- 516 passed (full suite
   minus the same two pre-existing, unrelated `test_knowledge_plugins.py`
   failures noted in the prior entry).
+
+### 2026-09-13 - Phase 3: itemized follow-up ledger + a third pre-existing gap closed
+- Operator said "keep driving." Bound a fresh worktree at Phase 3
+  (`effort-focus bind ... --slice "Phase 3 - Replace the boolean-only
+  follow-up model"`).
+- Added `tracking.FollowUpRecord`/`FollowUpRef` + `WorktreeRecord.follow_ups`
+  (YAML round-tripped, emitted only when non-empty) and the CRUD primitives
+  `add_follow_up`/`resolve_follow_up`/`dismiss_follow_up` +
+  `effective_open_follow_up_count` (itemized open/pending-transfer items,
+  falling back to the legacy boolean only when the ledger is empty -- no
+  double counting). `add_follow_up` reopens a `finalized` owner through the
+  same `reopen_finalized_owner` transaction Phase 2 built.
+- New CLI verb `agent-worktrees follow-ups [id|add|resolve|dismiss]`
+  (`--ref kind:value` repeatable on `add`; kinds include `issue` per the
+  operator's "encourage the agent to claim bugs it files proactively" ask).
+  `offer`/`accept`/`decline` transfer is **not implemented** -- there's no
+  existing acceptance machinery to route through (`claim_handoffs.py` itself
+  only has offer/decline/cancel).
+- Wired `prune.cleanup_disposition`'s existing follow-up gate to
+  `effective_open_follow_up_count` (was the raw `rec.follow_up` boolean) and
+  the two `gc.classify_managed_worktree` call sites in `__main__.py` the same
+  way, so an itemized open follow-up blocks cleanup/GC exactly like the
+  legacy boolean did.
+- **Found and fixed a third pre-existing gap** while implementing the
+  "keep `status --follow-up` as compat" bullet: `effort-focus bind` calls
+  `tracking.set_disposition(follow_up=True, ...)` directly, but
+  `set_disposition` itself never reopened a `finalized` owner -- only the
+  manual `status --follow-up` CLI path had its own explicit pre-check. So
+  binding an effort to an already-finalized worktree set the flag but left
+  `status: finalized` in place. Moved the reopen call into `set_disposition`
+  itself (any `follow_up=True` assertion now reopens consistently), verified
+  active-effort-binding compat was otherwise already correct pre-existing
+  behavior (no new code needed there beyond this fix).
+- Updated `docs/cli-reference.md` (new `follow-ups` row) and the `worktree`
+  skill's obligation-gate section (proactive issue-claiming guidance, tying
+  back to the operator's explicit ask from the prior session).
+- **Not done:** cross-writer merge-by-highest-revision reconciliation for
+  concurrent follow-up mutations (the per-item `revision` field exists but
+  nothing merges by it yet); `offer`/`accept`/`decline` transfer; auto-
+  materializing a legacy boolean into an itemized entry on its next mutation;
+  Phase 4-6 entirely.
+- `python tools/run-plugin-tests.py agent-worktrees` -- 525 passed (full suite
+  minus the same two pre-existing, unrelated `test_knowledge_plugins.py`
+  failures noted in prior entries).
 

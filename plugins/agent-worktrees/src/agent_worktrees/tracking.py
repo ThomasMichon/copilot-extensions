@@ -9,6 +9,7 @@ from __future__ import annotations
 import math
 import os
 import re
+import secrets
 import tempfile
 import threading
 from collections.abc import Callable, Iterable
@@ -537,6 +538,132 @@ class ResourceClaim:
         return obligations.is_abandoned(self.state)
 
 
+#: Recognized states for a `FollowUpRecord` (worktree-finality-and-obligations,
+#: Phase 3). ``open``/``pending-transfer`` count as effective open obligations
+#: (block finality); ``resolved``/``dismissed``/``transferred`` do not.
+FollowUpState = Literal[
+    "open", "resolved", "dismissed", "pending-transfer", "transferred",
+]
+
+FOLLOW_UP_OPEN: FollowUpState = "open"
+FOLLOW_UP_RESOLVED: FollowUpState = "resolved"
+FOLLOW_UP_DISMISSED: FollowUpState = "dismissed"
+FOLLOW_UP_PENDING_TRANSFER: FollowUpState = "pending-transfer"
+FOLLOW_UP_TRANSFERRED: FollowUpState = "transferred"
+
+#: States that still count as this worktree's obligation.
+_FOLLOW_UP_EFFECTIVE_OPEN: frozenset[str] = frozenset(
+    {FOLLOW_UP_OPEN, FOLLOW_UP_PENDING_TRANSFER})
+
+#: Recognized ``kind`` values for a follow-up's typed objective reference.
+FollowUpRefKind = Literal[
+    "resource-claim", "dispatch-task", "issue", "pull-request", "file",
+    "effort", "other",
+]
+
+
+@dataclass
+class FollowUpRef:
+    """One typed pointer from a follow-up to the objective it tracks.
+
+    The referenced subsystem (its own claim ledger, the issue tracker, the PR
+    provider, ...) remains authoritative for its own lifecycle -- this is a
+    cross-reference, never a second owner (design invariant #4).
+    """
+
+    kind: FollowUpRefKind = "other"
+    ref: str = ""
+
+
+@dataclass
+class FollowUpRecord:
+    """One itemized worktree-local obligation (worktree-finality-and-obligations,
+    Phase 3 -- replaces the boolean-only ``follow_up`` flag).
+
+    A follow-up may point at a resource claim, dispatch task, issue, pull
+    request, file, effort, or other durable objective (``refs``), but it does
+    not duplicate ownership from the subsystem that owns the referenced object
+    -- resolving/dismissing/transferring a follow-up never mutates the
+    referenced object's own state.
+
+    ``revision`` is a per-item monotonic counter (bumped on every mutation) so
+    the record merge path can reconcile concurrent writers by highest revision
+    per ID rather than by list-replacement (stale background stamp writes must
+    never drop, resurrect, or reorder a concurrently-mutated item). Deletion is
+    a tombstone (``dismissed``/``transferred``/``resolved`` with the item kept,
+    never a list removal) so history and revision continuity survive.
+    """
+
+    id: str
+    summary: str
+    state: FollowUpState = FOLLOW_UP_OPEN
+    revision: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+    refs: list[FollowUpRef] = field(default_factory=list)
+    result_ref: str | None = None
+    transfer_target: str | None = None  # qualified ref while pending-transfer
+    reason: str = ""  # dismiss/transfer reason, optional
+
+    @property
+    def is_effective_open(self) -> bool:
+        """True while this follow-up still counts as an open obligation."""
+        return self.state in _FOLLOW_UP_EFFECTIVE_OPEN
+
+    def to_dict(self) -> dict:
+        d: dict = {
+            "id": self.id,
+            "summary": self.summary,
+            "state": self.state,
+            "revision": self.revision,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+        if self.refs:
+            d["refs"] = [{"kind": r.kind, "ref": r.ref} for r in self.refs]
+        if self.result_ref:
+            d["result_ref"] = self.result_ref
+        if self.transfer_target:
+            d["transfer_target"] = self.transfer_target
+        if self.reason:
+            d["reason"] = self.reason
+        return d
+
+    @staticmethod
+    def from_dict(data: dict) -> "FollowUpRecord":
+        raw_refs = data.get("refs") or []
+        refs = [
+            FollowUpRef(kind=str(r.get("kind", "other")), ref=str(r.get("ref", "")))
+            for r in raw_refs if isinstance(r, dict)
+        ]
+        state = str(data.get("state", FOLLOW_UP_OPEN))
+        if state not in (FOLLOW_UP_OPEN, FOLLOW_UP_RESOLVED, FOLLOW_UP_DISMISSED,
+                        FOLLOW_UP_PENDING_TRANSFER, FOLLOW_UP_TRANSFERRED):
+            state = FOLLOW_UP_OPEN
+        # YAML may parse a bare ISO timestamp into a datetime -- normalize
+        # back to text (mirrors the completed_at/last_finalized_at handling
+        # in load_record).
+        created_raw = data.get("created_at", "")
+        if hasattr(created_raw, "isoformat"):
+            created_raw = created_raw.isoformat()
+        updated_raw = data.get("updated_at", "")
+        if hasattr(updated_raw, "isoformat"):
+            updated_raw = updated_raw.isoformat()
+        return FollowUpRecord(
+            id=str(data.get("id", "")),
+            summary=str(data.get("summary", "")),
+            state=state,  # type: ignore[arg-type]
+            revision=int(data.get("revision", 1) or 1),
+            created_at=str(created_raw or ""),
+            updated_at=str(updated_raw or ""),
+            refs=refs,
+            result_ref=(str(data["result_ref"]) if data.get("result_ref") else None),
+            transfer_target=(str(data["transfer_target"])
+                             if data.get("transfer_target") else None),
+            reason=str(data.get("reason", "") or ""),
+        )
+
+
 @dataclass
 class ControllerRelation:
     """One authoritative controller relationship for a child worktree.
@@ -687,6 +814,13 @@ class WorktreeRecord:
     # finalized as of X" once `completed_at` is cleared by the reopen -- see
     # `reopen_finalized_owner`. Never set except by a reopen transition.
     last_finalized_at: str | None = None
+    # worktree-finality-and-obligations, Phase 3: the itemized follow-up
+    # ledger replacing the boolean-only flag above. `follow_up` (the legacy
+    # boolean) is preserved as-is for back-compat callers/YAMLs and is treated
+    # as one synthetic effective-open item when no explicit items exist (see
+    # `effective_open_follow_up_count`) -- it is NOT auto-migrated into this
+    # list. Absent/empty keeps legacy YAML byte-identical.
+    follow_ups: list[FollowUpRecord] = field(default_factory=list)
     # One worktree-local pointer to the canonical effort and declared slice.
     # It is identity, not a second responsibility flag: an open binding derives
     # the existing follow_up/summary status core. Absent keeps legacy YAML
@@ -1914,6 +2048,12 @@ def load_record(path: Path) -> WorktreeRecord:
     elif hasattr(completed_raw, "isoformat"):
         completed_raw = completed_raw.isoformat()
 
+    # worktree-finality-and-obligations: same YAML-parses-bare-timestamp
+    # gotcha as completed_at above.
+    last_finalized_raw = data.get("last_finalized_at")
+    if hasattr(last_finalized_raw, "isoformat"):
+        last_finalized_raw = last_finalized_raw.isoformat()
+
     # #4057: YAML may parse an ISO timestamp into a datetime -- normalize back to
     # an isoformat string (mirrors started_at/last_resumed_at handling) so the
     # stamp round-trips as text, not "2026-07-31 20:00:00".
@@ -2213,6 +2353,16 @@ def load_record(path: Path) -> WorktreeRecord:
             if isinstance(raw, dict) and raw.get("ref"):
                 resources_list.append(_parse_claim_mapping(raw))
 
+    # worktree-finality-and-obligations Phase 3: itemized follow-up ledger.
+    # Absent in un-annotated worktrees, so legacy records parse to an empty
+    # list and re-serialize byte-identically.
+    follow_ups_list: list[FollowUpRecord] = []
+    raw_follow_ups = data.get("follow_ups")
+    if isinstance(raw_follow_ups, list):
+        for raw in raw_follow_ups:
+            if isinstance(raw, dict) and raw.get("id"):
+                follow_ups_list.append(FollowUpRecord.from_dict(raw))
+
     head_transitions: list[HeadTransition] = []
     raw_transitions = data.get("head_transitions")
     if isinstance(raw_transitions, list):
@@ -2450,14 +2600,14 @@ def load_record(path: Path) -> WorktreeRecord:
                    if data.get("owner_ref") else None),
         resources=resources_list,
         follow_up=bool(data.get("follow_up", False)),
+        follow_ups=follow_ups_list,
         summary=str(data.get("summary", "") or ""),
         active_effort=active_effort_from_mapping(data.get("active_effort")),
         effort_revision=int(data.get("effort_revision", 0) or 0),
         title_asserted=bool(data.get("title_asserted", False)),
         status_note_at=(str(data["status_note_at"])
                         if data.get("status_note_at") else None),
-        last_finalized_at=(str(data["last_finalized_at"])
-                        if data.get("last_finalized_at") else None),
+        last_finalized_at=(str(last_finalized_raw) if last_finalized_raw else None),
         mux_live=(bool(data["mux_live"])
                   if data.get("mux_live") is not None else None),
         mux_live_at=(str(mux_live_at_raw) if mux_live_at_raw else None),
@@ -2989,6 +3139,16 @@ def _save_record_unlocked(
             sort_keys=False,
         )
 
+    # worktree-finality-and-obligations Phase 3: itemized follow-up ledger.
+    # Emitted only when non-empty, keeping legacy YAMLs (boolean-only
+    # `follow_up`) identical.
+    if record.follow_ups:
+        content += yaml.safe_dump(
+            {"follow_ups": [fu.to_dict() for fu in record.follow_ups]},
+            default_flow_style=False,
+            sort_keys=False,
+        )
+
     # Serialize PR records.  Emit the multi-PR ``prs:`` list and mirror the
     # active PR to a legacy ``pr:`` block for one release, so a same-machine
     # tool *downgrade* still finds the active PR.  Zero-PR worktrees emit
@@ -3424,6 +3584,13 @@ def set_disposition(
     if follow_up is not None:
         record.follow_up = follow_up
         changed.append("follow_up")
+        # worktree-finality-and-obligations Phase 3: any caller that asserts a
+        # NEW open obligation via the legacy boolean (manual `status
+        # --follow-up`, or `effort-focus bind`'s automatic follow_up=True)
+        # reopens a finalized owner too -- not just the itemized ledger path
+        # in `add_follow_up`. Idempotent/no-op when already non-finalized.
+        if follow_up and record.status == "finalized":
+            reopen_finalized_owner(record, reason="follow_up flag set")
     record.status_note_at = _now_iso()
     if changed:
         disposition_history.append(
@@ -4489,6 +4656,117 @@ def settle_resource_claim(
     if save:
         save_record(record, path)
     return match
+
+
+# ── Follow-up ledger CRUD (worktree-finality-and-obligations, Phase 3) ──────
+
+def effective_open_follow_up_count(record: WorktreeRecord) -> int:
+    """The number of obligations this worktree's follow-up model reports open.
+
+    Sums explicit ``open``/``pending-transfer`` ``FollowUpRecord`` items. When
+    the itemized list is empty, the legacy boolean ``follow_up`` contributes
+    one synthetic open item (compatibility -- see the Phase 3 design), so an
+    un-migrated record still counts as having an obligation. An active effort
+    binding is a SEPARATE compatibility source (not counted here; callers that
+    also want that signal add it themselves) since this worktree cannot
+    observe another repository's effort completion.
+    """
+    items_open = sum(1 for fu in record.follow_ups if fu.is_effective_open)
+    if items_open:
+        return items_open
+    return 1 if record.follow_up else 0
+
+
+def _follow_up_id(id_factory: Callable[[], str] | None = None) -> str:
+    make = id_factory or (lambda: secrets.token_hex(4))
+    return f"fu-{make()}"
+
+
+def add_follow_up(
+    record: WorktreeRecord,
+    summary: str,
+    *,
+    refs: list[FollowUpRef] | None = None,
+    id_factory: Callable[[], str] | None = None,
+    save: bool = True,
+) -> FollowUpRecord:
+    """Journal a new open follow-up onto ``record`` (Phase 3).
+
+    Reopens a currently-``finalized`` owner (a new open obligation always
+    increases the held-obligation set -- see the reopen table in
+    ``design.md``). ``finalizing``/``orphaned`` are hard-reject states, mirroring
+    ``add_resource_claim``.
+    """
+    if record.status in {"finalizing", "orphaned"}:
+        raise ValueError(
+            f"owner worktree {record.worktree_id} is {record.status}; "
+            "creator ownership is frozen")
+    now = _now_iso()
+    item = FollowUpRecord(
+        id=_follow_up_id(id_factory),
+        summary=summary,
+        state=FOLLOW_UP_OPEN,
+        revision=1,
+        created_at=now,
+        updated_at=now,
+        refs=list(refs or []),
+    )
+    record.follow_ups.append(item)
+    if record.status == "finalized":
+        reopen_finalized_owner(record, reason=f"new follow-up {item.id}")
+    if save:
+        save_record(record)
+    return item
+
+
+def _resolve_follow_up_item(
+    record: WorktreeRecord, follow_up_id: str,
+) -> FollowUpRecord | None:
+    return next((fu for fu in record.follow_ups if fu.id == follow_up_id), None)
+
+
+def resolve_follow_up(
+    record: WorktreeRecord,
+    follow_up_id: str,
+    *,
+    result_ref: str | None = None,
+    save: bool = True,
+) -> FollowUpRecord | None:
+    """Mark a follow-up ``resolved`` (does not reopen; only decreases open count).
+
+    Returns ``None`` (no-op) when no item matches the ID -- degrade-safe, like
+    ``settle_resource_claim``.
+    """
+    item = _resolve_follow_up_item(record, follow_up_id)
+    if item is None:
+        return None
+    item.state = FOLLOW_UP_RESOLVED
+    item.result_ref = result_ref
+    item.updated_at = _now_iso()
+    item.revision += 1
+    if save:
+        save_record(record)
+    return item
+
+
+def dismiss_follow_up(
+    record: WorktreeRecord,
+    follow_up_id: str,
+    *,
+    reason: str,
+    save: bool = True,
+) -> FollowUpRecord | None:
+    """Mark a follow-up ``dismissed`` (explicitly not requiring action)."""
+    item = _resolve_follow_up_item(record, follow_up_id)
+    if item is None:
+        return None
+    item.state = FOLLOW_UP_DISMISSED
+    item.reason = reason
+    item.updated_at = _now_iso()
+    item.revision += 1
+    if save:
+        save_record(record)
+    return item
 
 
 def sweep_abandoned_obligations(
