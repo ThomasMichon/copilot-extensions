@@ -167,3 +167,31 @@ def test_runtime_spot_check_repairs_only_after_failed_readiness(tmp_path, monkey
 
 def _stub_result() -> R.ResourceResult:
     return R.ResourceResult("file", "conf", changed=False, dry_run=True, action="none")
+
+
+def test_runtime_command_runner_resolves_pathext_shim(monkeypatch):
+    """Regression: `_runtime_command_runner`'s default (non-test-injected)
+    subprocess call must resolve a bare plugin binstub name (a `.cmd` shim on
+    Windows) the same way self_update.default_command_runner does, or the
+    runtime spot-check silently fails with WinError 2 on every real Windows
+    machine despite the binstub genuinely being on PATH."""
+    captured: dict[str, list[str]] = {}
+
+    def fake_which(name):
+        return f"C:\\Users\\tmichon\\.local\\bin\\{name}.cmd" if name == "agent-machines" else None
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+
+        class _Proc:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        return _Proc()
+
+    monkeypatch.setattr(reconcile_module.shutil, "which", fake_which)
+    monkeypatch.setattr(reconcile_module.subprocess, "run", fake_run)
+    reconcile_module._runtime_command_runner(["agent-machines", "installer-readiness"], timeout=60)
+    assert captured["argv"][0] == "C:\\Users\\tmichon\\.local\\bin\\agent-machines.cmd"
+

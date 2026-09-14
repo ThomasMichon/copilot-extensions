@@ -516,6 +516,61 @@ def test_reconcile_task_removes_opted_out_task_without_retry_prompt(monkeypatch,
     assert "elevated PowerShell" not in result.detail
 
 
+def test_default_command_runner_resolves_pathext_shim(monkeypatch):
+    """Regression: on Windows, a bare command name that resolves to a
+    `.cmd`/`.bat` shim (e.g. the `agent-worktrees` binstub) raises
+    FileNotFoundError under subprocess.run(shell=False), because CreateProcess
+    does not apply PATHEXT resolution the way cmd.exe does. Found while
+    dogfooding the sweep tier's `agent-worktrees reconcile-plugins` call on a
+    real Windows machine -- it failed with WinError 2 even though
+    `agent-worktrees` was genuinely on PATH."""
+    captured: dict[str, list[str]] = {}
+
+    def fake_which(name):
+        return f"C:\\Users\\tmichon\\.local\\bin\\{name}.cmd" if name == "agent-worktrees" else None
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+
+        class _Proc:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        return _Proc()
+
+    monkeypatch.setattr(self_update.shutil, "which", fake_which)
+    monkeypatch.setattr(self_update.subprocess, "run", fake_run)
+    result = self_update.default_command_runner(["agent-worktrees", "-p", "dotfiles", "list"])
+    assert captured["argv"][0] == "C:\\Users\\tmichon\\.local\\bin\\agent-worktrees.cmd"
+    # The reported CommandResult.argv still shows the original logical argv
+    # (not the resolved absolute path) so status/log output stays readable.
+    assert result.argv[0] == "agent-worktrees"
+
+
+def test_default_command_runner_leaves_unresolvable_argv0_unchanged(monkeypatch):
+    def fake_which(name):
+        return None
+
+    captured: dict[str, list[str]] = {}
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+
+        class _Proc:
+            returncode = 1
+            stdout = ""
+            stderr = "not found"
+
+        return _Proc()
+
+    monkeypatch.setattr(self_update.shutil, "which", fake_which)
+    monkeypatch.setattr(self_update.subprocess, "run", fake_run)
+    self_update.default_command_runner(["totally-unknown-binary"])
+    assert captured["argv"] == ["totally-unknown-binary"]
+
+
+
 def test_cli_self_update_install_skips_non_opted_in_tier_without_registration(monkeypatch, capsys):
     resource = type("Resource", (), {"desired": {"state": "absent"}})()
     monkeypatch.setattr(

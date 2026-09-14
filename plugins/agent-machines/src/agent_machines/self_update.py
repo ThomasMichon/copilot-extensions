@@ -15,6 +15,7 @@ import ctypes
 import dataclasses
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -430,8 +431,20 @@ def default_command_runner(
     cwd: Path | None = None,
     timeout: int = 1800,
 ) -> CommandResult:
+    # Resolve argv[0] through PATH/PATHEXT before invoking: Windows subprocess
+    # creation (CreateProcess, used when shell=False) does not apply PATHEXT
+    # resolution the way cmd.exe does, so a bare command name that is really a
+    # `.cmd`/`.bat` shim (e.g. the `agent-worktrees` binstub) raises
+    # FileNotFoundError / WinError 2 even though it is genuinely on PATH.
+    # shutil.which() performs the same PATHEXT-aware search cmd.exe does, so
+    # resolving here fixes every unattended self-update caller uniformly.
+    resolved = argv
+    if argv:
+        binary = shutil.which(argv[0])
+        if binary:
+            resolved = [binary, *argv[1:]]
     proc = subprocess.run(  # noqa: S603 - argv list, no shell
-        argv,
+        resolved,
         cwd=str(cwd) if cwd is not None else None,
         capture_output=True,
         text=True,
