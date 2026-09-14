@@ -29,6 +29,13 @@ durable objectives, but they do not duplicate ownership from the subsystem that
 owns the referenced object. Preserve the existing boolean as a derived
 compatibility field.
 
+An agent that files an issue closely related to its current worktree's task
+should proactively open a follow-up (or claim) referencing that issue rather
+than letting it drift unattached — the filed bug remains this worktree's
+obligation until it resolves, is explicitly dismissed as unrelated, or is
+transferred, instead of silently disappearing from the worktree's picture the
+moment finalize's local Git checks are otherwise clean.
+
 Produce one versioned, faceted status descriptor from ground-layer truth and
 make list JSON, the mux status segment, the Picker, cleanup policy, legends,
 filters, and guidance consume it. A state label, glyph, color, count, or cleanup
@@ -106,6 +113,22 @@ _Verbatim operator request; original spelling and punctuation preserved._
 > list to act on. We could also spin this so that "follow-ups" are actually
 > claims on files issues and the like. That could unify the systems.
 
+**2026-09-13 follow-up** (verbatim):
+
+> Next, let's check for an local efforts, visions, or tracking items related to
+> a request I had a bit back to itemize "follow-up" flag items and track them
+> as claims. Right now, I think a worktree has a follow-up solo flag, but I'd
+> rather force a worktree agent to name the follow-up items, or just open
+> claims on things like bugs and whatnot. The intent here is that if an agent
+> decided to pause mid-effort, it should keep its claim on the effort, bug, etc.
+> that it was doing, and the *claim* should be what blocks finalization even
+> though all local changes are settled. The user must be the one to request
+> finalization and release the claims. This prevents auto-cleanup of worktrees
+> caught mid-stream in an effort or task series.
+>
+> And for the agent, we should encourage the agent to claim bugs it files
+> proactively, when they are related to the task at hand.
+
 ## Plan
 
 ### Phase 1 - Lock the contracts with failing fixtures
@@ -156,6 +179,12 @@ _Verbatim operator request; original spelling and punctuation preserved._
 - [ ] Treat active effort bindings and legacy `follow_up=true` records as
   effective open obligations with explicit local clear/transfer paths, without
   pretending to infer completion from another repository.
+- [ ] Add a `kind: issue` follow-up ref and guidance (`file-issue` skill +
+  `worktree` skill) directing an agent to open a follow-up referencing any
+  issue it files that is closely related to its current worktree's task, so a
+  proactively-filed bug remains this worktree's obligation (open until
+  resolved, explicitly dismissed as unrelated, or transferred) instead of
+  silently dropping out of view once local Git state is clean.
 
 ### Phase 4 - Derive canonical finality once
 - [ ] Add a versioned faceted descriptor that preserves Git state, tracking
@@ -199,6 +228,9 @@ _Verbatim operator request; original spelling and punctuation preserved._
 - [ ] Update lifecycle, conduct, worktree, and cleanup guidance: finalized is
   resumable until pruned; follow-ups are explicit items; cleanup receives and
   reports the exact blocking list.
+- [ ] Update `file-issue` guidance to proactively open a follow-up/claim on any
+  issue the agent files for its current task, so filed bugs stay visible as
+  worktree obligations rather than relying on the agent to remember later.
 
 ### Phase 6 - Release and prove the lifecycle
 - [ ] Run a fleet inventory/backfill preview for legacy boolean follow-ups,
@@ -299,3 +331,25 @@ The approved design is the faceted model in [design.md](design.md):
 - Operator confirmed the slug `worktree-finality-and-obligations`, the faceted
   descriptor model, and the worktree-local obligation ledger with external
   references.
+
+### 2026-09-13 - Hotfix landed ahead of the phased plan; scope confirmed
+- Landed an unplanned, narrower fix in
+  [PR #2592](https://github.com/ThomasMichon/copilot-extensions/pull/2592):
+  `tracking.add_resource_claim`, `claims add`, and both `claim_handoffs` actor
+  checks no longer reject a `finalized` owner (only `finalizing`/`orphaned`
+  remain blocked). This closes the immediate "creator ownership is frozen"
+  rejection reported in the Request, and updated `docs/worktree-lifecycle.md`
+  + the `worktree` skill to match, but it is **not** the full Phase 2 design:
+  it does not reopen the record's lifecycle state back to `active`, does not
+  implement the reopen/freeze/rollback transaction, and does not touch
+  `follow_up`/the descriptor at all. Phase 1-6 checkboxes remain unstarted;
+  Phase 2's mutation-centralization item should absorb/supersede this hotfix
+  rather than duplicate it.
+- Operator resumed this effort via a fresh session, reconfirmed the standing
+  request (see the dated Request addendum above), and added new scope: an
+  agent should proactively open a follow-up (or claim) on any issue it files
+  that's related to its current task, so a self-filed bug doesn't silently
+  fall out of the worktree's obligations. Folded into Phase 3 and Phase 5.
+- No further implementation done this session; still Draft, plan not yet
+  submitted for the effort's own PR review gate.
+
