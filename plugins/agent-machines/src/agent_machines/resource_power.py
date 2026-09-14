@@ -76,6 +76,9 @@ class PowerSettingResourceHandler(ResourceHandler):
             "scheme": scheme,
             "subgroup": subgroup,
             "setting": setting,
+            "maintenance_safe": any(
+                bool(member.declaration.get("maintenance_safe")) for member in members
+            ),
         }
         for source in ("ac", "dc"):
             value, selected, _, conflict, decision, info = _select_field(

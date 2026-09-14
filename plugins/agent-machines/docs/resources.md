@@ -34,6 +34,27 @@ resources:
     state: present              # present (default) | absent
 ```
 
+## Common resource fields
+
+Every resource type supports the same small set of cross-cutting fields:
+
+| Field | Meaning |
+| --- | --- |
+| `authority` | Optional schema-v4 authority override for deterministic field selection and reporting. |
+| `platforms` | Restrict to a subset of `windows` / `linux` / `wsl`. |
+| `gate` | Restrict to specific machines (defaults to the package gate). |
+| `owner` | Override the collision owner label (defaults to the package name). |
+| `maintenance_safe` | Optional boolean, default `false`. Includes the resource in `agent-machines restore --maintenance-safe` unattended restores. When omitted, the resource stays visible in maintenance-safe restores as a skipped result with an explicit reason. |
+
+`maintenance_safe` is an unattended-maintenance opt-in, not the default. The
+one built-in exception is a `type: package` resource that declares both
+`pin: true` and an explicit `version:`: when that package is **already
+installed** but at the wrong version, maintenance-safe restore treats
+realignment back to the declared pinned version as safe drift correction even
+without `maintenance_safe: true`. First install, removal, pin-only metadata
+changes, and package declarations without explicit `pin` + `version` still
+require `maintenance_safe: true` to participate in unattended runs.
+
 ## Resource types
 
 ### `package`
@@ -209,10 +230,10 @@ with independent authority and locking.
 | `owner` | no | Override the collision owner label (defaults to the package name). |
 
 `watchdog` is the narrow hourly dtssh-launcher liveness tier; `sweep` is the
-broader daily pull + plugin-reconcile + restore tier. Declaring the resource
-controls both `agent-machines self-update run` and the Windows Scheduled Task
-presence reconciled by `agent-machines self-update install` and
-`agent-machines restore --apply`:
+broader daily pull + plugin-reconcile + **maintenance-safe** restore tier.
+Declaring the resource controls both `agent-machines self-update run` and the
+Windows Scheduled Task presence reconciled by `agent-machines self-update
+install` and `agent-machines restore --apply`:
 
 - `run` resolves the selected tier first and is a clean no-op when it is
   opted out.
@@ -250,6 +271,7 @@ compatibility data from lower-authority declarations remain effective:
 | package two different `version` pins | highest authority wins; equal-highest disagreement errors |
 | package `pin` flags differ | OR'd to pinned (compatible) |
 | package `process_guard.names` differ | names are case-folded and unioned (conservative, compatible) |
+| resource `maintenance_safe` flags differ | OR'd to maintenance-safe (compatible opt-in) |
 | file two `enforce` with different `content` | highest enforce authority wins; equal-highest disagreement errors |
 | file conflicting `format` | highest authority wins; equal-highest disagreement errors |
 | file `enforce` + `ensure-present` | enforce wins (advisory) |
@@ -289,6 +311,12 @@ Resources appear in every verb:
   `--dry-run` (the default) previews the exact commands / writes, `--apply`
   performs them, and `--only <id|type|type:id>` restricts the run to a resource
   (and skips modules when nothing else is selected).
+- `agent-machines restore --maintenance-safe` still reconciles every `manage:`
+  Copilot settings/permissions entry, runs runtime spot checks for installed
+  runtime plugins, and applies only resources that explicitly declare
+  `maintenance_safe: true` plus the package pinned-version realignment exception
+  above. Excluded resources remain visible as `skipped` results with a reason;
+  plain restore behavior is otherwise unchanged.
 - `agent-machines restore --json` includes a `resources` list (each result has
   `status: ok|changed|deferred|skipped|error`), a `plan.resources` list, and
   stable `authority_decisions`. Any resource error makes the top-level `ok`

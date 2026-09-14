@@ -278,7 +278,23 @@ def test_fast_forward_repo_skips_dirty_and_diverged(tmp_path):
     assert "diverged" in diverged.detail
 
 
-def test_sweep_defers_when_live_session_is_present(tmp_path, monkeypatch):
+def test_live_session_deferral_reason_reports_busy_worktree():
+    reason = self_update.live_session_deferral_reason(
+        worktree_lister=lambda: [
+            {
+                "id": "wt-1",
+                "title": "busy worktree",
+                "live_rest": "busy",
+                "reciprocal_relation": {"binding": {"state": "bound-here"}},
+            }
+        ]
+    )
+    assert reason == "live session is active in worktree busy worktree"
+
+
+def test_sweep_continues_despite_unrelated_live_session_and_uses_maintenance_safe_restore(
+    tmp_path, monkeypatch
+):
     monkeypatch.setattr(self_update.sys, "platform", "win32")
     monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
     monkeypatch.setattr(self_update, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
@@ -287,11 +303,16 @@ def test_sweep_defers_when_live_session_is_present(tmp_path, monkeypatch):
     repo.path.mkdir()
 
     def runner(argv, *, cwd=None, timeout=0):
+        if argv[:2] == ["git", "status"]:
+            if cwd == repo.path:
+                return self_update.CommandResult(list(argv), 0, " M tracked.txt\n", "")
+            return self_update.CommandResult(list(argv), 0, "", "")
         mapping = {
-            ("git", "status"): self_update.CommandResult(list(argv), 0, "", ""),
             ("git", "rev-parse"): self_update.CommandResult(list(argv), 0, "origin/main\n", ""),
             ("git", "fetch"): self_update.CommandResult(list(argv), 0, "", ""),
             ("git", "rev-list"): self_update.CommandResult(list(argv), 0, "0\t0\n", ""),
+            ("agent-worktrees", "-p"): self_update.CommandResult(list(argv), 0, "", ""),
+            (self_update.sys.executable, "-m"): self_update.CommandResult(list(argv), 0, "", ""),
         }
         for prefix, result in mapping.items():
             if tuple(argv[: len(prefix)]) == prefix:
@@ -313,8 +334,12 @@ def test_sweep_defers_when_live_session_is_present(tmp_path, monkeypatch):
         ],
         home=tmp_path,
     )
-    assert result.status == "deferred"
-    assert any(step.name == "pre-mutation" for step in result.steps)
+    assert result.status == "ok"
+    assert result.steps[0].name == "git-pull"
+    assert result.steps[0].status == "skipped"
+    assert "dirty" in result.steps[0].detail
+    restore_step = next(step for step in result.steps if step.name == "restore")
+    assert "--maintenance-safe" in (restore_step.command or [])
 
 
 def test_plan_includes_self_update_observed_status(tmp_path, monkeypatch):
