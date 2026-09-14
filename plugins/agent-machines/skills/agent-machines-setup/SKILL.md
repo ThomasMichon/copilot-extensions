@@ -167,8 +167,12 @@ a live interactive session -- two independently-scheduled, independently-locked
 tiers: `watchdog` (hourly; dtssh launcher liveness only) and `sweep` (daily;
 fast-forward pulls of discovered adopted repos, `agent-worktrees
 reconcile-plugins --apply --with-payload-refresh`, and `agent-machines restore <!-- marketplace-isolation: allow self-update-watchdog-description -->
---apply --all-projects`). Both tiers defer around a live session and never
-mutate anything when their resolved config is "not opted in."
+--apply --all-projects --maintenance-safe`). Maintenance-safe sweep restores
+always include `manage:` Copilot settings/permissions, include only resources
+that declare `maintenance_safe: true`, and also allow already-installed pinned
+package version realignment by default. Sweep no longer blanket-defers for an
+unrelated live worktree session; git fast-forward safety still stays per-repo.
+Neither tier mutates anything when its resolved config is "not opted in."
 
 Opt in by declaring a `self-update` resource in a requirement package (`all/`
 for a fleet default, `machines/<machine>/` for one machine -- an explicit

@@ -434,6 +434,11 @@ def load_package(
             raise ManifestError(
                 f"{path}: resource state {state!r} must be one of {RESOURCE_STATES}"
             )
+        maintenance_safe = res.get("maintenance_safe")
+        if maintenance_safe is not None and type(maintenance_safe) is not bool:
+            raise ManifestError(
+                f"{path}: resource maintenance_safe must be a boolean when declared"
+            )
         strategy = res.get("strategy")
         if strategy is not None and strategy not in RESOURCE_STRATEGIES:
             raise ManifestError(

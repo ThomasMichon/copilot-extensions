@@ -113,6 +113,15 @@ def test_bad_state_and_strategy_rejected(tmp_path):
         _pkg(tmp_path, "acme/b", [{"type": "file", "path": "/x", "strategy": "obliterate"}])
 
 
+def test_resource_maintenance_safe_must_be_boolean(tmp_path):
+    with pytest.raises(ManifestError, match="maintenance_safe must be a boolean"):
+        _pkg(
+            tmp_path,
+            "acme/a",
+            [{"type": "file", "path": "/x", "maintenance_safe": "yes"}],
+        )
+
+
 def test_package_process_guard_schema(tmp_path):
     pkg = _pkg(
         tmp_path,
@@ -522,6 +531,111 @@ def test_winget_present_wrong_version_uses_verified_exact_upgrade(tmp_path, monk
     assert not any(call[:3] == ["winget", "pin", "add"] for call in runner.calls)
 
 
+def test_maintenance_safe_package_realigns_pinned_installed_version_without_flag(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/tool.exe")
+
+    class UpgradeRunner:
+        def __init__(self):
+            self.version = "3.3.3"
+            self.calls = []
+
+        def __call__(self, argv):
+            self.calls.append(argv)
+            if argv[:2] == ["winget", "list"]:
+                return RunOutcome(
+                    0,
+                    "Name  Id               Version Available Source\n"
+                    "------------------------------------------------\n"
+                    f"psmux marlocarlo.psmux {self.version}   3.3.7     winget\n",
+                    "",
+                )
+            if argv[:2] == ["winget", "upgrade"]:
+                self.version = "3.3.5"
+                return RunOutcome(0, "Successfully installed", "")
+            if argv[:3] == ["winget", "pin", "list"]:
+                return RunOutcome(
+                    0,
+                    "Name  Id               Version Source Pin type Pinned version\n"
+                    "-------------------------------------------------------------\n"
+                    "psmux marlocarlo.psmux 3.3.5   winget Gating   3.3.5\n",
+                    "",
+                )
+            return RunOutcome(0, "", "")
+
+    pkg = _pkg(
+        tmp_path,
+        "acme/a",
+        [{"type": "package", "id": "marlocarlo.psmux", "manager": "winget", "version": "3.3.5",
+          "pin": True}],
+    )
+    runner = UpgradeRunner()
+    result = apply_resources(
+        [pkg], "box-1", "windows", _ctx(tmp_path, runner), dry_run=False, maintenance_safe=True
+    )[0]
+    assert result.status == "changed"
+    assert result.action == "update"
+    assert result.skipped_reason is None
+    assert any(call[:2] == ["winget", "upgrade"] for call in runner.calls)
+
+
+def test_maintenance_safe_package_skips_first_install_without_flag(tmp_path, monkeypatch):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/winget.exe")
+    runner = FakeRunner(default=RunOutcome(0, "no results", ""))
+    pkg = _pkg(
+        tmp_path,
+        "acme/a",
+        [{"type": "package", "id": "marlocarlo.psmux", "manager": "winget"}],
+    )
+    result = apply_resources(
+        [pkg], "box-1", "windows", _ctx(tmp_path, runner), dry_run=False, maintenance_safe=True
+    )[0]
+    assert result.status == "skipped"
+    assert result.skipped_reason == (
+        "not maintenance-safe (would install; declare maintenance_safe: true "
+        "to include it in unattended runs)"
+    )
+    assert runner.calls == [[
+        "winget", "list", "--id", "marlocarlo.psmux", "--exact", "--accept-source-agreements",
+    ]]
+
+
+def test_maintenance_safe_package_honors_explicit_flag_for_first_install(tmp_path, monkeypatch):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/winget.exe")
+
+    class InstallingRunner:
+        def __init__(self):
+            self.installed = False
+            self.calls = []
+
+        def __call__(self, argv):
+            self.calls.append(argv)
+            if argv[:2] == ["winget", "list"]:
+                return RunOutcome(
+                    0,
+                    "marlocarlo.psmux 3.3.5" if self.installed else "no results",
+                    "",
+                )
+            if argv[:2] == ["winget", "install"]:
+                self.installed = True
+            return RunOutcome(0, "", "")
+
+    pkg = _pkg(
+        tmp_path,
+        "acme/a",
+        [{"type": "package", "id": "marlocarlo.psmux", "manager": "winget",
+          "maintenance_safe": True}],
+    )
+    runner = InstallingRunner()
+    result = apply_resources(
+        [pkg], "box-1", "windows", _ctx(tmp_path, runner), dry_run=False, maintenance_safe=True
+    )[0]
+    assert result.status == "changed"
+    assert result.action == "install"
+    assert any(call[:2] == ["winget", "install"] for call in runner.calls)
+
+
 @pytest.mark.parametrize("dry_run", [True, False])
 def test_package_process_guard_defers_live_wrong_version(tmp_path, monkeypatch, dry_run):
     monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/tool.exe")
@@ -838,6 +952,44 @@ def test_file_apply_text_enforce_writes_and_backs_up(tmp_path):
     res = next(r for r in results if r.type == "file")
     assert res.changed and target.read_text(encoding="utf-8") == "new\n"
     assert res.backup_path  # existing file was backed up before overwrite
+
+
+def test_maintenance_safe_file_requires_opt_in(tmp_path):
+    pkg = _pkg(
+        tmp_path,
+        "acme/a",
+        [{"type": "file", "path": "$HOME/.psmux.conf", "strategy": "enforce", "content": "new\n"}],
+    )
+    result = apply_resources(
+        [pkg],
+        "box-1",
+        "windows",
+        _ctx(tmp_path, FakeRunner()),
+        dry_run=False,
+        maintenance_safe=True,
+    )[0]
+    assert result.status == "skipped"
+    assert "maintenance_safe: true" in (result.skipped_reason or "")
+    assert not (tmp_path / ".psmux.conf").exists()
+
+
+def test_maintenance_safe_file_applies_with_opt_in(tmp_path):
+    pkg = _pkg(
+        tmp_path,
+        "acme/a",
+        [{"type": "file", "path": "$HOME/.psmux.conf", "strategy": "enforce",
+          "content": "new\n", "maintenance_safe": True}],
+    )
+    result = apply_resources(
+        [pkg],
+        "box-1",
+        "windows",
+        _ctx(tmp_path, FakeRunner()),
+        dry_run=False,
+        maintenance_safe=True,
+    )[0]
+    assert result.status == "changed"
+    assert (tmp_path / ".psmux.conf").read_text(encoding="utf-8") == "new\n"
 
 
 def test_file_apply_ensure_present_leaves_existing(tmp_path):
@@ -1773,6 +1925,152 @@ def test_power_setting_filtered_on_linux(tmp_path):
         dry_run=True,
     )
     assert not [r for r in results if r.type == "power-setting"]
+
+
+def test_maintenance_safe_registry_requires_opt_in(tmp_path, monkeypatch):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/reg.exe")
+    runner = FakeRunner()
+    pkg = _pkg(
+        tmp_path,
+        "acme/a",
+        [{"type": "registry", "path": r"HKCU:\Software\App", "name": "Setting", "value": "1"}],
+    )
+    result = apply_resources(
+        [pkg], "box-1", "windows", _ctx(tmp_path, runner), dry_run=False, maintenance_safe=True
+    )[0]
+    assert result.status == "skipped"
+    assert "maintenance_safe: true" in (result.skipped_reason or "")
+    assert runner.calls == []
+
+
+def test_maintenance_safe_registry_applies_with_opt_in(tmp_path, monkeypatch):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/reg.exe")
+
+    class RegistryRunner:
+        def __init__(self):
+            self.calls = []
+
+        def __call__(self, argv):
+            self.calls.append(argv)
+            if argv[:2] == ["reg", "query"]:
+                return RunOutcome(1, "", "not found")
+            return RunOutcome(0, "", "")
+
+    runner = RegistryRunner()
+    pkg = _pkg(
+        tmp_path,
+        "acme/a",
+        [{"type": "registry", "path": r"HKCU:\Software\App", "name": "Setting", "value": "1",
+          "maintenance_safe": True}],
+    )
+    result = apply_resources(
+        [pkg], "box-1", "windows", _ctx(tmp_path, runner), dry_run=False, maintenance_safe=True
+    )[0]
+    assert result.status == "changed"
+    assert result.action == "write"
+    assert any(call[:2] == ["reg", "add"] for call in runner.calls)
+
+
+def test_maintenance_safe_feature_requires_opt_in(tmp_path, monkeypatch):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: "/usr/bin/systemctl")
+    runner = FakeRunner()
+    pkg = _pkg(
+        tmp_path,
+        "acme/a",
+        [{"type": "feature", "manager": "linux-systemd", "id": "demo.service"}],
+    )
+    result = apply_resources(
+        [pkg], "box-1", "linux", _ctx(tmp_path, runner, plat="linux"),
+        dry_run=False, maintenance_safe=True
+    )[0]
+    assert result.status == "skipped"
+    assert "maintenance_safe: true" in (result.skipped_reason or "")
+    assert runner.calls == []
+
+
+def test_maintenance_safe_feature_applies_with_opt_in(tmp_path, monkeypatch):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: "/usr/bin/systemctl")
+
+    class FeatureRunner:
+        def __init__(self):
+            self.enabled = False
+            self.calls = []
+
+        def __call__(self, argv):
+            self.calls.append(argv)
+            if argv[:2] == ["systemctl", "is-enabled"]:
+                return RunOutcome(1, "disabled\n", "") if not self.enabled else RunOutcome(
+                    0, "enabled\n", ""
+                )
+            if argv[:2] == ["systemctl", "enable"]:
+                self.enabled = True
+            return RunOutcome(0, "", "")
+
+    runner = FeatureRunner()
+    pkg = _pkg(
+        tmp_path,
+        "acme/a",
+        [{"type": "feature", "manager": "linux-systemd", "id": "demo.service",
+          "maintenance_safe": True}],
+    )
+    result = apply_resources(
+        [pkg], "box-1", "linux", _ctx(tmp_path, runner, plat="linux"),
+        dry_run=False, maintenance_safe=True
+    )[0]
+    assert result.status == "changed"
+    assert result.action == "enable"
+    assert any(call[:2] == ["systemctl", "enable"] for call in runner.calls)
+
+
+def test_maintenance_safe_power_setting_requires_opt_in(tmp_path, monkeypatch):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/powercfg.exe")
+    runner = FakeRunner(script={("powercfg", "/QH"): _power_query(0, 0)})
+    pkg = _pkg(
+        tmp_path,
+        "acme/a",
+        [{"type": "power-setting", "subgroup": "SUB_BUTTONS", "setting": "LIDACTION", "ac": 1}],
+    )
+    result = apply_resources(
+        [pkg], "box-1", "windows", _ctx(tmp_path, runner), dry_run=False, maintenance_safe=True
+    )[0]
+    assert result.status == "skipped"
+    assert "maintenance_safe: true" in (result.skipped_reason or "")
+    assert runner.calls == []
+
+
+def test_maintenance_safe_power_setting_applies_with_opt_in(tmp_path, monkeypatch):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/powercfg.exe")
+
+    class PowerRunner:
+        def __init__(self):
+            self.ac = 0
+            self.dc = 0
+            self.calls = []
+
+        def __call__(self, argv):
+            self.calls.append(argv)
+            if argv[:2] == ["powercfg", "/QH"]:
+                return _power_query(self.ac, self.dc)
+            if argv[:2] == ["powercfg", "/SETACVALUEINDEX"]:
+                self.ac = int(argv[-1])
+                return RunOutcome(0, "", "")
+            if argv[:2] == ["powercfg", "/SETACTIVE"]:
+                return RunOutcome(0, "", "")
+            raise AssertionError(argv)
+
+    runner = PowerRunner()
+    pkg = _pkg(
+        tmp_path,
+        "acme/a",
+        [{"type": "power-setting", "subgroup": "SUB_BUTTONS", "setting": "LIDACTION", "ac": 1,
+          "maintenance_safe": True}],
+    )
+    result = apply_resources(
+        [pkg], "box-1", "windows", _ctx(tmp_path, runner), dry_run=False, maintenance_safe=True
+    )[0]
+    assert result.status == "changed"
+    assert result.action == "set"
+    assert any(call[:2] == ["powercfg", "/SETACVALUEINDEX"] for call in runner.calls)
 
 
 # --------------------------------------------------------------------------- #

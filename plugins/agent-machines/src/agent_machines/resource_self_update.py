@@ -53,7 +53,13 @@ class SelfUpdateResourceHandler(ResourceHandler):
         if decision:
             decisions.append(decision)
             findings.append(info)
-        return {"tier": ident[1], "state": state}, findings, decisions
+        return {
+            "tier": ident[1],
+            "state": state,
+            "maintenance_safe": any(
+                bool(member.declaration.get("maintenance_safe")) for member in members
+            ),
+        }, findings, decisions
 
     def apply(
         self, resolved: ResolvedResource, ctx: ResourceContext, dry_run: bool

@@ -730,6 +730,7 @@ def test_file_format_and_content_resolve_with_winning_strategy(tmp_path):
         "format": "text",
         "strategy": "enforce",
         "content": "plain text",
+        "maintenance_safe": False,
     }
     assert not any(finding.level == "error" for finding in findings)
 

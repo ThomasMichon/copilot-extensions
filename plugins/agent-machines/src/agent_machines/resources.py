@@ -171,7 +171,7 @@ class ResourceResult:
     id: str
     changed: bool
     dry_run: bool
-    action: str  # install | pin | write | uninstall | none | skip | blocked
+    action: str  # install | pin | write | uninstall | repair | none | skip | blocked
     detail: str = ""
     skipped_reason: str | None = None
     deferred_reason: str | None = None
@@ -394,6 +394,17 @@ class ResourceHandler:
     ) -> ResourceResult:  # pragma: no cover - abstract
         raise NotImplementedError
 
+    def maintenance_safe_decision(
+        self, resolved: ResolvedResource, ctx: ResourceContext
+    ) -> tuple[bool, str | None]:
+        if resolved.desired.get("maintenance_safe"):
+            return True, None
+        return (
+            False,
+            "not maintenance-safe (would mutate; declare maintenance_safe: true "
+            "to include it in unattended runs)",
+        )
+
 
 class PackageResourceHandler(ResourceHandler):
     TYPE = "package"
@@ -473,6 +484,7 @@ class PackageResourceHandler(ResourceHandler):
             "state": state,
             "version": version,
             "pin": pin,
+            "maintenance_safe": any(bool(d.get("maintenance_safe")) for d in decls),
             "process_guard": {"names": guard_names} if guard_names else None,
         }
         return desired, findings, decisions
@@ -511,6 +523,49 @@ class PackageResourceHandler(ResourceHandler):
             live.get("known", True)
             and live["present"]
             and (not version or live.get("version") == version)
+        )
+
+    def maintenance_safe_decision(
+        self, resolved: ResolvedResource, ctx: ResourceContext
+    ) -> tuple[bool, str | None]:
+        allowed, reason = super().maintenance_safe_decision(resolved, ctx)
+        if allowed:
+            return allowed, reason
+        d = resolved.desired
+        manager = str(d.get("manager"))
+        pkg_id = str(d.get("id"))
+        mgr = MANAGERS.get(manager)
+        if mgr is None or ctx.platform not in mgr["platforms"] or shutil.which(mgr["bin"]) is None:
+            return False, reason
+        live = self._detect(ctx, mgr, pkg_id)
+        version = d.get("version")
+        if d.get("pin") and version and live.get("present") and live.get("version") != version:
+            return True, None
+        verb = "mutate"
+        if d.get("state") == "absent":
+            verb = "uninstall"
+        elif not live.get("present"):
+            verb = "install"
+        elif version and live.get("version") != version:
+            verb = "mutate"
+        elif d.get("pin") and mgr.get("pin"):
+            pin = self._detect_pin(ctx, mgr, pkg_id)
+            if not self._matches_desired(pin, version):
+                verb = "mutate"
+            else:
+                verb = ""
+        else:
+            verb = ""
+        if verb:
+            return (
+                False,
+                f"not maintenance-safe (would {verb}; declare maintenance_safe: true "
+                "to include it in unattended runs)",
+            )
+        return (
+            False,
+            "not maintenance-safe (resource is outside unattended scope; declare "
+            "maintenance_safe: true to include it in unattended runs)",
         )
 
     @staticmethod
@@ -882,7 +937,13 @@ class FileResourceHandler(ResourceHandler):
                 findings.append(info)
             strategy = "ensure-present"
 
-        desired = {"path": path, "format": fmt, "strategy": strategy, "content": content}
+        desired = {
+            "path": path,
+            "format": fmt,
+            "strategy": strategy,
+            "content": content,
+            "maintenance_safe": any(bool(d.get("maintenance_safe")) for d in decls),
+        }
         if marker:
             desired["marker"] = marker
         return desired, findings, decisions
@@ -964,6 +1025,7 @@ class FileResourceHandler(ResourceHandler):
             "end": end,
             "state": state,
             "content": content,
+            "maintenance_safe": any(bool(d.get("maintenance_safe")) for d in decls),
         }
         return desired, findings, decisions
 
@@ -1283,7 +1345,14 @@ class RegistryResourceHandler(ResourceHandler):
         if decision:
             decisions.append(decision)
             findings.append(info)
-        desired = {"key": key, "name": name, "value": value, "value_type": vtype, "state": state}
+        desired = {
+            "key": key,
+            "name": name,
+            "value": value,
+            "value_type": vtype,
+            "state": state,
+            "maintenance_safe": any(bool(d.get("maintenance_safe")) for d in decls),
+        }
         return desired, findings, decisions
 
     def _detect(self, ctx: ResourceContext, key: str, name: str) -> dict[str, Any]:
@@ -1477,7 +1546,12 @@ class FeatureResourceHandler(ResourceHandler):
         if decision:
             decisions.append(decision)
             findings.append(info)
-        desired = {"manager": ident[1], "id": str(decls[0].get("id")), "state": state}
+        desired = {
+            "manager": ident[1],
+            "id": str(decls[0].get("id")),
+            "state": state,
+            "maintenance_safe": any(bool(d.get("maintenance_safe")) for d in decls),
+        }
         return desired, findings, decisions
 
     def _detect(self, ctx: ResourceContext, mgr: dict, fid: str) -> dict[str, Any]:
@@ -1877,6 +1951,7 @@ def apply_resources(
     ctx: ResourceContext,
     dry_run: bool = True,
     only: list[str] | None = None,
+    maintenance_safe: bool = False,
 ) -> list[ResourceResult]:
     """Apply every resolved resource (optionally filtered by ``only``)."""
     resolved, _ = resolve_resources(packages, machine, plat)
@@ -1897,6 +1972,20 @@ def apply_resources(
                 )
             )
             continue
+        if maintenance_safe:
+            allowed, reason = handler.maintenance_safe_decision(res, ctx)
+            if not allowed:
+                results.append(
+                    ResourceResult(
+                        res.type,
+                        res.id,
+                        False,
+                        dry_run,
+                        "skip",
+                        skipped_reason=reason,
+                    )
+                )
+                continue
         results.append(handler.apply(res, ctx, dry_run))
     return results
 

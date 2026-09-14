@@ -10,9 +10,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from agent_machines import reconcile as reconcile_module
 from agent_machines import resources as R
 from agent_machines.manifest import load_package
 from agent_machines.reconcile import plan, restore, restore_result_to_dict
+from agent_machines.surfaces import SurfaceResult
 
 from ._helpers import base_package, write_package
 
@@ -85,6 +87,82 @@ def test_restore_json_includes_resources(tmp_path):
     payload = restore_result_to_dict(result)
     assert "resources" in payload
     assert payload["plan"]["resources"][0]["id"] == "conf"
+
+
+def test_maintenance_safe_restore_still_applies_manage_entries(tmp_path, monkeypatch):
+    called: dict[str, object] = {}
+
+    def fake_apply_surfaces(resolved, *, home=None, dry_run=True, only=None):
+        called["packages"] = [pkg.name for pkg in resolved]
+        return [
+            SurfaceResult(
+                surface="copilot.settings",
+                file="settings.json",
+                changed=True,
+                dry_run=dry_run,
+                changes=[{"key": "model", "before": "old", "after": "new"}],
+            )
+        ]
+
+    monkeypatch.setattr("agent_machines.reconcile.apply_surfaces", fake_apply_surfaces)
+    pkg = _pkg(
+        tmp_path,
+        "acme/a",
+        [{"type": "file", "id": "conf", "path": "$HOME/.psmux.conf",
+          "strategy": "enforce", "content": "x\n"}],
+    )
+    result = restore(
+        [pkg],
+        "box-1",
+        dry_run=False,
+        plat="windows",
+        home=tmp_path,
+        maintenance_safe=True,
+    )
+    assert called["packages"] == ["acme/a"]
+    assert result.surface_results[0].surface == "copilot.settings"
+    assert result.resource_results[0].status == "skipped"
+
+
+def test_runtime_spot_check_repairs_only_after_failed_readiness(tmp_path, monkeypatch):
+    monkeypatch.setattr(reconcile_module.shutil, "which", lambda binary: "pwsh" if binary == "pwsh" else None)
+    payload = tmp_path / ".copilot" / "installed-plugins" / "copilot-extensions" / "agent-machines"
+    (payload / "scripts").mkdir(parents=True)
+    (payload / "plugin.json").write_text(
+        '{"name":"agent-machines","runtimeScope":"machine-gated","installerReadiness":"installer-readiness.json"}',
+        encoding="utf-8",
+    )
+    (payload / "scripts" / "init.ps1").write_text("# noop\n", encoding="utf-8")
+    state = {"healthy": False}
+    calls: list[list[str]] = []
+
+    def runner(argv, *, timeout):
+        calls.append(list(argv))
+        if argv == ["agent-machines", "installer-readiness"]:
+            return R.RunOutcome(0, "", "") if state["healthy"] else R.RunOutcome(1, "", "broken")
+        if any(str(token).endswith("init.ps1") for token in argv):
+            state["healthy"] = True
+            return R.RunOutcome(0, "", "")
+        raise AssertionError(argv)
+
+    repaired = reconcile_module.runtime_spot_check_results(
+        home=tmp_path, plat="windows", dry_run=False, runner=runner
+    )
+    assert repaired[0].status == "changed"
+    assert repaired[0].action == "repair"
+    assert calls == [
+        ["agent-machines", "installer-readiness"],
+        ["pwsh", "-File", str(payload / "scripts" / "init.ps1")],
+        ["agent-machines", "installer-readiness"],
+    ]
+
+    calls.clear()
+    already_healthy = reconcile_module.runtime_spot_check_results(
+        home=tmp_path, plat="windows", dry_run=False, runner=runner
+    )
+    assert already_healthy[0].status == "ok"
+    assert already_healthy[0].action == "none"
+    assert calls == [["agent-machines", "installer-readiness"]]
 
 
 def _stub_result() -> R.ResourceResult:

@@ -385,6 +385,7 @@ def _cmd_restore(args: argparse.Namespace) -> int:
             machine,
             dry_run=dry_run,
             only=args.only,
+            maintenance_safe=args.maintenance_safe,
             accepted_machines=identity.accepted,
         )
     except (_reconcile.RestoreValidationError, SurfaceStateError) as exc:
@@ -762,6 +763,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="append",
         metavar="NAME",
         help="restrict to named surfaces/modules (repeatable)",
+    )
+    restore.add_argument(
+        "--maintenance-safe",
+        action="store_true",
+        help="limit resources to maintenance-safe declarations and pinned version realignment",
     )
     restore.add_argument(
         "--verbose",
