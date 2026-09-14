@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-slice worktrees
 - **Created:** 2026-09-14
-- **Status:** Active
+- **Status:** done-with-this-slice
 - **Vision:** agent-fabric `unattended-tiered-self-convergence`
 - **Umbrella issue:** [#2620](https://github.com/ThomasMichon/copilot-extensions/issues/2620)
 - **Related efforts:** [`agent-machines-declarative-control-plane`](../agent-machines-declarative-control-plane/README.md)
@@ -161,10 +161,10 @@ the proposal into an implementable plan.
   removal.
 
 ### Phase 4 - Validation and rollout
-- [ ] Cover lock acquisition/staleness-reclaim, fast-forward-only pull
+- [x] Cover lock acquisition/staleness-reclaim, fast-forward-only pull
   safety (diverged/dirty skip, never force), live-session deferral, and
   installer elevate-or-instruct behavior on Windows.
-- [ ] Land, deploy, and dogfood on one machine; verify the status signal
+- [x] Land, deploy, and dogfood on one machine; verify the status signal
   reflects reality before proposing wider mesh rollout (mesh rollout itself
   is private-repo scope, tracked in the `dotfiles` proposal doc).
 
@@ -275,3 +275,21 @@ the proposal into an implementable plan.
   opted-out install skips, status JSON, and restore-time add/remove behavior
   without touching any live Scheduled Tasks.
   install-contract check, and version-consistency check passed.
+
+### 2026-09-14 - Phase 4 landed
+
+- Re-ran the focused and full `agent-machines` suites against the merged
+  Phases 2 and 3 implementation and re-checked the effort's own Validation
+  Plan item-by-item; the landed tests now cover lock reclaim, live-run
+  non-double-drive, dirty/diverged pull skips, live-session deferral,
+  installer elevate-or-instruct behavior, authority precedence, restore-time
+  task registration/removal, independent tier locks, and status visibility.
+- Deployed the merged runtime on this machine with `copilot-extensions update`
+  and dogfooded the installed `agent-machines self-update status --json`
+  surface. This machine is currently not opted in, so the expected real
+  output is both tiers reported as `opted_in: false` / `registered: false`
+  with no last-attempt or last-success timestamps; the shipped status command
+  reported exactly that.
+- Marked the public implementation slice done. Private mesh-wide rollout,
+  machine selection, and any organization-specific opt-in policy remain in the
+  separate private `dotfiles` proposal, per this effort's non-goals.
