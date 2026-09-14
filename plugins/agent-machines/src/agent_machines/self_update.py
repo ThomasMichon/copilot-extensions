@@ -27,52 +27,37 @@ from typing import Any
 
 from agent_procutil import no_window_kwargs
 
+from . import self_update_tasks as _tasks
 from .self_update_state import (
     STATE_VERSION,
-    TierStatus,
-    load_status,
+    TIER_SPECS,
+    WATCHDOG_TIER,
     lock_path,
     mutex_name,
-    state_root,
-    status_path,
-    task_config,
-    task_config_path,
-    tier_status,
+    record_task_config,
+    write_status,
+)
+from .self_update_tasks import (
+    ScheduledTaskReconcileResult,
+    ScheduledTaskSnapshot,
+    ScheduledTaskStatus,
+)
+from .self_update_tasks import (
+    query_scheduled_task as _query_scheduled_task,
+)
+from .self_update_tasks import (
+    reconcile_scheduled_task as _reconcile_scheduled_task,
+)
+from .self_update_tasks import (
+    scheduled_task_status as _scheduled_task_status,
 )
 
-WATCHDOG_TIER = "watchdog"
-SWEEP_TIER = "sweep"
-WATCHDOG_STALE_SECONDS = 10 * 60
-SWEEP_STALE_SECONDS = 3 * 60 * 60
 WATCHDOG_START_TIMEOUT_SECONDS = 40
 LIVE_SESSION_DEFER_STATUSES = {"awaiting-operator", "busy", "idle", "running"}
 
-
-@dataclass(frozen=True)
-class TierSpec:
-    tier: str
-    stale_seconds: int
-    task_name: str
-    schedule_kind: str
-    schedule_value: int
-
-
-TIER_SPECS: dict[str, TierSpec] = {
-    WATCHDOG_TIER: TierSpec(
-        tier=WATCHDOG_TIER,
-        stale_seconds=WATCHDOG_STALE_SECONDS,
-        task_name="agent-machines-self-update-watchdog",
-        schedule_kind="hourly",
-        schedule_value=1,
-    ),
-    SWEEP_TIER: TierSpec(
-        tier=SWEEP_TIER,
-        stale_seconds=SWEEP_STALE_SECONDS,
-        task_name="agent-machines-self-update-sweep",
-        schedule_kind="daily",
-        schedule_value=1,
-    ),
-}
+task_action_arguments = _tasks.task_action_arguments
+task_description = _tasks.task_description
+task_working_directory = _tasks.task_working_directory
 
 
 @dataclass
@@ -162,101 +147,8 @@ class LockSnapshot:
         return dataclasses.asdict(self)
 
 
-@dataclass
-class ScheduledTaskSnapshot:
-    task_name: str
-    present: bool
-    enabled: bool | None = None
-    state: str | None = None
-    logon_type: str | None = None
-    description: str | None = None
-    execute: str | None = None
-    arguments: str | None = None
-    working_directory: str | None = None
-    matching: bool = False
-
-    def to_dict(self) -> dict[str, Any]:
-        return dataclasses.asdict(self)
-
-
-@dataclass
-class ScheduledTaskReconcileResult:
-    tier: str
-    desired_state: str
-    status: str
-    changed: bool
-    detail: str
-    snapshot: ScheduledTaskSnapshot | None = None
-    commands: list[list[str]] = field(default_factory=list)
-    attempted_elevation: bool = False
-
-    @property
-    def ok(self) -> bool:
-        return self.status not in {"error", "deferred"}
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "tier": self.tier,
-            "desired_state": self.desired_state,
-            "status": self.status,
-            "changed": self.changed,
-            "ok": self.ok,
-            "detail": self.detail,
-            "snapshot": self.snapshot.to_dict() if self.snapshot is not None else None,
-            "commands": self.commands,
-            "attempted_elevation": self.attempted_elevation,
-        }
-
-
-@dataclass
-class ScheduledTaskStatus:
-    tier: str
-    opted_in: bool
-    task_name: str
-    registered: bool
-    enabled: bool | None = None
-    matching: bool = False
-    state: str | None = None
-    detail: str = ""
-    last_attempt: str | None = None
-    last_success: str | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return dataclasses.asdict(self)
-
-
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def runtime_root(home: Path | None = None) -> Path:
-    base = home if home is not None else Path.home()
-    return base / ".agent-machines"
-
-
-def runtime_python(home: Path | None = None) -> Path:
-    return runtime_root(home) / ".venv" / "Scripts" / "python.exe"
-
-
-def task_description(tier: str) -> str:
-    if tier == WATCHDOG_TIER:
-        return "agent-machines unattended self-update watchdog (hourly dtssh liveness)"
-    if tier == SWEEP_TIER:
-        return "agent-machines unattended self-update sweep (daily reconcile)"
-    raise ValueError(f"unknown self-update tier: {tier}")
-
-
-def task_action_arguments(tier: str, home: Path | None = None) -> str:
-    python = str(runtime_python(home))
-    return f'--headless "{python}" -m agent_machines self-update run --tier {tier}'
-
-
-def task_working_directory(home: Path | None = None) -> str:
-    return str(runtime_root(home))
-
-
-def install_retry_command(tier: str) -> list[str]:
-    return ["agent-machines", "self-update", "install", "--tier", tier]
 
 
 def _iso_utc(moment: datetime | None) -> str | None:
@@ -275,224 +167,19 @@ def _parse_iso_utc(value: str | None) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
-def _normalize_windows_text(value: str | None) -> str:
-    return (value or "").replace("/", "\\").casefold().strip()
-
-
-def _ps_literal(value: str) -> str:
-    return "'" + value.replace("'", "''") + "'"
-
-
-def powershell_binary() -> str:
-    binary = shutil_which("pwsh") or shutil_which("powershell")
-    if binary is None:
-        raise RuntimeError("pwsh or powershell is required to manage Scheduled Tasks")
-    return binary
-
-
-def run_powershell(
-    script: str,
-    *,
-    runner: Callable[..., CommandResult] | None = None,
-    timeout: int = 300,
-) -> CommandResult:
-    runner = runner or default_command_runner
-    return runner(
-        [powershell_binary(), "-NoProfile", "-NonInteractive", "-Command", script],
-        timeout=timeout,
-    )
-
-
-def _task_snapshot_from_payload(
-    tier: str,
-    payload: dict[str, Any],
-    *,
-    home: Path | None = None,
-) -> ScheduledTaskSnapshot:
-    snapshot = ScheduledTaskSnapshot(
-        task_name=TIER_SPECS[tier].task_name,
-        present=bool(payload.get("present")),
-        enabled=payload.get("enabled") if isinstance(payload.get("enabled"), bool) else None,
-        state=payload.get("state") if isinstance(payload.get("state"), str) else None,
-        logon_type=(
-            payload.get("logon_type") if isinstance(payload.get("logon_type"), str) else None
-        ),
-        description=(
-            payload.get("description") if isinstance(payload.get("description"), str) else None
-        ),
-        execute=payload.get("execute") if isinstance(payload.get("execute"), str) else None,
-        arguments=payload.get("arguments") if isinstance(payload.get("arguments"), str) else None,
-        working_directory=(
-            payload.get("working_directory")
-            if isinstance(payload.get("working_directory"), str)
-            else None
-        ),
-    )
-    snapshot.matching = task_definition_matches(snapshot, tier, home=home)
-    return snapshot
-
-
-def task_definition_matches(
-    snapshot: ScheduledTaskSnapshot,
-    tier: str,
-    *,
-    home: Path | None = None,
-) -> bool:
-    if not snapshot.present:
-        return False
-    expected_execute = "conhost.exe"
-    expected_description = task_description(tier)
-    expected_python = _normalize_windows_text(str(runtime_python(home)))
-    expected_workdir = _normalize_windows_text(task_working_directory(home))
-    arguments = _normalize_windows_text(snapshot.arguments)
-    execute = Path(snapshot.execute or "").name.casefold()
-    return (
-        execute == expected_execute
-        and (snapshot.logon_type or "") == "Interactive"
-        and (snapshot.description or "") == expected_description
-        and expected_python in arguments
-        and "-m agent_machines self-update run" in arguments
-        and f"--tier {tier}" in arguments
-        and _normalize_windows_text(snapshot.working_directory) == expected_workdir
-    )
-
-
 def query_scheduled_task(
     tier: str,
     *,
+    machine: str | None = None,
     runner: Callable[..., CommandResult] | None = None,
     home: Path | None = None,
 ) -> ScheduledTaskSnapshot:
-    task_name = TIER_SPECS[tier].task_name
-    script = f"""
-$task = Get-ScheduledTask -TaskName {_ps_literal(task_name)} -ErrorAction SilentlyContinue
-if (-not $task) {{
-  [ordered]@{{ present = $false }} | ConvertTo-Json -Compress
-  exit 0
-}}
-$action = @($task.Actions)[0]
-$enabled = $null
-try {{
-  $enabled = [bool]$task.Settings.Enabled
-}} catch {{
-  $enabled = [string]$task.State -ne 'Disabled'
-}}
-[ordered]@{{
-  present = $true
-  enabled = $enabled
-  state = [string]$task.State
-  logon_type = [string]$task.Principal.LogonType
-  description = [string]$task.Description
-  execute = [string]$action.Execute
-  arguments = [string]$action.Arguments
-  working_directory = [string]$action.WorkingDirectory
-}} | ConvertTo-Json -Compress
-""".strip()
-    result = run_powershell(script, runner=runner, timeout=300)
-    if result.returncode != 0:
-        raise RuntimeError(result.output or f"failed to query Scheduled Task {task_name!r}")
-    try:
-        payload = json.loads(result.stdout.strip() or "{}")
-    except ValueError as exc:
-        raise RuntimeError(f"invalid Scheduled Task query response for {task_name!r}") from exc
-    if not isinstance(payload, dict):
-        raise RuntimeError(f"invalid Scheduled Task query response for {task_name!r}")
-    return _task_snapshot_from_payload(tier, payload, home=home)
-
-
-def register_scheduled_task(
-    tier: str,
-    *,
-    runner: Callable[..., CommandResult] | None = None,
-    home: Path | None = None,
-) -> CommandResult:
-    spec = TIER_SPECS[tier]
-    task_name = spec.task_name
-    description = task_description(tier)
-    python = str(runtime_python(home))
-    working_directory = task_working_directory(home)
-    schedule_script = (
-        "$trigger = New-ScheduledTaskTrigger -Once -At ((Get-Date).Date.AddMinutes(5)); "
-        "$trigger.Repetition.Interval = (New-TimeSpan -Hours 1); "
-        "$trigger.Repetition.Duration = (New-TimeSpan -Days 3650)"
-        if spec.schedule_kind == "hourly"
-        else "$trigger = New-ScheduledTaskTrigger -Daily -At '3:00AM' -DaysInterval 1"
-    )
-    script = f"""
-$python = {_ps_literal(python)}
-$taskArgs = '--headless "' + $python + '" -m agent_machines self-update run --tier {tier}'
-$action = New-ScheduledTaskAction `
-  -Execute 'conhost.exe' `
-  -Argument $taskArgs `
-  -WorkingDirectory {_ps_literal(working_directory)}
-{schedule_script}
-$settings = New-ScheduledTaskSettingsSet `
-  -AllowStartIfOnBatteries `
-  -DontStopIfGoingOnBatteries `
-  -ExecutionTimeLimit ([TimeSpan]::Zero) `
-  -StartWhenAvailable
-$currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-$principal = New-ScheduledTaskPrincipal `
-  -UserId $currentUser `
-  -LogonType Interactive `
-  -RunLevel Limited
-Register-ScheduledTask `
-  -TaskName {_ps_literal(task_name)} `
-  -Action $action `
-  -Trigger $trigger `
-  -Settings $settings `
-  -Principal $principal `
-  -Force `
-  -Description {_ps_literal(description)} | Out-Null
-Enable-ScheduledTask -TaskName {_ps_literal(task_name)} -ErrorAction SilentlyContinue | Out-Null
-""".strip()
-    return run_powershell(script, runner=runner, timeout=300)
-
-
-def enable_scheduled_task(
-    tier: str,
-    *,
-    runner: Callable[..., CommandResult] | None = None,
-) -> CommandResult:
-    task_name = TIER_SPECS[tier].task_name
-    script = (
-        f"Enable-ScheduledTask -TaskName {_ps_literal(task_name)} "
-        "-ErrorAction Stop | Out-Null"
-    )
-    return run_powershell(script, runner=runner, timeout=180)
-
-
-def unregister_scheduled_task(
-    tier: str,
-    *,
-    runner: Callable[..., CommandResult] | None = None,
-) -> CommandResult:
-    task_name = TIER_SPECS[tier].task_name
-    script = f"""
-$task = Get-ScheduledTask -TaskName {_ps_literal(task_name)} -ErrorAction SilentlyContinue
-if (-not $task) {{
-  exit 0
-}}
-Stop-ScheduledTask -TaskName {_ps_literal(task_name)} -ErrorAction SilentlyContinue | Out-Null
-Unregister-ScheduledTask `
-  -TaskName {_ps_literal(task_name)} `
-  -Confirm:$false `
-  -ErrorAction Stop | Out-Null
-""".strip()
-    return run_powershell(script, runner=runner, timeout=180)
-
-
-def _looks_like_access_denied(text: str) -> bool:
-    folded = text.casefold()
-    return "access is denied" in folded or "0x80070005" in folded
-
-
-def scheduled_task_retry_message(tier: str, *, existing: bool) -> str:
-    action = "update the existing Scheduled Task" if existing else "install the Scheduled Task"
-    command = " ".join(install_retry_command(tier))
-    return (
-        f"Scheduled Task registration needs elevation -- run once from an elevated "
-        f"PowerShell to {action}: {command}"
+    return _query_scheduled_task(
+        tier,
+        machine=machine,
+        runner=runner or default_command_runner,
+        resolve_binary=shutil_which,
+        home=home,
     )
 
 
@@ -500,263 +187,38 @@ def reconcile_scheduled_task(
     tier: str,
     *,
     desired_present: bool,
+    machine: str | None = None,
     runner: Callable[..., CommandResult] | None = None,
     home: Path | None = None,
 ) -> ScheduledTaskReconcileResult:
-    if sys.platform != "win32":
-        return ScheduledTaskReconcileResult(
-            tier=tier,
-            desired_state="present" if desired_present else "absent",
-            status="skipped",
-            changed=False,
-            detail="Scheduled Task reconciliation is supported only on Windows",
-        )
-    runner = runner or default_command_runner
-    snapshot = query_scheduled_task(tier, runner=runner, home=home)
-    desired_state = "present" if desired_present else "absent"
-    try:
-        if desired_present:
-            if snapshot.present and snapshot.matching:
-                if snapshot.enabled is False:
-                    enabled = enable_scheduled_task(tier, runner=runner)
-                    if enabled.returncode != 0:
-                        raise RuntimeError(
-                            enabled.output
-                            or f"failed to enable Scheduled Task {snapshot.task_name!r}"
-                        )
-                    snapshot.enabled = True
-                    record_task_config(
-                        home,
-                        tier,
-                        installed=True,
-                        opted_in=True,
-                        attempted_elevation=False,
-                    )
-                    return ScheduledTaskReconcileResult(
-                        tier=tier,
-                        desired_state=desired_state,
-                        status="changed",
-                        changed=True,
-                        detail="enabled the existing Scheduled Task",
-                        snapshot=snapshot,
-                    )
-                record_task_config(
-                    home,
-                    tier,
-                    installed=True,
-                    opted_in=True,
-                    attempted_elevation=False,
-                )
-                return ScheduledTaskReconcileResult(
-                    tier=tier,
-                    desired_state=desired_state,
-                    status="ok",
-                    changed=False,
-                    detail="Scheduled Task is already registered",
-                    snapshot=snapshot,
-                )
-            registered = register_scheduled_task(tier, runner=runner, home=home)
-            if registered.returncode == 0:
-                current = query_scheduled_task(tier, runner=runner, home=home)
-                record_task_config(
-                    home,
-                    tier,
-                    installed=True,
-                    opted_in=True,
-                    attempted_elevation=False,
-                )
-                return ScheduledTaskReconcileResult(
-                    tier=tier,
-                    desired_state=desired_state,
-                    status="changed",
-                    changed=True,
-                    detail="registered the Scheduled Task",
-                    snapshot=current,
-                )
-            if _looks_like_access_denied(registered.output):
-                detail = scheduled_task_retry_message(tier, existing=snapshot.present)
-                record_task_config(
-                    home,
-                    tier,
-                    installed=snapshot.present,
-                    opted_in=True,
-                    attempted_elevation=True,
-                )
-                return ScheduledTaskReconcileResult(
-                    tier=tier,
-                    desired_state=desired_state,
-                    status="deferred",
-                    changed=False,
-                    detail=detail,
-                    snapshot=snapshot,
-                    commands=[install_retry_command(tier)],
-                    attempted_elevation=True,
-                )
-            raise RuntimeError(
-                registered.output or f"failed to register Scheduled Task {snapshot.task_name!r}"
-            )
-        if not snapshot.present:
-            record_task_config(
-                home,
-                tier,
-                installed=False,
-                opted_in=False,
-                attempted_elevation=False,
-            )
-            return ScheduledTaskReconcileResult(
-                tier=tier,
-                desired_state=desired_state,
-                status="ok",
-                changed=False,
-                detail="Scheduled Task is already absent",
-                snapshot=snapshot,
-            )
-        removed = unregister_scheduled_task(tier, runner=runner)
-        if removed.returncode != 0:
-            raise RuntimeError(
-                removed.output or f"failed to remove Scheduled Task {snapshot.task_name!r}"
-            )
-        record_task_config(
-            home,
-            tier,
-            installed=False,
-            opted_in=False,
-            attempted_elevation=False,
-        )
-        snapshot.present = False
-        snapshot.enabled = False
-        snapshot.matching = False
-        return ScheduledTaskReconcileResult(
-            tier=tier,
-            desired_state=desired_state,
-            status="changed",
-            changed=True,
-            detail="removed the Scheduled Task",
-            snapshot=snapshot,
-        )
-    except Exception as exc:
-        return ScheduledTaskReconcileResult(
-            tier=tier,
-            desired_state=desired_state,
-            status="error",
-            changed=False,
-            detail=str(exc),
-            snapshot=snapshot,
-        )
+    return _reconcile_scheduled_task(
+        tier,
+        desired_present=desired_present,
+        machine=machine,
+        runner=runner or default_command_runner,
+        resolve_binary=shutil_which,
+        record_task_config=record_task_config,
+        home=home,
+    )
 
 
 def scheduled_task_status(
     tier: str,
     *,
     opted_in: bool,
+    machine: str | None = None,
     runner: Callable[..., CommandResult] | None = None,
     home: Path | None = None,
 ) -> ScheduledTaskStatus:
-    if sys.platform != "win32":
-        observed = tier_status(home, tier)
-        return ScheduledTaskStatus(
-            tier=tier,
-            opted_in=opted_in,
-            task_name=TIER_SPECS[tier].task_name,
-            registered=False,
-            enabled=None,
-            matching=False,
-            state=None,
-            detail="Scheduled Tasks are supported only on Windows",
-            last_attempt=observed.last_attempt,
-            last_success=observed.last_success,
-        )
-    runner = runner or default_command_runner
-    snapshot = query_scheduled_task(tier, runner=runner, home=home)
-    observed = tier_status(home, tier)
-    if not snapshot.present:
-        detail = "Scheduled Task is not registered"
-    elif snapshot.matching:
-        detail = "Scheduled Task is registered"
-    else:
-        detail = "Scheduled Task is present but does not match the expected definition"
-    return ScheduledTaskStatus(
-        tier=tier,
+    return _scheduled_task_status(
+        tier,
         opted_in=opted_in,
-        task_name=TIER_SPECS[tier].task_name,
-        registered=snapshot.present,
-        enabled=snapshot.enabled,
-        matching=snapshot.matching,
-        state=snapshot.state,
-        detail=detail,
-        last_attempt=observed.last_attempt,
-        last_success=observed.last_success,
+        machine=machine,
+        runner=runner or default_command_runner,
+        resolve_binary=shutil_which,
+        home=home,
     )
 
-
-def write_status(
-    home: Path | None, tier: str, *, attempt: str | None = None, success: str | None = None
-) -> TierStatus:
-    mutex = (
-        _WindowsMutex("Global\\AgentMachinesSelfUpdateStatus")
-        if sys.platform == "win32"
-        else None
-    )
-    if mutex is not None:
-        state = mutex.try_acquire()
-        if state not in {"acquired", "abandoned"}:
-            raise RuntimeError("could not acquire the self-update status lock")
-    try:
-        root = state_root(home)
-        root.mkdir(parents=True, exist_ok=True)
-        path = status_path(home)
-        payload = load_status(home)
-        tiers = payload.setdefault("tiers", {})
-        current = tiers.setdefault(tier, {})
-        if attempt is not None:
-            current["last_attempt"] = attempt
-        if success is not None:
-            current["last_success"] = success
-        temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-        temp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-        os.replace(temp, path)
-        return tier_status(home, tier)
-    finally:
-        if mutex is not None:
-            mutex.release()
-            mutex.close()
-
-def record_task_config(
-    home: Path | None,
-    tier: str,
-    *,
-    installed: bool,
-    opted_in: bool,
-    attempted_elevation: bool,
-) -> None:
-    mutex = (
-        _WindowsMutex("Global\\AgentMachinesSelfUpdateTaskConfig")
-        if sys.platform == "win32"
-        else None
-    )
-    if mutex is not None:
-        state = mutex.try_acquire()
-        if state not in {"acquired", "abandoned"}:
-            raise RuntimeError("could not acquire the self-update task-config lock")
-    try:
-        root = state_root(home)
-        root.mkdir(parents=True, exist_ok=True)
-        path = task_config_path(home)
-        payload = task_config(home)
-        tiers = payload.setdefault("tiers", {})
-        tiers[tier] = {
-            "installed": installed,
-            "opted_in": opted_in,
-            "attempted_elevation": attempted_elevation,
-            "updated_at": _iso_utc(_utc_now()),
-        }
-        temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-        temp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-        os.replace(temp, path)
-    finally:
-        if mutex is not None:
-            mutex.release()
-            mutex.close()
 
 def _pid_alive(pid: int | None) -> bool:
     if not pid or pid <= 0:
@@ -1172,9 +634,7 @@ def _parse_git_counts(output: str) -> tuple[int, int]:
 def fast_forward_repo(
     repo: Path, *, runner: Callable[..., CommandResult] = default_command_runner
 ) -> StepResult:
-    status = runner(
-        ["git", "status", "--porcelain"], cwd=repo, timeout=120
-    )
+    status = runner(["git", "status", "--porcelain"], cwd=repo, timeout=120)
     if status.returncode != 0:
         return StepResult(
             "git-pull", "error", status.output or "git status failed", path=str(repo)

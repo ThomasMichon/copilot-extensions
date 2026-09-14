@@ -552,7 +552,7 @@ def _cmd_self_update_run(args: argparse.Namespace) -> int:
                 machine,
                 accepted_machines=identity.accepted,
             )
-            if args.tier == _self_update.SWEEP_TIER
+            if args.tier == _self_update_state.SWEEP_TIER
             else None
         ),
     )
@@ -582,7 +582,13 @@ def _cmd_self_update_install(args: argparse.Namespace) -> int:
                 )
             )
             continue
-        results.append(_self_update.reconcile_scheduled_task(tier, desired_present=True))
+        results.append(
+            _self_update.reconcile_scheduled_task(
+                tier,
+                desired_present=True,
+                machine=_machine,
+            )
+        )
     if args.json:
         payload = {
             "ok": all(result.ok for result in results),
@@ -608,6 +614,7 @@ def _cmd_self_update_status(args: argparse.Namespace) -> int:
             _self_update.scheduled_task_status(
                 tier,
                 opted_in=_self_update_state.tier_enabled(resource),
+                machine=_machine,
             )
         )
     if args.json:
@@ -633,8 +640,13 @@ def _cmd_self_update_status(args: argparse.Namespace) -> int:
 
 
 def _cmd_self_update_uninstall(args: argparse.Namespace) -> int:
+    machine = _resolve_machine_identity(args).canonical
     results = [
-        _self_update.reconcile_scheduled_task(tier, desired_present=False)
+        _self_update.reconcile_scheduled_task(
+            tier,
+            desired_present=False,
+            machine=machine,
+        )
         for tier in _selected_self_update_tiers(args)
     ]
     if args.json:

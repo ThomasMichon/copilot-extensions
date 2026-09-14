@@ -81,6 +81,15 @@ class SelfUpdateResourceHandler(ResourceHandler):
                     "install",
                     detail="would register the Scheduled Task",
                 )
+            if desired_present and task.enabled is False:
+                return ResourceResult(
+                    self.TYPE,
+                    resolved.id,
+                    True,
+                    True,
+                    "install",
+                    detail="would enable the existing Scheduled Task",
+                )
             if desired_present and not task.matching:
                 return ResourceResult(
                     self.TYPE,
