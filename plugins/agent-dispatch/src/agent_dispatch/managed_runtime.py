@@ -713,6 +713,10 @@ def _windows_runtime_sources(base_python: Path) -> tuple[list[Path], list[Path]]
     return unique_files, directories
 
 
+def _windows_trust_suffixes() -> frozenset[str]:
+    return frozenset({".dll", ".exe", ".pyd"})
+
+
 def _windows_runtime_digest(base_python: Path) -> str:
     files, directories = _windows_runtime_sources(base_python)
     digest = hashlib.sha256()
@@ -786,37 +790,27 @@ def _copy_windows_runtime(
 
 
 def _windows_trust_files(base_python: Path) -> tuple[str, ...]:
-    files, directories = _windows_runtime_sources(base_python)
+    files, _directories = _windows_runtime_sources(base_python)
     base = base_python.parent
+    trust_suffixes = _windows_trust_suffixes()
     trust_files = [
         path.relative_to(base).as_posix()
         for path in files
-        if path.suffix.casefold() in {".exe", ".dll"}
+        if path.suffix.casefold() in trust_suffixes
     ]
-    for directory in directories:
-        for current, child_dirs, child_files in os.walk(
-            directory, topdown=True, followlinks=False
-        ):
-            current_path = Path(current)
-            relative = current_path.relative_to(base).as_posix()
-            if relative == "Lib":
-                child_dirs[:] = [
-                    name
-                    for name in child_dirs
-                    if name not in {"site-packages", "__pycache__"}
-                ]
-            else:
-                child_dirs[:] = [
-                    name for name in child_dirs if name != "__pycache__"
-                ]
-            child_dirs.sort()
-            child_files.sort()
-            trust_files.extend(
-                (current_path / name).relative_to(base).as_posix()
-                for name in child_files
-                if not name.endswith((".pyc", ".pyo"))
-                and Path(name).suffix.casefold() in {".exe", ".dll"}
-            )
+    # Keep copy/digest broad enough for stdlib + tkinter support, but align
+    # Authenticode enforcement with the artifacts upstream actually signs on a
+    # stock python.org install: the top-level interpreter/runtime files plus
+    # the direct binary modules and support DLLs under DLLs/. The bundled tcl/
+    # tree includes legitimate upstream-unsigned third-party binaries, so
+    # recursing the full copied runtime would reject healthy installs.
+    dlls_dir = base / "DLLs"
+    if dlls_dir.is_dir():
+        trust_files.extend(
+            child.relative_to(base).as_posix()
+            for child in sorted(dlls_dir.iterdir(), key=lambda path: path.name.casefold())
+            if child.is_file() and child.suffix.casefold() in trust_suffixes
+        )
     return tuple(sorted(set(trust_files), key=str.casefold))
 
 

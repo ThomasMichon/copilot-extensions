@@ -16,12 +16,12 @@ from agent_dispatch.managed_runtime import (
     _BUILD_DIRS,
     _CELL_DIRS,
     _LAYOUT_VERSION_COMPACT,
-    RECEIPT_NAME,
     ManagedRuntimeError,
-    ManagedRuntimeMaterializer,
-    _layout_version,
     ManagedRuntimePolicy,
+    ManagedRuntimeMaterializer,
+    RECEIPT_NAME,
     _is_reparse,
+    _layout_version,
     _python_path,
     _runtime_dir,
     _subprocess_environment,
@@ -143,9 +143,25 @@ def _policy(tmp_path: Path, *, windows: bool = False) -> ManagedRuntimePolicy:
             tools / f"python{sys.version_info.major}{sys.version_info.minor}.dll"
         )
         versioned_dll.write_bytes(b"python-dll")
+        (tools / "python3.dll").write_bytes(b"python3")
+        (tools / "pythonw.exe").write_bytes(b"pythonw")
+        (tools / "vcruntime140.dll").write_bytes(b"vcruntime")
+        (tools / "msvcp140.dll").write_bytes(b"msvcp")
         standard_library = tools / "Lib"
         standard_library.mkdir()
         (standard_library / "os.py").write_text("# stdlib\n", encoding="utf-8")
+        site_packages = standard_library / "site-packages" / "tool"
+        site_packages.mkdir(parents=True)
+        (site_packages / "launcher.exe").write_bytes(b"launcher")
+        dlls = tools / "DLLs"
+        dlls.mkdir()
+        (dlls / "_socket.pyd").write_bytes(b"socket")
+        (dlls / "libffi-8.dll").write_bytes(b"libffi")
+        tcl = tools / "tcl"
+        (tcl / "tix8.4.3").mkdir(parents=True)
+        (tcl / "tix8.4.3" / "ix84.dll").write_bytes(b"unsigned tcl")
+        (tcl / "nmake").mkdir(exist_ok=True)
+        (tcl / "nmake" / "x86_64-w64-mingw32-nmakehlp.exe").write_bytes(b"unsigned helper")
     else:
         standard_library = tools / "lib" / "python"
         standard_library.mkdir(parents=True)
@@ -664,6 +680,7 @@ def test_windows_verifies_base_and_copied_python_before_install(tmp_path):
     assert verified[0] == policy.base_python
     assert any(".staging" in str(path) for path in verified[1:])
     assert result.python in verified
+    assert all("tcl" not in {part.casefold() for part in path.parts} for path in verified[1:])
     assert runner.calls.index(install_call) == 0
 
 
@@ -708,9 +725,6 @@ def test_windows_does_not_require_signatures_for_installed_launchers(tmp_path):
 def test_windows_trust_manifest_excludes_uncopied_site_packages(tmp_path):
     plugin = _project(tmp_path)
     policy = _policy(tmp_path, windows=True)
-    excluded = policy.base_python.parent / "Lib" / "site-packages" / "tool"
-    excluded.mkdir(parents=True)
-    (excluded / "launcher.exe").write_bytes(b"unsigned")
 
     result = ManagedRuntimeMaterializer(
         policy,
@@ -721,3 +735,37 @@ def test_windows_trust_manifest_excludes_uncopied_site_packages(tmp_path):
     assert not (
         _cell_runtime_dir(result.cell) / "Lib" / "site-packages" / "tool" / "launcher.exe"
     ).exists()
+
+
+def test_windows_trust_manifest_excludes_unsigned_tcl_binaries(tmp_path):
+    plugin = _project(tmp_path)
+    policy = _policy(tmp_path, windows=True)
+    result = ManagedRuntimeMaterializer(
+        policy,
+        runner=FakeRunner(windows=True),
+        trust_verifier=lambda path: "tcl" not in str(path),
+    ).materialize(_registration(plugin))[0]
+
+    receipt = _receipt(result.cell)
+    assert set(receipt["windows_trust_files"]) == {
+        "DLLs/_socket.pyd",
+        "DLLs/libffi-8.dll",
+        "msvcp140.dll",
+        "python.exe",
+        "python3.dll",
+        f"python{sys.version_info.major}{sys.version_info.minor}.dll",
+        "pythonw.exe",
+        "vcruntime140.dll",
+    }
+    assert (_cell_runtime_dir(result.cell) / "tcl" / "tix8.4.3" / "ix84.dll").is_file()
+
+
+def test_windows_untrusted_core_runtime_file_still_fails(tmp_path):
+    plugin = _project(tmp_path)
+
+    with pytest.raises(ManagedRuntimeError, match="trust verification"):
+        ManagedRuntimeMaterializer(
+            _policy(tmp_path, windows=True),
+            runner=FakeRunner(windows=True),
+            trust_verifier=lambda path: path.name != "python.exe" or ".staging" not in str(path),
+        ).materialize(_registration(plugin))
