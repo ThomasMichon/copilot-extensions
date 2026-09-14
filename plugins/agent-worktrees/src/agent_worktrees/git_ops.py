@@ -254,6 +254,23 @@ class WorktreeStateInfo:
     """The worktree's actual HEAD branch (None if detached or unreadable)."""
     branch_drift: bool = False
     """True when the worktree's HEAD is on a different branch than tracked."""
+    fetch_failed: bool = False
+    """True when a requested fetch either failed outright (network down,
+    remote unreachable -- classification proceeded on stale local refs) OR
+    could not be confirmed (a timeout anywhere in classification, since a
+    stalled classify may have stalled ON the fetch itself, before it could
+    even attempt the later git calls) -- both cases mean a `fetch=True`
+    caller must not treat the result as refreshed evidence. Always False
+    when ``fetch=False`` (no fetch was attempted) or classification short-
+    circuited before reaching the fetch (GONE/zombie/ACTIVE)."""
+    fetch_requested: bool = False
+    """True only when ``fetch=True`` actually reached the point of
+    attempting a fetch (i.e. classification proceeded past the GONE/zombie/
+    ACTIVE short-circuits). A caller must derive "was this genuinely
+    refreshed" as ``fetch_requested and not fetch_failed`` -- `fetch_failed`
+    alone is insufficient, since it stays False when no fetch was ever
+    attempted (e.g. the caller passed ``fetch=False``), which would
+    otherwise let a fetch-free classification masquerade as refreshed."""
 
 
 @dataclass
@@ -414,6 +431,13 @@ def classify_worktree(
         return WorktreeStateInfo(
             state=WorktreeState.UNKNOWN,
             current_branch=actual_branch, branch_drift=drift,
+            # A timeout gives no confirmation the requested fetch (if any)
+            # ever completed -- it may have stalled on the fetch itself or on
+            # a later git call. Either way, the classification is NOT
+            # confirmed refreshed, so a `fetch=True` caller must not treat
+            # this as authoritative current-state evidence.
+            fetch_requested=fetch,
+            fetch_failed=fetch,
         )
 
 
@@ -446,8 +470,17 @@ def _classify_git_state(
     def _g(*args):
         return git(*args, cwd=path, check=False, timeout=_CLASSIFY_GIT_TIMEOUT)
 
+    # worktree-finality-and-obligations (Phase 5 follow-up): a fetch that
+    # fails (network down, remote unreachable) must not be silently treated
+    # as refreshed evidence -- the classification below still proceeds
+    # (offline callers need SOME answer), but every WorktreeStateInfo this
+    # function returns carries the honest ``fetch_failed`` flag so a
+    # destructive-freshness-sensitive caller (e.g. the closure descriptor)
+    # never treats a failed fetch attempt as authoritative current state.
+    fetch_failed = False
     if fetch:
-        _g("fetch", remote, default_branch, "--quiet")
+        fetch_r = _g("fetch", remote, default_branch, "--quiet")
+        fetch_failed = fetch_r.returncode != 0
 
     # Dirty check
     result = _g("status", "--porcelain")
@@ -484,6 +517,7 @@ def _classify_git_state(
         return WorktreeStateInfo(
             state=WorktreeState.ORPHAN, dirty=dirty_count,
             current_branch=actual_branch, branch_drift=drift,
+            fetch_requested=fetch, fetch_failed=fetch_failed,
         )
 
     # Last commit subject as fallback title
@@ -497,7 +531,10 @@ def _classify_git_state(
             if len(title) > 60:
                 title = title[:57] + "..."
 
-    _drift_fields = dict(current_branch=actual_branch, branch_drift=drift)
+    _drift_fields = dict(
+        current_branch=actual_branch, branch_drift=drift,
+        fetch_requested=fetch, fetch_failed=fetch_failed,
+    )
 
     if dirty_count > 0:
         return WorktreeStateInfo(
@@ -545,6 +582,7 @@ def _classify_git_state(
         return WorktreeStateInfo(
             state=WorktreeState.ORPHAN, dirty=dirty_count,
             current_branch=actual_branch, branch_drift=drift,
+            fetch_requested=fetch, fetch_failed=fetch_failed,
         )
     diff_r = _g("diff", "--name-only", merge_base, effective_branch)
     changed_files = [f for f in diff_r.stdout.splitlines() if f.strip()]

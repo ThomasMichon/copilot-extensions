@@ -342,11 +342,21 @@ _Verbatim operator request; original spelling and punctuation preserved._
   consumer calling `interpret_descriptor_payload` on this field.
 - [ ] Make mux and Picker use the descriptor's exact compact text, marker counts,
   and semantic style token; surface adapters may translate that style token to
-  their native palette without redefining state. **Not done** -- the mux
-  status segment and the Textual Picker still derive their own labels
-  independently of `prune.assemble_closure_descriptor`. This is the largest
-  remaining Phase 5 item (real UI-surface rewiring against golden/parity
-  tests); deliberately deferred rather than rushed in this slice.
+  their native palette without redefining state. **Split status:** the
+  PSMux/TMux status segment (`_render_status_segment`) is now done -- it
+  calls `prune.cleanup_disposition` + `prune.assemble_closure_descriptor` on
+  a record's held claims/open follow-ups and renders the descriptor's own
+  `style`-keyed color (`_DESCRIPTOR_STYLE_BG`) and `compact` text
+  (`C<N>`/`F<N>` markers included), instead of the old raw-state-only
+  `_SEGMENT_STYLE` lookup; a fetch-free (cached) poll now correctly renders
+  `MERGED` rather than `FINAL` for a COMPLETED worktree, matching design.md's
+  destructive-freshness rule. **Not done:** the Textual Picker
+  (`picker_tui/derive.py`/`engine.py`) still derives its own label
+  independently -- its `state` column is a fixed 6-char width with an exact
+  `C_STATE` dict lookup keyed on the bare label, so folding in compact
+  markers needs real column-layout work (a wider column or a new one) plus
+  golden/layout test updates, not just a data-source swap. That's its own
+  focused slice.
 - [ ] Keep legends, filters, maintenance previews, and cleanup selections in
   parity with the same descriptor. **Not done**, same reason as above.
 - [x] Preserve mixed-version fleet safety: absent, unsupported, or newer
@@ -869,4 +879,156 @@ The approved design is the faceted model in [design.md](design.md):
 - `python tools/run-plugin-tests.py agent-worktrees --subsuite-timeout 600` --
   535 passed, the same two pre-existing unrelated
   `test_knowledge_plugins.py` failures noted in every prior entry.
+
+### 2026-09-14 - Phase 5: mux status segment now consumes the closure descriptor
+- Continued from the agent-bridge closure-passthrough slice (PR #2636,
+  merged as squash commit `56a85501c`) via the same worktree (reused after
+  its `finalize`, rebased/reset onto the new `origin/main`).
+- Rewired `_render_status_segment` (the PSMux/TMux status-bar renderer) to
+  call `prune.cleanup_disposition` + `prune.assemble_closure_descriptor` on
+  the worktree's held-claims count and `tracking.effective_open_follow_up_count`
+  -- exactly the same inputs `list --json --classify`'s row builder already
+  uses (Phase 4) -- instead of mapping the raw git `WorktreeState` straight to
+  a label/color via the old `_SEGMENT_STYLE` table. Added
+  `_DESCRIPTOR_STYLE_BG`, a color table keyed by the descriptor's own `style`
+  token (`final`/`merged-blocked`/`active`/base-state-lowercase) rather than
+  the raw state, with a new `merged-blocked` color (orange, colour208)
+  distinct from WIP's amber. The rendered text is the descriptor's `compact`
+  field, so a worktree with a held claim or open follow-up now shows `C<N>`/
+  `F<N>` markers in the status bar too -- previously invisible there entirely.
+  A fetch-free (cached) poll -- the segment's own default -- now correctly
+  reads `MERGED` rather than `FINAL` for a COMPLETED worktree, per
+  design.md's "cached evidence never authorizes FINAL" rule; only `--fetch`
+  can produce a genuine `FINAL`. The CONVO turn-count refinement (session
+  activity folded into `UNUSED`) is applied to the same `WorktreeStateInfo`
+  passed into the descriptor (mirroring `_classify_record`'s existing
+  pattern) so CONVO also gets descriptor treatment, not a special case.
+  A worktree with no tracking record (can't compute claims/follow-ups) keeps
+  the legacy raw-state fallback -- explicitly never FINAL, matching how it
+  already behaved.
+- Added 4 new tests to `test_status_segment.py` (fetched+clean -> FINAL,
+  cached+otherwise-clean -> MERGED not FINAL, COMPLETED+held-claim -> MERGED
+  with a `C1` marker, DIRTY+open-follow-up -> `F1` marker while keeping the
+  DIRTY label) plus a `rec=` override on the existing `_wire` test helper so
+  callers can inject claims/follow-ups.
+- **Explicitly NOT done this session** (scoped out, not silently dropped):
+  the Textual Picker (`picker_tui/derive.py`/`engine.py`). Investigated the
+  wiring point (`_state(w)`/`_bucket_from_raw(w)` in `derive.py`) and found a
+  real layout constraint the mux segment never had: `engine.py`'s `state`
+  table column is a **fixed 6-char width** with an exact `C_STATE` dict
+  lookup keyed on the bare label (`engine.py:310-322`, `("state", "state",
+  6, "l", 4)`) -- folding `compact`'s `C<N>`/`F<N>` markers into that same
+  cell would either overflow or need a wider/new column, which in turn needs
+  golden/layout test updates. That's real UI-surface work, not a
+  data-source swap, so it stays its own slice rather than being rushed here
+  (per the effort's own repeated "deserves its own focused slice" note).
+  Legends/filters/maintenance-preview parity (the next Plan bullet) has the
+  same dependency and is equally unstarted.
+- `python tools/run-plugin-tests.py agent-worktrees -k "status_segment"` --
+  22 passed (18 existing + 4 new).
+- `python tools/run-plugin-tests.py agent-worktrees --subsuite-timeout 600`
+  -- 1 pre-existing unrelated failure
+  (`test_controller_relations.py::test_controller_metadata_is_additive_to_json_surfaces`,
+  an `AttributeError: _all_tracking_dirs` unrelated to this change --
+  confirmed identical on a clean stash of this diff), rest passed.
+- **Review-response fix (PR #2642):** a Copilot-reviewer HIGH finding caught
+  a real gap: `evidence_mode` was `"refreshed"` whenever the CALLER requested
+  `--fetch`, regardless of whether the fetch itself actually succeeded --
+  `git_ops.classify_worktree`'s internal `git fetch` call used `check=False`
+  and silently proceeded on stale local refs on failure, with no signal
+  exposed. Added `WorktreeStateInfo.fetch_failed` (threaded through every
+  return path of `_classify_git_state`, default `False`) and gated the
+  segment's `evidence_mode` on `fetch and not info.fetch_failed`, so a failed
+  fetch attempt (network down, remote unreachable) can no longer report a
+  false `FINAL`. New tests: `test_git_ops.py`'s
+  `TestClassifyGitStateFetchFailed` (successful fetch -> `False`; failed
+  fetch -> `True`, state still resolves; no fetch requested -> always
+  `False`) and `test_status_segment.py`'s
+  `test_fetch_requested_but_failed_still_renders_merged_not_final`.
+- **Second review-response round (PR #2642):** two more real findings, both
+  fixed:
+  - The no-tracking-record fallback path still resolved a COMPLETED state
+    through the legacy `_SEGMENT_STYLE` table (which maps COMPLETED ->
+    FINAL directly), contradicting its own comment claiming "never FINAL:
+    that judgment needs a record." Fixed: COMPLETED with no record now
+    explicitly renders MERGED (using the same `merged-blocked` color), since
+    held claims/open follow-ups are unprovable without a record.
+  - Every prior descriptor test used `plain=True`, so the actual styled
+    (`bg=...`) branch that consumes `descriptor.style`/
+    `_DESCRIPTOR_STYLE_BG` was never exercised -- a color-mapping regression
+    would have passed silently. Added
+    `test_completed_with_held_claim_uses_merged_blocked_color` and
+    `test_completed_and_fetched_and_clean_uses_final_color` (both
+    `plain=False`), plus
+    `test_completed_without_tracking_record_renders_merged_never_final` for
+    the fallback fix.
+  - Also bumped `.github/plugin/marketplace.json`'s top-level
+    `metadata.version` (CONTRIBUTING.md's agent-worktrees versioning table
+    requires it alongside the per-plugin entry; `check-version-bump.py`
+    doesn't enforce this field today -- a real automation gap the reviewer
+    caught manually, worth a follow-up guard someday but out of scope here).
+- `python tools/run-plugin-tests.py agent-worktrees -k "status_segment"` --
+  26 passed (22 + 4 new).
+- `python tools/run-plugin-tests.py agent-worktrees --subsuite-timeout 600`
+  -- same single pre-existing unrelated failure, 584 passed.
+- **Third review-response round (PR #2642):** while this PR was in review,
+  an unrelated critical bug (#2650, a circular-import crash breaking every
+  `agent-worktrees` CLI invocation) surfaced and was fixed/merged separately
+  as PR #2653 -- see that PR's own history; not part of this effort. Also
+  during this round, an unrelated module-size-split refactor
+  (`agent-worktrees: properly break down the CLI root into smaller
+  modules`, #2657) merged to `main`; this PR's commits were squashed and
+  rebased past both, with each version-bump collision resolved as it came
+  (dev104 through dev109 across several merges racing in from a very active
+  main branch this session).
+  - The reviewer caught 3 more real gaps, all in the `fetch_failed`
+    propagation this effort's own earlier round added: (1) `classify_worktree`'s
+    `subprocess.TimeoutExpired` handler returned `UNKNOWN` without setting
+    `fetch_failed` -- a timeout mid-fetch gives no confirmation the fetch
+    completed, so it must propagate `fetch_failed=fetch` too, not just an
+    explicit nonzero-exit fetch failure. (2) The Phase-4 `_worktree_to_dict`
+    call site (`list --json --classify`) still hardcoded
+    `evidence_mode="refreshed"` unconditionally whenever `state_info` was
+    supplied, never checking `state_info.fetch_failed` -- the exact same
+    false-FINAL risk the status segment's own fix addressed, just at a
+    different call site. Both fixed; new tests
+    `TestClassifyGitStateFetchFailed::test_classify_worktree_timeout_with_fetch_reports_fetch_failed`
+    and `test_closure_descriptor_wiring.py`'s
+    `test_closure_downgrades_to_cached_when_fetch_failed`.
+  - Two documentation nits: `_render_status_segment`'s own docstring still
+    only described the legacy `FINAL`/raw-state contract (no mention of
+    `MERGED` or the `C<N>`/`F<N>` markers) -- updated. The PR description's
+    version-bump and test-count claims had drifted from the actual final
+    values across several rebase rounds -- reconciled.
+- `python tools/run-plugin-tests.py agent-worktrees -k "status_segment or
+  classify_worktree_timeout or closure_descriptor_wiring or
+  ClassifyGitStateFetchFailed"` -- 35 passed.
+- `python tools/run-plugin-tests.py agent-worktrees --subsuite-timeout 600`
+  -- 2 additional pre-existing unrelated failures surfaced by the
+  module-size-split rebase (`test_ahp_command.py::
+  test_direct_backend_refuses_active_hosted_binding` and
+  `::test_ensure_rejects_finalizing_worktree`, both an `IndexError` on an
+  empty output-capture list unrelated to fetch/closure logic -- confirmed
+  identical with and without this round's diff via `git stash`), plus the
+  same single pre-existing `test_controller_relations.py` failure noted in
+  every prior entry.
+- **Fourth review-response round (PR #2642):** the reviewer's persistence
+  paid off -- caught that the third round's `fetch_failed` fix was still
+  incomplete: `fetch_failed` alone stays `False` whenever no fetch was ever
+  attempted (every actual current caller of `classify_worktree` for `list
+  --json --classify` passes `fetch=False`), so both `assemble_closure_descriptor`
+  call sites still reported `"refreshed"` for an ordinary fetch-free
+  classification. Added `WorktreeStateInfo.fetch_requested` (mirrors
+  `fetch_failed`'s propagation through every `_classify_git_state` return
+  path and the timeout handler) and changed both call sites (the mux
+  segment and the Phase-4 `_worktree_to_dict`) to gate `evidence_mode` on
+  `fetch_requested and not fetch_failed`, not `fetch_failed` alone. Updated
+  existing tests whose fixtures had encoded the old (buggy) assumption, and
+  added `test_closure_downgrades_to_cached_when_no_fetch_requested` --
+  exactly the real-world case (`list --json --classify` with no `--fetch`)
+  the finding named.
+- `python tools/run-plugin-tests.py agent-worktrees -k "status_segment or
+  closure_descriptor_wiring or FetchFailed"` -- 34 passed.
+- `python tools/run-plugin-tests.py agent-worktrees --subsuite-timeout 600`
+  -- same pre-existing failures as the prior round, no new ones.
 
