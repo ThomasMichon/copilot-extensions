@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** reviewed plan PR, followed by serial implementation PRs
 - **Created:** 2026-08-28
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/agent-fabric` - `legible-live-state`,
   `resource-claims`, `resource-accountability`,
   `disposition-is-asserted-pulse-is-derived`, and
@@ -135,6 +135,15 @@ _Verbatim operator request; original spelling and punctuation preserved._
 - [ ] Add focused fixtures for a retained finalized record that receives new
   work, a Git-settled record with held claims, and a Git-settled record with
   multiple follow-ups.
+- [x] Prune-verdict slice only: `cleanup_disposition` and
+  `classify_managed_worktree` now treat a held resource claim
+  (`active`/`at-rest`) as a blocker even when `status == finalized` or Git is
+  COMPLETED/merged (new `held-claims` bucket/reason), closing the safety gap
+  PR #2592 opened (a finalized owner can now accept a new claim, but nothing
+  downstream of that fix previously re-checked for one before cleanup/GC).
+  The cross-surface **compact token/style/blocker-count parity** across list
+  JSON, mux, and Picker (the rest of this bullet) is not done -- no unified
+  descriptor exists yet; that's the remaining Phase 1/4 work.
 - [ ] Assert the same expected compact token, semantic style, blocker counts,
   and prune verdict across list JSON, mux rendering, and Picker derivation.
 - [ ] Add compatibility fixtures for legacy boolean-only records and active
@@ -352,4 +361,27 @@ The approved design is the faceted model in [design.md](design.md):
   fall out of the worktree's obligations. Folded into Phase 3 and Phase 5.
 - No further implementation done this session; still Draft, plan not yet
   submitted for the effort's own PR review gate.
+
+### 2026-09-13 - Started execution; closed a safety gap PR #2592 left open
+- Operator said "start it." Status moved **Draft -> Active**. Bound this
+  worktree to the effort at Phase 1
+  (`effort-focus bind ... --slice "Phase 1 - Lock the contracts with failing
+  fixtures"`).
+- While scoping Phase 1's "Git-settled record with held claims" fixture,
+  found that PR #2592 (letting a finalized owner accept a new claim) had
+  opened exactly the gap this effort exists to close: neither
+  `prune.cleanup_disposition` nor `gc.classify_managed_worktree` ever
+  consulted `rec.resources` at all, so a `finalized` record holding a fresh
+  claim was cleanable/reapable regardless. Fixed both (new `held-claims`
+  bucket/reason, gated the same way the existing `follow_up` override is),
+  with regression tests. This is the prune-verdict slice of Phase 1's first
+  bullet and part of Phase 4's "held claims + open follow-ups turn any base
+  state into blocked" invariant -- landed early because it was a live safety
+  gap, not merely a locked failing fixture.
+- Explicitly NOT done this session: the unified closure descriptor (Phase 4),
+  the `FollowUpRecord` ledger (Phase 3), the reopen/freeze/rollback
+  transaction (Phase 2), and the list JSON / mux / Picker parity fixtures
+  (rest of Phase 1). Next slice: either finish Phase 1's remaining fixtures
+  (compatibility, concurrency, inventory) or move to Phase 2's centralized
+  mutation/reopen transaction -- pick up from the Plan checklist above.
 
