@@ -182,8 +182,8 @@ duplicate or fight an existing mechanism:
       identified in Phase 1 scoped to just this one worktree (not a full
       fleet rescan), re-derive `turn_count` from current session state, and
       run the **complete** `cleanup_disposition` against all of that —
-      returning `(disposition, reason)` rather than a narrowed
-      dirty/active-only check.
+      returning the fresh record, classification, disposition, and reason
+      rather than a narrowed dirty/active-only check.
 - [ ] **"Re-run `cleanup_disposition`" is necessary but not yet sufficient
       by itself — its internal ordering has the same class of bug PR #2635
       fixed for `dirty`, but for `WIP`/`conversation-only`.**
@@ -271,10 +271,13 @@ duplicate or fight an existing mechanism:
          claim/follow-up writers also acquire `FinalizeLock` (or a
          compatible lock, with an explicitly defined lock order to avoid
          deadlock with existing per-record-lock callers), or (b) use a
-         target-record lock/CAS (a generation token bumped by every writer,
-         checked immediately before the reap) so a write racing the
-         critical section is detected even without a shared lock. Whichever
-         of (a)/(b) is chosen, **explicitly document that a true fence
+         non-degrading target-record lock (`require_sidecar=True`, failing
+         closed on timeout) or CAS (a generation token bumped by every
+         writer, checked immediately before the reap) so a write racing the
+         critical section is detected even without a shared lock. The
+         default `_RecordLock` mode is insufficient because it may proceed
+         on only its in-process lock after sidecar timeout. Whichever of
+         (a)/(b) is chosen, **explicitly document that a true fence
          against arbitrary *external* actors (an editor, a directly-invoked
          git command outside this tool entirely) remains out of scope**
          unless a further mechanism (e.g., marking the worktree read-only
@@ -301,10 +304,12 @@ duplicate or fight an existing mechanism:
       session-end auto-clean path) through the same consolidated function
       too — it builds candidates pre-lock and reaps under the lock with no
       fresh safety decision today, the identical race being fixed
-      elsewhere. If this reaper's constraints (e.g. no `force` concept, a
-      narrower record shape) make full reuse awkward, that's a Phase 2
-      design input, not a reason to leave it out — resolve the shape during
-      design, don't scope it out by default.
+      elsewhere. Recompute its idle-grace input at action time from fresh mux
+      activity and tracking timestamps so activity after candidate selection
+      postpones removal. If this reaper's constraints (e.g. no `force`
+      concept, a narrower record shape) make full reuse awkward, that's a
+      Phase 2 design input, not a reason to leave it out — resolve the shape
+      during design, don't scope it out by default.
 - [ ] Remove the now-superseded `_revalidate_before_reap` (or fold it into
       the new function) so there is exactly one non-forced revalidation code
       path left, not two that can drift apart again.
@@ -315,7 +320,8 @@ Each bullet below is **one named test per signal, per reaper, per mode** —
 not a bundled scenario covering several transitions at once. The full matrix
 crosses: **signal** (dirty, WIP, new conversation turn, held claim,
 follow-up, active session, branch-merge/GONE, claimant-liveness-unknown)
-× **reaper** (batch `cleanup --clean`, single `cleanup --worktree-id`)
+× **reaper** (batch `cleanup --clean`, single `cleanup --worktree-id`,
+automatic `sweep_finished_session_worktrees`)
 × **mode** (non-forced; forced, for the single-item reaper only, per
 Phase 2's forced-path contract). Concretely, at minimum:
 
@@ -323,9 +329,16 @@ Phase 2's forced-path contract). Concretely, at minimum:
       #2635 — confirm it still passes through the consolidated function).
 - [ ] Batch, non-forced: active-session-after-scan refused (closes gap #2).
 - [ ] Batch, non-forced: WIP-after-scan refused (closes part of gap #3).
+- [ ] Batch, non-forced: a record already marked `finalized` that gains WIP
+      after the scan is refused, proving the finalized shortcut cannot bypass
+      the fresh WIP gate.
 - [ ] Batch, non-forced: new-conversation-turn-after-scan refused, i.e. an
       `empty`/`unused` candidate that gained turns and would need
       `--include-conversations` (closes part of gap #3).
+- [ ] Batch, non-forced: a record already marked `finalized` that gains a
+      conversation turn after the scan is refused when conversations were not
+      included, proving the finalized shortcut cannot bypass the fresh
+      conversation gate.
 - [ ] Batch, non-forced: held-claim-or-follow-up-reopened-after-scan
       refused (closes part of gap #3).
 - [ ] Batch, non-forced: branch-becomes-unmerged-after-scan refused (the
@@ -333,10 +346,17 @@ Phase 2's forced-path contract). Concretely, at minimum:
 - [ ] Batch, non-forced: `claimant_alive` returns unknown under the lock —
       exercises the exact bounded-wait/fail-closed policy Phase 1/2 define
       (not just a happy-path alive/gone result).
+- [ ] Batch, non-forced: when the batched mux query is unavailable and the
+      record has a fresh cached `mux_live=False`, a mux session attached after
+      that stamp is still found by the authoritative action-time probe (or the
+      reap fails closed if the probe is unavailable).
 - [ ] Single-item (`reap_one`), non-forced: dirty/active/WIP/conversation/
       claim/follow-up/branch-merge-after-scan each refused, mirroring the
       batch cases above — this is the direct fix for gap #1 (currently zero
-      coverage).
+      coverage), including the finalized-record WIP and conversation variants.
+- [ ] Single-item (`reap_one`), non-forced: the unavailable-batch-query plus
+      fresh cached `mux_live=False` race is resolved by the authoritative
+      action-time probe or fails closed.
 - [ ] Single-item (`reap_one`), **forced**: an active session is still
       rejected (the one check `--force` does not bypass); a merely dirty/WIP/
       claimed worktree **is** removed when forced (confirms `--force` still
@@ -348,12 +368,28 @@ Phase 2's forced-path contract). Concretely, at minimum:
       bypasses the disposition checks but must not bypass a *fresh*
       liveness read, since `active_paths` is otherwise only ever computed
       before `FinalizeLock` is acquired.
-- [ ] A test that specifically exercises "shrink the window to one held
-      critical section" (Phase 2): assert the final classification/liveness
-      read and the `_reap_worktree` call happen while continuously holding
-      `FinalizeLock`, with no intervening I/O or re-entrant call between
-      them — the closest this design gets to closing the check-to-delete
-      gap, and the one thing that must be verified rather than assumed.
+- [ ] Single-item (`reap_one`), **forced**: the same post-scan attachment is
+      detected when the batched mux query is unavailable and the record has a
+      fresh cached `mux_live=False`, or the action-time probe fails closed.
+- [ ] Automatic finished-session sweep, non-forced: each dirty, active, WIP,
+      new-conversation-turn, held-claim, follow-up, branch-merge/GONE, and
+      claimant-liveness-unknown transition after candidate selection is
+      refused in its own named test, including finalized-record WIP and
+      conversation variants.
+- [ ] Automatic finished-session sweep, non-forced: activity after candidate
+      selection refreshes the idle-grace timestamp and postpones removal even
+      when no session remains live at reap time.
+- [ ] Automatic finished-session sweep, non-forced: the unavailable-batch-query
+      plus fresh cached `mux_live=False` race is covered by an authoritative
+      action-time probe/fail-closed test, matching both manual reapers.
+- [ ] Tests that specifically exercise the Phase 2 critical section for both
+      manual reapers and the automatic finished-session sweep: assert the final
+      classification/liveness read and `_reap_worktree` happen while
+      continuously holding `FinalizeLock`, and that a racing record mutation
+      is fenced or detected before removal. Exercise record-lock contention
+      from a separate process and prove sidecar-lock timeout fails closed
+      rather than degrading to in-process-only exclusion. Assert every
+      participant acquires locks in the declared order.
 - [ ] Every existing regression test from PR #2635
       (`test_tracking_override.py`, `test_prune.py`) still passes unchanged
       or is updated to call through the new consolidated function without
@@ -362,12 +398,12 @@ Phase 2's forced-path contract). Concretely, at minimum:
 ### Phase 5 — Documentation
 
 - [ ] Update the `worktree` skill's Cleanup Procedure / dirty-worktree
-      section (added in #2635) to describe the **unified** guarantee — both
-      `cleanup --clean` and `cleanup --worktree-id` (non-forced) revalidate
-      the complete safety decision under the lock, while `--force` remains
-      the documented, narrower, individually-verified exception — so a
-      future reader doesn't have to reverse-engineer this from two PRs'
-      diffs.
+      section (added in #2635) to describe the **unified** guarantee — batch
+      cleanup, single-item cleanup (non-forced), and automatic finished-session
+      cleanup revalidate the complete safety decision through the cleanup
+      handoff, while `--force` remains the documented, narrower,
+      individually-verified exception — so a future reader doesn't have to
+      reverse-engineer this from several PRs' diffs.
 
 ## Validation Plan
 
@@ -377,7 +413,9 @@ Phase 2's forced-path contract). Concretely, at minimum:
       unrelated (as PR #2635 did for `test_knowledge_plugins.py`).
 - [ ] Every named test enumerated in Phase 4 exists, is named for the
       specific signal/reaper/mode it covers (no bundled test standing in for
-      several transitions), fails on the pre-effort code, and passes after.
+      several transitions), includes the authoritative action-time mux
+      fallback, automatic reaper, idle-grace refresh, cross-process fence, and
+      lock ordering, fails on the pre-effort code, and passes after.
 - [ ] `tools/check-version-consistency.py` and `tools/check-version-bump.py`
       pass on the implementation PR.
 - [ ] Manual smoke check (documented in the Journal, not just asserted): a
@@ -497,3 +535,15 @@ clears review._
   remaining design refinements (if any) belong to Phase 1's investigation,
   which will re-derive and settle them against the real code rather than a
   plan document's prose.
+
+### 2026-09-14 — Review round 4 follow-up
+
+- Expanded Phase 4 so all three reapers explicitly cover the complete signal
+  matrix, finalized-record WIP/conversation drift, and cached-negative mux
+  fallback; the forced path keeps its separate liveness-only contract.
+- Required non-degrading cross-process record exclusion: sidecar-lock timeout
+  must fail closed (or an equivalent generation/CAS protocol must detect the
+  write), with real cross-process contention coverage.
+- Added action-time idle-grace revalidation for the automatic sweep so a
+  post-selection resume cannot be hidden merely because no session remains
+  live at the final check.
