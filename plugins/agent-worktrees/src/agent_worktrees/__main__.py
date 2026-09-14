@@ -413,17 +413,20 @@ def _build_active_paths(
     else:
         # Batch list unavailable (mux missing or blocked): prefer the #4057
         # cached liveness hint on the record (a free read, stamped by the
-        # authoritative verify at the action moments) when it is FRESH, and only
-        # fall back to the slow per-worktree has-session probe when there is no
-        # usable hint. This keeps the populate cheap even when the live batch
-        # can't run, without trusting a stale stamp.
+        # authoritative verify at the action moments) when it is a FRESH
+        # ``True`` -- that short-circuits the slow per-worktree probe. A
+        # missing hint OR a fresh cached ``False`` both still fall through to
+        # the authoritative ``has_mux_session`` probe (cleanup-toctou-
+        # revalidation effort): a cached negative is not proof a session
+        # hasn't attached since the stamp, so it must never be trusted on its
+        # own to skip the fallback check.
         for rec in records:
             if not rec.worktree_path:
                 continue
             hint = _fresh_mux_live_hint(rec)
             if hint is True:
                 active.add(_normalize_path(rec.worktree_path))
-            elif hint is None and sessions.has_mux_session(rec.worktree_id):
+            elif sessions.has_mux_session(rec.worktree_id):
                 active.add(_normalize_path(rec.worktree_path))
     # #4057/#1416 bare-resume blind spot: a bare-resumed Copilot (cwd=home) is
     # invisible to BOTH the lock scan above (its session isn't registered under
@@ -13641,18 +13644,29 @@ def reap_one(
             }
         )
     try:
-        latest = tracking.load_record(yaml_path)
-        if _hosted_session_blocks_cleanup(latest):
+        result = _revalidate_cleanup_safety(
+            wt_id,
+            repo=repo,
+            tracking_path=tracking_path,
+            force=force,
+            include_unused=include_unused,
+            include_conversations=include_conversations,
+            reap=lambda latest, fresh_info: _reap_worktree(
+                latest, fresh_info, repo, tracking_path),
+        )
+        if not result.cleanable:
             return _result(
                 {
                     "ok": False,
                     "removed": False,
                     "skipped": True,
-                    "reason": "active hosted Copilot session in use",
-                    "bucket": "active",
+                    "reason": result.reason,
+                    "bucket": result.bucket,
                 }
             )
-        failures, warnings = _reap_worktree(rec, info, repo, tracking_path)
+        failures = result.failures
+        warnings = result.warnings
+        info = result.info
         git_ops.prune_worktrees(cwd=repo.anchor)
     finally:
         lock.release()
@@ -14823,14 +14837,48 @@ def sweep_finished_session_worktrees(
         return result
     try:
         for rec, info, reason in candidates:
-            f, warns = _reap_worktree(rec, info, repo, tracking_path)
+            # Idle-grace revalidation (cleanup-toctou-revalidation, Phase 3):
+            # re-derive activity at action time so a resume between candidate
+            # selection (Pass 1) and this reap (Pass 2) postpones removal even
+            # when no session remains live at this final check.
+            name = sessions.mux_session_name(rec.worktree_id)
+            fresh_activity = sessions._mux_session_activity()
+            fresh_last_active = fresh_activity.get(name)
+            if fresh_last_active is None:
+                fresh_yaml = tracking_path / f"{rec.worktree_id}.yaml"
+                fresh_rec = tracking.load_record(fresh_yaml) if fresh_yaml.exists() else rec
+                fresh_last_active = (
+                    _iso_epoch(fresh_rec.last_resumed_at)
+                    or _iso_epoch(fresh_rec.completed_at)
+                    or _iso_epoch(fresh_rec.started_at)
+                )
+            if fresh_last_active is not None and (time.time() - fresh_last_active) < grace:
+                result["skipped"].append(
+                    {"id": rec.worktree_id,
+                     "reason": "idle grace not elapsed (activity since selection)"}
+                )
+                continue
+
+            rr = _revalidate_cleanup_safety(
+                rec.worktree_id,
+                repo=repo,
+                tracking_path=tracking_path,
+                include_unused=False,
+                include_conversations=False,
+                reap=lambda latest, fresh_info: _reap_worktree(
+                    latest, fresh_info, repo, tracking_path),
+            )
+            if not rr.cleanable:
+                result["skipped"].append({"id": rec.worktree_id, "reason": rr.reason})
+                continue
             try:
                 activity.log_event(
-                    "session_worktree_autoclean", worktree_id=rec.worktree_id, reason=reason
+                    "session_worktree_autoclean", worktree_id=rec.worktree_id,
+                    reason=rr.reason,
                 )
             except Exception:
                 pass
-            full = reason + (f"; {'; '.join(warns)}" if warns else "")
+            full = rr.reason + (f"; {'; '.join(rr.warnings)}" if rr.warnings else "")
             result["removed"].append({"id": rec.worktree_id, "reason": full})
         git_ops.prune_worktrees(cwd=repo.anchor)
     finally:
@@ -15397,45 +15445,180 @@ def _cleanup_per_item_skip_reason(disp: prune.CleanupDisposition) -> str:
     return ""
 
 
-def _revalidate_before_reap(
-    latest: tracking.WorktreeRecord,
-    info: git_ops.WorktreeStateInfo,
+@dataclasses.dataclass
+class RevalidationResult:
+    """The canonical outcome of :func:`_revalidate_cleanup_safety`."""
+
+    cleanable: bool
+    reason: str
+    bucket: str
+    #: Populated only when ``cleanable`` -- the fresh record/classification the
+    #: reap must act on, never the caller's pre-lock objects.
+    record: tracking.WorktreeRecord | None = None
+    info: git_ops.WorktreeStateInfo | None = None
+    #: Populated only when a ``reap`` callback was supplied and actually ran.
+    failures: int = 0
+    warnings: list[str] = dataclasses.field(default_factory=list)
+    reaped: bool = False
+
+
+def _revalidate_cleanup_safety(
+    wt_id: str,
     *,
     repo,
-    active_paths: set[str],
-) -> tuple[git_ops.WorktreeStateInfo | None, str | None]:
-    """Re-check a worktree's git state right before deleting it.
+    tracking_path: Path,
+    force: bool = False,
+    include_unused: bool = False,
+    include_conversations: bool = False,
+    reap: Callable[
+        [tracking.WorktreeRecord, git_ops.WorktreeStateInfo], tuple[int, list[str]]
+    ]
+    | None = None,
+) -> RevalidationResult:
+    """The one canonical, under-``FinalizeLock`` safety recheck every reaper
+    shares (cleanup-toctou-revalidation effort, replacing the narrower
+    ``_revalidate_before_reap``).
 
-    `cmd_cleanup` builds its `to_clean` set from a snapshot taken *before* the
-    finalization lock is acquired -- so a worktree can pick up real,
-    uncommitted edits (an editor left open, another process, the operator) in
-    the gap between that scan and the actual reap. Trusting the stale `info`
-    across that gap would let plain `cleanup --clean` delete content that
-    became dirty after it was scanned. This re-classifies fresh, under the
-    lock, right before the caller reaps -- a cheap local git read, no network
-    fetch -- and returns ``(None, reason)`` if the worktree is no longer safe
-    to reap (now dirty, or a session has since attached to it), or
-    ``(reclassified_info, None)`` when it's still safe.
+    Reloads the tracking record fresh, rebuilds a single-worktree
+    ``active_paths``, re-classifies git state fresh (no network fetch),
+    re-derives ``turn_count``, and runs the complete (ordering-fixed)
+    :func:`prune.cleanup_disposition` -- never a narrowed dirty/active-only
+    check. Returns a :class:`RevalidationResult` carrying the fresh
+    ``record``/``info`` the caller must reap, not the caller's stale pre-lock
+    objects.
 
-    A worktree with no on-disk path (already gone) skips revalidation and is
-    returned unchanged -- there's nothing left to re-check.
+    **Two named contracts** (Phase 2):
+
+    - **Non-forced** (default): re-checks the complete disposition --
+      dirty/WIP/conversation/held-claims/follow-up/paired-pending/branch-merge
+      (for a missing directory) -- via the *ordering-fixed*
+      ``cleanup_disposition``, in addition to liveness. When ``reap`` is
+      given and the fresh decision is cleanable, this acquires
+      ``tracking._RecordLock(yaml_path, require_sidecar=True)`` and invokes
+      ``reap`` **while continuing to hold it**, so the fresh read and the
+      delete happen as one uninterrupted, lock-held sequence (Option 1(b)):
+      a racing write from this codebase's OTHER record mutators (resource
+      claims, follow-ups, session registration -- all of which already take
+      the same sidecar lock for their own RMW) is fenced out for the whole
+      window, not just the read. ``require_sidecar=True`` means lock
+      contention **fails closed** (raises ``TimeoutError``, reported as the
+      ``"locked"`` bucket) rather than degrading to the in-process-only
+      lock. Callers must already hold ``FinalizeLock`` before calling this
+      (lock order: ``FinalizeLock`` then ``_RecordLock`` -- never reversed).
+    - **Forced** (`force=True`): mirrors ``reap_one --force``'s documented,
+      narrower escape hatch -- skips ``cleanup_disposition`` entirely (dirty/
+      WIP/claims/follow-ups/branch-merge are NOT re-checked), but still
+      refreshes liveness fresh, under the lock, via the *same* liveness-read
+      code path as the non-forced contract (closing the gap where ``--force``
+      used to trust a stale pre-lock ``active_paths`` snapshot). The one
+      check ``--force`` never bypasses is an active/hosted session. Forced
+      mode does not take ``_RecordLock`` -- its narrower contract isn't
+      gated on the fields other writers mutate.
+
+    A worktree with no on-disk path (``GONE``) re-proves the branch-merged
+    gate itself (``cleanup_disposition`` deliberately excludes ``GONE`` --
+    that proof is caller-owned), so a branch that became unmerged after an
+    earlier, caller-side pre-lock proof is still caught here.
+
+    This function never performs a network PR reconciliation -- ``rec.prs``
+    is read as already reconciled at scan time (or not reconciled at all, in
+    which case a stale ``open`` fails safe toward "don't reap").
     """
-    if not latest.worktree_path or not Path(latest.worktree_path).exists():
-        return info, None
-    fresh_info = git_ops.classify_worktree(
-        latest.worktree_path,
-        latest.branch,
-        fetch=False,
-        remote=repo.remote,
-        default_branch=repo.default_branch,
-        active_paths=active_paths,
-    )
-    fresh_info = _apply_tracking_override(latest, fresh_info)
-    if fresh_info.state == git_ops.WorktreeState.ACTIVE:
-        return None, "worktree became active since the initial scan"
-    if fresh_info.state == git_ops.WorktreeState.DIRTY or fresh_info.dirty > 0:
-        return None, "worktree became dirty since the initial scan"
-    return fresh_info, None
+    yaml_path = tracking_path / f"{wt_id}.yaml"
+    if not yaml_path.exists():
+        return RevalidationResult(False, f"worktree not found: {wt_id}", "gone")
+
+    def _fresh_liveness(latest: tracking.WorktreeRecord) -> tuple[
+        git_ops.WorktreeStateInfo, set[str], sessions.SessionContext
+    ]:
+        session_ctx = sessions.scan_sessions_fast([latest])
+        active_paths = _build_active_paths([latest], session_ctx)
+        if latest.worktree_path and Path(latest.worktree_path).exists():
+            fresh_info = git_ops.classify_worktree(
+                latest.worktree_path,
+                latest.branch,
+                fetch=False,
+                remote=repo.remote,
+                default_branch=repo.default_branch,
+                active_paths=active_paths,
+            )
+            fresh_info = _apply_tracking_override(latest, fresh_info)
+        elif latest.status == "finalized":
+            fresh_info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
+        else:
+            fresh_info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.GONE)
+        return fresh_info, active_paths, session_ctx
+
+    def _do_reap(
+        latest: tracking.WorktreeRecord, fresh_info: git_ops.WorktreeStateInfo
+    ) -> tuple[int, list[str]]:
+        if reap is not None:
+            return reap(latest, fresh_info)
+        return 0, []
+
+    if force:
+        latest = tracking.load_record(yaml_path)
+        if _hosted_session_blocks_cleanup(latest):
+            return RevalidationResult(
+                False, "active hosted Copilot session in use", "active")
+        fresh_info, _active_paths, _ctx = _fresh_liveness(latest)
+        if fresh_info.state == git_ops.WorktreeState.ACTIVE:
+            return RevalidationResult(
+                False, "worktree became active since the initial scan", "active")
+        failures, warnings = _do_reap(latest, fresh_info)
+        return RevalidationResult(
+            True, "forced", "forced", latest, fresh_info,
+            failures=failures, warnings=warnings, reaped=reap is not None,
+        )
+
+    try:
+        with tracking._RecordLock(yaml_path, require_sidecar=True):
+            latest = tracking.load_record(yaml_path)
+            if _hosted_session_blocks_cleanup(latest):
+                return RevalidationResult(
+                    False, "active hosted Copilot session in use", "active")
+            fresh_info, active_paths, session_ctx = _fresh_liveness(latest)
+            if fresh_info.state == git_ops.WorktreeState.ACTIVE:
+                return RevalidationResult(
+                    False, "worktree became active since the initial scan",
+                    "active")
+
+            if fresh_info.state == git_ops.WorktreeState.GONE:
+                upstream = f"{repo.remote}/{repo.default_branch}"
+                if latest.branch and not git_ops.is_branch_merged(
+                    latest.branch, upstream, cwd=repo.anchor,
+                ):
+                    return RevalidationResult(
+                        False,
+                        "branch has unmerged commits (worktree dir missing)",
+                        "unmerged")
+                failures, warnings = _do_reap(latest, fresh_info)
+                return RevalidationResult(
+                    True, "gone; branch merged", "clean", latest, fresh_info,
+                    failures=failures, warnings=warnings, reaped=reap is not None,
+                )
+
+            norm = _normalize_path(latest.worktree_path) if latest.worktree_path else ""
+            turns = session_ctx.turn_count.get(norm, 0)
+            disp = prune.cleanup_disposition(
+                latest,
+                fresh_info,
+                turn_count=turns,
+                include_unused=include_unused,
+                include_conversations=include_conversations,
+                claimant_alive=claimant_mod.resolve_claimant_alive,
+                paired_sibling_final=prune.default_paired_sibling_final,
+            )
+            if not disp.cleanable:
+                return RevalidationResult(False, disp.reason, disp.bucket)
+            failures, warnings = _do_reap(latest, fresh_info)
+            return RevalidationResult(
+                True, disp.reason, disp.bucket, latest, fresh_info,
+                failures=failures, warnings=warnings, reaped=reap is not None,
+            )
+    except TimeoutError:
+        return RevalidationResult(
+            False, "revalidation lock contended", "locked")
 
 
 def cmd_cleanup(args: argparse.Namespace) -> int:
@@ -15633,30 +15816,25 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     cleaned_count = 0
     try:
         for rec, info in to_clean:
-            yaml_path = tracking_path / f"{rec.worktree_id}.yaml"
-            if yaml_path.exists():
-                latest = tracking.load_record(yaml_path)
-                if _hosted_session_blocks_cleanup(latest):
-                    output.warn(
-                        f"Skipping {rec.worktree_id}: active hosted Copilot session in use"
-                    )
-                    continue
-            else:
-                latest = rec
-            revalidated, revalidate_reason = _revalidate_before_reap(
-                latest, info, repo=repo, active_paths=active_paths,
+
+            def _reap_cb(latest_rec, latest_info):
+                return _reap_worktree(latest_rec, latest_info, repo, tracking_path)
+
+            result = _revalidate_cleanup_safety(
+                rec.worktree_id,
+                repo=repo,
+                tracking_path=tracking_path,
+                include_unused=args.include_unused,
+                include_conversations=include_conversations,
+                reap=_reap_cb,
             )
-            if revalidated is None:
-                output.warn(
-                    f"Skipping {rec.worktree_id}: {revalidate_reason}"
-                )
+            if not result.cleanable:
+                output.warn(f"Skipping {rec.worktree_id}: {result.reason}")
                 continue
-            info = revalidated
-            print(f"Cleaning {rec.worktree_id} ({info.state.value})...")
-            f, warns = _reap_worktree(rec, info, repo, tracking_path)
-            for w in warns:
+            print(f"Cleaning {rec.worktree_id} ({result.info.state.value})...")
+            for w in result.warnings:
                 output.warn(w)
-            failures += f
+            failures += result.failures
             cleaned_count += 1
 
         # Prune stale worktree entries

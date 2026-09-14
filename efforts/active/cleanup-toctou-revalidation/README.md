@@ -458,14 +458,14 @@ duplicate or fight an existing mechanism:
 
 ### Phase 3 — Wire all three reaper call sites through it
 
-- [ ] Route `cmd_cleanup`'s batch loop through the consolidated function
+- [x] Route `cmd_cleanup`'s batch loop through the consolidated function
       (replacing today's narrower `_revalidate_before_reap` call).
-- [ ] Route `reap_one` (`cleanup --worktree-id <id>`) through the *same*
+- [x] Route `reap_one` (`cleanup --worktree-id <id>`) through the *same*
       function for its **non-forced** path — this is the actual fix for gap
       #1; it must not gain its own parallel implementation. Its **forced**
       path keeps the narrower, separately-specified contract from Phase 2
       (active-session rejection only) — force stays force.
-- [ ] Route `sweep_finished_session_worktrees` (the no-daemon/picker/
+- [x] Route `sweep_finished_session_worktrees` (the no-daemon/picker/
       session-end auto-clean path) through the same consolidated function
       too — it builds candidates pre-lock and reaps under the lock with no
       fresh safety decision today, the identical race being fixed
@@ -475,9 +475,13 @@ duplicate or fight an existing mechanism:
       concept, a narrower record shape) make full reuse awkward, that's a
       Phase 2 design input, not a reason to leave it out — resolve the shape
       during design, don't scope it out by default.
-- [ ] Remove the now-superseded `_revalidate_before_reap` (or fold it into
+- [x] Remove the now-superseded `_revalidate_before_reap` (or fold it into
       the new function) so there is exactly one non-forced revalidation code
       path left, not two that can drift apart again.
+
+**Implemented** in `_revalidate_cleanup_safety` (`__main__.py`), replacing
+`_revalidate_before_reap` entirely — see the 2026-09-14 Phase 3 Journal
+entry for the concrete shape and the two upstream bugs fixed alongside it.
 
 ### Phase 4 — Regression coverage
 
@@ -818,3 +822,46 @@ decisions folded into Phase 2's checkboxes above; summarized here:
   out of scope, to be documented plainly in Phase 5.
 
 Proceeding to Phase 3 (wiring) in a follow-on PR.
+
+### 2026-09-14 — Phase 3: wiring implemented
+
+Implemented exactly the Phase 2 design; no design changes. Summary:
+
+- Added `_revalidate_cleanup_safety(wt_id, *, repo, tracking_path,
+  force=False, include_unused=False, include_conversations=False, reap=None)`
+  returning a `RevalidationResult(cleanable, reason, bucket, record, info,
+  failures, warnings, reaped)`. It reloads the record fresh from disk,
+  rebuilds a single-worktree `active_paths`, re-classifies git state, and —
+  non-forced only — runs the full `cleanup_disposition` and re-proves the
+  `GONE`/branch-merge gate itself. When a `reap` callback is supplied and
+  the decision is cleanable, it is invoked while a non-forced call still
+  holds `tracking._RecordLock(require_sidecar=True)` (fail-closed on
+  contention), so the fresh read and the delete are one uninterrupted,
+  lock-held sequence. Forced mode shares the same liveness-read path but
+  skips `cleanup_disposition` and doesn't take `_RecordLock`.
+- Wired all three call sites: `cmd_cleanup`'s batch loop, `reap_one`'s
+  non-forced path (forced keeps its pre-lock fast-reject UX checks but the
+  authoritative decision now goes through the same function too, with
+  `force=True`), and `sweep_finished_session_worktrees`'s Pass 2 — which
+  also re-derives its idle-grace timestamp at reap time from fresh mux
+  activity/tracking timestamps before calling the revalidator, so a resume
+  between Pass 1 (candidate selection) and Pass 2 (reap) postpones removal.
+- Fixed `cleanup_disposition`'s WIP/conversation-only ordering bug and
+  `_build_active_paths`'s stale-negative-cache fallback in their own
+  functions, per the Phase 2 decision, so every caller benefits.
+- Removed `_revalidate_before_reap` entirely — one non-forced revalidation
+  path now exists.
+- Updated `test_auto_clean.py`'s `_sweep` test helper to mock
+  `tracking.load_record`/`tracking._RecordLock` (the revalidator reloads
+  fresh from disk under the lock, which the old helper didn't anticipate).
+- Full `agent-worktrees` suite: 583 passed, 1 pre-existing unrelated failure
+  (`test_controller_relations.py`'s `_all_tracking_dirs` reference, confirmed
+  to fail identically on an unmodified checkout — filed as #2647, not part
+  of this effort).
+- Bumped `agent-worktrees` to `1.5.5-dev104` (`plugin.json`/`pyproject.toml`/
+  `marketplace.json`), verified via `check-version-consistency.py`.
+
+Phase 3 complete. Phase 4 (the full named signal × reaper × mode regression
+matrix) and Phase 5 (skill docs) remain — substantial enough in their own
+right (≈30 named tests) to warrant their own dedicated pass/PR(s), continuing
+this effort rather than closing it here.
