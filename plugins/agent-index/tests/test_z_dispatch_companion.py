@@ -16,6 +16,7 @@ import pytest
 
 PLUGIN = Path(__file__).resolve().parents[1]
 PROVIDER = PLUGIN / "scripts" / "companion-provider.py"
+RESOLVER = PLUGIN / "scripts" / "resolve_effective_config.py"
 SERVICE = PLUGIN / "scripts" / "companion-service.py"
 ENGINE_SERVICE = PLUGIN / "scripts" / "companion-engine.py"
 REGISTER = PLUGIN / "scripts" / "register-dispatch-companion.py"
@@ -46,12 +47,20 @@ def _module(path: Path, name: str):
     return module
 
 
-def _repo(path: Path, machine: str | None) -> Path:
+def _repo(
+    path: Path,
+    machine: str | None,
+    *,
+    requires_external_state_root: bool = False,
+) -> Path:
     path.mkdir()
     subprocess.run(["git", "init", "-q", str(path)], check=True)
     policy = path / ".agent-worktrees" / "config.yaml"
     policy.parent.mkdir()
-    policy.write_text("requires_external_state_root: false\n", encoding="utf-8")
+    policy.write_text(
+        f"requires_external_state_root: {str(requires_external_state_root).lower()}\n",
+        encoding="utf-8",
+    )
     if machine is not None:
         config = path / ".copilot-extensions" / "agent-index" / "config.yaml"
         config.parent.mkdir(parents=True)
@@ -82,6 +91,17 @@ def _registry(home: Path, project: str, repo: Path) -> None:
     platform_key = _platform_key()
     registry.write_text(
         f"repos:\n  {project}:\n    {platform_key}: {json.dumps(str(repo))}\n",
+        encoding="utf-8",
+    )
+
+
+def _append_registry(home: Path, project: str, repo: Path) -> None:
+    registry = home / ".agent-worktrees" / "repos.yaml"
+    platform_key = _platform_key()
+    registry.write_text(
+        registry.read_text(encoding="utf-8")
+        + f"  {project}:\n"
+        + f"    {platform_key}: {json.dumps(str(repo))}\n",
         encoding="utf-8",
     )
 
@@ -135,20 +155,57 @@ def test_provider_stamps_engine_generation_for_engine_companion(
     assert environment["AGENT_INDEX_ENGINE_GENERATION"] == "engine-v1"
 
 
+def test_provider_collapses_shared_effective_config_to_one_host_environment(
+    tmp_path: Path, monkeypatch
+) -> None:
+    provider = _module(PROVIDER, "companion_provider_shared_config")
+    resolver = _module(RESOLVER, "companion_provider_shared_config_resolver")
+    home = tmp_path / "home"
+    knowledge = _repo(tmp_path / "knowledge", "primary")
+    harness = _repo(
+        tmp_path / "harness",
+        None,
+        requires_external_state_root=True,
+    )
+    config = knowledge / ".copilot-extensions" / "agent-index" / "config.yaml"
+    _registry(home, "dotfiles", knowledge)
+    _append_registry(home, "odsp-web-harness", harness)
+    monkeypatch.setattr(provider.Path, "home", lambda: home)
+    monkeypatch.setattr(provider, "_supports_companion_mode", lambda _env: True)
+    monkeypatch.setattr(provider, "resolve", lambda root: resolver.resolve(root))
+    monkeypatch.setattr(
+        resolver,
+        "_external_state_root",
+        lambda root: ("ready", knowledge) if Path(root).resolve() == harness.resolve() else ("unavailable", None),
+    )
+
+    environment = provider._active_environment(
+        {
+            "schema_version": 1,
+            "activation_scopes": [
+                "global",
+                "project:dotfiles",
+                "project:odsp-web-harness",
+            ],
+            "machine": "primary",
+        }
+    )
+
+    assert environment == {
+        "AGENT_INDEX_EFFECTIVE_CONFIG": str(config.resolve()),
+        "AGENT_INDEX_MACHINE": "primary",
+        "AGENT_INDEX_NO_SELFPROVISION": "1",
+        "AGENT_INDEX_REPO": str(harness.resolve()),
+    }
+
+
 def test_provider_is_inactive_for_client_or_missing_config(tmp_path: Path, monkeypatch) -> None:
     module = _module(PROVIDER, "companion_provider_inactive")
     home = tmp_path / "home"
     repo = _repo(tmp_path / "repo", "primary")
     empty = _repo(tmp_path / "empty", None)
     _registry(home, "harness", repo)
-    registry = home / ".agent-worktrees" / "repos.yaml"
-    platform_key = _platform_key()
-    registry.write_text(
-        registry.read_text(encoding="utf-8")
-        + "  empty:\n"
-        + f"    {platform_key}: {json.dumps(str(empty))}\n",
-        encoding="utf-8",
-    )
+    _append_registry(home, "empty", empty)
     monkeypatch.setattr(module.Path, "home", lambda: home)
     monkeypatch.setattr(
         module, "_supports_companion_mode",
@@ -208,6 +265,31 @@ def test_provider_reports_effective_config_uncertainty_as_indeterminate(
         assert "uncertain" in str(exc)
     else:
         raise AssertionError("unavailable effective config must be indeterminate")
+
+
+def test_provider_rejects_multiple_distinct_host_configs(
+    tmp_path: Path, monkeypatch
+) -> None:
+    module = _module(PROVIDER, "companion_provider_multiple_configs")
+    home = tmp_path / "home"
+    first = _repo(tmp_path / "first", "primary")
+    second = _repo(tmp_path / "second", "primary")
+    _registry(home, "alpha", first)
+    _append_registry(home, "beta", second)
+    monkeypatch.setattr(module.Path, "home", lambda: home)
+    monkeypatch.setattr(module, "_supports_companion_mode", lambda _env: True)
+
+    with pytest.raises(
+        RuntimeError,
+        match="multiple agent-index host configurations are active on this machine",
+    ):
+        module._active_environment(
+            {
+                "schema_version": 1,
+                "activation_scopes": ["project:alpha", "project:beta"],
+                "machine": "primary",
+            }
+        )
 
 
 def test_provider_keeps_namespaced_installation_inactive(tmp_path: Path, monkeypatch) -> None:
