@@ -43,6 +43,14 @@ actions) and per-machine data stay in the consuming repo.
   engine installs/pins/writes itself (with cross-package collision detection),
   instead of hiding them in per-repo scripts. See
   [`docs/resources.md`](docs/resources.md).
+- **Optional unattended self-update watchdog.** A reachable, logged-in machine
+  can opt in (per machine or fleet-wide, via the `self-update` resource) to two
+  independently-scheduled OS Scheduled Tasks that converge it between
+  sessions: an hourly `watchdog` tier (dtssh launcher liveness) and a daily
+  `sweep` tier (repo fast-forward + plugin reconcile + full restore). Both
+  defer around a live session and are a clean no-op when not opted in. See the
+  `agent-machines-setup` skill's *Enable a regular unattended maintenance
+  schedule* section and [`docs/resources.md`](docs/resources.md#self-update).
 
 For implementation details, see [`docs/architecture.md`](docs/architecture.md).
 

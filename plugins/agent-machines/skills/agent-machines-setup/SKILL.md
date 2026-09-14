@@ -19,6 +19,8 @@ description: >
   - 'ensure this setting on every machine'
   - 'make this the default on all machines'
   - 'agent-machines setup'
+  - 'enable the self-update watchdog'
+  - 'set up a regular maintenance schedule'
 ---
 
 # agent-machines setup
@@ -157,6 +159,48 @@ protects `agent-worktrees`, `agent-machines`, and every declared bootstrap-floor
 plugin.
 
 Run `<catalog argv[0]> validate` after authoring to catch conflicts.
+
+## Enable a regular unattended maintenance schedule (self-update watchdog)
+
+A reachable, logged-in machine can converge on its own, on a schedule, without
+a live interactive session -- two independently-scheduled, independently-locked
+tiers: `watchdog` (hourly; dtssh launcher liveness only) and `sweep` (daily;
+fast-forward pulls of discovered adopted repos, `agent-worktrees
+reconcile-plugins --apply --with-payload-refresh`, and `agent-machines restore
+--apply --all-projects`). Both tiers defer around a live session and never
+mutate anything when their resolved config is "not opted in."
+
+Opt in by declaring a `self-update` resource in a requirement package (`all/`
+for a fleet default, `machines/<machine>/` for one machine -- an explicit
+local declaration overrides a shared default, matching every other resource's
+authority precedence):
+
+```yaml
+schema_version: 3
+package: <owner>/self-update-defaults
+resources:
+  - type: self-update
+    tier: watchdog          # or sweep
+    state: present          # present (default) opts in; absent opts out
+```
+
+Then register the actual OS scheduling (one-time, interactive, may require
+elevation):
+
+```
+<catalog argv[0]> self-update install    # registers Scheduled Tasks for opted-in tiers
+<catalog argv[0]> self-update status     # shows opt-in + registration state
+<catalog argv[0]> self-update run --tier watchdog   # manual/on-demand invocation
+<catalog argv[0]> self-update uninstall  # removes registered tasks
+```
+
+`install` resolves the declared config first and only attempts registration
+for tiers resolved as `present`; a not-opted-in tier is never registered and
+never prompts for elevation. `restore --apply` also reconciles Scheduled Task
+presence as ordinary drift (registers a newly opted-in tier, removes a newly
+opted-out one) so opting out never requires a separate uninstall step. See
+[`docs/resources.md`](docs/resources.md#self-update) for the full resource
+schema and conflict-resolution rules.
 
 ## Diagnose and migrate package layout
 
