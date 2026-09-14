@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ from agent_bridge.agent_registry import (
     AgentConfig,
     AgentRegistryLoadError,
     AgentResolver,
+    CliNamespaceResolver,
     NamespaceAgentInfo,
     build_resolver,
     discover_local_agents,
@@ -857,6 +859,37 @@ class TestNamespaceResolvers:
         assert not any(n.startswith("hangs:") for n in names)
         # Bounded by the 0.05s per-resolver timeout, not the 5s sleep.
         assert elapsed < 1.0
+
+    @pytest.mark.asyncio
+    async def test_list_agents_async_forwards_timeout_into_cli_resolver_subprocess(
+        self, monkeypatch
+    ):
+        # Integration coverage: AgentResolver.list_agents_async() must not
+        # just bound a wedged CliNamespaceResolver by cancellation (which
+        # cannot stop a subprocess.run already running in a worker thread --
+        # see test_list_threads_timeout_into_subprocess_run in
+        # test_cli_namespace_resolver.py for the unit-level proof). It must
+        # actually detect that this resolver's list() accepts a ``timeout``
+        # keyword and pass the configured bound through, so the underlying
+        # subprocess.run(..., timeout=...) is what kills the child process.
+        import shutil
+        from unittest.mock import patch
+
+        monkeypatch.setenv("AGENT_BRIDGE_NAMESPACE_LIST_RESOLVER_TIMEOUT", "3.5")
+
+        resolver = AgentResolver({}, {})
+        resolver.register_namespace_resolver(
+            CliNamespaceResolver("codespace", "agent-codespaces")
+        )
+
+        with patch.object(shutil, "which", return_value="/usr/bin/agent-codespaces"), \
+             patch(
+                 "subprocess.run",
+                 return_value=subprocess.CompletedProcess([], 0, "[]", ""),
+             ) as mock_run:
+            await resolver.list_agents_async()
+
+        assert mock_run.call_args.kwargs["timeout"] == 3.5
 
     @pytest.mark.asyncio
     async def test_list_agents_async_one_namespace_failure_does_not_block_others(self):

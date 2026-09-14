@@ -483,7 +483,7 @@ class CliNamespaceResolver(NamespaceResolver):
         ``subprocess.run(..., timeout=...)``), so a slow provider's *process*
         is actually killed on expiry -- not merely abandoned. This matters
         because an outer ``asyncio.wait_for`` around this coroutine (as
-        :meth:`AgentRegistry.list_agents_async` uses) only cancels the
+        :meth:`AgentResolver.list_agents_async` uses) only cancels the
         *awaiting task*; it cannot stop a ``subprocess.run`` already running
         in a worker thread via ``asyncio.to_thread``, which would otherwise
         keep the child process (and the thread blocked on it) alive until
