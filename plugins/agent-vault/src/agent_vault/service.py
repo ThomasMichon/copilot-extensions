@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import logging
+import logging.handlers
 import os
 import signal
 import subprocess
@@ -1282,14 +1282,14 @@ def main() -> None:
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    log.setLevel(logging.DEBUG)
+    log.setLevel(level)
 
     try:
-        fh = logging.FileHandler(str(LOG_FILE), encoding="utf-8")
-        fh.setLevel(logging.DEBUG)
+        fh = logging.handlers.RotatingFileHandler(
+            str(LOG_FILE), maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8")
+        fh.setLevel(level)
         fh.setFormatter(logging.Formatter(
-            "%(asctime)s %(name)s [%(levelname)s] %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S"))
+            "%(asctime)s %(name)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
         logging.getLogger().addHandler(fh)
         log.debug("Log file: %s", LOG_FILE)
     except Exception as exc:
