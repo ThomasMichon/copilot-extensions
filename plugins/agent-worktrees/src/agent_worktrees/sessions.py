@@ -24,6 +24,7 @@ import yaml
 from . import activity
 from .sessions_pane_retire import (
     _mux_bin,
+    _mux_last_window_guard,  # noqa: F401 -- re-export for tests
     _mux_pane_alive,
     _mux_pane_process_tree,
     _mux_pane_session_name,
