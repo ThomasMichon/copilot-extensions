@@ -5,7 +5,7 @@
   `agent-bridge` plugins)
 - **Branch(es):** `effort/context-handoff-overhaul` (Phase 0, merged #2593),
   `effort/context-handoff-overhaul-phase1` (Phase 1, merged #2643),
-  `effort/context-handoff-overhaul-phase2` (Phase 2, in review)
+  `effort/context-handoff-overhaul-phase2` (Phase 2, merged #2663)
 - **Created:** 2026-09-13
 - **Status:** Active
 - **Umbrella issue:** #2594
@@ -372,4 +372,11 @@ gate land._
   so the Validation Plan's continuity-content item stays unchecked pending
   a real-session or clean-room run; unit coverage for the schema/constant/
   wiring is in place.
+- PR #2663 merged (squash `bb39c12`); a pre-existing, unrelated CI blocker
+  (`agent-machines/resources.py` had grown past its grandfathered
+  module-size ceiling via #2661, landed on `main` after this branch forked)
+  was fixed in the same PR via a deliberate, precise baseline widen (1982 ->
+  2002, its exact current size) rather than an out-of-scope refactor. Branch
+  deleted. Next: Phase 3 (host-agnostic reliability) on a fresh branch off
+  post-merge `main`.
 
