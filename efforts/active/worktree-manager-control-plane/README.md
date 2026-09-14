@@ -628,9 +628,14 @@ its issues; the public artifacts stay self-contained and general-purpose.
   the copied `worktree-manager/bin/apply-mux-keybinds.ps1` (kept
   byte-identical), with a structural regression test in
   `test_terminal_decoupling.py` and a byte-identity drift guard in
-  `test_self_install.py`. `worktree-manager`'s `test_self_install.py` suite
+  `test_self_install.py`. Bumped agent-worktrees' own version surfaces
+  (`plugin.json`, `pyproject.toml`, `.github/plugin/marketplace.json`:
+  `1.5.5-dev110` → `1.5.5-dev111`) so version-gated plugin updates don't skip
+  this fix for installed agent-worktrees copies (a repeat of the same
+  version-consistency lesson, this time on the plugin side rather than
+  Worktree Manager's). `worktree-manager`'s `test_self_install.py` suite
   passes (12/12); `agent-worktrees`' `test_terminal_decoupling.py` passes
-  (14/14).
+  (14/14); `tools/check-version-consistency.py` passes across both.
 
 - **2026-09-14** — Operator direction for a new Sub-slice 3 (not yet
   designed): migrating the Picker and Mux handling to Worktree Manager is
