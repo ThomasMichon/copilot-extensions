@@ -102,20 +102,37 @@ class TestProvisionCommand:
 
     def test_pins_relay_credential_helper_for_ado_and_github(self) -> None:
         """#133/#112/#159: git's per-host credential.<host>.helper must be
-        pinned to the relay-first ~/ado-auth-helper for the ADO hosts and
+        pinned to the relay-first ~/ado-auth-helper for dev.azure.com and
         github.com, with a leading empty reset so it overrides the native
         broker/codespace-token helpers, so headless `git push` works."""
         cmd = build_provision_command()
         for host in (
-            "https://your-org.visualstudio.com",
             "https://dev.azure.com",
             "https://github.com",
         ):
             assert host in cmd
+        # No un-substituted placeholder host when ado_host isn't configured (#383).
+        assert "your-org.visualstudio.com" not in cmd
         # The pin points at the relay-first wrapper...
         assert 'git config --global --add "credential.${_h}.helper" "$HOME/ado-auth-helper"' in cmd
         # ...preceded by an empty reset so lower-priority helpers don't win.
         assert 'git config --global --add "credential.${_h}.helper" ""' in cmd
+
+    def test_pins_relay_credential_helper_for_configured_ado_host(self) -> None:
+        """#383: the repo's configured `credentials.ado_host` (e.g.
+        `onedrive.visualstudio.com`) must be registered instead of the
+        un-substituted `your-org.visualstudio.com` placeholder."""
+        cmd = build_provision_command(ado_host="onedrive.visualstudio.com")
+        assert "https://onedrive.visualstudio.com" in cmd
+        assert "https://dev.azure.com" in cmd
+        assert "https://github.com" in cmd
+        assert "your-org.visualstudio.com" not in cmd
+
+    def test_configured_ado_host_not_duplicated(self) -> None:
+        """When the configured ado_host is itself dev.azure.com, it must not
+        be registered twice."""
+        cmd = build_provision_command(ado_host="dev.azure.com")
+        assert cmd.count("https://dev.azure.com") == 1
 
     def test_embedded_payload_roundtrips(self) -> None:
         cmd = build_provision_command()

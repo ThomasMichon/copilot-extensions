@@ -209,7 +209,7 @@ def build_auth_error_policy_command() -> str:
     )
 
 
-def build_provision_command() -> str:
+def build_provision_command(ado_host: str | None = None) -> str:
     """Build an idempotent bash command that installs the relay helpers.
 
     The returned command is safe to run on every SSH connect:
@@ -230,11 +230,27 @@ def build_provision_command() -> str:
 
     Assets are transported as gzip-compressed base64 chunks so arbitrary script
     content survives the SSH command line without one oversized argv token.
+
+    ``ado_host``, when given, is the repo's configured
+    ``credentials.ado_host`` (e.g. ``onedrive.visualstudio.com``); it is
+    registered alongside ``dev.azure.com``/``github.com`` in the pinned git
+    credential-helper loop below, instead of an un-substituted placeholder
+    (#383).
     """
     relay_b64 = _compressed_b64(asset_text(_RELAY_CLIENT))
     wrapper_b64 = _compressed_b64(asset_text(_WRAPPER))
     profile_b64 = _compressed_b64(_NONINTERACTIVE_GIT_PROFILE)
     npm_scrub_b64 = _compressed_b64(_STALE_NPM_TOKEN_SCRUB)
+    # The configured ADO host (if any) always comes first; dev.azure.com and
+    # github.com are pinned unconditionally, skipping either if it duplicates
+    # the configured ado_host.
+    _credential_hosts = ([f"https://{ado_host}"] if ado_host else []) + [
+        h for h in ("https://dev.azure.com", "https://github.com")
+        if not ado_host or h != f"https://{ado_host}"
+    ]
+    _credential_hosts_literal = " ".join(
+        shlex.quote(h) for h in _credential_hosts
+    )
     parts = [
         "set -e",
         'mkdir -p "$HOME/.local/bin"',
@@ -288,21 +304,26 @@ def build_provision_command() -> str:
         'done; '
         'rm -f "$HOME/.agent-codespaces-auth-wrapper"',
         # --- #133/#112/#159: pin the relay-first git credential helper --------
-        # The native git config points ADO (your-org.visualstudio.com /
-        # dev.azure.com) at the VS Code broker (`external-git ado-helper`), which
-        # returns EMPTY over headless SSH -> `git push` fails with "could not
-        # read Username"; and GitHub at the codespace-scoped
-        # `gitcredential_github.sh` -- a valid token, but scoped to the
-        # CodeSpaces repo, so pushing to another GitHub repo (e.g. the
-        # dotfiles/harness repo) 403s. Both fail headless even though the relay
-        # itself serves working creds. Point these hosts at the relay-first
-        # ~/ado-auth-helper wrapper (host identity over the relay): the leading
-        # empty value resets any lower-priority helper so ours is authoritative,
-        # and the wrapper falls back to the real VS Code helper when no relay is
-        # active, so interactive VS Code auth is unaffected. Best-effort.
+        # The native git config points ADO (dev.azure.com or an
+        # organization's own *.visualstudio.com host) at the VS Code broker
+        # (`external-git ado-helper`), which returns EMPTY over headless SSH ->
+        # `git push` fails with "could not read Username"; and GitHub at the
+        # codespace-scoped `gitcredential_github.sh` -- a valid token, but
+        # scoped to the CodeSpaces repo, so pushing to another GitHub repo
+        # (e.g. the dotfiles/harness repo) 403s. Both fail headless even
+        # though the relay itself serves working creds. Point these hosts at
+        # the relay-first ~/ado-auth-helper wrapper (host identity over the
+        # relay): the leading empty value resets any lower-priority helper so
+        # ours is authoritative, and the wrapper falls back to the real VS
+        # Code helper when no relay is active, so interactive VS Code auth is
+        # unaffected. Best-effort.
+        #
+        # The repo's configured `credentials.ado_host` (e.g.
+        # `onedrive.visualstudio.com`) is registered here too -- an
+        # un-substituted `your-org.visualstudio.com` placeholder previously
+        # stood in its place and never matched a real ADO remote (#383).
         "( "
-        'for _h in "https://your-org.visualstudio.com" '
-        '"https://dev.azure.com" "https://github.com"; do '
+        f"for _h in {_credential_hosts_literal}; do "
         'git config --global --unset-all "credential.${_h}.helper" 2>/dev/null || true; '
         'git config --global --add "credential.${_h}.helper" ""; '
         'git config --global --add "credential.${_h}.helper" "$HOME/ado-auth-helper"; '
