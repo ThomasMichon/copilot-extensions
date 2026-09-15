@@ -202,11 +202,15 @@ def parse_tenant_block(data: dict, *, source: str, default_id: str) -> dict | No
         raise TenantConfigError(f"{source}: tenant must be a mapping")
 
     schema_version = data.get("schema_version", REPO_CONFIG_SCHEMA_VERSION)
-    future = (
-        isinstance(schema_version, int)
-        and not isinstance(schema_version, bool)
-        and schema_version > REPO_CONFIG_SCHEMA_VERSION
-    )
+    if isinstance(schema_version, bool) or not isinstance(schema_version, int):
+        raise TenantConfigError(
+            f"{source}: schema_version must be an integer, got {schema_version!r}"
+        )
+    if schema_version < 1:
+        raise TenantConfigError(
+            f"{source}: schema_version must be >= 1, got {schema_version!r}"
+        )
+    future = schema_version > REPO_CONFIG_SCHEMA_VERSION
 
     allowed = {"id", "roles", "enabled", "sync", "chronicle", "machines"}
     unknown = set(block) - allowed
@@ -218,6 +222,20 @@ def parse_tenant_block(data: dict, *, source: str, default_id: str) -> dict | No
     tenant_id = block.get("id", default_id)
     if not isinstance(tenant_id, str) or not tenant_id.strip():
         raise TenantConfigError(f"{source}: tenant.id must be a non-empty string")
+    tenant_id = tenant_id.strip()
+    # tenant_id is interpolated into <home>/tenants/<id>.yaml and the per-tenant
+    # chronicle db/manifest paths, so a repo-controlled value must be a bare
+    # name -- never a path separator, dot-segment, or absolute path that could
+    # escape the runtime home.
+    if (
+        tenant_id in {".", ".."}
+        or any(sep in tenant_id for sep in ("/", "\\"))
+        or os.path.isabs(tenant_id)
+    ):
+        raise TenantConfigError(
+            f"{source}: tenant.id {tenant_id!r} must be a bare name "
+            "(no '/', '\\', '.', '..', or absolute path)"
+        )
 
     roles = block.get("roles", ["source"])
     roles_list = _as_str_list(roles, f"{source}: tenant.roles")
@@ -259,9 +277,25 @@ def parse_tenant_block(data: dict, *, source: str, default_id: str) -> dict | No
                 f"{source}: tenant.machines.{mkey} has unknown field(s): "
                 f"{', '.join(sorted(munknown))}"
             )
+        # Validate override types at parse time so resolve_tenant cannot coerce
+        # a truthy string (YAML ``enabled: "false"`` -> True) or raise on a
+        # malformed ``roles`` outside discovery's TenantConfigError handling.
+        if "enabled" in mval and not isinstance(mval["enabled"], bool):
+            raise TenantConfigError(
+                f"{source}: tenant.machines.{mkey}.enabled must be a boolean"
+            )
+        if "roles" in mval:
+            mroles = _as_str_list(mval["roles"], f"{source}: tenant.machines.{mkey}.roles")
+            if not future:
+                for role in mroles:
+                    if role not in VALID_ROLES:
+                        raise TenantConfigError(
+                            f"{source}: tenant.machines.{mkey}.roles has unknown "
+                            f"role {role!r} (valid: {', '.join(VALID_ROLES)})"
+                        )
 
     return {
-        "id": tenant_id.strip(),
+        "id": tenant_id,
         "roles": roles_list,
         "enabled": enabled,
         "sync": dict(block.get("sync") or {}),
@@ -354,6 +388,12 @@ def resolve_tenant(
             chronicle = _deep_merge(chronicle, override["chronicle"])
         break
 
+    # A newer-schema config may carry roles this build cannot serve; keep only
+    # the serviceable ones (post-override, so an override's roles are filtered
+    # too). May legitimately become empty -> the tenant is inert on this build.
+    if block.get("future_schema"):
+        roles = [r for r in roles if r in VALID_ROLES]
+
     # (4) uncommitted machine-local supplement (transport + secrets).
     supplement = _machine_supplement(home, tenant_id)
     if isinstance(supplement.get("sync"), dict):
@@ -361,8 +401,12 @@ def resolve_tenant(
     if isinstance(supplement.get("chronicle"), dict):
         chronicle = _deep_merge(chronicle, supplement["chronicle"])
 
-    # Distinct lock per tenant so concurrent tenant syncs never serialize.
-    sync.setdefault("lock_name", f"session-sync-{tenant_id}.lock")
+    # Lock scope follows the SOURCE, not the tenant: every tenant syncing the
+    # same ~/.copilot shares the default ``session-sync.lock`` so their
+    # source-mutating steps (origin marking, cold-session compaction) and the
+    # legacy ``session-sync`` never race. A tenant that overrides its source to
+    # a distinct tree sets its own ``sync.lock_name`` in the supplement. (The
+    # orchestrator also runs tenants sequentially -- see run_all.)
 
     # Namespace sink state per tenant so multiple sink tenants never collide.
     if "sink" in roles:
@@ -410,6 +454,7 @@ def discover_tenants(
     resolved_home = home or home_dir()
     resolved_machine = machine or detect_machine()
     tenants: list[ResolvedTenant] = []
+    seen_ids: set[str] = set()
     for repo_name, repo_path in adopted_repo_paths(aw_home):
         config_path = find_tenant_config(repo_path)
         if config_path is None:
@@ -419,14 +464,9 @@ def discover_tenants(
             block = parse_tenant_block(
                 data, source=str(config_path), default_id=repo_name
             )
-        except TenantConfigError:
-            # A malformed tenant block must not take down the whole fleet's
-            # orchestration; skip it (doctor/list surfaces the error separately).
-            continue
-        if block is None:
-            continue
-        tenants.append(
-            resolve_tenant(
+            if block is None:
+                continue
+            tenant = resolve_tenant(
                 block,
                 repo_name=repo_name,
                 repo_path=repo_path,
@@ -434,7 +474,18 @@ def discover_tenants(
                 machine=resolved_machine,
                 home=resolved_home,
             )
-        )
+        except TenantConfigError:
+            # A malformed tenant block (parse OR resolve) must not take down the
+            # whole fleet's orchestration; skip it. doctor/list surfaces the
+            # error separately.
+            continue
+        if tenant.tenant_id in seen_ids:
+            # Two adopted repos declaring the same id would share one supplement,
+            # lock, and sink-state namespace -- not independent tenants. Keep the
+            # first and drop the collision (fail closed on ambiguous identity).
+            continue
+        seen_ids.add(tenant.tenant_id)
+        tenants.append(tenant)
     return tenants
 
 
@@ -498,6 +549,71 @@ def _run_sink(tenant: ResolvedTenant, *, dry_run: bool) -> TenantOutcome:
     )
 
 
+def _source_include(tenant: ResolvedTenant) -> tuple[str, set[str] | None]:
+    """Return ``(source_path, included_session_ids)`` for a source tenant.
+
+    ``None`` for the id set means "every session" (no allow/deny filter).
+    """
+    from agent_logger.sync.engine import _included_sessions
+    from agent_logger.sync.origin import effective_harness
+
+    cfg = tenant.config
+    machine = cfg.machine_name or detect_machine()
+    allowlist = cfg.sync_repo_allowlist
+    denylist = cfg.sync_repo_denylist
+    effective = effective_harness(allowlist, cfg.sync_harness_repos, denylist)
+    include = _included_sessions(
+        cfg.sync_source,
+        allowlist,
+        cfg.sync_repo_allowlist_fail_closed,
+        effective,
+        machine,
+        denylist,
+    )
+    return str(cfg.sync_source), include
+
+
+def source_conflicts(tenants: list[ResolvedTenant]) -> list[str]:
+    """Report source tenants that would claim the same session.
+
+    The agent-logger vision requires source claims to be **provably disjoint**
+    (or resolution to fail closed): a session pushed by two tenants lands in two
+    destinations -- exactly the cross-tenant leak the scope model exists to
+    prevent. Only tenants sharing a source can overlap; a ``None`` (unfiltered)
+    claim covers every session in its source.
+    """
+    by_source: dict[str, list[tuple[str, set[str] | None]]] = {}
+    for t in tenants:
+        if not (t.enabled and t.has_role("source")):
+            continue
+        src, include = _source_include(t)
+        by_source.setdefault(src, []).append((t.tenant_id, include))
+
+    conflicts: list[str] = []
+    for src, claims in by_source.items():
+        if len(claims) < 2:
+            continue
+        catchall = sorted(tid for tid, inc in claims if inc is None)
+        if catchall:
+            conflicts.append(
+                f"{', '.join(catchall)} claim every session in {src}, "
+                f"overlapping the other tenant(s) on that source"
+            )
+        explicit = [(tid, inc) for tid, inc in claims if inc is not None]
+        for i in range(len(explicit)):
+            for j in range(i + 1, len(explicit)):
+                a_id, a = explicit[i]
+                b_id, b = explicit[j]
+                overlap = a & b
+                if overlap:
+                    sample = ", ".join(sorted(overlap)[:3])
+                    conflicts.append(
+                        f"{a_id} and {b_id} both claim {len(overlap)} session(s) "
+                        f"in {src} (e.g. {sample})"
+                    )
+    return conflicts
+
+
 def run_all(
     tenants: list[ResolvedTenant],
     *,
@@ -508,18 +624,36 @@ def run_all(
 ) -> OrchestrationResult:
     """Drive each enabled tenant's daemon(s) for the requested *roles*.
 
-    Each tenant runs independently with its own resolved config (own lock, own
-    target, own scope), so one tenant's failure never blocks another's. Returns
-    a per-tenant/-role outcome summary.
+    Tenants run **sequentially**; tenants sharing a source serialize on that
+    source's lock (default ``session-sync.lock``), so their source-mutating
+    steps never race each other or the legacy ``session-sync``. One tenant's
+    failure never blocks another's.
+
+    **Source preflight (fail closed).** Before any source push, the source plan
+    is checked for overlapping claims. If two tenants would claim the same
+    session, *no* source tenant is synced (a failed conflict outcome is
+    reported) -- never double-push a session to two destinations. The sink role
+    is unaffected by a source conflict.
     """
     result = OrchestrationResult(machine=machine or detect_machine())
+
+    run_source = "source" in roles
+    if run_source:
+        conflicts = source_conflicts(tenants)
+        if conflicts:
+            for detail in conflicts:
+                result.outcomes.append(
+                    TenantOutcome("*", "source", "failed", f"source conflict: {detail}")
+                )
+            run_source = False  # fail closed: sync no source tenant
+
     for tenant in tenants:
         if not tenant.enabled:
             result.outcomes.append(
                 TenantOutcome(tenant.tenant_id, "-", "skipped", "disabled")
             )
             continue
-        if "source" in roles and tenant.has_role("source"):
+        if run_source and tenant.has_role("source"):
             result.outcomes.append(_run_source(tenant, dry_run=dry_run, prune=prune))
         if "sink" in roles and tenant.has_role("sink"):
             result.outcomes.append(_run_sink(tenant, dry_run=dry_run))

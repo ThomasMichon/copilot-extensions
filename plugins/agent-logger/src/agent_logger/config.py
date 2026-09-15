@@ -62,10 +62,11 @@ DEFAULTS: dict[str, Any] = {
         # Retention for destination pruning. None/<=0 -> retain everything.
         "retention_days": None,
         "lock_timeout_sec": 10,
-        # Name of the push lock file under <home>. Default keeps every install's
-        # single sync serialized. The multi-tenant orchestrator gives each
-        # tenant a distinct lock name (session-sync-<tenant>.lock) so concurrent
-        # tenant syncs over one shared home never block each other.
+        # Name of the push lock file under <home>. Default serializes every
+        # sync of the same source. The multi-tenant orchestrator keeps this
+        # default so all tenants syncing one shared ~/.copilot (and the legacy
+        # session-sync) coordinate on the same lock; a tenant with a distinct
+        # source sets its own name to run in parallel.
         "lock_name": "session-sync.lock",
         # Target-independent post-push notify. After any successful push the
         # engine fires a best-effort HTTP POST to `url` (JSON body

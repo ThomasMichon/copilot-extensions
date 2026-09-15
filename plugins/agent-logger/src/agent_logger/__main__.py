@@ -272,11 +272,28 @@ def _cmd_tenants_list(args: argparse.Namespace) -> int:
 
 
 def _cmd_tenants_sync(args: argparse.Namespace) -> int:
-    """Run one sync pass per adopted source tenant (the orchestrated tick)."""
+    """Run one sync pass per adopted source tenant (the orchestrated tick).
+
+    With no adopted tenants (no agent-worktrees registry, or no repo declares a
+    tenant), fall back to the legacy single-home ``run_sync`` so a scheduler
+    wired to ``tenants sync`` keeps syncing on a plain single-tenant install.
+    """
     from agent_logger import tenancy
 
     machine = getattr(args, "machine", None) or detect_machine()
     tenants = tenancy.discover_tenants(machine=machine)
+    if not tenants:
+        from agent_logger.config import load_config
+        from agent_logger.sync.engine import run_sync
+
+        code = run_sync(
+            load_config(),
+            dry_run=bool(getattr(args, "dry_run", False)),
+            prune=bool(getattr(args, "prune", False)),
+        )
+        print(json.dumps({"machine": machine, "tenants": [], "fallback": "single-tenant",
+                          "exit": code}, indent=2))
+        return code
     result = tenancy.run_all(
         tenants,
         roles=("source",),
