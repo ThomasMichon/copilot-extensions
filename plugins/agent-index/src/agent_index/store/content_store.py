@@ -665,27 +665,47 @@ class ContentStore:
                 f"{proc.stderr.strip()[-500:]}"
             )
 
-    def _durable_fts_index_exists(self, table) -> bool:
-        """Best-effort check of LanceDB's own index metadata for an existing
-        FTS index on ``content``.
+    @staticmethod
+    def _index_columns(index: object) -> list[str]:
+        if isinstance(index, dict):
+            raw = index.get("columns")
+        else:
+            raw = getattr(index, "columns", None)
+        if isinstance(raw, str):
+            return [raw]
+        if isinstance(raw, (list, tuple)):
+            return [str(value) for value in raw]
+        return []
 
-        ``_fts_available`` starts ``False`` on every fresh process, so
-        without this check a restarted process would assume no index exists
-        and pay for a full rebuild even when the on-disk index from a prior
-        process is still perfectly valid. A failure here (e.g. an older
-        LanceDB without ``list_indices``) is not fatal -- it just falls back
-        to the previous behavior of doing one full rebuild.
-        """
+    @staticmethod
+    def _index_type(index: object) -> str:
+        if isinstance(index, dict):
+            raw = index.get("index_type") or index.get("type")
+        else:
+            raw = getattr(index, "index_type", None) or getattr(index, "type", None)
+        return str(raw or "").upper()
+
+    def _durable_fts_index_exists(self, table) -> bool:
+        """Best-effort check of LanceDB metadata for an existing content FTS index."""
         try:
-            return any(
-                idx.index_type == "FTS" and "content" in idx.columns
-                for idx in table.list_indices()
-            )
-        except Exception:
-            logger.debug(
-                "Failed to check for a durable FTS index", exc_info=True
-            )
+            list_indices = table.list_indices
+        except AttributeError:
+            logger.debug("LanceDB table does not expose list_indices()")
             return False
+
+        try:
+            indices = list_indices()
+        except Exception:
+            logger.debug("Failed to check for a durable FTS index", exc_info=True)
+            return False
+
+        for index in indices:
+            index_type = self._index_type(index)
+            if index_type not in {"FTS", "INVERTED"}:
+                continue
+            if "content" in self._index_columns(index):
+                return True
+        return False
 
     def _rebuild_fts_locked(self, *, max_retries: int) -> bool:
         """Inner FTS rebuild - caller must hold the in-process ``_fts_lock``.
@@ -697,10 +717,10 @@ class ContentStore:
         on persistent failure so the 60s maintainer stops hammering a stuck
         conflict every tick.
 
-        Does a full ``create_fts_index(replace=True)`` only when no index has
-        ever been built successfully (``_fts_available`` False, e.g. first
-        build or recovery); a "merely dirty" rebuild of an already-available
-        index relies on ``optimize()``'s incremental FTS update instead (see
+        Does a full ``create_fts_index(replace=True)`` only when durable
+        LanceDB metadata does not show an existing content FTS index. A
+        "merely dirty" rebuild of an already-available index relies on
+        ``optimize()``'s incremental FTS update instead (see
         ``_run_fts_build``), avoiding a full-corpus rescan for a small delta.
 
         ``_fts_available`` is in-process state only, seeded ``False`` on
@@ -708,12 +728,10 @@ class ContentStore:
         a prior process already built a perfectly good FTS index durably on
         disk. Before assuming a full rebuild is needed, check LanceDB's own
         index metadata (``table.list_indices()``) for an existing FTS index
-        on ``content`` -- this avoids paying for one wasted full-corpus
-        rebuild per restart. That check (and the resulting ``full`` decision)
-        happens AFTER acquiring the cross-process file lock, not before: an
-        unlocked check could see no index, then block on the lock while a
-        concurrent process finishes the first build, and still barrel into a
-        second full ``replace=True`` rebuild once unblocked.
+        on ``content`` while holding the cross-process file lock -- this avoids
+        paying for one wasted full-corpus rebuild per restart, and avoids a
+        second full rebuild if another process created the first index while
+        this process was waiting for the lock.
         """
         table = self._get_or_create_table()
         try:
@@ -736,11 +754,16 @@ class ContentStore:
                 self._fts_next_retry_at = time.monotonic() + _FTS_LOCK_RECHECK_S
                 return self._fts_available
 
-            # Recompute durable-index availability and the full/incremental
-            # decision only now that the lock is held, so a process that
-            # waited out a concurrent build sees its result.
-            if not self._fts_available and self._durable_fts_index_exists(table):
-                self._fts_available = True
+            if not self._fts_available:
+                # A different process may have created the first durable index
+                # while this one was waiting for the cross-process lock. Reopen
+                # before probing so a table handle cached before that build does
+                # not force a redundant full replace=True rebuild.
+                self._table = None
+                table = self._get_or_create_table()
+                if self._durable_fts_index_exists(table):
+                    self._fts_available = True
+
             full = not self._fts_available
 
             last_err: Exception | None = None

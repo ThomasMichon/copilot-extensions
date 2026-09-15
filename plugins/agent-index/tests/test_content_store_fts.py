@@ -15,6 +15,7 @@ a handful of new commits.
 from __future__ import annotations
 
 import subprocess
+from contextlib import contextmanager
 
 from agent_index.store.content_store import ChunkRecord, ContentStore
 
@@ -116,6 +117,8 @@ def test_run_fts_build_code_gen_full_vs_incremental(tmp_path, monkeypatch):
     assert "create_fts_index" not in calls[1]
     assert "t.optimize()" in calls[0]
     assert "t.optimize()" in calls[1]
+    assert "try:" in calls[0]
+    assert "try:" not in calls[1]
 
 
 def test_optimize_failure_on_incremental_path_is_not_swallowed(tmp_path, monkeypatch):
@@ -207,6 +210,42 @@ def test_restart_detects_durable_fts_index_and_skips_full_rebuild(tmp_path, monk
     assert "create_fts_index" not in calls[0], (
         "restart detection must find the durable index and take the "
         "incremental path, not re-pay for a full rebuild"
+    )
+
+
+def test_full_decision_rechecks_durable_index_after_file_lock(tmp_path, monkeypatch):
+    """If another process creates the first index while this process waits for
+    the cross-process lock, the waiter must re-check durable metadata under the
+    lock before deciding whether to run a full replace=True rebuild."""
+    store = ContentStore(str(tmp_path / "db"))
+    store.upsert([_chunk(0)])
+
+    lock_entered = False
+
+    @contextmanager
+    def _lock():
+        nonlocal lock_entered
+        lock_entered = True
+        yield True
+
+    def _durable_exists(_table):
+        return lock_entered
+
+    calls: list[str] = []
+    monkeypatch.setattr(store, "_fts_file_lock", _lock)
+    monkeypatch.setattr(store, "_durable_fts_index_exists", _durable_exists)
+    monkeypatch.setattr(
+        "agent_index.store.content_store.subprocess.run", _fake_run_factory(calls)
+    )
+
+    assert store.fts_available is False
+    assert store.ensure_fts_index() is True
+
+    assert store.fts_available is True
+    assert len(calls) == 1
+    assert "create_fts_index" not in calls[0], (
+        "the full/incremental decision must use the durable-index state observed "
+        "after acquiring the cross-process lock"
     )
 
 
