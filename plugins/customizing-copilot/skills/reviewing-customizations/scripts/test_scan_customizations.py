@@ -413,6 +413,121 @@ def test_local_settings_can_disable_base_plugin(tmp_path: Path):
     ) == []
 
 
+def test_agent_worktrees_repo_marketplace_resolves_via_registry(
+    tmp_path: Path, monkeypatch,
+):
+    # A marketplace declared via {"source": "agent-worktrees-repo", "repo":
+    # "<name>"} resolves that repo's local checkout through the trusted
+    # agent-worktrees registry (mocked here), then treats it exactly like a
+    # directory marketplace rooted there -- portable across machines since
+    # the declaration carries only a stable repo name, never an absolute path.
+    other_repo = tmp_path / "other-repo-checkout"
+    (other_repo / ".ai" / "cap" / "skills").mkdir(parents=True)
+    _skill(other_repo / ".ai" / "cap" / "skills", "cap")
+    (other_repo / ".ai" / "cap" / "plugin.json").write_text(
+        json.dumps({"name": "cap", "version": "1.0.0"}), encoding="utf-8",
+    )
+    _marketplace(
+        other_repo / ".ai",
+        "other-marketplace",
+        entries=[{"name": "cap", "source": "cap"}],
+    )
+
+    def fake_which(name):
+        return "/usr/bin/agent-worktrees" if name == "agent-worktrees" else None
+
+    def fake_run(argv, **kwargs):
+        assert argv[1:3] == ["repos", "find"]
+        assert argv[3] == "other-repo-alias"
+        return scan.subprocess.CompletedProcess(
+            argv, 0, stdout=f"{other_repo}\n", stderr="",
+        )
+
+    monkeypatch.setattr(scan.shutil, "which", fake_which)
+    monkeypatch.setattr(scan.subprocess, "run", fake_run)
+
+    repo = tmp_path / "consuming-repo"
+    repo.mkdir()
+    _settings(
+        repo,
+        {"cap@other-marketplace": True},
+        {
+            "other-marketplace": {
+                "source": {
+                    "source": "agent-worktrees-repo",
+                    "repo": "other-repo-alias",
+                },
+            },
+        },
+    )
+
+    sources = scan.assemble_enabled_plugins(
+        repo,
+        installed_root=tmp_path / "none",
+        home=tmp_path / "home",
+    )
+    assert len(sources) == 1
+    assert sources[0].payload_root == (other_repo / ".ai" / "cap").resolve()
+    assert sources[0].origin == "other-marketplace/cap"
+    # Cross-repo (repo dir isn't a parent of the resolved payload) -> external,
+    # unlike an in-repo ./.ai directory marketplace which is "controlled".
+    assert sources[0].controlled is False
+
+
+@pytest.mark.parametrize(
+    "break_it",
+    ["no_cli", "cli_fails", "empty_output", "bad_repo_name", "not_a_directory"],
+)
+def test_agent_worktrees_repo_marketplace_unresolvable_cases(
+    tmp_path: Path, monkeypatch, break_it: str,
+):
+    repo_name = "not a valid name!" if break_it == "bad_repo_name" else "some-repo"
+
+    def fake_which(name):
+        if break_it == "no_cli":
+            return None
+        return "/usr/bin/agent-worktrees" if name == "agent-worktrees" else None
+
+    def fake_run(argv, **kwargs):
+        if break_it == "cli_fails":
+            return scan.subprocess.CompletedProcess(argv, 1, stdout="", stderr="not found")
+        if break_it == "empty_output":
+            return scan.subprocess.CompletedProcess(argv, 0, stdout="   \n", stderr="")
+        if break_it == "not_a_directory":
+            missing = tmp_path / "does-not-exist"
+            return scan.subprocess.CompletedProcess(argv, 0, stdout=f"{missing}\n", stderr="")
+        raise AssertionError("fake_run should not be reached for this case")
+
+    monkeypatch.setattr(scan.shutil, "which", fake_which)
+    monkeypatch.setattr(scan.subprocess, "run", fake_run)
+
+    repo = tmp_path / "consuming-repo"
+    repo.mkdir()
+    _settings(
+        repo,
+        {"cap@other-marketplace": True},
+        {
+            "other-marketplace": {
+                "source": {
+                    "source": "agent-worktrees-repo",
+                    "repo": repo_name,
+                },
+            },
+        },
+    )
+
+    sources = scan.assemble_enabled_plugins(
+        repo,
+        installed_root=tmp_path / "none",
+        home=tmp_path / "home",
+    )
+    # Unresolvable -> falls through to the generic installed-plugins
+    # footprint (matching an ordinary unresolvable external marketplace),
+    # never raises.
+    assert len(sources) == 1
+    assert sources[0].payload_root == tmp_path / "none" / "other-marketplace" / "cap"
+
+
 def test_assemble_github_marketplace_is_external_with_source(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
