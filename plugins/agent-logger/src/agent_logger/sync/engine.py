@@ -183,23 +183,29 @@ def run_sync(
                 print(f"session-sync: archive push failed: {arc.detail}", file=sys.stderr)
 
             opts = cfg.sync_compact
-            from agent_logger.sync.compact import tracked_worktree_paths
+            from agent_logger.sync.compact import resolve_hub_tracked_paths
 
-            tracked = (
-                tracked_worktree_paths()
-                if opts["require_untracked_worktree"]
-                else None
+            tracked, unresolved = resolve_hub_tracked_paths(
+                opts["require_untracked_worktree"]
             )
-            backlog = target.compact_backlog(
-                machine, opts["min_age_days"], opts["codec"],
-                tracked_paths=tracked,
-            )
-            if backlog:
-                print(f"session-sync: compacted {backlog} hub-only session(s)")
+            if unresolved:
+                print(
+                    "session-sync: tracked-worktree protection requested but "
+                    "unresolved this pass; skipping hub compaction to avoid "
+                    "archiving an unverified live session",
+                    file=sys.stderr,
+                )
+            else:
+                backlog = target.compact_backlog(
+                    machine, opts["min_age_days"], opts["codec"],
+                    tracked_paths=tracked,
+                )
+                if backlog:
+                    print(f"session-sync: compacted {backlog} hub-only session(s)")
 
-            reclaimed = target.reconcile_hub(machine)
-            if reclaimed:
-                print(f"session-sync: reconciled {reclaimed} hub session(s)")
+                reclaimed = target.reconcile_hub(machine)
+                if reclaimed:
+                    print(f"session-sync: reconciled {reclaimed} hub session(s)")
 
         notify = cfg.sync_notify
         if notify["url"]:
@@ -453,10 +459,22 @@ def do_compact_hub(cfg: Config, *, dry_run: bool, verbose: bool) -> int:
     target = build_target(cfg.sync_target, cfg.target_options(cfg.sync_target))
     lock_file = cfg.home / "session-sync.lock"
     # Protect hub copies of sessions whose worktree is still tracked (the
-    # running machine authoritatively knows its own namespace).
-    from agent_logger.sync.compact import tracked_worktree_paths
+    # running machine authoritatively knows its own namespace). Hub sessions
+    # may belong to a foreign machine, so there is no on-disk existence
+    # fallback here (unlike select_compactable's live-session path): an
+    # unresolved lookup must fail closed rather than proceed as "nothing to
+    # protect" (see resolve_hub_tracked_paths).
+    from agent_logger.sync.compact import resolve_hub_tracked_paths
 
-    tracked = tracked_worktree_paths() if opts["require_untracked_worktree"] else None
+    tracked, unresolved = resolve_hub_tracked_paths(opts["require_untracked_worktree"])
+    if unresolved:
+        print(
+            "session-sync compact-hub: tracked-worktree protection requested "
+            "but unresolved this pass; skipping to avoid archiving an unverified "
+            "live session",
+            file=sys.stderr,
+        )
+        return 0
     with sync_lock(lock_file, timeout=cfg.sync_lock_timeout) as acquired:
         if not acquired:
             print(

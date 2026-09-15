@@ -375,6 +375,40 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-15 — Fix reviewed compaction-safety findings
+
+- Advisory review of #2697 caught two real defects in the Logger conversion:
+  (1) `do_compact_hub`/`run_sync`'s hub-compaction path treats
+  `tracked_worktree_paths() is None` as "confirmed nothing to protect", so an
+  owner/peer/probe FAILURE under explicit context (not genuine peer absence)
+  could silently disable the tracked-worktree protection and archive a live
+  hub session; (2) a malformed peer response row was silently skipped rather
+  than rejected, so a schema mismatch could yield a false "nothing tracked"
+  empty set.
+- Fixed by distinguishing genuine absence (returns `None`, unchanged) from
+  failure (now raises `_peer_launch.ContextRefused`) in
+  `tracked_worktree_paths()`. Added two purpose-built resolvers:
+  `_resolve_tracked_paths_or_none` (used by `select_compactable`, which
+  already has a safe per-session on-disk fallback, so folding a failure into
+  `None` there is fine) and `resolve_hub_tracked_paths` (used by both hub
+  call sites, which have no such fallback for foreign-machine hub sessions,
+  so a failure now fails the whole compaction pass closed instead of
+  proceeding unprotected). `_paths_from_list_response` now rejects the whole
+  response on any malformed row instead of silently omitting it.
+- Added dedicated `plugins/agent-logger/tests/test_worktrees_peer.py` (22
+  cases) covering explicit-context resolution, the absence/failure split,
+  malformed-row rejection, and the two resolvers, plus an engine-level test
+  proving both hub call sites fail closed on an unresolved lookup. Corrected
+  the shared dispatch regression's now-invalid absence/failure assertions to
+  match.
+- Re-verified: agent-logger 302 passed (Windows) / 302 (POSIX, same
+  selection); shared dispatch procutil 61 passed/5 skipped (Windows), 60/6
+  (POSIX); module-size, docs, install-contract, and headless-launch guards
+  passed. A handful of unrelated pre-existing environment-flaky tests
+  (ARM64 PowerShell package installs on Windows; WSL-to-Windows-PowerShell
+  path bridging) were confirmed to fail identically on an unmodified
+  checkout and are out of this slice's scope.
+
 ### 2026-09-14 — Logger as a fourth same-cell peer-launch consumer
 
 - Continued Phase 6 caller conversions. Added `agent-logger` to the shared

@@ -429,14 +429,18 @@ def test_containers_config_validates_owner_before_optional_peer(tmp_path, monkey
         config.load_config()
 
 
-def test_logger_compact_degrades_to_none_never_raises(tmp_path, monkeypatch):
-    """Unlike Containers' config, a refused/ambiguous lookup here is SAFE:
-
-    ``None`` triggers the caller's on-disk-existence fallback (errs toward
-    keeping, not archiving, a session), so owner/peer failures must degrade
-    quietly rather than raise or crash a compaction pass."""
+def test_logger_compact_distinguishes_absence_from_failure(tmp_path, monkeypatch):
+    """Unlike Containers' config, a genuinely absent peer here is SAFE and
+    degrades to ``None`` (triggering the caller's on-disk-existence fallback
+    that errs toward keeping, not archiving, a session). But every other
+    failure -- invalid owner context, blocked governance, or a malformed peer
+    response -- must raise ``ContextRefused`` rather than silently degrading
+    to ``None``, since a caller that only checks ``is not None`` (agent-logger's
+    own hub-compaction path) would otherwise treat an unresolved lookup as a
+    confirmed-empty one and risk archiving a still-live session."""
     source = Path(__file__).resolve().parents[2] / "agent-logger" / "src"
     monkeypatch.syspath_prepend(str(source))
+    from agent_logger._peer_launch import ContextRefused
     from agent_logger.sync import compact
 
     cell = tmp_path / "marketplaces" / FIRST_MARKETPLACE_ID
@@ -444,26 +448,31 @@ def test_logger_compact_degrades_to_none_never_raises(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENT_LOGGER_HOME", str(own.parent))
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own))
     monkeypatch.setattr("shutil.which", lambda _: pytest.fail("ambient PATH selected"))
-    # Valid owner, no peer installed at all: documented optional absence.
+    # Valid owner, no peer installed at all: the sole documented absence case.
     assert compact.tracked_worktree_paths() is None
-    # Invalid/foreign explicit context: degrades to None, never raises.
+    # Invalid/foreign explicit context: a failure, not absence -- must raise.
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "{")
-    assert compact.tracked_worktree_paths() is None
+    with pytest.raises(ContextRefused):
+        compact.tracked_worktree_paths()
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own))
-    # Blocked owner governance also degrades to None.
+    # Blocked owner governance is also a failure, not absence.
     maintenance = own.parent / "maintenance"
     maintenance.touch()
-    assert compact.tracked_worktree_paths() is None
+    with pytest.raises(ContextRefused):
+        compact.tracked_worktree_paths()
     maintenance.unlink()
     # A live, healthy same-cell peer resolves through the real subprocess.
     python = _make_live_peer(cell, "agent-worktrees", "1.0.0-dev1")
     _patch_worktrees_module_for_list(python, tmp_path)
     result = compact.tracked_worktree_paths()
     assert result == {os.path.normcase(os.path.normpath(str(tmp_path / "wt-a")))}
-    # A malformed peer response also degrades to None instead of raising.
+    # A malformed peer response is a failure too: must raise, never degrade
+    # to None (which would make compaction treat every session as untracked).
     peer_activation = (cell / "plugins" / "agent-worktrees" / "installation-activation.json")
     peer_activation.write_text("{", encoding="utf-8")
-    assert compact.tracked_worktree_paths() is None
+    with pytest.raises(ContextRefused):
+        compact.tracked_worktree_paths()
+
 
 
 def _patch_worktrees_module_for_list(python: Path, tmp_path: Path) -> None:
