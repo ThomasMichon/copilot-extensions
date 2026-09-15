@@ -6251,6 +6251,7 @@ def test_run_bg_logs_when_marshalling_the_outcome_back_to_the_ui_fails(caplog):
     point.
     """
     import logging as _logging
+    import threading as _threading
     import time as _time
 
     from worktree_manager.production_picker.picker_tui import engine as engine_mod
@@ -6265,6 +6266,8 @@ def test_run_bg_logs_when_marshalling_the_outcome_back_to_the_ui_fails(caplog):
     screen = _Screen()
     screen.app = _FakeApp()
     screen._busy_label = None
+    screen._bg_cancel = _threading.Event()
+    screen._bg_threads = set()
 
     with caplog.at_level(_logging.WARNING, logger="agent-worktrees.picker"):
         engine_mod.PickerScreen._run_bg(
@@ -6278,6 +6281,54 @@ def test_run_bg_logs_when_marshalling_the_outcome_back_to_the_ui_fails(caplog):
     assert any(
         "could not marshal its outcome back to the UI" in r.message
         for r in caplog.records
+    )
+
+
+def test_run_bg_drops_quietly_when_the_picker_already_cancelled_it(caplog):
+    """When ``on_unmount`` has already set ``_bg_cancel`` (the picker itself is
+    tearing down -- a launch decision, cancel, or quit), a worker still
+    finishing its blocking ``work()`` at that moment must NOT attempt
+    ``app.call_from_thread`` at all, and must NOT log a WARNING: this is an
+    expected, intentional exit, not an unforeseen marshal failure. Distinguishes
+    this case from
+    ``test_run_bg_logs_when_marshalling_the_outcome_back_to_the_ui_fails``,
+    which covers a genuinely unexpected marshal failure."""
+    import logging as _logging
+    import threading as _threading
+    import time as _time
+
+    from worktree_manager.production_picker.picker_tui import engine as engine_mod
+
+    class _FakeApp:
+        def __init__(self):
+            self.called = False
+
+        def call_from_thread(self, fn):
+            self.called = True
+            fn()
+
+    class _Screen:
+        pass
+
+    screen = _Screen()
+    app = _FakeApp()
+    screen.app = app
+    screen._busy_label = None
+    screen._bg_cancel = _threading.Event()
+    screen._bg_cancel.set()  # picker already tore down before work() finished
+    screen._bg_threads = set()
+
+    with caplog.at_level(_logging.DEBUG, logger="agent-worktrees.picker"):
+        engine_mod.PickerScreen._run_bg(
+            screen, "steer", lambda: (True, "ok"),
+        )
+        deadline = _time.monotonic() + 2
+        while screen._bg_threads and _time.monotonic() < deadline:
+            _time.sleep(0.02)
+
+    assert app.called is False
+    assert not any(
+        r.levelno >= _logging.WARNING for r in caplog.records
     )
 
 

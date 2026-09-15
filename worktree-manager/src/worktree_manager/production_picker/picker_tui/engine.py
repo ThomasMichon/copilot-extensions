@@ -1115,6 +1115,17 @@ class PickerScreen(Widget):
         # data-relative (indexes the scrolling data rows only, since the M/BTN
         # chrome is fixed above it), distinct from the monolith's ``top``.
         self._data_top = 0
+        # Cancellation for in-flight ``_run_bg`` pivot-action workers: set by
+        # ``on_unmount`` when the picker itself is tearing down (a launch
+        # decision, cancel, or quit) so a worker still running off-thread at that
+        # moment knows the render flow it would marshal its outcome onto is gone
+        # -- it drops quietly instead of racing ``app.call_from_thread`` and
+        # logging a "could not marshal" warning for what is actually an expected,
+        # intentional exit rather than an unforeseen failure. ``_bg_threads``
+        # tracks the live worker threads so the teardown path (and any future
+        # extension of it) has visibility into what is still outstanding.
+        self._bg_cancel = threading.Event()
+        self._bg_threads: set[threading.Thread] = set()
         # Per-refresh render caches (#169): in the NF compose tree every segment
         # widget (title / pivots / chrome / machine / buttons / footer) renders
         # from this one screen's derived frame in the SAME paint pass. Without a
@@ -1520,10 +1531,17 @@ class PickerScreen(Widget):
             ).start()
 
     def on_unmount(self):
-        # Picker is tearing down (a launch decision, cancel, or quit). Kill any
-        # in-flight SSH prefetch so it never orphans into a heavy git-classify
-        # churning on the machine we're about to hand off into -- the picker
-        # perf bug where Copilot "slows to a crawl" after launch.
+        # Picker is tearing down (a launch decision, cancel, or quit). Signal
+        # every in-flight ``_run_bg`` pivot-action worker first: each checks
+        # ``_bg_cancel`` right before it would otherwise race
+        # ``app.call_from_thread`` against an app that (by the time the worker's
+        # blocking work() call returns) may already be gone -- so a worker still
+        # running at this moment drops its outcome quietly instead of logging a
+        # "could not marshal" warning for what is really just this expected exit.
+        self._bg_cancel.set()
+        # Kill any in-flight SSH prefetch so it never orphans into a heavy
+        # git-classify churning on the machine we're about to hand off into --
+        # the picker perf bug where Copilot "slows to a crawl" after launch.
         loader = getattr(self, "loader", None)
         if loader is not None:
             try:
@@ -5286,19 +5304,43 @@ class PickerScreen(Widget):
         when a *different* surface already shows the load state (e.g. the Actions
         menu's own footer spinner while it refines in place) -- then the main
         footer is left alone and ``done`` is still invoked (with ``None`` on
-        error) so the caller can always finalize (drop its spinner)."""
+        error) so the caller can always finalize (drop its spinner).
+
+        The worker is tracked on ``self._bg_threads`` and honors
+        ``self._bg_cancel``, an ``Event`` set by ``on_unmount`` when the picker
+        itself is torn down (a launch decision, cancel, or quit). A worker
+        still running at that point drops its outcome quietly once
+        ``work()`` returns, instead of racing ``app.call_from_thread`` against
+        an app that may already be gone."""
         if not quiet:
             self._busy_label = label
 
         # Resolve the App while this screen is still attached. The worker may
         # outlive picker exit, when MessagePump.app can no longer walk to it.
         app = self.app
+        cancel = self._bg_cancel
 
         def _worker():
             try:
                 result, err = work(), None
             except Exception as exc:  # a worker thread must never die silently
                 result, err = None, exc
+
+            if cancel.is_set():
+                # The picker tore down (a launch decision, cancel, or quit)
+                # while this worker's blocking work() was still in flight --
+                # ``on_unmount`` already set ``_bg_cancel`` for exactly this
+                # case. There is no UI left to marshal onto and this is an
+                # expected, intentional exit rather than an unforeseen
+                # failure, so drop the outcome quietly (debug only, no
+                # traceback) instead of racing ``app.call_from_thread`` and
+                # logging it as a warning.
+                log.debug(
+                    "pivot action %r: picker exited while this worker was "
+                    "still running; dropping its outcome (err=%r)",
+                    label, err,
+                )
+                return
 
             def _apply():
                 if not quiet:
@@ -5323,16 +5365,16 @@ class PickerScreen(Widget):
             try:
                 app.call_from_thread(_apply)
             except Exception:
-                # The action's own outcome (ok/failed, and any status-line
-                # update) is normally surfaced by `_apply` above -- but if
-                # marshalling back onto the event loop itself fails (the app
-                # exited, the screen is gone, etc.), that outcome is otherwise
-                # lost with **no** operator-visible signal at all: a steer
-                # submission (or any other action) can genuinely succeed or
-                # fail off-thread while the operator sees nothing change and
-                # reasonably assumes it worked. Log it so this class of silent
-                # drop is at least diagnosable after the fact, even though the
-                # status line itself is unreachable at this point.
+                # marshalling back onto the event loop itself failed for a
+                # reason OTHER than the expected/cancelled exit handled above
+                # (e.g. the screen itself is gone but the app is still up) --
+                # that outcome is otherwise lost with **no** operator-visible
+                # signal at all: a steer submission (or any other action) can
+                # genuinely succeed or fail off-thread while the operator sees
+                # nothing change and reasonably assumes it worked. Log it so
+                # this class of silent drop is at least diagnosable after the
+                # fact, even though the status line itself is unreachable at
+                # this point.
                 log.warning(
                     "pivot action %r: could not marshal its outcome back to "
                     "the UI (app.call_from_thread failed); the action itself "
@@ -5340,9 +5382,18 @@ class PickerScreen(Widget):
                     label, err, exc_info=True,
                 )
 
-        threading.Thread(
-            target=_worker, name=f"pivot-action:{label}", daemon=True
-        ).start()
+        def _tracked_worker():
+            thread = threading.current_thread()
+            try:
+                _worker()
+            finally:
+                self._bg_threads.discard(thread)
+
+        thread = threading.Thread(
+            target=_tracked_worker, name=f"pivot-action:{label}", daemon=True
+        )
+        self._bg_threads.add(thread)
+        thread.start()
 
     def _run_task_action(self, reg, action, rec):
         """Execute one task action, then invalidate the cached list so the row
