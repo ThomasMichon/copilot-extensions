@@ -9,6 +9,8 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
+from .. import agent_plugin_runtime
+
 ENGINE_SOURCE_ENV = "WORKTREE_MANAGER_AGENT_WORKTREES_SRC"
 
 
@@ -17,6 +19,17 @@ class EngineRuntimeError(RuntimeError):
 
 
 def _context_runtime_root() -> Path | None:
+    """The cell-scoped root named by an explicit ``COPILOT_EXTENSIONS_CONTEXT``.
+
+    A context that names the wrong plugin, or is otherwise unreadable, is a
+    genuine misconfiguration and raises. But a context that DOES name
+    agent-worktrees is only trusted when the shared installation-mode policy
+    (``agent_plugin_runtime.marketplace_cells_enabled`` -- the same vendored
+    resolver every agent-* plugin's own bootstrap consults) says marketplace
+    cells are actually enabled. This is the "same config" invariant: an
+    explicit context alone must never be more authoritative here than it
+    would be for agent-worktrees itself.
+    """
     context = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip()
     if not context:
         return None
@@ -35,6 +48,8 @@ def _context_runtime_root() -> Path | None:
         raise EngineRuntimeError(
             "the selected installation context does not own agent-worktrees"
         )
+    if not agent_plugin_runtime.marketplace_cells_enabled():
+        return None
     return pointer.parent
 
 

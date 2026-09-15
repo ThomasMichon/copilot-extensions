@@ -157,8 +157,45 @@ def test_engine_runtime_prefers_explicit_context_over_checkout(monkeypatch, tmp_
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(root / "install.json"))
     monkeypatch.delenv(engine_runtime.ENGINE_SOURCE_ENV, raising=False)
     monkeypatch.setattr(engine_runtime, "_checkout_source", lambda: tmp_path / "checkout")
+    monkeypatch.setattr(
+        engine_runtime.agent_plugin_runtime, "marketplace_cells_enabled", lambda: True
+    )
 
     assert engine_runtime._active_runtime_source() == source
+
+
+def test_engine_runtime_ignores_context_when_cells_policy_disabled(monkeypatch, tmp_path):
+    """The 'same config' invariant: a context that names agent-worktrees is
+    never trusted on its own. When the shared installation-mode policy
+    (mirrored across every agent-* plugin's own bootstrap) has marketplace
+    cells off, the context is ignored exactly as if it were absent."""
+    root = (
+        tmp_path
+        / "durable"
+        / "marketplaces"
+        / "cell-a"
+        / "plugins"
+        / "agent-worktrees"
+    )
+    slot = root / "versions" / "1.2.3"
+    source = (
+        slot / "Lib" / "site-packages"
+        if engine_runtime.os.name == "nt"
+        else slot / "lib" / "python3.10" / "site-packages"
+    )
+    (source / "agent_worktrees").mkdir(parents=True)
+    (root / "current-version").write_text("1.2.3", encoding="utf-8")
+    (root / "install.json").write_text(
+        json.dumps({"pluginId": "agent-worktrees"}), encoding="utf-8"
+    )
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(root / "install.json"))
+    monkeypatch.delenv(engine_runtime.ENGINE_SOURCE_ENV, raising=False)
+    monkeypatch.setattr(
+        engine_runtime.agent_plugin_runtime, "marketplace_cells_enabled", lambda: False
+    )
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "no-legacy-here"))
+
+    assert engine_runtime._active_runtime_source() is None
 
 
 def test_engine_runtime_rejects_foreign_explicit_context(monkeypatch, tmp_path):
