@@ -126,7 +126,7 @@ def run_sync(
         )
         return 0
 
-    lock_file = cfg.home / "session-sync.lock"
+    lock_file = cfg.home / cfg.sync_lock_name
     with sync_lock(lock_file, timeout=cfg.sync_lock_timeout) as acquired:
         if not acquired:
             print("session-sync: another sync holds the lock; skipping", file=sys.stderr)
@@ -451,7 +451,7 @@ def do_compact_hub(cfg: Config, *, dry_run: bool, verbose: bool) -> int:
         print("session-sync compact-hub: disabled (sync.compact.enabled=false)")
         return 0
     target = build_target(cfg.sync_target, cfg.target_options(cfg.sync_target))
-    lock_file = cfg.home / "session-sync.lock"
+    lock_file = cfg.home / cfg.sync_lock_name
     # Protect hub copies of sessions whose worktree is still tracked (the
     # running machine authoritatively knows its own namespace).
     from agent_logger.sync.compact import tracked_worktree_paths
