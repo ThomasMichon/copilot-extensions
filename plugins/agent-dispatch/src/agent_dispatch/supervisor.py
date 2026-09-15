@@ -3336,6 +3336,16 @@ class Supervisor:
                             handle.get("error"),
                         )
                     elif spawn_task.get("spawn_worktree_ownership") == "created":
+                        failed_session = handle.get("session")
+                        if isinstance(failed_session, str) and failed_session:
+                            self.client.record_spawn(
+                                key,
+                                session_handle=failed_session,
+                                worktree=(
+                                    handle.get("worktree")
+                                    or spawn_task.get("spawn_worktree")
+                                ),
+                            )
                         self.client.request_spawn_release(
                             key,
                             detail=detail,
