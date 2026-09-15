@@ -58,14 +58,17 @@ The scrubber removes the Containers environment namespace as well as the other
 callers' credentials and routing overrides.
 
 Logger uses this boundary for its cold-session-compaction tracked-worktree
-check. Unlike Containers' config lookup, a `None` result here is the *safe*
-direction: the caller falls back to an on-disk existence check that errs
-toward keeping (not archiving) a session. Owner-validation failure, a missing
-peer, or a malformed/failed peer response therefore all degrade to `None`
-rather than raising -- raising would crash a compaction pass over an
-installation-governance blip. A missing same-cell peer remains the sole
-documented absence case after owner admission; legacy lookup is unchanged
-without explicit context.
+check. Genuine absence -- a valid owner with no same-cell worktrees peer
+installed -- returns `None`, the sole documented absence case; legacy lookup
+is unchanged without explicit context. Every other failure (owner-validation
+error, blocked governance, a probe error, or a malformed peer response) raises
+`ContextRefused` instead of degrading to `None`, since `None` here specifically
+means "confirmed nothing to protect." Callers choose their own safe response
+to that refusal: `select_compactable` already has a per-session on-disk
+existence fallback that errs toward keeping (not archiving) a session, so it
+folds a refusal into that same fallback; the hub-compaction callers have no
+such fallback for a foreign machine's session, so they fail the whole
+compaction pass closed instead of proceeding as if nothing needed protecting.
 
 ## Validation
 

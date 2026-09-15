@@ -74,6 +74,9 @@ def test_valid_owner_with_no_peer_is_the_sole_absence_case(
     subprocess.CompletedProcess([], 0, json.dumps(
         {"worktrees": [{"path": "C:/ok"}, {"path": 7}]}
     ), ""),
+    subprocess.CompletedProcess([], 0, json.dumps(
+        {"worktrees": [{"path": "C:/ok"}, {"path": "   "}]}
+    ), ""),
 ])
 def test_failed_or_malformed_probe_raises_context_refused_not_none(
     owner: dict[str, str], response: subprocess.CompletedProcess[str],
@@ -115,6 +118,20 @@ def test_legacy_ambient_path_also_rejects_malformed_rows(monkeypatch: pytest.Mon
         subprocess, "run",
         lambda *a, **k: subprocess.CompletedProcess(
             [], 0, json.dumps({"worktrees": [{"path": "ok"}, {}]}), "",
+        ),
+    )
+    assert compact.tracked_worktree_paths() is None
+
+
+def test_legacy_ambient_path_also_rejects_whitespace_only_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr("shutil.which", lambda name: "agent-worktrees")
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda *a, **k: subprocess.CompletedProcess(
+            [], 0, json.dumps({"worktrees": [{"path": "ok"}, {"path": "   "}]}), "",
         ),
     )
     assert compact.tracked_worktree_paths() is None
