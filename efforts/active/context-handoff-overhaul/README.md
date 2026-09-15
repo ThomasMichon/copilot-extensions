@@ -6,7 +6,8 @@
 - **Branch(es):** `effort/context-handoff-overhaul` (Phase 0, merged #2593),
   `effort/context-handoff-overhaul-phase1` (Phase 1, merged #2643),
   `effort/context-handoff-overhaul-phase2` (Phase 2, merged #2663),
-  `effort/context-handoff-overhaul-phase3` (Phase 3, in progress)
+  `effort/context-handoff-overhaul-phase3` (Phase 3 slice 1, merged #2669;
+  further slices continue on new branches)
 - **Created:** 2026-09-13
 - **Status:** Active
 - **Umbrella issue:** #2594
@@ -460,7 +461,11 @@ gate land._
   real CI matrix for broader coverage beyond the specifically-touched files,
   which were run to completion and are clean.
 - Bumped `agent-worktrees` to 1.5.5-dev112 (`plugin.json` + `pyproject.toml`
-  + marketplace.json).
+  + marketplace.json) -- first attempt (dev111) collided with PR #2666
+  landing on `main` mid-session with the same version; rebased and bumped
+  past it before pushing.
+- **PR #2669 merged** (squash). Next: Phase 3 slice 2 (coordinator-fallback
+  wiring) on a fresh branch off post-merge `main`.
 - **Not yet done this slice:** the coordinator-fallback wiring itself (item
   2), the `userPromptSubmitted` observability hook (item 3), and closing
   `handoff-live-cutover`'s remaining Phase 3 items (item 4). All three
