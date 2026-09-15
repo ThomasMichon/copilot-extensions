@@ -114,7 +114,7 @@ with `Tab`:
   local host git-classifies its own worktrees; remote machines report their state
   over SSH.
 - **Worktree rows** — each shows machine · environment · `repo:id4` and a **state
-  block** (`WIP`, `DIRTY`, `UNUSED`, `CONVO 💬N`, `FINAL`, `ORPHAN`) with an
+  block** (`WIP`, `DIRTY`, `UNUSED`, `CONVO 💬N`, `FINAL`, `MERGED`, `ORPHAN`) with an
   `↑ahead`/`↓behind` sync tag. Same vocabulary as the status bar and
   [worktree-lifecycle.md § states](worktree-lifecycle.md#worktree-states). The
   `RELATION` column independently summarizes reciprocal session metadata as
@@ -382,8 +382,9 @@ The same capture seam produces **safe-to-publish** imagery from real fleet data:
 The Picker reflects **live** state, not a snapshot: rows carry git-derived
 state + sync tags, a staged runtime update surfaces as an "apply staged update +
 restart the picker" row, and `r` refreshes (re-scanning contributed pivots).
-Merged worktrees show as `FINAL`/completed and are cleared by Cleanup, not left
-lying as open work.
+Merged worktrees show as `FINAL` or `MERGED` (see
+[worktree-lifecycle.md § FINAL vs MERGED](worktree-lifecycle.md#final-vs-merged----the-closure-descriptor-split))
+and are cleared by Cleanup, not left lying as open work.
 
 ## Related config
 
