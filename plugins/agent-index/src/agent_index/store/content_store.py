@@ -595,15 +595,11 @@ class ContentStore:
         bridge DEADLOCKS (#3587) -- the worker blocks forever on the
         background-loop result while the loop sits idle, so uvicorn never binds
         and the service is DOWN. A fresh interpreter has a pristine background
-        loop, so the build completes normally out of process (verified: works
-        standalone in <1s where the in-process call hangs). Running it out of
-        process ALSO (a) makes the build KILLABLE with a hard timeout so a stuck
-        build can never wedge the server (never-strand, #1208), and (b) lets us
-        ``optimize()`` (compact) the table first -- a full reindex leaves
-        hundreds of tiny fragments/versions, the pathological state that made the
-        in-process build crawl before it deadlocked. The server's cached table
-        handle sees the freshly-built index immediately, with no reopen
-        (verified), so search picks up FTS without a restart.
+        loop, so the build completes normally out of process. Running it out of
+        process ALSO makes the build KILLABLE with a hard timeout (never-strand,
+        #1208) and lets us ``optimize()`` (compact) the table first -- a full
+        reindex leaves hundreds of tiny fragments/versions, the pathological
+        state that made the in-process build crawl before it deadlocked.
 
         ``full`` controls whether a from-scratch ``create_fts_index(...,
         replace=True)`` runs after ``optimize()``. Per LanceDB's own docs
@@ -613,27 +609,20 @@ class ContentStore:
         NOT require ``create_fts_index`` to pick up new data. Forcing
         ``replace=True`` on every dirty-triggered rebuild discards the existing
         BM25 index and rebuilds it from scratch over the *entire* content
-        table regardless of how small the actual delta is -- disproportionate
-        I/O on a large, mostly-unchanged corpus (observed downstream as a
-        sustained heavy read burst off a handful of new commits). Only the
-        first-ever build, or a
-        recovery from an index that was never successfully created
-        (``_fts_available`` False), needs the full ``replace=True`` path;
-        every subsequent "merely dirty" rebuild can rely on ``optimize()``
-        alone.
+        table regardless of how small the actual delta is. Only the first-ever
+        build, or a recovery from an index that was never successfully created
+        (``_fts_available`` False), needs the full ``replace=True`` path.
 
         On the ``full`` path, an ``optimize()`` failure is swallowed (only
         logged) because ``create_fts_index(replace=True)`` still runs
-        afterward and is the actual source of correctness there -- a failed
-        compaction is a missed cleanup opportunity, not a missed index update.
-        On the incremental (``full=False``) path there is no follow-up
+        afterward and is the actual source of correctness there. On the
+        incremental (``full=False``) path there is no follow-up
         ``create_fts_index`` call, so ``optimize()`` succeeding IS the only
-        thing that updates the index; swallowing its failure there would let
-        the caller believe the rebuild succeeded (clearing ``_fts_dirty``)
-        while the on-disk FTS index silently went stale. So the incremental
-        path lets ``optimize()`` raise, causing the subprocess to exit
-        non-zero and the caller's existing retry/backoff logic to treat it as
-        a genuine failed rebuild instead.
+        thing that updates the index -- swallowing its failure there would let
+        the caller believe the rebuild succeeded while the on-disk index
+        silently went stale. So the incremental path lets ``optimize()``
+        raise, causing the subprocess to exit non-zero and the caller's
+        existing retry/backoff logic to treat it as a genuine failure.
         """
         if full:
             body = (
@@ -723,15 +712,13 @@ class ContentStore:
         ``optimize()``'s incremental FTS update instead (see
         ``_run_fts_build``), avoiding a full-corpus rescan for a small delta.
 
-        ``_fts_available`` is in-process state only, seeded ``False`` on
-        every fresh ``ContentStore`` (e.g. after a service restart) even when
-        a prior process already built a perfectly good FTS index durably on
-        disk. Before assuming a full rebuild is needed, check LanceDB's own
-        index metadata (``table.list_indices()``) for an existing FTS index
-        on ``content`` while holding the cross-process file lock -- this avoids
-        paying for one wasted full-corpus rebuild per restart, and avoids a
-        second full rebuild if another process created the first index while
-        this process was waiting for the lock.
+        ``_fts_available`` is in-process state only, seeded ``False`` on every
+        fresh ``ContentStore`` (e.g. after a restart) even when a prior
+        process already built a valid FTS index. This checks LanceDB's own
+        index metadata (``table.list_indices()``) for an existing ``content``
+        index while holding the cross-process file lock -- avoiding both a
+        wasted full rebuild per restart and a second one if another process
+        just finished the first build while this one waited for the lock.
         """
         table = self._get_or_create_table()
         try:
