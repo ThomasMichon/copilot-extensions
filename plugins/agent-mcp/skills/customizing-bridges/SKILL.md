@@ -3,7 +3,7 @@ name: customizing-bridges
 description: >-
   Customize or tune an EXISTING agent-mcp bridge on this machine -- change which
   upstream tools are exposed, add/remove decorators (filter, defer, code-mode,
-  rename, storage, transform, gate), or tweak headers / auth / resource /
+  rename, storage, transform, gate, input_gate), or tweak headers / auth / resource /
   timeout / upstream -- WITHOUT editing the committed or plugin-shipped config,
   by writing a machine-local override overlay (`~/.agent-mcp/overrides/<id>.yaml`,
   deep-merged at load). Use when asked to "customize a bridge", "override an mcp
@@ -124,5 +124,5 @@ headers:
 
 - **`agent-mcp`** skill -- create a bridge; auth kinds; the full decorator-stack
   reference (`filter` / `rename` / `defer` / `code-mode` / `storage` /
-  `transform` / `gate`).
+  `transform` / `gate` / `input_gate`).
 - Plugin README → *Decorator stack*.

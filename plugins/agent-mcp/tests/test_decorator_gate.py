@@ -78,6 +78,17 @@ def test_predicate_not_in_vacuously_true_when_absent():
     assert _eval_predicate({"path": "missing[*]", "not_in": ["secret"]}, {})
 
 
+def test_predicate_contains_stays_total_on_type_mismatch():
+    # `value in v` raises TypeError when `v` is a str and `value` is not a
+    # str (e.g. `1 in "abc"`). input_gate evaluates deny_when against
+    # caller-controlled call arguments, so a mismatched-type `contains`
+    # config must not crash predicate evaluation -- it should just not match.
+    doc = {"title": "abc123", "tags": ["public", 1]}
+    assert not _eval_predicate({"path": "title", "contains": 1}, doc)
+    assert _eval_predicate({"path": "title", "contains": "123"}, doc)
+    assert _eval_predicate({"path": "tags", "contains": 1}, doc)
+
+
 def test_predicate_combinators():
     doc = {"tags": ["public"], "isSensitive": False}
     assert _eval_predicate({"all": [

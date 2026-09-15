@@ -153,3 +153,126 @@ def test_gate_invalid_on_deny_rejected():
                           "preflight": {"tool": "lookup"},
                           "allow_when": {"path": "x", "equals": 1},
                           "on_deny": "bogus"}])
+
+
+def test_gate_rejects_malformed_allow_when_null_leaf():
+    # {any: [null]} previously reached the runtime predicate engine, which
+    # treats a non-dict node as simply FALSE -- fail-open for an
+    # authorization-style predicate. Config validation must reject it.
+    with pytest.raises(ConfigError):
+        _cfg(decorators=[{"type": "gate", "match_tools": ["a"],
+                          "preflight": {"tool": "lookup"},
+                          "allow_when": {"any": [None]}}])
+
+
+def test_gate_rejects_invalid_regex_in_allow_when():
+    with pytest.raises(ConfigError):
+        _cfg(decorators=[{"type": "gate", "match_tools": ["a"],
+                          "preflight": {"tool": "lookup"},
+                          "allow_when": {"path": "title", "matches": "["}}])
+
+
+def test_input_gate_valid():
+    cfg = _cfg(decorators=[{
+        "type": "input_gate",
+        "match_tools": ["update_incident"],
+        "deny_when": {"any": [
+            {"path": "tags[*]", "matches": "(?i)^ai-safe$"},
+            {"path": "title", "matches": "(?i)ai-safe"},
+        ]},
+        "on_deny": "error",
+        "reason": "human-only marker",
+    }])
+    assert cfg.decorators[0].type == "input_gate"
+    assert cfg.decorators[0].options["match_tools"] == ["update_incident"]
+
+
+def test_input_gate_requires_match_tools():
+    with pytest.raises(ConfigError):
+        _cfg(decorators=[{"type": "input_gate",
+                          "deny_when": {"path": "x", "equals": 1}}])
+
+
+def test_input_gate_requires_deny_when():
+    with pytest.raises(ConfigError):
+        _cfg(decorators=[{"type": "input_gate", "match_tools": ["a"]}])
+
+
+def test_input_gate_invalid_on_deny_rejected():
+    with pytest.raises(ConfigError):
+        _cfg(decorators=[{"type": "input_gate", "match_tools": ["a"],
+                          "deny_when": {"path": "x", "equals": 1},
+                          "on_deny": "bogus"}])
+
+
+def test_input_gate_rejects_malformed_deny_when_null_leaf():
+    with pytest.raises(ConfigError):
+        _cfg(decorators=[{"type": "input_gate", "match_tools": ["a"],
+                          "deny_when": {"any": [None]}}])
+
+
+def test_input_gate_rejects_leaf_with_no_recognized_op():
+    with pytest.raises(ConfigError):
+        _cfg(decorators=[{"type": "input_gate", "match_tools": ["a"],
+                          "deny_when": {"path": "tags", "bogus_op": 1}}])
+
+
+def test_input_gate_rejects_invalid_regex_in_deny_when():
+    with pytest.raises(ConfigError):
+        _cfg(decorators=[{"type": "input_gate", "match_tools": ["a"],
+                          "deny_when": {"path": "title", "matches": "["}}])
+
+
+def test_input_gate_rejects_combinator_with_extra_keys():
+    with pytest.raises(ConfigError):
+        _cfg(decorators=[{"type": "input_gate", "match_tools": ["a"],
+                          "deny_when": {"any": [{"path": "x", "equals": 1}],
+                                        "path": "y"}}])
+
+
+_INPUT_GATE_SPEC = {"type": "input_gate", "match_tools": ["a"],
+                    "deny_when": {"path": "x", "equals": 1}}
+
+
+def test_input_gate_rejects_position_before_storage():
+    with pytest.raises(ConfigError, match="must be positioned AFTER"):
+        _cfg(decorators=[dict(_INPUT_GATE_SPEC), {"type": "storage"}])
+
+
+def test_input_gate_rejects_position_before_code_mode():
+    with pytest.raises(ConfigError, match="must be positioned AFTER"):
+        _cfg(decorators=[dict(_INPUT_GATE_SPEC), {"type": "code-mode"}])
+
+
+def test_input_gate_rejects_position_before_defer():
+    with pytest.raises(ConfigError, match="must be positioned AFTER"):
+        _cfg(decorators=[dict(_INPUT_GATE_SPEC), {"type": "defer"}])
+
+
+def test_input_gate_rejects_position_before_rename():
+    # RenameDecorator rewrites the client-visible tool name back to the real
+    # upstream name on the way down -- an input_gate positioned before it
+    # would evaluate match_tools against the RENAMED name, so a gate written
+    # for the real upstream name would silently never trigger.
+    with pytest.raises(ConfigError, match="must be positioned AFTER"):
+        _cfg(decorators=[dict(_INPUT_GATE_SPEC), {"type": "rename", "prefix": "x_"}])
+
+
+def test_input_gate_accepts_position_after_rename():
+    cfg = _cfg(decorators=[{"type": "rename", "prefix": "x_"}, dict(_INPUT_GATE_SPEC)])
+    assert cfg.decorators[-1].type == "input_gate"
+
+
+def test_input_gate_accepts_position_after_storage_and_code_mode():
+    cfg = _cfg(decorators=[
+        {"type": "code-mode"},
+        {"type": "storage"},
+        dict(_INPUT_GATE_SPEC),
+    ])
+    assert cfg.decorators[-1].type == "input_gate"
+
+
+def test_input_gate_accepts_when_no_unsafe_decorators_present():
+    cfg = _cfg(decorators=[{"type": "filter", "allow": ["a"]}, dict(_INPUT_GATE_SPEC)])
+    assert cfg.decorators[-1].type == "input_gate"
+

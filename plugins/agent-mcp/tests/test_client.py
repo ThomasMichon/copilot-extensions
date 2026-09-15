@@ -122,6 +122,25 @@ async def test_oneshot_tool_filter():
             await sess.call_tool("boom", {})
 
 
+async def test_oneshot_call_tool_honors_input_gate():
+    # The `agent-mcp call` one-shot path must not bypass an `input_gate`
+    # decorator -- a config-declared write-protection has to hold regardless
+    # of which surface (bridge daemon vs one-shot) invokes the tool.
+    cfg = _cfg({"decorators": [{
+        "type": "input_gate",
+        "match_tools": ["greet"],
+        "deny_when": {"path": "name", "equals": "forbidden"},
+        "on_deny": "error",
+        "reason": "denied by test policy",
+    }]})
+    async with OneShotSession(cfg) as sess:
+        ok = await sess.call_tool("greet", {"name": "Cave"})
+        assert result_text(ok) == "hello Cave"
+
+        with pytest.raises(UpstreamError, match="denied by test policy"):
+            await sess.call_tool("greet", {"name": "forbidden"})
+
+
 def test_call_verb_success(tmp_path, capsys):
     cfg = _write_cfg(tmp_path)
     rc = main(["call", str(cfg), "greet", '{"name": "Cave"}'])
