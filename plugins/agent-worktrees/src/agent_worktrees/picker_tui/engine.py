@@ -162,7 +162,11 @@ C_STATE = {
     # status bar use one vocabulary + palette (test-chamber #1290).
     "DIRTY": "#d70000",    # red (colour160)
     "WIP": "#d7af00",      # amber (colour178)
-    "FINAL": "#00af00",    # green (colour034) -- COMPLETED
+    "FINAL": "#00af00",    # green (colour034) -- COMPLETED, refreshed + settled
+    "MERGED": "#ff8700",   # orange (colour208) -- COMPLETED but not yet
+                           # provably settled (Phase 5 closure descriptor);
+                           # distinct from WIP's amber so "landed but not
+                           # closed out" never reads as "still being written".
     "UNUSED": "grey58",    # grey (colour244)
     "CONVO": "#00afaf",    # teal (colour037) -- UNUSED + conversation
     "ORPHAN": "#af00ff",   # magenta (colour129)
@@ -388,7 +392,7 @@ POLL_SECS = _poll_secs()
 # Maintenance groups worktrees by state; this is the display order (#1345).
 # Any state not listed is appended after these, in first-seen order.
 MAINT_GROUP_ORDER = ["DIRTY", "WIP", "ACTIVE", "ORPHAN", "CONVO", "UNUSED",
-                     "GONE", "CLEAN", "FINAL"]
+                     "GONE", "CLEAN", "FINAL", "MERGED"]
 # Per-tab button sets — Tab/Shift+Tab rotate within these when focused.
 # Worktrees has a single "New worktree…" entry that opens the options dialog
 # directly (test-chamber #1346); the old separate "More options…" is gone.
