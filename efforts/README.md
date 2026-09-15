@@ -47,6 +47,7 @@ that pattern to this repository.
 | [agent-index Engine Daemon](active/agent-index-engine-daemon/README.md) | Done; pending archive | See effort |
 | [Uniform Runtime Resolution](active/uniform-runtime-resolution/README.md) | Done; pending archive | #765 |
 | [Vendored Installer Engine](active/vendored-installer-engine/README.md) | Draft | See effort |
+| [Pull-Request Capability](active/pull-request-capability/README.md) | Draft | #2691, #2699, #2700 |
 
 ## Local conventions
 
