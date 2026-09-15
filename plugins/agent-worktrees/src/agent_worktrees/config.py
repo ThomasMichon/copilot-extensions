@@ -416,45 +416,28 @@ class RepoConfig:
     ``launch`` command. Configured entirely from the user-local
     ``~/.<project>/config.yaml`` overlay -- nothing is written into the repo."""
     stateless: bool = False
-    """When true, this repo is a **stateless harness**: it holds the shareable
-    control-plane intelligence (instructions, config, skills, sub-agents) but no
-    personal state (efforts, logs, visions, artifacts). Personal state is routed
-    to a separately-bound **knowledge repo** (top-level ``knowledge_repo`` in the
-    machine-local config; see :attr:`Config.knowledge_repo`). Consumed by the
-    state-root resolver (``agent-worktrees state-root``) so effort/vision/log
-    plugins default their writes into the bound knowledge checkout instead of the
-    harness tree. Declared in the repo's own committed
-    ``<anchor>/.agent-worktrees/config.yaml`` (``stateless: true``) -- it is a
-    property of the harness, not of a machine. **Implies**
-    :attr:`requires_external_state_root` (a stateless harness by definition
-    requires an external state root). See the ``stateless-harness`` vision /
-    ``citadel-harness-split`` effort."""
+    """When true, this repo is a **stateless harness**: shareable control-plane
+    intelligence only, no personal state -- routed to a separately-bound
+    **knowledge repo** (top-level ``knowledge_repo``; see
+    :attr:`Config.knowledge_repo`). The state-root resolver defaults
+    effort/vision/log writes into that checkout instead of the harness tree.
+    Declared in the repo's own committed ``<anchor>/.agent-worktrees/config.yaml``
+    (``stateless: true``). **Implies** :attr:`requires_external_state_root`.
+    See the ``stateless-harness`` vision."""
     requires_external_state_root: bool = False
     """When true, personal state (efforts/visions/logs) **must** be written to a
     separately-bound external **knowledge repo**, not into this repo's checkout.
-    The state-root resolver routes to the bound knowledge repo and **refuses**
-    (rather than falling back to the launch repo) when nothing is bound. This is
-    the explicit, plugin-facing knob the ``efforts`` and ``visions`` plugins key
-    on; it is **decoupled** from :attr:`stateless` (a repo can require external
-    state without being a fully guarded/linted stateless harness), but
-    ``stateless: true`` **implies** it, so a harness never has to set both.
-    **Default false** -- a normal repo is its own state home (fully
-    backward-compatible). Declared in the repo's committed
-    ``<anchor>/.agent-worktrees/config.yaml``."""
+    The state-root resolver routes there and **refuses** (rather than falling
+    back to the launch repo) when nothing is bound. The explicit,
+    plugin-facing knob ``efforts``/``visions`` key on; **decoupled** from
+    :attr:`stateless` (a repo can require external state without being a
+    fully guarded stateless harness), but ``stateless: true`` **implies** it.
+    **Default false**. Declared in ``<anchor>/.agent-worktrees/config.yaml``."""
     compose_knowledge_plugins: bool = True
-    """When false, ``agent-worktrees knowledge compose-plugins`` (and its
-    session-start refresh) never grafts the paired knowledge repo's own
-    marketplaces/plugins into this harness's session overlay -- it only
-    retires any previously-composed overlay. The knowledge repo remains fully
-    bound for **state** (efforts/visions/logs still route there via
-    :attr:`requires_external_state_root` / the state-root resolver); this knob
-    is scoped to the separate plugin-composition feature only, for an operator
-    who wants a knowledge repo's state without also treating it as a
-    directly-driveable second harness. **Default true** (existing behavior).
-    This is a machine/operator preference, not a property of the shareable
-    harness tree -- declare it in the machine-local
-    ``~/.<project>/config.yaml`` repo override, not the committed
-    ``<anchor>/.agent-worktrees/config.yaml``."""
+    """When false, never graft the paired knowledge repo's own
+    marketplaces/plugins into the harness session overlay (retiring any
+    prior composition) -- state (:attr:`requires_external_state_root`) is
+    unaffected. **Default true**; declare in ``~/.<project>/config.yaml``."""
 
 
 @dataclass(frozen=True)
