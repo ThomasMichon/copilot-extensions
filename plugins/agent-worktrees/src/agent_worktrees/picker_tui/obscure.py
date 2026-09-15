@@ -49,7 +49,7 @@ DEMO_TITLES = [
 
 # Keep a readable hero: cap each machine/env, preferring the interesting states.
 _STATE_PRI = {"ACTIVE": 0, "WIP": 1, "DIRTY": 1, "CONVO": 2, "ORPHAN": 2,
-              "UNUSED": 3, "FINAL": 5, "GONE": 6}
+              "UNUSED": 3, "FINAL": 5, "MERGED": 5, "GONE": 6}
 
 
 def _scrub(w: dict, disp: str, env: str) -> dict:

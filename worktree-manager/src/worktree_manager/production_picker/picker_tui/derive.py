@@ -159,6 +159,17 @@ def _state(w):
         # turns is not idle -- it's CONVO.
         if st == "unused" and w.get("turn_count", 0) > 0:
             return "CONVO"
+        if st == "completed":
+            # worktree-finality-and-obligations Phase 5: mirror the PSMux/TMux
+            # status segment's FINAL vs MERGED split via the same canonical
+            # closure descriptor (`list --json --classify`'s additive
+            # ``closure`` field), instead of always collapsing COMPLETED to
+            # FINAL. Falls back to the legacy FINAL label when a descriptor
+            # is unavailable (an older remote without Phase 4's `closure`).
+            closure_label = (w.get("closure") or {}).get("label")
+            if closure_label in ("FINAL", "MERGED"):
+                return closure_label
+            return "FINAL"
         return _STATE_LABEL.get(st, st.upper()[:6])
     pr = w.get("pr") or {}
     status = w.get("status")
@@ -579,15 +590,16 @@ def bucket(wts):
 
     * **active**    -- in session (state ``ACTIVE``: a live Copilot/mux session
       owns the worktree). NOT merely "status active / not finalized".
-    * **completed** -- finalized / merged (state ``FINAL``), regardless of age.
+    * **completed** -- finalized or merged (state ``FINAL`` or ``MERGED`` --
+      see ``_state``'s Phase 5 closure-descriptor split), regardless of age.
     * **recent**    -- everything else (WIP / UNUSED / CONVO / DIRTY / ORPHAN /
       GONE): not in session and not final.
     """
     active = sorted((w for w in wts if w["state"] == "ACTIVE"),
                     key=lambda w: w["age_secs"])
-    completed = sorted((w for w in wts if w["state"] == "FINAL"),
+    completed = sorted((w for w in wts if w["state"] in ("FINAL", "MERGED")),
                        key=lambda w: w["age_secs"])
     recent = sorted(
-        (w for w in wts if w["state"] not in ("ACTIVE", "FINAL")),
+        (w for w in wts if w["state"] not in ("ACTIVE", "FINAL", "MERGED")),
         key=lambda w: w["age_secs"])
     return active, recent, completed
