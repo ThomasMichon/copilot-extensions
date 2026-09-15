@@ -164,6 +164,26 @@ def test_engine_runtime_prefers_explicit_context_over_checkout(monkeypatch, tmp_
     assert engine_runtime._active_runtime_source() == source
 
 
+def test_engine_runtime_falls_back_to_last_known_good_slot(monkeypatch, tmp_path):
+    """A stale/missing current-version marker must not blank out the source
+    when last-known-good still names a real, importable slot -- the same
+    marker/fallback walk engine_client's resolver already does."""
+    root = tmp_path / ".agent-worktrees"
+    good_slot = root / "versions" / "1.2.2"
+    good_source = (
+        good_slot / "Lib" / "site-packages"
+        if engine_runtime.os.name == "nt"
+        else good_slot / "lib" / "python3.10" / "site-packages"
+    )
+    (good_source / "agent_worktrees").mkdir(parents=True)
+    (root / "current-version").write_text("missing", encoding="utf-8")
+    (root / "last-known-good").write_text("1.2.2", encoding="utf-8")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+
+    assert engine_runtime._active_runtime_source() == good_source
+
+
 def test_engine_runtime_ignores_context_when_cells_policy_disabled(monkeypatch, tmp_path):
     """The 'same config' invariant: a context that names agent-worktrees is
     never trusted on its own. When the shared installation-mode policy

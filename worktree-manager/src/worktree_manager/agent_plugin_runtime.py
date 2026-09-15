@@ -148,22 +148,23 @@ def _load_installation_context() -> ModuleType | None:
 
 
 def _canonical_os_profile(environment: dict[str, str]) -> Path | None:
-    """The OS account profile the installation-mode policy is keyed under.
+    """The OS account profile to pass as ``os_profile``, or ``None``.
 
-    Mirrors ``installation_context._current_environment``'s own selection
-    (``USERPROFILE`` on Windows, the passwd-database home on POSIX) but reads
-    it from an explicit ``environment`` mapping so callers -- and tests -- get
-    the same, testable answer on every platform instead of the resolver's
-    POSIX branch silently ignoring ``HOME`` in favor of the real system
-    passwd entry. Deliberately distinct from ``AGENT_HOME``, which overrides
-    Worktree Manager's own state root, not the shared OS identity policy is
-    scoped to.
+    On Windows this is ``USERPROFILE`` -- the exact selection
+    ``installation_context._current_environment`` makes itself, so passing it
+    explicitly changes nothing. On POSIX, the resolver deliberately selects
+    the real passwd-database home when ``os_profile`` is omitted, precisely
+    to avoid trusting a possibly-unset or spoofed ``HOME``; returning ``None``
+    here (rather than substituting ``HOME``) lets it do that canonical
+    lookup, so Worktree Manager reads the identical policy file an agent-*
+    plugin's own bootstrap would. Deliberately distinct from ``AGENT_HOME``,
+    which overrides Worktree Manager's own state root, not the shared OS
+    identity policy is scoped to.
     """
     if os.name == "nt":
         value = environment.get("USERPROFILE")
         return Path(value) if value else None
-    value = environment.get("HOME")
-    return Path(value) if value else None
+    return None
 
 
 def marketplace_cells_enabled(
@@ -278,13 +279,20 @@ def resolve_installed_plugin_slot(plugin_id: str) -> Path | None:
 
     Never PATH, never a bare command name: only an attributable, marker-
     selected slot under a validated install root (namespaced when policy and
-    an explicit context agree, else legacy).
+    an explicit context agree, else legacy) that is BOTH marked complete AND
+    actually has its interpreter present. A slot with a stale/damaged
+    interpreter is skipped in favor of the next candidate (``last-known-good``,
+    then the newest remaining ``versions/*``) rather than failing the whole
+    lookup -- matching the original single-root resolver's fallback loop.
     """
     for root in candidate_plugin_roots(plugin_id):
         if _validated_plugin_root(root, plugin_id) is None:
             continue
         for slot in _runtime_candidates(root):
-            if (slot / ".install-complete.json").is_file():
+            if not (slot / ".install-complete.json").is_file():
+                continue
+            python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+            if python.is_file():
                 return slot
     return None
 
@@ -298,6 +306,4 @@ def resolve_installed_plugin_command(
     if slot is None:
         return None
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    if not python.is_file():
-        return None
     return [str(python), "-m", module or plugin_id.replace("-", "_")]

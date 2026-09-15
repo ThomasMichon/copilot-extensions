@@ -69,6 +69,35 @@ def test_legacy_resolution_is_generic_over_plugin_id(monkeypatch, tmp_path):
     ]
 
 
+def test_legacy_resolution_skips_a_complete_slot_missing_its_interpreter(
+    monkeypatch, tmp_path
+):
+    """current-version can name a slot that is marked complete but whose
+    interpreter is missing/damaged (e.g. a partially-cleaned venv). The
+    resolver must keep trying last-known-good / the newest remaining slot,
+    not fail the whole lookup the moment the first candidate's marker exists."""
+    root = tmp_path / ".agent-bridge"
+    damaged_slot = root / "versions" / "9.9.9"
+    damaged_slot.mkdir(parents=True)
+    (damaged_slot / ".install-complete.json").write_text("{}", encoding="utf-8")
+    # No python executable under damaged_slot.
+    good_slot = root / "versions" / "9.9.8"
+    good_python = _write_slot(good_slot)
+    (root / "current-version").write_text("9.9.9", encoding="utf-8")
+    (root / "last-known-good").write_text("9.9.8", encoding="utf-8")
+    (root / "deploy-manifest.json").write_text(
+        json.dumps({
+            "service": "agent-bridge",
+            "source": {"plugin": "agent-bridge", "version": "9.9.9"},
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path))
+    assert apr.resolve_installed_plugin_command("agent-bridge") == [
+        str(good_python), "-m", "agent_bridge"
+    ]
+
+
 def test_marketplace_cells_enabled_defaults_false_without_policy(tmp_path):
     assert apr.marketplace_cells_enabled(os_profile=tmp_path) is False
 
@@ -166,3 +195,24 @@ def test_namespaced_context_falls_back_to_legacy_when_both_present(
     assert apr.resolve_installed_plugin_command("agent-worktrees") == [
         str(namespaced_python), "-m", "agent_worktrees"
     ]
+
+
+def test_canonical_os_profile_never_substitutes_home_on_posix(monkeypatch):
+    """The vendored resolver deliberately selects the real passwd-database
+    home on POSIX when ``os_profile`` is omitted, specifically to avoid
+    trusting a possibly-unset or spoofed ``HOME``. Substituting ``HOME``
+    ourselves would let Worktree Manager read a different policy file than
+    an agent-* plugin's own bootstrap would for the same account -- so this
+    must return ``None`` (never a HOME-derived path) on POSIX, regardless of
+    what HOME is set to."""
+    monkeypatch.setattr(apr.os, "name", "posix")
+    assert apr._canonical_os_profile({"HOME": "/some/spoofed/home"}) is None
+    assert apr._canonical_os_profile({}) is None
+
+
+def test_canonical_os_profile_uses_userprofile_on_windows(monkeypatch):
+    monkeypatch.setattr(apr.os, "name", "nt")
+    assert apr._canonical_os_profile({"USERPROFILE": "C:\\Users\\someone"}) == Path(
+        "C:\\Users\\someone"
+    )
+    assert apr._canonical_os_profile({}) is None

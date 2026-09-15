@@ -56,23 +56,21 @@ def _context_runtime_root() -> Path | None:
 def _active_runtime_source() -> Path | None:
     home = Path(os.environ.get("USERPROFILE") or Path.home())
     root = _context_runtime_root() or (home / ".agent-worktrees")
-    marker = root / "current-version"
-    try:
-        version = marker.read_text(encoding="utf-8").strip()
-    except OSError:
-        return None
-    if not version:
-        return None
-    slot = root / "versions" / version
-    for candidate in (
-        slot / "Lib" / "site-packages",
-        slot / "lib" / "python3.13" / "site-packages",
-        slot / "lib" / "python3.12" / "site-packages",
-        slot / "lib" / "python3.11" / "site-packages",
-        slot / "lib" / "python3.10" / "site-packages",
-    ):
-        if (candidate / "agent_worktrees").is_dir():
-            return candidate
+    # Reuse the shared marker/fallback walk (current-version, then
+    # last-known-good, then the newest remaining versions/*) instead of
+    # reading only current-version -- so a stale/damaged current-version slot
+    # here degrades exactly the way engine_client's resolver does, rather
+    # than reporting no source at all when a good fallback slot exists.
+    for slot in agent_plugin_runtime._runtime_candidates(root):
+        for candidate in (
+            slot / "Lib" / "site-packages",
+            slot / "lib" / "python3.13" / "site-packages",
+            slot / "lib" / "python3.12" / "site-packages",
+            slot / "lib" / "python3.11" / "site-packages",
+            slot / "lib" / "python3.10" / "site-packages",
+        ):
+            if (candidate / "agent_worktrees").is_dir():
+                return candidate
     return None
 
 
