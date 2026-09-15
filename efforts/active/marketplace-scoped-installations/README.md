@@ -375,6 +375,37 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-14 — Worktree Manager as a standalone-payload installation-context consumer
+
+- Cross-referenced from the `worktree-manager-control-plane` effort. Worktree
+  Manager (a standalone, non-plugin payload -- no `plugin.json`, outside
+  `plugins/`) previously had two divergent, non-cell-aware mechanisms for
+  locating an installed agent-* plugin runtime: one hardcoded to
+  agent-worktrees and legacy-root-only, the other checking only whether
+  `COPILOT_EXTENSIONS_CONTEXT` was *set*, never this effort's actual
+  installation-mode policy. Added `worktree-manager/src/worktree_manager/
+  agent_plugin_runtime.py`: a generic, plugin-id-parameterized resolver, with
+  `marketplace_cells_enabled()` calling the vendored `resolve_installation_mode()`
+  for the real global policy bit, so Worktree Manager's legacy-vs-namespaced
+  decision can never disagree with what a plugin's own bootstrap would decide
+  for the same file.
+- Extended `tools/sync-installation-context.py` with a new
+  `STANDALONE_PYTHON_ADOPTERS` list (REPO-relative paths, not resolved
+  `Path`s, so a test's `module.REPO` reassignment is honored) for non-plugin
+  payloads vendoring the Python primitive the same way agent-dispatch/
+  codespaces/containers do. `worktree-manager/src/worktree_manager/
+  _installation_context.py` is the first entry.
+- Deliberately did **not** make Worktree Manager a `libs/peer-launch`
+  consumer: that boundary's `OWNERS`/structural cell-root validation requires
+  the caller to itself own a marketplace cell identity, which a management
+  surface (the vision's own "explicit management context" concept) does not
+  have by design. Extending peer-launch to a non-plugin caller category
+  remains an explicitly open, separately-scoped follow-on if a future need
+  requires its stronger activation-generation revalidation-at-execution-time
+  guarantees.
+- Full detail and validation: `worktree-manager-control-plane`'s README,
+  Phase 3b Slice 2 Sub-slice 4.
+
 ### 2026-09-11 — Containers same-cell knowledge configuration
 
 - Verified [PR #2431](https://github.com/ThomasMichon/copilot-extensions/pull/2431)

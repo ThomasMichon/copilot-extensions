@@ -253,6 +253,48 @@ realized in `main`; unchecked items are the remaining delta.
             for the recorded direction; the transport, write-back contract,
             and interaction with the existing per-session `status-updater`
             fallback still need an ordered plan before implementation starts.
+      - [x] **Sub-slice 4 (landed 2026-09-14): same-config marketplace-cell
+            resolution + generic installed-binstub invocation.** Cross-cuts
+            the `marketplace-scoped-installations` effort's installation-mode
+            governance. Two prior gaps: `engine_client.py`'s
+            `installed_engine_command()` was hardcoded to agent-worktrees
+            only, and `production_picker/_engine_runtime.py`'s "temporary
+            compatibility boundary" decided legacy-vs-namespaced by checking
+            only whether `COPILOT_EXTENSIONS_CONTEXT` was *set*, never the
+            actual shared installation-mode policy — so Worktree Manager
+            could disagree with what agent-worktrees itself would decide for
+            the identical policy file. Fixed by:
+            - New generic `agent_plugin_runtime.py`: `legacy_plugin_root`,
+              `resolve_installed_plugin_slot`/`_command` walk the same
+              marker-selected immutable slot (`current-version` /
+              `last-known-good` / newest `versions/*`) for **any** `agent-*`
+              plugin id, not just agent-worktrees — never PATH, never a bare
+              command name.
+            - `marketplace_cells_enabled()` vendors
+              `libs/installation-context/installation_context.py` byte-
+              identical (via `tools/sync-installation-context.py`, extended
+              with a `STANDALONE_PYTHON_ADOPTERS` list for non-plugin
+              payloads) and calls its own `resolve_installation_mode()` for
+              the global `installationMode.enabled` policy bit — the exact
+              function every agent-* plugin's own bootstrap/doctor path
+              calls. A namespaced root is only ever considered when this
+              returns true **and** an explicit context names the exact
+              plugin; absent/disabled policy always falls back to legacy,
+              matching the resolver's own documented default.
+            - `engine_client.installed_engine_command()` and
+              `_engine_runtime._active_runtime_source()` both now resolve
+              through this shared module instead of two divergent, ad-hoc
+              mechanisms.
+            - **Explicitly deferred, by design:** this is the vision's
+              "explicit management context" path (Worktree Manager is not a
+              marketplace plugin and has no cell identity), not a fourth
+              `libs/peer-launch` consumer. `peer_launch.py`'s `OWNERS`/
+              structural cell-root validation remains plugin-to-plugin only;
+              extending it to a non-plugin caller category is a separate,
+              explicitly-scoped follow-on if ever needed for a use case that
+              requires peer-launch's stronger activation-generation
+              revalidation-at-execution-time guarantees (which this read-only
+              discovery boundary does not attempt to provide).
 - [ ] Update the Worktree Manager Picker to select Mux presentation and/or the
       AHP backend independently per launch/resume/create action, rather than
       assuming exactly one of them.
@@ -651,3 +693,113 @@ its issues; the public artifacts stay self-contained and general-purpose.
   `status-updater` fallback still need an ordered plan, per this effort's
   own "plan before code" discipline (mirrors how Sub-slices 1/2 each got a
   reviewed plan doc before implementation started).
+
+- **2026-09-14** — Landed Sub-slice 4: same-config marketplace-cell
+  resolution + generic installed-binstub invocation. Prompted by an operator
+  question about how Worktree Manager and agent-worktrees interact, which
+  surfaced two divergent, non-cell-aware resolution mechanisms:
+  `engine_client.installed_engine_command()` (agent-worktrees-only,
+  legacy-root-only) and `production_picker/_engine_runtime.py` (checked only
+  whether `COPILOT_EXTENSIONS_CONTEXT` was set, never the actual
+  installation-mode policy). Neither could ever disagree with agent-worktrees
+  in practice today (namespaced installation remains clean-room-only per
+  `installation-mode-governance.md`), but neither was *structurally*
+  guaranteed to agree either, once namespaced rollout reaches persistent
+  machines.
+
+  Added `worktree_manager/agent_plugin_runtime.py`: a generic,
+  plugin-id-parameterized resolver reusable for any `agent-*` plugin (not
+  just agent-worktrees), and `marketplace_cells_enabled()`, which vendors
+  `libs/installation-context/installation_context.py` byte-identical
+  (`tools/sync-installation-context.py`, extended with a new
+  `STANDALONE_PYTHON_ADOPTERS` list for non-plugin standalone payloads) and
+  calls its own `resolve_installation_mode()` for the global policy bit --
+  the exact function every agent-* plugin's own bootstrap/doctor path
+  already calls. Rewired both `engine_client.py` and `_engine_runtime.py` to
+  resolve through this one shared module. Deliberately did **not** make
+  Worktree Manager a fourth `libs/peer-launch` consumer: peer-launch's
+  `OWNERS`/structural cell-root validation is a plugin-to-plugin contract
+  requiring the caller to itself own a cell identity, which Worktree Manager
+  (an explicit management-context caller per the `installation-cells`
+  vision, not a marketplace plugin) structurally cannot satisfy without a
+  separate, explicitly-scoped design decision -- recorded as an open
+  follow-on, not silently hacked around.
+
+  Validation: new `tests/test_agent_plugin_runtime.py` (7 tests) proves the
+  "same config" guarantee directly -- an explicit context matching plugin id
+  is ignored whenever the shared policy is absent/disabled, and only used
+  when the policy is enabled, exactly mirroring what agent-worktrees' own
+  bootstrap would decide for the identical file. Updated
+  `test_production_picker_transplant.py`'s existing context-preference test
+  to require the policy gate too, and added the disabled-policy fallback
+  case. `libs/installation-context/tests/test_vendoring.py` updated so its
+  synthetic-adopter sandboxing isn't polluted by the new standalone-payload
+  list. Full `worktree-manager` suite: 798 passed (pre-existing, unrelated
+  environment failures confirmed present on `main` before this change).
+  `engine_client`/`agent_plugin_runtime`/`production_picker_transplant`
+  targeted runs: 64+43+7 all green.
+
+  **Follow-up review rounds on [#2674](https://github.com/ThomasMichon/copilot-extensions/pull/2674)
+  found four more real issues, all fixed in the same PR before merge:**
+  bumped Worktree Manager's own payload version (`0.1.0-dev37` → `dev38`, in
+  sync with `pyproject.toml`, so version-gated installs actually redeploy
+  this resolver); `resolve_installed_plugin_slot` now checks the interpreter
+  exists *before* selecting a slot, so a complete-but-damaged
+  `current-version` slot correctly falls through to `last-known-good` / the
+  newest remaining `versions/*` (matching the original single-function
+  resolver's behavior, which the refactor into two functions had
+  regressed); `_engine_runtime`'s legacy fallback now shares
+  `legacy_plugin_root()` instead of a second, `AGENT_HOME`-blind
+  `USERPROFILE`-only computation; and, most importantly, a **HIGH-severity
+  finding**: `_namespaced_plugin_root` originally trusted `pointer.parent`
+  after only checking the raw JSON's `pluginId` field, so any
+  user-controlled directory containing a minimal `{"pluginId": ...}` blob
+  plus a crafted `versions/*/bin/python` would be accepted and later
+  executed. Fixed by validating the receipt through the vendored
+  `validate_context_receipt` (real schema/version, canonical
+  marketplace-id format, and -- critically -- that the receipt sits at the
+  exact canonical path derived from its own declared identity under the
+  real durable home) instead of trusting any file that merely claims the
+  right `pluginId`. Also fixed a self-inflicted regression along the way: an
+  early `if profile is None: return False` in `marketplace_cells_enabled()`
+  made every POSIX policy check return `False` unconditionally, since
+  `_canonical_os_profile` deliberately returns `None` on POSIX so the
+  vendored resolver derives the canonical passwd-database home itself.
+  New/updated tests include a forged-receipt rejection test and real
+  `namespace.json`/`install.json` fixtures built from
+  `libs/installation-context/fixtures/source-identities.json`'s existing
+  vectors (mirroring the construction `libs/installation-context`'s own
+  governance tests use), replacing the earlier minimal JSON stand-ins.
+
+  **A further review round on the same PR found six more issues, all fixed
+  before merge:** the vendored `_installation_context.py` (9,169 lines)
+  needed a `tools/module-size-baseline.json` entry, exactly like the other
+  vendored copies already have, or the module-size guard would fail CI.
+  More substantively: `_validated_plugin_root` (renamed
+  `_validated_legacy_root`) accepted a bare `install.json` for the **legacy**
+  root too, so a forged receipt dropped directly into `~/.agent-worktrees`
+  could still bypass `validate_context_receipt` entirely -- fixed by
+  restricting the legacy root to the `deploy-manifest.json` shape only, and
+  reusing `_namespaced_plugin_root`'s already-fully-validated root
+  (never re-validated the weaker way) for the namespaced case.
+  `_engine_runtime._context_runtime_root()` still separately checked only
+  the raw `pluginId` and returned `pointer.parent` directly, bypassing the
+  new validated resolver entirely for the Picker's own import path -- fixed
+  by routing it through `agent_plugin_runtime._namespaced_plugin_root`, the
+  exact same function `resolve_installed_plugin_command` uses.
+  `marketplace_cells_enabled()`'s one global-only policy check couldn't see
+  marketplace- or plugin-scoped overrides; `_namespaced_plugin_root` now
+  evaluates the effective policy from the *validated receipt's own*
+  marketplace id via a second `resolve_installation_mode` call, so a
+  marketplace- or plugin-scoped override is honored with full precedence,
+  not just the coarse global bit. `_engine_runtime`'s marker walk didn't
+  require `.install-complete.json` the way the command resolver does, so an
+  in-progress install's `agent_worktrees` package directory could be
+  imported early. And several tests set `USERPROFILE`/`HOME` directly, which
+  the resolver deliberately ignores on POSIX (by design, to avoid trusting a
+  possibly-spoofed variable) -- replaced with a shared `patch_profile` test
+  helper (`tests/_installation_context_fixtures.py`) that patches the two
+  profile-resolution seams directly, making the tests platform-portable
+  instead of silently depending on the real test-runner account's home
+  directory. Full `worktree-manager` suite after this round: 806 passed (the
+  same 6 pre-existing, unrelated environment failures).
