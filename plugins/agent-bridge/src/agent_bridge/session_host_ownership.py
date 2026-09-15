@@ -90,6 +90,27 @@ def finish_host_metadata_cleanup(
     return True
 
 
+async def prune_dead_local_host(manager: SessionManager, record: HostRecord) -> bool:
+    """Prune only confirmed-dead local authority after strict channel cleanup."""
+    index = manager._host_index
+    if index is None or index.get(record.session_id) != record:
+        return False
+    revision = index.revision(record.session_id)
+    if manager._rec_host_alive(record) or manager._rec_child_alive(record):
+        return False
+    await manager._drop_forward(record.session_id, strict=True, preserve_ownership=True)
+    if (
+        index.revision(record.session_id) != revision
+        or manager._rec_host_alive(record)
+        or manager._rec_child_alive(record)
+    ):
+        return False
+    cleaned = finish_host_metadata_cleanup(manager, record.session_id, record)
+    if cleaned:
+        manager._remote_recovery_inconclusive.discard(record.session_id)
+    return cleaned
+
+
 def _remember(
     manager: SessionManager, session_id: str, spawner: Any, spawned: SpawnedHost,
 ) -> PendingHostLaunch:

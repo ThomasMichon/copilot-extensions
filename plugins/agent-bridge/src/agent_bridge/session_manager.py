@@ -2086,6 +2086,8 @@ class SessionManager:
         if self._host_index is None:
             return
         for rec in self._host_index.all():
+            if rec.session_id in self._remote_recovery_inconclusive:
+                continue
             if (getattr(rec, "extra", None) or {}).get("launch_cleanup_pending"):
                 continue
             session = self._sessions.get(rec.session_id)
@@ -3323,6 +3325,7 @@ class SessionManager:
             self._db.update_session_status(
                 rec.session_id, new_status.value, time.time(), pid=session.pid,
             )
+            self._remote_recovery_inconclusive.discard(rec.session_id)
             log.info(
                 "Reattached session %s to live Session Host (pid=%s, port=%s)",
                 rec.session_id, rec.host_pid, rec.port,
@@ -3345,16 +3348,22 @@ class SessionManager:
                 await _settle_dead_child(child_exit_code)
                 return False
             log.warning(
-                "Failed to reattach session %s to host pid=%s%s",
+                "Failed to reattach session %s to host pid=%s; retaining "
+                "authority unless cleanup is confirmed",
                 rec.session_id, rec.host_pid,
-                "; pruning" if prune_on_fail else "",
                 exc_info=True,
             )
+            self._remote_recovery_inconclusive.add(rec.session_id)
             if prune_on_fail and self._host_index is not None:
-                with contextlib.suppress(Exception):
-                    await self._drop_forward(rec.session_id)
-                with contextlib.suppress(Exception):
-                    self._host_index.remove(rec.session_id)
+                from .session_host_ownership import finish_host_metadata_cleanup, prune_dead_local_host
+
+                if getattr(rec, "boundary", "local") == "local":
+                    cleaned = await prune_dead_local_host(self, rec)
+                else:
+                    await self._drop_forward(rec.session_id, strict=True, preserve_ownership=True)
+                    cleaned = finish_host_metadata_cleanup(self, rec.session_id, rec)
+                if cleaned:
+                    self._remote_recovery_inconclusive.discard(rec.session_id)
             return False
 
         # If this session's in-flight turn was graceful-cancelled for a redeploy,
@@ -3443,7 +3452,16 @@ class SessionManager:
                 f"{session.session_id}; refusing to attach or spawn a "
                 "duplicate Copilot process"
             )
+        local = getattr(rec, "boundary", "local") == "local"
         if not self._rec_host_alive(rec) or not self._rec_child_alive(rec):
+            if local:
+                from .session_host_ownership import prune_dead_local_host
+
+                if not await prune_dead_local_host(self, rec):
+                    raise RemoteHostRecoveryPendingError(
+                        f"Local Session Host cleanup is pending for {session.session_id}; "
+                        "refusing to spawn a duplicate"
+                    )
             return False
         from .session_host.version_mux import HostDisposition, plan_host
 
@@ -3458,11 +3476,10 @@ class SessionManager:
         )
         if plan.disposition is not HostDisposition.REATTACH:
             if (
-                getattr(rec, "boundary", "local") != "local"
-                and authority_v2
+                local or authority_v2
             ):
                 raise RemoteHostRecoveryPendingError(
-                    f"Remote Session Host for {session.session_id} is still "
+                    f"Session Host for {session.session_id} is still "
                     f"authoritative but cannot be reattached: {plan.reason}"
                 )
             return False
@@ -3480,11 +3497,16 @@ class SessionManager:
         )
         if (
             not attached
-            and getattr(rec, "boundary", "local") != "local"
-            and authority_v2
+            and (local or authority_v2)
+            and self._host_index.get(session.session_id) is not None
         ):
+            if local:
+                from .session_host_ownership import prune_dead_local_host
+
+                if await prune_dead_local_host(self, rec):
+                    return False
             raise RemoteHostRecoveryPendingError(
-                f"Could not reattach remote Session Host for "
+                f"Could not reattach retained Session Host for "
                 f"{session.session_id}; retained its authority record and "
                 "credential relay, refusing to spawn a duplicate Copilot process"
             )

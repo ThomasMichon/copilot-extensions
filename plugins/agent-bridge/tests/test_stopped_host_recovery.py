@@ -996,6 +996,90 @@ async def test_redeploy_nudge_retry_uses_durable_turn_receipt(context, monkeypat
     assert RESUME_NUDGE_TURN_INDEX not in restarted._host_index.get(sid).extra
 
 
+@pytest.mark.parametrize("outcome", ["host_alive", "child_alive", "dead", "cleanup_failed"])
+async def test_startup_local_attach_failure_prunes_only_after_confirmed_cleanup(
+    context, monkeypatch, outcome,
+):
+    ctx = context
+    ctx.record.boundary = "local"
+    ctx.manager._host_index.register(ctx.record)
+    ctx.session.target = SpawnTarget(type="local", cwd=".")
+    alive = {"host": True, "child": True}
+    monkeypatch.setattr(ctx.manager, "_rec_host_alive", lambda _rec: alive["host"])
+    monkeypatch.setattr(ctx.manager, "_rec_child_alive", lambda _rec: alive["child"])
+    monkeypatch.setattr(ctx.manager, "_recover_remote_host_records", AsyncMock(return_value=0))
+    monkeypatch.setattr(ctx.manager, "_ensure_forward", AsyncMock())
+    monkeypatch.setattr(ctx.manager, "_reattach_one", SessionManager._reattach_one.__get__(ctx.manager))
+    forward = SimpleNamespace(cancel=AsyncMock(
+        side_effect=OSError("forward cleanup failed") if outcome == "cleanup_failed" else None,
+    ))
+    ctx.manager._forwards[ctx.session.session_id] = forward
+
+    async def connect(**_kwargs):
+        alive["host"] = outcome == "host_alive"
+        alive["child"] = outcome in {"host_alive", "child_alive"}
+        raise ConnectionError("temporary attach failure")
+
+    monkeypatch.setattr("agent_bridge.session_host.client.SessionHostClient.connect", connect)
+    if outcome == "cleanup_failed":
+        with pytest.raises(OSError, match="forward cleanup failed"):
+            await ctx.manager.reattach_session_hosts()
+        assert ctx.manager._forwards[ctx.session.session_id] is forward
+    else:
+        assert await ctx.manager.reattach_session_hosts() == 0
+    assert (ctx.manager._host_index.get(ctx.session.session_id) is None) is (outcome == "dead")
+    if outcome != "dead":
+        assert ctx.session.session_id in ctx.manager._remote_recovery_inconclusive
+        ctx.manager._prune_dead_hosts()
+        assert ctx.manager._host_index.get(ctx.session.session_id) is not None
+    if outcome in {"host_alive", "child_alive"}:
+        forward.cancel.assert_not_awaited()
+
+
+async def test_startup_legacy_remote_cleanup_failure_retains_authority(context, monkeypatch):
+    ctx = context
+    ctx.record.extra = {}
+    ctx.manager._host_index.register(ctx.record)
+    monkeypatch.setattr(ctx.manager, "_recover_remote_host_records", AsyncMock(return_value=0))
+    monkeypatch.setattr(ctx.manager, "_ensure_forward", AsyncMock())
+    monkeypatch.setattr(ctx.manager, "_reattach_one", SessionManager._reattach_one.__get__(ctx.manager))
+    monkeypatch.setattr(
+        "agent_bridge.session_host.client.SessionHostClient.connect",
+        AsyncMock(side_effect=ConnectionError("temporary attach failure")),
+    )
+    forward = SimpleNamespace(cancel=AsyncMock(side_effect=OSError("forward cleanup failed")))
+    ctx.manager._forwards[ctx.session.session_id] = forward
+    with pytest.raises(OSError, match="forward cleanup failed"):
+        await ctx.manager.reattach_session_hosts()
+    assert ctx.manager._host_index.get(ctx.session.session_id) is not None
+    assert ctx.manager._forwards[ctx.session.session_id] is forward
+    assert ctx.session.session_id in ctx.manager._remote_recovery_inconclusive
+
+
+@pytest.mark.parametrize("alive", [False, True])
+async def test_local_resume_fallback_requires_confirmed_host_death(context, monkeypatch, alive):
+    from agent_bridge.session_manager import RemoteHostRecoveryPendingError
+
+    ctx = context
+    ctx.record.boundary = "local"
+    ctx.manager._host_index.register(ctx.record)
+    ctx.session.target = SpawnTarget(type="local", cwd=".")
+    ctx.session.status = SessionStatus.STOPPED
+    monkeypatch.setattr(ctx.manager, "_rec_host_alive", lambda _rec: alive)
+    monkeypatch.setattr(ctx.manager, "_rec_child_alive", lambda _rec: alive)
+    if alive:
+        with pytest.raises(RemoteHostRecoveryPendingError, match="retained Session Host"):
+            await ctx.manager._try_reattach_live_host(ctx.session)
+        assert ctx.manager._host_index.get(ctx.session.session_id) is not None
+        ctx.attach.assert_awaited_once()
+    else:
+        ctx.manager._remote_recovery_inconclusive.add(ctx.session.session_id)
+        assert await ctx.manager._try_reattach_live_host(ctx.session) is False
+        assert ctx.manager._host_index.get(ctx.session.session_id) is None
+        assert ctx.session.session_id not in ctx.manager._remote_recovery_inconclusive
+        ctx.attach.assert_not_awaited()
+
+
 async def test_child_exit_settlement_joins_late_prompt_state_writer(
     context, monkeypatch, mock_acp_client,
 ):
