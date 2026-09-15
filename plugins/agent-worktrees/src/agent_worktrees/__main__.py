@@ -24771,7 +24771,58 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum exact session projection relations to inspect (default: 256)",
     )
 
+    # hygiene -- detect/clean stale global-Python editable installs (#2726)
+    sp = sub.add_parser(
+        "hygiene",
+        help="Detect (and with --fix, remove) stale global-Python editable "
+        "installs left by a manual 'pip install -e .' against a worktree "
+        "checkout (see #2726). Machine-wide; no project context needed.",
+    )
+    sp.add_argument(
+        "--fix",
+        action="store_true",
+        help="Remove each finding (pip uninstall, falling back to deleting "
+        "the .pth file). Default: report only.",
+    )
+    sp.add_argument("--json", action="store_true", help="Emit the report as JSON.")
+
     return parser
+
+
+def cmd_hygiene(args: argparse.Namespace) -> int:
+    """``hygiene`` -- report (and with ``--fix``, remove) stale global-Python
+    editable installs pointing at a worktree checkout (#2726).
+
+    A manual ``pip install -e .`` run inside a worktree (instead of this
+    plugin's own installer, which always builds an isolated versioned venv)
+    leaves a ``.pth`` file in the interpreter's global ``site-packages``
+    permanently pinned to that one worktree, silently shadowing whatever
+    worktree a later ``import``/console-script invocation actually intends --
+    with no error, even after the worktree is deleted.
+    """
+    from . import hygiene
+
+    fix = getattr(args, "fix", False)
+    json_mode = getattr(args, "json", False)
+    report = hygiene.scan_and_clean(fix=fix)
+
+    if json_mode:
+        print(json.dumps(report, indent=2))
+        return 0
+
+    findings = report["findings"]
+    if not findings:
+        print("No stale global-Python editable installs found.")
+        return 0
+    for item in findings:
+        print(
+            f"{item['distribution']} {item['version']} -> {item['target']} "
+            f"[{item['status']}]"
+        )
+        print(f"  {item['pth']}")
+    if not fix:
+        print(f"\n{len(findings)} stale editable install(s) found. Re-run with --fix to remove.")
+    return 0
 
 
 def cmd_dev(args: argparse.Namespace) -> int:
@@ -26811,6 +26862,7 @@ COMMAND_MAP = {
     "session-role": cmd_session_role,
     "backfill-sessions": cmd_backfill_sessions,
     "doctor": cmd_doctor,
+    "hygiene": cmd_hygiene,
     "list-sessions": cmd_list_sessions,
     "head-session": cmd_head_session,
     "worktree-lineage": cmd_worktree_lineage,
@@ -27187,6 +27239,7 @@ _NO_PROJECT_COMMANDS = {
     "reconcile-marketplaces",
     "picker",
     "doctor",
+    "hygiene",
     "reap-shells",
     "status-updater",
     "status-monitor",
