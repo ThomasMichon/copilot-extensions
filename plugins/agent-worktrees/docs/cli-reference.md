@@ -226,13 +226,18 @@ followed by a colored state block:
 | State | Color | Meaning |
 |-------|-------|---------|
 | `DIRTY` | red | Working tree has uncommitted changes (modified, staged, or untracked) |
-| `FINAL` | green | Clean; work landed / fast-forwardable to upstream |
+| `FINAL` | green | Landed on upstream AND *proven* currently safe to clean: a refreshed (fetched) classification with zero held claims, zero open follow-ups, and no other blocker |
+| `MERGED` | orange | Landed on upstream but **not (yet) proven** safe to clean -- see below |
 | `UNUSED` | grey | Clean; no commits **and no conversation** since the fork point |
 | `CONVO` | teal | Clean; no commits, but the session held conversation turns (annotated with the turn count, e.g. `CONVO 12💬`) |
 | `WIP` | amber | Clean; ahead with content not yet on upstream |
 | `ORPHAN` | magenta | No merge base with upstream |
 
-A trailing `↑ahead`/`↓behind` tag mirrors the picker's inline sync status. The
+A trailing `↑ahead`/`↓behind` tag mirrors the picker's inline sync status.
+`MERGED` may carry a compact `C<N>`/`F<N>` marker suffix for held claims / open
+follow-ups; see
+[worktree-lifecycle.md § FINAL vs MERGED](worktree-lifecycle.md#final-vs-merged----the-closure-descriptor-split)
+for the full closure-descriptor rules that decide `FINAL` vs `MERGED`. The
 `CONVO` state refines `UNUSED` using session turn-count detection: a worktree
 with no committed work is only truly *unused* when its session also held zero
 turns; once it has held conversation, it renders as `CONVO` with the turn
