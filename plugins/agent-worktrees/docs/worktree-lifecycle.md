@@ -76,7 +76,7 @@ The tracking state (seen in `list` / the picker) and its status-bar block:
 | `unused` | `UNUSED` (grey) | Clean; no commits **and** no conversation since the fork point |
 | `convo` | `CONVO` (teal) | Clean; no commits, but the session held conversation turns (`💬N`) |
 | `pushed` | — | Changes pushed to the default branch, awaiting finalization |
-| `completed` | `FINAL` (green) | All content landed on the default branch; safe to clean |
+| `completed` | `FINAL` (green) or `MERGED` (orange) | All content landed on the default branch -- see below for which label shows |
 | `finalized` | — | Landed and the worktree removed |
 | `gone` | — | Worktree directory missing |
 | `orphan` | `ORPHAN` (magenta) | No merge base with upstream |
@@ -84,6 +84,33 @@ The tracking state (seen in `list` / the picker) and its status-bar block:
 `unused` vs `convo` is why cleanup never auto-purges a commit-less worktree: it
 may hold planning or conversation. See
 [cli-reference.md § status-segment](cli-reference.md) for the bar detail.
+
+#### `FINAL` vs `MERGED` -- the closure descriptor split
+
+A `completed` worktree (its content is fully on the default branch) does not
+always render as `FINAL`. The canonical closure descriptor
+(`prune.assemble_closure_descriptor`, worktree-finality-and-obligations Phase
+5) splits it into two distinct labels, shared by the status bar, `list --json
+--classify`'s additive `closure` field, and the Picker/Worktree Manager table:
+
+- **`FINAL`** (green) -- a `completed` worktree that is genuinely, currently
+  *proven* safe to clean: the evidence came from a **refreshed** (fetched)
+  classification, it has **zero held claims**, **zero open follow-ups**, and
+  no other blocker (e.g. `rec.status == "finalizing"`).
+- **`MERGED`** (orange) -- `completed`, but not (yet) provably settled. Any of
+  the following forces `MERGED` instead of `FINAL`: no tracking record at all
+  (there is no evidence to prove `FINAL` with), a fetch-free/cached poll (the
+  default `status-interval` tick never fetches), a requested `--fetch` that
+  itself failed, one or more held claims, or one or more open follow-ups. A
+  `MERGED` block may carry a compact `C<N>`/`F<N>` marker suffix for held
+  claims / open follow-ups.
+
+A cached or fetch-free descriptor **never** reports `FINAL`, even when the
+underlying facts would otherwise qualify -- proving a worktree safe to clean
+always requires a fresh fetch immediately before acting. Pass `--fetch` to
+`agent-worktrees status-segment` (or trigger a picker refresh) to let a
+genuinely clean, claim-free, follow-up-free worktree earn `FINAL`.
+
 
 ### The status core — an orthogonal disposition layer
 
