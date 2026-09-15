@@ -1048,6 +1048,10 @@ cold path with `--no-serve` or `AGENT_MCP_NO_SERVE=1`.
   wrapped in a synthetic envelope.
 - **Errors** are a non-zero exit + a stderr message. The wait is bounded by the
   config `timeout`, so a dead or silent upstream fails fast instead of hanging.
+- **Honors the full `decorators:` stack**, including `gate`/`input_gate`'s
+  authorization decisions and `transform`'s reshaping — the cold path is not a
+  bypass. (When routed to a live `agent-mcp serve` daemon it goes through that
+  daemon's own pipeline instead, to the same effect.)
 
 ```sh
 agent-mcp call gitea list_issues '{"owner":"me","repo":"x"}'
@@ -1174,5 +1178,7 @@ stdin/stdout        Bridge        Decorator pipeline           UpstreamClient   
 - `client.py` — `OneShotSession`: connect + **negotiate era** (`server/discover`
   probe / forced) + one `tools/list` / `tools/call` against an upstream, then exit
   (the engine under `call` and the introspection step of `materialize`).
+  `call_tool` runs through the same `Pipeline`/`decorators:` stack the
+  long-lived bridge does, so `gate`/`input_gate`/etc. apply on the cold path too.
 - `materialize.py` — project a `tools/list` catalog into the on-disk stub fleet
   (symlink farm on POSIX, `.ps1`/`.cmd` shim farm on Windows) + plated sidecars.

@@ -27,6 +27,17 @@ from typing import Any
 
 _STEP_RE = re.compile(r"([^.\[\]]+)|\[(\*)\]|\[(-?\d+)\]")
 
+# A path must be FULLY covered by steps (key / [*] / [n]) joined by literal
+# dots -- used to REJECT a path containing invalid syntax at validation time.
+# _STEP_RE's own `findall` is intentionally permissive at resolve-time (it
+# just skips anything it doesn't recognize), which means a typo like
+# "tags[foo]" or an unterminated "tags[" silently degrades to whatever steps
+# DO match instead of raising -- for a security predicate that's a fail-open
+# risk (see validate_predicate), so this stricter fullmatch pattern is used
+# ONLY to validate a path string's syntax, never to resolve it.
+_PATH_FULLMATCH_RE = re.compile(
+    r"^[^.\[\]]+(?:\[(?:\*|-?\d+)\])*(?:\.[^.\[\]]+(?:\[(?:\*|-?\d+)\])*)*$")
+
 # Leaf comparison ops. "Positive" ops are satisfied when ANY resolved value
 # matches; their negative twins are satisfied when NO resolved value matches
 # (vacuously true when the path resolves to nothing).
@@ -153,6 +164,18 @@ def validate_predicate(node: Any, label: str) -> list[str]:
     path = node.get("path")
     if not isinstance(path, str) or not path:
         errors.append(f"{label}: leaf predicate requires a non-empty string 'path'")
+    elif not _PATH_FULLMATCH_RE.fullmatch(path):
+        # _resolve_path's tokenizer is a permissive `findall` that silently
+        # SKIPS anything it doesn't recognize (e.g. "tags[foo]" degrades to
+        # just "tags", "tags[" degrades to just "tags") -- it never errors.
+        # For a security predicate that's a fail-open risk: a typo'd path
+        # could resolve to a DIFFERENT (wrong) field than intended and never
+        # match what the author meant to gate on. Reject it at validation
+        # time instead of letting it silently mis-resolve at runtime.
+        errors.append(
+            f"{label}.path: {path!r} is not valid path syntax (dotted keys, "
+            "'[*]' wildcards, and '[n]'/'[-n]' indices only -- e.g. "
+            "'tags[*]', 'items[*].n', 'a.b[-1]')")
     ops_present = [k for k in node if k != "path"]
     if not ops_present:
         errors.append(f"{label}: leaf predicate requires at least one op ({', '.join(_ALL_OPS)})")

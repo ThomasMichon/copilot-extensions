@@ -28,9 +28,10 @@ from . import __version__
 from . import protocol as proto
 from .auth import build_injector
 from .config import BridgeConfig, ToolFilter
+from .decorators import build_decorators
 from .decorators._catalog import fetch_all_tools
 from .decorators.base import BridgeContext
-from .pipeline import UpstreamClient
+from .pipeline import Pipeline, UpstreamClient
 from .transports import Transport, build_transport
 
 log = logging.getLogger("agent-mcp.client")
@@ -99,6 +100,7 @@ class OneShotSession:
         self._transport = transport
         self._client: UpstreamClient | None = None
         self._ctx: BridgeContext | None = None
+        self._pipeline: Pipeline | None = None
         self._server_info: dict = {}
         # Negotiated era: ``_modern`` True once we've settled on a per-request
         # metadata revision; ``_protocol_version`` is the concrete revision we
@@ -116,6 +118,18 @@ class OneShotSession:
         client.on_unsolicited(lambda _msg: None)
         self._client = client
         self._ctx = BridgeContext(new_id=client.new_id, emit_to_client=lambda _m: None)
+        # `call_tool` routes through the SAME `decorators:` pipeline the
+        # long-lived bridge runs -- a one-shot (`agent-mcp call`, and the
+        # introspection step of `materialize`) must honor `gate`/`input_gate`/
+        # `transform`/etc. too, not just the legacy top-level `tools:` filter
+        # (still checked separately below). The pipeline's `core` is this same
+        # bounded `_request` + `_prepare`, so a decorator's own upstream calls
+        # (e.g. `gate`'s preflight) get the identical timeout/era handling as
+        # a direct call.
+        self._pipeline = Pipeline(
+            build_decorators(self.cfg, self._ctx),
+            core=self._pipeline_core,
+        )
 
         try:
             # ``_negotiate`` already bounds each individual JSON-RPC request via
@@ -150,7 +164,9 @@ class OneShotSession:
         await self._teardown()
 
     async def _teardown(self) -> None:
-        client, transport = self._client, self._transport
+        pipeline, client, transport = self._pipeline, self._client, self._transport
+        if pipeline is not None:
+            await pipeline.aclose()
         if client is not None:
             client.fail_pending("one-shot session closing")
         if transport is not None:
@@ -293,6 +309,18 @@ class OneShotSession:
             raise RuntimeError("OneShotSession used outside its async context")
         return self._client
 
+    async def _pipeline_core(self, msg: dict) -> dict | None:
+        """The ``Next``-shaped upstream core for :attr:`_pipeline` -- identical
+        request stamping/timeout handling as a direct :meth:`_request`, so a
+        decorator's own upstream calls (e.g. ``gate``'s preflight) behave the
+        same as ``call_tool``'s own outer request."""
+        return await self._request(self._prepare(msg))
+
+    def _need_pipeline(self) -> Pipeline:
+        if self._pipeline is None:
+            raise RuntimeError("OneShotSession used outside its async context")
+        return self._pipeline
+
     async def _request(self, msg: dict) -> dict | None:
         """Send one upstream request under a bounded timeout.
 
@@ -347,6 +375,7 @@ class OneShotSession:
         the exit code) -- only a protocol-level error raises.
         """
         client = self._need_client()
+        pipeline = self._need_pipeline()
         if not tool_visible(name, self.cfg.tools):
             raise UpstreamError(
                 f"tools/call '{name}': blocked by bridge tools filter",
@@ -358,7 +387,7 @@ class OneShotSession:
             "method": "tools/call",
             "params": {"name": name, "arguments": arguments or {}},
         }
-        resp = await self._request(self._prepare(req))
+        resp = await pipeline.handle(req)
         if not isinstance(resp, dict):
             raise UpstreamError(f"no response for tools/call '{name}'")
         if "error" in resp:
