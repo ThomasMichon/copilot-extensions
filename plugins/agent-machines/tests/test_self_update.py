@@ -248,6 +248,145 @@ def test_watchdog_starts_launcher_when_missing(monkeypatch):
     assert "started dtssh host launcher" in steps[0].detail
 
 
+def test_refresh_dtssh_mesh_skips_when_agent_ssh_missing(monkeypatch):
+    monkeypatch.setattr(self_update.shutil, "which", lambda _name: None)
+    step = self_update.refresh_dtssh_mesh(runner=lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("must not run without agent-ssh")
+    ))
+    assert step.status == "skipped"
+    assert "agent-ssh is not installed" in step.detail
+
+
+def test_refresh_dtssh_mesh_skips_when_no_machines_yaml(monkeypatch):
+    monkeypatch.setattr(self_update.shutil, "which", lambda _name: "agent-ssh")
+
+    def runner(argv, *, cwd=None, timeout=0):
+        payload = json.dumps(
+            {"ok": True, "machines_yaml": None, "detail": "no machines.yaml found", "aliases": []}
+        )
+        return self_update.CommandResult(list(argv), 0, payload, "")
+
+    step = self_update.refresh_dtssh_mesh(runner=runner)
+    assert step.status == "skipped"
+    assert "no machines.yaml" in step.detail
+
+
+def test_refresh_dtssh_mesh_ok_when_mesh_reachable(monkeypatch):
+    monkeypatch.setattr(self_update.shutil, "which", lambda _name: "agent-ssh")
+
+    def runner(argv, *, cwd=None, timeout=0):
+        payload = json.dumps(
+            {
+                "ok": True,
+                "machines_yaml": "machines.yaml",
+                "detail": "refreshed the dtssh mesh; all 2 known alias(es) reachable",
+                "aliases": [
+                    {"alias": "host-a", "reachable": True, "detail": "reachable"},
+                    {"alias": "host-b", "reachable": True, "detail": "reachable"},
+                ],
+            }
+        )
+        return self_update.CommandResult(list(argv), 0, payload, "")
+
+    step = self_update.refresh_dtssh_mesh(runner=runner)
+    assert step.status == "ok"
+    assert "all 2 known alias(es) reachable" in step.detail
+
+
+def test_refresh_dtssh_mesh_error_when_alias_unreachable(monkeypatch):
+    monkeypatch.setattr(self_update.shutil, "which", lambda _name: "agent-ssh")
+
+    def runner(argv, *, cwd=None, timeout=0):
+        payload = json.dumps(
+            {
+                "ok": False,
+                "machines_yaml": "machines.yaml",
+                "detail": "refreshed the dtssh mesh; unreachable: host-b",
+                "aliases": [
+                    {"alias": "host-a", "reachable": True, "detail": "reachable"},
+                    {"alias": "host-b", "reachable": False, "detail": "unreachable after refresh"},
+                ],
+            }
+        )
+        return self_update.CommandResult(list(argv), 1, payload, "")
+
+    step = self_update.refresh_dtssh_mesh(runner=runner)
+    assert step.status == "error"
+    assert "host-b" in step.detail
+
+
+def test_run_tier_watchdog_appends_mesh_refresh_step(monkeypatch, tmp_path):
+    monkeypatch.setattr(self_update.sys, "platform", "win32")
+    monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
+    monkeypatch.setattr(self_update, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
+    monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
+    config = self_update.DtsshConfig(
+        config_path=tmp_path / "config.json",
+        install_root=tmp_path,
+        launcher_path=tmp_path / "dtssh-host-launcher.ps1",
+        alias="box-1",
+        port=2222,
+    )
+    monkeypatch.setattr(self_update, "load_dtssh_config", lambda local_app_data=None: config)
+    monkeypatch.setattr(
+        self_update,
+        "watchdog_running",
+        lambda _config, process_lister=None: True,
+    )
+
+    calls = []
+
+    def mesh_refresher():
+        calls.append(True)
+        return self_update.StepResult("dtssh-mesh-refresh", "ok", "refreshed the dtssh mesh")
+
+    result = self_update.run_tier(
+        "watchdog",
+        opted_in=True,
+        mesh_refresher=mesh_refresher,
+        home=tmp_path,
+    )
+    assert result.status == "ok"
+    assert calls == [True]
+    assert result.steps[-1].name == "dtssh-mesh-refresh"
+    assert result.steps[-1].status == "ok"
+
+
+def test_run_tier_watchdog_fails_when_mesh_refresh_errors(monkeypatch, tmp_path):
+    monkeypatch.setattr(self_update.sys, "platform", "win32")
+    monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
+    monkeypatch.setattr(self_update, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
+    monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
+    config = self_update.DtsshConfig(
+        config_path=tmp_path / "config.json",
+        install_root=tmp_path,
+        launcher_path=tmp_path / "dtssh-host-launcher.ps1",
+        alias="box-1",
+        port=2222,
+    )
+    monkeypatch.setattr(self_update, "load_dtssh_config", lambda local_app_data=None: config)
+    monkeypatch.setattr(
+        self_update,
+        "watchdog_running",
+        lambda _config, process_lister=None: True,
+    )
+
+    def mesh_refresher():
+        return self_update.StepResult(
+            "dtssh-mesh-refresh", "error", "unreachable: host-b"
+        )
+
+    result = self_update.run_tier(
+        "watchdog",
+        opted_in=True,
+        mesh_refresher=mesh_refresher,
+        home=tmp_path,
+    )
+    assert result.status == "error"
+    assert "unreachable: host-b" in result.detail
+    assert result.steps[-1].status == "error"
+
+
 def test_fast_forward_repo_skips_dirty_and_diverged(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
