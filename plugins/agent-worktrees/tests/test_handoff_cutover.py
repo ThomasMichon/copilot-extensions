@@ -21,6 +21,7 @@ import pytest
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import activity, locks, procs, reclaim, sessions
+from agent_worktrees import sessions_pane_retire
 
 
 # â”€â”€ build_mux_new_window_argv (pure) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -480,7 +481,13 @@ class TestPaneWrapperInitialPrompt:
 
 class TestMuxRetirePane:
     def test_already_gone(self, monkeypatch):
-        monkeypatch.setattr(sessions, "_mux_pane_alive", lambda p, b: False)
+        # mux_retire_pane lives in sessions_pane_retire.py (the module-size
+        # split moved it there); its `_mux_pane_alive` reference resolves in
+        # THAT module's namespace, not `sessions`'s re-export -- patching
+        # `sessions._mux_pane_alive` alone silently no-ops here (#2660-class
+        # regression: discovered while working Phase 3 of
+        # context-handoff-overhaul, unrelated to this fix).
+        monkeypatch.setattr(sessions_pane_retire, "_mux_pane_alive", lambda p, b: False)
         out = sessions.mux_retire_pane("%3", mux="tmux")
         assert out == {"ok": True, "pane": "%3", "gone": True,
                        "method": "already-gone"}
@@ -488,11 +495,11 @@ class TestMuxRetirePane:
     def test_graceful_quit(self, monkeypatch):
         # alive once (initial check), then gone after the double Ctrl-C
         states = iter([True, False])
-        monkeypatch.setattr(sessions, "_mux_pane_alive",
+        monkeypatch.setattr(sessions_pane_retire, "_mux_pane_alive",
                             lambda p, b: next(states))
         import subprocess
         monkeypatch.setattr(subprocess, "run",
-                            lambda *a, **k: type("R", (), {"returncode": 0})())
+                            lambda *a, **k: type("R", (), {"returncode": 0, "stdout": ""})())
         out = sessions.mux_retire_pane("%3", mux="tmux", ctrl_c_gap=0,
                                        poll_interval=0, settle_timeout=1)
         assert out["gone"] is True
@@ -500,10 +507,10 @@ class TestMuxRetirePane:
 
     def test_hard_kill_fallback(self, monkeypatch):
         # never gone via graceful; kill-pane also fails to remove it
-        monkeypatch.setattr(sessions, "_mux_pane_alive", lambda p, b: True)
+        monkeypatch.setattr(sessions_pane_retire, "_mux_pane_alive", lambda p, b: True)
         import subprocess
         monkeypatch.setattr(subprocess, "run",
-                            lambda *a, **k: type("R", (), {"returncode": 0})())
+                            lambda *a, **k: type("R", (), {"returncode": 0, "stdout": ""})())
         out = sessions.mux_retire_pane("%3", mux="tmux", ctrl_c_gap=0,
                                        poll_interval=0, settle_timeout=0,
                                        hard_kill_settle=0)
@@ -513,12 +520,12 @@ class TestMuxRetirePane:
     def test_hard_kill_waits_for_mux_to_drop_pane(self, monkeypatch):
         states = iter([True, True, True, True, False])
         monkeypatch.setattr(
-            sessions, "_mux_pane_alive", lambda p, b: next(states),
+            sessions_pane_retire, "_mux_pane_alive", lambda p, b: next(states),
         )
         import subprocess
         monkeypatch.setattr(
             subprocess, "run",
-            lambda *a, **k: type("R", (), {"returncode": 0})(),
+            lambda *a, **k: type("R", (), {"returncode": 0, "stdout": ""})(),
         )
         out = sessions.mux_retire_pane(
             "%3", mux="tmux", ctrl_c_gap=0, poll_interval=0,
@@ -529,15 +536,15 @@ class TestMuxRetirePane:
 
     def test_last_window_guard_skips_retire(self, monkeypatch):
         calls: list[list[str]] = []
-        monkeypatch.setattr(sessions, "_mux_pane_alive", lambda p, b: True)
-        monkeypatch.setattr(sessions, "_mux_last_window_guard",
+        monkeypatch.setattr(sessions_pane_retire, "_mux_pane_alive", lambda p, b: True)
+        monkeypatch.setattr(sessions_pane_retire, "_mux_last_window_guard",
                             lambda p, b: {"session": "wt-demo", "window_count": 1})
         monkeypatch.setattr(activity, "log_event", lambda *a, **k: None)
         import subprocess
 
         def _fake_run(*a, **k):
             calls.append(list(a[0]))
-            return type("R", (), {"returncode": 0})()
+            return type("R", (), {"returncode": 0, "stdout": ""})()
 
         monkeypatch.setattr(subprocess, "run", _fake_run)
         out = sessions.mux_retire_pane("%3", mux="tmux")
@@ -552,13 +559,13 @@ class TestMuxRetirePane:
 
         # alive for: initial check + escalate poll (still up), then gone.
         states = iter([True, True, False])
-        monkeypatch.setattr(sessions, "_mux_pane_alive",
+        monkeypatch.setattr(sessions_pane_retire, "_mux_pane_alive",
                             lambda p, b: next(states))
         import subprocess
 
         def _fake_run(*a, **k):
             calls.append(list(a[0]))
-            return type("R", (), {"returncode": 0})()
+            return type("R", (), {"returncode": 0, "stdout": ""})()
 
         monkeypatch.setattr(subprocess, "run", _fake_run)
         out = sessions.mux_retire_pane(
@@ -578,9 +585,78 @@ def _ns(**kw):
                 retire_pane=None, mux_session=None, require_mux_identity=False,
                 expected_copilot_pid=None, expected_copilot_start_time=None,
                 dry_run=False, retry=False, handoff_token=None,
-                copilot_args=[], recovery=False)
+                copilot_args=[], recovery=False, headless=False)
     base.update(kw)
     return argparse.Namespace(**base)
+
+
+class TestHeadlessNewSession:
+    """sessions.headless_new_session / mux_available -- the non-mux launch
+    primitive (context-handoff-overhaul Phase 3 §4.3)."""
+
+    def test_mux_available_true_when_binary_on_path(self, monkeypatch):
+        monkeypatch.setattr(shutil, "which", lambda b: "/usr/bin/tmux" if b == "tmux" else None)
+        assert sessions.mux_available(mux="tmux") is True
+
+    def test_mux_available_false_when_no_mux_at_all(self, monkeypatch):
+        monkeypatch.setattr(shutil, "which", lambda b: None)
+        assert sessions.mux_available(mux="tmux") is False
+        assert sessions.mux_available(mux="psmux") is False
+
+    def test_headless_new_session_spawns_detached_with_native_seed_arg(
+        self, monkeypatch,
+    ):
+        captured = {}
+
+        class _Proc:
+            pid = 4242
+
+        def _fake_popen(argv, **kwargs):
+            captured["argv"] = argv
+            captured["kwargs"] = kwargs
+            return _Proc()
+
+        monkeypatch.setattr(subprocess, "Popen", _fake_popen)
+        out = sessions.headless_new_session(
+            "wtH", "/work/dir", ["copilot"], {"FOO": "bar"}, seed="continue please",
+        )
+        assert out == {"ok": True, "pid": 4242, "error": None}
+        # The seed is a native -i arg -- headless has no pane-wrapper argv
+        # mangling to route around, unlike the mux path.
+        assert captured["argv"] == ["copilot", "-i", "continue please"]
+        assert captured["kwargs"]["cwd"] == "/work/dir"
+        assert captured["kwargs"]["env"]["FOO"] == "bar"
+        assert captured["kwargs"]["stdin"] == subprocess.DEVNULL
+        assert captured["kwargs"]["stdout"] == subprocess.DEVNULL
+        assert captured["kwargs"]["stderr"] == subprocess.DEVNULL
+        if platform.system() == "Windows":
+            assert captured["kwargs"]["creationflags"] & subprocess.DETACHED_PROCESS
+        else:
+            assert captured["kwargs"]["start_new_session"] is True
+
+    def test_headless_new_session_without_seed_omits_interactive_arg(
+        self, monkeypatch,
+    ):
+        captured = {}
+
+        class _Proc:
+            pid = 7
+
+        def _fake_popen(argv, **k):
+            captured["argv"] = argv
+            return _Proc()
+
+        monkeypatch.setattr(subprocess, "Popen", _fake_popen)
+        sessions.headless_new_session("wtH", "/work", ["copilot"], None)
+        assert captured["argv"] == ["copilot"]
+
+    def test_headless_new_session_reports_spawn_failure(self, monkeypatch):
+        monkeypatch.setattr(
+            subprocess, "Popen",
+            lambda *a, **k: (_ for _ in ()).throw(OSError("no such file")),
+        )
+        out = sessions.headless_new_session("wtH", "/work", ["copilot"])
+        assert out == {"ok": False, "pid": None, "error": "no such file"}
 
 
 class TestCmdHandoffCutover:
@@ -1813,6 +1889,137 @@ class TestCmdHandoffCutover:
             "handoff_successor_spawn_failed",
         ]
         assert recorded[1][1] == "unexpected mux blowup"
+
+    # -- --headless (Phase 3 §4.3 non-mux launch primitive) --------------
+
+    def test_headless_bypasses_mux_session_requirement(self, monkeypatch, capfd):
+        """Unlike the ordinary spawn path, --headless must NOT fail just
+        because there is no live mux session for this worktree."""
+        monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", lambda: "wtH")
+        monkeypatch.setattr(
+            sessions, "has_mux_session",
+            lambda w: pytest.fail("headless must not check for a mux session"),
+        )
+        rc = m.cmd_handoff_cutover(_ns(seed="go", headless=True))
+        # Fails later (no config/record fixtures here), but never on the
+        # mux-session check -- confirmed by has_mux_session never being called.
+        assert rc != 3 or "not under mux" not in capfd.readouterr().out
+
+    def test_headless_rejects_anchor_mode(self, monkeypatch, capfd):
+        monkeypatch.setattr(
+            m, "_resolve_handoff_cutover_target",
+            lambda raw_id, session_id: (
+                0, {"worktree_id": "wtX", "config": None, "anchor_mode": True},
+            ),
+        )
+        rc = m.cmd_handoff_cutover(_ns(seed="go", headless=True))
+        assert rc == 2
+        assert "anchor-mode" in capfd.readouterr().out
+
+    def test_headless_spawn_success(self, monkeypatch, capfd, tmp_path):
+        monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", lambda: "wtH")
+        (tmp_path / "wtH.yaml").write_text("x")
+        monkeypatch.setattr(m.cfg, "load_config", lambda: object())
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+
+        class _Rec:
+            worktree_path = str(tmp_path / "w")
+
+        monkeypatch.setattr(m.tracking, "load_record", lambda p: _Rec())
+        monkeypatch.setattr(
+            m, "_preflight_launch", lambda c, a, w: m.LaunchPreflight())
+        monkeypatch.setattr(m, "_build_launch_cmd",
+                            lambda c, a, wd, **k: ["copilot"])
+        monkeypatch.setattr(m, "_build_env", lambda p, s, work_dir=None: {})
+        monkeypatch.setattr(m, "_repo_session_env", lambda c, w: {})
+
+        captured = {}
+
+        def _fake_headless(wt, wd, cmd, env, *, seed=None):
+            captured["cmd"] = cmd
+            captured["env"] = env
+            captured["seed"] = seed
+            return {"ok": True, "pid": 4242, "error": None}
+
+        monkeypatch.setattr(sessions, "headless_new_session", _fake_headless)
+        monkeypatch.setattr(
+            m,
+            "_wait_for_handoff_candidate",
+            lambda *a, **k: ("successor-session", "session-associated"),
+        )
+        rc = m.cmd_handoff_cutover(_ns(
+            seed="resume the multi word work",
+            headless=True,
+            handoff_token="task-123",
+        ))
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["ok"] is True
+        assert out["headless"] is True
+        assert out["pid"] == 4242
+        assert out["seed_len"] == len("resume the multi word work")
+        assert out["seeded"] is True
+        assert out["candidate_session"] == "successor-session"
+        # The seed is threaded through as a real kwarg -- headless_new_session
+        # (not this call site) is responsible for appending native -i <seed>.
+        assert captured["cmd"] == ["copilot"]
+        assert captured["seed"] == "resume the multi word work"
+        assert captured["env"]["AGENT_WORKTREES_HANDOFF_TOKEN"] == "task-123"
+
+    def test_headless_spawn_failure_reports_error(self, monkeypatch, capfd, tmp_path):
+        monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", lambda: "wtH")
+        (tmp_path / "wtH.yaml").write_text("x")
+        monkeypatch.setattr(m.cfg, "load_config", lambda: object())
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+
+        class _Rec:
+            worktree_path = str(tmp_path / "w")
+
+        monkeypatch.setattr(m.tracking, "load_record", lambda p: _Rec())
+        monkeypatch.setattr(
+            m, "_preflight_launch", lambda c, a, w: m.LaunchPreflight())
+        monkeypatch.setattr(m, "_build_launch_cmd",
+                            lambda c, a, wd, **k: ["copilot"])
+        monkeypatch.setattr(m, "_build_env", lambda p, s, work_dir=None: {})
+        monkeypatch.setattr(m, "_repo_session_env", lambda c, w: {})
+        monkeypatch.setattr(
+            sessions, "headless_new_session",
+            lambda *a, **k: {"ok": False, "pid": None, "error": "no such file"},
+        )
+        rc = m.cmd_handoff_cutover(_ns(seed="go", headless=True))
+        assert rc == 4
+        out = json.loads(capfd.readouterr().out)
+        assert out["ok"] is False
+        assert "no such file" in out["error"]
+
+    def test_headless_dry_run_reports_plan_without_spawning(
+        self, monkeypatch, capfd, tmp_path,
+    ):
+        monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", lambda: "wtH")
+        (tmp_path / "wtH.yaml").write_text("x")
+        monkeypatch.setattr(m.cfg, "load_config", lambda: object())
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+
+        class _Rec:
+            worktree_path = str(tmp_path / "w")
+
+        monkeypatch.setattr(m.tracking, "load_record", lambda p: _Rec())
+        monkeypatch.setattr(
+            m, "_preflight_launch", lambda c, a, w: m.LaunchPreflight())
+        monkeypatch.setattr(
+            m, "_build_launch_cmd", lambda c, a, wd, **k: ["copilot"])
+        monkeypatch.setattr(m, "_build_env", lambda p, s, work_dir=None: {})
+        monkeypatch.setattr(m, "_repo_session_env", lambda c, w: {})
+        monkeypatch.setattr(
+            sessions, "headless_new_session",
+            lambda *a, **k: pytest.fail("dry-run must not spawn"),
+        )
+        rc = m.cmd_handoff_cutover(_ns(seed="continue", headless=True, dry_run=True))
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["dry_run"] is True
+        assert out["headless"] is True
+        assert out["cmd"] == ["copilot", "-i", "<seed>"]
 
 
 class TestCmdHandoffsCheck:

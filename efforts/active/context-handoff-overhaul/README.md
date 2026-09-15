@@ -5,7 +5,8 @@
   `agent-bridge` plugins)
 - **Branch(es):** `effort/context-handoff-overhaul` (Phase 0, merged #2593),
   `effort/context-handoff-overhaul-phase1` (Phase 1, merged #2643),
-  `effort/context-handoff-overhaul-phase2` (Phase 2, merged #2663)
+  `effort/context-handoff-overhaul-phase2` (Phase 2, merged #2663),
+  `effort/context-handoff-overhaul-phase3` (Phase 3, in progress)
 - **Created:** 2026-09-13
 - **Status:** Active
 - **Umbrella issue:** #2594
@@ -216,14 +217,41 @@ Verbatim from the operator:
   guarantee.
 
 ### Phase 3 — Host-agnostic reliability (Challenge 3)
-- [ ] Confirm `agent-worktrees handoff-cutover` supports a genuinely headless
+- [x] Confirm `agent-worktrees handoff-cutover` supports a genuinely headless
   (no-mux) invocation, or build a non-mux launch primitive if it doesn't --
   open question flagged in `redesign.md` §4.3; must resolve before the
   coordinator fallback below can rely on it.
+  **Confirmed neither existing path is genuinely mux-less:**
+  `handoff-cutover` requires an already-live mux session for the target
+  worktree (`sessions.has_mux_session`), and `embody` requires the mux
+  binary itself to create a detached session on demand
+  (`sessions.mux_new_session` shells to tmux/psmux unconditionally) -- so a
+  host with no multiplexer at all (the coordinator-fallback case this phase
+  exists for) has no working launch path today. Built the non-mux primitive:
+  `sessions.headless_new_session()` (+ `sessions.mux_available()` to detect
+  the no-mux-at-all case) spawns the launch command as a fully detached
+  background process via `subprocess.Popen` (`DETACHED_PROCESS` + a new
+  process group on Windows, `start_new_session` on POSIX -- the same shape
+  `agent_dispatch`'s own coordinator autostart uses), with the seed passed
+  as a native `-i <seed>` argument directly (no pane-wrapper argv-mangling
+  to route around, unlike the mux path). Wired into `handoff-cutover` as an
+  explicit opt-in `--headless` flag (bypasses the mux-session-required
+  check; rejects anchor-mode cutover explicitly rather than silently doing
+  the wrong thing) so existing mux-based callers are unaffected. Along the
+  way, found and fixed a real pre-existing regression: the recent
+  agent-worktrees module-size split (#2653/#2657/#2658) moved
+  `mux_retire_pane`/`_mux_pane_alive` into `sessions_pane_retire.py`, but 5
+  `TestMuxRetirePane` tests still monkeypatched the stale `sessions.*`
+  re-export, silently no-opping the patch and leaving those tests either
+  falsely green (by lucky "tmux not found -> OSError -> False" coincidence)
+  or failing outright -- retargeted the monkeypatches to the module that
+  actually owns the functions now.
 - [ ] Extend `agent-dispatch`'s coordinator to reconcile an unclaimed
   `proposed`/`handoff` task past a bounded window into a fallback headless
   successor launch, per `redesign.md` §4.3 (reusing already-supervised
-  infrastructure rather than a new standing watchdog).
+  infrastructure rather than a new standing watchdog). **Next slice** --
+  wire the coordinator's existing liveness-GC-style polling loop to call
+  the new `handoff-cutover --headless` path.
 - [ ] Evaluate a `userPromptSubmitted` hook that greps the successor's first
   submitted prompt for the expected handoff token, as a deterministic
   "pickup actually happened" signal feeding the lineage trace (complements,
@@ -380,3 +408,60 @@ gate land._
   deleted. Next: Phase 3 (host-agnostic reliability) on a fresh branch off
   post-merge `main`.
 
+### 2026-09-14 — Phase 3, slice 1 (non-mux launch primitive)
+- Started Phase 3 on `effort/context-handoff-overhaul-phase3` (based on
+  post-merge `main`). Read `redesign.md` §4.3 closely (the effort README's
+  Phase 3 bullets are only a summary of it).
+- Confirmed the open question from kickoff: neither `handoff-cutover`
+  (requires an already-live mux session) nor `embody` (requires the mux
+  binary present to create one) supports a genuinely mux-less launch --
+  verified by reading `_handoff_cutover_spawn_result`'s explicit
+  `sessions.has_mux_session` gate and `mux_new_session`'s unconditional
+  tmux/psmux shell-out.
+- Built `sessions.headless_new_session()` + `sessions.mux_available()` in
+  `agent_worktrees/sessions.py`: a detached `subprocess.Popen` launch with
+  no pane/mux/session-registry involvement at all, seed passed as a native
+  `-i <seed>` arg. Wired as an explicit opt-in `--headless` flag on
+  `handoff-cutover` (bypasses the mux-session-required check; explicitly
+  rejects `--headless` + anchor-mode rather than silently misbehaving).
+  Reused the existing token-association wait (`_wait_for_handoff_candidate`)
+  unchanged -- it was already mux-agnostic (only touches mux state when a
+  pane id is given).
+- Along the way, found and fixed a real regression from the recent
+  agent-worktrees module-size split (#2653/#2657/#2658): 5
+  `TestMuxRetirePane` tests monkeypatched `sessions._mux_pane_alive` /
+  `sessions._mux_last_window_guard`, but `mux_retire_pane` itself now lives
+  in `sessions_pane_retire.py` and resolves those names from ITS OWN
+  namespace -- so the patches silently no-op'd. One test happened to still
+  "pass" by coincidence (the real tmux/psmux call fails with `OSError` on
+  this machine, which the function already treats as `alive=False`,
+  matching that one test's expected outcome); the other four genuinely
+  failed. Retargeted the monkeypatches to `sessions_pane_retire` (the
+  module that actually owns the functions) and fixed the fake subprocess
+  mock objects to carry a `.stdout` attribute the real code path reads.
+  Confirmed via `git stash` that this was pre-existing on `main`, unrelated
+  to this session's diff.
+- Also confirmed (same `git stash` method) one further pre-existing,
+  unrelated failure remains on `main`:
+  `TestMuxNewWindow::test_missing_prompt_receipt_retires_successor` -- a
+  real behavioral question in `mux_new_window`'s retire-on-missing-receipt
+  path (the mocked retire call never fires), not a test-isolation artifact
+  like the other five. Left unfixed (out of scope, needs its own
+  investigation) but is now the ONE remaining pre-existing failure in
+  `test_handoff_cutover.py`, down from 6.
+- Added unit tests: `TestHeadlessNewSession` (pure `sessions.py` coverage)
+  and four new `TestCmdHandoffCutover` cases (`--headless` bypasses the
+  mux-session check, rejects anchor-mode, spawn success, spawn failure,
+  dry-run). `test_handoff_cutover.py` now 78/79 passing (was 150/156 before
+  this session across the two files run together; the arithmetic differs
+  because new tests were added). Full-suite regression run timed out at the
+  bounded test-supervisor's 10-minute ceiling (this plugin's suite is large
+  enough that real CI shards it across parallel jobs) -- relying on the
+  real CI matrix for broader coverage beyond the specifically-touched files,
+  which were run to completion and are clean.
+- Bumped `agent-worktrees` to 1.5.5-dev112 (`plugin.json` + `pyproject.toml`
+  + marketplace.json).
+- **Not yet done this slice:** the coordinator-fallback wiring itself (item
+  2), the `userPromptSubmitted` observability hook (item 3), and closing
+  `handoff-live-cutover`'s remaining Phase 3 items (item 4). All three
+  remain for a follow-up Phase 3 continuation.
