@@ -292,8 +292,13 @@ _FLEET_BODY_PREFIX = "fleet-body:"
 #: :func:`make_headless_spawn`). Unlike a fleet body there is no host component --
 #: the session lives on *this* machine's agent-bridge daemon.
 _LOCAL_BODY_PREFIX = "local-body:"
-_FAILED_BRIDGE_SESSION = re.compile(
-    r"\bSession\s+([A-Za-z0-9][A-Za-z0-9._-]*)\s+entered failed\b"
+_TERMINAL_BRIDGE_SESSION = re.compile(
+    r"\bSession\s+([A-Za-z0-9][A-Za-z0-9._-]*)\s+"
+    r"entered\s+(?:failed|ended|stopped)\b"
+)
+_TIMED_OUT_BRIDGE_SESSION = re.compile(
+    r"\bTimed out waiting for session\s+"
+    r"([A-Za-z0-9][A-Za-z0-9._-]*)\s+to become idle\b"
 )
 
 
@@ -302,8 +307,10 @@ def _failed_bridge_session(result: object) -> str | None:
         str(getattr(result, name, "") or "")
         for name in ("stdout", "stderr")
     )
-    match = _FAILED_BRIDGE_SESSION.search(text)
-    return match.group(1) if match else None
+    for pattern in (_TERMINAL_BRIDGE_SESSION, _TIMED_OUT_BRIDGE_SESSION):
+        if match := pattern.search(text):
+            return match.group(1)
+    return None
 
 
 def _request_failed_created_spawn_release(

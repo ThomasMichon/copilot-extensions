@@ -3190,7 +3190,16 @@ def test_make_headless_spawn_resolves_allocation_project_lazily(monkeypatch):
     ]
 
 
-def test_make_headless_spawn_reports_failure_on_nonzero(monkeypatch):
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "[FAIL] Session failed-123 entered failed: Connection closed",
+        "[FAIL] Session failed-123 entered ended",
+        "[FAIL] Session failed-123 entered stopped",
+        "[FAIL] Timed out waiting for session failed-123 to become idle",
+    ],
+)
+def test_make_headless_spawn_reports_failure_on_nonzero(monkeypatch, stderr):
     import subprocess
 
     from agent_dispatch import bridge, embody
@@ -3199,16 +3208,11 @@ def test_make_headless_spawn_reports_failure_on_nonzero(monkeypatch):
     monkeypatch.setattr(embody, "autopilot_worker_prompt", lambda *a, **k: "seed")
     monkeypatch.setattr(
         bridge, "spawn_worker",
-        lambda *a, **k: subprocess.CompletedProcess(
-            [],
-            1,
-            "",
-            "[FAIL] Session failed-123 entered failed: Connection closed",
-        ),
+        lambda *a, **k: subprocess.CompletedProcess([], 1, "", stderr),
     )
     ok, handle = make_headless_spawn()({"id": "t"})
     assert ok is False
-    assert "Connection closed" in handle["error"]
+    assert "failed-123" in handle["error"]
     assert handle["session"] == "local-body:failed-123"
 
 
