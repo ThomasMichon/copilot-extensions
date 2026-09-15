@@ -45,9 +45,9 @@ import json
 import logging
 from typing import Any
 
+from .._predicate import eval_predicate, parse_path, resolve_path
 from ._catalog import tool_call_args, tool_call_name
 from ._jsonutil import json_documents
-from ._predicate import eval_predicate, parse_path, resolve_path
 from .base import BridgeContext, Decorator, Next, error_response, result_response
 
 log = logging.getLogger("agent-mcp.gate")

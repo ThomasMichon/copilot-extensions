@@ -153,3 +153,79 @@ def test_gate_invalid_on_deny_rejected():
                           "preflight": {"tool": "lookup"},
                           "allow_when": {"path": "x", "equals": 1},
                           "on_deny": "bogus"}])
+
+
+def test_gate_rejects_malformed_allow_when_null_leaf():
+    # {any: [null]} previously reached the runtime predicate engine, which
+    # treats a non-dict node as simply FALSE -- fail-open for an
+    # authorization-style predicate. Config validation must reject it.
+    with pytest.raises(ConfigError):
+        _cfg(decorators=[{"type": "gate", "match_tools": ["a"],
+                          "preflight": {"tool": "lookup"},
+                          "allow_when": {"any": [None]}}])
+
+
+def test_gate_rejects_invalid_regex_in_allow_when():
+    with pytest.raises(ConfigError):
+        _cfg(decorators=[{"type": "gate", "match_tools": ["a"],
+                          "preflight": {"tool": "lookup"},
+                          "allow_when": {"path": "title", "matches": "["}}])
+
+
+def test_input_gate_valid():
+    cfg = _cfg(decorators=[{
+        "type": "input_gate",
+        "match_tools": ["update_incident"],
+        "deny_when": {"any": [
+            {"path": "tags[*]", "matches": "(?i)^ai-safe$"},
+            {"path": "title", "matches": "(?i)ai-safe"},
+        ]},
+        "on_deny": "error",
+        "reason": "human-only marker",
+    }])
+    assert cfg.decorators[0].type == "input_gate"
+    assert cfg.decorators[0].options["match_tools"] == ["update_incident"]
+
+
+def test_input_gate_requires_match_tools():
+    with pytest.raises(ConfigError):
+        _cfg(decorators=[{"type": "input_gate",
+                          "deny_when": {"path": "x", "equals": 1}}])
+
+
+def test_input_gate_requires_deny_when():
+    with pytest.raises(ConfigError):
+        _cfg(decorators=[{"type": "input_gate", "match_tools": ["a"]}])
+
+
+def test_input_gate_invalid_on_deny_rejected():
+    with pytest.raises(ConfigError):
+        _cfg(decorators=[{"type": "input_gate", "match_tools": ["a"],
+                          "deny_when": {"path": "x", "equals": 1},
+                          "on_deny": "bogus"}])
+
+
+def test_input_gate_rejects_malformed_deny_when_null_leaf():
+    with pytest.raises(ConfigError):
+        _cfg(decorators=[{"type": "input_gate", "match_tools": ["a"],
+                          "deny_when": {"any": [None]}}])
+
+
+def test_input_gate_rejects_leaf_with_no_recognized_op():
+    with pytest.raises(ConfigError):
+        _cfg(decorators=[{"type": "input_gate", "match_tools": ["a"],
+                          "deny_when": {"path": "tags", "bogus_op": 1}}])
+
+
+def test_input_gate_rejects_invalid_regex_in_deny_when():
+    with pytest.raises(ConfigError):
+        _cfg(decorators=[{"type": "input_gate", "match_tools": ["a"],
+                          "deny_when": {"path": "title", "matches": "["}}])
+
+
+def test_input_gate_rejects_combinator_with_extra_keys():
+    with pytest.raises(ConfigError):
+        _cfg(decorators=[{"type": "input_gate", "match_tools": ["a"],
+                          "deny_when": {"any": [{"path": "x", "equals": 1}],
+                                        "path": "y"}}])
+

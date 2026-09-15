@@ -98,3 +98,16 @@ async def test_no_upstream_call_at_all_before_denial():
     gate, up = _gate()
     await run(gate, up, call_req("update_incident", {"tags": ["ai-safe"]}))
     assert up.calls == []
+
+
+async def test_denied_notification_produces_no_response_and_no_forward():
+    # A tools/call with no 'id' is a JSON-RPC notification -- per the pipeline
+    # contract, it never gets a response (pipeline.py's Next return type is
+    # `dict | None`, None for notifications). A denied notification must
+    # still produce None, not an id:null error/stub response.
+    gate, up = _gate()
+    notification = {"jsonrpc": "2.0", "method": "tools/call",
+                     "params": {"name": "update_incident", "arguments": {"tags": ["ai-safe"]}}}
+    resp = await run(gate, up, notification)
+    assert resp is None
+    assert up.calls == []

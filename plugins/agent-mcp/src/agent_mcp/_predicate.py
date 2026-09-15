@@ -34,7 +34,7 @@ _POSITIVE_OPS = ("in", "equals", "matches", "contains", "exists")
 _NEGATIVE_OPS = {"not_in": "in", "not_matches": "matches", "not_equals": "equals"}
 _ALL_OPS = (*_POSITIVE_OPS, *_NEGATIVE_OPS)
 
-__all__ = ["eval_leaf", "eval_predicate", "parse_path", "resolve_path"]
+__all__ = ["eval_leaf", "eval_predicate", "parse_path", "resolve_path", "validate_predicate"]
 
 
 def parse_path(path: str) -> list[tuple[str, Any]]:
@@ -107,6 +107,66 @@ def eval_leaf(node: dict, doc: Any, *, log=None) -> bool:
         elif log is not None:
             log.warning("predicate: unknown op '%s' (ignored)", op)
     return True
+
+
+def validate_predicate(node: Any, label: str) -> list[str]:
+    """Recursively validate a predicate tree's SHAPE (not the data it will run
+    against): every combinator/leaf is a well-formed node, every leaf names a
+    known op, and every ``matches``/``not_matches`` regex compiles.
+
+    This exists so a malformed predicate is caught at config-load time
+    (``agent-mcp validate``) rather than silently mis-evaluating at runtime.
+    Two failure modes this specifically closes:
+
+    * A malformed node (e.g. ``null`` inside an ``any:`` list, or a leaf with
+      no recognized op) would otherwise reach :func:`eval_predicate`, which
+      treats "not a dict" / "no matching op" as simply FALSE -- for a
+      restrictive predicate like ``input_gate``'s ``deny_when`` this is
+      FAIL-OPEN (a broken config silently denies nothing instead of refusing
+      to load).
+    * An invalid regex in ``matches``/``not_matches`` would otherwise only
+      surface as an uncaught ``re.error`` the first time a matching call
+      arrives at runtime, well after the config was accepted.
+    """
+    errors: list[str] = []
+    if not isinstance(node, dict):
+        errors.append(f"{label}: predicate node must be a mapping, got {node!r}")
+        return errors
+    combinators = [k for k in ("all", "any", "not") if k in node]
+    if combinators:
+        if len(combinators) > 1 or len(node) > 1:
+            errors.append(
+                f"{label}: a combinator node must contain exactly one of "
+                "'all'/'any'/'not' and nothing else")
+        key = combinators[0]
+        if key == "not":
+            errors.extend(validate_predicate(node["not"], f"{label}.not"))
+        else:
+            children = node[key]
+            if not isinstance(children, list):
+                errors.append(f"{label}.{key} must be a list of predicate nodes")
+            else:
+                for i, child in enumerate(children):
+                    errors.extend(validate_predicate(child, f"{label}.{key}[{i}]"))
+        return errors
+    # A leaf: must have a string 'path' and at least one recognized op.
+    path = node.get("path")
+    if not isinstance(path, str) or not path:
+        errors.append(f"{label}: leaf predicate requires a non-empty string 'path'")
+    ops_present = [k for k in node if k != "path"]
+    if not ops_present:
+        errors.append(f"{label}: leaf predicate requires at least one op ({', '.join(_ALL_OPS)})")
+    for op in ops_present:
+        if op not in _ALL_OPS:
+            errors.append(f"{label}.{op}: unknown predicate op (known: {', '.join(_ALL_OPS)})")
+        elif op in ("matches", "not_matches"):
+            try:
+                re.compile(str(node[op]))
+            except re.error as exc:
+                errors.append(f"{label}.{op}: invalid regex {node[op]!r} ({exc})")
+        elif op in ("in", "not_in") and not isinstance(node[op], list):
+            errors.append(f"{label}.{op} must be a list")
+    return errors
 
 
 def eval_predicate(node: Any, doc: Any, *, log=None) -> bool:

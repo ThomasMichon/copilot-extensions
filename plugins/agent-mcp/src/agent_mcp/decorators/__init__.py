@@ -7,7 +7,12 @@ list; responses bubble back up.
 
 Recommended ordering: context-reducers that synthesize their own tools
 (``defer``, ``code-mode``) go *first* (outermost), then cosmetic ``rename``, then
-``filter``, with ``storage`` *last* (innermost) so it sees real payloads.
+``filter``, then ``gate``/``input_gate``, with ``storage`` *last* (innermost) so
+it sees real payloads. ``input_gate`` in particular should sit as close to
+innermost as possible (after ``code-mode``/``defer``, whose synthesized
+sub-requests never reach decorators above their own position, and after
+``storage``, which may rehydrate a ``$stream`` handle into its real value) --
+see ``input_gate.py``'s module docstring for the full placement rationale.
 """
 
 from __future__ import annotations

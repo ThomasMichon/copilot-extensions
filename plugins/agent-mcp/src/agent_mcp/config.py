@@ -26,6 +26,8 @@ from typing import Any
 
 import yaml
 
+from ._predicate import validate_predicate
+
 # Transport kinds (mirror MCP server-launch ``type`` values, plus ``cli`` --
 # the local CLI->MCP responder that has no upstream MCP at all).
 TRANSPORTS = ("http", "stdio", "cli")
@@ -1051,6 +1053,8 @@ def _validate_gate(opts: dict, label: str) -> list[str]:
             errors.append(f"{label}.preflight.cache '{cache}' must be per-key|none")
     if not isinstance(opts.get("allow_when"), dict):
         errors.append(f"{label}: gate requires an 'allow_when' predicate mapping")
+    else:
+        errors.extend(validate_predicate(opts["allow_when"], f"{label}.allow_when"))
     on_deny = opts.get("on_deny", "stub")
     if on_deny not in ("stub", "drop", "error"):
         errors.append(f"{label}.on_deny '{on_deny}' must be stub|drop|error")
@@ -1068,6 +1072,8 @@ def _validate_input_gate(opts: dict, label: str) -> list[str]:
         errors.append(f"{label}: input_gate requires a non-empty 'match_tools' list")
     if not isinstance(opts.get("deny_when"), dict):
         errors.append(f"{label}: input_gate requires a 'deny_when' predicate mapping")
+    else:
+        errors.extend(validate_predicate(opts["deny_when"], f"{label}.deny_when"))
     on_deny = opts.get("on_deny", "error")
     if on_deny not in ("stub", "drop", "error"):
         errors.append(f"{label}.on_deny '{on_deny}' must be stub|drop|error")

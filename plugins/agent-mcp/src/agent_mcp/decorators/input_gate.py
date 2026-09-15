@@ -36,7 +36,27 @@ Unlike ``gate`` (fail-closed on preflight error, since it protects a READ), a
 predicate evaluation error here can only reasonably fail closed too --
 ``deny_when`` is evaluated purely locally (no network call), so there is no
 transient-failure case to distinguish; a malformed predicate is a config bug,
-not a runtime condition, and is caught by config validation instead.
+not a runtime condition, and is caught by config validation instead
+(:func:`agent_mcp.config._validate_input_gate` recursively validates the
+``deny_when`` tree's shape and regexes at load time).
+
+> **Placement -- put ``input_gate`` innermost (last in the ``decorators:``
+> list, closest to the upstream).** ``code-mode``/``defer`` synthesize their
+> own ``tools/call`` sub-requests and forward them via the SAME ``nxt`` they
+> themselves were invoked with -- i.e. only to decorators BELOW their own
+> position, never back through decorators above them. Recommended ordering
+> already places ``code-mode``/``defer`` first/outermost (see
+> ``decorators/__init__.py``'s module docstring) specifically so their
+> synthesized calls still pass through everything below -- but that only
+> protects ``input_gate`` if ``input_gate`` is ALSO below them, not above.
+> Likewise, ``storage`` may rehydrate a ``$stream`` argument handle into its
+> real value on the way to upstream; an ``input_gate`` placed OUTER (earlier)
+> than ``storage`` would evaluate ``deny_when`` against the un-rehydrated
+> handle instead of the real value it references, silently missing a match.
+> Placing ``input_gate`` last -- after ``code-mode``/``defer``/``storage`` --
+> guarantees it always evaluates the fully-resolved arguments the upstream is
+> actually about to receive, regardless of what synthesized or rehydrated the
+> call.
 """
 
 from __future__ import annotations
@@ -45,8 +65,9 @@ import fnmatch
 import json
 import logging
 
+from .._predicate import eval_predicate
+from ..pipeline import is_notification
 from ._catalog import tool_call_args, tool_call_name
-from ._predicate import eval_predicate
 from .base import BridgeContext, Decorator, Next, error_response, result_response
 
 log = logging.getLogger("agent-mcp.input_gate")
@@ -79,6 +100,13 @@ class InputGateDecorator(Decorator):
         args = tool_call_args(request)
         if eval_predicate(self.deny_when, args, log=log):
             log.warning("input_gate: denied '%s' -- %s", name, self.reason)
+            if is_notification(request):
+                # A JSON-RPC notification (no 'id') never gets a response --
+                # per the pipeline contract (pipeline.py), fire-and-forget.
+                # Denying it means simply not forwarding it; there is nothing
+                # to reply with (an id:null response would be an invalid
+                # message on a notification-only stream).
+                return None
             return self._deny(request)
         return await nxt(request)
 

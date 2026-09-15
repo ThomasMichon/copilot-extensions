@@ -801,6 +801,16 @@ own state safe to read"; `input_gate` decides "does this write attempt
 introduce a value it must never introduce", independent of any preflight
 lookup or the record's current state.
 
+> **Placement.** Put `input_gate` **last** in the `decorators:` list (innermost,
+> closest to upstream) — after `code-mode`/`defer` (whose synthesized
+> `tools/call` sub-requests only reach decorators BELOW their own position, so
+> an `input_gate` placed above them never sees those calls) and after `storage`
+> (which may rehydrate a `$stream` argument handle into its real value on the
+> way to upstream — an `input_gate` placed above `storage` would evaluate
+> `deny_when` against the un-rehydrated handle instead). Last position
+> guarantees `input_gate` always sees the fully-resolved arguments the
+> upstream is actually about to receive.
+
 
 
 ## Use from a Copilot agent
