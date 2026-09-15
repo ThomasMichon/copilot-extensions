@@ -1062,6 +1062,81 @@ def test_pair_requires_live_binding_and_knowledge_identity(
     assert not (harness / ".github" / "copilot" / "settings.local.json").exists()
 
 
+def test_compose_from_pair_disabled_withholds_composition(
+    tmp_path: Path, monkeypatch
+):
+    """`compose_knowledge_plugins: false` withholds composition entirely.
+
+    The pair remains valid (`paired: True`) -- only plugin grafting is
+    skipped -- since state-root/knowledge binding is a separate concern.
+    """
+    harness = tmp_path / "harness"
+    knowledge = tmp_path / "knowledge"
+    harness.mkdir()
+    (knowledge / ".ai").mkdir(parents=True)
+    _write_settings(
+        knowledge,
+        {
+            "extraKnownMarketplaces": {
+                "personal": {"source": {"source": "directory", "path": "./.ai"}}
+            },
+            "enabledPlugins": {"notes@personal": True},
+        },
+    )
+    resolution = _pair_resolution(harness, knowledge)
+    monkeypatch.setattr(kp.state_root, "resolve_pair", lambda *_a, **_k: resolution)
+    config = SimpleNamespace(
+        knowledge_repo="private",
+        repos={"harness": SimpleNamespace(compose_knowledge_plugins=False)},
+    )
+
+    summary = kp.compose_from_pair(cwd=harness, config=config)
+
+    assert summary["action"] == "disabled"
+    assert summary["paired"] is True
+    assert not (harness / ".github" / "copilot" / "settings.local.json").exists()
+
+
+def test_compose_from_pair_disabled_retires_prior_composition(
+    tmp_path: Path, monkeypatch
+):
+    """Turning the toggle off after a prior compose retires what it added."""
+    harness = tmp_path / "harness"
+    knowledge = tmp_path / "knowledge"
+    harness.mkdir()
+    (knowledge / ".ai").mkdir(parents=True)
+    _write_settings(
+        knowledge,
+        {
+            "extraKnownMarketplaces": {
+                "personal": {"source": {"source": "directory", "path": "./.ai"}}
+            },
+            "enabledPlugins": {"notes@personal": True},
+        },
+    )
+    kp.compose(harness, knowledge, pair_id="pair-1", pair_kind="worktree")
+    assert (
+        "notes@personal"
+        in _read_overlay(harness).get("enabledPlugins", {})
+    )
+
+    resolution = _pair_resolution(harness, knowledge)
+    monkeypatch.setattr(kp.state_root, "resolve_pair", lambda *_a, **_k: resolution)
+    config = SimpleNamespace(
+        knowledge_repo="private",
+        repos={"harness": SimpleNamespace(compose_knowledge_plugins=False)},
+    )
+
+    summary = kp.compose_from_pair(cwd=harness, config=config)
+
+    assert summary["action"] == "disabled"
+    assert summary["changed"] is True
+    # Emptied overlay content is removed entirely, same as other retirement
+    # paths (e.g. `_retire_invalid_pair_overlay`) -- nothing left to carry
+    # `notes@personal` (or anything else) forward.
+    assert not (harness / ".github" / "copilot" / "settings.local.json").exists()
+
+
 def test_stale_retirement_preserves_modified_managed_value(
     tmp_path: Path, monkeypatch
 ):
