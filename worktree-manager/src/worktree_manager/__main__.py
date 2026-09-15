@@ -468,6 +468,20 @@ def _cmd_contracts(rest: list[str]) -> int:
     return 0
 
 
+def _cmd_companion(rest: list[str]) -> int:
+    """[Prototype] Launch the Mux Companion exit/focus experiment.
+
+    Not the real Companion (see visions/mux-companion) -- a throwaway shell
+    (border + Exit button, no bindings of its own) used to find out, live
+    inside a psmux ``display-popup -E`` pane, how the popup actually gets
+    exited and how keyboard focus behaves, before any real design commits.
+    """
+    del rest  # no options yet
+    from .mux_companion import run as run_companion
+
+    return run_companion()
+
+
 def _cmd_picker(rest: list[str]) -> int:
     """Run, mock, or capture the Manager-owned production Picker."""
     args = list(rest)
@@ -1343,6 +1357,7 @@ def main(argv: list[str] | None = None) -> int:
         print("                         capture the production Picker headlessly")
         print("  picker --demo          preview the retired minimal scaffold")
         print("                         (in the Picker: l launch/resume · b bare-resume · n new)")
+        print("  companion              [prototype] Mux Companion exit/focus experiment (visions/mux-companion)")
         print()
         print("Phase 2 provisions prerequisites + drives the core install; Phase 3")
         print("adds the Manager state views (projects/repos/plugin enablement); later")
@@ -1360,6 +1375,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_contracts(args[1:])
     if args and args[0] == "picker":
         return _cmd_picker(args[1:])
+    if args and args[0] == "companion":
+        return _cmd_companion(args[1:])
     if args and args[0] == "doctor":
         return _cmd_doctor()
     if args and args[0] == "setup":
