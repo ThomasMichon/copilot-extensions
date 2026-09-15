@@ -375,6 +375,36 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-14 — Logger as a fourth same-cell peer-launch consumer
+
+- Continued Phase 6 caller conversions. Added `agent-logger` to the shared
+  `libs/peer-launch` boundary's `OWNERS` set (joining dispatch, CodeSpaces, and
+  Containers) and its environment-scrub prefixes; re-synced all four packaged
+  vendors and bumped all four plugins' versions together (a canonical
+  peer-launch change reaches every consumer's payload).
+- Converted `agent-logger`'s `tracked_worktree_paths()` (used by session
+  compaction to decide whether a session's worktree is still tracked before
+  archiving it) to resolve only the validated same-cell Agent Worktrees peer
+  under an explicit installation context, never an ambient `PATH` command.
+- This caller has the **opposite** safety direction from Containers' config
+  lookup: its documented `None` result already triggers the *safer* fallback
+  (an on-disk existence check that errs toward keeping, not archiving, a
+  session), so owner-validation failure, a missing/foreign/malformed peer, or
+  a probe error all deliberately degrade to `None` rather than raising --
+  raising here would crash a compaction pass over an installation-governance
+  blip. Recorded this reasoning inline so it is not mistaken for the
+  Containers-style "must-refuse" contract.
+- Native Windows and POSIX selections: agent-logger 26 passed; the expanded
+  shared real-process peer selection (now covering four owners across two
+  resolvers) 61 passed/5 skipped on Windows and 60/6 on POSIX; CodeSpaces
+  adapter 30 passed; Containers config/relay 103 passed -- all on both
+  platforms. Shared packaging passed 7 (one new test for the fourth vendor).
+  Lint, sync, version-consistency, docs-consistency, install-contract, and
+  headless-launch guards passed.
+- Only the converted caller's tested legacy PATH branch received an isolation
+  allowance; the remaining report-only inventory is unchanged by this slice.
+  No persistent installation was activated or deployed.
+
 ### 2026-09-14 — Worktree Manager as a standalone-payload installation-context consumer
 
 - Cross-referenced from the `worktree-manager-control-plane` effort. Worktree

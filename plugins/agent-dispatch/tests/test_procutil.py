@@ -281,7 +281,9 @@ def _make_live_peer(cell: Path, plugin: str, version: str) -> Path:
         (procutil.agent_bridge_launch_prefix, "agent-bridge", "agent_bridge"),
     ],
 )
-@pytest.mark.parametrize("owner", ["agent-dispatch", "agent-codespaces", "agent-containers"])
+@pytest.mark.parametrize(
+    "owner", ["agent-dispatch", "agent-codespaces", "agent-containers", "agent-logger"],
+)
 def test_namespaced_sibling_resolution_stays_in_active_marketplace_cell(
     tmp_path, monkeypatch, resolver, sibling_id, module, owner
 ):
@@ -325,6 +327,7 @@ def test_namespaced_sibling_resolution_stays_in_active_marketplace_cell(
             "AGENT_CODESPACES_TOKEN", "GH_TOKEN", "GITHUB_TOKEN",
             "AGENT_CONTAINERS_TOKEN", "AGENT_CONTAINERS_CONFIG",
             "AGENT_CONTAINERS_RELAY_ENABLED",
+            "AGENT_LOGGER_HOME", "AGENT_LOGGER_SYNC_TARGET",
             "AGENT_BRIDGE_SESSION_HOST_NONCE", "AGENT_BRIDGE_NO_ROUTING_TABLE",
             "AGENT_WORKTREES_OWNER_REF", "AGENT_WORKTREES_AHP_AUTH_TOKEN",
             "AGENT_WORKTREES_BIND", "AGENT_WORKTREES_PROJECT",
@@ -334,7 +337,7 @@ def test_namespaced_sibling_resolution_stays_in_active_marketplace_cell(
         if owner == "agent-codespaces":
             adapter = _codespaces_adapter(monkeypatch)
             result = adapter.run(*raw_args)
-        elif owner == "agent-containers":
+        elif owner in ("agent-containers", "agent-logger"):
             from agent_dispatch import peer_launch
 
             prefix = peer_launch.launch_prefix(
@@ -372,6 +375,7 @@ def test_namespaced_sibling_resolution_stays_in_active_marketplace_cell(
             "AGENT_CODESPACES_HOME", "AGENT_CODESPACES_TOKEN", "GH_TOKEN", "GITHUB_TOKEN",
             "AGENT_CONTAINERS_TOKEN", "AGENT_CONTAINERS_CONFIG",
             "AGENT_CONTAINERS_RELAY_ENABLED",
+            "AGENT_LOGGER_HOME", "AGENT_LOGGER_SYNC_TARGET",
             "AGENT_BRIDGE_SESSION_HOST_NONCE", "AGENT_BRIDGE_NO_ROUTING_TABLE",
             "AGENT_WORKTREES_OWNER_REF", "AGENT_WORKTREES_AHP_AUTH_TOKEN",
             "AGENT_WORKTREES_BIND", "AGENT_WORKTREES_PROJECT",
@@ -423,6 +427,67 @@ def test_containers_config_validates_owner_before_optional_peer(tmp_path, monkey
     peer_activation.write_text("{", encoding="utf-8")
     with pytest.raises(config._peer_launch.ContextRefused, match="activation-invalid"):
         config.load_config()
+
+
+def test_logger_compact_degrades_to_none_never_raises(tmp_path, monkeypatch):
+    """Unlike Containers' config, a refused/ambiguous lookup here is SAFE:
+
+    ``None`` triggers the caller's on-disk-existence fallback (errs toward
+    keeping, not archiving, a session), so owner/peer failures must degrade
+    quietly rather than raise or crash a compaction pass."""
+    source = Path(__file__).resolve().parents[2] / "agent-logger" / "src"
+    monkeypatch.syspath_prepend(str(source))
+    from agent_logger.sync import compact
+
+    cell = tmp_path / "marketplaces" / FIRST_MARKETPLACE_ID
+    own = _make_namespaced_context(cell, plugin_id="agent-logger")
+    monkeypatch.setenv("AGENT_LOGGER_HOME", str(own.parent))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own))
+    monkeypatch.setattr("shutil.which", lambda _: pytest.fail("ambient PATH selected"))
+    # Valid owner, no peer installed at all: documented optional absence.
+    assert compact.tracked_worktree_paths() is None
+    # Invalid/foreign explicit context: degrades to None, never raises.
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "{")
+    assert compact.tracked_worktree_paths() is None
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own))
+    # Blocked owner governance also degrades to None.
+    maintenance = own.parent / "maintenance"
+    maintenance.touch()
+    assert compact.tracked_worktree_paths() is None
+    maintenance.unlink()
+    # A live, healthy same-cell peer resolves through the real subprocess.
+    python = _make_live_peer(cell, "agent-worktrees", "1.0.0-dev1")
+    _patch_worktrees_module_for_list(python, tmp_path)
+    result = compact.tracked_worktree_paths()
+    assert result == {os.path.normcase(os.path.normpath(str(tmp_path / "wt-a")))}
+    # A malformed peer response also degrades to None instead of raising.
+    peer_activation = (cell / "plugins" / "agent-worktrees" / "installation-activation.json")
+    peer_activation.write_text("{", encoding="utf-8")
+    assert compact.tracked_worktree_paths() is None
+
+
+def _patch_worktrees_module_for_list(python: Path, tmp_path: Path) -> None:
+    """Make the disposable peer venv's ``agent_worktrees -m`` answer ``list --json``.
+
+    Mirrors ``_make_live_peer``'s own site-packages layout computation exactly,
+    then overwrites its generic echo ``__main__.py`` with a ``list --json``
+    responder.
+    """
+    slot = python.parent.parent
+    site = (
+        slot / "Lib" / "site-packages" if os.name == "nt"
+        else slot / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}"
+        / "site-packages"
+    )
+    module = site / "agent_worktrees"
+    (module / "__main__.py").write_text(
+        "import json, sys\n"
+        "if sys.argv[1:] == ['list', '--json']:\n"
+        f"    print(json.dumps({{'worktrees': [{{'path': {str(tmp_path / 'wt-a')!r}}}]}}))\n"
+        "else:\n"
+        "    raise SystemExit(2)\n",
+        encoding="utf-8",
+    )
 
 
 def test_codespaces_peer_refusals_are_not_optional_absence(tmp_path, monkeypatch):

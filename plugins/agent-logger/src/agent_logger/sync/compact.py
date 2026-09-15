@@ -16,6 +16,7 @@ Console: ``session-sync compact`` (see :mod:`agent_logger.sync.engine`).
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -26,8 +27,8 @@ from pathlib import Path
 
 from agent_procutil import no_window_kwargs
 
-from agent_logger import sessions
-from agent_logger.config import Config
+from agent_logger import _peer_launch, sessions
+from agent_logger.config import Config, home_dir
 from agent_logger.segmenter.platform import detect_machine
 from agent_logger.sessions import SessionRef
 
@@ -35,6 +36,8 @@ from agent_logger.sessions import SessionRef
 # ``~/.copilot/session-state``).
 from agent_logger.sync.lock import sync_lock
 from agent_logger.sync.origin import classify_for_sync, effective_harness
+
+log = logging.getLogger("agent-logger.compact")
 
 # On Windows, shelling out from a windowless parent (pythonw under a Scheduled
 # Task) flashes a console; suppress it. No-op on POSIX.
@@ -72,8 +75,21 @@ def tracked_worktree_paths() -> set[str] | None:
     registry entry together, so a pruned worktree drops out of this set.)
     Returns ``None`` when agent-worktrees is unavailable, so callers fall back
     to an on-disk existence check -- reliable for the same reason.
+
+    Under an explicit installation-cell context, resolution uses only the
+    validated same-cell peer boundary (never an ambient ``PATH`` command),
+    scoped to that cell. Unlike a config lookup, this callsite's ``None``
+    result is deliberately the *safer* direction here: it falls through to an
+    on-disk existence check that errs toward keeping (not archiving) a
+    session. Owner-validation failure, a missing/foreign/malformed peer
+    response, or a probe error therefore all resolve to ``None`` rather than
+    raising -- a compaction pass must never crash or destructively archive a
+    live session merely because installation governance is ambiguous.
     """
-    exe = shutil.which("agent-worktrees")
+    explicit_context = os.environ.get(_peer_launch.CONTEXT_ENV, "")
+    if explicit_context:
+        return _tracked_worktree_paths_same_cell(explicit_context)
+    exe = shutil.which("agent-worktrees")  # marketplace-isolation: allow legacy-compatibility
     if not exe:
         return None
     try:
@@ -92,12 +108,54 @@ def tracked_worktree_paths() -> set[str] | None:
         data = json.loads(proc.stdout)
     except json.JSONDecodeError:
         return None
+    return _paths_from_list_response(data)
+
+
+def _paths_from_list_response(data: object) -> set[str] | None:
+    if not isinstance(data, dict):
+        return None
+    worktrees = data.get("worktrees")
+    if not isinstance(worktrees, list):
+        return None
     paths: set[str] = set()
-    for wt in data.get("worktrees", []):
+    for wt in worktrees:
+        if not isinstance(wt, dict):
+            continue
         p = wt.get("path")
         if p:
             paths.add(_normalize_path(str(p)))
     return paths
+
+
+def _tracked_worktree_paths_same_cell(raw_context: str) -> set[str] | None:
+    """Same-cell resolution: any owner/peer/probe failure degrades to ``None``."""
+    try:
+        own = _peer_launch.validate_owner("agent-logger", home_dir(), raw_context)
+    except (OSError, ValueError, ImportError) as error:
+        log.debug("agent-logger installation context refused: %s", error)
+        return None
+    peer_root = Path(own["cellRoot"]) / "plugins" / "agent-worktrees"
+    if not peer_root.exists() and not peer_root.is_symlink():
+        return None
+    try:
+        prefix = _peer_launch.launch_prefix(
+            "agent-logger", Path(own["pluginRoot"]), raw_context, "agent-worktrees",
+        )
+        proc = subprocess.run(
+            [*prefix, "list", "--json"],
+            capture_output=True, encoding="utf-8", timeout=30,
+            **_peer_launch.no_window_kwargs(),
+        )
+    except (OSError, ValueError, ImportError, subprocess.SubprocessError) as error:
+        log.debug("Same-cell worktrees list failed: %s", error)
+        return None
+    if proc.returncode != 0 or not (proc.stdout or "").strip():
+        return None
+    try:
+        data = json.loads(proc.stdout)
+    except ValueError:
+        return None
+    return _paths_from_list_response(data)
 
 
 def _parse_iso(ts: str) -> datetime | None:
