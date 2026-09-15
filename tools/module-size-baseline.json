@@ -26,7 +26,7 @@
   "plugins/agent-codespaces/libs/ssh-manager/src/ssh_manager/carrier.py": 1313,
   "plugins/agent-codespaces/scripts/installation-context/installation_context.py": 9169,
   "plugins/agent-codespaces/scripts/versioned_runtime.py": 1245,
-  "plugins/agent-codespaces/src/agent_codespaces/__main__.py": 4630,
+  "plugins/agent-codespaces/src/agent_codespaces/__main__.py": 4636,
   "plugins/agent-codespaces/src/agent_codespaces/_installation_context.py": 9169,
   "plugins/agent-codespaces/src/agent_codespaces/config.py": 2554,
   "plugins/agent-containers/libs/ssh-manager/src/ssh_manager/carrier.py": 1313,
@@ -77,7 +77,7 @@
   "plugins/agent-worktrees/libs/plugin-activation/src/plugin_activation/resolver.py": 1270,
   "plugins/agent-worktrees/scripts/installation-context/installation_context.py": 9169,
   "plugins/agent-worktrees/scripts/versioned_runtime.py": 1245,
-  "plugins/agent-worktrees/src/agent_worktrees/__main__.py": 28504,
+  "plugins/agent-worktrees/src/agent_worktrees/__main__.py": 28510,
   "plugins/agent-worktrees/src/agent_worktrees/config.py": 2098,
   "plugins/agent-worktrees/src/agent_worktrees/finalize.py": 1826,
   "plugins/agent-worktrees/src/agent_worktrees/git_ops.py": 1481,
@@ -104,6 +104,6 @@
   "worktree-manager/src/worktree_manager/__main__.py": 1419,
   "worktree-manager/src/worktree_manager/_installation_context.py": 9169,
   "worktree-manager/src/worktree_manager/production_picker/picker_tui/data_ssh.py": 2033,
-  "worktree-manager/src/worktree_manager/production_picker/picker_tui/engine.py": 8231,
+  "worktree-manager/src/worktree_manager/production_picker/picker_tui/engine.py": 8282,
   "worktree-manager/src/worktree_manager/production_picker/picker_tui/pivots.py": 2159
 }
