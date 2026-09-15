@@ -1706,9 +1706,12 @@ async def _provision_relay_helpers(manager, name: str) -> None:
     but never raises, since the SSH command itself should still proceed.
     """
     from .codespace_assets import build_provision_command
+    from .config import load_merged_config
 
     try:
-        command = build_provision_command()
+        cfg = load_merged_config(include_cwd=False)
+        ado_host = getattr(cfg.credentials, "ado_host", None)
+        command = build_provision_command(ado_host=ado_host)
         result = await manager.exec_command(name, command, timeout=30.0)
         if result.exit_code == 0:
             log.debug("Relay helpers provisioned on %s", name)
@@ -4421,8 +4424,11 @@ def _cmd_provision_command() -> int:
     Prints the idempotent bash command to stdout.
     """
     from .codespace_assets import build_provision_command
+    from .config import load_merged_config
 
-    print(build_provision_command())
+    cfg = load_merged_config(include_cwd=False)
+    ado_host = getattr(cfg.credentials, "ado_host", None)
+    print(build_provision_command(ado_host=ado_host))
     return 0
 
 
