@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 
 from agent_worktrees import __main__ as m
+from agent_worktrees import repos as repos_module
 from agent_worktrees import tracking
 
 
@@ -74,3 +75,40 @@ def test_status_context_fallback_no_record(monkeypatch, capsys):
     assert rc == 0
     # No record -> machine + env only, repo:id4 omitted.
     assert capsys.readouterr().out.strip() == "emancipation-cube  wsl"
+
+
+def test_status_context_resolves_machine_alias_from_tracked_record(monkeypatch, capsys):
+    """Regression: a worktree's tracking record freezes ``machine`` at
+    registration time (a raw COMPUTERNAME), and this segment never re-resolved
+    it through machines.yaml's hostname/alias mapping the way ``machine-context``
+    does -- so a shared-pool box whose COMPUTERNAME differs from its canonical
+    mesh alias (dotfiles machines.yaml's decoupled-hostname convention) showed
+    the raw hostname in the mux forever, even after the alias mapping existed."""
+    monkeypatch.setattr(
+        m, "_find_record_for_path", lambda _p: _record(machine="cpc-tmich-oixui")
+    )
+    monkeypatch.setattr(repos_module, "resolve_path", lambda name: "/repo/test-chamber")
+    entry = m.cfg.MachineEntry(
+        key="tmichon-augloop1",
+        display_name="augloop1",
+        environment="Windows",
+        alias="augloop1",
+        hostname="cpc-tmich-oixui",
+    )
+    monkeypatch.setattr(m.cfg, "load_machines_yaml", lambda repo_dir: {"tmichon-augloop1": entry})
+    rc = m.cmd_status_context(_ns())
+    assert rc == 0
+    assert capsys.readouterr().out.strip() == "augloop1  win  test-chamber:8e45"
+
+
+def test_status_context_alias_resolution_fails_open(monkeypatch, capsys):
+    """No resolvable repo_dir / no machines.yaml -> the raw value renders
+    unchanged rather than raising or blanking the segment."""
+    monkeypatch.setattr(
+        m, "_find_record_for_path", lambda _p: _record(machine="cpc-tmich-oixui")
+    )
+    monkeypatch.setattr(repos_module, "resolve_path", lambda name: None)
+    monkeypatch.setattr(m, "_find_repo_dir", lambda: None)
+    rc = m.cmd_status_context(_ns())
+    assert rc == 0
+    assert capsys.readouterr().out.strip() == "cpc-tmich-oixui  win  test-chamber:8e45"
