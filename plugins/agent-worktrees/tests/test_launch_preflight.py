@@ -107,7 +107,6 @@ def _forbid_create_mutations(monkeypatch) -> None:
     monkeypatch.setattr(m.tracking, "create_new_record", forbidden)
     monkeypatch.setattr(m.permissions, "clone_permissions", forbidden)
     monkeypatch.setattr(m.permissions, "add_trusted_folder", forbidden)
-    monkeypatch.setattr(m, "_reconcile_marketplaces_for_checkout", forbidden)
 
 
 def _stub_successful_create(monkeypatch, tmp_path) -> None:
@@ -141,11 +140,6 @@ def _stub_successful_create(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(m.permissions, "clone_permissions", lambda *_a: False)
     monkeypatch.setattr(m.permissions, "add_trusted_folder", lambda *_a: False)
     monkeypatch.setattr(m.activity, "log_event", lambda *_a, **_k: None)
-    monkeypatch.setattr(
-        m,
-        "_reconcile_marketplaces_for_checkout",
-        lambda *_a, **_k: None,
-    )
     monkeypatch.setattr(
         m,
         "_worktree_to_dict",

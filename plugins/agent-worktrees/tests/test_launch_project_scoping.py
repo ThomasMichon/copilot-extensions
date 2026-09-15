@@ -103,7 +103,6 @@ def _stub_create_worktree_core_internals(monkeypatch, m, tmp_path):
     monkeypatch.setattr(m.permissions, "add_trusted_folder", lambda *_a: False)
     monkeypatch.setattr(m.activity, "log_event", lambda *_a, **_k: None)
     monkeypatch.setattr(m, "_worktree_to_dict", lambda record: {"id": record.worktree_id})
-    monkeypatch.setattr(m, "_reconcile_marketplaces_for_checkout", lambda *_a, **_k: None)
     monkeypatch.setattr(
         m.state_root_mod,
         "resolve_state_root",
