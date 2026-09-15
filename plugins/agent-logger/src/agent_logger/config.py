@@ -62,6 +62,11 @@ DEFAULTS: dict[str, Any] = {
         # Retention for destination pruning. None/<=0 -> retain everything.
         "retention_days": None,
         "lock_timeout_sec": 10,
+        # Name of the push lock file under <home>. Default keeps every install's
+        # single sync serialized. The multi-tenant orchestrator gives each
+        # tenant a distinct lock name (session-sync-<tenant>.lock) so concurrent
+        # tenant syncs over one shared home never block each other.
+        "lock_name": "session-sync.lock",
         # Target-independent post-push notify. After any successful push the
         # engine fires a best-effort HTTP POST to `url` (JSON body
         # {"machine": <machine>}; `{machine}` in the url is also substituted),
@@ -155,7 +160,7 @@ REPO_CONFIG_FILENAMES: tuple[str, ...] = (
     ".config/agent-logger.yaml",
     ".config/agent-logger.yml",
 )
-REPO_CONFIG_SCHEMA_VERSION = 1
+REPO_CONFIG_SCHEMA_VERSION = 2  # v2 adds the ``tenant`` block (see tenancy)
 REPO_LOG_FIELDS = {
     "root",
     "path_template",
@@ -376,23 +381,47 @@ def find_repo_config(start: Path | None = None) -> Path | None:
 def _load_repo_config(path: Path) -> dict[str, Any]:
     """Load the repo-local organization config.
 
-    Repo-local config is intentionally scoped to ``log`` settings. It lets a
-    repository define its checked-in log organization without letting arbitrary
-    checkouts change machine-local sync targets or runtime state locations.
+    Repo-local config is intentionally scoped to ``log`` settings (plus the
+    ``tenant`` block, consumed only by tenancy discovery). It lets a repository
+    define its checked-in log organization without letting arbitrary checkouts
+    change machine-local sync targets or runtime state locations.
+
+    **Forward compatibility (rolling updates).** A config written for a *newer*
+    schema than this build supports is read **tolerantly** -- top-level and
+    ``log`` fields this version does not recognize are ignored rather than fatal
+    -- so a fleet mid-upgrade never has an older reader hard-fail on a config a
+    newer machine committed. A config at or below this build's schema is
+    validated **strictly** (unknown fields are a typo and raise). This is why
+    growing the schema is a version bump, not a breaking change.
     """
     data = _load_repo_yaml(path)
-    _reject_unknown_fields(data, {"schema_version", "log"}, str(path))
     schema_version = data.get("schema_version", REPO_CONFIG_SCHEMA_VERSION)
-    if schema_version != REPO_CONFIG_SCHEMA_VERSION:
+    if isinstance(schema_version, bool) or not isinstance(schema_version, int):
         raise RepositoryConfigError(
-            f"{path}: schema_version must be {REPO_CONFIG_SCHEMA_VERSION}, "
-            f"got {schema_version!r}"
+            f"{path}: schema_version must be an integer, got {schema_version!r}"
         )
+    if schema_version < 1:
+        raise RepositoryConfigError(
+            f"{path}: schema_version must be >= 1, got {schema_version!r}"
+        )
+    future = schema_version > REPO_CONFIG_SCHEMA_VERSION
+    if not future:
+        _reject_unknown_fields(data, {"schema_version", "log", "tenant"}, str(path))
 
+    # The ``tenant`` block is consumed only by tenancy discovery (see
+    # agent_logger.tenancy), never by the ambient repo-local layer -- an
+    # arbitrary checkout must not be able to change machine-local sync state.
+    # A repo may carry a tenant block with no ``log`` block; that is a no-op here.
     log = data.get("log")
+    if log is None:
+        return {}
     if not isinstance(log, dict):
         raise RepositoryConfigError(f"{path}: log must be a mapping")
-    _reject_unknown_fields(log, REPO_LOG_FIELDS, f"{path}: log")
+    if future:
+        # Tolerant read: keep only the fields this build understands.
+        log = {k: v for k, v in log.items() if k in REPO_LOG_FIELDS}
+    else:
+        _reject_unknown_fields(log, REPO_LOG_FIELDS, f"{path}: log")
 
     scoped = copy.deepcopy(log)
     config_base = path.parent.parent if path.parent.name == ".config" else path.parent
@@ -528,6 +557,19 @@ class Config:
     @property
     def sync_lock_timeout(self) -> int:
         return int(self._data.get("sync", {}).get("lock_timeout_sec", 10))
+
+    @property
+    def sync_lock_name(self) -> str:
+        """Push lock file name under ``home``.
+
+        Defaults to ``session-sync.lock``. A tenant-resolved config sets a
+        distinct name so independent tenant syncs sharing one home do not
+        serialize against each other.
+        """
+        raw = self._data.get("sync", {}).get("lock_name") or "session-sync.lock"
+        name = str(raw).strip() or "session-sync.lock"
+        # Guard against a path-injecting name; the lock always sits in home.
+        return Path(name).name
 
     @property
     def sync_repo_allowlist(self) -> list[str]:
