@@ -179,3 +179,11 @@ class TestResolveHubTrackedPaths:
 
         monkeypatch.setattr(compact, "tracked_worktree_paths", raiser)
         assert compact.resolve_hub_tracked_paths(True) == (None, True)
+
+    def test_plain_none_also_reports_unresolved(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Genuine absence is no more informative than failure for hub
+        sessions, which may belong to a foreign machine this process cannot
+        verify: "no peer in this cell" must not be read as "nothing tracked
+        anywhere"."""
+        monkeypatch.setattr(compact, "tracked_worktree_paths", lambda: None)
+        assert compact.resolve_hub_tracked_paths(True) == (None, True)

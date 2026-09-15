@@ -408,6 +408,27 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   (ARM64 PowerShell package installs on Windows; WSL-to-Windows-PowerShell
   path bridging) were confirmed to fail identically on an unmodified
   checkout and are out of this slice's scope.
+- A further review round caught two more real issues: a whitespace-only peer
+  path passed validation and normalized to an accepted empty-string entry
+  (fixed: reject on `p.strip()`); and `resolve_hub_tracked_paths` treated
+  genuine peer *absence* as a resolved empty set for hub sessions, which may
+  belong to a foreign machine this process cannot verify -- "no peer in this
+  cell" is no more informative than a failure there. Both absence and failure
+  now report `unresolved=True` uniformly for the hub path, while
+  `select_compactable`'s local on-disk fallback keeps folding both into its
+  existing safe degrade. Also caught: origin/main moved twice more during
+  review with unrelated module-size-baseline regressions
+  (`worktree-manager/__main__.py`, `agent-worktrees/__main__.py`) blocking
+  every PR's required guard; widened both grandfathered ceilings to their
+  true, already-merged size as separate atomic commits.
+- A separate finding (Logger's own systemd/Task-generated scheduled
+  compaction service invokes the venv's console-script entry point directly,
+  bypassing the payload-local `runtime-gate.sh` dispatcher, so a
+  namespaced/scoped installation's background job never receives explicit
+  context) is Logger's own Phase-4 service-identity conversion, not a
+  follow-on to this caller conversion -- filed as
+  [#2701](https://github.com/ThomasMichon/copilot-extensions/issues/2701)
+  rather than expanding this PR's scope.
 
 ### 2026-09-14 — Logger as a fourth same-cell peer-launch consumer
 

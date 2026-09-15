@@ -59,16 +59,17 @@ callers' credentials and routing overrides.
 
 Logger uses this boundary for its cold-session-compaction tracked-worktree
 check. Genuine absence -- a valid owner with no same-cell worktrees peer
-installed -- returns `None`, the sole documented absence case; legacy lookup
-is unchanged without explicit context. Every other failure (owner-validation
+installed -- returns `None` from `tracked_worktree_paths()`; legacy lookup is
+unchanged without explicit context. Every other failure (owner-validation
 error, blocked governance, a probe error, or a malformed peer response) raises
-`ContextRefused` instead of degrading to `None`, since `None` here specifically
-means "confirmed nothing to protect." Callers choose their own safe response
-to that refusal: `select_compactable` already has a per-session on-disk
-existence fallback that errs toward keeping (not archiving) a session, so it
-folds a refusal into that same fallback; the hub-compaction callers have no
-such fallback for a foreign machine's session, so they fail the whole
-compaction pass closed instead of proceeding as if nothing needed protecting.
+`ContextRefused` instead. Callers choose their own safe response to a `None`
+or a refusal: `select_compactable` already has a per-session on-disk existence
+fallback that errs toward keeping (not archiving) a session, so it folds
+either into that same fallback. The hub-compaction callers have no such
+fallback for a foreign machine's session, so "no peer in this cell" is no more
+informative than a failure there -- both are treated as unresolved, and the
+whole compaction pass fails closed rather than proceeding as if nothing
+needed protecting.
 
 ## Validation
 
