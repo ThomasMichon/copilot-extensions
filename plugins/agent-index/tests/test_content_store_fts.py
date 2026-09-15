@@ -20,14 +20,14 @@ from contextlib import contextmanager
 from agent_index.store.content_store import ChunkRecord, ContentStore
 
 
-def _chunk(i: int) -> ChunkRecord:
+def _chunk(i: int, content: str | None = None) -> ChunkRecord:
     return ChunkRecord(
         chunk_id=f"c{i}",
         source="test:repo",
         file_path=f"f{i}.py",
         chunk_type="function",
         language="python",
-        content=f"def f{i}(): pass",
+        content=content if content is not None else f"def f{i}(): pass",
         content_hash=f"hash{i}",
         line_start=1,
         line_end=1,
@@ -268,3 +268,49 @@ def test_recovery_from_unavailable_index_does_full_replace(tmp_path, monkeypatch
     assert ok is True
     assert len(calls) == 1
     assert "t.create_fts_index('content', replace=True)" in calls[0]
+
+
+def _fts_index_stats(store: ContentStore):
+    """(indexed, unindexed) row counts for the content FTS index, read from a
+    freshly-opened table handle so a cached one cannot hide a newer version."""
+    store._table = None
+    table = store._get_or_create_table()
+    indices = table.list_indices()
+    name = getattr(indices[0], "name", None) or indices[0]["name"]
+    stats = table.index_stats(name)
+    return stats.num_indexed_rows, stats.num_unindexed_rows
+
+
+def test_incremental_optimize_indexes_and_finds_new_content(tmp_path):
+    """End-to-end against a REAL LanceDB table with no mocked subprocess:
+    content added after the first build must be folded into the existing FTS
+    index by the incremental (optimize-only) path, and be searchable.
+
+    The code-generation tests above only inspect the generated child source,
+    so they would still pass if ``optimize()`` did not actually update the
+    index. Searchability alone is not sufficient evidence either -- LanceDB
+    also flat-scans rows that are not yet in the index -- so this asserts the
+    index itself absorbed the new row (unindexed count drops to zero).
+    """
+    store = ContentStore(str(tmp_path / "db"))
+    store.upsert([_chunk(0), _chunk(1)])
+
+    assert store.ensure_fts_index() is True
+    assert store.fts_available is True
+    assert _fts_index_stats(store) == (2, 0)
+    assert store.fts_search("quetzalcoatl") == []
+
+    store.upsert([_chunk(2, content="quetzalcoatl migration helper")])
+    store.mark_fts_dirty()
+    assert _fts_index_stats(store) == (2, 1), "new row is not yet indexed"
+
+    # Incremental path: an already-available index, so no create_fts_index.
+    assert store.ensure_fts_index() is True
+    assert store.fts_dirty is False
+
+    assert _fts_index_stats(store) == (3, 0), (
+        "optimize() must incrementally fold newly-ingested rows into the "
+        "EXISTING FTS index, without a full from-scratch rebuild"
+    )
+    hits = [chunk_id for chunk_id, _score in store.fts_search("quetzalcoatl")]
+    assert hits == ["c2"]
