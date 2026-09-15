@@ -21382,6 +21382,39 @@ def cmd_knowledge_dispatch(argv: list[str]) -> int:
     return 0
 
 
+def cmd_reconcile_marketplaces(args: argparse.Namespace) -> int:
+    """Deprecated no-op compatibility shim for the retired ``reconcile-marketplaces``
+    command (#2722).
+
+    Local-checkout marketplace source overrides were retired entirely --
+    nothing produces or consumes ``_agentWorktreesMarketplaceOverrides``
+    markers anymore (see ``_migrate_legacy_marketplace_overrides``). This
+    shim exists ONLY to bridge the upgrade window: a launch already in
+    flight when the runtime updates (its ``launch-session.ps1``/``.sh``
+    already read into the shell process before the update lands), or a
+    stale ``marketplace-overrides.ps1``/``.sh`` left behind under a
+    machine's ``~/.agent-worktrees/bin/`` by a pre-#2722 install that a
+    later install hasn't overwritten/pruned yet, can still invoke this
+    subcommand. Without it, either caller hits the catch-all "Unknown
+    subcommand" error and -- in the launch-session.ps1 case -- aborts the
+    entire session launch. Accepts the retired flags, does nothing, and
+    always succeeds. Safe to delete once enough versions have shipped that
+    no pre-#2722 caller can still be invoking it.
+    """
+    if args.stdin:
+        try:
+            sys.stdin.read()
+        except OSError:
+            pass
+    if args.session_start:
+        print("{}")
+    elif args.json:
+        print(json.dumps({"action": "no-op", "changed": False, "reason": "retired"}, indent=2))
+    else:
+        print("Marketplace source overrides were retired; nothing to reconcile.")
+    return 0
+
+
 def _hunt_checkout(name: str) -> str | None:
     """Best-effort: find a local checkout for ``name`` under a known source root.
 
@@ -24228,6 +24261,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sp.add_argument("--json", action="store_true", help="Echo the status dict to stdout")
 
+    # reconcile-marketplaces -- retired (#2722); kept as a no-op compatibility
+    # shim so a caller still running pre-upgrade script content (an in-flight
+    # launch, or a stale deployed marketplace-overrides.ps1/.sh) doesn't
+    # hard-fail with "Unknown subcommand" during the upgrade window.
+    sp = sub.add_parser(
+        "reconcile-marketplaces",
+        help="Deprecated no-op (local marketplace source overrides were retired)",
+    )
+    sp.add_argument("--cwd", default=None, help=argparse.SUPPRESS)
+    sp.add_argument("--stdin", action="store_true", help=argparse.SUPPRESS)
+    sp.add_argument("--session-start", action="store_true", help=argparse.SUPPRESS)
+    sp.add_argument("--ensure-ignored", action="store_true", help=argparse.SUPPRESS)
+    sp.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+
     # reconcile-plugins (repo-configured plugin payload + runtime reconcile)
     sp = sub.add_parser(
         "reconcile-plugins", help="Reconcile repo enabledPlugins payloads + gated runtimes (JSON)"
@@ -26745,6 +26792,7 @@ COMMAND_MAP = {
     "get": cmd_get,
     "pre-launch": cmd_pre_launch,
     "stage-update": cmd_stage_update,
+    "reconcile-marketplaces": cmd_reconcile_marketplaces,
     "reconcile-plugins": cmd_reconcile_plugins,
     "uninstall-plugins": cmd_uninstall_plugins,
     "reconcile-binstubs": cmd_reconcile_binstubs,
@@ -27136,6 +27184,7 @@ _NO_PROJECT_COMMANDS = {
     "register",
     "hook",
     "knowledge",
+    "reconcile-marketplaces",
     "picker",
     "doctor",
     "reap-shells",
