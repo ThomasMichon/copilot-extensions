@@ -381,7 +381,7 @@ below for the carved implementation plan.
   `prune.interpret_descriptor_payload`) may treat it as authoritative. **Not
   done (item stays unchecked until this lands too):** the actual cockpit
   consumer calling `interpret_descriptor_payload` on this field.
-- [ ] Make mux and Picker use the descriptor's exact compact text, marker counts,
+- [x] Make mux and Picker use the descriptor's exact compact text, marker counts,
   and semantic style token; surface adapters may translate that style token to
   their native palette without redefining state. **Split status:** the
   PSMux/TMux status segment (`_render_status_segment`) is now done -- it
@@ -391,32 +391,50 @@ below for the carved implementation plan.
   (`C<N>`/`F<N>` markers included), instead of the old raw-state-only
   `_SEGMENT_STYLE` lookup; a fetch-free (cached) poll now correctly renders
   `MERGED` rather than `FINAL` for a COMPLETED worktree, matching design.md's
-  destructive-freshness rule. **Not done:** the Textual Picker
-  (`picker_tui/derive.py`/`engine.py`) still derives its own label
-  independently -- its `state` column is a fixed 6-char width with an exact
-  `C_STATE` dict lookup keyed on the bare label, so folding in compact
-  markers needs real column-layout work (a wider column or a new one) plus
-  golden/layout test updates, not just a data-source swap. That's its own
-  focused slice.
+  destructive-freshness rule. **Picker now done too:** `picker_tui/derive.py`
+  routes the completed-state label split through
+  `prune.interpret_descriptor_payload` (was reading `closure.label` directly
+  -- unsafe for a mixed-version fleet) and exposes `state_markers` (the
+  `C<N>`/`F<N>` suffix) and `state_style` (the descriptor's style token) on
+  every normalized record. `picker_tui/engine.py` adds a new narrow `markers`
+  column (kept separate from the fixed 6-char `state` column, dropped first
+  under width pressure) to `ACTIVE_SPECS`/`LIST_SPECS`/`CLEAN_SPECS`, and
+  resolves cell color via a new `_DESCRIPTOR_STYLE` style-token palette
+  (falling back to the legacy label-keyed `C_STATE` lookup when no descriptor
+  is present) -- a style adapter, not a state redefinition, per this item's
+  own wording.
 - [ ] Keep legends, filters, maintenance previews, and cleanup selections in
-  parity with the same descriptor. **Not done**, same reason as above.
+  parity with the same descriptor. **Narrowed, not fully done:** the
+  Maintenance pivot's `CLEAN_SPECS` table got the same `markers` column +
+  style-token color for free (shares `row_text`'s rendering with the main
+  list); filters/grouping already keyed off `_state()`'s label (unaffected by
+  the marker addition, so already in parity). **Still open:** no separate
+  state-color legend UI was found to need updating (checked; none exists),
+  but cleanup *selection* (which buckets `Cleanup` offers) still reads
+  `cleanup_bucket` independently of the closure descriptor's own
+  `action_disposition` -- reconciling those two verdict sources is real
+  follow-on work, left for a future slice rather than silently folded in
+  here.
 - [x] Preserve mixed-version fleet safety: absent, unsupported, or newer
   descriptor versions render provisional/review and never `FINAL` or
   prune-eligible. Landed as `prune.interpret_descriptor_payload`: an exact
   `version == DESCRIPTOR_VERSION` match is trusted; anything else (missing,
   malformed, older, or newer) reports `supported: False`,
   `final: False`, `action_disposition: "blocked"` regardless of what the
-  payload's own fields claim. Not yet CALLED by a real remote/cockpit
-  consumer (there isn't one yet -- see the two unchecked items above); the
-  safety net itself is built and tested ahead of that wiring.
+  payload's own fields claim. Now CALLED by the Picker (`derive.py`'s
+  `_state`/`_closure_markers`/`_closure_style`), in addition to the
+  already-tested safety net itself.
 - [ ] Assemble and truncate compact text in one shared function so parity is
   measured before and after the same width rule, with deterministic priority:
-  base label, blocker markers, then title/detail. **Partially done**:
+  base label, blocker markers, then title/detail. **Still partially done**:
   `assemble_closure_descriptor` already assembles `label` + `C<N>`/`F<N>`
   markers in one place (base label, then blocker markers, matching the
-  priority order), but does NOT yet fold in title/detail or truncate to a
-  width budget -- that needs the mux/Picker wiring above to know what width
-  budget applies.
+  priority order); the Picker's own truncation is column-local (`_clip()` at
+  the `markers` column's fixed width), which is a reasonable per-surface
+  width budget but not yet the single shared assemble+truncate function this
+  item envisions unifying across mux and Picker (mux truncates its own
+  `compact` text to the status-bar segment width independently) -- left as a
+  named follow-on, not silently dropped.
 - [x] Update lifecycle, conduct, worktree, and cleanup guidance: finalized is
   resumable until pruned; follow-ups are explicit items; cleanup receives and
   reports the exact blocking list.

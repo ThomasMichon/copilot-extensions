@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime as _dt
 
+from .. import prune
 from . import reciprocal
 from . import source_identity
 
@@ -164,11 +165,14 @@ def _state(w):
             # status segment's FINAL vs MERGED split via the same canonical
             # closure descriptor (`list --json --classify`'s additive
             # ``closure`` field), instead of always collapsing COMPLETED to
-            # FINAL. Falls back to the legacy FINAL label when a descriptor
-            # is unavailable (an older remote without Phase 4's `closure`).
-            closure_label = (w.get("closure") or {}).get("label")
-            if closure_label in ("FINAL", "MERGED"):
-                return closure_label
+            # FINAL. Routed through ``prune.interpret_descriptor_payload`` for
+            # mixed-version fleet safety (a remote on an older/newer
+            # ``agent-worktrees`` never gets its raw ``closure.label`` trusted
+            # directly) -- falls back to the legacy FINAL label when the
+            # descriptor is absent or unsupported.
+            interpreted = prune.interpret_descriptor_payload(w.get("closure"))
+            if interpreted["supported"] and interpreted["label"] in ("FINAL", "MERGED"):
+                return interpreted["label"]
             return "FINAL"
         return _STATE_LABEL.get(st, st.upper()[:6])
     pr = w.get("pr") or {}
@@ -180,6 +184,38 @@ def _state(w):
     if status == "active":
         return "WIP" if w.get("turn_count", 0) > 0 else "UNUSED"
     return (status or "?").upper()[:6]
+
+
+def _closure_markers(w):
+    """The closure descriptor's held-claim/open-follow-up marker suffix
+    (``"C<N>"``/``"F<N>"``, space-joined), version-safe via
+    ``prune.interpret_descriptor_payload``.
+
+    worktree-finality-and-obligations Phase 5: the Picker's own presentation
+    of the same marker counts the mux/PSMux status segment already renders
+    (``_render_status_segment``'s ``compact`` text) -- rendered in a separate
+    narrow column here (the ``state`` column is a fixed 6-char width sized for
+    the bare label alone). Empty when unsupported/absent/zero, never guessed.
+    """
+    interpreted = prune.interpret_descriptor_payload(w.get("closure"))
+    if not interpreted["supported"]:
+        return ""
+    parts = []
+    if interpreted["held_claims"]:
+        parts.append(f"C{interpreted['held_claims']}")
+    if interpreted["open_follow_ups"]:
+        parts.append(f"F{interpreted['open_follow_ups']}")
+    return " ".join(parts)
+
+
+def _closure_style(w):
+    """The closure descriptor's semantic style token (e.g. ``"final"``,
+    ``"merged-blocked"``, ``"dirty"``), version-safe via
+    ``prune.interpret_descriptor_payload``. Empty when unsupported/absent --
+    the engine falls back to its legacy label-keyed ``C_STATE`` lookup.
+    """
+    interpreted = prune.interpret_descriptor_payload(w.get("closure"))
+    return interpreted["style"] if interpreted["supported"] else ""
 
 
 def _sess(w):
@@ -450,6 +486,13 @@ def norm(
         "kind": kind,
         "tracking": w.get("status", ""),
         "state": _state(w),
+        # worktree-finality-and-obligations Phase 5: the closure descriptor's
+        # held-claim/open-follow-up marker suffix and semantic style token,
+        # rendered by the engine's own dedicated column/palette lookup
+        # (kept separate from ``state`` so the state column's fixed 6-char
+        # width and existing golden tests are undisturbed).
+        "state_markers": _closure_markers(w),
+        "state_style": _closure_style(w),
         "relation": reciprocal.short_label(reciprocal_relation),
         "reciprocal_relation": reciprocal_relation,
         "age": _age(

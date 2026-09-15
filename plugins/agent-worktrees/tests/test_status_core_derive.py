@@ -237,3 +237,61 @@ class TestFollowUpBucket:
     def test_fallback_unflagged_finalized_is_clean(self):
         assert derive._bucket_from_raw(
             {"id": "x", "status": "finalized"}) == "clean"
+
+
+class TestClosureDescriptorMarkers:
+    """worktree-finality-and-obligations Phase 5: the Picker's own marker/style
+    consumption of the closure descriptor, routed through
+    ``prune.interpret_descriptor_payload`` for mixed-version fleet safety."""
+
+    def _closure(self, **overrides):
+        payload = {
+            "version": 1,
+            "label": "MERGED",
+            "style": "merged-blocked",
+            "compact": "MERGED C2 F1",
+            "claims": {"held": 2},
+            "follow_ups": {"open": 1},
+            "closure": {"final": False},
+            "action": {"disposition": "blocked", "bucket": "wip"},
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_markers_render_both_counts(self):
+        n = derive.norm(_raw(state="completed", closure=self._closure()),
+                        "anomalous-potato", "win")
+        assert n["state"] == "MERGED"
+        assert n["state_markers"] == "C2 F1"
+        assert n["state_style"] == "merged-blocked"
+
+    def test_markers_omit_zero_counts(self):
+        closure = self._closure(
+            claims={"held": 0}, follow_ups={"open": 3}, compact="MERGED F3")
+        n = derive.norm(_raw(state="completed", closure=closure),
+                        "anomalous-potato", "win")
+        assert n["state_markers"] == "F3"
+
+    def test_no_closure_is_blank_markers_and_style(self):
+        n = derive.norm(_raw(state="completed"), "anomalous-potato", "win")
+        assert n["state"] == "FINAL"
+        assert n["state_markers"] == ""
+        assert n["state_style"] == ""
+
+    def test_unsupported_version_never_trusted(self):
+        # A version-mismatched descriptor is never treated as authoritative --
+        # markers/style fall back to blank, and the label stays the legacy
+        # FINAL fallback (never the raw payload's own claim).
+        closure = self._closure(version=999)
+        n = derive.norm(_raw(state="completed", closure=closure),
+                        "anomalous-potato", "win")
+        assert n["state"] == "FINAL"
+        assert n["state_markers"] == ""
+        assert n["state_style"] == ""
+
+    def test_malformed_closure_never_trusted(self):
+        n = derive.norm(_raw(state="completed", closure="not-a-dict"),
+                        "anomalous-potato", "win")
+        assert n["state"] == "FINAL"
+        assert n["state_markers"] == ""
+        assert n["state_style"] == ""

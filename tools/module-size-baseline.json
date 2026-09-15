@@ -83,7 +83,7 @@
   "plugins/agent-worktrees/src/agent_worktrees/git_ops.py": 1481,
   "plugins/agent-worktrees/src/agent_worktrees/installer.py": 1727,
   "plugins/agent-worktrees/src/agent_worktrees/picker_tui/data_ssh.py": 2156,
-  "plugins/agent-worktrees/src/agent_worktrees/picker_tui/engine.py": 8526,
+  "plugins/agent-worktrees/src/agent_worktrees/picker_tui/engine.py": 8554,
   "plugins/agent-worktrees/src/agent_worktrees/picker_tui/pivots.py": 2040,
   "plugins/agent-worktrees/src/agent_worktrees/pr_contract.py": 1463,
   "plugins/agent-worktrees/src/agent_worktrees/pr_ops.py": 1944,
