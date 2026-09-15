@@ -738,3 +738,68 @@ its issues; the public artifacts stay self-contained and general-purpose.
   environment failures confirmed present on `main` before this change).
   `engine_client`/`agent_plugin_runtime`/`production_picker_transplant`
   targeted runs: 64+43+7 all green.
+
+  **Follow-up review rounds on [#2674](https://github.com/ThomasMichon/copilot-extensions/pull/2674)
+  found four more real issues, all fixed in the same PR before merge:**
+  bumped Worktree Manager's own payload version (`0.1.0-dev37` → `dev38`, in
+  sync with `pyproject.toml`, so version-gated installs actually redeploy
+  this resolver); `resolve_installed_plugin_slot` now checks the interpreter
+  exists *before* selecting a slot, so a complete-but-damaged
+  `current-version` slot correctly falls through to `last-known-good` / the
+  newest remaining `versions/*` (matching the original single-function
+  resolver's behavior, which the refactor into two functions had
+  regressed); `_engine_runtime`'s legacy fallback now shares
+  `legacy_plugin_root()` instead of a second, `AGENT_HOME`-blind
+  `USERPROFILE`-only computation; and, most importantly, a **HIGH-severity
+  finding**: `_namespaced_plugin_root` originally trusted `pointer.parent`
+  after only checking the raw JSON's `pluginId` field, so any
+  user-controlled directory containing a minimal `{"pluginId": ...}` blob
+  plus a crafted `versions/*/bin/python` would be accepted and later
+  executed. Fixed by validating the receipt through the vendored
+  `validate_context_receipt` (real schema/version, canonical
+  marketplace-id format, and -- critically -- that the receipt sits at the
+  exact canonical path derived from its own declared identity under the
+  real durable home) instead of trusting any file that merely claims the
+  right `pluginId`. Also fixed a self-inflicted regression along the way: an
+  early `if profile is None: return False` in `marketplace_cells_enabled()`
+  made every POSIX policy check return `False` unconditionally, since
+  `_canonical_os_profile` deliberately returns `None` on POSIX so the
+  vendored resolver derives the canonical passwd-database home itself.
+  New/updated tests include a forged-receipt rejection test and real
+  `namespace.json`/`install.json` fixtures built from
+  `libs/installation-context/fixtures/source-identities.json`'s existing
+  vectors (mirroring the construction `libs/installation-context`'s own
+  governance tests use), replacing the earlier minimal JSON stand-ins.
+
+  **A further review round on the same PR found six more issues, all fixed
+  before merge:** the vendored `_installation_context.py` (9,169 lines)
+  needed a `tools/module-size-baseline.json` entry, exactly like the other
+  vendored copies already have, or the module-size guard would fail CI.
+  More substantively: `_validated_plugin_root` (renamed
+  `_validated_legacy_root`) accepted a bare `install.json` for the **legacy**
+  root too, so a forged receipt dropped directly into `~/.agent-worktrees`
+  could still bypass `validate_context_receipt` entirely -- fixed by
+  restricting the legacy root to the `deploy-manifest.json` shape only, and
+  reusing `_namespaced_plugin_root`'s already-fully-validated root
+  (never re-validated the weaker way) for the namespaced case.
+  `_engine_runtime._context_runtime_root()` still separately checked only
+  the raw `pluginId` and returned `pointer.parent` directly, bypassing the
+  new validated resolver entirely for the Picker's own import path -- fixed
+  by routing it through `agent_plugin_runtime._namespaced_plugin_root`, the
+  exact same function `resolve_installed_plugin_command` uses.
+  `marketplace_cells_enabled()`'s one global-only policy check couldn't see
+  marketplace- or plugin-scoped overrides; `_namespaced_plugin_root` now
+  evaluates the effective policy from the *validated receipt's own*
+  marketplace id via a second `resolve_installation_mode` call, so a
+  marketplace- or plugin-scoped override is honored with full precedence,
+  not just the coarse global bit. `_engine_runtime`'s marker walk didn't
+  require `.install-complete.json` the way the command resolver does, so an
+  in-progress install's `agent_worktrees` package directory could be
+  imported early. And several tests set `USERPROFILE`/`HOME` directly, which
+  the resolver deliberately ignores on POSIX (by design, to avoid trusting a
+  possibly-spoofed variable) -- replaced with a shared `patch_profile` test
+  helper (`tests/_installation_context_fixtures.py`) that patches the two
+  profile-resolution seams directly, making the tests platform-portable
+  instead of silently depending on the real test-runner account's home
+  directory. Full `worktree-manager` suite after this round: 806 passed (the
+  same 6 pre-existing, unrelated environment failures).

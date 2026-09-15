@@ -22,13 +22,13 @@ def _context_runtime_root() -> Path | None:
     """The cell-scoped root named by an explicit ``COPILOT_EXTENSIONS_CONTEXT``.
 
     A context that names the wrong plugin, or is otherwise unreadable, is a
-    genuine misconfiguration and raises. But a context that DOES name
-    agent-worktrees is only trusted when the shared installation-mode policy
-    (``agent_plugin_runtime.marketplace_cells_enabled`` -- the same vendored
-    resolver every agent-* plugin's own bootstrap consults) says marketplace
-    cells are actually enabled. This is the "same config" invariant: an
-    explicit context alone must never be more authoritative here than it
-    would be for agent-worktrees itself.
+    genuine misconfiguration and raises with a clear diagnostic. Beyond that
+    basic sanity check, the actual ROOT always comes from
+    ``agent_plugin_runtime._namespaced_plugin_root`` -- the same
+    ``validate_context_receipt``-backed, policy-gated resolver
+    ``resolve_installed_plugin_command`` uses -- never ``pointer.parent``
+    directly, so a forged receipt cannot be imported merely because its
+    ``pluginId`` happens to match.
     """
     context = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip()
     if not context:
@@ -48,9 +48,7 @@ def _context_runtime_root() -> Path | None:
         raise EngineRuntimeError(
             "the selected installation context does not own agent-worktrees"
         )
-    if not agent_plugin_runtime.marketplace_cells_enabled():
-        return None
-    return pointer.parent
+    return agent_plugin_runtime._namespaced_plugin_root("agent-worktrees")
 
 
 def _active_runtime_source() -> Path | None:
@@ -62,7 +60,12 @@ def _active_runtime_source() -> Path | None:
     # reading only current-version -- so a stale/damaged current-version slot
     # here degrades exactly the way engine_client's resolver does, rather
     # than reporting no source at all when a good fallback slot exists.
+    # The completion marker is required here too, matching the command
+    # resolver's own contract: a current slot must not be importable before
+    # its install has actually finished.
     for slot in agent_plugin_runtime._runtime_candidates(root):
+        if not (slot / ".install-complete.json").is_file():
+            continue
         for candidate in (
             slot / "Lib" / "site-packages",
             slot / "lib" / "python3.13" / "site-packages",

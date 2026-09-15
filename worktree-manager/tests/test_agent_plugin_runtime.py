@@ -5,9 +5,12 @@ Extracted from ``engine_client.py``'s agent-worktrees-specific resolution
 prove: (1) the legacy marker-selected-slot behavior is preserved for any
 plugin id, (2) the namespaced root is only ever considered when the SAME
 vendored installation-mode policy every agent-* plugin's own bootstrap reads
-says marketplace cells are enabled, and (3) an absent/disabled policy or a
+says marketplace cells are enabled, (3) an absent/disabled policy or a
 foreign/invalid explicit context always falls back to legacy -- exactly the
-resolver's own "absent policy selects legacy" default.
+resolver's own "absent policy selects legacy" default, and (4) a forged
+receipt that merely claims the right ``pluginId`` is rejected outright, even
+with an enabled policy, because it fails the real ``validate_context_receipt``
+schema/canonical-path checks.
 """
 
 from __future__ import annotations
@@ -18,6 +21,8 @@ from pathlib import Path
 import pytest
 
 from worktree_manager import agent_plugin_runtime as apr
+
+from _installation_context_fixtures import namespaced_fixture, patch_profile
 
 
 def _python_path(slot: Path) -> Path:
@@ -99,6 +104,22 @@ def test_legacy_resolution_skips_a_complete_slot_missing_its_interpreter(
     ]
 
 
+def test_legacy_root_never_accepts_a_bare_install_json(monkeypatch, tmp_path):
+    """A forged ``install.json`` dropped directly into the legacy root must
+    never be trusted -- only ``deploy-manifest.json`` authorizes a legacy
+    root. Accepting install.json there too would let a forged receipt bypass
+    the real namespaced-receipt validation entirely."""
+    root = tmp_path / ".agent-bridge"
+    slot = root / "versions" / "9.9.9"
+    _write_slot(slot)
+    (root / "current-version").write_text("9.9.9", encoding="utf-8")
+    (root / "install.json").write_text(
+        json.dumps({"pluginId": "agent-bridge"}), encoding="utf-8"
+    )
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path))
+    assert apr.resolve_installed_plugin_command("agent-bridge") is None
+
+
 def test_marketplace_cells_enabled_defaults_false_without_policy(tmp_path):
     assert apr.marketplace_cells_enabled(os_profile=tmp_path) is False
 
@@ -110,95 +131,14 @@ def test_marketplace_cells_enabled_reads_global_policy_bit(tmp_path):
     assert apr.marketplace_cells_enabled(os_profile=tmp_path) is False
 
 
-def _source_vector(index: int = 0) -> dict:
-    fixtures = (
-        Path(__file__).resolve().parents[2]
-        / "libs" / "installation-context" / "fixtures" / "source-identities.json"
-    )
-    return json.loads(fixtures.read_text(encoding="utf-8"))["vectors"][index]
-
-
-def _write_json(path: Path, value: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
-
-
-def _namespaced_fixture(
-    home: Path, plugin_id: str = "agent-worktrees",
-) -> tuple[Path, Path]:
-    """Build a fully valid namespace.json + install.json pair -- enough to
-    satisfy ``validate_context_receipt``'s real schema/canonical-path checks,
-    not just a JSON blob with a matching ``pluginId`` -- under
-    ``<home>/.copilot-extensions/marketplaces/<id>/plugins/<plugin_id>/``,
-    plus a marker-selected runtime slot. Returns (install.json path, python).
-    """
-    vector = _source_vector(0)
-    marketplace_id = str(vector["marketplaceId"])
-    normalized = vector["normalized"]
-    durable = home / ".copilot-extensions"
-    cell = durable / "marketplaces" / marketplace_id
-    plugin_root = cell / "plugins" / plugin_id
-    payload = home / "payload"
-    payload.mkdir(parents=True, exist_ok=True)
-    namespace = cell / "namespace.json"
-    install = plugin_root / "install.json"
-    _write_json(namespace, {
-        "schema": "copilot-extensions.marketplace-namespace",
-        "version": 1,
-        "marketplaceId": marketplace_id,
-        "source": {
-            "kind": normalized["kind"],
-            "canonical": normalized["canonical"],
-            "ref": normalized["ref"],
-            "fingerprint": f"sha256:{vector['sha256']}",
-        },
-        "locators": [],
-        "generation": 1,
-        "state": "active",
-        "createdAt": "2026-01-01T00:00:00Z",
-        "updatedAt": "2026-01-01T00:00:00Z",
-    })
-    _write_json(install, {
-        "schema": "copilot-extensions.plugin-installation",
-        "version": 1,
-        "marketplaceId": marketplace_id,
-        "pluginId": plugin_id,
-        "pluginRoot": str(plugin_root.resolve()),
-        "namespaceReceipt": str(namespace.resolve()),
-        "payload": {
-            "root": str(payload.resolve()),
-            "version": "1.0.0",
-            "origin": "explicit",
-        },
-        "roots": {
-            "versions": "versions",
-            "snapshots": "snapshots",
-            "state": "state",
-            "run": "run",
-            "logs": "logs",
-            "cache": "cache",
-            "launchers": "launchers",
-        },
-        "generation": 1,
-        "state": "active",
-        "createdAt": "2026-01-01T00:00:00Z",
-        "updatedAt": "2026-01-01T00:00:00Z",
-    })
-    slot = plugin_root / "versions" / "1.2.3"
-    python = _write_slot(slot)
-    (plugin_root / "current-version").write_text("1.2.3", encoding="utf-8")
-    return install, python
-
-
 def test_namespaced_root_used_when_policy_enabled_and_context_matches(
     monkeypatch, tmp_path
 ):
     home = tmp_path / "home"
     home.mkdir()
-    install, python = _namespaced_fixture(home)
+    install, python = namespaced_fixture(home, windows=apr.os.name == "nt")
     _write_policy(home, enabled=True)
-    monkeypatch.setenv("USERPROFILE", str(home))
-    monkeypatch.setenv("HOME", str(home))
+    patch_profile(monkeypatch, apr, home)
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(install))
     # No legacy root exists at all -- proves namespaced resolution, not a
     # coincidental legacy hit.
@@ -214,9 +154,8 @@ def test_namespaced_root_ignored_when_policy_disabled(monkeypatch, tmp_path):
     exactly like a plugin's own bootstrap would for the same file."""
     home = tmp_path / "home"
     home.mkdir()
-    install, _python = _namespaced_fixture(home)
-    monkeypatch.setenv("USERPROFILE", str(home))
-    monkeypatch.setenv("HOME", str(home))
+    install, _python = namespaced_fixture(home, windows=apr.os.name == "nt")
+    patch_profile(monkeypatch, apr, home)
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(install))
     monkeypatch.setenv("AGENT_HOME", str(tmp_path / "no-legacy-here"))
     assert apr.resolve_installed_plugin_command("agent-worktrees") is None
@@ -227,10 +166,9 @@ def test_namespaced_root_ignored_when_context_names_a_different_plugin(
 ):
     home = tmp_path / "home"
     home.mkdir()
-    install, _python = _namespaced_fixture(home)
+    install, _python = namespaced_fixture(home, windows=apr.os.name == "nt")
     _write_policy(home, enabled=True)
-    monkeypatch.setenv("USERPROFILE", str(home))
-    monkeypatch.setenv("HOME", str(home))
+    patch_profile(monkeypatch, apr, home)
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(install))
     monkeypatch.setenv("AGENT_HOME", str(tmp_path / "no-legacy-here"))
     assert apr.resolve_installed_plugin_command("agent-bridge") is None
@@ -247,14 +185,13 @@ def test_namespaced_root_ignored_when_receipt_is_not_a_real_installation(
     home = tmp_path / "home"
     home.mkdir()
     _write_policy(home, enabled=True)
+    patch_profile(monkeypatch, apr, home)
     forged = tmp_path / "attacker-controlled" / "install.json"
     forged.parent.mkdir(parents=True)
     forged.write_text(json.dumps({"pluginId": "agent-worktrees"}), encoding="utf-8")
     forged_slot = forged.parent / "versions" / "9.9.9"
     _write_slot(forged_slot)
     (forged.parent / "current-version").write_text("9.9.9", encoding="utf-8")
-    monkeypatch.setenv("USERPROFILE", str(home))
-    monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(forged))
     monkeypatch.setenv("AGENT_HOME", str(tmp_path / "no-legacy-here"))
     assert apr.resolve_installed_plugin_command("agent-worktrees") is None
@@ -267,8 +204,9 @@ def test_namespaced_context_falls_back_to_legacy_when_both_present(
     ALSO-present legacy install (namespaced is tried first)."""
     home = tmp_path / "home"
     home.mkdir()
-    install, namespaced_python = _namespaced_fixture(home)
+    install, namespaced_python = namespaced_fixture(home, windows=apr.os.name == "nt")
     _write_policy(home, enabled=True)
+    patch_profile(monkeypatch, apr, home)
     legacy_root = tmp_path / "legacy" / ".agent-worktrees"
     legacy_slot = legacy_root / "versions" / "0.0.1"
     _write_slot(legacy_slot)
@@ -280,8 +218,6 @@ def test_namespaced_context_falls_back_to_legacy_when_both_present(
         }),
         encoding="utf-8",
     )
-    monkeypatch.setenv("USERPROFILE", str(home))
-    monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(install))
     monkeypatch.setenv("AGENT_HOME", str(tmp_path / "legacy"))
     assert apr.resolve_installed_plugin_command("agent-worktrees") == [
@@ -308,3 +244,26 @@ def test_canonical_os_profile_uses_userprofile_on_windows(monkeypatch):
         "C:\\Users\\someone"
     )
     assert apr._canonical_os_profile({}) is None
+
+
+def test_marketplace_cells_enabled_never_disabled_outright_when_profile_is_none(
+    monkeypatch, tmp_path
+):
+    """Regression guard: an early ``if profile is None: return False`` once
+    silently disabled every POSIX policy check, since
+    ``_canonical_os_profile`` returns ``None`` on POSIX by design. Passing
+    ``None`` through must let the vendored resolver derive its own canonical
+    profile instead of short-circuiting to ``False``."""
+    monkeypatch.setattr(apr, "_canonical_os_profile", lambda environment: None)
+    monkeypatch.setattr(apr, "legacy_plugin_root", lambda plugin_id: tmp_path)
+    calls = []
+
+    class _Fake:
+        @staticmethod
+        def resolve_installation_mode(**kwargs):
+            calls.append(kwargs)
+            return {"policy": {"enabled": True}}
+
+    monkeypatch.setattr(apr, "_load_installation_context", lambda: _Fake())
+    assert apr.marketplace_cells_enabled(environment={}) is True
+    assert calls and calls[0]["os_profile"] is None

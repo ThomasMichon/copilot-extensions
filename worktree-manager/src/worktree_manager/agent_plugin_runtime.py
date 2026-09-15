@@ -224,20 +224,20 @@ def _durable_home(ic: ModuleType, environment: dict[str, str]) -> Path | None:
 def _namespaced_plugin_root(plugin_id: str) -> Path | None:
     """The cell-scoped plugin root named by ``COPILOT_EXTENSIONS_CONTEXT``.
 
-    Only returned when: the global policy gate is on, an explicit context
-    points at a receipt, and that receipt validates as an attributable
-    installation for this exact plugin via the vendored
-    ``validate_context_receipt`` -- schema/version, canonical marketplace-id
-    format, and (crucially) that the receipt sits at the exact canonical
-    path derived from its own declared identity under the real durable home,
-    not merely "some file whose JSON happens to say the right pluginId".
-    This still does not re-validate activation/generation state the way
-    ``libs/peer-launch`` does before actually launching a process -- it is
-    the read-only "which root should I look under" question, not an
+    Only returned when: an explicit context points at a receipt, that
+    receipt validates as an attributable installation for this exact plugin
+    via the vendored ``validate_context_receipt`` -- schema/version,
+    canonical marketplace-id format, and (crucially) that the receipt sits
+    at the exact canonical path derived from its own declared identity under
+    the real durable home, not merely "some file whose JSON happens to say
+    the right pluginId" -- AND the shared installation-mode policy,
+    evaluated for this EXACT plugin/marketplace (global -> marketplace ->
+    plugin precedence, not just the coarse global bit), says cells are
+    enabled. This still does not re-validate activation/generation state the
+    way ``libs/peer-launch`` does before actually launching a process -- it
+    is the read-only "which root should I look under" question, not an
     invocation-time governance gate.
     """
-    if not marketplace_cells_enabled():
-        return None
     context = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip()
     if not context:
         return None
@@ -248,9 +248,6 @@ def _namespaced_plugin_root(plugin_id: str) -> Path | None:
     if ic is None:
         return None
     env = dict(os.environ)
-    durable = _durable_home(ic, env)
-    if durable is None:
-        return None
     # COPILOT_PLUGIN_ROOT (when present) is cross-checked against the
     # receipt's own payload root -- a real protection when a plugin resolves
     # its OWN context. Worktree Manager is not that plugin: any
@@ -258,84 +255,104 @@ def _namespaced_plugin_root(plugin_id: str) -> Path | None:
     # unrelated ambient context, not this lookup's target, so it must not
     # leak in and spuriously reject an otherwise-valid receipt.
     env.pop("COPILOT_PLUGIN_ROOT", None)
+    durable = _durable_home(ic, env)
+    if durable is None:
+        return None
     try:
         validated = ic.validate_context_receipt(
             pointer, durable, expected_plugin_id=plugin_id, environment=env,
         )
     except Exception:
         return None
-    plugin_root = validated.get("pluginRoot") if isinstance(validated, dict) else None
-    if not plugin_root:
+    if not isinstance(validated, dict):
+        return None
+    plugin_root = validated.get("pluginRoot")
+    payload_root = validated.get("payloadRoot")
+    if not plugin_root or not payload_root:
+        return None
+    profile = _canonical_os_profile(env)
+    try:
+        resolution = ic.resolve_installation_mode(
+            legacy_root=legacy_plugin_root(plugin_id),
+            plugin_id=plugin_id,
+            context=str(pointer),
+            payload_root=payload_root,
+            expected_payload_root=payload_root,
+            expected_plugin_id=plugin_id,
+            durable_home=durable,
+            os_profile=profile,
+            environment=env,
+        )
+    except Exception:
+        return None
+    policy = resolution.get("policy") if isinstance(resolution, dict) else None
+    if not isinstance(policy, dict) or not policy.get("enabled"):
         return None
     return Path(plugin_root)
 
 
-def _validated_plugin_root(root: Path, plugin_id: str) -> Path | None:
-    """Confirm ``root`` is an attributable install root for ``plugin_id``.
-
-    Accepts either receipt shape: the legacy ``deploy-manifest.json``
-    (``service`` + ``source.plugin``) or the namespaced ``install.json``
-    (``pluginId``). A root with neither, or a receipt naming a different
-    plugin, is never trusted.
+def _validated_legacy_root(root: Path, plugin_id: str) -> Path | None:
+    """Confirm ``root`` is an attributable LEGACY install root for
+    ``plugin_id``: only the ``deploy-manifest.json`` shape (``service`` +
+    ``source.plugin``) is ever trusted here. The namespaced ``install.json``
+    shape is validated separately -- and far more strictly, via the vendored
+    ``validate_context_receipt`` -- by ``_namespaced_plugin_root``. Accepting
+    a bare ``install.json`` here too would let a forged receipt dropped
+    directly into the legacy root bypass that validation entirely.
     """
     manifest_path = root / "deploy-manifest.json"
-    if manifest_path.is_file():
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError, TypeError):
-            return None
-        if not isinstance(manifest, dict):
-            return None
-        source = manifest.get("source")
-        if (
-            manifest.get("service") == plugin_id
-            and isinstance(source, dict)
-            and source.get("plugin") == plugin_id
-        ):
-            return root
+    if not manifest_path.is_file():
         return None
-    install_path = root / "install.json"
-    if install_path.is_file():
-        try:
-            install = json.loads(install_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError, TypeError):
-            return None
-        if isinstance(install, dict) and install.get("pluginId") == plugin_id:
-            return root
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+    if not isinstance(manifest, dict):
+        return None
+    source = manifest.get("source")
+    if (
+        manifest.get("service") == plugin_id
+        and isinstance(source, dict)
+        and source.get("plugin") == plugin_id
+    ):
+        return root
     return None
 
 
-def candidate_plugin_roots(plugin_id: str) -> list[Path]:
-    """Roots to check, namespaced first (when policy-enabled and named by an
-    explicit context), then the always-available legacy root."""
-    roots: list[Path] = []
-    namespaced = _namespaced_plugin_root(plugin_id)
-    if namespaced is not None:
-        roots.append(namespaced)
-    roots.append(legacy_plugin_root(plugin_id))
-    return roots
+def _select_complete_slot(root: Path) -> Path | None:
+    """The first marker-selected slot under ``root`` that is both marked
+    complete AND actually has its interpreter present, skipping a
+    complete-but-damaged slot in favor of the next candidate."""
+    for slot in _runtime_candidates(root):
+        if not (slot / ".install-complete.json").is_file():
+            continue
+        python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        if python.is_file():
+            return slot
+    return None
 
 
 def resolve_installed_plugin_slot(plugin_id: str) -> Path | None:
     """The exact marker-selected immutable runtime slot for ``plugin_id``.
 
-    Never PATH, never a bare command name: only an attributable, marker-
-    selected slot under a validated install root (namespaced when policy and
-    an explicit context agree, else legacy) that is BOTH marked complete AND
-    actually has its interpreter present. A slot with a stale/damaged
-    interpreter is skipped in favor of the next candidate (``last-known-good``,
-    then the newest remaining ``versions/*``) rather than failing the whole
-    lookup -- matching the original single-root resolver's fallback loop.
+    Never PATH, never a bare command name: only an attributable slot under a
+    validated install root. The namespaced root (when policy is enabled and
+    an explicit context validates via ``_namespaced_plugin_root``) is
+    already fully validated and is tried first; the legacy root is trusted
+    only via the ``deploy-manifest.json`` shape, never a bare
+    ``install.json``, so a forged receipt cannot masquerade as either kind
+    of root.
     """
-    for root in candidate_plugin_roots(plugin_id):
-        if _validated_plugin_root(root, plugin_id) is None:
-            continue
-        for slot in _runtime_candidates(root):
-            if not (slot / ".install-complete.json").is_file():
-                continue
-            python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-            if python.is_file():
-                return slot
+    namespaced_root = _namespaced_plugin_root(plugin_id)
+    if namespaced_root is not None:
+        slot = _select_complete_slot(namespaced_root)
+        if slot is not None:
+            return slot
+    legacy_root = legacy_plugin_root(plugin_id)
+    if _validated_legacy_root(legacy_root, plugin_id) is not None:
+        slot = _select_complete_slot(legacy_root)
+        if slot is not None:
+            return slot
     return None
 
 
