@@ -6,6 +6,17 @@ This module runs those commands -- always as a subprocess against the
 contributing plugin's CLI on ``PATH``, never a cross-venv Python import -- so
 the picker stays decoupled from the plugin's runtime.
 
+That decoupling has to cover the child's *environment* too: the picker itself
+is one plugin's own process (agent-worktrees), so its environment can carry
+agent-worktrees-scoped identity vars (``COPILOT_PLUGIN_ROOT``,
+``COPILOT_EXTENSIONS_CONTEXT``, and friends). A pivot's ``list``/action
+command is almost always a *different* plugin's CLI (e.g. ``agent-dispatch``);
+inheriting those vars unchanged makes that CLI's own installation-context
+self-check see a foreign plugin root and reject the invocation outright (a
+"payload context mismatch" that has nothing to do with the actual command).
+Every subprocess this module spawns therefore runs under
+:func:`_child_process_env`, never the picker's raw ``os.environ``.
+
 :class:`RegisteredPivotRuntime` keeps the picker responsive: the ``list``
 command runs on a daemon thread and the result is cached per machine, so the
 render loop only ever reads a snapshot. Everything degrades gracefully -- a
@@ -30,6 +41,30 @@ from .pivots import RegisteredPivot, format_template, parse_list_payload
 #: Hard cap on how long a pivot's ``list``/action command may run.
 LIST_TIMEOUT = 20.0
 ACTION_TIMEOUT = 30.0
+
+#: Plugin-identity env vars that must never leak from the picker's own process
+#: into a *different* plugin's CLI. Mirrors ``reconcile._RUNTIME_ENV_UNSET``
+#: (the installer's own "clean child environment" list) -- kept as an
+#: independent, dependency-light copy here so this hot-path module doesn't pull
+#: in ``reconcile``'s (and its ``yaml``) import weight just for one tuple.
+_CHILD_ENV_UNSET = (
+    "COPILOT_EXTENSIONS_CONTEXT",
+    "COPILOT_PLUGIN_INSTALL_STAGED",
+    "COPILOT_PLUGIN_ROOT",
+    "COPILOT_PLUGIN_STAGED_FROM",
+    "PYTHONPATH",
+)
+
+
+def _child_process_env() -> dict[str, str]:
+    """A copy of the current environment with this plugin's own identity vars
+    removed, safe to hand to *any other* plugin's CLI. See the module
+    docstring for why this matters -- without it, a pivot action can fail with
+    a spurious cross-plugin "payload context mismatch"."""
+    env = dict(os.environ)
+    for key in _CHILD_ENV_UNSET:
+        env.pop(key, None)
+    return env
 #: Overall watchdog for a one-shot (non-``subscribe``) streaming ``list``: a
 #: stalled producer is killed after this many seconds, but rows already received
 #: are kept. A ``subscribe`` (held/live) stream has no overall deadline.
@@ -249,6 +284,7 @@ class RegisteredPivotRuntime:
             stdin=subprocess.DEVNULL,
             text=True, encoding="utf-8", errors="replace",
             bufsize=1,
+            env=_child_process_env(),
         )
         if os.name == "posix":
             kwargs["start_new_session"] = True
@@ -455,7 +491,8 @@ class RegisteredPivotRuntime:
             return ("error", [], "empty list command", {})
         try:
             proc = subprocess.run(
-                argv, capture_output=True, text=True, timeout=LIST_TIMEOUT, check=False
+                argv, capture_output=True, text=True, timeout=LIST_TIMEOUT,
+                check=False, env=_child_process_env(),
             )
         except FileNotFoundError:
             return ("error", [], f"{argv[0]} not found on PATH", {})
@@ -498,7 +535,8 @@ class RegisteredPivotRuntime:
             return (False, "empty action command")
         try:
             proc = subprocess.run(
-                argv, capture_output=True, text=True, timeout=ACTION_TIMEOUT, check=False
+                argv, capture_output=True, text=True, timeout=ACTION_TIMEOUT,
+                check=False, env=_child_process_env(),
             )
         except FileNotFoundError:
             return (False, f"{argv[0]} not found on PATH")
@@ -636,7 +674,8 @@ def run_config_section(action, ctx: Mapping[str, object]) -> tuple[bool, str]:
         return (False, "empty config command")
     try:
         proc = subprocess.run(
-            argv, capture_output=True, text=True, timeout=ACTION_TIMEOUT, check=False
+            argv, capture_output=True, text=True, timeout=ACTION_TIMEOUT,
+            check=False, env=_child_process_env(),
         )
     except FileNotFoundError:
         return (False, f"{argv[0]} not found on PATH")
@@ -659,7 +698,8 @@ def run_worktree_action(action, ctx: Mapping[str, object]) -> tuple[bool, str]:
         return (False, "empty action command")
     try:
         proc = subprocess.run(
-            argv, capture_output=True, text=True, timeout=ACTION_TIMEOUT, check=False
+            argv, capture_output=True, text=True, timeout=ACTION_TIMEOUT,
+            check=False, env=_child_process_env(),
         )
     except FileNotFoundError:
         return (False, f"{argv[0]} not found on PATH")
