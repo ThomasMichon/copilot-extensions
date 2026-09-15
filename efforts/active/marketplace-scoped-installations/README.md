@@ -429,6 +429,21 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   follow-on to this caller conversion -- filed as
   [#2701](https://github.com/ThomasMichon/copilot-extensions/issues/2701)
   rather than expanding this PR's scope.
+- A further finding, empirically verified: `agent-worktrees list --json`
+  requires a resolved single project (from CWD or `--project`) and exits
+  non-zero from a neutral working directory -- the typical shape of a
+  scheduled/background compaction run. This is a pre-existing limitation
+  shared identically by the legacy ambient-`PATH` caller and the new
+  same-cell caller (neither is machine-wide capable today), not something
+  the peer-launch conversion introduced. Its practical consequence became
+  more visible because the fail-closed hub-compaction fix now means hub
+  compaction with the default `require_untracked_worktree=true` will
+  typically skip rather than run in that deployment shape, until
+  `agent-worktrees` gains a machine-wide listing capability or the caller
+  resolves project scope explicitly. Filed as
+  [#2706](https://github.com/ThomasMichon/copilot-extensions/issues/2706);
+  fixing it requires either a new `agent-worktrees` capability or a
+  considered design decision, not a caller-side isolation change.
 
 ### 2026-09-14 — Logger as a fourth same-cell peer-launch consumer
 
