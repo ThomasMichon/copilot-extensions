@@ -587,8 +587,8 @@ class ContentStore:
                         fcntl.flock(fd, fcntl.LOCK_UN)
                 os.close(fd)
 
-    def _run_fts_build(self, *, timeout: float = 300.0) -> None:
-        """Build the BM25 FTS index in a FRESH subprocess (optimize + create).
+    def _run_fts_build(self, *, full: bool, timeout: float = 300.0) -> None:
+        """Update the BM25 FTS index in a FRESH subprocess (optimize [+ create]).
 
         LanceDB's sync ``create_fts_index`` bridges to a module-singleton
         background asyncio loop; inside the agent-index server's full lifespan that
@@ -604,15 +604,51 @@ class ContentStore:
         in-process build crawl before it deadlocked. The server's cached table
         handle sees the freshly-built index immediately, with no reopen
         (verified), so search picks up FTS without a restart.
+
+        ``full`` controls whether a from-scratch ``create_fts_index(...,
+        replace=True)`` runs after ``optimize()``. Per LanceDB's own docs
+        (Reindexing / Incremental Reindexing), ``optimize()`` already performs
+        compaction, retention pruning, *and* an incremental update of any
+        existing vector/scalar/FTS index against newly-ingested rows -- it does
+        NOT require ``create_fts_index`` to pick up new data. Forcing
+        ``replace=True`` on every dirty-triggered rebuild discards the existing
+        BM25 index and rebuilds it from scratch over the *entire* content
+        table regardless of how small the actual delta is -- disproportionate
+        I/O on a large, mostly-unchanged corpus (observed downstream as a
+        sustained heavy read burst off a handful of new commits). Only the
+        first-ever build, or a
+        recovery from an index that was never successfully created
+        (``_fts_available`` False), needs the full ``replace=True`` path;
+        every subsequent "merely dirty" rebuild can rely on ``optimize()``
+        alone.
+
+        On the ``full`` path, an ``optimize()`` failure is swallowed (only
+        logged) because ``create_fts_index(replace=True)`` still runs
+        afterward and is the actual source of correctness there -- a failed
+        compaction is a missed cleanup opportunity, not a missed index update.
+        On the incremental (``full=False``) path there is no follow-up
+        ``create_fts_index`` call, so ``optimize()`` succeeding IS the only
+        thing that updates the index; swallowing its failure there would let
+        the caller believe the rebuild succeeded (clearing ``_fts_dirty``)
+        while the on-disk FTS index silently went stale. So the incremental
+        path lets ``optimize()`` raise, causing the subprocess to exit
+        non-zero and the caller's existing retry/backoff logic to treat it as
+        a genuine failed rebuild instead.
         """
+        if full:
+            body = (
+                "try:\n"
+                "    t.optimize()\n"
+                "except Exception as e:\n"
+                "    print(f'optimize skipped: {e}', file=sys.stderr)\n"
+                "t.create_fts_index('content', replace=True)\n"
+            )
+        else:
+            body = "t.optimize()\n"
         code = (
             "import sys, lancedb\n"
             "t = lancedb.connect(sys.argv[1]).open_table(sys.argv[2])\n"
-            "try:\n"
-            "    t.optimize()\n"
-            "except Exception as e:\n"
-            "    print(f'optimize skipped: {e}', file=sys.stderr)\n"
-            "t.create_fts_index('content', replace=True)\n"
+            + body
         )
         proc = subprocess.run(
             [sys.executable, "-B", "-c", code, self._db_path, self._table_name],
@@ -629,6 +665,28 @@ class ContentStore:
                 f"{proc.stderr.strip()[-500:]}"
             )
 
+    def _durable_fts_index_exists(self, table) -> bool:
+        """Best-effort check of LanceDB's own index metadata for an existing
+        FTS index on ``content``.
+
+        ``_fts_available`` starts ``False`` on every fresh process, so
+        without this check a restarted process would assume no index exists
+        and pay for a full rebuild even when the on-disk index from a prior
+        process is still perfectly valid. A failure here (e.g. an older
+        LanceDB without ``list_indices``) is not fatal -- it just falls back
+        to the previous behavior of doing one full rebuild.
+        """
+        try:
+            return any(
+                idx.index_type == "FTS" and "content" in idx.columns
+                for idx in table.list_indices()
+            )
+        except Exception:
+            logger.debug(
+                "Failed to check for a durable FTS index", exc_info=True
+            )
+            return False
+
     def _rebuild_fts_locked(self, *, max_retries: int) -> bool:
         """Inner FTS rebuild - caller must hold the in-process ``_fts_lock``.
 
@@ -638,6 +696,24 @@ class ContentStore:
         race/poison the shared Lance table, and arms a capped exponential backoff
         on persistent failure so the 60s maintainer stops hammering a stuck
         conflict every tick.
+
+        Does a full ``create_fts_index(replace=True)`` only when no index has
+        ever been built successfully (``_fts_available`` False, e.g. first
+        build or recovery); a "merely dirty" rebuild of an already-available
+        index relies on ``optimize()``'s incremental FTS update instead (see
+        ``_run_fts_build``), avoiding a full-corpus rescan for a small delta.
+
+        ``_fts_available`` is in-process state only, seeded ``False`` on
+        every fresh ``ContentStore`` (e.g. after a service restart) even when
+        a prior process already built a perfectly good FTS index durably on
+        disk. Before assuming a full rebuild is needed, check LanceDB's own
+        index metadata (``table.list_indices()``) for an existing FTS index
+        on ``content`` -- this avoids paying for one wasted full-corpus
+        rebuild per restart. That check (and the resulting ``full`` decision)
+        happens AFTER acquiring the cross-process file lock, not before: an
+        unlocked check could see no index, then block on the lock while a
+        concurrent process finishes the first build, and still barrel into a
+        second full ``replace=True`` rebuild once unblocked.
         """
         table = self._get_or_create_table()
         try:
@@ -660,10 +736,17 @@ class ContentStore:
                 self._fts_next_retry_at = time.monotonic() + _FTS_LOCK_RECHECK_S
                 return self._fts_available
 
+            # Recompute durable-index availability and the full/incremental
+            # decision only now that the lock is held, so a process that
+            # waited out a concurrent build sees its result.
+            if not self._fts_available and self._durable_fts_index_exists(table):
+                self._fts_available = True
+            full = not self._fts_available
+
             last_err: Exception | None = None
             for attempt in range(1, max_retries + 1):
                 try:
-                    self._run_fts_build()
+                    self._run_fts_build(full=full)
                     # The subprocess built the index on its OWN connection; drop
                     # this store's cached table handle so the next query re-opens
                     # at the latest version and actually sees the new FTS index
@@ -675,7 +758,11 @@ class ContentStore:
                     self._fts_dirty = False
                     self._fts_consecutive_failures = 0
                     self._fts_next_retry_at = 0.0
-                    logger.info("FTS index created/rebuilt on %d chunks", count)
+                    logger.info(
+                        "FTS index %s on %d chunks",
+                        "created/rebuilt" if full else "incrementally updated",
+                        count,
+                    )
                     return True
                 except Exception as e:
                     last_err = e
