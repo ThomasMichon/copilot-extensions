@@ -52,12 +52,15 @@ control plane's current sweep target, use the dedicated
 ## Every session knows this exists
 
 This is not a mechanism a session opts into only once it feels context
-pressure or the user says a trigger phrase. The extension delivers a one-time
-awareness message on THIS session's first turn -- whether or not it began
-from a handoff -- stating plainly that the mechanism exists and that context
-pressure is never a reason to rush, truncate diligence, or leave work
-unfinished. Treat that awareness as standing permission to work as thoroughly
-as a task deserves: you can always hand off instead of cutting corners.
+pressure or the user says a trigger phrase. Every session receives the
+static, hookless session-start guidance
+(`instructions/context-handoff/session-guidance.instructions.md`, written by
+this plugin's `sessionStart` hook -- see `scripts/emit-guidance.*`), which
+states plainly -- whether or not it began
+from a handoff -- that the mechanism exists and that context pressure is
+never a reason to rush, truncate diligence, or leave work unfinished. Treat
+that awareness as standing permission to work as thoroughly as a task
+deserves: you can always hand off instead of cutting corners.
 
 ## Continuity contract
 

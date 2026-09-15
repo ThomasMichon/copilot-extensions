@@ -39,14 +39,20 @@ test("handoff-core threads the mechanism-awareness constant into every delivered
   assert.match(core, /CONTINUATION_DIRECTIVE,\s*\n\s*""[,\s]*\n\s*HANDOFF_MECHANISM_AWARENESS/);
 });
 
-test("extension delivers the awareness nudge on the first turn regardless of handoff origin", () => {
+test("extension no longer re-delivers the awareness nudge from in-memory module state", () => {
   const extension = readFileSync(
     join(plugin, "extensions", "context-handoff", "extension.mjs"),
     "utf8",
   );
-  assert.match(extension, /awarenessNudgeSent/);
-  assert.match(extension, /pendingAwareness = true/);
-  assert.match(extension, /HANDOFF_MECHANISM_AWARENESS/);
+  // The fresh-session awareness message moved to the static, naturally
+  // idempotent session-guidance file (scripts/emit-guidance.*) so a
+  // mid-session extension re-fork (reconnect/reload) can never replay it --
+  // see efforts/active/context-handoff-overhaul's journal for the incident
+  // (a reload replayed this nudge and raced the skill registry, producing a
+  // transient "Skill not found: context-handoff").
+  assert.doesNotMatch(extension, /awarenessNudgeSent/);
+  assert.doesNotMatch(extension, /pendingAwareness/);
+  assert.doesNotMatch(extension, /HANDOFF_MECHANISM_AWARENESS/);
 });
 
 test("skill and README distinguish context-pressure auto-trigger from follow-up ask-first", () => {

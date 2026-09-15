@@ -127,6 +127,13 @@ def test_bash_emits_owned_bounded_continuity_guidance() -> None:
     assert "Bounded delegates remain within their assigned scope" in context
     assert "The session owning the objective stops only" in context
     assert "Use the `context-handoff` skill" in context
+    # Fresh-session awareness (Goal 2/3): a session did not need to begin
+    # from a handoff to learn the mechanism exists -- delivered here (static,
+    # naturally idempotent session-start guidance) rather than a runtime
+    # session.send() nudge from the extension (which is reimported on every
+    # reconnect/refork and so cannot track "sent once" safely).
+    assert "whether or not this session began from a handoff" in context
+    assert "available from turn one" in context
     kernel = context.split("\n\n## agent-worktrees session command catalog", 1)[0]
     assert len(kernel.encode("utf-8")) < 2048
     assert len(context.encode("utf-8")) < 3072

@@ -470,3 +470,39 @@ gate land._
   2), the `userPromptSubmitted` observability hook (item 3), and closing
   `handoff-live-cutover`'s remaining Phase 3 items (item 4). All three
   remain for a follow-up Phase 3 continuation.
+
+### 2026-09-14 — incidental fix found while resuming Phase 3 slice 2
+
+- Before starting the coordinator-fallback wiring, the operator reported a
+  live production defect: a "Skill not found: context-handoff" error and the
+  fresh-session awareness message ("This worktree has a context-handoff
+  mechanism available from turn one...") appearing to reinject mid-
+  conversation, unrelated to the current turn. Root-caused to
+  `extension.mjs`'s first-turn awareness nudge (`awarenessNudgeSent`/
+  `pendingAwareness`, added in Phase 2/#2663): that module is reimported on
+  every session reconnect/refork (documented in its own top-level comment),
+  so the in-memory "sent once" guard is not idempotent across a session's
+  real lifetime -- a mid-session extension/skill reload replays the nudge
+  and races the skill registry, producing the transient lookup failure.
+- Per the operator's steer, moved the "mechanism exists" fact out of the
+  extension's runtime nudge entirely and into the plugin's existing static,
+  hookless session-start guidance (`scripts/emit-guidance.*`, written once
+  per real session start) -- a plain file rewrite is naturally idempotent,
+  so no reforked module state can replay it. The extension is now scoped to
+  only what genuinely requires it: `session.usage_info` monitoring and the
+  soft/hard/force threshold nudges.
+- Also fixed an unrelated pre-existing version-drift bug found while
+  pushing: `marketplace.json`'s `agent-worktrees` entry (`1.5.5-dev113`) was
+  stale against `plugin.json`/`pyproject.toml` (`1.5.5-dev114`) already on
+  `main`, blocking every push's version-consistency guard.
+- Bumped `context-handoff` to `0.1.1-dev22`. **PR #2683** opened (not yet
+  merged as of this entry).
+- **Phase 3 slice 2's actual objective (coordinator-fallback launch wiring)
+  is still not started** -- this detour consumed the session before that
+  work began. Next session: branch fresh off `origin/main` (after #2683
+  merges) and pick up the coordinator-fallback wiring per the "Next Slice"
+  plan already on file (extend `agent_dispatch/coordinator.py`'s
+  `_gc_loop`/`_orphan_reap_loop`-style periodic reconciliation to detect an
+  unclaimed `proposed`/`handoff`-labeled task past a bounded window and
+  launch `agent-worktrees handoff-cutover --headless`, guarded against
+  double-launch).
