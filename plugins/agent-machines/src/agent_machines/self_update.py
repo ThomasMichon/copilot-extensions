@@ -1,7 +1,9 @@
 """Tiered unattended self-update for agent-machines.
 Two independently scheduled tiers keep a logged-in Windows machine converging
 without an interactive Copilot session:
-* ``watchdog``: ensure the dtssh host launcher watchdog is running.
+* ``watchdog``: ensure the dtssh host launcher watchdog is running, and
+  reconcile this machine's outbound reach into the dtssh mesh (re-discover
+  live tunnel ids, re-emit the SSH profile, verify every known alias).
 * ``sweep``: fast-forward adopted repos, refresh plugin payloads/runtimes, then
   run the maintenance-safe machine restore subset.
 The tiers resolve opt-in from declarative ``self-update`` resources, use one
@@ -635,6 +637,56 @@ def ensure_watchdog(
     )
 
 
+def refresh_dtssh_mesh(
+    *, runner: Callable[..., CommandResult] = default_command_runner
+) -> StepResult:
+    """Reconcile this machine's outbound reach into the dtssh mesh.
+
+    Delegates to ``agent-ssh refresh-mesh``, which re-discovers live tunnel
+    ids, re-emits the managed SSH profile from that live state, and verifies
+    reachability to every ``machines.yaml`` dtssh alias. This closes the gap
+    where the watchdog tier only checked that *this* machine's own dtssh host
+    launcher was alive, never that every other machine could still be reached
+    -- a cached tunnel id going stale after a peer's host restart otherwise
+    breaks inbound SSH silently until an operator notices
+    (copilot-extensions#2684).
+
+    Missing ``agent-ssh`` or no declared mesh is reported as ``skipped``, not
+    an error: not every machine participates in a dtssh mesh.
+    """
+    binary = shutil.which("agent-ssh")
+    if binary is None:
+        return StepResult(
+            "dtssh-mesh-refresh", "skipped", "agent-ssh is not installed on this machine"
+        )
+    result = runner([binary, "refresh-mesh", "--json"], timeout=300)
+    payload: dict[str, Any] | None = None
+    try:
+        payload = json.loads(result.stdout) if result.stdout.strip() else None
+    except ValueError:
+        payload = None
+    if isinstance(payload, dict) and payload.get("machines_yaml") is None:
+        return StepResult(
+            "dtssh-mesh-refresh",
+            "skipped",
+            payload.get("detail") or "no machines.yaml found for this machine",
+        )
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    if result.returncode == 0:
+        return StepResult(
+            "dtssh-mesh-refresh",
+            "ok",
+            detail or "refreshed the dtssh mesh",
+            command=result.argv,
+        )
+    return StepResult(
+        "dtssh-mesh-refresh",
+        "error",
+        detail or result.output or "dtssh mesh refresh failed",
+        command=result.argv,
+    )
+
+
 def _parse_git_counts(output: str) -> tuple[int, int]:
     fields = output.strip().split()
     if len(fields) < 2:
@@ -751,6 +803,7 @@ def run_tier(
     process_lister: Callable[[], list[dict[str, Any]]] = default_process_lister,
     launcher_starter: Callable[[DtsshConfig], bool] = default_launcher_starter,
     worktree_lister: Callable[[], list[dict[str, Any]]] = default_worktree_lister,
+    mesh_refresher: Callable[[], StepResult] | None = None,
     home: Path | None = None,
 ) -> RunResult:
     if tier not in TIER_SPECS:
@@ -789,6 +842,19 @@ def run_tier(
                 process_lister=process_lister,
                 launcher_starter=launcher_starter,
             )
+            refresher = mesh_refresher or (lambda: refresh_dtssh_mesh(runner=runner))
+            mesh_step = refresher()
+            steps.append(mesh_step)
+            if mesh_step.status == "error":
+                return RunResult(
+                    tier=tier,
+                    status="error",
+                    opted_in=True,
+                    detail=mesh_step.detail,
+                    lock_reclaimed=lock.reclaimed,
+                    attempted_at=attempted_at,
+                    steps=steps,
+                )
         else:
             steps = list(sweep_repo_paths(discovered_repos or [], runner=runner))
             pull_errors = [step for step in steps if step.status == "error"]

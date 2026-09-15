@@ -107,6 +107,16 @@ def _payload_root() -> Path:
     raise RuntimeError("cannot resolve the active agent-ssh payload")
 
 
+def payload_root() -> Path:
+    """Public wrapper: resolve the installed agent-ssh payload root.
+
+    Reused by ``mesh_refresh`` to locate transport-owned deploy assets
+    (``transports/<name>/...``) the same way host restoration does, instead of
+    duplicating the marketplace/version resolution logic.
+    """
+    return _payload_root()
+
+
 def _dtssh_command(alias: str, port: int, *, apply: bool) -> list[str]:
     payload = _payload_root()
     script = payload / "transports" / "dtssh" / "scripts" / "install-host.ps1"

@@ -1255,7 +1255,7 @@ def test_verify_network_failure_does_not_reclassify_active_fragment(
         calls.append(command)
         return SimpleNamespace(returncode=1)
 
-    monkeypatch.setattr("agent_ssh.__main__.subprocess.run", unreachable)
+    monkeypatch.setattr("agent_ssh.probe.subprocess.run", unreachable)
     assert main(["verify", "--config-d", str(config_d), "host-a"]) == 1
     output = capsys.readouterr().out
     assert "host-a unreachable" in output
@@ -1278,7 +1278,7 @@ def test_verify_fails_closed_on_unscoped_registry_uncertainty(
     def must_not_probe(*_args, **_kwargs):
         raise AssertionError("SSH must not run under unscoped registry uncertainty")
 
-    monkeypatch.setattr("agent_ssh.__main__.subprocess.run", must_not_probe)
+    monkeypatch.setattr("agent_ssh.probe.subprocess.run", must_not_probe)
     assert main(["verify", "--config-d", str(config_d), "fresh-alias"]) == 1
     captured = capsys.readouterr()
     assert "not permitted by current managed-profile evidence" in captured.out
