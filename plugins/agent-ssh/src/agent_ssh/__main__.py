@@ -5,6 +5,8 @@ Subcommands:
   emit-profile   Render/write a managed SSH profile fragment.
   explore        Introspect a reachable SSH target (repos, runtimes, agents).
   mesh-status    Render the calling repo's SSH machine mesh from machines.yaml.
+  refresh-mesh   Re-discover live tunnel ids, re-emit the profile, and verify
+                 reachability to every machines.yaml dtssh alias.
   verify         Probe machine-name SSH reachability using the active profile.
   version        Show package version.
 """
@@ -13,16 +15,14 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
 from pathlib import Path
 
-from agent_procutil import no_window_flags
-
-from . import __version__, fragment_registry, ssh_profile
+from . import __version__, fragment_registry, host_restore, ssh_profile
 from . import explore as explore_mod
-from . import host_restore
 from . import mesh as mesh_mod
+from . import mesh_refresh as mesh_refresh_mod
+from .probe import probe_alias
 
 
 def _cmd_emit_profile(args: argparse.Namespace) -> int:
@@ -70,10 +70,6 @@ def _cmd_emit_profile(args: argparse.Namespace) -> int:
     return 0
 
 
-def _creation_flags() -> int:
-    return no_window_flags()
-
-
 def _cmd_verify(args: argparse.Namespace) -> int:
     if not args.names:
         print("agent-ssh verify: at least one host name is required", file=sys.stderr)
@@ -88,31 +84,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
             )
             rc = 1
             continue
-        proc = subprocess.run(
-            [
-                "ssh",
-                "-o",
-                "BatchMode=yes",
-                "-o",
-                f"ConnectTimeout={args.timeout}",
-                "-o",
-                "StrictHostKeyChecking=accept-new",
-                name,
-                # A shell-agnostic no-op: "true" is a POSIX shell builtin that
-                # does not exist on a pwsh remote shell (the DefaultShell on
-                # every Windows/dtssh host in this mesh), so it made every such
-                # host register as a false-negative "unreachable" even though
-                # the SSH session itself authenticated and ran fine
-                # (copilot-extensions#2199). "exit 0" is valid, no-op syntax
-                # under both pwsh and POSIX shells (bash/sh).
-                "exit 0",
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=_creation_flags(),
-            check=False,
-        )
-        if proc.returncode == 0:
+        if probe_alias(name, args.timeout):
             print(f"[OK]   {name} reachable")
         else:
             print(f"[FAIL] {name} unreachable")
@@ -166,6 +138,22 @@ def _cmd_mesh_status(args: argparse.Namespace) -> int:
     else:
         print(mesh_mod.format_report(mesh))
     return 0
+
+
+def _cmd_refresh_mesh(args: argparse.Namespace) -> int:
+    result = mesh_refresh_mod.refresh_mesh(
+        machines_yaml=args.path,
+        config_d=args.config_d,
+        verify_timeout=args.timeout,
+    )
+    if args.json:
+        print(json.dumps(result.to_dict(), indent=2))
+        return 0 if result.ok else 1
+    print(f"agent-ssh refresh-mesh: {result.detail}")
+    for alias in result.aliases:
+        status = "OK" if alias.reachable else "FAIL"
+        print(f"  [{status}] {alias.alias}")
+    return 0 if result.ok else 1
 
 
 def _cmd_doctor(args: argparse.Namespace) -> int:
@@ -274,6 +262,31 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override the managed-fragment audit directory only.",
     )
     mesh.set_defaults(func=_cmd_mesh_status)
+
+    refresh_mesh = sub.add_parser(
+        "refresh-mesh",
+        help="Re-discover live dtssh tunnel ids, re-emit the managed SSH profile, "
+        "and verify reachability to every machines.yaml dtssh alias.",
+    )
+    refresh_mesh.add_argument(
+        "--path",
+        type=Path,
+        default=None,
+        help="Path to a machines.yaml (default: resolve from the current repo).",
+    )
+    refresh_mesh.add_argument(
+        "--config-d", type=Path, default=None, help="Override ~/.ssh/config.d."
+    )
+    refresh_mesh.add_argument(
+        "--timeout",
+        type=int,
+        default=8,
+        help="SSH ConnectTimeout seconds for the post-refresh reachability probe.",
+    )
+    refresh_mesh.add_argument(
+        "--json", action="store_true", help="Emit the structured result as JSON."
+    )
+    refresh_mesh.set_defaults(func=_cmd_refresh_mesh)
 
     doctor = sub.add_parser(
         "doctor",

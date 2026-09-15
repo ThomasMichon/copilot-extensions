@@ -46,7 +46,9 @@ actions) and per-machine data stay in the consuming repo.
 - **Optional unattended self-update watchdog.** A reachable, logged-in machine
   can opt in (per machine or fleet-wide, via the `self-update` resource) to two
   independently-scheduled OS Scheduled Tasks that converge it between
-  sessions: an hourly `watchdog` tier (dtssh launcher liveness) and a daily
+  sessions: an hourly `watchdog` tier (dtssh launcher liveness plus a dtssh
+  mesh refresh -- re-discover live tunnel ids, re-emit this machine's SSH
+  profile, and verify reachability to every known alias) and a daily
   `sweep` tier (repo fast-forward + plugin reconcile + full restore). Both
   defer around a live session and are a clean no-op when not opted in. See the
   `agent-machines-setup` skill's *Enable a regular unattended maintenance
