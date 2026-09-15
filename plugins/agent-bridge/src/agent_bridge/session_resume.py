@@ -470,6 +470,13 @@ async def resync_session(self: SessionManager, session_id: str, *, background: b
             raise RemoteHostRecoveryPendingError(
                 f"Remote Session Host cleanup is pending for {session_id}"
             )
+        if self._host_index is not None and self._host_index.get(session_id) is not None:
+            from .session_manager import RemoteHostRecoveryPendingError
+
+            raise RemoteHostRecoveryPendingError(
+                f"Session Host authority is retained for {session_id}; "
+                "resume through the host lifecycle or confirm host cleanup before resync"
+            )
         if session.status == SessionStatus.RUNNING:
             turn_live = (
                 session._prompt_task is not None
