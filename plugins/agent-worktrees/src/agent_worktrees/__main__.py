@@ -8490,6 +8490,39 @@ _ENV_BG: dict[str, str] = {
 }
 
 
+def _resolve_machine_alias(machine: str, repo: str | None) -> str:
+    """Normalize a raw/tracked machine value through machines.yaml's alias
+    resolution, mirroring ``cmd_machine_context``'s own resolution.
+
+    A worktree's tracking record freezes ``machine`` at registration time (an
+    older raw hostname/COMPUTERNAME), and ``cfg.detect_machine()`` returns the
+    raw hostname when called with no ``repo_dir``. Neither path re-resolves
+    through ``machines.yaml``'s ``hostname:``/``alias:`` mapping the way
+    ``machine-context`` does, so a box whose COMPUTERNAME differs from its
+    canonical mesh key/alias (dotfiles machines.yaml's decoupled-hostname
+    convention) never gets its friendly name rendered here even though live
+    detection resolves it correctly elsewhere. Fails open to the raw value on
+    any error -- this must never break the status segment.
+    """
+    if not machine:
+        return machine
+    try:
+        from . import repos as repos_mod
+
+        repo_dir = repos_mod.resolve_path(repo) if repo else None
+        if not repo_dir:
+            repo_dir = _find_repo_dir()
+        if not repo_dir:
+            return machine
+        entries = cfg.load_machines_yaml(repo_dir)
+        entry = cfg.find_machine_entry(entries, machine)
+        if entry is None:
+            return machine
+        return cfg.machine_name(entry)
+    except Exception:
+        return machine
+
+
 def _render_status_context(path: str | None = None, plain: bool = False) -> str:
     """Render the left status-bar segment: machine, environment, repo:id.
 
@@ -8506,12 +8539,17 @@ def _render_status_context(path: str | None = None, plain: bool = False) -> str:
     worktree id) rendered as a colored badge keyed on OS type, and
     ``<id4>`` is the worktree id's 4-char suffix (its "last 4 digits").
     Values come from the worktree's tracking record when the path is
-    inside a tracked worktree, falling back to live host detection.
+    inside a tracked worktree, falling back to live host detection. Either
+    source is normalized through machines.yaml's alias resolution (see
+    ``_resolve_machine_alias``) so a decoupled hostname/alias mapping (a
+    shared-pool box whose COMPUTERNAME differs from its mesh key) renders
+    its friendly name here too, matching ``machine-context``.
     """
     target = str(Path(path).resolve()) if path else os.getcwd()
     rec = _find_record_for_path(target)
 
     machine = (rec.machine if rec and rec.machine else "") or cfg.detect_machine()
+    machine = _resolve_machine_alias(machine, rec.repo if rec else None)
     platform = (rec.platform if rec and rec.platform else "") or cfg.detect_platform()
     env = _platform_short(platform)
 
