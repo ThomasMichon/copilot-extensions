@@ -14,6 +14,10 @@
 #   2. check-skills   -- staged SKILL.md files: frontmatter validity, name rules,
 #      and the description <=1024-char HARD limit the Copilot CLI enforces (over
 #      it, the loader silently DROPS the skill). See tools/check-skills.py.
+#   3. check-effort-vision-structure -- staged efforts/visions README.md files:
+#      the canonical section-set contract from efforts/README.md and
+#      visions/README.md § Local conventions. See
+#      tools/check-effort-vision-structure.py.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
@@ -71,6 +75,23 @@ if [[ ${#STAGED_SKILLS[@]} -gt 0 ]]; then
         echo "" >&2
         echo "pre-commit: SKILL.md validation failed (see errors above)." >&2
         echo "  A description over 1024 chars makes the Copilot CLI DROP the skill." >&2
+        echo "  Fix it, or run with --no-verify to bypass (discouraged)." >&2
+        failed=1
+    fi
+fi
+
+# --- 3. check-effort-vision-structure on staged efforts/visions READMEs -----
+STAGED_EFFORT_VISION=()
+while IFS= read -r -d '' f; do
+    STAGED_EFFORT_VISION+=("$f")
+done < <(git diff --cached --name-only --diff-filter=ACM -z -- 'efforts/**/README.md' 'visions/**/README.md')
+
+if [[ ${#STAGED_EFFORT_VISION[@]} -gt 0 ]]; then
+    if [[ ${#PY[@]} -eq 0 ]]; then
+        echo "pre-commit: python not found -- skipping effort/vision structure validation" >&2
+    elif ! "${PY[@]}" "$ROOT/tools/check-effort-vision-structure.py" "${STAGED_EFFORT_VISION[@]}"; then
+        echo "" >&2
+        echo "pre-commit: effort/vision structure validation failed (see errors above)." >&2
         echo "  Fix it, or run with --no-verify to bypass (discouraged)." >&2
         failed=1
     fi
