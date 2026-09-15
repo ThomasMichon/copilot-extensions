@@ -56,11 +56,18 @@ export const CONTINUATION_DIRECTIVE =
 // DIRECTIVE above) plus fresh-session awareness that the mechanism exists at
 // all. This is deliberately a SHARED CODE-LEVEL constant, not prose re-typed
 // into a template -- it is carried on every stored/consumed handoff brief
-// (see handoff-core.mjs's formatConsumeResult/buildResumePrompt) AND
-// delivered on the first turn of a session that did NOT start from a
-// handoff (see extension.mjs's first-turn awareness nudge), so a brand-new
-// session learns the mechanism exists without needing to hit a pressure
-// threshold or an explicit skill trigger phrase first.
+// (see handoff-core.mjs's formatConsumeResult/buildResumePrompt). A session
+// that did NOT start from a handoff instead learns the mechanism exists from
+// the static, hookless session-start guidance (scripts/emit-guidance.*, via
+// write_session_guidance.py), not from this extension: that guidance is
+// naturally idempotent (a plain file rewrite) and delivered exactly once per
+// real session start, unlike a runtime session.send() nudge queued from
+// extension.mjs's top-level module state -- that module is reimported on
+// every reconnect/refork, so an in-memory "sent once" guard there is not
+// idempotent across a session's real lifetime. See
+// efforts/active/context-handoff-overhaul's journal for the incident this
+// design avoids (a mid-session reload replayed the nudge and raced the
+// skill registry).
 export const HANDOFF_MECHANISM_AWARENESS =
   "This worktree has a context-handoff mechanism available from turn one, " +
   "whether or not this session began from a handoff. Context-window pressure " +
