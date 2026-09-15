@@ -67,20 +67,27 @@ trace; not repeated here (public-artifact rule: keep this effort generic).
 ## Plan
 
 ### Phase 1 — Provider conformance contract + mock provider
-- [ ] Formalize the existing `test_pr_*.py` / `test_providers.py` suite (or
+- [x] Formalize the existing `test_pr_*.py` / `test_providers.py` suite (or
       a curated subset of it) into an explicit, named conformance contract
       that any `PRProvider` implementation — real or fabricated — is run
       against, per Vision §Features/`conformance-verified-mock-provider`.
-- [ ] Decide the mock provider's fabrication strategy: an in-process fake
+      Landed as `tests/test_pr_provider_conformance.py`: a structural layer
+      (`TestProviderRegistryConformance`) parametrized across every
+      registered provider name (protocol conformance, `name` matches
+      registry key, `authority_endpoint`/`head_contained_in_base` contracts)
+      needing no transport, plus a full behavioral lifecycle layer
+      (`TestMockProviderLifecycle`) run against `mock`.
+- [x] Decide the mock provider's fabrication strategy: an in-process fake
       store (simplest, fastest, no external process) vs. a purpose-built MCP
       sub-agent that fabricates PR details/diffs (richer, closer to what a
       driven agent would actually interact with, per the operator's original
       framing). Start with the in-process fake unless the conformance
       contract proves it insufficient — the simpler shape first, escalate
-      only if needed.
-- [ ] Implement `MockPRProvider` satisfying the `PRProvider` protocol;
+      only if needed. Chose the in-process fake; it satisfied the full
+      conformance contract without needing to escalate.
+- [x] Implement `MockPRProvider` satisfying the `PRProvider` protocol;
       register it in `_PROVIDERS` as `mock`.
-- [ ] Run the conformance contract against `mock` and confirm it passes the
+- [x] Run the conformance contract against `mock` and confirm it passes the
       same assertions real providers do (adjusting only what is genuinely
       forge-specific, e.g. exact URL formats).
 
@@ -150,3 +157,24 @@ _Pending._
 - Not started: no implementation yet. Next session should begin Phase 1
   (formalize the conformance contract, decide the mock's fabrication
   strategy, implement `MockPRProvider`).
+
+### 2026-09-15 — Phase 1 landed
+- Added `plugins/agent-worktrees/src/agent_worktrees/providers/mock.py`:
+  `MockPRProvider`, an in-process fake (`_FakePR` store keyed by repo →
+  number) implementing every `PRProvider` protocol method plus test-only
+  `add_review`/`add_thread` fabrication helpers. Registered as `"mock"` in
+  `providers/base.py`'s `_PROVIDERS`.
+- Added `tests/test_pr_provider_conformance.py`: the named conformance
+  contract — a structural layer run against all four registered providers
+  (no transport needed) and a full behavioral lifecycle layer run against
+  `mock` only. Deliberately did not build a unified transport-faking harness
+  for the three real providers (`github`/`gitea`/`azure-devops`); their
+  existing bespoke `test_providers.py` coverage stands as-is — out of
+  Phase 1 scope.
+- Validated: `python tools/run-plugin-tests.py agent-worktrees` — new
+  conformance suite passes 39/39; full plugin suite passes except two
+  pre-existing, unrelated `test_ahp_command.py` failures confirmed present
+  on `main` before this change (verified via `git stash`).
+- Landed via PR (see this worktree's PR) using `pr-self-merge` per the
+  effort's working pattern. Next: open Phase 2's worktree (foreign-repo
+  addressing).

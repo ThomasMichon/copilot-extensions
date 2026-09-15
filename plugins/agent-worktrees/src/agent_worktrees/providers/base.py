@@ -585,6 +585,7 @@ _PROVIDERS = {
     "gitea": ("agent_worktrees.providers.gitea", "GiteaProvider"),
     "github": ("agent_worktrees.providers.github", "GitHubProvider"),
     "azure-devops": ("agent_worktrees.providers.azure_devops", "AzureDevOpsProvider"),
+    "mock": ("agent_worktrees.providers.mock", "MockPRProvider"),
 }
 
 
