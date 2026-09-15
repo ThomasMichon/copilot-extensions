@@ -14,7 +14,7 @@ def test_all_packaged_launchers_and_validators_match():
     primitive = ROOT / "libs" / "installation-context" / "installation_context.py"
     for plugin, filename in (
         ("agent-dispatch", "peer_launch.py"), ("agent-codespaces", "_peer_launch.py"),
-        ("agent-containers", "_peer_launch.py"),
+        ("agent-containers", "_peer_launch.py"), ("agent-logger", "_peer_launch.py"),
     ):
         package = ROOT / "plugins" / plugin / "src" / plugin.replace("-", "_")
         assert (package / filename).read_bytes() == canonical.read_bytes()
@@ -48,7 +48,7 @@ def test_sync_tool_registers_all_packaged_primitives():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     destinations = {destination for _, destination in module.vendor_pairs()}
-    for plugin in ("agent-dispatch", "agent-codespaces", "agent-containers"):
+    for plugin in ("agent-dispatch", "agent-codespaces", "agent-containers", "agent-logger"):
         assert (
             ROOT / "plugins" / plugin / "src" / plugin.replace("-", "_")
             / "_installation_context.py"
@@ -88,6 +88,20 @@ def test_containers_config_has_no_unexplained_sibling_launches(monkeypatch):
     monkeypatch.setitem(sys.modules, spec.name, guard)
     spec.loader.exec_module(guard)
     path = ROOT / "plugins" / "agent-containers" / "src" / "agent_containers" / "config.py"
+    assert not [
+        finding for finding in guard._scan_file(path, ROOT, guard._command_patterns(ROOT))
+        if finding.category == "path-sibling-launch"
+    ]
+
+
+def test_logger_compact_has_no_unexplained_sibling_launches(monkeypatch):
+    spec = importlib.util.spec_from_file_location(
+        "logger_peer_isolation_guard", ROOT / "tools" / "check-marketplace-isolation.py",
+    )
+    guard = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, guard)
+    spec.loader.exec_module(guard)
+    path = ROOT / "plugins" / "agent-logger" / "src" / "agent_logger" / "sync" / "compact.py"
     assert not [
         finding for finding in guard._scan_file(path, ROOT, guard._command_patterns(ROOT))
         if finding.category == "path-sibling-launch"

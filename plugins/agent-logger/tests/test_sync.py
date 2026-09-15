@@ -1473,6 +1473,36 @@ def test_engine_dry_run_makes_no_dest(tmp_path: Path) -> None:
     assert not dest.exists()
 
 
+def test_hub_compaction_fails_closed_when_tracked_lookup_unresolved(
+    monkeypatch, capsys, tmp_path: Path,
+) -> None:
+    """An unresolved (not confirmed-empty) tracked-worktree lookup must skip
+    hub compaction rather than proceed as if nothing needed protecting."""
+    from agent_logger.sync import compact as compact_mod
+
+    src = _make_source(tmp_path)
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", src, dest)
+    cfg._data["sync"]["compact"] = {"enabled": True}
+    calls: list[object] = []
+    monkeypatch.setattr(
+        compact_mod, "resolve_hub_tracked_paths", lambda require: (None, True),
+    )
+    monkeypatch.setattr(
+        LocalTarget, "compact_backlog",
+        lambda *a, **k: calls.append((a, k)) or 0,
+    )
+
+    assert engine.run_sync(cfg) == 0
+    assert calls == []
+    assert "unresolved this pass" in capsys.readouterr().err
+
+    calls.clear()
+    assert engine.do_compact_hub(cfg, dry_run=False, verbose=False) == 0
+    assert calls == []
+    assert "unresolved this pass" in capsys.readouterr().err
+
+
 def test_engine_run_sync_disabled(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("AGENT_LOGGER_SYNC_DISABLED", "1")
     cfg = _cfg(tmp_path / "home", _make_source(tmp_path), tmp_path / "dest")

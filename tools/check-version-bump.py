@@ -113,7 +113,9 @@ def _vendored_consumers() -> dict[str, list[str]]:
         for lib in sorted(x for x in libs.iterdir() if x.is_dir()):
             consumers.setdefault(lib.name, []).append(plugin.name)
     packaged_peers = [
-        plugin for plugin in ("agent-dispatch", "agent-codespaces", "agent-containers")
+        plugin for plugin in (
+            "agent-dispatch", "agent-codespaces", "agent-containers", "agent-logger",
+        )
         if (PLUGINS_DIR / plugin).is_dir()
     ]
     if packaged_peers:
