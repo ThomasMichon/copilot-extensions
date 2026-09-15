@@ -239,8 +239,7 @@ def _is_local_marketplace(definition: dict) -> bool:
 
 # A knowledge repo's own `<something>-harness` plugin is, by the same
 # established convention this ecosystem already uses for named-repo/maintainer
-# adapters (e.g. `odsp-web-harness-harness`, `copilot-extensions-harness`,
-# `agency-harness`), a self-referential surface for maintaining *that* repo
+# adapters (e.g. `<repo>-harness`), a self-referential surface for maintaining *that* repo
 # from within its own session. It is not meant to be graftable into a
 # different repo's harness session, the same way a `*-agent` plugin is
 # venue-scoped and never loaded centrally. Composing it into an unrelated
@@ -707,7 +706,12 @@ def _compose_locked(
         if _is_self_referential_harness_plugin(source, local_names):
             # Never graft the knowledge repo's own self-maintenance
             # `*-harness` plugin into this harness's session; see
-            # `_is_self_referential_harness_plugin`.
+            # `_is_self_referential_harness_plugin`. Also force-remove any
+            # stale entry a pre-fix (markerless-legacy or marker-owned)
+            # composition already wrote -- retirement above only clears
+            # entries with a recorded marker, so a markerless-legacy overlay
+            # would otherwise keep carrying it forever.
+            enabled.pop(source, None)
             excluded_enabled.append(source)
             continue
         _, marketplace = split_source(source)
