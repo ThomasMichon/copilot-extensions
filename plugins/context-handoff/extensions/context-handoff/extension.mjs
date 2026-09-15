@@ -53,7 +53,6 @@ import {
   storeHandoff,
   triggerHandoff,
 } from "./handoff-core.mjs";
-import { HANDOFF_MECHANISM_AWARENESS } from "./cutover-seed.mjs";
 import { loadContextHandoffConfig } from "./config.mjs";
 import {
   FORCE_TIER_DENY_FEEDBACK,
@@ -76,11 +75,6 @@ const state = {
   handoffGenerated: false,
   pendingHandoff: null,
   firstUserPrompt: null,          // first user message (for topic bias)
-  // Goal 2/3: fresh-session awareness. Delivered once, on the first user
-  // turn, regardless of whether this session began from a handoff -- so the
-  // mechanism's existence is never gated behind a pressure threshold or an
-  // explicit skill trigger phrase (see HANDOFF_MECHANISM_AWARENESS).
-  awarenessNudgeSent: false,
   // Force tier (Goal 1): once true, an auto-handoff has been drafted/stored/
   // triggered without waiting for the agent, and onPermissionRequest below
   // denies further mutating tool calls for the remainder of the session
@@ -897,13 +891,6 @@ session.on("user.message", (event) => {
   if (!state.firstUserPrompt && event.data?.content) {
     state.firstUserPrompt = event.data.content;
   }
-  // Fresh-session awareness (Goal 2/3): queue once, on the very first turn,
-  // regardless of whether this turn is an ordinary user prompt or a handoff
-  // seed being injected -- delivered on the next idle boundary below.
-  if (!state.awarenessNudgeSent) {
-    state.awarenessNudgeSent = true;
-    pendingAwareness = true;
-  }
 });
 
 // File / tool-invocation tracking (replaces onPostToolUse's bookkeeping).
@@ -977,18 +964,23 @@ session.on("tool.execution_complete", (event) => {
 // Guarded by the once-only softReminderSent / hardReminderSent flags (reset
 // on compaction). session.send() inside an idle handler does not loop: the
 // queue is cleared before sending and the guard flags prevent re-queueing.
+// Fresh-session awareness (Goal 2/3) is NOT delivered from here. It is
+// static, session-start guidance (the "mechanism exists" fact never depends
+// on a live token count), so it belongs in the hookless
+// instructions/context-handoff/session-guidance.instructions.md path (see
+// scripts/emit-guidance.*) rather than a runtime session.send() nudge. This
+// extension's top-level module is reimported on every reconnect/refork (see
+// the session-lifecycle comment above), so an in-memory "sent once" flag
+// here is not idempotent across a session's real lifetime and would
+// re-deliver the message on every reload -- exactly the failure a static,
+// naturally-idempotent file write avoids. See
+// efforts/active/context-handoff-overhaul's journal for the incident this
+// closed (a mid-session extension/skill reload replayed the nudge and raced
+// the skill registry, producing a transient "Skill not found: context-handoff").
 let pendingNudge = null;  // null | "soft" | "hard"
-// Fresh-session awareness (Goal 2/3): queued from the first user.message
-// event above, delivered alongside (or instead of) a pressure nudge on the
-// next idle boundary -- never gated behind a pressure threshold.
-let pendingAwareness = false;
 
 session.on("session.idle", () => {
   const messages = [];
-  if (pendingAwareness) {
-    pendingAwareness = false;
-    messages.push(`[Context Handoff] ${HANDOFF_MECHANISM_AWARENESS}`);
-  }
   if (pendingNudge) {
     const level = pendingNudge;
     pendingNudge = null;
