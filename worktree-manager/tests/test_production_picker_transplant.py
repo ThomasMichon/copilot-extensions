@@ -180,8 +180,18 @@ def test_engine_runtime_falls_back_to_last_known_good_slot(monkeypatch, tmp_path
     )
     (good_source / "agent_worktrees").mkdir(parents=True)
     (good_slot / ".install-complete.json").write_text("{}", encoding="utf-8")
+    python = good_slot / ("Scripts/python.exe" if engine_runtime.os.name == "nt" else "bin/python")
+    python.parent.mkdir(parents=True, exist_ok=True)
+    python.write_text("", encoding="utf-8")
     (root / "current-version").write_text("missing", encoding="utf-8")
     (root / "last-known-good").write_text("1.2.2", encoding="utf-8")
+    (root / "deploy-manifest.json").write_text(
+        json.dumps({
+            "service": "agent-worktrees",
+            "source": {"plugin": "agent-worktrees", "version": "1.2.2"},
+        }),
+        encoding="utf-8",
+    )
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.setenv("AGENT_HOME", str(tmp_path / "legacy"))
 

@@ -18,21 +18,18 @@ class EngineRuntimeError(RuntimeError):
     """The production Picker's temporary engine compatibility layer is absent."""
 
 
-def _context_runtime_root() -> Path | None:
-    """The cell-scoped root named by an explicit ``COPILOT_EXTENSIONS_CONTEXT``.
-
-    A context that names the wrong plugin, or is otherwise unreadable, is a
-    genuine misconfiguration and raises with a clear diagnostic. Beyond that
-    basic sanity check, the actual ROOT always comes from
-    ``agent_plugin_runtime._namespaced_plugin_root`` -- the same
-    ``validate_context_receipt``-backed, policy-gated resolver
-    ``resolve_installed_plugin_command`` uses -- never ``pointer.parent``
-    directly, so a forged receipt cannot be imported merely because its
-    ``pluginId`` happens to match.
+def _validate_explicit_context() -> None:
+    """Raise a clear diagnostic for a genuinely foreign/invalid explicit
+    context. This is a UX nicety only -- the actual root/slot selection
+    always comes from ``agent_plugin_runtime.resolve_installed_plugin_slot``,
+    which applies the identical validated, policy-gated, namespaced-then-
+    legacy fallback ``engine_client.installed_engine_command`` uses, so both
+    the subprocess and in-process paths can never disagree about which
+    install is available.
     """
     context = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip()
     if not context:
-        return None
+        return
     pointer = Path(context).expanduser()
     if not pointer.is_absolute():
         raise EngineRuntimeError(
@@ -48,33 +45,27 @@ def _context_runtime_root() -> Path | None:
         raise EngineRuntimeError(
             "the selected installation context does not own agent-worktrees"
         )
-    return agent_plugin_runtime._namespaced_plugin_root("agent-worktrees")
 
 
 def _active_runtime_source() -> Path | None:
-    root = _context_runtime_root() or agent_plugin_runtime.legacy_plugin_root(
-        "agent-worktrees"
-    )
-    # Reuse the shared marker/fallback walk (current-version, then
-    # last-known-good, then the newest remaining versions/*) instead of
-    # reading only current-version -- so a stale/damaged current-version slot
-    # here degrades exactly the way engine_client's resolver does, rather
-    # than reporting no source at all when a good fallback slot exists.
-    # The completion marker is required here too, matching the command
-    # resolver's own contract: a current slot must not be importable before
-    # its install has actually finished.
-    for slot in agent_plugin_runtime._runtime_candidates(root):
-        if not (slot / ".install-complete.json").is_file():
-            continue
-        for candidate in (
-            slot / "Lib" / "site-packages",
-            slot / "lib" / "python3.13" / "site-packages",
-            slot / "lib" / "python3.12" / "site-packages",
-            slot / "lib" / "python3.11" / "site-packages",
-            slot / "lib" / "python3.10" / "site-packages",
-        ):
-            if (candidate / "agent_worktrees").is_dir():
-                return candidate
+    _validate_explicit_context()
+    # Shares the exact namespaced-then-legacy slot selection
+    # engine_client.installed_engine_command() uses (marker/fallback walk,
+    # completion-marker requirement, validated receipts) so the Picker's
+    # in-process import path and the CLI subprocess path can never disagree
+    # about which install is available.
+    slot = agent_plugin_runtime.resolve_installed_plugin_slot("agent-worktrees")
+    if slot is None:
+        return None
+    for candidate in (
+        slot / "Lib" / "site-packages",
+        slot / "lib" / "python3.13" / "site-packages",
+        slot / "lib" / "python3.12" / "site-packages",
+        slot / "lib" / "python3.11" / "site-packages",
+        slot / "lib" / "python3.10" / "site-packages",
+    ):
+        if (candidate / "agent_worktrees").is_dir():
+            return candidate
     return None
 
 

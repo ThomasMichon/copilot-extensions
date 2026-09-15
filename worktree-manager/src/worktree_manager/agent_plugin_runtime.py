@@ -34,6 +34,23 @@ from types import ModuleType
 
 _INSTALLATION_CONTEXT_MODULE = "worktree_manager._installation_context"
 
+#: Filesystem-safe plugin id: mirrors the vendored resolver's own
+#: ``_assert_plugin_id`` shape (alnum, ``._-`` interior, no leading/trailing
+#: separator, no bare ``.``/``..``) so a value like ``"agent-foo/../../x"``
+#: can never be interpolated into a legacy or namespaced root path.
+_PLUGIN_ID_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?")
+
+
+def _validate_plugin_id(plugin_id: str) -> None:
+    if (
+        not isinstance(plugin_id, str)
+        or plugin_id in {".", ".."}
+        or not _PLUGIN_ID_RE.fullmatch(plugin_id)
+        or "/" in plugin_id
+        or "\\" in plugin_id
+    ):
+        raise ValueError(f"Invalid filesystem-safe plugin id: {plugin_id!r}")
+
 
 def _state_home() -> Path:
     override = os.environ.get("AGENT_HOME")
@@ -45,6 +62,7 @@ def _state_home() -> Path:
 
 def legacy_plugin_root(plugin_id: str) -> Path:
     """The classic, non-cell-scoped install root: ``~/.<plugin-id>``."""
+    _validate_plugin_id(plugin_id)
     return _state_home() / f".{plugin_id}"
 
 
@@ -221,6 +239,14 @@ def _durable_home(ic: ModuleType, environment: dict[str, str]) -> Path | None:
     return profile / ".copilot-extensions"
 
 
+def _paths_equal(left: object, right: object) -> bool:
+    if not isinstance(left, str) or not isinstance(right, str):
+        return False
+    return os.path.normcase(os.path.normpath(left)) == os.path.normcase(
+        os.path.normpath(right)
+    )
+
+
 def _namespaced_plugin_root(plugin_id: str) -> Path | None:
     """The cell-scoped plugin root named by ``COPILOT_EXTENSIONS_CONTEXT``.
 
@@ -285,8 +311,21 @@ def _namespaced_plugin_root(plugin_id: str) -> Path | None:
         )
     except Exception:
         return None
-    policy = resolution.get("policy") if isinstance(resolution, dict) else None
-    if not isinstance(policy, dict) or not policy.get("enabled"):
+    if not isinstance(resolution, dict):
+        return None
+    # Mirror libs/peer-launch's own governance gate, with one deliberate
+    # narrowing: peer-launch also allows "deactivation-required" (policy now
+    # says legacy, but the runtime is still actively namespaced) because it
+    # is invoking an ALREADY-RUNNING same-cell peer that must finish
+    # cleanly. Worktree Manager is choosing which install to launch NEXT,
+    # not continuing an in-flight execution -- so once policy says legacy,
+    # a still-namespaced-but-deactivating cell must not be selected either.
+    if (
+        resolution.get("status") != "ready"
+        or resolution.get("reason") != "namespaced-active"
+        or resolution.get("actualMode") != "namespaced"
+        or not _paths_equal(resolution.get("runtimeRoot"), plugin_root)
+    ):
         return None
     return Path(plugin_root)
 
@@ -332,6 +371,33 @@ def _select_complete_slot(root: Path) -> Path | None:
     return None
 
 
+def _policy_is_invalid() -> bool:
+    """True when the installation-mode policy FILE EXISTS but is malformed
+    or an unsupported version -- as distinct from simply being absent (the
+    default, always-legacy case). agent-* runtime gates fail closed on an
+    invalid policy rather than silently falling back to legacy; Worktree
+    Manager mirrors that here so a corrupt policy blocks resolution outright
+    instead of masking itself as an ordinary legacy install.
+    """
+    ic = _load_installation_context()
+    if ic is None:
+        return False
+    env = dict(os.environ)
+    profile = _canonical_os_profile(env)
+    try:
+        resolution = ic.resolve_installation_mode(
+            legacy_root=legacy_plugin_root("worktree-manager"),
+            os_profile=profile,
+            environment=env,
+        )
+    except Exception:
+        return False
+    policy = resolution.get("policy") if isinstance(resolution, dict) else None
+    if not isinstance(policy, dict):
+        return False
+    return policy.get("state") in {"invalid", "unsupported"}
+
+
 def resolve_installed_plugin_slot(plugin_id: str) -> Path | None:
     """The exact marker-selected immutable runtime slot for ``plugin_id``.
 
@@ -341,8 +407,13 @@ def resolve_installed_plugin_slot(plugin_id: str) -> Path | None:
     already fully validated and is tried first; the legacy root is trusted
     only via the ``deploy-manifest.json`` shape, never a bare
     ``install.json``, so a forged receipt cannot masquerade as either kind
-    of root.
+    of root. A malformed (present-but-invalid) policy file blocks
+    resolution entirely, fail-closed, rather than silently degrading to
+    legacy.
     """
+    _validate_plugin_id(plugin_id)
+    if _policy_is_invalid():
+        return None
     namespaced_root = _namespaced_plugin_root(plugin_id)
     if namespaced_root is not None:
         slot = _select_complete_slot(namespaced_root)

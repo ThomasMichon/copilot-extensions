@@ -120,6 +120,44 @@ def test_legacy_root_never_accepts_a_bare_install_json(monkeypatch, tmp_path):
     assert apr.resolve_installed_plugin_command("agent-bridge") is None
 
 
+def test_plugin_id_path_traversal_is_rejected():
+    """A plugin id must never be interpolated into a filesystem path
+    unvalidated -- ``"agent-foo/../../target"`` (or any value containing a
+    path separator, or ``.``/``..``) must be refused outright rather than
+    silently escaping the intended state root."""
+    for hostile in ("agent-foo/../../target", "..", ".", "a/b", "a\\b", ""):
+        with pytest.raises(ValueError):
+            apr.legacy_plugin_root(hostile)
+        with pytest.raises(ValueError):
+            apr.resolve_installed_plugin_slot(hostile)
+
+
+def test_invalid_policy_blocks_resolution_even_with_a_valid_legacy_install(
+    monkeypatch, tmp_path,
+):
+    """A malformed (present-but-invalid) policy file is a different case
+    from an ABSENT one: agent-* runtime gates fail closed on it rather than
+    silently degrading to legacy, and Worktree Manager must not disagree."""
+    root = tmp_path / ".agent-bridge"
+    slot = root / "versions" / "9.9.9"
+    _write_slot(slot)
+    (root / "current-version").write_text("9.9.9", encoding="utf-8")
+    (root / "deploy-manifest.json").write_text(
+        json.dumps({
+            "service": "agent-bridge",
+            "source": {"plugin": "agent-bridge", "version": "9.9.9"},
+        }),
+        encoding="utf-8",
+    )
+    (tmp_path / ".copilot-extensions").mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".copilot-extensions" / "installation-mode.json").write_text(
+        "not valid json at all", encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path))
+    patch_profile(monkeypatch, apr, tmp_path)
+    assert apr.resolve_installed_plugin_command("agent-bridge") is None
+
+
 def test_marketplace_cells_enabled_defaults_false_without_policy(tmp_path):
     assert apr.marketplace_cells_enabled(os_profile=tmp_path) is False
 
@@ -193,6 +231,25 @@ def test_namespaced_root_ignored_when_receipt_is_not_a_real_installation(
     _write_slot(forged_slot)
     (forged.parent / "current-version").write_text("9.9.9", encoding="utf-8")
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(forged))
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path / "no-legacy-here"))
+    assert apr.resolve_installed_plugin_command("agent-worktrees") is None
+
+
+def test_namespaced_root_ignored_when_never_activated(monkeypatch, tmp_path):
+    """A genuine, schema-valid install.json/namespace.json with no matching
+    ``installation-activation.json`` (or a stale one) must still be
+    rejected: policy alone is not enough, mirroring
+    ``libs/peer-launch``'s own governance gate. A never-activated receipt
+    resolves to ``actualMode: legacy`` even though the install itself is
+    real, so it must fall back to legacy exactly like an absent policy would."""
+    home = tmp_path / "home"
+    home.mkdir()
+    install, _python = namespaced_fixture(
+        home, windows=apr.os.name == "nt", activated=False,
+    )
+    _write_policy(home, enabled=True)
+    patch_profile(monkeypatch, apr, home)
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(install))
     monkeypatch.setenv("AGENT_HOME", str(tmp_path / "no-legacy-here"))
     assert apr.resolve_installed_plugin_command("agent-worktrees") is None
 

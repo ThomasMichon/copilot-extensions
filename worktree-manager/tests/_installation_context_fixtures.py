@@ -13,6 +13,7 @@ that actually satisfies that contract, using the same
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from types import ModuleType
 
@@ -56,12 +57,64 @@ def write_slot(slot: Path, *, windows: bool) -> Path:
     return python
 
 
+def _environment_record(home: Path) -> dict:
+    platform = "windows" if os.name == "nt" else "posix"
+    return {
+        "platform": platform,
+        "homeRealPath": str(home.resolve()),
+        "wslDistro": None if platform == "windows" else os.environ.get("WSL_DISTRO_NAME") or None,
+    }
+
+
+def write_activation(
+    home: Path, plugin_root: Path, marketplace_id: str, install: Path, *,
+    mode: str = "namespaced", state: str = "active",
+) -> Path:
+    """Write a valid ``installation-activation.json`` pinning this receipt as
+    the actual, currently-active install -- required for
+    ``resolve_installation_mode`` to report ``actualMode: "namespaced"`` and
+    ``reason: "namespaced-active"``. A receipt with no activation resolves
+    to ``actualMode: "legacy"`` even though the install.json itself is
+    genuine, exactly the gap ``libs/peer-launch``'s governance gate (and now
+    ``agent_plugin_runtime``'s) exists to catch.
+    """
+    activation = plugin_root / "installation-activation.json"
+    write_json(activation, {
+        "schema": "copilot-extensions.installation-activation",
+        "version": 1,
+        "marketplaceId": marketplace_id,
+        "pluginId": plugin_root.name,
+        "mode": mode,
+        "state": state,
+        "environment": _environment_record(home),
+        "context": str(install.resolve()),
+        "namespaceGeneration": 1,
+        "installGeneration": 1,
+        "generation": 1,
+        "legacy": {
+            "disposition": "absent" if mode == "namespaced" else "restored",
+            "probe": {
+                "declared": True,
+                "result": "absent",
+                "checkedAt": "2026-01-01T00:00:00Z",
+            },
+        },
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:00:00Z",
+    })
+    return activation
+
+
 def namespaced_fixture(
     home: Path, plugin_id: str = "agent-worktrees", *, windows: bool,
+    activated: bool = True,
 ) -> tuple[Path, Path]:
     """Build a valid namespace.json + install.json pair under
     ``<home>/.copilot-extensions/marketplaces/<id>/plugins/<plugin_id>/``,
-    plus a marker-selected runtime slot. Returns (install.json path, python).
+    plus a marker-selected runtime slot. Writes a matching
+    ``installation-activation.json`` too (unless ``activated=False``, for
+    tests that specifically want a genuine, un-activated receipt). Returns
+    (install.json path, python).
     """
     vector = source_vector(0)
     marketplace_id = str(vector["marketplaceId"])
@@ -118,4 +171,6 @@ def namespaced_fixture(
     slot = plugin_root / "versions" / "1.2.3"
     python = write_slot(slot, windows=windows)
     (plugin_root / "current-version").write_text("1.2.3", encoding="utf-8")
+    if activated:
+        write_activation(home, plugin_root, marketplace_id, install)
     return install, python
