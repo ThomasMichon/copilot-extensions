@@ -26,6 +26,8 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+RESUME_NUDGE_TURN_INDEX = "resume_nudge_turn_index"
+
 
 @dataclass
 class HostRecord:
@@ -153,14 +155,20 @@ class HostIndex:
         True if the record existed and was updated.
         """
         rec = self._records.get(session_id)
-        if rec is None or rec.resume_on_reattach == value:
+        if rec is None or (
+            rec.resume_on_reattach == value
+            and RESUME_NUDGE_TURN_INDEX not in rec.extra
+        ):
             return False
         previous = rec.resume_on_reattach
+        previous_extra = rec.extra
         rec.resume_on_reattach = value
+        rec.extra = {key: item for key, item in rec.extra.items() if key != RESUME_NUDGE_TURN_INDEX}
         try:
             self._flush()
         except Exception:
             rec.resume_on_reattach = previous
+            rec.extra = previous_extra
             raise
         self._revision += 1
         self._record_revisions[session_id] = self._revision
