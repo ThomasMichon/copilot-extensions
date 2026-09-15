@@ -12,8 +12,11 @@ real mux.
 from __future__ import annotations
 
 import argparse
+import json
 import re
+import threading
 import types
+from datetime import datetime, timedelta, timezone
 
 import agent_procutil
 import pytest
@@ -876,10 +879,37 @@ def test_monitor_pending_handoff_request_skips_already_claimed(tmp_path, monkeyp
     assert m._monitor_pending_handoff_request(record) is None
 
 
-def test_monitor_claim_handoff_cutover_is_atomic_one_shot(tmp_path, monkeypatch):
+def test_monitor_claim_handoff_cutover_acquires_fresh_claim(tmp_path, monkeypatch):
     monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
     logged = []
     monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: logged.append((a, k)))
+    monkeypatch.setattr(m.locks, "process_start_time", lambda pid: "live-start")
+
+    request = {
+        "token": "handoff-1",
+        "worktree_id": "a",
+        "predecessor_session_id": "session-1",
+    }
+    claim = m._monitor_claim_handoff_cutover(request)
+    claim_path = tmp_path / "status-monitor-handoffs.d" / "a" / "handoff-1.json"
+
+    assert claim == {
+        "ok": True,
+        "claimed": True,
+        "path": str(claim_path),
+    }
+    assert claim_path.exists()
+    payload = json.loads(claim_path.read_text(encoding="utf-8"))
+    assert payload["pid"] == m.os.getpid()
+    assert payload["start_time"] == "live-start"
+    assert logged[0][1]["outcome"] == "acquired"
+
+
+def test_monitor_claim_handoff_cutover_keeps_live_claim(tmp_path, monkeypatch):
+    monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
+    logged = []
+    monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: logged.append((a, k)))
+    monkeypatch.setattr(m.locks, "process_start_time", lambda pid: "live-start")
 
     request = {
         "token": "handoff-1",
@@ -902,6 +932,159 @@ def test_monitor_claim_handoff_cutover_is_atomic_one_shot(tmp_path, monkeypatch)
     assert (tmp_path / "status-monitor-handoffs.d" / "a" / "handoff-1.json").exists()
     assert logged[0][1]["outcome"] == "acquired"
     assert logged[1][1]["outcome"] == "already-claimed"
+
+
+def test_monitor_claim_handoff_cutover_reclaims_dead_pid_claim(tmp_path, monkeypatch):
+    monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
+    logged = []
+    monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: logged.append((a, k)))
+    monkeypatch.setattr(
+        m.locks,
+        "pid_alive",
+        lambda pid: False if pid == 777 else True,
+    )
+    monkeypatch.setattr(
+        m.locks,
+        "process_start_time",
+        lambda pid: "new-start" if pid == m.os.getpid() else "old-start",
+    )
+    claim_path = tmp_path / "status-monitor-handoffs.d" / "a" / "handoff-1.json"
+    claim_path.parent.mkdir(parents=True, exist_ok=True)
+    claim_path.write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "kind": "handoff-cutover-claim",
+                "token": "handoff-1",
+                "worktree_id": "a",
+                "session_id": "session-1",
+                "pid": 777,
+                "start_time": "old-start",
+                "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    claim = m._monitor_claim_handoff_cutover(
+        {
+            "token": "handoff-1",
+            "worktree_id": "a",
+            "predecessor_session_id": "session-1",
+        }
+    )
+
+    assert claim == {"ok": True, "claimed": True, "path": str(claim_path)}
+    payload = json.loads(claim_path.read_text(encoding="utf-8"))
+    assert payload["pid"] == m.os.getpid()
+    assert payload["start_time"] == "new-start"
+    assert logged[-1][1]["outcome"] == "acquired"
+    assert logged[-1][1]["claim_reclaimed"] is True
+    assert logged[-1][1]["stale_reason"] == "pid-gone"
+    assert logged[-1][1]["prior_pid"] == 777
+
+
+def test_monitor_claim_handoff_cutover_reclaims_expired_live_pid_claim(tmp_path, monkeypatch):
+    monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
+    monkeypatch.setenv("AGENT_WORKTREES_STATUS_MONITOR_HANDOFF_CLAIM_STALE_SECONDS", "60")
+    logged = []
+    monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: logged.append((a, k)))
+    monkeypatch.setattr(m.locks, "pid_alive", lambda pid: True)
+    monkeypatch.setattr(
+        m.locks,
+        "process_start_time",
+        lambda pid: "same-start" if pid != m.os.getpid() else "new-start",
+    )
+    claim_path = tmp_path / "status-monitor-handoffs.d" / "a" / "handoff-1.json"
+    claim_path.parent.mkdir(parents=True, exist_ok=True)
+    claim_path.write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "kind": "handoff-cutover-claim",
+                "token": "handoff-1",
+                "worktree_id": "a",
+                "session_id": "session-1",
+                "pid": 777,
+                "start_time": "same-start",
+                "created_at": (
+                    datetime.now(timezone.utc) - timedelta(minutes=10)
+                ).isoformat(timespec="seconds"),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    claim = m._monitor_claim_handoff_cutover(
+        {
+            "token": "handoff-1",
+            "worktree_id": "a",
+            "predecessor_session_id": "session-1",
+        }
+    )
+
+    assert claim == {"ok": True, "claimed": True, "path": str(claim_path)}
+    assert logged[-1][1]["claim_reclaimed"] is True
+    assert logged[-1][1]["stale_reason"] == "age-expired"
+    assert logged[-1][1]["stale_age_seconds"] >= 600
+
+
+def test_monitor_claim_handoff_cutover_stale_reclaim_is_single_winner(tmp_path, monkeypatch):
+    monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
+    monkeypatch.setenv("AGENT_WORKTREES_STATUS_MONITOR_HANDOFF_CLAIM_STALE_SECONDS", "1")
+    monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: None)
+    monkeypatch.setattr(m.locks, "pid_alive", lambda pid: False)
+    monkeypatch.setattr(m.locks, "process_start_time", lambda pid: f"start-{pid}")
+    claim_path = tmp_path / "status-monitor-handoffs.d" / "a" / "handoff-1.json"
+    claim_path.parent.mkdir(parents=True, exist_ok=True)
+    claim_path.write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "kind": "handoff-cutover-claim",
+                "token": "handoff-1",
+                "worktree_id": "a",
+                "session_id": "session-1",
+                "pid": 777,
+                "start_time": "dead-start",
+                "created_at": (
+                    datetime.now(timezone.utc) - timedelta(minutes=10)
+                ).isoformat(timespec="seconds"),
+            }
+        ),
+        encoding="utf-8",
+    )
+    barrier = threading.Barrier(2)
+    original = m._monitor_handoff_claim_staleness
+
+    def synchronized_staleness(path, claim=None):
+        info = original(path, claim)
+        if info.get("stale"):
+            barrier.wait(timeout=5)
+        return info
+
+    monkeypatch.setattr(m, "_monitor_handoff_claim_staleness", synchronized_staleness)
+    request = {
+        "token": "handoff-1",
+        "worktree_id": "a",
+        "predecessor_session_id": "session-1",
+    }
+    results = []
+
+    def worker():
+        results.append(m._monitor_claim_handoff_cutover(request))
+
+    first = threading.Thread(target=worker)
+    second = threading.Thread(target=worker)
+    first.start()
+    second.start()
+    first.join(timeout=5)
+    second.join(timeout=5)
+
+    assert len(results) == 2
+    assert sorted(result["claimed"] for result in results) == [False, True]
+    payload = json.loads(claim_path.read_text(encoding="utf-8"))
+    assert payload["pid"] == m.os.getpid()
 
 
 def test_sweep_does_not_retry_after_verification_timeout(tmp_path, monkeypatch):

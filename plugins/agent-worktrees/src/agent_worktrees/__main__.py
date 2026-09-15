@@ -64,6 +64,7 @@ import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from collections.abc import Callable
@@ -9031,6 +9032,10 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
 # lock; a superseded runtime self-retires (mirrors the updater's #911 behaviour).
 
 _STATUS_MONITOR_ENV = "AGENT_WORKTREES_STATUS_MONITOR"
+_STATUS_MONITOR_HANDOFF_CLAIM_STALE_SECONDS_ENV = (
+    "AGENT_WORKTREES_STATUS_MONITOR_HANDOFF_CLAIM_STALE_SECONDS"
+)
+_STATUS_MONITOR_HANDOFF_CLAIM_STALE_SECONDS_DEFAULT = 180.0
 
 
 def _status_monitor_enabled() -> bool:
@@ -9066,6 +9071,18 @@ def _monitor_handoff_claim_root() -> Path:
     return _aw_runtime_home() / "status-monitor-handoffs.d"
 
 
+def _monitor_handoff_claim_stale_seconds() -> float:
+    raw = os.environ.get(_STATUS_MONITOR_HANDOFF_CLAIM_STALE_SECONDS_ENV, "").strip()
+    if raw:
+        try:
+            value = float(raw)
+            if value > 0:
+                return value
+        except ValueError:
+            pass
+    return _STATUS_MONITOR_HANDOFF_CLAIM_STALE_SECONDS_DEFAULT
+
+
 def _monitor_handoff_claim_segment(value: str | None, fallback: str) -> str:
     safe = re.sub(r"[^A-Za-z0-9._-]", "_", str(value or "")).strip("._-")
     return safe[:160] or fallback
@@ -9079,6 +9096,125 @@ def _monitor_handoff_claim_path(worktree_id: str | None, token: str | None) -> P
     )
 
 
+def _monitor_handoff_claim_created_at(
+    path: Path,
+    claim: dict[str, object] | None,
+) -> datetime | None:
+    value = claim.get("created_at") if isinstance(claim, dict) else None
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            parsed = None
+        if parsed is not None:
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    except OSError:
+        return None
+
+
+def _monitor_handoff_claim_staleness(
+    path: Path,
+    claim: dict[str, object] | None = None,
+) -> dict[str, object]:
+    claim = claim if isinstance(claim, dict) else locks.read_lock(path)
+    created_at = _monitor_handoff_claim_created_at(path, claim)
+    age_seconds = (
+        max(
+            0.0,
+            (datetime.now(timezone.utc) - created_at).total_seconds(),
+        )
+        if created_at is not None
+        else None
+    )
+    if isinstance(claim, dict):
+        pid = claim.get("pid")
+        if isinstance(pid, int) and pid > 0:
+            if not locks.pid_alive(pid):
+                return {
+                    "stale": True,
+                    "reason": "pid-gone",
+                    "age_seconds": age_seconds,
+                    "claim": claim,
+                }
+            recorded = claim.get("start_time")
+            if recorded:
+                current = locks.process_start_time(pid)
+                if current is not None and str(current) != str(recorded):
+                    return {
+                        "stale": True,
+                        "reason": "pid-reused",
+                        "age_seconds": age_seconds,
+                        "claim": claim,
+                    }
+    if age_seconds is not None and age_seconds >= _monitor_handoff_claim_stale_seconds():
+        return {
+            "stale": True,
+            "reason": "age-expired",
+            "age_seconds": age_seconds,
+            "claim": claim,
+        }
+    return {
+        "stale": False,
+        "reason": None,
+        "age_seconds": age_seconds,
+        "claim": claim,
+    }
+
+
+def _monitor_publish_handoff_cutover_claim(
+    path: Path,
+    payload: dict[str, object],
+) -> tuple[bool, str | None]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(
+        dir=str(path.parent),
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            json.dump(payload, handle, ensure_ascii=True)
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            os.link(tmp, path)
+        except FileExistsError:
+            return False, None
+        return True, None
+    except OSError as exc:
+        return False, str(exc)
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
+def _monitor_reclaim_stale_handoff_cutover_claim(
+    path: Path,
+    payload: dict[str, object],
+) -> tuple[bool, bool, str | None]:
+    displaced = path.with_name(
+        f".{path.name}.{os.getpid()}.{secrets.token_hex(8)}.stale"
+    )
+    try:
+        os.replace(path, displaced)
+    except FileNotFoundError:
+        return True, False, None
+    except OSError as exc:
+        return False, False, str(exc)
+    try:
+        claimed, error = _monitor_publish_handoff_cutover_claim(path, payload)
+        return error is None, claimed, error
+    finally:
+        with contextlib.suppress(OSError):
+            displaced.unlink()
+
+
 def _monitor_claim_handoff_cutover(
     request: dict[str, object],
 ) -> dict[str, object]:
@@ -9086,20 +9222,103 @@ def _monitor_claim_handoff_cutover(
     token = str(request.get("token") or "").strip()
     worktree_id = str(request.get("worktree_id") or "").strip()
     path = _monitor_handoff_claim_path(worktree_id, token)
+    owner_pid = os.getpid()
     payload = {
         "schema": 1,
         "kind": "handoff-cutover-claim",
         "token": token,
         "worktree_id": worktree_id or None,
         "session_id": str(request.get("predecessor_session_id") or "").strip() or None,
-        "pid": os.getpid(),
+        "pid": owner_pid,
+        "start_time": locks.process_start_time(owner_pid),
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "x", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=True)
-    except FileExistsError:
+
+    def _acquired_response() -> dict[str, object]:
+        log_data = {
+            "worktree_id": worktree_id or None,
+            "session_id": payload["session_id"],
+            "source": "python",
+            "handoff_token": token or None,
+            "reason": "monitor-cutover",
+            "outcome": "acquired",
+        }
+        if reclaim_reason is not None:
+            log_data["claim_reclaimed"] = True
+            log_data["stale_reason"] = reclaim_reason
+            log_data["stale_age_seconds"] = (
+                round(reclaim_age_seconds, 3)
+                if reclaim_age_seconds is not None
+                else None
+            )
+            if isinstance(prior_claim, dict):
+                prior_pid = prior_claim.get("pid")
+                if isinstance(prior_pid, int) and prior_pid > 0:
+                    log_data["prior_pid"] = prior_pid
+                prior_session = str(prior_claim.get("session_id") or "").strip()
+                if prior_session:
+                    log_data["prior_session_id"] = prior_session
+        activity.log_event("handoff_cutover_claim", **log_data)
+        return {"ok": True, "claimed": True, "path": str(path)}
+
+    reclaim_reason = None
+    reclaim_age_seconds = None
+    prior_claim: dict[str, object] | None = None
+    for _attempt in range(3):
+        claimed, error = _monitor_publish_handoff_cutover_claim(path, payload)
+        if error is not None:
+            activity.log_event(
+                "handoff_cutover_claim",
+                worktree_id=worktree_id or None,
+                session_id=payload["session_id"],
+                source="python",
+                handoff_token=token or None,
+                reason="monitor-cutover",
+                outcome="error",
+                error=error,
+            )
+            return {
+                "ok": False, "claimed": False, "path": str(path), "error": error,
+            }
+        if claimed:
+            return _acquired_response()
+        if not path.exists():
+            continue
+        staleness = _monitor_handoff_claim_staleness(path)
+        if not staleness.get("stale"):
+            break
+        prior_claim = staleness.get("claim") if isinstance(staleness.get("claim"), dict) else None
+        reclaim_reason = str(staleness.get("reason") or "").strip() or "unknown"
+        reclaim_age_raw = staleness.get("age_seconds")
+        reclaim_age_seconds = (
+            float(reclaim_age_raw) if isinstance(reclaim_age_raw, (int, float)) else None
+        )
+        ok, reclaimed, reclaim_error = _monitor_reclaim_stale_handoff_cutover_claim(path, payload)
+        if reclaim_error is not None:
+            activity.log_event(
+                "handoff_cutover_claim",
+                worktree_id=worktree_id or None,
+                session_id=payload["session_id"],
+                source="python",
+                handoff_token=token or None,
+                reason="monitor-cutover",
+                outcome="error",
+                error=reclaim_error,
+            )
+            return {
+                "ok": False,
+                "claimed": False,
+                "path": str(path),
+                "error": reclaim_error,
+            }
+        if ok and reclaimed:
+            return _acquired_response()
+        reclaim_reason = None
+        reclaim_age_seconds = None
+        prior_claim = None
+        break
+
+    if path.exists():
         activity.log_event(
             "handoff_cutover_claim",
             worktree_id=worktree_id or None,
@@ -9110,7 +9329,8 @@ def _monitor_claim_handoff_cutover(
             outcome="already-claimed",
         )
         return {"ok": True, "claimed": False, "path": str(path)}
-    except OSError as exc:
+    claimed, error = _monitor_publish_handoff_cutover_claim(path, payload)
+    if error is not None:
         activity.log_event(
             "handoff_cutover_claim",
             worktree_id=worktree_id or None,
@@ -9119,11 +9339,11 @@ def _monitor_claim_handoff_cutover(
             handoff_token=token or None,
             reason="monitor-cutover",
             outcome="error",
-            error=str(exc),
+            error=error,
         )
-        return {
-            "ok": False, "claimed": False, "path": str(path), "error": str(exc),
-        }
+        return {"ok": False, "claimed": False, "path": str(path), "error": error}
+    if claimed:
+        return _acquired_response()
     activity.log_event(
         "handoff_cutover_claim",
         worktree_id=worktree_id or None,
@@ -9131,9 +9351,9 @@ def _monitor_claim_handoff_cutover(
         source="python",
         handoff_token=token or None,
         reason="monitor-cutover",
-        outcome="acquired",
+        outcome="already-claimed",
     )
-    return {"ok": True, "claimed": True, "path": str(path)}
+    return {"ok": True, "claimed": False, "path": str(path)}
 
 
 def _valid_monitor_session(sess: str) -> bool:
