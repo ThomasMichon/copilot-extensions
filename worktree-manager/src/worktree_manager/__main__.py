@@ -469,12 +469,13 @@ def _cmd_contracts(rest: list[str]) -> int:
 
 
 def _cmd_companion(rest: list[str]) -> int:
-    """[Prototype] Launch the Mux Companion exit/focus experiment.
+    """Launch the Mux Companion: a read-only status + session-lineage view
+    for the CURRENT worktree, resolved from cwd (visions/mux-companion).
 
-    Not the real Companion (see visions/mux-companion) -- a throwaway shell
-    (border + Exit button, no bindings of its own) used to find out, live
-    inside a psmux ``display-popup -E`` pane, how the popup actually gets
-    exited and how keyboard focus behaves, before any real design commits.
+    v1 is view-only -- explains the worktree's status in plain language and
+    lists its session lineage with the current head marked. No session
+    switching, resume, or head-override action lives here yet; that is a
+    distinct, later feature (see the vision's Non-Goals).
     """
     del rest  # no options yet
     from .mux_companion import run as run_companion
@@ -1357,7 +1358,7 @@ def main(argv: list[str] | None = None) -> int:
         print("                         capture the production Picker headlessly")
         print("  picker --demo          preview the retired minimal scaffold")
         print("                         (in the Picker: l launch/resume · b bare-resume · n new)")
-        print("  companion              [prototype] Mux Companion exit/focus experiment (visions/mux-companion)")
+        print("  companion              Mux Companion: read-only status + session lineage for the current worktree (visions/mux-companion)")
         print()
         print("Phase 2 provisions prerequisites + drives the core install; Phase 3")
         print("adds the Manager state views (projects/repos/plugin enablement); later")

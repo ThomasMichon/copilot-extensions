@@ -8458,8 +8458,112 @@ def _render_status_segment(
     return " ".join(parts)
 
 
+def _status_segment_json(path: str | None = None, fetch: bool = False) -> dict | None:
+    """Cheap, single-worktree JSON snapshot of the status-segment's own facts.
+
+    Mirrors :func:`_render_status_segment`'s classify pass -- the same
+    non-daemon, fetch-free-by-default :func:`git_ops.classify_worktree` call
+    -- but returns structured data instead of a rendered bar string. Built
+    for a caller (the Mux Companion) that wants the current worktree's id,
+    state, sync counts, and closure descriptor WITHOUT paying the resident
+    classify daemon's whole-fleet negotiation cost that ``list --json
+    --classify --worktree-id`` incurs even when scoped to one id (the daemon
+    protocol has no per-id request shape, only project-wide filters, so a
+    single-id caller still waits on/falls through a full-fleet round trip).
+
+    Kept as a deliberate sibling of ``_render_status_segment`` rather than a
+    shared refactor of it -- that function renders the live,
+    every-``status-interval`` mux bar, so duplicating its (already carefully
+    reviewed) classify prefix here is safer than reshaping it. Returns
+    ``None`` outside a git worktree, exactly like the rendered segment
+    returns an empty string.
+    """
+    target = str(Path(path).resolve()) if path else os.getcwd()
+
+    remote, config_default = "origin", None
+    try:
+        repo_cfg = cfg.load_config(include_control_plane_related_pr=False).default_repo
+        remote, config_default = repo_cfg.remote, repo_cfg.default_branch
+    except Exception:
+        pass
+    default_branch = (
+        _detect_upstream_branch(target, remote, config_default) or config_default or "master"
+    )
+
+    rec = _find_record_for_path(target)
+    branch = rec.branch if rec else (git_ops._get_current_branch_safe(target) or "HEAD")
+
+    try:
+        info = git_ops.classify_worktree(
+            target,
+            branch,
+            fetch=bool(fetch),
+            remote=remote,
+            default_branch=default_branch,
+            active_paths=None,
+        )
+    except Exception:
+        return None
+
+    if info.state == git_ops.WorktreeState.GONE:
+        return None
+
+    if rec is not None:
+        info = _apply_tracking_override(rec, info)
+
+    turns = 0
+    if rec is not None:
+        try:
+            ctx = sessions.scan_sessions_fast([rec])
+            turns = ctx.turn_count.get(_normalize_path(target), 0)
+        except Exception:
+            turns = 0
+
+    refined_state = git_ops.refine_state_with_session(info.state, turns)
+    refined_info = (
+        dataclasses.replace(info, state=refined_state)
+        if refined_state != info.state else info
+    )
+
+    closure = None
+    if rec is not None:
+        held_claims = sum(1 for c in rec.resources if c.is_live)
+        open_follow_ups = tracking.effective_open_follow_up_count(rec)
+        disposition = prune.cleanup_disposition(
+            rec, refined_info, turn_count=turns,
+            claimant_alive=_local_claimant_alive,
+            paired_sibling_final=prune.default_paired_sibling_final,
+        )
+        descriptor = prune.assemble_closure_descriptor(
+            rec, refined_info, disposition,
+            held_claims=held_claims, open_follow_ups=open_follow_ups,
+            evidence_mode=(
+                "refreshed" if info.fetch_requested and not info.fetch_failed else "cached"
+            ),
+        )
+        closure = descriptor.to_dict()
+
+    return {
+        "id": rec.worktree_id if rec is not None else None,
+        "path": target,
+        "repo": rec.repo if rec is not None else None,
+        "branch": branch,
+        "state": refined_state.value,
+        "ahead": refined_info.ahead,
+        "behind": refined_info.behind,
+        "dirty": refined_info.dirty,
+        "turn_count": turns,
+        "status": rec.status if rec is not None else None,
+        "closure": closure,
+    }
+
+
 def cmd_status_segment(args: argparse.Namespace) -> int:
     """Print the worktree status-bar segment (thin wrapper over the renderer)."""
+    if getattr(args, "json", False):
+        data = _status_segment_json(args.path, fetch=bool(args.fetch))
+        _json_output(data if data is not None else {"error": "not a tracked git worktree"})
+        return 0
     line = _render_status_segment(
         args.path,
         fetch=bool(args.fetch),
@@ -22993,6 +23097,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-title",
         action="store_true",
         help="Omit the worktree title; show only the state block",
+    )
+    p.add_argument(
+        "--json",
+        action="store_true",
+        help=(
+            "Emit structured JSON (id/path/repo/branch/state/ahead/behind/"
+            "dirty/closure) instead of the rendered bar string. Same cheap, "
+            "non-daemon single-worktree classify pass -- unlike `list --json "
+            "--classify --worktree-id`, which still pays the resident "
+            "classify daemon's whole-fleet negotiation cost."
+        ),
     )
 
     # status-context (left status-bar segment: machine / env / repo:id)
