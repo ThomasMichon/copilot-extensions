@@ -48,8 +48,14 @@ Usage:
 plugin set **actually loaded for this repo** -- from its
 `.github/copilot/settings.json` (+ user settings) `enabledPlugins` /
 `extraKnownMarketplaces` -- and brings each into scope: an in-repo `directory`
-marketplace plugin (e.g. `./.ai`) is **owned** (fully checked), while an
-external marketplace plugin is **advisory**: its skills join the collision map
+marketplace plugin (e.g. `./.ai`) is **owned** (fully checked); an
+`agent-worktrees-repo` marketplace (``{"source": "agent-worktrees-repo",
+"repo": "<registered-repo-name>"}``, resolved via the trusted
+`agent-worktrees repos find` registry rather than a hardcoded path -- the
+portable way to consume *another* repo's directory marketplace from a
+committed, shared settings.json) is treated identically to a `directory`
+marketplace once resolved; while an external marketplace plugin is
+**advisory**: its skills join the collision map
 and its agents receive origin/version-aware safety findings without making the
 consumer repo fail strict mode. `--include-plugins` / `--include-installed` add raw
 installed-plugin trees (layout `<root>/<marketplace>/<plugin>/...`) the
@@ -325,6 +331,11 @@ SESSION_CONTEXT_MAX_BYTES = 65536
 SESSION_CONTEXT_IDENTIFIER = re.compile(
     r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
 )
+# Registered repo names (agent-worktrees repos.yaml) are looser than a
+# marketplace/plugin identifier -- real examples include dots and mixed
+# case (e.g. "dev.tmichon", "ODSP-Web.wiki") -- but still bounded and
+# shell-metacharacter-free before being passed as a subprocess argument.
+AGENT_WORKTREES_REPO_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 SESSION_CONTEXT_ROLES = {
     "output": "complete-declared-output-capable",
     "side_effect": "proven-output-free",
@@ -579,6 +590,49 @@ def _marketplace_manifest(root: Path) -> tuple[dict, Path] | None:
     return None
 
 
+def _agent_worktrees_repo_root(repo_name: str) -> Path | None:
+    """Resolve a registered repo's local checkout path via the trusted
+    ``agent-worktrees`` repo registry, by stable repo name.
+
+    Lets a marketplace declaration reference *another* repo's directory
+    marketplace portably: ``{"source": "agent-worktrees-repo", "repo":
+    "<name>"}`` resolves identically on any machine where that repo is
+    registered, without embedding a machine-specific absolute path in
+    committed settings -- which a plain ``directory`` source would require
+    for a cross-repo reference, and which is exactly what a committed,
+    shared settings.json must not do. Never raises; an unavailable CLI,
+    an unregistered repo, or any other resolution failure is treated the
+    same as an unresolvable ``directory`` source (returns ``None``), not
+    an error -- this mirrors ``_directory_marketplace_plugin``'s own
+    not-found handling below.
+    """
+    if not AGENT_WORKTREES_REPO_NAME.fullmatch(repo_name):
+        return None
+    agent_worktrees = shutil.which("agent-worktrees")
+    if not agent_worktrees:
+        return None
+    try:
+        completed = subprocess.run(
+            [agent_worktrees, "repos", "find", repo_name],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    if not lines:
+        return None
+    try:
+        path = Path(lines[-1]).resolve(strict=True)
+    except OSError:
+        return None
+    return path if path.is_dir() else None
+
+
 def _directory_marketplace_plugin(
     marketplace: str,
     name: str,
@@ -589,19 +643,37 @@ def _directory_marketplace_plugin(
     source = declaration.get("source")
     if not isinstance(source, dict):
         return None
-    if str(source.get("source", "")).strip().lower() != "directory":
-        return None
-    raw_path = source.get("path")
-    if not isinstance(raw_path, str) or not raw_path.strip():
-        return None
-    configured = Path(raw_path).expanduser()
-    root = configured if configured.is_absolute() else base / configured
-    try:
-        root = root.resolve(strict=True)
-    except OSError:
+    source_kind = str(source.get("source", "")).strip().lower()
+    if source_kind == "directory":
+        raw_path = source.get("path")
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            return None
+        configured = Path(raw_path).expanduser()
+        root = configured if configured.is_absolute() else base / configured
+        try:
+            root = root.resolve(strict=True)
+        except OSError:
+            return None
+    elif source_kind == "agent-worktrees-repo":
+        repo_name = source.get("repo")
+        if not isinstance(repo_name, str) or not repo_name.strip():
+            return None
+        repo_root = _agent_worktrees_repo_root(repo_name.strip())
+        if repo_root is None:
+            return None
+        raw_path = source.get("path", ".ai")
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            return None
+        configured = Path(raw_path).expanduser()
+        root = configured if configured.is_absolute() else repo_root / configured
+        try:
+            root = root.resolve(strict=True)
+        except OSError:
+            return None
+    else:
         return None
     loaded = _marketplace_manifest(root)
-    if loaded is None:
+    if loaded is None: 
         return None
     manifest, manifest_root = loaded
     if manifest.get("name") != marketplace:
