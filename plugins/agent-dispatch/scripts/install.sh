@@ -440,14 +440,43 @@ _source_version() {
 }
 
 # True (0) if version $1 is strictly older than $2. Normalizes the PEP 440 dev
-# separator (plugin.json `0.1.0-dev19` vs importlib `0.1.0.dev19`) so `sort -V`
-# orders the devN build stream correctly.
+# separator (plugin.json `0.1.0-dev19` vs importlib `0.1.0.dev19`), then
+# compares MAJOR.MINOR.PATCH[.devN] component-by-component as integers.
+#
+# This deliberately avoids `sort -V`: GNU coreutils orders a trailing `devN`
+# stream numerically, but Apple's `sort -V` (macOS) orders it lexically, so
+# e.g. "0.1.2.dev102" sorts *before* "0.1.2.dev74" on macOS -- a false
+# "source is older" positive that permanently blocks legitimate upgrades
+# (#377). A component-wise integer compare gives the same, correct answer on
+# every platform.
 _version_lt() {
     local a="${1//-/.}" b="${2//-/.}"
     [[ "$a" == "$b" ]] && return 1
-    local lower
-    lower="$(printf '%s\n%s\n' "$a" "$b" | sort -V | head -n1)"
-    [[ "$lower" == "$a" ]]
+    local -a pa pb
+    IFS='.' read -r -a pa <<< "$a"
+    IFS='.' read -r -a pb <<< "$b"
+    local len=${#pa[@]}
+    (( ${#pb[@]} > len )) && len=${#pb[@]}
+    local i ca cb na nb
+    for (( i = 0; i < len; i++ )); do
+        ca="${pa[i]:-}"
+        cb="${pb[i]:-}"
+        [[ -z "$ca" && -z "$cb" ]] && continue
+        # A version that ran out of components here (e.g. "0.1.2" vs
+        # "0.1.2.dev5") is the finished release; a release outranks any
+        # devN pre-release build of the same prefix.
+        [[ -z "$ca" ]] && return 1
+        [[ -z "$cb" ]] && return 0
+        na="${ca//[!0-9]/}"
+        nb="${cb//[!0-9]/}"
+        na="${na:-0}"
+        nb="${nb:-0}"
+        na=$((10#$na))
+        nb=$((10#$nb))
+        (( na < nb )) && return 0
+        (( na > nb )) && return 1
+    done
+    return 1
 }
 
 _downgrade_guard() {
