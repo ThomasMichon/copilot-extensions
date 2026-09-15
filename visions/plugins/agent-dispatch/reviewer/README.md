@@ -194,6 +194,9 @@ reviving a released lineage.
 
 - [agent-dispatch vision](../README.md)
 - [agent-worktrees vision](../../agent-worktrees/README.md)
+- [agent-worktrees pull-requests vision](../../agent-worktrees/pull-requests/README.md) —
+  the provider-neutral PR capability this reviewer loop composes (or should)
+  for reviewer-side operations, rather than embedding its own forge client.
 - [agent-bridge vision](../../agent-bridge/README.md)
 - Realization:
   [`efforts/active/review-automation-reliability/`](../../../../efforts/active/review-automation-reliability/)

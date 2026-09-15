@@ -5,7 +5,7 @@
   obligations, disposition, and source-control completion.
 - **Scope:** leaf (concrete component; child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-09-12
+- **Last revised:** 2026-09-14
 - **Reality docs:** the agent-worktrees plugin `docs/`
 - **Supersedes / superseded by:** none
 
@@ -107,6 +107,15 @@ The worktree owns the ledger of resources it creates or adopts: related
 worktrees, pull requests, environments, sessions, connections, and other
 scarce resources. Exclusive access is fenced, ownership is answerable in both
 directions, and finalization is gated on settlement or an explicit transfer.
+
+### Pull-request capability
+
+A pull request is more than a claimed resource on a worktree's ledger: it is
+the subject of a provider-neutral capability in its own right, covering both
+the author's and the reviewer's side of its life, addressable for a repo
+regardless of local checkout, and verifiable against a fabricated provider
+with the same confidence as a real one. See
+[pull-requests](pull-requests/README.md) (child vision).
 
 ### Source-control completion
 
@@ -320,6 +329,16 @@ manager, or session-host implementation.
 
 ## Provenance
 
+- **2026-09-14** — Added *pull-request capability* (Concepts & Components),
+  linking a new child leaf vision,
+  [`pull-requests`](pull-requests/README.md), that generalizes the PR concept
+  beyond "a claimed resource on the worktree's ledger" into its own
+  provider-neutral capability (author+reviewer symmetric, foreign-repo
+  addressable, mock-provider verifiable). Mined from a live odsp-web-harness
+  clean-room finding: a scenario-eval correctly reported BLOCKED for "no PR
+  available" rather than fabricate a review, surfacing that reviewer-side PR
+  operations, foreign-repo addressing, and a conformance-verified mock
+  provider have no first-class home today.
 - **2026-09-12** — Added *related-repo relationship and contribution posture*
   (Concepts & Components), *auto-discovered-contribution-posture* and
   *ambient-cross-repo-contribution-guidance* (Features), and
