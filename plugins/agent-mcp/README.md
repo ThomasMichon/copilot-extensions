@@ -758,6 +758,49 @@ tool itself — something a static `filter`/`transform` can't see.
 > result. `gate` never prunes `tools/list`; a gated tool stays advertised and
 > returns the deny action for calls that fail the predicate.
 
+### `input_gate` — deny a call whose OWN arguments match a predicate
+
+`gate` judges a call by an out-of-band **preflight** fact (a different tool's
+response). Some authorization invariants instead need to judge the call by its
+**own request arguments** — e.g. "never let a metadata-write call itself
+introduce a specific marker value into a `tags`/`title` argument", so a marker
+meant to be human-set can't be self-granted by the same session that also
+benefits from it being present. Neither `filter` (static per-tool allow/deny,
+no argument inspection) nor `transform` (reshapes a tool's OUTPUT only) can
+express that. `input_gate` closes that specific gap: it evaluates a boolean
+`deny_when` predicate over the call's **own arguments**, using the same
+path/op mini-language as `gate`'s `allow_when`, and denies the call before it
+ever reaches the upstream if the predicate matches.
+
+```yaml
+- type: input_gate
+  match_tools: [update_incident]                # globs; which tools/call to gate
+  deny_when:                                     # boolean predicate over the call's OWN args
+    any:
+      - { path: "tags[*]", matches: "(?i)^ai-safe$" }
+      - { path: "title", matches: "(?i)(^|[^A-Za-z0-9_-])ai-safe([^A-Za-z0-9_-]|$)" }
+  on_deny: error                                  # error | stub | drop (default: error)
+  reason: "the ai-safe tag/keyword is human-only; an agent must never self-grant it"
+```
+
+- **`match_tools`** — globs; only a matching `tools/call` is evaluated
+  (everything else passes straight through; `input_gate` never prunes
+  `tools/list`).
+- **`deny_when`** — the same predicate tree/leaf-op language as `gate`'s
+  `allow_when` (§ above), evaluated against the call's **arguments object**
+  directly (no preflight round-trip — there is nothing out-of-band to fetch).
+- **`on_deny`** — `error` (JSON-RPC error, **default** — this decorator
+  protects a WRITE, so the default is the opposite of `gate`'s READ-oriented
+  `stub` default), `stub` (return the `stub`/`reason` payload as the result),
+  or `drop` (empty result).
+- **`reason`** — a short human-readable string used as the JSON-RPC error
+  message (`on_deny: error`) or the default `stub` payload's `reason` field.
+
+Complementary to `gate`, not a replacement: `gate` decides "is this record's
+own state safe to read"; `input_gate` decides "does this write attempt
+introduce a value it must never introduce", independent of any preflight
+lookup or the record's current state.
+
 
 
 ## Use from a Copilot agent
@@ -1099,7 +1142,7 @@ stdin/stdout        Bridge        Decorator pipeline           UpstreamClient   
                                  ^                                                   or cli responder
                           filter/rename/defer/                                      Auth injector -> credential_relay.sources
                           code-mode/storage/
-                          transform/gate
+                          transform/gate/input_gate
 ```
 
 - `config.py` — load + validate the per-bridge config file (incl. `decorators:`).
@@ -1109,8 +1152,9 @@ stdin/stdout        Bridge        Decorator pipeline           UpstreamClient   
 - `pipeline.py` — `UpstreamClient` (JSON-RPC id correlation over a transport) +
   `Pipeline` (compose decorators around the upstream core call).
 - `decorators/` — `base` (Decorator + BridgeContext), `_catalog` (catalog
-  pagination + JSON-Schema→TS), and the `filter`/`rename`/`defer`/`code-mode`/
-  `storage`/`transform`/`gate` decorators.
+  pagination + JSON-Schema→TS), `_predicate` (the shared path/op predicate
+  engine used by `gate` and `input_gate`), and the `filter`/`rename`/`defer`/
+  `code-mode`/`storage`/`transform`/`gate`/`input_gate` decorators.
 - `bridge.py` — stdio framing, per-request dispatch through the pipeline,
   unsolicited-message passthrough.
 - `protocol.py` — the dual-era version model: modern (`2026-07-28`, per-request

@@ -66,7 +66,8 @@ PARSE_MODES = ("keyvalue", "raw")
 
 # Decorator types in the ``decorators:`` stack. Kept in sync with the registry in
 # ``agent_mcp.decorators`` (a test asserts they match) to avoid a circular import.
-DECORATOR_TYPES = ("filter", "rename", "defer", "code-mode", "storage", "transform", "gate")
+DECORATOR_TYPES = ("filter", "rename", "defer", "code-mode", "storage", "transform",
+                    "gate", "input_gate")
 
 BRIDGES_DIR = Path(os.environ.get("AGENT_MCP_HOME", Path.home() / ".agent-mcp")) / "bridges"
 
@@ -1027,6 +1028,8 @@ def _validate_decorators(decorators: list[DecoratorSpec]) -> list[str]:
             errors.extend(_validate_transform_rules(opts, label))
         if d.type == "gate":
             errors.extend(_validate_gate(opts, label))
+        if d.type == "input_gate":
+            errors.extend(_validate_input_gate(opts, label))
     return errors
 
 
@@ -1054,6 +1057,20 @@ def _validate_gate(opts: dict, label: str) -> list[str]:
     on_error = opts.get("on_error", "deny")
     if on_error not in ("deny", "allow"):
         errors.append(f"{label}.on_error '{on_error}' must be deny|allow")
+    return errors
+
+
+def _validate_input_gate(opts: dict, label: str) -> list[str]:
+    """Validate an input_gate decorator (match_tools + deny_when + on_deny)."""
+    errors: list[str] = []
+    match_tools = opts.get("match_tools")
+    if not match_tools or not isinstance(match_tools, list):
+        errors.append(f"{label}: input_gate requires a non-empty 'match_tools' list")
+    if not isinstance(opts.get("deny_when"), dict):
+        errors.append(f"{label}: input_gate requires a 'deny_when' predicate mapping")
+    on_deny = opts.get("on_deny", "error")
+    if on_deny not in ("stub", "drop", "error"):
+        errors.append(f"{label}.on_deny '{on_deny}' must be stub|drop|error")
     return errors
 
 

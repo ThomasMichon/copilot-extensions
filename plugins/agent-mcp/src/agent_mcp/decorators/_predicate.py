@@ -1,0 +1,122 @@
+"""Shared boolean-predicate engine over a path/op mini-language.
+
+Used by both ``gate`` (evaluated against a preflight lookup's result) and
+``input_gate`` (evaluated against a tool call's own arguments) so the two
+share identical path resolution and operator semantics -- a config author
+who learns one gate's predicate syntax already knows the other's.
+
+```yaml
+allow_when:                                  # (or deny_when, etc. -- caller-named)
+  all:
+    - any:
+        - { path: "tags[*]", in: ["public", "internal"] }
+        - { path: "title", matches: "\\[OK\\]" }
+    - { path: "isSensitive", equals: false }
+```
+
+Leaf ops: ``in``, ``equals``, ``matches``, ``contains``, ``exists`` (positive),
+and their negative twins ``not_in``, ``not_equals``, ``not_matches`` (a
+negative op is vacuously TRUE when its path resolves to nothing -- "nothing
+violates it"). Combinators: ``all`` (AND), ``any`` (OR), ``not``.
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Any
+
+_STEP_RE = re.compile(r"([^.\[\]]+)|\[(\*)\]|\[(-?\d+)\]")
+
+# Leaf comparison ops. "Positive" ops are satisfied when ANY resolved value
+# matches; their negative twins are satisfied when NO resolved value matches
+# (vacuously true when the path resolves to nothing).
+_POSITIVE_OPS = ("in", "equals", "matches", "contains", "exists")
+_NEGATIVE_OPS = {"not_in": "in", "not_matches": "matches", "not_equals": "equals"}
+_ALL_OPS = (*_POSITIVE_OPS, *_NEGATIVE_OPS)
+
+__all__ = ["eval_leaf", "eval_predicate", "parse_path", "resolve_path"]
+
+
+def parse_path(path: str) -> list[tuple[str, Any]]:
+    """Tokenize a path (``a.b[*].c`` / ``tags[*]`` / ``x[0]``) into steps."""
+    steps: list[tuple[str, Any]] = []
+    for key, wild, idx in _STEP_RE.findall(str(path)):
+        if key:
+            steps.append(("key", key))
+        elif wild:
+            steps.append(("wild", None))
+        elif idx:
+            steps.append(("idx", int(idx)))
+    return steps
+
+
+def resolve_path(doc: Any, path: str) -> list[Any]:
+    """Resolve ``path`` in ``doc`` to the (0..n) values it addresses.
+
+    ``[*]`` fans out over a list; a bare key descends an object; ``[n]`` indexes a
+    list. A key that misses, or a type mismatch, simply contributes no values --
+    so an absent path yields ``[]`` (which reads as "condition not satisfied").
+    """
+    nodes: list[Any] = [doc]
+    for kind, val in parse_path(path):
+        nxt: list[Any] = []
+        for node in nodes:
+            if kind == "key":
+                if isinstance(node, dict) and val in node:
+                    nxt.append(node[val])
+            elif kind == "wild":
+                if isinstance(node, list):
+                    nxt.extend(node)
+            elif kind == "idx" and isinstance(node, list) and -len(node) <= val < len(node):
+                nxt.append(node[val])
+        nodes = nxt
+    return nodes
+
+
+def _leaf_positive(op: str, value: Any, resolved: list[Any]) -> bool:
+    """Evaluate a positive leaf op: true if ANY resolved value satisfies it."""
+    if op == "exists":
+        present = len(resolved) > 0
+        return present if bool(value) else not present
+    for v in resolved:
+        if op == "in" and isinstance(value, list) and v in value:
+            return True
+        if op == "equals" and v == value:
+            return True
+        if op == "matches" and isinstance(v, str) and re.search(str(value), v):
+            return True
+        if op == "contains":
+            if isinstance(v, (list, str)) and value in v:
+                return True
+    return False
+
+
+def eval_leaf(node: dict, doc: Any, *, log=None) -> bool:
+    path = node.get("path")
+    resolved = resolve_path(doc, path) if path is not None else []
+    for op, value in node.items():
+        if op == "path":
+            continue
+        if op in _NEGATIVE_OPS:
+            # No resolved value may satisfy the positive twin (vacuously true).
+            if _leaf_positive(_NEGATIVE_OPS[op], value, resolved):
+                return False
+        elif op in _POSITIVE_OPS:
+            if not _leaf_positive(op, value, resolved):
+                return False
+        elif log is not None:
+            log.warning("predicate: unknown op '%s' (ignored)", op)
+    return True
+
+
+def eval_predicate(node: Any, doc: Any, *, log=None) -> bool:
+    """Evaluate a predicate node (``all``/``any``/``not`` combinator or a leaf)."""
+    if not isinstance(node, dict):
+        return False
+    if "all" in node:
+        return all(eval_predicate(c, doc, log=log) for c in (node["all"] or []))
+    if "any" in node:
+        return any(eval_predicate(c, doc, log=log) for c in (node["any"] or []))
+    if "not" in node:
+        return not eval_predicate(node["not"], doc, log=log)
+    return eval_leaf(node, doc, log=log)

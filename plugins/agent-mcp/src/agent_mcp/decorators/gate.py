@@ -43,116 +43,36 @@ from __future__ import annotations
 import fnmatch
 import json
 import logging
-import re
 from typing import Any
 
 from ._catalog import tool_call_args, tool_call_name
 from ._jsonutil import json_documents
+from ._predicate import eval_predicate, parse_path, resolve_path
 from .base import BridgeContext, Decorator, Next, error_response, result_response
 
 log = logging.getLogger("agent-mcp.gate")
 
 _MISSING = object()
 
-# A path step: a dotted key, an ``[*]`` array wildcard, or a ``[n]`` array index.
-_STEP_RE = re.compile(r"([^.\[\]]+)|\[(\*)\]|\[(-?\d+)\]")
-
 
 def _parse_path(path: str) -> list[tuple[str, Any]]:
-    """Tokenize a path (``a.b[*].c`` / ``tags[*]`` / ``x[0]``) into steps."""
-    steps: list[tuple[str, Any]] = []
-    for key, wild, idx in _STEP_RE.findall(str(path)):
-        if key:
-            steps.append(("key", key))
-        elif wild:
-            steps.append(("wild", None))
-        elif idx:
-            steps.append(("idx", int(idx)))
-    return steps
+    """Deprecated alias -- use :func:`agent_mcp.decorators._predicate.parse_path`."""
+    return parse_path(path)
 
 
 def _resolve_path(doc: Any, path: str) -> list[Any]:
-    """Resolve ``path`` in ``doc`` to the (0..n) values it addresses.
-
-    ``[*]`` fans out over a list; a bare key descends an object; ``[n]`` indexes a
-    list. A key that misses, or a type mismatch, simply contributes no values --
-    so an absent path yields ``[]`` (which reads as "condition not satisfied").
-    """
-    nodes: list[Any] = [doc]
-    for kind, val in _parse_path(path):
-        nxt: list[Any] = []
-        for node in nodes:
-            if kind == "key":
-                if isinstance(node, dict) and val in node:
-                    nxt.append(node[val])
-            elif kind == "wild":
-                if isinstance(node, list):
-                    nxt.extend(node)
-            elif kind == "idx" and isinstance(node, list) and -len(node) <= val < len(node):
-                nxt.append(node[val])
-        nodes = nxt
-    return nodes
-
-
-# ---------------------------------------------------------------------------
-# Predicate engine
-# ---------------------------------------------------------------------------
-
-# Leaf comparison ops. "Positive" ops are satisfied when ANY resolved value
-# matches; their negative twins are satisfied when NO resolved value matches
-# (vacuously true when the path resolves to nothing).
-_POSITIVE_OPS = ("in", "equals", "matches", "contains", "exists")
-_NEGATIVE_OPS = {"not_in": "in", "not_matches": "matches", "not_equals": "equals"}
-_ALL_OPS = (*_POSITIVE_OPS, *_NEGATIVE_OPS)
-
-
-def _leaf_positive(op: str, value: Any, resolved: list[Any]) -> bool:
-    """Evaluate a positive leaf op: true if ANY resolved value satisfies it."""
-    if op == "exists":
-        present = len(resolved) > 0
-        return present if bool(value) else not present
-    for v in resolved:
-        if op == "in" and isinstance(value, list) and v in value:
-            return True
-        if op == "equals" and v == value:
-            return True
-        if op == "matches" and isinstance(v, str) and re.search(str(value), v):
-            return True
-        if op == "contains":
-            if isinstance(v, (list, str)) and value in v:
-                return True
-    return False
-
-
-def _eval_leaf(node: dict, doc: Any) -> bool:
-    path = node.get("path")
-    resolved = _resolve_path(doc, path) if path is not None else []
-    for op, value in node.items():
-        if op == "path":
-            continue
-        if op in _NEGATIVE_OPS:
-            # No resolved value may satisfy the positive twin (vacuously true).
-            if _leaf_positive(_NEGATIVE_OPS[op], value, resolved):
-                return False
-        elif op in _POSITIVE_OPS:
-            if not _leaf_positive(op, value, resolved):
-                return False
-        else:
-            log.warning("gate: unknown predicate op '%s' (ignored)", op)
-    return True
+    """Deprecated alias -- use :func:`agent_mcp.decorators._predicate.resolve_path`."""
+    return resolve_path(doc, path)
 
 
 def _eval_predicate(node: Any, doc: Any) -> bool:
-    """Evaluate a predicate node (``all``/``any``/``not`` combinator or a leaf)."""
-    if not isinstance(node, dict):
-        return False
-    if "all" in node:
-        return all(_eval_predicate(c, doc) for c in (node["all"] or []))
-    if "any" in node:
-        return any(_eval_predicate(c, doc) for c in (node["any"] or []))
-    if "not" in node:
-        return not _eval_predicate(node["not"], doc)
-    return _eval_leaf(node, doc)
+    """Deprecated alias -- use :func:`agent_mcp.decorators._predicate.eval_predicate`.
+
+    Kept here (bound to this module's ``log``) for backward compatibility with
+    existing imports/tests; the actual engine now lives in ``_predicate`` so
+    ``input_gate`` can share it without importing from ``gate``.
+    """
+    return eval_predicate(node, doc, log=log)
 
 
 # ---------------------------------------------------------------------------
