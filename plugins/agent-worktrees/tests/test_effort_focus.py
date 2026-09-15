@@ -339,6 +339,60 @@ def test_bind_show_and_transfer_release(cli_env, capsys, monkeypatch):
     assert released.summary == "Transferred effort durable-loop to issue #42"
 
 
+def test_bind_show_resolves_effort_against_paired_knowledge_worktree(
+    tmp_path, tmp_tracking_dir, monkeypatch_config, monkeypatch
+):
+    """A stateless harness worktree's ``effort-focus bind``/``show`` must
+    resolve the effort README against the paired knowledge worktree, not the
+    harness's own checkout (#300)."""
+
+    harness_repo = tmp_path / "harness"
+    harness_repo.mkdir()
+    knowledge_repo = tmp_path / "knowledge"
+    knowledge_repo.mkdir()
+    relative = _effort(knowledge_repo)
+
+    record = _record(harness_repo)
+    tracking.save_record(record, tmp_tracking_dir / f"{record.worktree_id}.yaml")
+
+    class _StatelessRepoConfig:
+        stateless = True
+        requires_external_state_root = True
+
+    class _FakeConfig:
+        default_repo = _StatelessRepoConfig()
+
+    fake_config = _FakeConfig()
+    monkeypatch.setattr(m.cfg, "load_config", lambda: fake_config)
+    monkeypatch.setattr(m, "_infer_worktree_id", lambda _wid, _config=None: record.worktree_id)
+    monkeypatch.setattr(m, "_resolve_worktree_id", lambda wid: wid)
+    monkeypatch.setattr(ef, "repository_root", lambda _path: harness_repo)
+
+    sibling = m.state_root_mod.PairCheckout(
+        role="knowledge",
+        path=str(knowledge_repo),
+        repo="knowledge-repo",
+        worktree_id="wt-knowledge",
+    )
+    current = m.state_root_mod.PairCheckout(
+        role="harness", path=str(harness_repo), repo="example", worktree_id=record.worktree_id
+    )
+    pair = m.state_root_mod.StatePair(
+        paired=True, pair_id="pair-1", current=current, sibling=sibling
+    )
+    monkeypatch.setattr(m.state_root_mod, "resolve_pair", lambda _config, cwd=None: pair)
+
+    assert m.cmd_effort_focus(_args(
+        "bind",
+        path=relative,
+        participant="Driver",
+        effort_slice="Phase 2 - Bind active effort",
+    )) == 0
+    loaded = tracking.load_record(tmp_tracking_dir / f"{record.worktree_id}.yaml")
+    assert loaded.active_effort is not None
+    assert loaded.follow_up is True
+
+
 def test_release_requires_done_or_named_transfer(cli_env):
     repo, _record, _tracking_dir = cli_env
     relative = _effort(repo)
