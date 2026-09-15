@@ -115,13 +115,21 @@ class QueueBackedClient:
         return asdict(self._q.defer_spawn(key, detail=detail))
 
     def request_spawn_release(
-        self, key, *, detail=None, disposition="failed"
+        self,
+        key,
+        *,
+        detail=None,
+        disposition="failed",
+        session_handle=None,
+        worktree=None,
     ):
         return asdict(
             self._q.request_spawn_release(
                 key,
                 detail=detail,
                 disposition=disposition,
+                session_handle=session_handle,
+                worktree=worktree,
             )
         )
 

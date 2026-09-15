@@ -685,9 +685,11 @@ class SpawnReservationMixin:
         *,
         detail: str | None = None,
         disposition: str = "failed",
+        session_handle: str | None = None,
+        worktree: str | None = None,
         now: float | None = None,
     ) -> SpawnReservation:
-        """Fence an attempt until exact body absence is proven."""
+        """Fence an attempt and atomically retain any failed body identity."""
         if disposition not in {"failed", "settled"}:
             raise TaskError(f"invalid spawn release disposition: {disposition!r}")
         ts = self._now(now)
@@ -702,6 +704,12 @@ class SpawnReservationMixin:
                 raise TaskError(
                     f"reservation {key} is {row['state']!r}, not active (cannot request release)"
                 )
+            if worktree and row["worktree"] and row["worktree"] != worktree:
+                conn.execute("COMMIT")
+                raise TaskError(
+                    f"reservation {key} worktree is {row['worktree']!r}, "
+                    f"not {worktree!r}"
+                )
             if row["state"] == SpawnState.RELEASING:
                 release_disposition = (
                     "failed"
@@ -711,20 +719,33 @@ class SpawnReservationMixin:
                 conn.execute(
                     "UPDATE spawn_reservations SET release_requested = 1, "
                     "release_disposition = ?, detail = COALESCE(?, detail), "
+                    "session_handle = COALESCE(?, session_handle), "
+                    "worktree = COALESCE(?, worktree), "
                     "updated_at = ? WHERE key = ?",
-                    (release_disposition, detail, ts, key),
+                    (
+                        release_disposition,
+                        detail,
+                        session_handle,
+                        worktree,
+                        ts,
+                        key,
+                    ),
                 )
             else:
                 conn.execute(
                     "UPDATE spawn_reservations SET state = ?, "
                     "release_requested = 1, release_disposition = ?, "
                     "detail = COALESCE(?, detail), "
+                    "session_handle = COALESCE(?, session_handle), "
+                    "worktree = COALESCE(?, worktree), "
                     "conclusion_state = COALESCE(conclusion_state, ?), "
                     "updated_at = ? WHERE key = ?",
                     (
                         SpawnState.RELEASING,
                         disposition,
                         detail,
+                        session_handle,
+                        worktree,
                         "pending",
                         ts,
                         key,
