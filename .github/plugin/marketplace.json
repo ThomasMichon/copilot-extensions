@@ -42,7 +42,7 @@
     {
       "name": "agent-ssh",
       "description": "SSH connectivity layer for the agent fabric: emit and verify machine-name SSH profiles from a normalized registry, and define the public transport-provider contract for pluggable direct or tunnel transports.",
-      "version": "0.1.0-dev98",
+      "version": "0.1.0-dev99",
       "source": "plugins/agent-ssh"
     },
     {
@@ -72,7 +72,7 @@
     {
       "name": "customizing-copilot",
       "description": "Customize, diagnose, and extend the Copilot CLI - authoring skills, defining sub-agents, registering MCP servers, installing plugins, building an agent control-harness, reviewing customizations, diagnosing startup hangs, and authoring <repo>-harness plugins - with the per-skill folder conventions and Agent Skills best practices; ships eight focused skills",
-      "version": "0.1.0-dev66",
+      "version": "0.1.0-dev67",
       "source": "plugins/customizing-copilot"
     },
     {
@@ -108,7 +108,7 @@
     {
       "name": "agent-machines",
       "description": "Portable machine setup and restore for Copilot CLI. Derives setup from declared topology, enabled capabilities, and in-repo requirement packages, then converges the current machine through Copilot settings, resources, and repo-local modules. Organization policy and per-machine values remain downstream while the engine and conductor stay generic.",
-      "version": "0.1.0-dev119",
+      "version": "0.1.0-dev120",
       "source": "plugins/agent-machines"
     },
     {
