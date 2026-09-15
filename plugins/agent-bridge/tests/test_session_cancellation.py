@@ -809,6 +809,30 @@ async def test_resync_refuses_pending_remote_reap_without_mutation(owned_context
         await reap
 
 
+@pytest.mark.parametrize("boundary", ["local", "codespace", "container"])
+@pytest.mark.parametrize("background", [False, True])
+async def test_resync_refuses_retained_completed_host_before_cleanup(
+    owned_context, monkeypatch, boundary, background,
+):
+    from agent_bridge.session_manager import RemoteHostRecoveryPendingError
+
+    ctx = owned_context
+    record = _remote_record(ctx)
+    record.boundary = boundary
+    ctx.manager._host_index.register(record)
+    ctx.session.status = SessionStatus.RUNNING if background else SessionStatus.STOPPED
+    generation = ctx.session._lifecycle_generation
+    cleanup = AsyncMock(side_effect=AssertionError("retained host must not be detached for direct spawn"))
+    monkeypatch.setattr("agent_bridge.session_resume.cleanup_failed_resume", cleanup)
+    with pytest.raises(RemoteHostRecoveryPendingError, match="authority is retained"):
+        await ctx.manager.resync_session(record.session_id, background=background)
+    cleanup.assert_not_awaited()
+    assert ctx.manager._host_index.get(record.session_id) == record
+    assert ctx.session._lifecycle_generation == generation
+    assert ctx.session.status == (SessionStatus.RUNNING if background else SessionStatus.STOPPED)
+    assert ctx.processes == []
+
+
 @pytest.mark.parametrize("fault", ["error", "cancel"])
 @pytest.mark.parametrize("retain_host", [False, True])
 async def test_preconnect_start_claim_cleanup(owned_context, monkeypatch, fault, retain_host):

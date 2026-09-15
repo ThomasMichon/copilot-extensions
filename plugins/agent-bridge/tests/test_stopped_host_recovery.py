@@ -1183,6 +1183,8 @@ async def test_resync_excludes_prompt_admission_until_client_replacement(
     context, monkeypatch, mock_acp_client,
 ):
     ctx = context
+    ctx.manager._host_index.remove(ctx.session.session_id)
+    ctx.session.target = SpawnTarget(type="local", cwd=".")
     ctx.session.status = SessionStatus.IDLE
     ctx.session.client = mock_acp_client
     entered, release, delivered = asyncio.Event(), asyncio.Event(), asyncio.Event()

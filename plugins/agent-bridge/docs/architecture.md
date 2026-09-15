@@ -510,6 +510,9 @@ restart does not inherently close the child's pipes.
   clear without submitting the same nudge twice; rejection before admission
   leaves the nudge retryable. Authority refresh preserves the receipt, while
   an explicit clear or a new redeploy nudge removes the previous receipt.
+  Direct process-backed resync refuses any retained Session Host record before
+  teardown or spawning, including background resync after a failed reattach.
+  Such sessions must use host-aware resume or confirmed host cleanup first.
   The manager remains the public facade; `session_resume.py`,
   `session_teardown.py`, and `session_ownership.py` own the bounded lifecycle
   implementations. Additive session migrations live in `db_migrations.py`.
