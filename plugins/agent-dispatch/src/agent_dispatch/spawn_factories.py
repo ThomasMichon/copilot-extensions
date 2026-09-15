@@ -306,6 +306,23 @@ def _failed_bridge_session(result: object) -> str | None:
     return match.group(1) if match else None
 
 
+def _request_failed_created_spawn_release(
+    client: object,
+    key: str,
+    handle: dict,
+    spawn_task: dict,
+    detail: str,
+) -> None:
+    failed_session = handle.get("session")
+    if isinstance(failed_session, str) and failed_session:
+        client.record_spawn(
+            key,
+            session_handle=failed_session,
+            worktree=handle.get("worktree") or spawn_task.get("spawn_worktree"),
+        )
+    client.request_spawn_release(key, detail=detail, disposition="failed")
+
+
 def _parse_fleet_body_handle(session_handle: str | None) -> tuple[str, str] | None:
     """Decode a ``fleet-body:<host>:<bridge-session-id>`` reservation handle.
 
