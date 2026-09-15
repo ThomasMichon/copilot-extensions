@@ -97,7 +97,15 @@ def _leaf_positive(op: str, value: Any, resolved: list[Any]) -> bool:
         if op == "matches" and isinstance(v, str) and re.search(str(value), v):
             return True
         if op == "contains":
-            if isinstance(v, (list, str)) and value in v:
+            # `x in v` is safe for any `value` when `v` is a list (element-wise
+            # `==`), but raises TypeError for a str `v` unless `value` is ALSO
+            # a str (e.g. `1 in "abc"`). input_gate evaluates this against
+            # caller-controlled call arguments, so a mismatched-type config
+            # must not crash predicate evaluation -- restrict the str branch
+            # to str values instead of letting it raise.
+            if isinstance(v, list) and value in v:
+                return True
+            if isinstance(v, str) and isinstance(value, str) and value in v:
                 return True
     return False
 

@@ -1032,6 +1032,43 @@ def _validate_decorators(decorators: list[DecoratorSpec]) -> list[str]:
             errors.extend(_validate_gate(opts, label))
         if d.type == "input_gate":
             errors.extend(_validate_input_gate(opts, label))
+    errors.extend(_validate_input_gate_position(decorators))
+    return errors
+
+
+# Decorator types whose synthesized/rehydrated sub-requests can bypass an
+# `input_gate` positioned before (client-side / outer of) them -- see
+# input_gate.py's module docstring for the full rationale.
+_UNSAFE_BEFORE_INPUT_GATE = ("code-mode", "defer", "storage")
+
+
+def _validate_input_gate_position(decorators: list[DecoratorSpec]) -> list[str]:
+    """Reject a decorator stack where an ``input_gate`` sits BEFORE
+    ``code-mode``/``defer`` (whose synthesized sub-requests only reach
+    decorators below their own position, never back through ``input_gate``
+    above them) or ``storage`` (which may rehydrate a ``$stream`` argument
+    handle into its real value on the way to upstream -- an ``input_gate``
+    above it would evaluate ``deny_when`` against the handle, not the real
+    value). This is a documented ordering requirement (README, module
+    docstrings); this function makes it a HARD, enforced requirement instead
+    of a config author simply having to remember it correctly."""
+    errors: list[str] = []
+    input_gate_indices = [i for i, d in enumerate(decorators) if d.type == "input_gate"]
+    if not input_gate_indices:
+        return errors
+    last_unsafe_index = max(
+        (i for i, d in enumerate(decorators) if d.type in _UNSAFE_BEFORE_INPUT_GATE),
+        default=-1,
+    )
+    for i in input_gate_indices:
+        if i < last_unsafe_index:
+            errors.append(
+                f"decorators[{i}] (input_gate) must be positioned AFTER every "
+                f"{'/'.join(_UNSAFE_BEFORE_INPUT_GATE)} decorator (found one at "
+                f"decorators[{last_unsafe_index}]) -- a synthesized sub-request "
+                "or a rehydrated $stream value would otherwise bypass its "
+                "deny_when check. Move input_gate to be the LAST decorator in "
+                "the stack.")
     return errors
 
 

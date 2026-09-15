@@ -1178,7 +1178,10 @@ stdin/stdout        Bridge        Decorator pipeline           UpstreamClient   
 - `client.py` — `OneShotSession`: connect + **negotiate era** (`server/discover`
   probe / forced) + one `tools/list` / `tools/call` against an upstream, then exit
   (the engine under `call` and the introspection step of `materialize`).
-  `call_tool` runs through the same `Pipeline`/`decorators:` stack the
-  long-lived bridge does, so `gate`/`input_gate`/etc. apply on the cold path too.
+  **Only `call_tool`** runs through the same `Pipeline`/`decorators:` stack the
+  long-lived bridge does, so `gate`/`input_gate`/etc. apply on the cold `call`
+  path too; `list_tools` (materialize's introspection, and `call`'s own catalog
+  fetch) still calls the upstream directly and does not go through
+  `rename`/`defer`/`transform` — only the legacy top-level `tools:` filter.
 - `materialize.py` — project a `tools/list` catalog into the on-disk stub fleet
   (symlink farm on POSIX, `.ps1`/`.cmd` shim farm on Windows) + plated sidecars.

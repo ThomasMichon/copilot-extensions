@@ -229,3 +229,36 @@ def test_input_gate_rejects_combinator_with_extra_keys():
                           "deny_when": {"any": [{"path": "x", "equals": 1}],
                                         "path": "y"}}])
 
+
+_INPUT_GATE_SPEC = {"type": "input_gate", "match_tools": ["a"],
+                    "deny_when": {"path": "x", "equals": 1}}
+
+
+def test_input_gate_rejects_position_before_storage():
+    with pytest.raises(ConfigError, match="must be positioned AFTER"):
+        _cfg(decorators=[dict(_INPUT_GATE_SPEC), {"type": "storage"}])
+
+
+def test_input_gate_rejects_position_before_code_mode():
+    with pytest.raises(ConfigError, match="must be positioned AFTER"):
+        _cfg(decorators=[dict(_INPUT_GATE_SPEC), {"type": "code-mode"}])
+
+
+def test_input_gate_rejects_position_before_defer():
+    with pytest.raises(ConfigError, match="must be positioned AFTER"):
+        _cfg(decorators=[dict(_INPUT_GATE_SPEC), {"type": "defer"}])
+
+
+def test_input_gate_accepts_position_after_storage_and_code_mode():
+    cfg = _cfg(decorators=[
+        {"type": "code-mode"},
+        {"type": "storage"},
+        dict(_INPUT_GATE_SPEC),
+    ])
+    assert cfg.decorators[-1].type == "input_gate"
+
+
+def test_input_gate_accepts_when_no_unsafe_decorators_present():
+    cfg = _cfg(decorators=[{"type": "filter", "allow": ["a"]}, dict(_INPUT_GATE_SPEC)])
+    assert cfg.decorators[-1].type == "input_gate"
+

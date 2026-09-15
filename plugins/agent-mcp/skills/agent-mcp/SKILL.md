@@ -303,12 +303,14 @@ decorators:
 | `storage` | Externalize large outputs to `mcpstream://…` handles; rehydrate handle inputs; `read_stream` fetches them. **Field-level `rules:`** target specific tool input/output JSON paths, attach a summary (count + schema + head, or a command), and rewrite a stream-mode input param's schema to a URL. |
 | `transform` | Reshape tool results per tool: `extract`/`pick`/`drop` dotted paths (literal-dotted keys like ADO `fields.System.Title` supported) or a `command` (jq-style) filter. |
 | `gate` | Allow/deny a tool **per-call** by a **preflight** upstream lookup + boolean predicate (`all`/`any`/`not`; `in`/`matches`/`equals`/`contains`/`exists` over `[*]`/dotted paths). Deny → `stub`/`drop`/`error`; fail-closed on preflight error. For rules whose signal is out-of-band for the gated tool. |
+| `input_gate` | Deny a tool call whose **own arguments** match a `deny_when` predicate (same predicate language as `gate`'s `allow_when`, evaluated directly against the call — no preflight). For "never let this write introduce marker X" invariants a preflight can't see. Must be positioned **last** (innermost) — after `code-mode`/`defer`/`storage` — or config validation rejects it; see the README's `input_gate` section for why. |
 
 Decorators compose because each calls *through* the ones below it. Recommended
-order: `defer`/`code-mode` outermost, then `rename`, then `filter`, with
-`storage` innermost. The legacy `tools:` filter still works (applied as an
-implicit `filter`). Full reference + per-decorator options:
-[README → Decorator stack](../../README.md#decorator-stack).
+order: `defer`/`code-mode` outermost, then `rename`, then `filter`, then `gate`,
+with `storage` innermost — **except `input_gate`, which must go even after
+`storage`** (truly last of all; config validation enforces this). The legacy
+`tools:` filter still works (applied as an implicit `filter`). Full reference +
+per-decorator options: [README → Decorator stack](../../README.md#decorator-stack).
 
 ### Is an MCP a good `code-mode` candidate? (prerequisites)
 

@@ -66,7 +66,7 @@
   "plugins/agent-machines/src/agent_machines/resources.py": 2002,
   "plugins/agent-mcp/scripts/installation-context/installation_context.py": 9169,
   "plugins/agent-mcp/scripts/versioned_runtime.py": 1245,
-  "plugins/agent-mcp/src/agent_mcp/config.py": 1133,
+  "plugins/agent-mcp/src/agent_mcp/config.py": 1170,
   "plugins/agent-ssh/scripts/installation-context/installation_context.py": 9169,
   "plugins/agent-ssh/scripts/versioned_runtime.py": 1245,
   "plugins/agent-ssh/src/agent_ssh/fragment_registry.py": 1195,
