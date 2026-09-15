@@ -77,6 +77,9 @@ def test_valid_owner_with_no_peer_is_the_sole_absence_case(
     subprocess.CompletedProcess([], 0, json.dumps(
         {"worktrees": [{"path": "C:/ok"}, {"path": "   "}]}
     ), ""),
+    subprocess.CompletedProcess([], 0, json.dumps(
+        {"worktrees": [{"path": "C:/ok"}, {"path": "C:/ba\x00d"}]}
+    ), ""),
 ])
 def test_failed_or_malformed_probe_raises_context_refused_not_none(
     owner: dict[str, str], response: subprocess.CompletedProcess[str],

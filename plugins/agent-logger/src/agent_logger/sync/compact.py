@@ -133,7 +133,7 @@ def _paths_from_list_response(data: object) -> set[str] | None:
         if not isinstance(wt, dict):
             return None
         p = wt.get("path")
-        if not isinstance(p, str) or not p.strip():
+        if not isinstance(p, str) or not p.strip() or "\x00" in p:
             return None
         paths.add(_normalize_path(p))
     return paths
