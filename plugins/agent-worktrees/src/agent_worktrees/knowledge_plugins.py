@@ -24,6 +24,7 @@ from plugin_resolve.conventions import (
 )
 
 from . import config as cfg
+from . import knowledge_composition_policy as policy
 from . import repos as repos_mod
 from . import state_root, tracking
 
@@ -235,24 +236,6 @@ def _is_local_marketplace(definition: dict) -> bool:
         and isinstance(source.get("source"), str)
         and source["source"].strip() in LOCAL_MARKETPLACE_SOURCE_KINDS
     )
-
-
-# A knowledge repo's own `<something>-harness` plugin is, by the same
-# established convention this ecosystem already uses for named-repo/maintainer
-# adapters (e.g. `<repo>-harness`), a self-referential surface for maintaining *that* repo
-# from within its own session. It is not meant to be graftable into a
-# different repo's harness session, the same way a `*-agent` plugin is
-# venue-scoped and never loaded centrally. Composing it into an unrelated
-# harness can introduce that harness's session-start/agent surface to a
-# plugin whose triggers, hooks, and assumptions were authored for a different
-# repository entirely -- excluding it here keeps composition additive-only.
-_SELF_HARNESS_SUFFIX = "-harness"
-
-
-def _is_self_referential_harness_plugin(source: str, local_names: set[str]) -> bool:
-    """True when `source` names a knowledge-local `*-harness` plugin."""
-    plugin, marketplace = split_source(source)
-    return marketplace in local_names and plugin.endswith(_SELF_HARNESS_SUFFIX)
 
 
 def _localized_marketplace(definition: dict, knowledge_path: Path) -> dict:
@@ -555,10 +538,10 @@ def _compose_locked(
     later re-point/removal can retire stale entries without deleting operator
     edits.
 
-    The knowledge repo's own local self-referential ``*-harness`` plugin (its
-    own maintenance surface, e.g. ``<repo>-harness``) is never composed in --
-    see :func:`_is_self_referential_harness_plugin`. It is reported separately
-    under ``excluded_enabled_plugins``, not as a conflict.
+    The knowledge repo's own local self-referential ``*-harness`` plugin is
+    never composed in -- see
+    :func:`knowledge_composition_policy.is_self_referential_harness_plugin`.
+    It is reported separately under ``excluded_enabled_plugins``.
     """
     harness = Path(harness_path).resolve()
     knowledge = Path(knowledge_path).resolve()
@@ -703,14 +686,12 @@ def _compose_locked(
     for source, on in sorted(knowledge_settings.enabled.items()):
         if not on:
             continue
-        if _is_self_referential_harness_plugin(source, local_names):
-            # Never graft the knowledge repo's own self-maintenance
-            # `*-harness` plugin into this harness's session; see
-            # `_is_self_referential_harness_plugin`. Also force-remove any
-            # stale entry a pre-fix (markerless-legacy or marker-owned)
-            # composition already wrote -- retirement above only clears
-            # entries with a recorded marker, so a markerless-legacy overlay
-            # would otherwise keep carrying it forever.
+        if policy.is_self_referential_harness_plugin(source, local_names):
+            # Never graft it in; also force-remove any stale entry a
+            # pre-fix (markerless-legacy or marker-owned) composition
+            # already wrote -- retirement above only clears entries with a
+            # recorded marker, so a markerless-legacy overlay would
+            # otherwise keep carrying it forever.
             enabled.pop(source, None)
             excluded_enabled.append(source)
             continue
@@ -911,15 +892,53 @@ def _is_tracked_harness(
         return False
     if current.role == "harness":
         return True
-    if loaded_config is None:
-        return False
-    repo_config = getattr(loaded_config, "repos", {}).get(current.repo)
+    repo_config = policy.repo_config_for(loaded_config, current.repo)
     if repo_config is None:
-        try:
-            repo_config = loaded_config.default_repo
-        except KeyError:
-            return False
+        return False
     return bool(repo_config.stateless)
+
+
+def _retire_disabled_overlay(harness_path: str | Path) -> dict[str, Any]:
+    """Retire a marker-owned overlay when composition is config-disabled
+    (pair stays valid -- only composition is off; see `_retire_invalid_pair_overlay`)."""
+    harness = Path(harness_path).resolve()
+    output_path = harness / ".github" / "copilot" / "settings.local.json"
+    with _overlay_transaction(output_path):
+        existing = _load_json_object(output_path)
+        marker = _managed_marker(existing, output_path)
+        if marker is None or not marker.get("pairId"):
+            return {
+                "action": "disabled",
+                "paired": True,
+                "changed": False,
+                "settings_local": str(output_path),
+                "harness_path": str(harness),
+            }
+        marketplaces = _dict_setting(existing, "extraKnownMarketplaces", output_path)
+        enabled = _dict_setting(existing, "enabledPlugins", output_path)
+        previous_marketplaces = dict(marker["marketplaces"])
+        previous_enabled = dict(marker["enabledPlugins"])
+        _retire_previous(marketplaces, previous_marketplaces)
+        _retire_previous(enabled, previous_enabled)
+
+        result = dict(existing)
+        result.pop(_OVERLAY_KEY, None)
+        if marketplaces:
+            result["extraKnownMarketplaces"] = marketplaces
+        else:
+            result.pop("extraKnownMarketplaces", None)
+        if enabled:
+            result["enabledPlugins"] = enabled
+        else:
+            result.pop("enabledPlugins", None)
+        changed = _write_overlay(output_path, result)
+        return {
+            "action": "disabled",
+            "paired": True,
+            "changed": changed,
+            "settings_local": str(output_path),
+            "harness_path": str(harness),
+        }
 
 
 def compose_from_pair(
@@ -953,6 +972,15 @@ def compose_from_pair(
             "changed": False,
             "pair_error": pair_error,
         }
+
+    assert resolution.current is not None
+    repo_config = policy.repo_config_for(loaded_config, resolution.current.repo)
+    if repo_config is not None and not repo_config.compose_knowledge_plugins:
+        # Opted out via `RepoConfig.compose_knowledge_plugins`: state-root
+        # pairing stays valid; only the plugin overlay is retired/withheld.
+        summary = _retire_disabled_overlay(pair.harness_path)
+        summary["knowledge_repo"] = pair.knowledge_repo
+        return summary
 
     legacy_anchor: str | None = None
     if pair.pair_kind == "worktree":
