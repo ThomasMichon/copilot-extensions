@@ -237,6 +237,25 @@ def _is_local_marketplace(definition: dict) -> bool:
     )
 
 
+# A knowledge repo's own `<something>-harness` plugin is, by the same
+# established convention this ecosystem already uses for named-repo/maintainer
+# adapters (e.g. `odsp-web-harness-harness`, `copilot-extensions-harness`,
+# `agency-harness`), a self-referential surface for maintaining *that* repo
+# from within its own session. It is not meant to be graftable into a
+# different repo's harness session, the same way a `*-agent` plugin is
+# venue-scoped and never loaded centrally. Composing it into an unrelated
+# harness can introduce that harness's session-start/agent surface to a
+# plugin whose triggers, hooks, and assumptions were authored for a different
+# repository entirely -- excluding it here keeps composition additive-only.
+_SELF_HARNESS_SUFFIX = "-harness"
+
+
+def _is_self_referential_harness_plugin(source: str, local_names: set[str]) -> bool:
+    """True when `source` names a knowledge-local `*-harness` plugin."""
+    plugin, marketplace = split_source(source)
+    return marketplace in local_names and plugin.endswith(_SELF_HARNESS_SUFFIX)
+
+
 def _localized_marketplace(definition: dict, knowledge_path: Path) -> dict:
     """Copy a local marketplace definition and absolutize its directory path."""
     source = definition.get("source")
@@ -536,6 +555,11 @@ def _compose_locked(
     preserved.  A private ownership marker records exact managed values, so a
     later re-point/removal can retire stale entries without deleting operator
     edits.
+
+    The knowledge repo's own local self-referential ``*-harness`` plugin (its
+    own maintenance surface, e.g. ``<repo>-harness``) is never composed in --
+    see :func:`_is_self_referential_harness_plugin`. It is reported separately
+    under ``excluded_enabled_plugins``, not as a conflict.
     """
     harness = Path(harness_path).resolve()
     knowledge = Path(knowledge_path).resolve()
@@ -664,6 +688,7 @@ def _compose_locked(
 
     managed_enabled: dict[str, bool] = {}
     conflicting_enabled: list[str] = []
+    excluded_enabled: list[str] = []
     conflicting_names = set(conflicting_marketplaces)
     if markerless_legacy:
         for source, on in enabled.items():
@@ -678,6 +703,12 @@ def _compose_locked(
                 conflicting_enabled.append(source)
     for source, on in sorted(knowledge_settings.enabled.items()):
         if not on:
+            continue
+        if _is_self_referential_harness_plugin(source, local_names):
+            # Never graft the knowledge repo's own self-maintenance
+            # `*-harness` plugin into this harness's session; see
+            # `_is_self_referential_harness_plugin`.
+            excluded_enabled.append(source)
             continue
         _, marketplace = split_source(source)
         if marketplace in conflicting_names:
@@ -740,6 +771,7 @@ def _compose_locked(
             "enabled_plugins": sorted(set(conflicting_enabled)),
         },
         "harness_owned_marketplaces": sorted(harness_owned_marketplaces),
+        "excluded_enabled_plugins": sorted(set(excluded_enabled)),
     }
 
 

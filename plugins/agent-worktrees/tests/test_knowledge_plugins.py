@@ -140,6 +140,42 @@ def test_paired_compose_uses_knowledge_worktree_and_carries_remote(
     assert overlay["enabledPlugins"]["mine@unmanaged"] is True
 
 
+def test_compose_excludes_knowledge_self_harness_plugin(tmp_path: Path):
+    """A knowledge repo's own `*-harness` plugin never grafts into the harness.
+
+    It is the knowledge repo's self-referential maintenance surface (same
+    convention as `odsp-web-harness-harness`, `copilot-extensions-harness`),
+    not a generically graftable capability -- composing it in could introduce
+    an unclassified extra `sessionStart` producer into the harness's session.
+    """
+    harness = tmp_path / "harness"
+    knowledge = tmp_path / "knowledge"
+    harness.mkdir()
+    (knowledge / ".ai").mkdir(parents=True)
+    _write_settings(
+        knowledge,
+        {
+            "extraKnownMarketplaces": {
+                "personal": {
+                    "source": {"source": "directory", "path": "./.ai"}
+                }
+            },
+            "enabledPlugins": {
+                "notes@personal": True,
+                "knowledge-harness@personal": True,
+            },
+        },
+    )
+
+    summary = kp.compose(harness, knowledge)
+    overlay = _read_overlay(harness)
+
+    assert overlay["enabledPlugins"]["notes@personal"] is True
+    assert "knowledge-harness@personal" not in overlay.get("enabledPlugins", {})
+    assert summary["excluded_enabled_plugins"] == ["knowledge-harness@personal"]
+    assert "knowledge-harness@personal" not in summary["conflicts"]["enabled_plugins"]
+
+
 def test_repointed_knowledge_retires_old_managed_entries(tmp_path: Path):
     harness = tmp_path / "harness"
     first = tmp_path / "knowledge-one"
