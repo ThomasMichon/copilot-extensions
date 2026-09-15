@@ -321,13 +321,17 @@ def _request_failed_created_spawn_release(
     detail: str,
 ) -> None:
     failed_session = handle.get("session")
-    if isinstance(failed_session, str) and failed_session:
-        client.record_spawn(
-            key,
-            session_handle=failed_session,
-            worktree=handle.get("worktree") or spawn_task.get("spawn_worktree"),
-        )
-    client.request_spawn_release(key, detail=detail, disposition="failed")
+    client.request_spawn_release(
+        key,
+        detail=detail,
+        disposition="failed",
+        session_handle=(
+            failed_session
+            if isinstance(failed_session, str) and failed_session
+            else None
+        ),
+        worktree=handle.get("worktree") or spawn_task.get("spawn_worktree"),
+    )
 
 
 def _parse_fleet_body_handle(session_handle: str | None) -> tuple[str, str] | None:
