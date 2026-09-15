@@ -202,6 +202,17 @@ since review tone/severity can vary run to run. A PR sitting untouched after
 a review lands, waiting for some further signal from Copilot, is a stuck PR --
 merge it or explicitly abandon it instead.
 
+**Never post an `@copilot review` (or any `@copilot` mention) comment to
+request a fresh pass.** GitHub's automatic review already fires on every push
+with no mention needed. An explicit `@copilot` mention instead risks routing
+to the autonomous **Copilot coding agent**, which can push its OWN commit
+directly onto your PR branch (observed: a `copilot-swe-agent[bot]`-authored
+commit landing mid-session, requiring inspection before trusting it and
+creating a real force-push race against the driving agent's own commits). If
+a fresh review genuinely helps after a substantive fix, just push the update
+(`push-changes`) and let the automatic review re-fire -- never `@`-mention the
+bot to ask for one.
+
 ### Coordinating Across Control Repos
 
 This repo is public and may be driven from **multiple downstream/control repos**
