@@ -5,7 +5,7 @@
   obligations, disposition, and source-control completion.
 - **Scope:** leaf (concrete component; child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-09-14
+- **Last revised:** 2026-09-15
 - **Reality docs:** the agent-worktrees plugin `docs/`
 - **Supersedes / superseded by:** none
 
@@ -147,6 +147,22 @@ suite-wide
 guarantee, generalized here from session-lifecycle hooks to every ordinary
 reader.
 
+The reduction's inputs are a fixed, small set of independently named facts —
+whether the session has held activity since its last checkpoint, whether the
+worktree's content is contained in its upstream default branch, whether the
+working tree is locally dirty, whether any claim against the worktree remains
+open, and whether a handoff is pending pickup — never a hand-authored combined
+enum that grows a new case per situation. The costliest of these,
+upstream-containment, depends on evidence (the repo's remote-tracking refs)
+shared by every sibling worktree of the same repo; the resident accelerator
+keeps that evidence current through its own periodic sweep and through
+prompt, operation-triggered recomputation (a merge landing, a push, a sync, a
+claim settling) — rather than trusting whichever individual caller happened
+to request a fetch on its own call. Any fact whose current truth cannot be
+confirmed is marked as such in the rendered result — never silently reported
+as certain, and never given a separate, whole state of its own standing in
+for "unverified."
+
 ### Declarative presentation contribution
 
 agent-worktrees contributes machine-readable worktree semantics and actions to
@@ -218,6 +234,43 @@ The Worktrees presentation surface is described through machine-readable
 semantics that any compatible control plane can render without importing the
 engine or persisting a second copy of its state.
 
+### decomposed-status-facts
+
+The status a worktree renders is a reduction over a fixed, small set of
+independently named facts — activity since the last checkpoint,
+upstream-containment, local dirtiness, open claims, and pending handoff —
+never a hand-authored combined enum that grows a new case per situation.
+
+### continuously-revalidated-freshness
+
+The costliest fact — whether a worktree's content is contained in its
+upstream default branch — is kept current by the resident accelerator itself:
+a periodic background sweep (on the order of once a minute, not once per
+render) plus prompt, operation-triggered recomputation, rather than trusting
+whichever caller happened to request a fetch on its own call.
+
+### repo-scoped-freshness
+
+Sibling worktrees of one repo share the same remote-tracking refs, so
+upstream-containment freshness is tracked once per repo, not once per
+worktree. Any fetch — a background sweep, a finalize, a merge — refreshes
+every sibling worktree's evidence at once.
+
+### operation-triggered-recompute
+
+Operations that plausibly change a sub-state's truth — a merge landing, a
+push, a sync or rebase, a claim settling or releasing, a handoff resolving —
+signal the resident accelerator to recompute promptly, rather than leaving
+the affected worktrees to wait out the next periodic sweep.
+
+### marked-not-multiplied-uncertainty
+
+When a specific fact's truth cannot currently be confirmed, the rendered
+status marks that one fact as unconfirmed rather than inventing a separate
+whole state for the unverified case — the vocabulary of possible statuses
+stays fixed size regardless of how many facts happen to be stale at any
+moment.
+
 ## Behaviors
 
 ### durable-state-outlives-execution
@@ -249,6 +302,27 @@ coordination layers derive over both rather than copying either.
 When a provider is unreachable, agent-worktrees reports stale or unknown live
 state while preserving durable state. It does not infer that an objective is
 resolved, a session is dead, or a claim is abandoned from missing telemetry.
+
+### uncertainty-is-marked-not-multiplied
+
+An unconfirmed fact renders as that fact's real value plus an explicit
+marker, never as a different, separately-named state standing in for
+"unverified." A consumer sees one fixed vocabulary of facts and,
+independently, which of them are currently confirmed.
+
+### freshness-is-pursued-not-assumed
+
+No caller may treat a fact as confirmed merely because its own request
+happened to include a fetch. The system actively keeps shared evidence
+current — a periodic background sweep plus operation-triggered
+recomputation — so an ordinary reader benefits from freshness without
+personally requesting it.
+
+### one-fetch-serves-every-sibling
+
+A repo's upstream-containment evidence, once refreshed by any means, is
+immediately available to every worktree of that repo — never re-fetched
+independently per worktree for the same evidence.
 
 ### contribution-posture-degrades-honestly
 
@@ -313,6 +387,10 @@ manager, or session-host implementation.
   session archive.
 - **Not the presentation host.** It contributes worktree semantics but does not
   render the operator experience.
+- **Not a second background service.** The periodic freshness sweep and
+  operation-triggered recomputation extend the existing resident accelerator
+  (already required to exist as a single process per host); they do not
+  introduce a second daemon.
 - **Not a specification.** This vision fixes ownership boundaries and durable
   guarantees, not schemas, commands, endpoints, file layouts, or provider APIs.
 
@@ -329,6 +407,20 @@ manager, or session-host implementation.
 
 ## Provenance
 
+- **2026-09-15** — Refined *Derived status* into a decomposed sub-state model:
+  a fixed set of independently named facts (checkpoint activity,
+  upstream-containment, dirtiness, open claims, pending handoff), freshness
+  actively and continuously maintained by the resident accelerator (a
+  periodic sweep plus operation-triggered recomputation) rather than trusted
+  from whichever caller's own request happened to pass a fetch flag, and
+  unconfirmed facts marked individually rather than each spawning a separate
+  whole state. Mined from an operator observation that every worktree read as
+  `MERGED`, never `FINAL`, because the closure descriptor's freshness signal
+  was scoped to a single call's own fetch rather than to the repo-wide
+  remote-tracking refs every sibling worktree actually shares — refined via
+  discussion into treating uncertainty as a per-fact marker instead of a
+  parallel state space, and freshness as an actively pursued, resident-owned
+  property instead of a passively hoped-for one.
 - **2026-09-14** — Added *pull-request capability* (Concepts & Components),
   linking a new child leaf vision,
   [`pull-requests`](pull-requests/README.md), that generalizes the PR concept
