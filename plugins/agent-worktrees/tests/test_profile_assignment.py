@@ -1492,11 +1492,6 @@ def test_new_worktree_survives_optional_assignment_state_failure(
         "add_trusted_folder",
         lambda *_args, **_kwargs: False,
     )
-    monkeypatch.setattr(
-        m,
-        "_reconcile_marketplaces_for_checkout",
-        lambda *_args, **_kwargs: None,
-    )
     monkeypatch.setattr(m.activity, "log_event", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(m, "_repo_session_env", lambda *_args, **_kwargs: {})
 

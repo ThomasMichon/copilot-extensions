@@ -577,7 +577,6 @@ def _fallback_legacy_session_start(payload: dict) -> dict:
         ("register-nudge", ("--side-effect-only",)),
         ("register-session", ("--side-effect-only",)),
         ("anchor-hygiene-check", ()),
-        ("marketplace-overrides", ("--side-effect-only",)),
         ("provision-check", ()),
     )
     encoded = json.dumps(payload, separators=(",", ":"))
