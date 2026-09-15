@@ -140,29 +140,51 @@ def _runtime_candidates(root: Path) -> list[Path]:
     return out
 
 
+class _MissingType:
+    """Sentinel distinguishing 'not attempted yet' from 'attempted and
+    failed' so a load failure is cached too, instead of re-parsing the
+    9,169-line vendored module on every single call within a process."""
+
+
+_NOT_LOADED = _MissingType()
+_LOADED_INSTALLATION_CONTEXT: "ModuleType | _MissingType" = _NOT_LOADED
+
+
 def _load_installation_context() -> ModuleType | None:
     """Load the vendored, byte-identical installation-context primitive.
+
+    Cached for the lifetime of the process (successful or failed) -- this
+    module is looked up on every engine request, and re-parsing/executing a
+    9,169-line file each time is avoidable latency for something that never
+    changes mid-process.
 
     Returns ``None`` (never raises) when the vendored copy is somehow
     missing, so a corrupted/absent library never turns a read-only policy
     check into a hard failure -- the caller falls back to legacy exactly as
     if no policy existed, which is the resolver's own stated default.
     """
+    global _LOADED_INSTALLATION_CONTEXT
+    if _LOADED_INSTALLATION_CONTEXT is not _NOT_LOADED:
+        return _LOADED_INSTALLATION_CONTEXT  # type: ignore[return-value]
     path = Path(__file__).with_name("_installation_context.py")
+    module: ModuleType | None
     if not path.is_file():
-        return None
-    try:
-        spec = importlib.util.spec_from_file_location(
-            _INSTALLATION_CONTEXT_MODULE, path
-        )
-        if spec is None or spec.loader is None:
-            return None
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[_INSTALLATION_CONTEXT_MODULE] = module
-        spec.loader.exec_module(module)
-        return module
-    except Exception:
-        return None
+        module = None
+    else:
+        try:
+            spec = importlib.util.spec_from_file_location(
+                _INSTALLATION_CONTEXT_MODULE, path
+            )
+            if spec is None or spec.loader is None:
+                module = None
+            else:
+                module = importlib.util.module_from_spec(spec)
+                sys.modules[_INSTALLATION_CONTEXT_MODULE] = module
+                spec.loader.exec_module(module)
+        except Exception:
+            module = None
+    _LOADED_INSTALLATION_CONTEXT = module
+    return module
 
 
 def _canonical_os_profile(environment: dict[str, str]) -> Path | None:
@@ -404,10 +426,15 @@ def resolve_installed_plugin_slot(plugin_id: str) -> Path | None:
     Never PATH, never a bare command name: only an attributable slot under a
     validated install root. The namespaced root (when policy is enabled and
     an explicit context validates via ``_namespaced_plugin_root``) is
-    already fully validated and is tried first; the legacy root is trusted
-    only via the ``deploy-manifest.json`` shape, never a bare
-    ``install.json``, so a forged receipt cannot masquerade as either kind
-    of root. A malformed (present-but-invalid) policy file blocks
+    already fully validated and is tried first -- and once selected, it is
+    authoritative: an incomplete or damaged slot under it fails closed
+    rather than falling through to legacy, since the plugin's own runtime
+    gate has already established the namespaced install as active and would
+    not silently prefer an older legacy runtime either. Legacy is only
+    considered when no namespaced root was selected at all. The legacy root
+    itself is trusted only via the ``deploy-manifest.json`` shape, never a
+    bare ``install.json``, so a forged receipt cannot masquerade as either
+    kind of root. A malformed (present-but-invalid) policy file blocks
     resolution entirely, fail-closed, rather than silently degrading to
     legacy.
     """
@@ -416,9 +443,7 @@ def resolve_installed_plugin_slot(plugin_id: str) -> Path | None:
         return None
     namespaced_root = _namespaced_plugin_root(plugin_id)
     if namespaced_root is not None:
-        slot = _select_complete_slot(namespaced_root)
-        if slot is not None:
-            return slot
+        return _select_complete_slot(namespaced_root)
     legacy_root = legacy_plugin_root(plugin_id)
     if _validated_legacy_root(legacy_root, plugin_id) is not None:
         slot = _select_complete_slot(legacy_root)
