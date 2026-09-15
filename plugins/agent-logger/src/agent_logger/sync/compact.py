@@ -213,24 +213,35 @@ def _resolve_tracked_paths_or_none(require_untracked: bool) -> set[str] | None:
 
 
 def resolve_hub_tracked_paths(require_untracked: bool) -> tuple[set[str] | None, bool]:
-    """Hub-safe resolution: an unresolved lookup must fail closed, not proceed.
+    """Hub-safe resolution: any non-affirmative result must fail closed.
 
     Returns ``(tracked_paths, unresolved)``. Hub sessions may belong to a
-    foreign machine, so there is no reliable on-disk existence fallback the way
-    :func:`select_compactable` has for its own live sessions. When protection
-    was requested (``require_untracked``) but resolution raises
-    :class:`_peer_launch.ContextRefused`, ``unresolved`` is ``True`` and the
-    caller must skip this compaction pass rather than proceed with
+    foreign machine, so there is no reliable per-session on-disk fallback the
+    way :func:`select_compactable` has for its own live sessions -- and
+    genuine peer *absence* is no more informative than a *failure* here: "no
+    same-cell worktrees peer in this cell" is not evidence that nothing,
+    anywhere, is tracked. Every ``None`` from :func:`tracked_worktree_paths`
+    (absence, a legacy lookup miss, or a :class:`_peer_launch.ContextRefused`
+    failure) is therefore treated identically as ``unresolved``, and only a
+    genuinely resolved, non-``None`` set is passed through. The caller must
+    skip this compaction pass on ``unresolved`` rather than proceed with
     ``tracked_paths=None`` -- ``FilesystemTarget.compact_backlog`` treats
     ``None`` as "nothing to protect", not "protection unavailable".
     """
     if not require_untracked:
         return None, False
     try:
-        return tracked_worktree_paths(), False
+        tracked = tracked_worktree_paths()
     except _peer_launch.ContextRefused as error:
         log.warning("agent-logger tracked-worktree lookup unresolved: %s", error)
         return None, True
+    if tracked is None:
+        log.warning(
+            "agent-logger tracked-worktree lookup returned no result "
+            "(peer absent or legacy lookup unavailable); treating as unresolved"
+        )
+        return None, True
+    return tracked, False
 
 
 def _parse_iso(ts: str) -> datetime | None:
