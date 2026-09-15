@@ -37,6 +37,7 @@ def test_sync_repairs_missing_and_drifted_copies(tmp_path: Path) -> None:
     module.CANONICAL_DIR = canonical
     module.ADOPTERS = ("plugin-a", "plugin-b")
     module.LEGACY_ENTRYPOINT_ADOPTERS = ("plugin-a",)
+    module.STANDALONE_PYTHON_ADOPTERS = ()
     assert module.verify()
     written = module.sync()
     assert len(written) == len(module.FILES) * 2 + len(module.LEGACY_ENTRYPOINT_FILES)
@@ -68,6 +69,7 @@ def test_verify_flags_a_plugin_that_vendors_without_being_registered(
     module.CANONICAL_DIR = canonical
     module.ADOPTERS = ("plugin-a",)
     module.LEGACY_ENTRYPOINT_ADOPTERS = ()
+    module.STANDALONE_PYTHON_ADOPTERS = ()
     module.sync()
     assert module.verify() == []
 

@@ -19,12 +19,13 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shlex
 import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+
+from . import agent_plugin_runtime
 
 #: The engine binstub name (the self-provisioning agent-worktrees tool CLI).
 ENGINE_BIN = "agent-worktrees"
@@ -152,111 +153,18 @@ def accept_inherited_engine_command() -> str | None:
     return None
 
 
-def _state_home() -> Path:
-    override = os.environ.get("AGENT_HOME")
-    if override:
-        return Path(override)
-    variable = "USERPROFILE" if os.name == "nt" else "HOME"
-    return Path(os.environ.get(variable) or Path.home())
-
-
-def _version_key(version: str):
-    supported = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?", version)
-    if supported:
-        major, minor, patch, dev = supported.groups()
-        return (
-            1,
-            int(major),
-            int(minor),
-            int(patch),
-            1 if dev is None else 0,
-            int(dev or 0),
-        )
-    tokens = re.split(r"(\d+)", version.casefold())
-    return (0, tuple((1, int(t)) if t.isdigit() else (0, t) for t in tokens))
-
-
-def _runtime_candidates(root: Path) -> list[Path]:
-    versions = root / "versions"
-    candidates: list[Path] = []
-
-    def contained_slot(version: str) -> Path | None:
-        if (
-            not version
-            or version in {".", ".."}
-            or Path(version).name != version
-        ):
-            return None
-        try:
-            versions_root = versions.resolve()
-            candidate = (versions / version).resolve()
-        except OSError:
-            return None
-        if candidate.parent != versions_root:
-            return None
-        return candidate
-
-    for marker_name in ("current-version", "last-known-good"):
-        try:
-            version = (root / marker_name).read_text(encoding="utf-8").strip()
-        except OSError:
-            version = ""
-        candidate = contained_slot(version)
-        if candidate is not None:
-            candidates.append(candidate)
-    try:
-        fallback = sorted(
-            (path for path in versions.iterdir() if path.is_dir()),
-            key=lambda path: _version_key(path.name),
-            reverse=True,
-        )
-    except OSError:
-        fallback = []
-    candidates.extend(
-        candidate
-        for path in fallback
-        if (candidate := contained_slot(path.name)) is not None
-    )
-    out: list[Path] = []
-    seen: set[str] = set()
-    for candidate in candidates:
-        key = os.path.normcase(str(candidate.resolve()))
-        if key not in seen:
-            seen.add(key)
-            out.append(candidate)
-    return out
-
-
 def installed_engine_command() -> list[str] | None:
     """Resolve the exact marker-selected agent-worktrees runtime.
 
-    The deployment manifest attests the owning provider; its marker/fallback
-    files select the immutable runtime slot. A bare command name or PATH lookup
-    is never accepted.
+    Delegates to the generic, plugin-name-parameterized resolver in
+    ``agent_plugin_runtime`` (Phase 3b/4 follow-on) so every agent-* peer is
+    located the same way agent-worktrees is here: the attributable install
+    receipt (legacy ``deploy-manifest.json``, or a namespaced ``install.json``
+    when the shared installation-mode policy has marketplace cells enabled
+    and an explicit context names this exact plugin) selects the immutable
+    runtime slot. A bare command name or PATH lookup is never accepted.
     """
-    root = _state_home() / ".agent-worktrees"
-    try:
-        manifest = json.loads(
-            (root / "deploy-manifest.json").read_text(encoding="utf-8")
-        )
-    except (OSError, ValueError, TypeError):
-        return None
-    if not isinstance(manifest, dict):
-        return None
-    source = manifest.get("source")
-    if (
-        manifest.get("service") != ENGINE_BIN
-        or not isinstance(source, dict)
-        or source.get("plugin") != ENGINE_BIN
-    ):
-        return None
-    for slot in _runtime_candidates(root):
-        if not (slot / ".install-complete.json").is_file():
-            continue
-        python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-        if python.is_file():
-            return [str(python), "-m", "agent_worktrees"]
-    return None
+    return agent_plugin_runtime.resolve_installed_plugin_command(ENGINE_BIN)
 
 
 #: In-process base-command override (wins over the env). Set by the Picker's

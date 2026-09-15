@@ -9,6 +9,13 @@ every standalone payload byte-identical.
 Dispatch, CodeSpaces, and Containers peer launchers consume the Python primitive packaged
 inside their wheels. They must bootstrap validation from their own installed bytes,
 not import a validator from an as-yet-unvalidated receipt's payload pointer.
+
+Worktree Manager -- a standalone, non-plugin payload outside ``plugins/`` --
+vendors the same primitive for its own read-only ``agent_plugin_runtime.py``
+resolver (worktree-manager-control-plane effort): it never provisions or
+activates anything, only reads the shared installation-mode policy so its
+legacy-vs-namespaced decision can never disagree with what an agent-* plugin
+itself would compute for the same file.
 """
 from __future__ import annotations
 
@@ -46,6 +53,18 @@ ADOPTERS = (
 )
 LEGACY_ENTRYPOINT_ADOPTERS = ("agent-machines", "agent-index")
 
+#: Standalone, non-plugin payloads (outside ``plugins/``) that vendor the
+#: Python primitive the same way agent-dispatch/codespaces/containers do:
+#: read-only discovery of an installed agent-* runtime, never provisioning.
+#: Worktree Manager's ``agent_plugin_runtime.py`` is the consumer (Phase 3b/4
+#: follow-on, worktree-manager-control-plane effort). Stored as a REPO-relative
+#: path (not a resolved ``Path``) so a test's ``module.REPO`` reassignment is
+#: honored by ``vendor_pairs()`` at call time instead of a stale absolute path
+#: baked in at import time.
+STANDALONE_PYTHON_ADOPTERS: tuple[tuple[str, str], ...] = (
+    ("worktree-manager/src/worktree_manager", "worktree_manager"),
+)
+
 
 def vendor_pairs() -> list[tuple[Path, Path]]:
     return [
@@ -71,6 +90,12 @@ def vendor_pairs() -> list[tuple[Path, Path]]:
         )
         for plugin in LEGACY_ENTRYPOINT_ADOPTERS
         for name in LEGACY_ENTRYPOINT_FILES
+    ] + [
+        (
+            CANONICAL_DIR / "installation_context.py",
+            REPO / relative_dir / "_installation_context.py",
+        )
+        for relative_dir, _label in STANDALONE_PYTHON_ADOPTERS
     ]
 
 
@@ -160,7 +185,8 @@ def main() -> int:
             return 1
         print(
             "installation-context files in sync across "
-            f"{len(ADOPTERS)} adopters."
+            f"{len(ADOPTERS)} plugin adopters and "
+            f"{len(STANDALONE_PYTHON_ADOPTERS)} standalone-payload adopter(s)."
         )
         return 0
 
