@@ -1934,6 +1934,83 @@ def mux_new_session(
     }
 
 
+def mux_available(mux: str | None = None) -> bool:
+    """Whether the platform multiplexer binary (psmux/tmux) is even on PATH.
+
+    Distinct from :func:`has_mux_session`, which asks about a *specific*
+    worktree's already-running session -- this asks whether the mux tooling
+    exists at all. Both ``handoff-cutover`` (an existing live session) and
+    ``embody`` (creates one on demand) require this; a host with genuinely no
+    mux backend (e.g. a headless coordinator box) needs
+    :func:`headless_new_session` instead.
+    """
+    import shutil
+
+    return shutil.which(_mux_bin(mux)) is not None
+
+
+def headless_new_session(
+    worktree_id: str,
+    work_dir: str,
+    cmd: list[str],
+    env: dict[str, str] | None = None,
+    *,
+    seed: str | None = None,
+) -> dict:
+    """Launch ``cmd`` as a fully detached background process with **no mux at
+    all** (context-handoff-overhaul Phase 3 §4.3's non-mux launch primitive).
+
+    ``handoff-cutover`` requires an already-live mux session for the target
+    worktree and ``embody`` requires the mux binary to create one -- neither
+    works on a host with no multiplexer present, which is exactly the case an
+    ``agent-dispatch`` coordinator-driven fallback launch needs to cover (no
+    human is attaching to a pane; the successor just needs to exist and start
+    reading its handoff). This spawns the launch command directly via
+    ``subprocess.Popen``, detached from this process's controlling terminal
+    (``DETACHED_PROCESS`` + a new process group on Windows; a new session on
+    POSIX -- the same shape ``agent_dispatch``'s own coordinator autostart
+    uses for its detached ``serve`` process), with no pane, no session
+    registry entry, and no seed-typing choreography: the seed, when given, is
+    passed as a **native** ``-i <seed>`` argument directly, since headless has
+    no pane-wrapper argv-mangling to route around (unlike the mux path, which
+    must inject the seed as post-launch keystrokes -- see
+    :func:`build_mux_new_window_argv`'s ``initial_prompt`` handling).
+
+    Returns ``{ok, pid, error}``. The caller is responsible for verifying the
+    launch actually registers with the local bridge -- this only confirms the
+    process was *started*, not that Copilot itself came up successfully.
+    """
+    import subprocess
+
+    from agent_procutil import detached_kwargs
+
+    argv = list(cmd)
+    if seed:
+        argv += ["-i", seed]
+
+    full_env = {**os.environ, **(env or {})}
+    kwargs: dict[str, object] = {
+        "cwd": work_dir,
+        "env": full_env,
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "close_fds": True,
+        **detached_kwargs(),
+    }
+
+    try:
+        proc = subprocess.Popen(argv, **kwargs)  # noqa: S603 -- fixed argv, caller-built
+    except OSError as e:
+        return {"ok": False, "pid": None, "error": str(e)}
+
+    activity.log_event(
+        "headless_session_assigned", worktree_id=worktree_id,
+        method="headless_new_session", pid=proc.pid,
+    )
+    return {"ok": True, "pid": proc.pid, "error": None}
+
+
 def mux_seed_pane(
     pane_id: str,
     seed: str,
