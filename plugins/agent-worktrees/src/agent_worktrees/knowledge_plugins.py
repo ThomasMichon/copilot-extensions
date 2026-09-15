@@ -901,6 +901,26 @@ def resolve_pair(
     return _validate_pair(resolution, loaded_config, config_error)
 
 
+def _repo_config_for(
+    loaded_config: cfg.Config | None, repo_name: str
+) -> cfg.RepoConfig | None:
+    """Resolve the exact or default `RepoConfig` for `repo_name`, if any.
+
+    Tolerant of a loaded_config that isn't a full `cfg.Config` (tests pass a
+    lightweight stand-in exposing only `knowledge_repo`) -- any attribute
+    lookup failure just means "no repo config available", not an error.
+    """
+    if loaded_config is None:
+        return None
+    try:
+        repo_config = getattr(loaded_config, "repos", {}).get(repo_name)
+        if repo_config is not None:
+            return repo_config
+        return loaded_config.default_repo
+    except (KeyError, AttributeError):
+        return None
+
+
 def _is_tracked_harness(
     resolution: state_root.StatePair,
     loaded_config: cfg.Config | None,
@@ -911,15 +931,58 @@ def _is_tracked_harness(
         return False
     if current.role == "harness":
         return True
-    if loaded_config is None:
-        return False
-    repo_config = getattr(loaded_config, "repos", {}).get(current.repo)
+    repo_config = _repo_config_for(loaded_config, current.repo)
     if repo_config is None:
-        try:
-            repo_config = loaded_config.default_repo
-        except KeyError:
-            return False
+        return False
     return bool(repo_config.stateless)
+
+
+def _retire_disabled_overlay(harness_path: str | Path) -> dict[str, Any]:
+    """Retire a marker-owned overlay when composition is config-disabled.
+
+    Unlike :func:`_retire_invalid_pair_overlay`, the pair itself remains
+    valid -- only plugin composition is turned off for this repo -- so this
+    reports ``paired: True`` and ``action: "disabled"`` rather than treating
+    the pair as broken.
+    """
+    harness = Path(harness_path).resolve()
+    output_path = harness / ".github" / "copilot" / "settings.local.json"
+    with _overlay_transaction(output_path):
+        existing = _load_json_object(output_path)
+        marker = _managed_marker(existing, output_path)
+        if marker is None or not marker.get("pairId"):
+            return {
+                "action": "disabled",
+                "paired": True,
+                "changed": False,
+                "settings_local": str(output_path),
+                "harness_path": str(harness),
+            }
+        marketplaces = _dict_setting(existing, "extraKnownMarketplaces", output_path)
+        enabled = _dict_setting(existing, "enabledPlugins", output_path)
+        previous_marketplaces = dict(marker["marketplaces"])
+        previous_enabled = dict(marker["enabledPlugins"])
+        _retire_previous(marketplaces, previous_marketplaces)
+        _retire_previous(enabled, previous_enabled)
+
+        result = dict(existing)
+        result.pop(_OVERLAY_KEY, None)
+        if marketplaces:
+            result["extraKnownMarketplaces"] = marketplaces
+        else:
+            result.pop("extraKnownMarketplaces", None)
+        if enabled:
+            result["enabledPlugins"] = enabled
+        else:
+            result.pop("enabledPlugins", None)
+        changed = _write_overlay(output_path, result)
+        return {
+            "action": "disabled",
+            "paired": True,
+            "changed": changed,
+            "settings_local": str(output_path),
+            "harness_path": str(harness),
+        }
 
 
 def compose_from_pair(
@@ -953,6 +1016,17 @@ def compose_from_pair(
             "changed": False,
             "pair_error": pair_error,
         }
+
+    assert resolution.current is not None
+    repo_config = _repo_config_for(loaded_config, resolution.current.repo)
+    if repo_config is not None and not repo_config.compose_knowledge_plugins:
+        # The operator has opted this repo out of knowledge-plugin
+        # composition (see `RepoConfig.compose_knowledge_plugins`). The pair
+        # remains valid for state-root purposes; only the plugin overlay is
+        # retired/withheld.
+        summary = _retire_disabled_overlay(pair.harness_path)
+        summary["knowledge_repo"] = pair.knowledge_repo
+        return summary
 
     legacy_anchor: str | None = None
     if pair.pair_kind == "worktree":

@@ -441,6 +441,20 @@ class RepoConfig:
     **Default false** -- a normal repo is its own state home (fully
     backward-compatible). Declared in the repo's committed
     ``<anchor>/.agent-worktrees/config.yaml``."""
+    compose_knowledge_plugins: bool = True
+    """When false, ``agent-worktrees knowledge compose-plugins`` (and its
+    session-start refresh) never grafts the paired knowledge repo's own
+    marketplaces/plugins into this harness's session overlay -- it only
+    retires any previously-composed overlay. The knowledge repo remains fully
+    bound for **state** (efforts/visions/logs still route there via
+    :attr:`requires_external_state_root` / the state-root resolver); this knob
+    is scoped to the separate plugin-composition feature only, for an operator
+    who wants a knowledge repo's state without also treating it as a
+    directly-driveable second harness. **Default true** (existing behavior).
+    This is a machine/operator preference, not a property of the shareable
+    harness tree -- declare it in the machine-local
+    ``~/.<project>/config.yaml`` repo override, not the committed
+    ``<anchor>/.agent-worktrees/config.yaml``."""
 
 
 @dataclass(frozen=True)
@@ -1592,6 +1606,9 @@ def _build_repo_config(
         stateless=bool(data.get("stateless", False)),
         requires_external_state_root=bool(
             data.get("requires_external_state_root", False)
+        ),
+        compose_knowledge_plugins=bool(
+            data.get("compose_knowledge_plugins", True)
         ),
     )
 
