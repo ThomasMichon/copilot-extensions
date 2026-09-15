@@ -2543,7 +2543,11 @@ class SessionManager:
                                 )
                                 continue
                         if existing is not None:
+                            from .session_host.host_index import RESUME_NUDGE_TURN_INDEX
+
                             record.resume_on_reattach = existing.resume_on_reattach
+                            if RESUME_NUDGE_TURN_INDEX in existing.extra:
+                                record.extra[RESUME_NUDGE_TURN_INDEX] = existing.extra[RESUME_NUDGE_TURN_INDEX]
                         try:
                             self._host_index.register(record)
                         except Exception:
@@ -3360,13 +3364,14 @@ class SessionManager:
             try:
                 if session.client is None or not session.client.is_running:
                     raise ConnectionError("Reattached transport dropped before resume nudge")
-                self._host_index.set_resume_flag(rec.session_id, False)
+                from .session_resume import submit_redeploy_nudge
+
                 # Automatic reattach callers hold turn admission before lifecycle.
-                await self._submit_prompt_locked(rec.session_id, "Resume")
+                submitted = await submit_redeploy_nudge(self, session)
                 log.info(
-                    "Sent 'Resume' to reattached session %s "
+                    "Redeploy 'Resume' %s for reattached session %s "
                     "(turn was graceful-cancelled for redeploy)",
-                    rec.session_id,
+                    "submitted" if submitted else "already admitted", rec.session_id,
                 )
             except Exception:
                 log.warning(

@@ -505,6 +505,11 @@ restart does not inherently close the child's pipes.
   Background authority inspection owns turn admission before lifecycle, not
   just during result application: a stop already admitted prevents new provider
   probes, and an inspection already in flight finishes before stop admission.
+  Redeploy nudges retain their durable flag until the intended turn exists.
+  A persisted turn-index receipt lets a later reattach consume a failed flag
+  clear without submitting the same nudge twice; rejection before admission
+  leaves the nudge retryable. Authority refresh preserves the receipt, while
+  an explicit clear or a new redeploy nudge removes the previous receipt.
   The manager remains the public facade; `session_resume.py`,
   `session_teardown.py`, and `session_ownership.py` own the bounded lifecycle
   implementations. Additive session migrations live in `db_migrations.py`.

@@ -877,7 +877,7 @@ async def test_stop_serializes_with_already_admitted_prompt(
     assert ctx.db.get_session(ctx.session.session_id)["status"] == "stopped"
 
 
-@pytest.mark.parametrize("outcome", ["healthy", "transport_lost", "child_exited"])
+@pytest.mark.parametrize("outcome", ["healthy", "transport_lost", "child_exited", "shutdown"])
 async def test_startup_resume_nudge_respects_lock_order_and_transport_loss(
     context, monkeypatch, mock_acp_client, outcome,
 ):
@@ -903,6 +903,8 @@ async def test_startup_resume_nudge_respects_lock_order_and_transport_loss(
     )
     mock_acp_client.start_streams = AsyncMock()
     mock_acp_client.is_running = outcome != "transport_lost"
+    if outcome == "shutdown":
+        mock_acp_client.adopt_session.side_effect = lambda _sid: setattr(ctx.manager, "_shutting_down", True)
     monkeypatch.setattr("agent_bridge.session_manager.AcpClient", lambda **_kwargs: mock_acp_client)
     if outcome == "child_exited":
         async def old_driver():
@@ -921,14 +923,77 @@ async def test_startup_resume_nudge_respects_lock_order_and_transport_loss(
         assert ctx.session._prompt_task.done()
         assert ctx.session.status == SessionStatus.STOPPED
         assert ctx.db.get_session(ctx.session.session_id)["status"] == "stopped"
-    elif outcome == "transport_lost":
+    elif outcome in {"transport_lost", "shutdown"}:
         assert ctx.session._prompt_task is None
         assert ctx.manager._host_index.get(ctx.session.session_id).resume_on_reattach is True
+        assert ctx.db.get_turns(ctx.session.session_id) == []
     else:
         await asyncio.wait_for(ctx.session._prompt_task, 1)
         mock_acp_client.send_prompt.assert_awaited_once_with("Resume")
     assert not ctx.session._turn_start_lock.locked()
     assert not ctx.session._lifecycle_lock.locked()
+
+
+@pytest.mark.parametrize("failure", ["draining", "before_turn", "after_turn", "clear"])
+async def test_redeploy_nudge_retry_uses_durable_turn_receipt(context, monkeypatch, failure):
+    from dataclasses import replace
+
+    from agent_bridge.session_host.host_index import RESUME_NUDGE_TURN_INDEX
+    from agent_bridge.session_manager import DaemonDrainingError
+    from agent_bridge.session_resume import submit_redeploy_nudge
+
+    ctx = context
+    sid = ctx.session.session_id
+    ctx.manager._host_index.set_resume_flag(sid, True)
+    flush = ctx.manager._host_index._flush
+
+    async def submit(_sid, prompt):
+        if failure == "before_turn":
+            raise RuntimeError("admission rejected")
+        ctx.db.create_turn(sid, ctx.session.turn_count, prompt, time.time())
+        ctx.session.turn_count += 1
+        if failure == "after_turn":
+            raise RuntimeError("post-admission notification failed")
+        return ctx.session.turn_count - 1
+
+    if failure == "draining":
+        ctx.manager._shutting_down = True
+    else:
+        monkeypatch.setattr(ctx.manager, "_submit_prompt_locked", AsyncMock(side_effect=submit))
+    if failure == "clear":
+        def fail_clear():
+            if not ctx.manager._host_index.get(sid).resume_on_reattach:
+                raise OSError("nudge clear failed")
+            flush()
+
+        monkeypatch.setattr(ctx.manager._host_index, "_flush", fail_clear)
+    async with ctx.session._turn_start_lock, ctx.session._lifecycle_lock:
+        with pytest.raises((DaemonDrainingError, RuntimeError, OSError)):
+            await submit_redeploy_nudge(ctx.manager, ctx.session)
+    assert ctx.manager._host_index.get(sid).resume_on_reattach is (failure != "after_turn")
+    monkeypatch.setattr(ctx.manager._host_index, "_flush", flush)
+    restarted = SessionManager(ctx.db, session_host_state_dir=ctx.state_dir)
+    restored = restarted.get_session(sid)
+    if failure == "clear":
+        ctx.spawner.recover_record.return_value = replace(
+            ctx.record, extra={"remote_authority_v2": True},
+        )
+        await restarted._recover_remote_host_records(allow_wake=True, session_ids={sid})
+        assert restarted._host_index.get(sid).extra[RESUME_NUDGE_TURN_INDEX] == 0
+
+    async def submit_retry(_sid, prompt):
+        ctx.db.create_turn(sid, restored.turn_count, prompt, time.time())
+        restored.turn_count += 1
+        return restored.turn_count - 1
+
+    retry = AsyncMock(side_effect=submit_retry)
+    monkeypatch.setattr(restarted, "_submit_prompt_locked", retry)
+    async with restored._turn_start_lock, restored._lifecycle_lock:
+        assert await submit_redeploy_nudge(restarted, restored) is (failure in {"draining", "before_turn"})
+    assert len(ctx.db.get_turns(sid)) == 1
+    assert retry.await_count == (1 if failure in {"draining", "before_turn"} else 0)
+    assert restarted._host_index.get(sid).resume_on_reattach is False
+    assert RESUME_NUDGE_TURN_INDEX not in restarted._host_index.get(sid).extra
 
 
 async def test_child_exit_settlement_joins_late_prompt_state_writer(

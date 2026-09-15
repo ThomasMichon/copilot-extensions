@@ -15,6 +15,37 @@ if TYPE_CHECKING:
     from .session_manager import Session, SessionManager
 
 
+async def submit_redeploy_nudge(manager: SessionManager, session: Session) -> bool:
+    """Keep a nudge pending until its durable turn exists, including failed clears."""
+    from dataclasses import replace
+
+    from .session_host.host_index import RESUME_NUDGE_TURN_INDEX
+
+    index = manager._host_index
+    if index is None:
+        raise RuntimeError("Redeploy nudge requires a Session Host index")
+    record = index.get(session.session_id)
+    if record is None or not record.resume_on_reattach:
+        return False
+    planned_turn = record.extra.get(RESUME_NUDGE_TURN_INDEX)
+    if planned_turn is not None:
+        if type(planned_turn) is not int or planned_turn < 0:
+            raise ValueError(f"Invalid redeploy nudge turn for {session.session_id}")
+        if manager.db.get_turn(session.session_id, planned_turn) is not None:
+            index.set_resume_flag(session.session_id, False)
+            return False
+    planned_turn = session.turn_count
+    index.register(replace(
+        record, extra={**record.extra, RESUME_NUDGE_TURN_INDEX: planned_turn},
+    ))
+    try:
+        await manager._submit_prompt_locked(session.session_id, "Resume")
+    finally:
+        if manager.db.get_turn(session.session_id, planned_turn) is not None:
+            index.set_resume_flag(session.session_id, False)
+    return True
+
+
 async def resume_session_admitted(
     self: SessionManager,
     session: Session,
