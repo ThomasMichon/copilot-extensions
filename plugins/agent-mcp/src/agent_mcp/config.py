@@ -1036,22 +1036,27 @@ def _validate_decorators(decorators: list[DecoratorSpec]) -> list[str]:
     return errors
 
 
-# Decorator types whose synthesized/rehydrated sub-requests can bypass an
-# `input_gate` positioned before (client-side / outer of) them -- see
-# input_gate.py's module docstring for the full rationale.
-_UNSAFE_BEFORE_INPUT_GATE = ("code-mode", "defer", "storage")
+# Decorator types whose synthesized/rewritten/rehydrated sub-requests can
+# bypass an `input_gate` positioned before (client-side / outer of) them --
+# see input_gate.py's module docstring for the full rationale.
+_UNSAFE_BEFORE_INPUT_GATE = ("code-mode", "defer", "storage", "rename")
 
 
 def _validate_input_gate_position(decorators: list[DecoratorSpec]) -> list[str]:
     """Reject a decorator stack where an ``input_gate`` sits BEFORE
     ``code-mode``/``defer`` (whose synthesized sub-requests only reach
     decorators below their own position, never back through ``input_gate``
-    above them) or ``storage`` (which may rehydrate a ``$stream`` argument
+    above them), ``storage`` (which may rehydrate a ``$stream`` argument
     handle into its real value on the way to upstream -- an ``input_gate``
     above it would evaluate ``deny_when`` against the handle, not the real
-    value). This is a documented ordering requirement (README, module
-    docstrings); this function makes it a HARD, enforced requirement instead
-    of a config author simply having to remember it correctly."""
+    value), or ``rename`` (which rewrites the client-visible tool name back to
+    the real upstream name on the way down -- an ``input_gate`` above it would
+    see the RENAMED name in ``match_tools``, e.g. a caller-facing
+    `partner__update_incident` instead of the real `update_incident`, so a
+    `match_tools: [update_incident]` gate would silently never trigger). This
+    is a documented ordering requirement (README, module docstrings); this
+    function makes it a HARD, enforced requirement instead of a config author
+    simply having to remember it correctly."""
     errors: list[str] = []
     input_gate_indices = [i for i, d in enumerate(decorators) if d.type == "input_gate"]
     if not input_gate_indices:

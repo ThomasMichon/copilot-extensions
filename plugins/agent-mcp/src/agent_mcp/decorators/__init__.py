@@ -8,13 +8,16 @@ list; responses bubble back up.
 Recommended ordering: context-reducers that synthesize their own tools
 (``defer``, ``code-mode``) go *first* (outermost), then cosmetic ``rename``, then
 ``filter``, then ``gate``, with ``storage`` *last* (innermost) so it sees real
-payloads -- EXCEPT ``input_gate``, which must go even *after* ``storage``
-(truly last/innermost of all), because ``storage`` may rehydrate a ``$stream``
-argument handle into its real value on the way to upstream, and
-``input_gate``'s ``deny_when`` must see that real value, not the handle. See
-``input_gate.py``'s module docstring for the full placement rationale
-(including why it must also be below ``code-mode``/``defer``, whose
-synthesized sub-requests never reach decorators above their own position).
+payloads -- EXCEPT ``input_gate``, which must go even *after* ``storage`` AND
+``rename`` (truly last/innermost of all; enforced by config validation, not
+just documented). ``storage`` may rehydrate a ``$stream`` argument handle into
+its real value on the way to upstream, and ``rename`` rewrites the
+client-visible tool name back to the real upstream one -- ``input_gate``'s
+``deny_when``/``match_tools`` must see those real, final values, not the
+handle or the renamed name. See ``input_gate.py``'s module docstring for the
+full placement rationale (including why it must also be below
+``code-mode``/``defer``, whose synthesized sub-requests never reach decorators
+above their own position).
 """
 
 from __future__ import annotations

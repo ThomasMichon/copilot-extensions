@@ -41,8 +41,10 @@ not a runtime condition, and is caught by config validation instead
 ``deny_when`` tree's shape and regexes at load time).
 
 > **Placement -- put ``input_gate`` innermost (last in the ``decorators:``
-> list, closest to the upstream).** ``code-mode``/``defer`` synthesize their
-> own ``tools/call`` sub-requests and forward them via the SAME ``nxt`` they
+> list, closest to the upstream). This is a HARD, config-validation-enforced
+> requirement, not just a recommendation** (see
+> ``config._validate_input_gate_position``). ``code-mode``/``defer`` synthesize
+> their own ``tools/call`` sub-requests and forward them via the SAME ``nxt`` they
 > themselves were invoked with -- i.e. only to decorators BELOW their own
 > position, never back through decorators above them. Recommended ordering
 > already places ``code-mode``/``defer`` first/outermost (see
@@ -53,10 +55,16 @@ not a runtime condition, and is caught by config validation instead
 > real value on the way to upstream; an ``input_gate`` placed OUTER (earlier)
 > than ``storage`` would evaluate ``deny_when`` against the un-rehydrated
 > handle instead of the real value it references, silently missing a match.
-> Placing ``input_gate`` last -- after ``code-mode``/``defer``/``storage`` --
-> guarantees it always evaluates the fully-resolved arguments the upstream is
-> actually about to receive, regardless of what synthesized or rehydrated the
-> call.
+> And ``rename`` rewrites the client-visible tool name back to the real
+> upstream name on the way down -- an ``input_gate`` placed OUTER than
+> ``rename`` would see the RENAMED name (e.g. a caller-facing
+> ``partner__update_incident``) rather than the real upstream name its
+> ``match_tools`` glob names (``update_incident``), so the gate would silently
+> never trigger for a renamed tool. Placing ``input_gate`` last -- after
+> ``code-mode``/``defer``/``storage``/``rename`` -- guarantees it always
+> evaluates the fully-resolved arguments AND the real tool name the upstream
+> is actually about to receive, regardless of what synthesized, rehydrated, or
+> renamed the call on the way down.
 """
 
 from __future__ import annotations
@@ -96,6 +104,27 @@ class InputGateDecorator(Decorator):
         name = tool_call_name(request)
         if not self._gates(name):
             return await nxt(request)
+
+        params = request.get("params") or {}
+        raw_args = params.get("arguments")
+        # `tool_call_args` coerces any non-dict `arguments` to `{}` (a
+        # convenience for callers that just want SOME mapping to resolve
+        # paths against) -- but for an authorization boundary, treating a
+        # malformed/non-object `arguments` as "empty" means every `deny_when`
+        # leaf that checks a path finds nothing and the predicate quietly
+        # evaluates false, ALLOWING a call whose real (malformed) arguments
+        # were never actually inspected. Fail closed instead: a `tools/call`
+        # for a gated tool must carry an object `arguments` (or none at all,
+        # which legitimately means "no fields to gate on") to be evaluated;
+        # anything else (a list, string, number, etc.) is denied outright.
+        if raw_args is not None and not isinstance(raw_args, dict):
+            log.warning(
+                "input_gate: denied '%s' -- non-object 'arguments' (%s) "
+                "cannot be safely evaluated against deny_when",
+                name, type(raw_args).__name__)
+            if is_notification(request):
+                return None
+            return self._deny(request)
 
         args = tool_call_args(request)
         if eval_predicate(self.deny_when, args, log=log):

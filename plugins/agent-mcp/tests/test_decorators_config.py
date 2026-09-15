@@ -249,6 +249,20 @@ def test_input_gate_rejects_position_before_defer():
         _cfg(decorators=[dict(_INPUT_GATE_SPEC), {"type": "defer"}])
 
 
+def test_input_gate_rejects_position_before_rename():
+    # RenameDecorator rewrites the client-visible tool name back to the real
+    # upstream name on the way down -- an input_gate positioned before it
+    # would evaluate match_tools against the RENAMED name, so a gate written
+    # for the real upstream name would silently never trigger.
+    with pytest.raises(ConfigError, match="must be positioned AFTER"):
+        _cfg(decorators=[dict(_INPUT_GATE_SPEC), {"type": "rename", "prefix": "x_"}])
+
+
+def test_input_gate_accepts_position_after_rename():
+    cfg = _cfg(decorators=[{"type": "rename", "prefix": "x_"}, dict(_INPUT_GATE_SPEC)])
+    assert cfg.decorators[-1].type == "input_gate"
+
+
 def test_input_gate_accepts_position_after_storage_and_code_mode():
     cfg = _cfg(decorators=[
         {"type": "code-mode"},

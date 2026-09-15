@@ -111,3 +111,31 @@ async def test_denied_notification_produces_no_response_and_no_forward():
     resp = await run(gate, up, notification)
     assert resp is None
     assert up.calls == []
+
+
+async def test_denies_non_object_arguments_outright():
+    # `tool_call_args` coerces any non-dict `arguments` to `{}`, which would
+    # otherwise let a malformed payload (a list/string/number instead of an
+    # object) sail through deny_when evaluation as "no fields to check" --
+    # this is a fail-open bypass for an authorization boundary. A non-object
+    # `arguments` on a gated tool must be denied outright, never coerced away.
+    gate, up = _gate()
+    for bad_args in ([1, 2, 3], "not-an-object", 42, True):
+        req = call_req("update_incident", None)
+        req["params"]["arguments"] = bad_args
+        resp = await run(gate, up, req)
+        assert "error" in resp, f"expected denial for arguments={bad_args!r}"
+    assert up.calls == []
+
+
+async def test_allows_missing_or_null_arguments_as_empty():
+    # Absent/null 'arguments' legitimately means "no fields" and is NOT the
+    # same failure mode as a wrong-TYPE 'arguments' -- it should evaluate
+    # deny_when against an empty object (matching pre-existing behavior),
+    # not be denied outright.
+    gate, up = _gate()
+    req = {"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+           "params": {"name": "update_incident"}}
+    resp = await run(gate, up, req)
+    assert resp["result"]["content"][0]["text"] == "ran update_incident"
+

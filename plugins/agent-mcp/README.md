@@ -801,15 +801,22 @@ own state safe to read"; `input_gate` decides "does this write attempt
 introduce a value it must never introduce", independent of any preflight
 lookup or the record's current state.
 
-> **Placement.** Put `input_gate` **last** in the `decorators:` list (innermost,
-> closest to upstream) — after `code-mode`/`defer` (whose synthesized
+> **Placement — enforced, not just documented.** Put `input_gate` **last** in
+> the `decorators:` list (innermost, closest to upstream) — after
+> `code-mode`/`defer` (whose synthesized
 > `tools/call` sub-requests only reach decorators BELOW their own position, so
-> an `input_gate` placed above them never sees those calls) and after `storage`
+> an `input_gate` placed above them never sees those calls), after `storage`
 > (which may rehydrate a `$stream` argument handle into its real value on the
 > way to upstream — an `input_gate` placed above `storage` would evaluate
-> `deny_when` against the un-rehydrated handle instead). Last position
-> guarantees `input_gate` always sees the fully-resolved arguments the
-> upstream is actually about to receive.
+> `deny_when` against the un-rehydrated handle instead), and after `rename`
+> (which rewrites the client-visible tool name back to the real upstream name
+> — an `input_gate` placed above `rename` would see the RENAMED name instead
+> of the real one its `match_tools` glob names, so the gate could silently
+> never trigger). Last position guarantees `input_gate` always sees the
+> fully-resolved arguments AND the real tool name the upstream is actually
+> about to receive. **Config validation enforces this** — a stack with
+> `input_gate` positioned before any of `code-mode`/`defer`/`storage`/`rename`
+> is rejected at load time, not just discouraged in docs.
 
 
 
