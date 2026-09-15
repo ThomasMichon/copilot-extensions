@@ -124,6 +124,55 @@ def test_maintenance_safe_restore_still_applies_manage_entries(tmp_path, monkeyp
     assert result.resource_results[0].status == "skipped"
 
 
+def test_maintenance_safe_restore_skips_modules_entirely(tmp_path, monkeypatch):
+    """Regression: found while dogfooding the first real fleet-wide sweep --
+    `restore --apply --all-projects --maintenance-safe` ran every declared
+    module unconditionally (modules have no per-module safety opt-in), so a
+    module reporting legitimate unresolved drift (e.g. an unmanaged uv.toml)
+    made the whole unattended sweep report `error` even though every
+    maintenance-safe resource/surface step succeeded correctly. Modules must
+    stay out of a blanket maintenance-safe restore."""
+    from agent_machines import modules as _modules
+
+    executed: list[str] = []
+
+    def _fail_if_run(pkg, module, plat, dry_run):
+        executed.append(str(module.get("name")))
+        raise AssertionError("a module must never execute under a blanket maintenance-safe restore")
+
+    monkeypatch.setattr(_modules, "run_module", _fail_if_run)
+    data = base_package(
+        name="acme/a",
+        modules=[
+            {
+                "name": "uv-feed",
+                "windows": {"command": ["pwsh", "-File", "restore.ps1"], "dry_run_args": ["-DryRun"]},
+            }
+        ],
+    )
+    path = write_package(tmp_path / "acme_a", "pkg.yaml", data)
+    pkg = load_package(path, source_repo="acme")
+
+    result = restore([pkg], "box-1", dry_run=False, plat="windows", home=tmp_path, maintenance_safe=True)
+    assert executed == []
+    assert len(result.module_results) == 1
+    mod = result.module_results[0]
+    assert mod.ran is False
+    assert mod.ok is True  # a documented skip, not a failure
+    assert "not maintenance-safe" in (mod.skipped_reason or "")
+
+    # An explicit --only <module> request still executes normally even under
+    # --maintenance-safe (operator-directed, not a blanket unattended sweep).
+    monkeypatch.setattr(_modules, "run_module", lambda pkg, module, plat, dry_run: _modules.ModuleResult(
+        str(module.get("name")), pkg.source_repo, ran=True, dry_run=dry_run, returncode=0,
+    ))
+    only_result = restore(
+        [pkg], "box-1", dry_run=False, plat="windows", home=tmp_path,
+        maintenance_safe=True, only=["uv-feed"],
+    )
+    assert only_result.module_results[0].ran is True
+
+
 def test_runtime_spot_check_repairs_only_after_failed_readiness(tmp_path, monkeypatch):
     monkeypatch.setattr(reconcile_module.shutil, "which", lambda binary: "pwsh" if binary == "pwsh" else None)
     payload = tmp_path / ".copilot" / "installed-plugins" / "copilot-extensions" / "agent-machines"

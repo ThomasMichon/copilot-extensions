@@ -322,3 +322,45 @@ def run_modules(
     for pkg, module in resolve_modules(packages, machine, plat):
         results.append(run_module(pkg, module, plat, dry_run))
     return results
+
+
+#: Shown for every module under a maintenance-safe restore -- modules run
+#: arbitrary repo-local commands (git config, PATH edits, power settings,
+#: package-manager feed configuration, ...) with no per-module opt-in
+#: equivalent to a resource's ``maintenance_safe: true`` yet, so none of them
+#: are safe to execute unattended by default (agent-machines#uv-feed-sweep).
+MAINTENANCE_SAFE_MODULE_SKIP_REASON = (
+    "not maintenance-safe (modules run arbitrary repo-local commands with no "
+    "per-module opt-in yet; run a full restore, or pass --only <module> "
+    "explicitly, to execute it)"
+)
+
+
+def maintenance_safe_skip_results(
+    packages: list[RequirementPackage], machine: str, plat: str, dry_run: bool
+) -> list[ModuleResult]:
+    """Report every applicable module as skipped, without running any of them.
+
+    Used by a ``--maintenance-safe`` restore in place of :func:`run_modules`:
+    modules have no granular safety opt-in the way typed ``resources:`` do, so
+    the whole category stays out of unattended runs by default rather than
+    executing arbitrary repo-local commands (which could touch python/node/az
+    cli/auth/etc.) with no operator review.
+    """
+    results: list[ModuleResult] = []
+    for pkg, module in resolve_modules(packages, machine, plat):
+        name = str(module.get("name"))
+        authority = effective_authority(pkg, module)
+        results.append(
+            ModuleResult(
+                name,
+                pkg.source_repo,
+                ran=False,
+                dry_run=dry_run,
+                skipped_reason=MAINTENANCE_SAFE_MODULE_SKIP_REASON,
+                package=pkg.name,
+                authority=authority,
+                authority_mode=AUTHORITY_MODE_OPAQUE_ADDITIVE,
+            )
+        )
+    return results

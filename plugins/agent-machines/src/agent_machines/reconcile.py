@@ -593,8 +593,12 @@ def restore(
     **modules**, all honoring the dry-run safety rules. ``only`` restricts the
     run to named surfaces/resources/modules -- the "review a section, then apply
     just that section" flow. ``maintenance_safe`` keeps surface reconciliation
-    fully enabled, scopes resources to unattended-safe entries, and adds runtime
-    spot checks for installed runtime plugins.
+    fully enabled, scopes resources to unattended-safe entries, adds runtime
+    spot checks for installed runtime plugins, and -- unless ``only`` names a
+    module explicitly -- reports every module as skipped rather than running
+    it: modules execute arbitrary repo-local commands with no per-module
+    safety opt-in yet, so the whole category stays out of a blanket
+    unattended sweep.
     """
     plat = plat or current_platform()
     resolved = resolve_union(packages, machine, accepted_machines)
@@ -629,7 +633,18 @@ def restore(
 
     all_modules: list[_modules.ModuleResult] = []
     if _want_modules(only, resource_names):
-        all_modules = _modules.run_modules(resolved, machine, plat, dry_run=dry_run)
+        if maintenance_safe and not only:
+            # Modules run arbitrary repo-local commands with no per-module
+            # opt-in equivalent to a resource's `maintenance_safe: true` yet,
+            # so the whole category stays out of a blanket unattended sweep.
+            # An operator-directed `--only <module>` request is explicit
+            # intent and still executes normally even under
+            # `--maintenance-safe`.
+            all_modules = _modules.maintenance_safe_skip_results(
+                resolved, machine, plat, dry_run=dry_run
+            )
+        else:
+            all_modules = _modules.run_modules(resolved, machine, plat, dry_run=dry_run)
     results = [r for r in all_modules if not only or r.name in only]
     return RestoreResult(
         plan=p,
