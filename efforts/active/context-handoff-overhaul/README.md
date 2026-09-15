@@ -459,7 +459,7 @@ gate land._
   enough that real CI shards it across parallel jobs) -- relying on the
   real CI matrix for broader coverage beyond the specifically-touched files,
   which were run to completion and are clean.
-- Bumped `agent-worktrees` to 1.5.5-dev111 (`plugin.json` + `pyproject.toml`
+- Bumped `agent-worktrees` to 1.5.5-dev112 (`plugin.json` + `pyproject.toml`
   + marketplace.json).
 - **Not yet done this slice:** the coordinator-fallback wiring itself (item
   2), the `userPromptSubmitted` observability hook (item 3), and closing
