@@ -186,9 +186,8 @@ class AgentProcess:
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.DEVNULL,
                 )
-                async with asyncio.timeout(5):
-                    await killer.wait()
-            except (TimeoutError, OSError, ProcessLookupError):
+                await asyncio.wait_for(killer.wait(), timeout=5)
+            except (TimeoutError, asyncio.TimeoutError, OSError, ProcessLookupError):
                 pass
         else:
             # POSIX: the agent spawns use start_new_session, so the child is a
@@ -203,9 +202,8 @@ class AgentProcess:
                     pass
         # Reap the direct child handle.
         try:
-            async with asyncio.timeout(5):
-                await self.proc.wait()
-        except (TimeoutError, ProcessLookupError):
+            await asyncio.wait_for(self.proc.wait(), timeout=5)
+        except (TimeoutError, asyncio.TimeoutError, ProcessLookupError):
             try:
                 self.proc.kill()
             except ProcessLookupError:

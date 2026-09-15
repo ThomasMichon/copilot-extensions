@@ -26,6 +26,8 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+RESUME_NUDGE_TURN_INDEX = "resume_nudge_turn_index"
+
 
 @dataclass
 class HostRecord:
@@ -87,6 +89,8 @@ class HostIndex:
     def __init__(self, path: str | os.PathLike[str]) -> None:
         self._path = Path(path)
         self._records: dict[str, HostRecord] = {}
+        self._revision = 0
+        self._record_revisions: dict[str, int] = {}
         self._load()
 
     # -- persistence -------------------------------------------------------
@@ -119,14 +123,29 @@ class HostIndex:
 
     # -- mutation ----------------------------------------------------------
     def register(self, record: HostRecord) -> None:
+        previous = self._records.get(record.session_id)
         self._records[record.session_id] = record
-        self._flush()
+        try:
+            self._flush()
+        except Exception:
+            if previous is None:
+                self._records.pop(record.session_id, None)
+            else:
+                self._records[record.session_id] = previous
+            raise
+        self._revision += 1
+        self._record_revisions[record.session_id] = self._revision
 
     def remove(self, session_id: str) -> bool:
-        existed = self._records.pop(session_id, None) is not None
-        if existed:
-            self._flush()
-        return existed
+        previous = self._records.pop(session_id, None)
+        if previous is not None:
+            try:
+                self._flush()
+            except Exception:
+                self._records[session_id] = previous
+                raise
+            self._record_revisions.pop(session_id, None)
+        return previous is not None
 
     def set_resume_flag(self, session_id: str, value: bool) -> bool:
         """Mark (or clear) a session to receive a 'Resume' nudge on reattach.
@@ -136,10 +155,23 @@ class HostIndex:
         True if the record existed and was updated.
         """
         rec = self._records.get(session_id)
-        if rec is None or rec.resume_on_reattach == value:
+        if rec is None or (
+            rec.resume_on_reattach == value
+            and RESUME_NUDGE_TURN_INDEX not in rec.extra
+        ):
             return False
+        previous = rec.resume_on_reattach
+        previous_extra = rec.extra
         rec.resume_on_reattach = value
-        self._flush()
+        rec.extra = {key: item for key, item in rec.extra.items() if key != RESUME_NUDGE_TURN_INDEX}
+        try:
+            self._flush()
+        except Exception:
+            rec.resume_on_reattach = previous
+            rec.extra = previous_extra
+            raise
+        self._revision += 1
+        self._record_revisions[session_id] = self._revision
         return True
 
     def prune_dead(self, is_alive: Callable[[int], bool]) -> list[HostRecord]:
@@ -154,6 +186,10 @@ class HostIndex:
     # -- query -------------------------------------------------------------
     def get(self, session_id: str) -> HostRecord | None:
         return self._records.get(session_id)
+
+    def revision(self, session_id: str) -> int:
+        """Return the in-process publication token, including equal-value replacements."""
+        return self._record_revisions.get(session_id, 0)
 
     def all(self) -> list[HostRecord]:
         return list(self._records.values())

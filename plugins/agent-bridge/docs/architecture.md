@@ -363,8 +363,187 @@ restart does not inherently close the child's pipes.
 
 - **Idle / stopped sessions survive transparently.** Session metadata, turns,
   events, and host connection data are persisted to SQLite/host state. On startup
-  the daemon reattaches to compatible surviving Session Hosts; otherwise it can
-  lazily resume from persisted Copilot state.
+  the daemon reattaches formerly active sessions to compatible surviving Session
+  Hosts; otherwise it can lazily resume from persisted Copilot state.
+- **Explicit stops remain dormant.** Startup and heartbeat recovery do not probe
+  a stopped session's provider, inspect its remote authority, or reconnect its
+  forward. Initial launch, stop, and recovery share the session lifecycle lock,
+  so a stop waits for an in-flight launch or recovery before acknowledging
+  containment; subsequent passes cannot re-arm it. The host record and conversation remain available for an
+  explicit resume (or a later send). Frontend shutdown instead records restart
+  recovery intent, independently of the cancel-on-redeploy policy. That intent
+  survives repeated frontend restarts and is cleared by an ordinary stop,
+  together with any pending redeploy "Resume" nudge. Authority-result cleanup
+  and observed child-exit settlement hold the same lock through their final
+  mutations, not just through provider inspection. Startup version-mux reaping
+  and opt-in redeploy nudge production share that lock as well. Dead-host pruning
+  and stranded-host sweeps run on the lifecycle event loop and skip dormant or
+  lifecycle-owned sessions. Stranded sweeps keep blocking local process teardown
+  off-loop while retaining that lifecycle lock, including during cancellation.
+  Only process termination is offloaded; shared host-index cleanup stays on the
+  event loop. Child-exit settlement joins the old prompt driver before its final
+  stopped-state write.
+  Remote authority results are applied only if the snapshotted host record and
+  lifecycle generation still match; a stop/resume cycle cannot revive a stale
+  probe result. Authority inspection and result application also defer to any
+  pending remote reap, so old cleanup cannot race restored authority.
+  Startup, heartbeat, and stranded-sweep candidates share the same
+  snapshot/ownership fence; startup also skips already attached sessions.
+  Explicit end/cleanup owns the same admission
+  and lifecycle locks before inspecting authority. Other synchronous local-reap entry points remain
+  unchanged; their offloading is tracked separately in #2465.
+  Stop also awaits any previously scheduled remote reap for that session before
+  acknowledging, shielding that cleanup from request cancellation. When both
+  locks are needed, turn admission precedes lifecycle ownership: a send admitted
+  before stop is quiesced, while a later explicit send may resume normally.
+  Background wedged-session resync and interrupt recheck under lifecycle
+  ownership rather than acting on a pre-stop snapshot.
+  Direct resync also owns turn admission while replacing its client. A queued
+  drain kick carries the generation of its admitted request and rechecks it
+  under admission, preserving queued rows rather than reviving a later stop.
+  Public resume owns admission too; send, drain, and handoff use the shared
+  admission-owned resume helper without reentering the lock. Scheduled automatic
+  handoffs recheck session identity, generation, idle state, and policy under
+  admission before doing any work. Handoff retirement failures propagate and
+  emit a cleanup-required ``handoff_failed`` event on both sessions, retaining
+  their identities/links rather than silently reporting a completed handoff.
+  Accepted stop teardown is an owned transaction: repeated request cancellation
+  does not interrupt quiesce, process cleanup, relay/forward shutdown, or the
+  final durable state write. Cancellation propagates only after that work
+  settles. A real cleanup failure is reported as FAILED with retry handles
+  retained, never as a successful stop.
+  Process-owned launch, resume/recreation, and resync retain their process handle
+  as soon as spawn ownership is delivered. Cancelled spawn is joined; cancelled
+  handshake/load/recreation reaps and verifies the child before recording
+  STOPPED. Failed process cleanup retains ownership and blocks automatic recovery.
+  Destructive authority results and stranded reaping take admission before
+  lifecycle ownership; each newly admitted turn advances the generation so an
+  older inspection cannot tear down its transport.
+  Frontend shutdown fences new admission, joins accepted launches even before
+  they install a client, and then closes remaining channels under admission and
+  lifecycle ownership. A fresh manager may resume the preserved restart intent.
+  Remote reap records are retained until termination is confirmed; failed
+  explicit or pending reaps fail the stop instead of acknowledging success, and
+  keep authority available for a deliberate retry. A missing remote endpoint
+  is unconfirmed cleanup, not a successful reap.
+  Session Host launch ownership is recorded before connect/attach/ACP work.
+  Cancellation joins the spawn and aborts the recorded partial host; ordinary
+  connect, attach, and stream-creation errors use the same rollback. If abort
+  cannot be confirmed, a durable cleanup-pending record and in-memory retry
+  handle remain. Another launch/resume/resync is refused until that ownership is
+  cleaned up, including after frontend restart. The durable container launch
+  marker is honored even if the host index is absent, and dead-host pruning
+  never discards a cleanup-pending record. Cancellation before any host or
+  durable launch marker exists releases the attempt's container claim rather
+  than retaining an unowned venue lock. Explicit reaping uses a partial
+  launch's abort handle before general record cleanup and releases its
+  container claim only after all host authority is gone. Failed initial
+  process-launch cleanup uses the same owned cancellation settlement as resume:
+  shutdown or kill cannot be interrupted with a STARTING row left behind.
+  Committing a Session Host also retains its frontend client on the session and
+  persists the ACP identity before returning through provider cleanup. A
+  cancellation at that return boundary closes the retained client without
+  losing the successfully created conversation. Durable container partial-launch
+  markers block every background recovery eligibility check, even when restart
+  provenance exists but no host-index row survived.
+  If process-owned teardown fails during shutdown, the frontend does not close
+  its database or discard its only process handle: shutdown remains pending
+  and retries cleanup every five seconds with explicit error logs until exit
+  is confirmed. Repeated cancellation cannot abandon that cleanup owner.
+  Forced process termination by an external supervisor is outside this
+  graceful-shutdown guarantee.
+  Host-ownership persistence failures immediately attempt rollback; if rollback
+  is inconclusive and the handle is not durably recorded, shutdown retains that
+  cleanup owner too. New container admission checks preserved sessions' host
+  records and launch markers before taking a target lock, so a dormant owner
+  still fences its venue after restart without any provider probe.
+  Failed initial CodeSpace launches release their attempted claim only after
+  host cleanup is confirmed and no other session still owns that claim.
+  Direct resync refuses pending remote reaps before mutating session state.
+  Confirmed remote reap clears container markers and target locks only if the
+  current host record still equals the reaped snapshot; replacement records
+  retain their ownership even when an older cleanup finishes later.
+  Confirmed-dead authority cleanup closes relay/forward channels strictly before
+  dropping descriptors or venue ownership. Failed remote reap completions stay
+  attached to the session until a confirmed explicit retry consumes them, so a
+  stop cannot miss a failure that completed during another teardown await.
+  Stranded-host sweeps await remote termination and count confirmed reaps only.
+  Host-index register/remove failures restore the previous in-memory snapshot,
+  keeping partial-launch rollback retryable after a failed persistence commit.
+  Shutdown also retries retained relay/forward handles (including orphan
+  channels) rather than exiting after a logged close failure. A failed
+  restart teardown persists its original restart intent with FAILED; only a
+  successful cleanup retry transitions it to recoverable STOPPED. FAILED
+  itself remains ineligible for background recovery.
+  Remote cleanup also checks an in-process HostIndex publication revision,
+  protecting equal-value replacement records from an older reap. Descriptor
+  removal must persist before pending handles or container ownership are
+  discarded. Forward refresh writes a copied candidate transactionally and
+  persistence errors refuse duplicate resume launches. Failed authority
+  registration releases a newly acquired container lock and leaves recovery
+  explicitly inconclusive.
+  Remote cleanup clears the durable container marker before removing authority;
+  marker writes restore their in-memory value on failure, and an unsuccessful
+  index removal restores the marker before returning the cleanup error. The
+  venue lock is released only after both metadata operations succeed.
+  Confirmed partial-launch rollback and confirmed-dead authority recovery use
+  that same metadata cleanup path, retaining replacement ownership. Stop and
+  end join existing remote reaps before direct cleanup; shutdown retries
+  retained failures rather than discarding them at database close. Resume-nudge
+  flag writes restore the old in-memory value when persistence fails.
+  Successful resume-flag publications advance the same revision fence as host
+  registration. Startup, heartbeat, stranded sweeps, and authority-result
+  application capture and recheck that revision, including equal-value ABA.
+  End cleanup for an already-removed container identity uses strict metadata
+  cleanup and retains the session and lock when index removal fails.
+  Missing-endpoint reaps also retain an unsuccessful cleanup task instead of
+  disappearing as a no-op. Stop attempts independent relay/forward containment
+  even if process cleanup fails, keeping failed handles and surfacing errors.
+  Automatic handoff transfers queued rows in one database transaction, preserving
+  FIFO ids and caller metadata; failed migration leaves the predecessor queue
+  intact and emits a handoff failure rather than clearing undelivered prompts.
+  Background authority inspection owns turn admission before lifecycle, not
+  just during result application: a stop already admitted prevents new provider
+  probes, and an inspection already in flight finishes before stop admission.
+  Redeploy nudges retain their durable flag until the intended turn exists.
+  A persisted turn-index receipt lets a later reattach consume a failed flag
+  clear without submitting the same nudge twice; rejection before admission
+  leaves the nudge retryable. Authority refresh preserves the receipt, while
+  an explicit clear or a new redeploy nudge removes the previous receipt.
+  Direct process-backed resync refuses any retained Session Host record before
+  teardown or spawning, including background resync after a failed reattach.
+  Such sessions must use host-aware resume or confirmed host cleanup first.
+  A local attach failure retains authority while either host or child is alive.
+  Local pruning rechecks liveness and publication revision after strict channel
+  cleanup; a retained live or incompatible local host blocks duplicate resume
+  spawning. Startup pruning also preserves authority and retry handles on
+  channel or metadata errors, including the legacy remote fallback path.
+  The manager remains the public facade; `session_resume.py`,
+  `session_teardown.py`, and `session_ownership.py` own the bounded lifecycle
+  implementations. Additive session migrations live in `db_migrations.py`.
+  `session_host_ownership.py` owns the pre-client Session Host handoff.
+  These extractions preserve factory injection seams and avoid widening the
+  repository's shrink-only module-size baseline.
+  Ordinary stop also stops per-session credential-relay supervisors and cancels
+  live forwards before acknowledgement; transport teardown failures are surfaced
+  rather than reported as containment. Host descriptors and venue ownership are
+  retained so explicit resume can rebuild channels. Frontend shutdown releases
+  its owned forward/relay processes too: the successor rebuilds channels from
+  descriptors without colliding with orphaned local-port bindings. Restart
+  intent remains distinct from an operator stop.
+  Retaining descriptors and conversation state does not pin idle child processes:
+  the existing graceful-detach policy may reap an idle child, while busy children
+  survive. Explicit resume adopts a surviving host or loads the persisted
+  conversation into a fresh child; this fix does not change that idle-reap policy.
+  Legacy STOPPED rows without restart provenance remain dormant rather than
+  guessing that an operator wanted recovery. Their NULL provenance stays NULL;
+  created/failed rows do not manufacture a restart marker. Interrupt notification
+  delivery also owns admission before lifecycle, releasing both before waiting
+  for turn settlement.
+  An explicit resume takes over recovery intent; a failed attempt leaves both
+  in-memory and durable restart provenance cleared rather than silently
+  restarting background probes. It also consumes any pending redeploy nudge so
+  later transport recovery cannot send an unsolicited "Resume".
 - **Background CodeSpace recovery does not wake unavailable venues.** Before
   reattaching a disconnected CodeSpace session, the heartbeat reads the exact
   target's state through the GitHub API, once per CodeSpace per pass. It honors
