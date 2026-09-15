@@ -227,13 +227,58 @@ class TestProvisioningAndClient:
 
     def test_relay_client_has_scoped_azure_branch(self):
         client = asset_text("ado-auth-helper-relay")
-        assert 'SCOPE="${2:-}"' in client
+        assert 'SCOPE="${1:-}"' in client
         assert 'HELPER_NAME="${LC_GIT_CREDENTIAL_RELAY_HELPER:-}"' in client
         assert 'RELAY_TOKEN="${LC_GIT_CREDENTIAL_RELAY_TOKEN:-}"' in client
         # Scoped get-access-token routes to the gated get-azure-token action.
         assert "get-azure-token" in client
         assert "scope=" in client
         assert "auth=" in client
+
+    def test_relay_client_parses_resource_flag_for_get_access_token(self):
+        """`get-access-token --resource <guid>` (odsp-npm-token.sh's exact
+        invocation) must resolve SCOPE to the guid, not the literal
+        ``--resource`` string (#384): a bare positional mis-parse silently
+        denied the allowlist lookup and returned empty output."""
+        def _is_shell_launcher_stub(path):
+            p = (path or "").lower()
+            return "windowsapps" in p or "system32" in p
+
+        bash = next(
+            (
+                b for b in _bash_candidates()
+                if _bash_runs(b) and not _is_wsl_bash(b)
+                and not _is_shell_launcher_stub(b)
+            ),
+            None,
+        )
+        if not bash:
+            pytest.skip("no non-WSL bash found for shell-script parsing test")
+        prologue = asset_text("ado-auth-helper-relay").split(
+            'HELPER_NAME="${LC_GIT_CREDENTIAL_RELAY_HELPER:-}"', 1
+        )[0]
+        script = prologue + '\necho "ACTION=$ACTION SCOPE=$SCOPE"\n'
+        for args, expected_scope in (
+            (["get-access-token", "--resource", "499b84ac-guid"], "499b84ac-guid"),
+            (["get-access-token", "--scope", "https://x/.default"], "https://x/.default"),
+            (["get-access-token", "--resource=499b84ac-guid"], "499b84ac-guid"),
+            (["get-access-token", "bare-scope"], "bare-scope"),
+            (["get-access-token"], ""),
+        ):
+            result = subprocess.run(
+                [bash, "-c", script, "ado-auth-helper-relay", *args],
+                capture_output=True, text=True, timeout=10,
+            )
+            assert result.returncode == 0, result.stderr
+            assert f"SCOPE={expected_scope}" in result.stdout, result.stdout
+
+    def test_relay_client_fails_loudly_on_denied_azure_token(self):
+        """A denied/empty get-azure-token response prints a diagnostic instead
+        of silently exiting 1 (#384 direction 3)."""
+        client = asset_text("ado-auth-helper-relay")
+        assert "get-azure-token denied for scope=" in client
+        assert "no ADO access token available for host=" in client
+        assert "no credential relay reachable and no cached" in client
 
     def test_relay_client_defaults_unscoped_azure_helper_to_ado_resource(self):
         client = asset_text("ado-auth-helper-relay")
