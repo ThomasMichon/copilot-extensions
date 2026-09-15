@@ -13,6 +13,7 @@ monkeypatched via ``self``, and every name is re-exported unchanged from
 from __future__ import annotations
 
 import json
+import re
 import stat
 import uuid
 from collections.abc import Callable, Mapping
@@ -291,6 +292,46 @@ _FLEET_BODY_PREFIX = "fleet-body:"
 #: :func:`make_headless_spawn`). Unlike a fleet body there is no host component --
 #: the session lives on *this* machine's agent-bridge daemon.
 _LOCAL_BODY_PREFIX = "local-body:"
+_TERMINAL_BRIDGE_SESSION = re.compile(
+    r"\bSession\s+([A-Za-z0-9][A-Za-z0-9._-]*)\s+"
+    r"entered\s+(?:failed|ended|stopped)\b"
+)
+_TIMED_OUT_BRIDGE_SESSION = re.compile(
+    r"\bTimed out waiting for session\s+"
+    r"([A-Za-z0-9][A-Za-z0-9._-]*)\s+to become idle\b"
+)
+
+
+def _failed_bridge_session(result: object) -> str | None:
+    text = "\n".join(
+        str(getattr(result, name, "") or "")
+        for name in ("stdout", "stderr")
+    )
+    for pattern in (_TERMINAL_BRIDGE_SESSION, _TIMED_OUT_BRIDGE_SESSION):
+        if match := pattern.search(text):
+            return match.group(1)
+    return None
+
+
+def _request_failed_created_spawn_release(
+    client: object,
+    key: str,
+    handle: dict,
+    spawn_task: dict,
+    detail: str,
+) -> None:
+    failed_session = handle.get("session")
+    client.request_spawn_release(
+        key,
+        detail=detail,
+        disposition="failed",
+        session_handle=(
+            failed_session
+            if isinstance(failed_session, str) and failed_session
+            else None
+        ),
+        worktree=handle.get("worktree") or spawn_task.get("spawn_worktree"),
+    )
 
 
 def _parse_fleet_body_handle(session_handle: str | None) -> tuple[str, str] | None:
@@ -567,7 +608,12 @@ def make_headless_spawn(
         except bridge.BridgeUnavailable as exc:
             return False, {"error": str(exc)}
         if result.returncode != 0:
-            return False, {"error": (result.stderr or "").strip()[:200] or "nonzero exit"}
+            handle = {
+                "error": (result.stderr or "").strip()[:200] or "nonzero exit"
+            }
+            if failed_session := _failed_bridge_session(result):
+                handle["session"] = f"{_LOCAL_BODY_PREFIX}{failed_session}"
+            return False, handle
         # Capture the created local agent-bridge session id and encode it as a
         # `local-body:<sid>` recovery handle so a *gone* body (ended/cancelled)
         # is liveness-recovered by the supervisor -- freeing its spawn slot --

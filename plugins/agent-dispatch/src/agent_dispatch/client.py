@@ -720,16 +720,15 @@ class DispatchClient(RegistrationClientMixin):
         )
 
     def request_spawn_release(
-        self,
-        key: str,
-        *,
-        detail: str | None = None,
-        disposition: str = "failed",
+        self, key: str, *, detail: str | None = None,
+        disposition: str = "failed", session_handle: str | None = None,
+        worktree: str | None = None,
     ) -> dict:
         return self._unwrap(
             self._http.post(
                 f"/spawn-reservations/{key}/release",
-                json={"detail": detail, "disposition": disposition},
+                json={"detail": detail, "disposition": disposition,
+                      "session_handle": session_handle, "worktree": worktree},
             )
         )
 

@@ -115,13 +115,21 @@ class QueueBackedClient:
         return asdict(self._q.defer_spawn(key, detail=detail))
 
     def request_spawn_release(
-        self, key, *, detail=None, disposition="failed"
+        self,
+        key,
+        *,
+        detail=None,
+        disposition="failed",
+        session_handle=None,
+        worktree=None,
     ):
         return asdict(
             self._q.request_spawn_release(
                 key,
                 detail=detail,
                 disposition=disposition,
+                session_handle=session_handle,
+                worktree=worktree,
             )
         )
 
@@ -381,6 +389,47 @@ def test_poll_treats_a_sessionless_success_as_a_failure(q, client):
     res = q.latest_reservation(t.id)
     assert res.state != SpawnState.SPAWNED
     assert res.session_handle is None
+
+
+def test_poll_records_failed_headless_session_before_releasing_worktree(
+    monkeypatch, q, client
+):
+    from agent_dispatch import embody
+
+    task = q.create("work")
+
+    def failed_spawn(_task):
+        return False, {
+            "error": "ACP launch failed",
+            "session": "local-body:failed-session",
+        }
+
+    failed_spawn.requires_reusable_worktree = True
+    failed_spawn.allocation_interface = "acp"
+    failed_spawn.allocation_project = "worker-harness"
+    monkeypatch.setattr(
+        embody,
+        "prepare_reusable_worktree",
+        lambda *_args, **_kwargs: {
+            "worktree": "wt-created",
+            "path": "/tmp/wt-created",
+            "created": True,
+            "replaced": False,
+            "ownership": "created",
+        },
+    )
+    sup = Supervisor(
+        client,
+        spawn_fn=failed_spawn,
+        repo=TEST_REPO,
+        machine="host-a",
+    )
+
+    assert sup.poll_once() == []
+    reservation = q.latest_reservation(task.id)
+    assert reservation.state == SpawnState.RELEASING
+    assert reservation.session_handle == "local-body:failed-session"
+    assert reservation.worktree == "wt-created"
 
 
 def test_protected_label_pool_does_not_claim_unlabeled_task(q, client):
@@ -3149,7 +3198,16 @@ def test_make_headless_spawn_resolves_allocation_project_lazily(monkeypatch):
     ]
 
 
-def test_make_headless_spawn_reports_failure_on_nonzero(monkeypatch):
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "[FAIL] Session failed-123 entered failed: Connection closed",
+        "[FAIL] Session failed-123 entered ended",
+        "[FAIL] Session failed-123 entered stopped",
+        "[FAIL] Timed out waiting for session failed-123 to become idle",
+    ],
+)
+def test_make_headless_spawn_reports_failure_on_nonzero(monkeypatch, stderr):
     import subprocess
 
     from agent_dispatch import bridge, embody
@@ -3158,11 +3216,12 @@ def test_make_headless_spawn_reports_failure_on_nonzero(monkeypatch):
     monkeypatch.setattr(embody, "autopilot_worker_prompt", lambda *a, **k: "seed")
     monkeypatch.setattr(
         bridge, "spawn_worker",
-        lambda *a, **k: subprocess.CompletedProcess([], 1, "", "boom"),
+        lambda *a, **k: subprocess.CompletedProcess([], 1, "", stderr),
     )
     ok, handle = make_headless_spawn()({"id": "t"})
     assert ok is False
-    assert "boom" in handle["error"]
+    assert "failed-123" in handle["error"]
+    assert handle["session"] == "local-body:failed-123"
 
 
 def test_make_headless_spawn_reuses_carried_session(monkeypatch):
