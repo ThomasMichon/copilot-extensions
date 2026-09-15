@@ -553,8 +553,26 @@ def _cmd_picker(rest: list[str]) -> int:
             print()
             return 1
         projects = build_projects()
-        project = positionals[0] if positionals else (
-            projects[0].name if projects else "")
+        if positionals:
+            project = positionals[0]
+        elif len(projects) == 1:
+            # Exactly one registered project is an unambiguous default -- no
+            # risk of silently opening the wrong one.
+            project = projects[0].name
+        elif not projects:
+            project = ""
+        else:
+            # #2426: multiple registered projects with no explicit selection
+            # is genuinely ambiguous -- picking projects[0] here silently
+            # opened an arbitrary (registration-order-dependent, not
+            # caller-intent-dependent) project's content with no visible
+            # error. Refuse instead of guessing.
+            print(
+                "error: multiple projects are registered and none was "
+                "specified. Pass a project name: "
+                f"{', '.join(p.name for p in projects)}"
+            )
+            return 2
         if not project:
             print("error: no project to open. Adopt one, or pass a project name.")
             return 2
