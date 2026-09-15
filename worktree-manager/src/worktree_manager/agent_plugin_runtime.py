@@ -269,22 +269,15 @@ def _paths_equal(left: object, right: object) -> bool:
     )
 
 
-def _namespaced_plugin_root(plugin_id: str) -> Path | None:
-    """The cell-scoped plugin root named by ``COPILOT_EXTENSIONS_CONTEXT``.
-
-    Only returned when: an explicit context points at a receipt, that
-    receipt validates as an attributable installation for this exact plugin
-    via the vendored ``validate_context_receipt`` -- schema/version,
-    canonical marketplace-id format, and (crucially) that the receipt sits
-    at the exact canonical path derived from its own declared identity under
-    the real durable home, not merely "some file whose JSON happens to say
-    the right pluginId" -- AND the shared installation-mode policy,
-    evaluated for this EXACT plugin/marketplace (global -> marketplace ->
-    plugin precedence, not just the coarse global bit), says cells are
-    enabled. This still does not re-validate activation/generation state the
-    way ``libs/peer-launch`` does before actually launching a process -- it
-    is the read-only "which root should I look under" question, not an
-    invocation-time governance gate.
+def _namespaced_resolution(plugin_id: str) -> dict | None:
+    """The raw ``resolve_installation_mode`` result for an explicit
+    ``COPILOT_EXTENSIONS_CONTEXT`` naming ``plugin_id``, after validating the
+    receipt via ``validate_context_receipt`` -- or ``None`` when there is no
+    context, it is unreadable, or it fails that validation (schema/version,
+    canonical marketplace-id format, and that the receipt sits at the exact
+    canonical path derived from its own declared identity under the real
+    durable home -- never merely "some file whose JSON happens to say the
+    right pluginId").
     """
     context = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip()
     if not context:
@@ -335,13 +328,32 @@ def _namespaced_plugin_root(plugin_id: str) -> Path | None:
         return None
     if not isinstance(resolution, dict):
         return None
-    # Mirror libs/peer-launch's own governance gate, with one deliberate
-    # narrowing: peer-launch also allows "deactivation-required" (policy now
-    # says legacy, but the runtime is still actively namespaced) because it
-    # is invoking an ALREADY-RUNNING same-cell peer that must finish
-    # cleanly. Worktree Manager is choosing which install to launch NEXT,
-    # not continuing an in-flight execution -- so once policy says legacy,
-    # a still-namespaced-but-deactivating cell must not be selected either.
+    resolution = dict(resolution)
+    resolution["_pluginRoot"] = plugin_root
+    return resolution
+
+
+def _namespaced_plugin_root(plugin_id: str) -> Path | None:
+    """The cell-scoped plugin root named by ``COPILOT_EXTENSIONS_CONTEXT``,
+    when the shared installation-mode policy, evaluated for this EXACT
+    plugin/marketplace (global -> marketplace -> plugin precedence), reports
+    the receipt as the actually-active namespaced install -- mirroring
+    ``libs/peer-launch``'s own governance gate, with one deliberate
+    narrowing: peer-launch also allows "deactivation-required" (policy now
+    says legacy, but the runtime is still actively namespaced) because it
+    is invoking an ALREADY-RUNNING same-cell peer that must finish cleanly.
+    Worktree Manager is choosing which install to launch NEXT, not
+    continuing an in-flight execution -- so once policy says legacy, a
+    still-namespaced-but-deactivating cell must not be selected either. This
+    still does not re-validate activation/generation state the way
+    ``libs/peer-launch`` does before actually launching a process -- it is
+    the read-only "which root should I look under" question, not an
+    invocation-time governance gate.
+    """
+    resolution = _namespaced_resolution(plugin_id)
+    if resolution is None:
+        return None
+    plugin_root = resolution.get("_pluginRoot")
     if (
         resolution.get("status") != "ready"
         or resolution.get("reason") != "namespaced-active"
@@ -350,6 +362,23 @@ def _namespaced_plugin_root(plugin_id: str) -> Path | None:
     ):
         return None
     return Path(plugin_root)
+
+
+def _namespaced_transition_blocks_legacy(plugin_id: str) -> bool:
+    """True when a real, currently-active namespaced runtime exists for
+    ``plugin_id`` (``actualMode == "namespaced"``) but was rejected by
+    ``_namespaced_plugin_root`` for some OTHER reason (a deactivation in
+    progress, a pending migration, maintenance, ...). In every such case the
+    live runtime the plugin's own dispatcher is actually using is still the
+    namespaced one, and the legacy root may itself be a retired, tombstoned
+    artifact of that same transition -- so falling through to it would
+    select an inert or wrong install rather than correctly reporting
+    "unavailable right now".
+    """
+    resolution = _namespaced_resolution(plugin_id)
+    if resolution is None:
+        return False
+    return resolution.get("actualMode") == "namespaced"
 
 
 def _validated_legacy_root(root: Path, plugin_id: str) -> Path | None:
@@ -430,11 +459,16 @@ def resolve_installed_plugin_slot(plugin_id: str) -> Path | None:
     authoritative: an incomplete or damaged slot under it fails closed
     rather than falling through to legacy, since the plugin's own runtime
     gate has already established the namespaced install as active and would
-    not silently prefer an older legacy runtime either. Legacy is only
-    considered when no namespaced root was selected at all. The legacy root
-    itself is trusted only via the ``deploy-manifest.json`` shape, never a
-    bare ``install.json``, so a forged receipt cannot masquerade as either
-    kind of root. A malformed (present-but-invalid) policy file blocks
+    not silently prefer an older legacy runtime either. A real, currently-
+    active namespaced runtime that was rejected for some OTHER reason (a
+    deactivation or migration in progress, maintenance, ...) also blocks the
+    legacy fallback -- the plugin's own dispatcher is still using that
+    namespaced runtime, and the legacy root may itself be a retired,
+    tombstoned artifact of that same transition. Legacy is only considered
+    when no namespaced context is in play at all. The legacy root itself is
+    trusted only via the ``deploy-manifest.json`` shape, never a bare
+    ``install.json``, so a forged receipt cannot masquerade as either kind
+    of root. A malformed (present-but-invalid) policy file blocks
     resolution entirely, fail-closed, rather than silently degrading to
     legacy.
     """
@@ -444,6 +478,8 @@ def resolve_installed_plugin_slot(plugin_id: str) -> Path | None:
     namespaced_root = _namespaced_plugin_root(plugin_id)
     if namespaced_root is not None:
         return _select_complete_slot(namespaced_root)
+    if _namespaced_transition_blocks_legacy(plugin_id):
+        return None
     legacy_root = legacy_plugin_root(plugin_id)
     if _validated_legacy_root(legacy_root, plugin_id) is not None:
         slot = _select_complete_slot(legacy_root)

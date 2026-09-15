@@ -254,6 +254,38 @@ def test_namespaced_root_ignored_when_never_activated(monkeypatch, tmp_path):
     assert apr.resolve_installed_plugin_command("agent-worktrees") is None
 
 
+def test_deactivating_namespaced_cell_blocks_legacy_fallback_too(
+    monkeypatch, tmp_path
+):
+    """When a cell is genuinely, currently namespaced-active but the policy
+    has just flipped to legacy (``status: "deactivation-required"``), the
+    plugin's own dispatcher keeps using the namespaced runtime through the
+    transition -- and the legacy root may itself be a retired, tombstoned
+    artifact of that same transition. Falling through to an ALSO-present
+    legacy install here would disagree with what the plugin is actually
+    running; resolution must report unavailable instead."""
+    home = tmp_path / "home"
+    home.mkdir()
+    install, _python = namespaced_fixture(home, windows=apr.os.name == "nt")
+    # No policy write -- absent (default disabled) policy with an activated,
+    # actually-namespaced cell is exactly the "deactivation-required" shape.
+    patch_profile(monkeypatch, apr, home)
+    legacy_root = tmp_path / "legacy" / ".agent-worktrees"
+    legacy_slot = legacy_root / "versions" / "0.0.1"
+    _write_slot(legacy_slot)
+    (legacy_root / "current-version").write_text("0.0.1", encoding="utf-8")
+    (legacy_root / "deploy-manifest.json").write_text(
+        json.dumps({
+            "service": "agent-worktrees",
+            "source": {"plugin": "agent-worktrees", "version": "0.0.1"},
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(install))
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path / "legacy"))
+    assert apr.resolve_installed_plugin_command("agent-worktrees") is None
+
+
 def test_namespaced_context_falls_back_to_legacy_when_both_present(
     monkeypatch, tmp_path
 ):
