@@ -513,6 +513,11 @@ restart does not inherently close the child's pipes.
   Direct process-backed resync refuses any retained Session Host record before
   teardown or spawning, including background resync after a failed reattach.
   Such sessions must use host-aware resume or confirmed host cleanup first.
+  A local attach failure retains authority while either host or child is alive.
+  Local pruning rechecks liveness and publication revision after strict channel
+  cleanup; a retained live or incompatible local host blocks duplicate resume
+  spawning. Startup pruning also preserves authority and retry handles on
+  channel or metadata errors, including the legacy remote fallback path.
   The manager remains the public facade; `session_resume.py`,
   `session_teardown.py`, and `session_ownership.py` own the bounded lifecycle
   implementations. Additive session migrations live in `db_migrations.py`.
