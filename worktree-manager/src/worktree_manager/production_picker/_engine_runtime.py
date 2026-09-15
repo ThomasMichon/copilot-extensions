@@ -54,8 +54,9 @@ def _context_runtime_root() -> Path | None:
 
 
 def _active_runtime_source() -> Path | None:
-    home = Path(os.environ.get("USERPROFILE") or Path.home())
-    root = _context_runtime_root() or (home / ".agent-worktrees")
+    root = _context_runtime_root() or agent_plugin_runtime.legacy_plugin_root(
+        "agent-worktrees"
+    )
     # Reuse the shared marker/fallback walk (current-version, then
     # last-known-good, then the newest remaining versions/*) instead of
     # reading only current-version -- so a stale/damaged current-version slot

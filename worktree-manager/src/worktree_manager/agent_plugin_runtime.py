@@ -184,9 +184,12 @@ def marketplace_cells_enabled(
     if ic is None:
         return False
     env = environment if environment is not None else dict(os.environ)
+    # On POSIX, `_canonical_os_profile` returns None BY DESIGN so the
+    # resolver derives the canonical passwd-database home itself; passing
+    # that None through (never substituting anything here) is required, not
+    # a failure case -- an early return on None would disable every POSIX
+    # policy outright.
     profile = os_profile or _canonical_os_profile(env)
-    if profile is None:
-        return False
     try:
         resolution = ic.resolve_installation_mode(
             legacy_root=legacy_plugin_root("worktree-manager"),
@@ -201,14 +204,36 @@ def marketplace_cells_enabled(
     return bool(policy.get("enabled"))
 
 
+def _durable_home(ic: ModuleType, environment: dict[str, str]) -> Path | None:
+    """The canonical ``~/.copilot-extensions`` durable home.
+
+    Delegates entirely to the vendored resolver's own environment/profile
+    selection (``_current_environment``) instead of re-deriving the OS
+    account profile a second time, which is exactly the kind of duplicated,
+    driftable logic that caused the POSIX policy bug above.
+    """
+    try:
+        _current, profile = ic._current_environment(
+            environment=environment, os_profile=None, platform=None, wsl_distro=None,
+        )
+    except Exception:
+        return None
+    return profile / ".copilot-extensions"
+
+
 def _namespaced_plugin_root(plugin_id: str) -> Path | None:
     """The cell-scoped plugin root named by ``COPILOT_EXTENSIONS_CONTEXT``.
 
     Only returned when: the global policy gate is on, an explicit context
-    points at a receipt, and that receipt's own declared ``pluginId`` names
-    this exact plugin. This does not re-validate activation/generation state
-    the way ``libs/peer-launch`` does before actually launching a process --
-    it is the read-only "which root should I look under" question, not an
+    points at a receipt, and that receipt validates as an attributable
+    installation for this exact plugin via the vendored
+    ``validate_context_receipt`` -- schema/version, canonical marketplace-id
+    format, and (crucially) that the receipt sits at the exact canonical
+    path derived from its own declared identity under the real durable home,
+    not merely "some file whose JSON happens to say the right pluginId".
+    This still does not re-validate activation/generation state the way
+    ``libs/peer-launch`` does before actually launching a process -- it is
+    the read-only "which root should I look under" question, not an
     invocation-time governance gate.
     """
     if not marketplace_cells_enabled():
@@ -219,13 +244,30 @@ def _namespaced_plugin_root(plugin_id: str) -> Path | None:
     pointer = Path(context)
     if not pointer.is_absolute():
         return None
+    ic = _load_installation_context()
+    if ic is None:
+        return None
+    env = dict(os.environ)
+    durable = _durable_home(ic, env)
+    if durable is None:
+        return None
+    # COPILOT_PLUGIN_ROOT (when present) is cross-checked against the
+    # receipt's own payload root -- a real protection when a plugin resolves
+    # its OWN context. Worktree Manager is not that plugin: any
+    # COPILOT_PLUGIN_ROOT it happens to have inherited describes an
+    # unrelated ambient context, not this lookup's target, so it must not
+    # leak in and spuriously reject an otherwise-valid receipt.
+    env.pop("COPILOT_PLUGIN_ROOT", None)
     try:
-        install = json.loads(pointer.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, ValueError, TypeError):
+        validated = ic.validate_context_receipt(
+            pointer, durable, expected_plugin_id=plugin_id, environment=env,
+        )
+    except Exception:
         return None
-    if not isinstance(install, dict) or install.get("pluginId") != plugin_id:
+    plugin_root = validated.get("pluginRoot") if isinstance(validated, dict) else None
+    if not plugin_root:
         return None
-    return pointer.parent
+    return Path(plugin_root)
 
 
 def _validated_plugin_root(root: Path, plugin_id: str) -> Path | None:
