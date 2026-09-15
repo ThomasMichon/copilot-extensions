@@ -7715,6 +7715,42 @@ def _effort_focus_output(
     }
 
 
+def _effort_storage_root(config: cfg.Config, worktree_root: Path) -> Path:
+    """Resolve the root an effort README path should be read against.
+
+    For an ordinary (self-hosted) repo, that is the worktree's own verified
+    Git root. For a stateless harness (``stateless: true`` /
+    ``requires_external_state_root: true``) the effort README instead lives in
+    the paired knowledge worktree/anchor -- exactly what
+    ``agent-worktrees state-root --pair`` already resolves -- so
+    ``effort-focus bind``/``show`` must resolve against that sibling instead of
+    the harness worktree's own checkout (#300). Falls back to
+    ``worktree_root`` unchanged when the repo isn't stateless, or when no
+    sibling can be resolved (surfaced as the usual "effort path does not
+    exist" once the (now-correct-for-this-repo) root is probed).
+    """
+    try:
+        repo_cfg = getattr(config, "default_repo", None)
+    except Exception:
+        repo_cfg = None
+    requires_external = bool(
+        getattr(repo_cfg, "stateless", False)
+        or getattr(repo_cfg, "requires_external_state_root", False)
+    )
+    if not requires_external:
+        return worktree_root
+    try:
+        pair = state_root_mod.resolve_pair(config, cwd=str(worktree_root))
+    except Exception:
+        return worktree_root
+    if pair.paired and pair.sibling and not pair.error:
+        try:
+            return Path(pair.sibling.path).resolve(strict=True)
+        except OSError:
+            pass
+    return worktree_root
+
+
 def cmd_effort_focus(args: argparse.Namespace) -> int:
     """Bind, show, replace, or release a worktree's canonical effort slice."""
     config = cfg.load_config()
@@ -7741,6 +7777,7 @@ def cmd_effort_focus(args: argparse.Namespace) -> int:
     if action in {"bind", "show"} or (action == "release" and args.completed):
         try:
             repo_root = effort_focus.repository_root(record.worktree_path)
+            repo_root = _effort_storage_root(config, repo_root)
         except effort_focus.EffortFocusError as exc:
             repo_error = str(exc)
             if action != "show":
