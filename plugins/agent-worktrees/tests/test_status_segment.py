@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -258,6 +259,88 @@ def test_completed_and_fetched_and_clean_uses_final_color(monkeypatch, capsys):
     out = capsys.readouterr().out.strip()
     assert f"bg={m._DESCRIPTOR_STYLE_BG['final']}" in out
     assert "FINAL" in out
+
+
+# ---------------------------------------------------------------------------
+# status-segment --json: the cheap, non-daemon single-worktree JSON snapshot
+# (worktree-status-json-segment) used by the Mux Companion instead of `list
+# --json --classify --worktree-id`, which still pays the resident classify
+# daemon's whole-fleet negotiation cost even when scoped to one id.
+# ---------------------------------------------------------------------------
+
+def _json_ns(target, *, fetch=False):
+    return argparse.Namespace(path=target, fetch=fetch, plain=True,
+                              no_title=True, json=True)
+
+
+def test_status_segment_json_outside_worktree_reports_error(monkeypatch, capfd):
+    target = str(Path("wt-gone").resolve())
+    monkeypatch.setattr(m, "_detect_upstream_branch", lambda *a, **k: "master")
+    monkeypatch.setattr(m, "_find_record_for_path", lambda _p: None)
+    monkeypatch.setattr(m.git_ops, "_get_current_branch_safe", lambda p: "main")
+    monkeypatch.setattr(
+        m.git_ops, "classify_worktree",
+        lambda *a, **k: git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.GONE),
+    )
+    rc = m.cmd_status_segment(_json_ns(target))
+    assert rc == 0
+    out = json.loads(capfd.readouterr().out)
+    assert "error" in out
+
+
+def test_status_segment_json_untracked_worktree_has_no_closure(monkeypatch, capfd):
+    target = str(Path("wt-untracked").resolve())
+    monkeypatch.setattr(m, "_detect_upstream_branch", lambda *a, **k: "master")
+    monkeypatch.setattr(m, "_find_record_for_path", lambda _p: None)
+    monkeypatch.setattr(m.git_ops, "_get_current_branch_safe", lambda p: "main")
+    monkeypatch.setattr(
+        m.git_ops, "classify_worktree",
+        lambda *a, fetch=False, **k: git_ops.WorktreeStateInfo(
+            state=git_ops.WorktreeState.WIP, ahead=2, fetch_requested=fetch,
+        ),
+    )
+    rc = m.cmd_status_segment(_json_ns(target))
+    assert rc == 0
+    out = json.loads(capfd.readouterr().out)
+    assert out["id"] is None
+    assert out["state"] == "wip"
+    assert out["ahead"] == 2
+    assert out["closure"] is None
+
+
+def test_status_segment_json_tracked_completed_matches_rendered_label(monkeypatch, capfd):
+    target = str(Path("wt-json-completed").resolve())
+    _wire(monkeypatch, target, state=git_ops.WorktreeState.COMPLETED, turns=0)
+    rc = m.cmd_status_segment(_json_ns(target, fetch=True))
+    assert rc == 0
+    out = json.loads(capfd.readouterr().out)
+    assert out["id"] == "anomalous-potato-win-20260625-221940-8e45"
+    assert out["closure"]["label"] == "FINAL"
+
+
+def test_status_segment_json_held_claim_surfaces_blocker(monkeypatch, capfd):
+    rec = _record(
+        worktree_path=str(Path("wt-json-claimed").resolve()),
+        resources=[tracking.ResourceClaim(kind="codespace", ref="cs-1", state="active")],
+    )
+    target = rec.worktree_path
+    _wire(monkeypatch, target, state=git_ops.WorktreeState.COMPLETED, turns=0, rec=rec)
+    rc = m.cmd_status_segment(_json_ns(target, fetch=True))
+    assert rc == 0
+    out = json.loads(capfd.readouterr().out)
+    assert out["closure"]["label"] == "MERGED"
+    codes = {b["code"] for b in out["closure"]["blockers"]}
+    assert "held-claims" in codes
+
+
+def test_status_segment_json_reports_turn_count(monkeypatch, capfd):
+    target = str(Path("wt-json-turns").resolve())
+    _wire(monkeypatch, target, state=git_ops.WorktreeState.UNUSED, turns=7)
+    rc = m.cmd_status_segment(_json_ns(target))
+    assert rc == 0
+    out = json.loads(capfd.readouterr().out)
+    assert out["turn_count"] == 7
+    assert out["state"] == "convo"  # refined by session turn count
 
 
 # ---------------------------------------------------------------------------

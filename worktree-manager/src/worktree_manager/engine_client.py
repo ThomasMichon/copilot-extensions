@@ -894,6 +894,72 @@ def list_worktrees(project: str, *, classify: bool = True) -> list[Worktree]:
     ]
 
 
+def current_worktree_status(
+    *,
+    path: str | None = None,
+    fetch: bool = False,
+    project: str | None = None,
+    runner=None,
+) -> dict | None:
+    """Cheap, single-worktree status snapshot via ``status-segment --json``.
+
+    Prefer this over ``list_worktree_rows(..., worktree_id=...)`` for a
+    single current-worktree lookup (the Mux Companion's use case): that verb
+    still negotiates with the resident classify daemon using project-wide
+    filters even when scoped to one id, paying a whole-fleet round trip
+    regardless. This reuses the status bar's own non-daemon classify pass.
+
+    Resolves from ``path`` (default: cwd). Returns the envelope payload
+    (``id``/``path``/``repo``/``branch``/``state``/``ahead``/``behind``/
+    ``dirty``/``turn_count``/``status``/``closure``), with an ``"error"`` key
+    when unresolved -- never raises for that case. Raises
+    :class:`EngineError` only when the engine itself is unreachable.
+    """
+    args = ["status-segment", "--json"]
+    if path:
+        args += ["--path", path]
+    if fetch:
+        args.append("--fetch")
+    return run_json(project, args, runner=runner)
+
+
+def find_worktree_for_path(
+    path: str,
+    *,
+    project: str | None = None,
+    runner=None,
+) -> dict | None:
+    """Return the raw ``list --json`` row whose worktree contains ``path``.
+
+    Cache-only (no ``--classify``) so this is cheap enough to call before the
+    caller even knows a worktree id -- exactly the resolution a hotkey-summoned,
+    "what worktree am I in" surface (the Mux Companion) needs on every launch.
+    Matches ``path`` itself or, walking upward, its nearest containing
+    worktree root, so a caller whose cwd is a subdirectory of the worktree
+    still resolves (mirrors ``agent-worktrees``' own path-to-record matching).
+    Returns ``None`` when no tracked worktree contains ``path``.
+    """
+    rows = list_worktree_rows(project, classify=False, cache_only=True, runner=runner)
+    by_path: dict[str, dict] = {}
+    for row in rows:
+        row_path = row.get("path")
+        if not isinstance(row_path, str) or not row_path:
+            continue
+        try:
+            by_path[str(Path(row_path).resolve())] = row
+        except OSError:
+            continue
+    try:
+        current = Path(path).resolve()
+    except OSError:
+        return None
+    for candidate in (current, *current.parents):
+        row = by_path.get(str(candidate))
+        if row is not None:
+            return row
+    return None
+
+
 def list_worktree_sessions(
     project: str,
     worktree_id: str,
