@@ -1231,6 +1231,13 @@ def test_combined_lifecycle_preserves_side_effect_snapshots(monkeypatch, tmp_pat
     )
     monkeypatch.setattr(
         main,
+        "_migrate_legacy_marketplace_overrides",
+        lambda payload, cwd: snapshots.append(
+            ("marketplace-overrides-migration", "{}")
+        ),
+    )
+    monkeypatch.setattr(
+        main,
         "_reconcile_knowledge_plugin_overlay",
         lambda payload, cwd: snapshots.append(
             ("knowledge-plugin-overlay", "{}")
@@ -1252,6 +1259,7 @@ def test_combined_lifecycle_preserves_side_effect_snapshots(monkeypatch, tmp_pat
     )
     assert snapshots == [
         ("register-nudge", '{"additionalContext": "register this repo"}'),
+        ("marketplace-overrides-migration", "{}"),
         ("knowledge-plugin-overlay", "{}"),
         ("register-session", '{"additionalContext":"binding"}'),
     ]
@@ -1263,6 +1271,102 @@ def test_combined_lifecycle_preserves_side_effect_snapshots(monkeypatch, tmp_pat
     assert registration["assignment_token"] == "assignment-1"
     assert registration["handoff_candidate_token"] == "handoff-1"
     assert registration["resident_environment"] is True
+
+
+def test_migrate_legacy_marketplace_overrides_retires_marker(tmp_path):
+    repo = tmp_path / "repo"
+    settings_local = repo / ".github" / "copilot" / "settings.local.json"
+    settings_local.parent.mkdir(parents=True)
+    unrelated_value = {"source": {"source": "directory", "path": "/kept/as-is"}}
+    settings_local.write_text(
+        json.dumps(
+            {
+                "extraKnownMarketplaces": {
+                    "odsp-web-harness": {
+                        "source": {
+                            "source": "directory",
+                            "path": "C:\\stale\\anchor\\.ai",
+                        }
+                    },
+                    "operator-own": unrelated_value,
+                },
+                "_agentWorktreesMarketplaceOverrides": {
+                    "version": 1,
+                    "marketplaces": {
+                        "odsp-web-harness": {
+                            "source": {
+                                "source": "directory",
+                                "path": "C:\\stale\\anchor\\.ai",
+                            }
+                        }
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    main._migrate_legacy_marketplace_overrides({}, str(repo))
+
+    result = json.loads(settings_local.read_text(encoding="utf-8"))
+    assert "_agentWorktreesMarketplaceOverrides" not in result
+    assert "odsp-web-harness" not in result.get("extraKnownMarketplaces", {})
+    assert result["extraKnownMarketplaces"]["operator-own"] == unrelated_value
+
+
+def test_migrate_legacy_marketplace_overrides_preserves_operator_edit(tmp_path):
+    repo = tmp_path / "repo"
+    settings_local = repo / ".github" / "copilot" / "settings.local.json"
+    settings_local.parent.mkdir(parents=True)
+    edited_value = {"source": {"source": "directory", "path": "/operator/edited"}}
+    settings_local.write_text(
+        json.dumps(
+            {
+                "extraKnownMarketplaces": {"odsp-web-harness": edited_value},
+                "_agentWorktreesMarketplaceOverrides": {
+                    "version": 1,
+                    "marketplaces": {
+                        "odsp-web-harness": {
+                            "source": {
+                                "source": "directory",
+                                "path": "C:\\stale\\anchor\\.ai",
+                            }
+                        }
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    main._migrate_legacy_marketplace_overrides({}, str(repo))
+
+    result = json.loads(settings_local.read_text(encoding="utf-8"))
+    assert "_agentWorktreesMarketplaceOverrides" not in result
+    # The operator changed this value after the marker was written, so the
+    # migration must not clobber it -- only exactly-unmodified marker-owned
+    # values are retired.
+    assert result["extraKnownMarketplaces"]["odsp-web-harness"] == edited_value
+
+
+def test_migrate_legacy_marketplace_overrides_no_marker_is_noop(tmp_path):
+    repo = tmp_path / "repo"
+    settings_local = repo / ".github" / "copilot" / "settings.local.json"
+    settings_local.parent.mkdir(parents=True)
+    original = {"extraKnownMarketplaces": {"other": {"source": {"source": "github"}}}}
+    settings_local.write_text(json.dumps(original), encoding="utf-8")
+
+    main._migrate_legacy_marketplace_overrides({}, str(repo))
+
+    assert json.loads(settings_local.read_text(encoding="utf-8")) == original
+
+
+def test_migrate_legacy_marketplace_overrides_no_file_is_noop(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    # Must not raise or create a file when there's nothing to migrate.
+    main._migrate_legacy_marketplace_overrides({}, str(repo))
+    assert not (repo / ".github" / "copilot" / "settings.local.json").exists()
 
 
 @pytest.mark.parametrize(

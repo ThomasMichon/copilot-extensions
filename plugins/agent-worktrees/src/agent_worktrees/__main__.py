@@ -10784,6 +10784,56 @@ def _anchor_hygiene_diagnostic(cwd: str) -> str:
     return "".join(f"{message}\n" for message in messages)
 
 
+def _migrate_legacy_marketplace_overrides(payload: dict, cwd: str) -> None:
+    """One-time cleanup of a marker left by the retired marketplace_overrides
+    mechanism.
+
+    A repo's ``.github/copilot/settings.local.json`` may still carry the
+    now-defunct ``_agentWorktreesMarketplaceOverrides`` marker and its
+    absolute ``directory``-source entries from a prior version of this
+    plugin. Left in place, those entries would keep shadowing the repo's own
+    committed marketplace declaration with a stale, anchor-pinned path
+    forever, since nothing produces or refreshes that marker anymore. This
+    retires exactly the marker-owned values that are still unmodified and
+    removes the marker; any operator edit to a managed key is preserved
+    untouched, matching ``_retire_invalid_pair_overlay_locked``'s own
+    retirement contract. Idempotent and a silent no-op once migrated.
+    """
+    output_text = "{}"
+    try:
+        from . import knowledge_plugins as kp
+
+        output_path = Path(cwd).resolve() / ".github" / "copilot" / "settings.local.json"
+        if output_path.is_file():
+            with kp._overlay_transaction(output_path):
+                existing = kp._load_json_object(output_path)
+                marker = existing.get("_agentWorktreesMarketplaceOverrides")
+                previous = marker.get("marketplaces") if isinstance(marker, dict) else None
+                if isinstance(marker, dict) and marker.get("version") == 1 and isinstance(previous, dict):
+                    marketplaces = kp._dict_setting(existing, "extraKnownMarketplaces", output_path)
+                    kp._retire_previous(marketplaces, previous)
+                    result = dict(existing)
+                    result.pop("_agentWorktreesMarketplaceOverrides", None)
+                    if marketplaces:
+                        result["extraKnownMarketplaces"] = marketplaces
+                    else:
+                        result.pop("extraKnownMarketplaces", None)
+                    if kp._write_overlay(output_path, result):
+                        output_text = json.dumps(
+                            {
+                                "additionalContext": (
+                                    "Agent Worktrees retired a legacy local "
+                                    f"marketplace source override in {output_path}. "
+                                    "Restart Copilot CLI for the committed "
+                                    "marketplace source to take effect."
+                                )
+                            }
+                        )
+    except Exception:
+        pass
+    _write_session_lifecycle_snapshot("marketplace-overrides-migration", payload, output_text)
+
+
 def _reconcile_knowledge_plugin_overlay(payload: dict, cwd: str) -> None:
     """Best-effort sessionStart refresh of the knowledge-repo plugin overlay.
 
@@ -11002,6 +11052,7 @@ def _run_session_lifecycle(
             json.dumps({"additionalContext": nudge}) if nudge else "{}",
         )
 
+        _migrate_legacy_marketplace_overrides(payload, cwd)
         _reconcile_knowledge_plugin_overlay(payload, cwd)
 
         registration_args = argparse.Namespace(
