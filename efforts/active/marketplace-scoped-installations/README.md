@@ -195,7 +195,7 @@ because they provide tools or services.
   - [x] Publish and independently validate immutable, generation-pinned snapshot
     provenance at the exact cell-local snapshot path without creating or
     activating a runtime slot.
-  - [ ] Carry validated snapshot identity into provision/runtime-slot ownership,
+  - [x] Carry validated snapshot identity into provision/runtime-slot ownership,
     cutover, rollback, and uninstall.
     - [x] Establish the non-activating Python reference for immutable,
       generation-pinned runtime-slot ownership.
@@ -405,6 +405,32 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   guarantees.
 - Full detail and validation: `worktree-manager-control-plane`'s README,
   Phase 3b Slice 2 Sub-slice 4.
+
+### 2026-09-14 — Phase 3 tracker reconciliation
+
+- Verified that
+  [#2122](https://github.com/ThomasMichon/copilot-extensions/issues/2122)
+  (ownership-checked Agent Machines repair/release and uninstall) was left
+  open on GitHub despite its implementation being merged and accepted.
+  [PR #2125](https://github.com/ThomasMichon/copilot-extensions/pull/2125)
+  (2026-09-05) is the preceding design/spec PR and used `Refs #2122` --
+  correctly non-closing since implementation had not landed yet.
+  [PR #2177](https://github.com/ThomasMichon/copilot-extensions/pull/2177)
+  (2026-09-07, 42 files changed) is the actual implementation -- its squashed
+  commit message says "Implement #2122 ..." (not a GitHub closing keyword) and
+  its PR body was empty, so the tracker was never auto- or manually closed.
+  Confirmed the delivered code directly: `plugins/agent-machines/scripts/
+  cell_lifecycle.py` and `tests/test_cell_lifecycle.py` implement and cover
+  `cell-repair`/`cell-uninstall` today. This was a bookkeeping gap, not an
+  implementation gap; closed #2122 with the evidence recorded in a closing
+  comment.
+- Checked the previously unchecked Phase 3 parent item "Carry validated
+  snapshot identity into provision/runtime-slot ownership, cutover, rollback,
+  and uninstall" now that all three of its nested children (including #2122)
+  are verifiably complete.
+- No code changed in this reconciliation. The parent effort, #1110, and #1096
+  remain open; the remaining Phase 2/6 caller conversions, Phase 7 intake
+  ledger, and full Validation Plan are still outstanding.
 
 ### 2026-09-11 — Containers same-cell knowledge configuration
 
