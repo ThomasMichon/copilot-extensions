@@ -1688,6 +1688,100 @@ class TestPairedRecordResolution:
         assert find_paired_record(rec) is None
 
 
+class TestOwningTrackingDirResolution:
+    """Regression for copilot-extensions#2788: a foreign-project record must
+    never be looked up (or, worse, re-saved) into the ambient project's own
+    tracking directory just because that happens to be the current process's
+    resolved project.
+    """
+
+    def _rec(self, wt_id: str, *, repo: str, **overrides) -> WorktreeRecord:
+        base = dict(
+            worktree_id=wt_id,
+            branch=f"worktree/{wt_id}",
+            worktree_path=f"/tmp/src/{wt_id}",
+            repo=repo,
+            machine="test",
+            platform="wsl",
+            started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00",
+            resume_count=0,
+            title=None,
+            status="active",
+            completed_at=None,
+            sessions=[],
+        )
+        base.update(overrides)
+        return WorktreeRecord(**base)
+
+    def _wire_two_projects(self, monkeypatch, tmp_path: Path):
+        """Ambient project is 'harness-proj'; 'knowledge-proj' is a sibling
+        project on the same machine (mirrors a harness + bound knowledge
+        repo pairing, or simply two unrelated adopted projects)."""
+        from agent_worktrees import config as _cfg
+        from agent_worktrees import repos as _repos
+        from agent_worktrees import tracking as _t
+
+        harness_dir = tmp_path / ".harness-proj" / "worktrees"
+        knowledge_dir = tmp_path / ".knowledge-proj" / "worktrees"
+        harness_dir.mkdir(parents=True)
+        knowledge_dir.mkdir(parents=True)
+
+        _cfg.set_active_project("harness-proj")
+        monkeypatch.setattr(_cfg, "tracking_dir", lambda: harness_dir)
+        monkeypatch.setattr(
+            _cfg, "project_dir",
+            lambda name=None: tmp_path / f".{name or 'harness-proj'}",
+        )
+        monkeypatch.setattr(
+            _repos, "_adopted_project_names",
+            lambda: {"harness-proj", "knowledge-proj"},
+        )
+        return harness_dir, knowledge_dir, _t
+
+    def test_yaml_path_uses_records_own_repo_not_ambient_project(
+        self, tmp_path: Path, monkeypatch
+    ):
+        harness_dir, knowledge_dir, _t = self._wire_two_projects(monkeypatch, tmp_path)
+        rec = self._rec("wt-k", repo="knowledge-proj")
+        # Ambient project is 'harness-proj', but the record itself knows it
+        # belongs to 'knowledge-proj' -- yaml_path must honor that, not the
+        # ambient tracking_dir().
+        assert rec.yaml_path == knowledge_dir / "wt-k.yaml"
+        assert rec.yaml_path != harness_dir / "wt-k.yaml"
+
+    def test_bare_id_lookup_falls_back_to_owning_project_without_duplicating(
+        self, tmp_path: Path, monkeypatch
+    ):
+        harness_dir, knowledge_dir, _t = self._wire_two_projects(monkeypatch, tmp_path)
+        knowledge_rec = self._rec("wt-k", repo="knowledge-proj")
+        save_record(knowledge_rec, knowledge_dir / "wt-k.yaml")
+
+        # register_session only has a bare worktree_id -- ambient project is
+        # 'harness-proj', but 'wt-k' actually lives under 'knowledge-proj'.
+        # Pre-fix, this would silently create a stale duplicate under
+        # harness_dir instead of updating the real record.
+        _t.register_session("wt-k", "session-1")
+
+        assert not (harness_dir / "wt-k.yaml").exists()
+        updated = load_record(knowledge_dir / "wt-k.yaml")
+        assert updated.sessions and updated.sessions[-1].session_id == "session-1"
+
+    def test_bare_id_lookup_prefers_ambient_when_present_there(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """The fast path stays fast: when the id genuinely belongs to the
+        ambient project, no cross-project scan result is needed/used."""
+        harness_dir, knowledge_dir, _t = self._wire_two_projects(monkeypatch, tmp_path)
+        own_rec = self._rec("wt-own", repo="harness-proj")
+        save_record(own_rec, harness_dir / "wt-own.yaml")
+
+        _t.register_session("wt-own", "session-1")
+
+        assert (harness_dir / "wt-own.yaml").exists()
+        assert not (knowledge_dir / "wt-own.yaml").exists()
+
+
 class TestRetireRecord:
     """retire_record -- delete outright, or tombstone a paired sibling (#957/#220).
 
