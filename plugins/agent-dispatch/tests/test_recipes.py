@@ -94,6 +94,18 @@ def test_conflict_resolution_charter_names_producer_origin_and_force_push():
     assert "never open a second pr" in charter
 
 
+def test_reviewer_charter_forbids_a_competing_pr_against_an_external_author():
+    # Under land=self, "own landing" must never be read as "replace the
+    # author's own PR with a competing one under this identity" -- even when
+    # their fork/branch is temporarily unreachable. Lock that in the charter
+    # so a worker never rediscovers "just open a repair-patch PR" on its own.
+    r = recipes.get_recipe("reviewer")
+    charter = r.charter_template.lower()
+    assert "competing pull request" in charter
+    assert "repairs, patches, or supersedes" in charter
+    assert "cooperative" in charter
+
+
 def test_render_missing_required_param_raises_listing_them():
     with pytest.raises(recipes.RecipeError) as exc:
         recipes.render_recipe("reviewer", {"repo": "o/n"})
