@@ -275,6 +275,13 @@ over the SSH tunnel, resolving them through the host's Git Credential Manager
 by agent-bridge; agent-codespaces contributes the CodeSpace policy/profile and
 sets up the SSH reverse-forward on connect.
 
+Provisioning installs the relay-first wrapper only as `~/ado-auth-helper`.
+It deliberately leaves `~/azure-auth-helper` to the native Azure tooling so
+interactive `az login` keeps working. Reconnecting with a newer
+agent-codespaces version repairs older installations that shadowed the Azure
+helper, restoring a preserved native helper when one exists and otherwise
+removing the stale relay wrapper.
+
 To avoid the failure mode where a missing/expired credential causes a CodeSpace
 `git fetch` to hang indefinitely on `git credential fill`:
 

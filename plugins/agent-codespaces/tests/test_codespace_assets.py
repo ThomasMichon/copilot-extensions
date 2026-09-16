@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import base64
 import gzip
+import os
 import re
+import shutil
+import subprocess
+
+import pytest
 
 from agent_codespaces.codespace_assets import (
     AUTH_ERROR_POLICY_INSTRUCTIONS_ROOT,
     AUTH_ERROR_POLICY_REMOTE_PATH,
+    _azure_auth_helper_repair_command,
     asset_text,
     build_auth_error_policy_command,
     build_provision_command,
@@ -68,13 +74,78 @@ class TestAssets:
 
 
 class TestProvisionCommand:
-    def test_command_installs_both_helpers(self) -> None:
+    def test_command_installs_only_ado_helper(self) -> None:
         cmd = build_provision_command()
         assert "$HOME/.local/bin/ado-auth-helper-relay" in cmd
         assert "base64 -d" in cmd
-        # Installed for both ado and azure auth helpers via the loop
-        assert "ado-auth-helper azure-auth-helper" in cmd
+        assert "for _n in ado-auth-helper; do" in cmd
+        assert "ado-auth-helper azure-auth-helper" not in cmd
         assert '"$HOME/$_n"' in cmd
+
+    def test_command_repairs_legacy_azure_helper_shadow(self) -> None:
+        cmd = build_provision_command()
+        assert 'grep -q ado-auth-helper-relay "$HOME/azure-auth-helper"' in cmd
+        assert (
+            'cp -f "$HOME/.azure-auth-helper-vscode" '
+            '"$HOME/azure-auth-helper"'
+        ) in cmd
+        assert 'else rm -f "$HOME/azure-auth-helper"; fi' in cmd
+        assert '[ -L "$HOME/.local/bin/azure-auth-helper" ]' in cmd
+        assert 'rm -f "$HOME/.local/bin/azure-auth-helper"' in cmd
+
+    @pytest.mark.skipif(
+        os.name == "nt" or shutil.which("bash") is None,
+        reason="requires a native POSIX shell",
+    )
+    @pytest.mark.parametrize("with_backup", [False, True])
+    def test_repair_removes_legacy_azure_shadow(
+        self, tmp_path, with_backup: bool
+    ) -> None:
+        home = tmp_path
+        local_bin = home / ".local" / "bin"
+        local_bin.mkdir(parents=True)
+        helper = home / "azure-auth-helper"
+        helper.write_text("# ado-auth-helper-relay\n", encoding="utf-8")
+        link = local_bin / "azure-auth-helper"
+        link.symlink_to(helper)
+        backup = home / ".azure-auth-helper-vscode"
+        if with_backup:
+            backup.write_text("#!/native/node\nnative\n", encoding="utf-8")
+
+        subprocess.run(
+            ["bash", "-c", _azure_auth_helper_repair_command()],
+            env={**os.environ, "HOME": str(home)},
+            check=True,
+        )
+
+        assert not link.is_symlink()
+        if with_backup:
+            assert helper.read_text(encoding="utf-8") == "#!/native/node\nnative\n"
+            assert os.access(helper, os.X_OK)
+        else:
+            assert not helper.exists()
+
+    @pytest.mark.skipif(
+        os.name == "nt" or shutil.which("bash") is None,
+        reason="requires a native POSIX shell",
+    )
+    def test_repair_leaves_native_azure_helper_untouched(self, tmp_path) -> None:
+        home = tmp_path
+        local_bin = home / ".local" / "bin"
+        local_bin.mkdir(parents=True)
+        helper = home / "azure-auth-helper"
+        helper.write_text("#!/native/node\nnative\n", encoding="utf-8")
+        link = local_bin / "azure-auth-helper"
+        link.symlink_to(helper)
+
+        subprocess.run(
+            ["bash", "-c", _azure_auth_helper_repair_command()],
+            env={**os.environ, "HOME": str(home)},
+            check=True,
+        )
+
+        assert helper.read_text(encoding="utf-8") == "#!/native/node\nnative\n"
+        assert link.is_symlink()
 
     def test_command_preserves_node_shebang(self) -> None:
         cmd = build_provision_command()
@@ -94,7 +165,7 @@ class TestProvisionCommand:
         # ...and only kept when it is actually executable; otherwise env-node.
         assert '[ -x "$_interp" ] || _sb="#!/usr/bin/env node"' in cmd
 
-    def test_command_backs_up_native_helper_once(self) -> None:
+    def test_command_backs_up_native_ado_helper_once(self) -> None:
         cmd = build_provision_command()
         # Only back up when the existing helper isn't already ours
         assert "grep -q ado-auth-helper-relay" in cmd
