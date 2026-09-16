@@ -1215,6 +1215,12 @@ def _cmd_self_install(rest: list[str]) -> int:
     else:
         print(f"  ! {res.reason}")
         return 1
+    if res.cleaned:
+        verb = "removed" if do_apply else "would remove"
+        print()
+        print(f"  legacy artifacts {verb}:")
+        for c in res.cleaned:
+            print(f"      {c}")
     print()
     return 0
 
