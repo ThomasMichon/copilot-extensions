@@ -151,6 +151,47 @@ _Verbatim operator request; original spelling and punctuation preserved._
 > worktree gets tracked, gets handled in the correct order in normal course of
 > business, and gets dealt with in the case of mishap.
 
+**2026-09-15 follow-up** (verbatim, MERGED/FINAL sub-state model):
+
+> My expected difference between MERGED and FINAL would be
+> - MERGED is verified proof that the current worktree commit is part of
+> origin/[main|master]'s history
+> - FINAL is MERGED, plus proof that all claims downstream of the worktree are
+> released
+>
+> MERGED should be re-computed on each git operation; ideally a post-op hook,
+> and a periodic background check, would ensure the `fetch` happens and then
+> compare each worktree branch's relation to [main|master], to ensure that
+> status. For FINAL, we then need to audit claims, re-validating on each claim
+> update whether our assertion holds.
+>
+> Every status in the enum represents a *computation* of individual
+> sub-states:
+> 1. Has turns since last checkpoint?
+> 2. Worktree branch at or upstream of origin/[main|master]
+> 3. Has uncommitted local changes?
+> 4. Has open downstream claims?
+> 5. Has pending unclaimed handoff?
+>
+> I'd rather you use an asterisk "*" if the state is an unverified guess,
+> rather than have whole separate states for the "unverified" cases.
+
+Follow-up direction on sequencing (verbatim):
+
+> The agent-worktrees daemon is like the correct place to schedule the
+> background git work, but that needs to be maybe once a minute. We can also
+> fire it on-demand in response to certain transitions, and we should ensure
+> that operations like pr-merge, git-sync, etc trigger on-demand recomputes
+> globally.
+
+Mined into `visions/plugins/agent-worktrees/README.md`'s *Derived status*
+concept (PR #2734): the reduction's inputs are named as a fixed, independently
+owned set of facts, freshness of upstream-containment is actively pursued by
+the resident accelerator (periodic sweep + operation-triggered recompute,
+repo-scoped since sibling worktrees share remote-tracking refs), and an
+unconfirmed fact is marked, never given a separate whole state. See Phase 9
+below for the carved implementation plan.
+
 ## Plan
 
 ### Phase 1 - Lock the contracts with failing fixtures
@@ -487,8 +528,72 @@ Plan (not started):
   surface it at finalize time" if unconfirmed, per the never-fabricate-a-
   verdict discipline the claim ledger already follows elsewhere.
 
+### Phase 9 - Decompose derived status into sub-state facts with pursued freshness
+
+Carves the 2026-09-15 request above into concrete work. Redefines the
+`FINAL`/`MERGED` split (Phase 4-5) from an implicit "cached vs refreshed"
+special case on one fact into a general model: a fixed set of independently
+named, independently freshness-tracked facts, with an unconfirmed fact marked
+in place rather than spawning a parallel state. Builds on the existing
+`ClosureDescriptor`/`assemble_closure_descriptor` (Phase 4) and the resident
+accelerator (`classify_daemon.py`/`cmd_status_monitor`) rather than replacing
+either.
+
+- [ ] Name the sub-state facts explicitly in the descriptor: checkpoint
+  activity (turns since last checkpoint), upstream-containment (branch at or
+  ahead of `origin/[main|master]`), local dirtiness, open downstream claims,
+  and pending unclaimed handoff. Each fact keeps its own value independent of
+  the others (no collapsing into a single label until render time).
+- [ ] Add a per-fact freshness flag (confirmed vs. unconfirmed/asterisked) to
+  the descriptor, replacing the current all-or-nothing
+  `evidence_mode`/`evidence_complete` pair that only ever gates the single
+  FINAL/MERGED distinction. `FINAL` requires upstream-containment AND
+  claims-clear to both be independently confirmed; either one alone being
+  stale marks only that fact, not the whole verdict.
+- [ ] Add a repo-scoped freshness ledger (last-confirmed-fetch timestamp per
+  repo, not per worktree) that any worktree's classify pass can read without
+  itself having fetched -- so a fetch performed by any sibling worktree's
+  finalize/pr-merge, or the periodic sweep below, immediately counts as
+  current evidence for every worktree of that repo.
+- [ ] Extend the resident status-monitor (`cmd_status_monitor`) with a
+  periodic per-repo revalidation sweep (default on the order of once a
+  minute, configurable) that fetches and reclassifies upstream-containment
+  for every repo it is tracking, publishing the refreshed ledger entry -- an
+  addition to the existing resident accelerator, not a second daemon.
+- [ ] Add operation-triggered recompute signals from `pr-merge`, `finalize`'s
+  own fetch, `sync`, and claim settle/release, so the affected repo's (or
+  worktree's, for worktree-scoped facts) freshness is refreshed promptly
+  instead of waiting out the next periodic sweep.
+- [ ] Add pending-handoff as a descriptor fact, read from context-handoff's
+  baton schema (read-only; agent-worktrees does not compose or consume a
+  handoff -- see the `mux-companion` vision's schema-read-only boundary for
+  the same rule applied to a different consumer).
+- [ ] Render the marker convention (an asterisk, or the compact-text
+  equivalent) on any individual unconfirmed fact across `list --json`, the
+  mux/PSMux status segment, and the Picker -- replacing today's implicit
+  "COMPLETED reads MERGED unless freshly fetched" special case with the
+  general per-fact marker.
+- [ ] Update `docs/cli-reference.md`, `docs/mux.md`, and
+  `docs/worktree-lifecycle.md` (all touched by PR #2679/#2681 for the old
+  FINAL/MERGED split) for the decomposed model, and update the
+  `mux-companion` vision's Companion explainer view to render the named
+  facts and their individual freshness rather than a single label.
+- [ ] Mixed-version safety: an older/newer descriptor version (or a payload
+  missing the new per-fact freshness fields) degrades the same way Phase 4's
+  `interpret_descriptor_payload` already degrades an unsupported version --
+  never silently promoted to confirmed.
+
 ## Validation Plan
 
+- [ ] **Sub-state decomposition** (Phase 9, proposed): the descriptor names
+  each of the five facts (checkpoint activity, upstream-containment, local
+  dirtiness, open claims, pending handoff) independently, with its own
+  freshness; `FINAL` requires upstream-containment and claims-clear both
+  independently confirmed; a repo-wide fetch (background sweep, a sibling
+  worktree's finalize/pr-merge) counts as fresh evidence for every worktree
+  of that repo without each needing its own fetch; an unconfirmed fact
+  renders with a marker on that fact alone, never as a separate whole state.
+  Not started.
 - [ ] **Session-claim lifecycle** (Phase 8, proposed): a worktree's own live
   Copilot session is a held claim; it settles on finalize, settles on a
   successful handoff cutover, releases on `sessionEnd`, and reopens on a
@@ -1031,4 +1136,55 @@ The approved design is the faceted model in [design.md](design.md):
   closure_descriptor_wiring or FetchFailed"` -- 34 passed.
 - `python tools/run-plugin-tests.py agent-worktrees --subsuite-timeout 600`
   -- same pre-existing failures as the prior round, no new ones.
+
+### 2026-09-15 - Picker label parity landed; Phase 9 proposed (decomposed sub-state facts)
+
+- Landed the Picker half of Phase 5's "mux and Picker use the descriptor's
+  exact... style token" bullet -- specifically the label/color sub-part, not
+  the compact `C<N>`/`F<N>` marker/column-layout sub-part (still its own
+  unstarted slice, per the 2026-09-14 entry above). `derive._state()` now
+  prefers `w["closure"]["label"]` (FINAL/MERGED) for a `completed` worktree,
+  falling back to legacy FINAL when no descriptor is present (older remote);
+  `derive.bucket()` groups MERGED with FINAL under "completed";
+  `engine.py`'s `C_STATE`/`MAINT_GROUP_ORDER` gained a MERGED entry (orange,
+  matching the status bar's `merged-blocked` color) in both the
+  agent-worktrees source and the worktree-manager transplant; `obscure.py`
+  gave MERGED the same demo-mode priority as FINAL. PR #2679, PR #2681
+  (docs: `cli-reference.md`/`picker.md`/`worktree-lifecycle.md` updated for
+  the FINAL/MERGED split -- the first time those reality docs documented it
+  at all).
+- Prototyped a hotkey-summoned, in-Mux "Companion" popup (`visions/
+  mux-companion`) as a separate, adjacent capability: PR #2687 (vision),
+  #2693 (exit/focus prototype -- found empirically that `display-popup -E`
+  auto-closes on any clean app exit, and that binding must be a bare
+  script-path, not an inlined multi-word command), #2703 (v1: real
+  status/lineage view backed by a new `agent-worktrees status-segment
+  --json` verb, added because `list --json --classify --worktree-id <id>`
+  still pays the resident classify daemon's whole-fleet negotiation cost
+  even scoped to one id). Filed as issue #2696 (prototype findings). This
+  Companion consumes whatever label the closure descriptor renders -- it is
+  a presentation surface, not a rival computation -- so Phase 9's decomposed
+  facts flow through it once Phase 9 lands, with no Companion-side change
+  needed beyond the explainer text noted in Phase 9's Plan.
+- Operator observed all their live worktrees read `MERGED`, never `FINAL` --
+  traced to `evidence_mode` being scoped to a single `classify_worktree`
+  call's own `fetch_requested`/`fetch_failed` flags (this effort's Phase 4/5
+  work, confirmed working as designed) rather than to the repo-wide
+  remote-tracking refs every sibling worktree of a repo actually shares (a
+  `finalize`/`pr-merge`'s own `git fetch` already refreshes those refs for
+  every worktree of that repo, on any git worktree setup, immediately -- the
+  descriptor just never gets to claim that shared freshness). Discussed
+  into a general redesign: name the derived status's inputs as independent
+  sub-state facts, track freshness per-repo instead of per-call, maintain it
+  actively (periodic sweep + operation-triggered recompute) via the existing
+  resident accelerator, and mark an individual unconfirmed fact rather than
+  doubling the state space for "unverified." Mined into `visions/plugins/
+  agent-worktrees/README.md` (PR #2734, also fixed two rounds of unrelated
+  pre-existing CI drift on `main` -- a module-size baseline gap hit twice
+  and a dead import blocking the repo-wide ruff guard -- to land at all).
+- Carved the vision delta into this effort's **Phase 9** (Plan +
+  Validation Plan above) rather than a new effort: this is a direct
+  continuation of Phase 4/5's "one canonical descriptor, every surface
+  consumes it" intent, not a new subject. Not started; handed off for
+  implementation.
 
