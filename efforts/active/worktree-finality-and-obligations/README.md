@@ -631,21 +631,27 @@ either.
   free. The Picker does NOT yet consume `compact` at all (a separate,
   already-flagged-unstarted slice per the 2026-09-15 Picker-label-parity
   Journal entry) -- still open.
-- [ ] Update `docs/cli-reference.md`, `docs/mux.md`, and
+- [x] Update `docs/cli-reference.md`, `docs/mux.md`, and
   `docs/worktree-lifecycle.md` (all touched by PR #2679/#2681 for the old
   FINAL/MERGED split) for the decomposed model, and update the
   `mux-companion` vision's Companion explainer view to render the named
-  facts and their individual freshness rather than a single label. Partial:
-  `docs/cli-reference.md` and `docs/worktree-lifecycle.md` updated for the
-  marker convention; `docs/mux.md` and the `mux-companion` vision explainer
-  still unstarted.
-- [ ] Mixed-version safety: an older/newer descriptor version (or a payload
+  facts and their individual freshness rather than a single label. All
+  three reality docs now updated for the marker convention. The
+  `mux-companion` vision (and the parent `visions/plugins/agent-worktrees`
+  vision) turned out to need NO further edit -- both were already updated
+  to the decomposed-facts model in PR #2734 (before this Phase 9
+  implementation even started), and both already describe the "named
+  facts, individually confirmed/stale" shape this session actually built.
+- [x] Mixed-version safety: an older/newer descriptor version (or a payload
   missing the new per-fact freshness fields) degrades the same way Phase 4's
   `interpret_descriptor_payload` already degrades an unsupported version --
-  never silently promoted to confirmed. Partially covered: bumping
-  `DESCRIPTOR_VERSION` to 2 makes `interpret_descriptor_payload`'s existing
-  exact-version check reject a v1 payload automatically (no code change
-  needed there); not yet exercised by a dedicated v1-vs-v2 payload test.
+  never silently promoted to confirmed. Bumping `DESCRIPTOR_VERSION` to 2
+  makes the existing exact-version check reject a v1 payload automatically
+  (no code change needed); now exercised by a dedicated test against a
+  REALISTIC hand-built v1-shaped payload (top-level
+  `evidence_mode`/`evidence_complete`, no `facts` key at all), plus a test
+  documenting that `interpret_descriptor_payload` never reads `facts`
+  in the first place (the version check IS the whole safety net).
 
 ## Validation Plan
 
@@ -1564,4 +1570,41 @@ The approved design is the faceted model in [design.md](design.md):
 - **Not done this session** (remaining Phase 9 Plan items, unstarted): the
   Picker's own `compact`-marker rendering, `docs/mux.md` + `mux-companion`
   vision updates, and the mixed-version-safety test.
+
+### 2026-09-16 (continued) - Phase 9 slice 7: mixed-version test + remaining docs
+
+- Added the mixed-version-safety test the Plan called for: a REALISTIC,
+  hand-built v1-shaped payload (top-level `evidence_mode`/`evidence_complete`,
+  no `facts` key at all -- not just a v2 payload with its `version` field
+  edited) is rejected by `interpret_descriptor_payload` the same way any
+  other version mismatch is. A second test documents the actual mechanism
+  explicitly: `interpret_descriptor_payload` never reads `facts` at all --
+  the exact-version check IS the entire safety net, not per-field
+  validation -- so this is a real behavioral test, not just a version-number
+  tweak repeated.
+- Updated `docs/mux.md` (a short addition after the existing status-bar
+  paragraph, linking to `worktree-lifecycle.md`'s decomposed-facts section
+  for the `C<N>`/`F<N>`/`U*`/`OC*` marker meanings).
+- Investigated the `mux-companion` vision's Companion explainer bullet and
+  the parent `visions/plugins/agent-worktrees` vision: **both already
+  describe the decomposed-facts model** (named facts, each independently
+  confirmed/stale) -- both were updated in PR #2734, landed BEFORE this
+  Phase 9 implementation session even started. No vision-doc edit was
+  needed; verified by reading both documents rather than assuming.
+- All Plan bullets except the Picker's own `compact` rendering are now
+  checked off. `test_prune.py` (92 tests) passes; `ruff check` diff
+  confirmed identical before/after.
+- **Remaining** (the one open Phase 9 Plan item): the Picker's own
+  `compact`-marker rendering. Investigated: the Picker lives in a SEPARATE
+  package (`worktree-manager/src/worktree_manager/production_picker/
+  picker_tui/`, a transplant of `plugins/agent-worktrees`'s picker logic,
+  per the existing "Picker label parity" pattern from PR #2679) --
+  `derive.py`'s `_state()` currently reads only `w["closure"]["label"]`
+  (FINAL/MERGED), never `w["closure"]["compact"]`, and `engine.py` (an
+  ~8,000-line file) owns the actual fixed-width column rendering with
+  golden-snapshot tests (`tests/production_picker/test_picker_capture.py`).
+  This is a materially larger, higher-risk frontend slice than any prior
+  one in this phase (touches rendered-text golden files in a UI I cannot
+  visually verify from here) -- deliberately not attempted in this same
+  pass; left as the final piece for a dedicated follow-up slice.
 

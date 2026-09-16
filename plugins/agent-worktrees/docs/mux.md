@@ -67,7 +67,13 @@ non-persistent diagnostic path.
 
 The status bar of a muxed worktree session shows its identity and live git
 state; that's the same `status-segment` / `status-updater` machinery documented
-in [cli-reference.md](cli-reference.md#status-bar-segment-tmux--psmux).
+in [cli-reference.md](cli-reference.md#status-bar-segment-tmux--psmux). A
+`MERGED`/`FINAL` block there can carry markers of its own -- a compact
+`C<N>`/`F<N>` for held claims / open follow-ups, and an independent `U*`/`OC*`
+for an unconfirmed upstream-containment / claims fact (worktree-finality-and-
+obligations Phase 9's per-fact freshness markers) -- see
+[worktree-lifecycle.md § Decomposed sub-state facts](worktree-lifecycle.md#decomposed-sub-state-facts-phase-9)
+for what each one means.
 
 ## Two backends, one model
 
