@@ -167,3 +167,45 @@ def test_sweep_detects_a_single_assignment_violation(q, client, monkeypatch):
     monkeypatch.setattr(sup, "_pool_reservations", lambda **_kw: tampered_rows)
     result = sup.sweep_spawn_consistency()
     assert result["assignment_violations"] == 1
+
+
+def test_poll_once_runs_the_sweep_every_cycle_by_default(q, client, monkeypatch):
+    """Phase 10's periodic-cadence follow-up: ``poll_once`` (the real
+    ``serve()`` loop's per-cycle method) must call the sweep on its own,
+    with no separate caller-owned scheduler required."""
+    task = q.create("review", labels=["review"])
+    sup = Supervisor(client, spawn_fn=_ok_spawn(), repo=TEST_REPO, labels=["review"])
+    calls = []
+    monkeypatch.setattr(sup, "sweep_spawn_consistency", lambda: calls.append(1) or {})
+    sup.poll_once()
+    assert calls == [1]
+    assert q.get(task.id).status is not None  # cycle still ran normally
+
+
+def test_poll_once_skips_the_sweep_when_disabled(q, client, monkeypatch):
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        labels=["review"],
+        consistency_sweep=False,
+    )
+    calls = []
+    monkeypatch.setattr(sup, "sweep_spawn_consistency", lambda: calls.append(1) or {})
+    sup.poll_once()
+    assert calls == []
+
+
+def test_poll_once_tolerates_a_sweep_failure(q, client, monkeypatch):
+    """A blip in the (read-only, best-effort) sweep must never abort the
+    cycle's own reconcile/spawn work."""
+    task = q.create("review", labels=["review"])
+    spawn = _ok_spawn()
+    sup = Supervisor(client, spawn_fn=spawn, repo=TEST_REPO, labels=["review"], max_concurrent=5)
+
+    def _boom():
+        raise RuntimeError("transient sweep failure")
+
+    monkeypatch.setattr(sup, "sweep_spawn_consistency", _boom)
+    assert sup.poll_once() == [task.id]
+    assert spawn.calls == [task.id]
