@@ -186,6 +186,7 @@ class Supervisor:
         evaluate_limit: int = 100,
         event_wake: SupervisorEventWake | None = None,
         reserving_timeout: float = _MIN_RESERVING_TIMEOUT_SECONDS,
+        consistency_sweep: bool = True,
     ):
         self.client = client
         self.spawn_fn = spawn_fn
@@ -232,6 +233,13 @@ class Supervisor:
         self.nudge = nudge
         #: Quiet-but-live window before a nudge. 0 disables nudging.
         self.stall_seconds = max(0.0, float(stall_seconds))
+        #: When True, :meth:`poll_once` calls :meth:`sweep_spawn_consistency`
+        #: every cycle -- the Phase 10 (review-automation-reliability)
+        #: periodic-cadence wiring the sweep's own docstring left as a
+        #: follow-up decision. Read-only and additive (see that method), so
+        #: this is safe to leave enabled by default; off only for a caller
+        #: that wants to invoke the sweep on its own schedule instead.
+        self.consistency_sweep = consistency_sweep
         self.liveness_fn = liveness_fn or _default_liveness
         #: Tri-state verdict resolver used by :meth:`recover_gone`. Injectable so
         #: tests drive ``gone``/``live``/``unknown`` deterministically.
@@ -964,8 +972,10 @@ class Supervisor:
         it only classifies today's real state and logs any detected
         anomaly, so the declared classification functions are actually
         exercised against live data rather than only proven sound in
-        isolation. Scheduling this sweep on a periodic cadence is left as
-        a follow-up decision; this method is safe to call at any time.
+        isolation. Called every cycle by :meth:`poll_once` when
+        ``consistency_sweep`` is enabled (the default) -- the periodic
+        cadence this docstring previously left as a follow-up decision;
+        it also remains safe to call directly at any time.
 
         Liveness is resolved only for reservations carrying a local body
         handle, via the same ``local_body_verdict_fn`` the rest of this
@@ -3196,6 +3206,13 @@ class Supervisor:
             self.hold_live_leases()
         if self.recover:
             self.recover_gone()
+        if self.consistency_sweep:
+            # Read-only and additive (see sweep_spawn_consistency's own
+            # docstring) -- never gates spawning, only classifies+logs.
+            try:
+                self.sweep_spawn_consistency()
+            except Exception:  # pragma: no cover -- never let a cycle die on this
+                log.exception("spawn-consistency sweep failed")
         self.redrive_unclaimed_spawns()
         if self.nudge:
             self.nudge_stalled(now=now)
