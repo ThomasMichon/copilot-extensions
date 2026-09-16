@@ -14,8 +14,8 @@ import socket
 from pathlib import Path
 
 from .. import config as cfg
-from .. import reclaim, sessions, tracking
-from . import derive, roster, source_identity
+from .. import reclaim, roster, sessions, tracking
+from . import derive, source_identity
 
 bucket = derive.bucket
 for_machine = derive.for_machine

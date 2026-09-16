@@ -42,7 +42,8 @@ import threading
 from agent_procutil import no_window_flags
 
 from .. import config as cfg
-from . import data_local, derive, provider_sources, roster, source_identity
+from .. import roster
+from . import data_local, derive, provider_sources, source_identity
 
 # Shared display surface so the engine treats this exactly like ``data_local``.
 # ``LOCAL`` is resolved from the actual local source below (so it carries the

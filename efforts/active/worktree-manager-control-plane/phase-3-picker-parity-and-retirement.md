@@ -122,24 +122,42 @@ this test fails in CI even though the local per-plugin suites look clean -- this
   of it (confirmed pre-existing via `git stash`). All directly-touched test files
   green; `worktree-manager`'s full `production_picker` suite green (515 passed, 2
   skipped); `ruff check --select F,E9` clean on both sides.
+- ~~`picker_tui/roster.py`~~ — **done (2026-09-16):** relocated to `agent_worktrees/roster.py`
+  (top-level, non-TUI); `local_host()` is called from the standalone, SSH-able
+  `cmd_profiles` CLI command in `__main__.py`, not just the Picker's Profiles view.
+  `picker_tui/data_local.py`/`data_ssh.py` (already Manager-owned adapters, free to
+  diverge) and `picker_tui/profiles_io.py` (newly added to the transplant byte-parity
+  exclusion set) still import it for the TUI's own Profiles view. `engine.py` never
+  imported it directly (only docstring mentions, fixed for accuracy) despite being the
+  Profiles view's renderer. All directly-touched tests green (74/74); `worktree-manager`'s
+  full `production_picker` suite green (515 passed, 2 skipped) and the transplant test
+  green (45/45) after the `profiles_io.py` exclusion; `ruff check --select F,E9` clean.
+
+**Not yet started:**
+
 - `picker_tui/data_local.py::_stamp_from_raw` / `_overlay_cached_state` — called from
   `cmd_status_monitor` (the resident background status-JSON-stream daemon) and
   `cmd_list --classify`, to warm/read a "session-render cache" keyed for the picker's
   first-paint (dotfiles#948) but written from general status/list streaming, not the TUI.
+  Note: `data_local.py` itself is already in the transplant byte-parity exclusion set (a
+  Manager-owned adapter, per Step 0), so extracting just these two helpers doesn't need a
+  new exclusion entry -- but check whether Worktree Manager's own `data_local.py` needs
+  the same cache-stamping (it may not, if WM has no equivalent status-monitor/list
+  streaming command).
 - `picker_tui/pivots.py::scan_pivot_registry` / `prune_stale_entries` — called from
   `cmd_doctor` (general health-check/prune command) for pivot-registry maintenance,
-  unrelated to rendering.
-- `picker_tui/roster.py` — called from `cmd_profiles` (terminal-profile management
-  command); needs a closer read to confirm whether roster resolution here is TUI-adjacent
-  bookkeeping or genuinely shared with non-TUI profile management.
+  unrelated to rendering. `pivots.py` is also already excluded from the transplant
+  byte-parity check (Manager-owned adapter).
 
 **Confirmed TUI-only — safe to delete with the rest of the package:**
 
 - `picker_tui/engine.py`, `steering*.py`, `selection.py`, `maintenance.py`,
-  `provider_sources.py`, `prewarm.py`, `profiles_io.py`, `tasks.py`, `derive.py`,
+  `provider_sources.py`, `prewarm.py`, `tasks.py`, `derive.py`,
   `obscure.py`, `source_identity.py` (pending a final pass — this list has not been
   independently re-verified module-by-module the way `reciprocal.py`/`frame_health.py`/
-  `data_local.py`/`pivots.py` were; treat as provisional).
+  `roster.py`/`data_local.py`/`pivots.py` were; treat as provisional). `profiles_io.py`
+  was previously listed here in error -- it imports `roster` and is TUI-Profiles-view-only
+  itself, but now needs the transplant-test exclusion since its import line changed.
 - `_run_new_picker` and `cmd_picker` in `__main__.py` are the bundled Picker's own launch
   surface — these are retired *with* the package (per Step 2.2's bare-invocation seam
   check), not extracted.

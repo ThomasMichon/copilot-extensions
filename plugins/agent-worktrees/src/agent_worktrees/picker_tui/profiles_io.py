@@ -20,7 +20,8 @@ from __future__ import annotations
 import json
 
 from .. import profiles as profiles_mod
-from . import data_ssh, roster
+from .. import roster
+from . import data_ssh
 
 TargetSel = profiles_mod.TargetSel
 
