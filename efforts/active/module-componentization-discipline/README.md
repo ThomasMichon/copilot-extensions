@@ -344,3 +344,26 @@ the Phase 0 runbook, picked up as capacity allows.
   unrelated to `db.py`). Bumped `agent-bridge` to `0.4.0-dev491`. Deferred
   `coordinator.py` to its own future slice given the FastAPI-closure
   complexity noted above.
+
+### 2026-09-16 — Real regression caught by CI, not local validation: a lesson for the skill
+- CI on the `db.py` PR failed `agent-bridge`'s full suite with 19 real
+  failures (`TypeError: _EventsMixin._event_continuity() takes 2 positional
+  arguments but 3 were given`) — the extraction had dropped `@staticmethod`
+  from `_event_continuity` when moving it into `_EventsMixin`. My own local
+  `run-plugin-tests.py agent-bridge` run had reported "580 passed" and
+  looked identical to the pre-split baseline, but it never actually reached
+  the failing tests: the runner groups tests into sub-suites and stops at
+  the first failing one, and sub-suite 1 always contains the pre-existing,
+  unrelated `test_bootstrap_check_reconcile_opt_in.py` failures — so
+  sub-suites 2–6 (including `test_cursor_routes.py`/`test_delivery_cursor.py`)
+  never ran locally at all. Fixed the decorator, verified with a `-k` filter
+  targeting the affected files directly (bypasses sub-suite grouping: 88
+  passed, 1 skipped), then let CI's full-matrix run confirm before merging.
+- **Documented this as a new Step 2/Step 3 addition to the
+  `componentizing-modules` skill**: grep the original file for
+  `@staticmethod`/`@classmethod`/`@property`/`@cached_property` before
+  starting and confirm each survives the move; and never trust a local
+  `run-plugin-tests.py` run that stops at sub-suite 1 as full coverage when
+  the plugin has any pre-existing failure — use a `-k` filter targeting the
+  changed area, or treat CI's full-matrix run as the real gate. This applies
+  to every future Phase 2/3/4 split, not just this one.

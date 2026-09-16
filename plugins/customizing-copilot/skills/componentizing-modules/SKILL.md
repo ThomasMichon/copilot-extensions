@@ -106,6 +106,17 @@ TypeScript file keep growing unsplit.
 3. Keep the diff mechanical wherever possible (move + import fixups) —
    behavior changes belong in a separate commit/PR from a pure split, so a
    reviewer (or a future bisect) can tell "moved" from "changed" at a glance.
+4. **Check every method/function you moved for decorators that don't show up
+   in a plain `^def ` grep** — `@staticmethod`, `@classmethod`, `@property`,
+   `@cached_property`, and similar sit on the line(s) *above* the
+   `def`/`async def` and are trivially dropped when moving code by hand or
+   copy-paste. A dropped `@staticmethod` in particular fails loudly (a
+   `TypeError: takes N positional arguments but N+1 were given`) but only
+   when something actually calls it through `self.` — which a partial test
+   run can miss (see Step 3). Grep the *original* file for
+   `@staticmethod|@classmethod|@property|@cached_property` before you start
+   and confirm every one of those decorated definitions still carries its
+   decorator in its new home.
 
 ## Step 3 — re-validate
 
@@ -114,6 +125,29 @@ python tools/run-plugin-tests.py <plugin>        # the plugin(s) you touched
 ruff check --select F,E9 <every file you touched or created>
 python tools/check-module-size.py                # must still pass
 ```
+
+**`run-plugin-tests.py` groups a plugin's tests into sub-suites and stops at
+the first sub-suite that fails** — including a pre-existing, unrelated
+failure already in sub-suite 1 that has nothing to do with your change. A
+green run only proves sub-suite 1 passed; it does **not** prove your change
+is safe if an earlier, unrelated failure means later sub-suites (2, 3, ...)
+never ran at all. This masked a real regression during this effort's own
+`db.py` mixin split (a dropped `@staticmethod`, see Step 2) until CI's
+differently-shaped run surfaced it. Do not trust a local run that stops at
+sub-suite 1 as full coverage of your change:
+- If the plugin has **any** pre-existing failure, target the actual
+  files/behavior you changed directly, e.g.
+  `python tools/run-plugin-tests.py <plugin> -k "<area you touched>"`,
+  and confirm that filtered run is fully green (it bypasses sub-suite
+  grouping and reaches every matching test regardless of unrelated
+  failures elsewhere).
+- Compare the *total counts* (`N passed, M failed, K skipped`) your run
+  reports against what you expect for the whole suite, not just "did it
+  print PASS" — a truncated early-exit run reports a smaller, misleadingly
+  clean-looking number.
+- CI is the authoritative, full-matrix confirmation — treat a passing CI
+  run (with only already-known, unrelated pre-existing failures) as the
+  real gate before merging, not a substitute for your own targeted check.
 
 If a **baselined** file shrunk below its prior grandfathered ceiling:
 
