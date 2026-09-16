@@ -346,6 +346,16 @@ class PRConfig:
     # override it via its own ``fork`` field.
     roles: dict[str, PRRoleOverride] = field(default_factory=dict)
     fork: ForkConfig = field(default_factory=ForkConfig)
+    # ── Free-text repo-specific guidance (#pr-conduct-guidance-consolidation).
+    # Agents interact with PR config via ``agent-worktrees repos get``/the
+    # ``pr-*`` verbs, not by reading this file's comments directly -- so a
+    # comment explaining a non-obvious repo choice (e.g. "why bypass_mode:
+    # pull_request, not always/exempt") never reaches a calling agent unless
+    # it rides along through a command's own output. ``notes`` is that ride:
+    # free text surfaced as an extra ``Note:`` line in every ``pr_reminder``
+    # (the "Reminder [...]" text every pr-* verb already prints) whenever it's
+    # non-empty. Keep it short -- one or two sentences, not a policy essay.
+    notes: str = ""
 
 
 @dataclass(frozen=True)
@@ -1815,6 +1825,7 @@ def _parse_pr(raw: Any) -> PRConfig:
         prefer_auto_merge=bool(raw.get("prefer_auto_merge", True)),
         roles=_parse_pr_roles(raw.get("roles")),
         fork=_parse_fork(raw.get("fork")),
+        notes=str(raw.get("notes", "")).strip(),
     )
 
 

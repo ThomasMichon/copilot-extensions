@@ -199,6 +199,13 @@ fits the target repo's configured flow — they are not interchangeable:
 Absent one of those two, do not silently settle for "PR opened" — see it
 through, using the waiting policy above.
 
+**Repo-specific instructions:** a repo's own PR quirks that don't fit any of
+the structured `pr.*` config fields (why a bypass mode is shaped a
+particular way, an unusual review-request step, etc.) surface as an extra
+`Note:` line in every `pr_reminder()` when the repo sets `pr.notes` — read it
+the same way you'd read any other `Note:` line; it is not optional
+commentary. See `docs/config-reference.md`'s `pr.notes` entry.
+
 ### End-to-end PR loop (when PRs are required)
 
 The normal, expected flow for a worktree with work to land:

@@ -179,6 +179,7 @@ class TestDataModels:
         assert pr.branch_update_strategy == "rebase"
         assert pr.merge_strategy == "squash"
         assert pr.prefer_auto_merge is True
+        assert pr.notes == ""
 
 
 class TestSessionBackendConfig:
@@ -247,6 +248,29 @@ class TestPRConfigParsing:
         self._write(cfgfile)
         conf = cfg.load_config(cfgfile)
         assert conf.repos["ext"].pr.enabled is False
+
+    def test_pr_notes_parsed(self, tmp_path: Path):
+        cfgfile = tmp_path / "config.yaml"
+        self._write(
+            cfgfile,
+            "    pr:\n"
+            "      enabled: true\n"
+            "      merge_actor: submitter-direct\n"
+            "      notes: >-\n"
+            "        Maintainers bypass required review in pull_request mode,\n"
+            "        not always/exempt, to keep an audit trail.\n",
+        )
+        conf = cfg.load_config(cfgfile)
+        assert conf.repos["ext"].pr.notes == (
+            "Maintainers bypass required review in pull_request mode, "
+            "not always/exempt, to keep an audit trail."
+        )
+
+    def test_pr_notes_defaults_empty(self, tmp_path: Path):
+        cfgfile = tmp_path / "config.yaml"
+        self._write(cfgfile, "    pr:\n      enabled: true\n")
+        conf = cfg.load_config(cfgfile)
+        assert conf.repos["ext"].pr.notes == ""
 
     def test_pr_block_parsed(self, tmp_path: Path):
         cfgfile = tmp_path / "config.yaml"
