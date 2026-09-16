@@ -966,6 +966,15 @@ class TestInterpretDescriptorPayload:
         interpreted = prune.interpret_descriptor_payload(payload)
         assert interpreted["supported"] is False
 
+    def test_missing_compact_is_unsupported_not_defaulted(self):
+        # Regression: a truncated payload with a `label` but no `compact` must
+        # not default to the label -- that would let a truncated FINAL payload
+        # (label present, compact absent) still render as a supported FINAL.
+        payload = self._final_payload()
+        del payload["compact"]
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
     def test_non_mapping_action_is_unsupported_not_defaulted(self):
         payload = self._final_payload()
         payload["action"] = "blocked"

@@ -48,6 +48,37 @@ def test_final_label_has_no_markers() -> None:
     assert row["status_markers"] == ""
 
 
+def test_state_style_carried_through_for_supported_final_descriptor() -> None:
+    row = derive.norm(_raw(
+        state="completed",
+        closure=_closure(),
+    ), "host", "windows")
+    assert row["state_style"] == "final"
+
+
+def test_state_style_carried_through_for_supported_merged_descriptor() -> None:
+    row = derive.norm(_raw(
+        state="completed",
+        closure=_closure(
+            label="MERGED", style="merged-blocked", compact="MERGED",
+            closure={"final": False}),
+    ), "host", "windows")
+    assert row["state_style"] == "merged-blocked"
+
+
+def test_state_style_absent_without_a_closure_descriptor() -> None:
+    row = derive.norm(_raw(), "host", "windows")
+    assert row["state_style"] is None
+
+
+def test_state_style_absent_for_unsupported_descriptor() -> None:
+    row = derive.norm(_raw(
+        state="completed",
+        closure=_closure(version=prune.DESCRIPTOR_VERSION + 1),
+    ), "host", "windows")
+    assert row["state_style"] is None
+
+
 def test_merged_with_held_claim_and_unconfirmed_facts() -> None:
     row = derive.norm(_raw(
         state="completed",

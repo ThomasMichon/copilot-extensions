@@ -69,6 +69,15 @@ class TestProductionShimInterpretDescriptorPayload:
         interpreted = prune.interpret_descriptor_payload(payload)
         assert interpreted["supported"] is False
 
+    def test_missing_compact_is_never_trusted(self):
+        # Regression: a truncated payload with a `label` but no `compact` must
+        # not default to the label -- that would let a truncated FINAL payload
+        # (label present, compact absent) still render as a supported FINAL.
+        payload = _valid_final_payload()
+        del payload["compact"]
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
     def test_wrong_shaped_closure_is_never_trusted(self):
         payload = _valid_final_payload(closure=[])
         interpreted = prune.interpret_descriptor_payload(payload)

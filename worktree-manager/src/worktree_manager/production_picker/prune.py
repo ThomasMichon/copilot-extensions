@@ -78,7 +78,7 @@ def interpret_descriptor_payload(payload: dict | None) -> dict:
             or not isinstance(final_value, bool)
             or not isinstance(action_disposition, str)):
         return _unsupported_descriptor("unsupported-descriptor:scalar-field-type")
-    compact = payload.get("compact", label)
+    compact = payload.get("compact")
     if not isinstance(compact, str):
         return _unsupported_descriptor("unsupported-descriptor:scalar-field-type")
     if (label == "FINAL") != final_value:
