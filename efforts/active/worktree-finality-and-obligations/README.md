@@ -466,7 +466,7 @@ below for the carved implementation plan.
   extending this plan before implementation when necessary.
 - [ ] Keep fixtures synthetic and independent of any adopting worktree registry.
 
-### Phase 8 - Session-claim lifecycle (proposed 2026-09-14; NOT YET REVIEWED/BUILT)
+### Phase 8 - Session-claim lifecycle (proposed 2026-09-14; designed 2026-09-16; NOT YET BUILT)
 
 Operator idea (see the dated Request above): a worktree should hold a claim on
 every Copilot session that opens inside it, not just track `sessions:` as
@@ -494,39 +494,120 @@ Grounding (confirmed before proposing, not assumed):
   CLI host -- confirm before relying on it, since building a reclaim path on a
   wrong assumption here would misfire.
 
-Plan (not started):
-- [ ] Add a `session` `ResourceClaim` kind (alongside
-  `worktree|codespace|container|ssh|workdir|pr`) that a worktree holds on its
-  own live Copilot session id -- outbound, not a second `sessions:` list.
-- [ ] `sessionStart` opens/refreshes the claim (active) for the current
-  session id when CWD resolves to a tracked worktree.
-- [ ] Settle-on-finalize: a successful `finalize` settles (not releases) the
-  *current* session's claim as part of its existing cascade, mirroring how it
-  already settles the parent's claim on this worktree.
-- [ ] Settle-on-handoff: the handoff-cutover lifecycle (already tracks
-  predecessor/successor sessions) settles the predecessor's session claim on
-  successful cutover -- reuse that machinery rather than re-deriving handoff
-  completion here.
-- [ ] `sessionEnd` releases the claim outright (a clean process exit, not just
-  "safe").
-- [ ] A `userPromptSubmitted` hook: if a new prompt arrives on a session whose
-  claim was just settled/released (finalize completed, or handoff cut over),
-  reopen it -- this is the mechanism that resolves the "user starts another
-  turn after finalizing" case the operator flagged, and composes with the
-  existing `reopen_finalized_owner` transaction (Phase 2) rather than
-  duplicating it.
-- [ ] `finalize` gains an advisory (not hard-blocking) check: if OTHER live
-  session claims exist on this worktree besides the current one, name them
-  (session ids) and ask the operator whether to ignore or sweep for
-  follow-ups, rather than silently finalizing out from under a second live
-  session or silently ignoring it.
-- [ ] Reuse (not duplicate) the existing `claims sweep` never-wedge reclaim for
-  a session claim whose process is confirmed gone -- a crashed/killed session
-  must not wedge finalize forever, same invariant as every other claim kind.
-- [ ] Confirm the `/clear`-vs-`/new` assumption above against the current host
-  before relying on it for the reclaim path; degrade to "leave it active,
-  surface it at finalize time" if unconfirmed, per the never-fabricate-a-
-  verdict discipline the claim ledger already follows elsewhere.
+Both of the above were re-verified independently during the 2026-09-16 design
+session (the `docs/architecture.md` citation above turned out to describe
+`sessionStart`'s `additionalContext` behavior, not `userPromptSubmitted` --
+the real confirmation source is the public hooks reference, cited below).
+
+Design (resolved 2026-09-16, this design session -- see the matching Journal
+entry): grounded against the real code (`tracking.py`, `finalize.py`,
+`sweep.py`, `__main__.py`'s handoff-cutover retirement path,
+`session_catalog._maybe_reap_fsmonitor`) and against the public Copilot CLI
+hooks reference. Both assumptions the 2026-09-14 entry flagged as unconfirmed
+are now confirmed (see bullets 9-10 below); nothing in this design is still
+open pending host verification.
+
+Plan (not started; reviewed/buildable, replaces the prior proposal-only list):
+- [ ] Add `"session"` to `ResourceKind`/`ResourceClaim.kind`'s vocabulary
+  (`tracking.py:380-382`, `:499-508`) -- outbound, not a second `sessions:`
+  list. `ref` reuses the existing qualified-ref grammar via
+  `format_claim_ref(machine, project, worktree_id, session=session_id)`
+  (`tracking.py:432-471`), i.e. `<machine>/<project>/<worktree_id>#<session_id>`,
+  so `parse_claim_ref` (`tracking.py:473-497`) needs no change.
+- [ ] `cmd_register_session`/`tracking.register_session`
+  (`__main__.py:24830`, `tracking.py:4823`): in the same locked-record
+  transaction that creates/updates the `SessionEntry`, call
+  `tracking.add_resource_claim(record, ResourceClaim(kind="session",
+  ref=self_session_ref, state=obligations.ACTIVE, note="live Copilot
+  session"), save=False)` before the existing save. No new reopen logic is
+  needed: `add_resource_claim`'s existing `_claim_reopens_owner`/
+  `reopen_finalized_owner` path (`tracking.py:3930-3971`, `:3993-4041`)
+  already reopens a finalized owner for any new live claim of any kind (the
+  Phase 1 held-claims fix the 2026-09-14 entry's "[x] Reopen" checkbox
+  already validated) -- this is a pure application of existing machinery,
+  not a new mechanism.
+- [ ] Add `release_resource_claim(record, ref, *, save=True)` to
+  `tracking.py`, mirroring `settle_resource_claim` (`tracking.py:4057-4083`)
+  but writing `state = obligations.RELEASED`. Call it from
+  `cmd_deregister_session`/`tracking.deregister_session`
+  (`__main__.py:25523`, `tracking.py:5115`) for the ending session's own
+  ref, right after `_end_session_activation`, so `sessionEnd` releases (not
+  just settles) the claim outright -- matching the Plan's "clean process
+  exit" requirement and `ResourceClaim.state`'s existing
+  active/at-rest/released vocabulary (`tracking.py:510-536`).
+- [ ] Settle-on-finalize: in `validate_and_finalize` (`finalize.py:1334`),
+  resolve the invoking session id the same way `cmd_register_session` does
+  (`_activate_session_binding`/payload-CWD resolution, `__main__.py:24873-
+  24894`) and call `tracking.settle_resource_claim(record,
+  current_session_ref, disposition=obligations.AT_REST)` *before*
+  `_assert_obligations_settled` runs (`finalize.py:1421-1429`) -- so the
+  invoking session's own claim is settled by finalize itself, never left
+  for the operator to settle by hand, and never blocks the hard gate.
+- [ ] `_assert_obligations_settled` (`finalize.py:1136-1233`): exclude
+  `kind == "session"` claims from the hard-blocking `unsettled` computation
+  at `finalize.py:1183` (`unsettled = [c for c in record.resources if
+  c.is_unsettled and c.kind != "session"]`). Session claims never
+  hard-block finalize; they get their own advisory pass (next bullet), per
+  this Plan's own "advisory (not hard-blocking)" framing -- the authoritative
+  text below, not the handoff-note paraphrase that suggested a hard block
+  with an `--abandon` escape, which this design deliberately does not
+  follow.
+- [ ] Add an advisory-only `_advise_other_live_sessions(record,
+  current_session_ref)` in `finalize.py`, called from
+  `validate_and_finalize` right after the settle-current-session step
+  above. It finds every OTHER live (`ResourceClaim.is_live`,
+  `tracking.py:383-390`) `kind == "session"` claim and, if any exist, lists
+  each one (`kind`/`ref`/`note`, mirroring the existing claim-listing
+  style at `finalize.py:1215-1220`) via `output.warn(...)` -- but always
+  returns/proceeds; it must never return `False`. This is the "name them
+  and ask" behavior from the Plan bullet below, scoped to advisory (warn +
+  continue) rather than an interactive block, since most finalize
+  invocations here are non-interactive/agent-driven.
+- [ ] Handoff-cutover settle: in `_handoff_cutover_retire_result`
+  (`__main__.py`, right after `sessions.mux_retire_pane` and
+  `reclaim.ensure_session_copilot_reaped` both succeed, `__main__.py:3659-
+  3665`), call `tracking.settle_resource_claim(record,
+  predecessor_session_ref, disposition=obligations.AT_REST)` for the
+  predecessor session -- reusing the existing settle primitive, not
+  re-deriving handoff completion, and settling (not releasing) since the
+  predecessor process may still be winding down.
+- [ ] Extend the existing never-wedge sweep resolvers `claim_gone`/
+  `claim_safe` (`sweep.py:397-431`, dispatched from `make_resolvers`/
+  `self_heal`, `sweep.py:432-472`) with a `claim.kind == "session"` branch,
+  reusing `session_catalog._maybe_reap_fsmonitor`'s liveness-transition
+  pattern (`session_catalog.py:379-417`): level-triggered (act on the
+  current non-live observation, not an edge), cooldown-throttled, and
+  corroborated against a real PID/process check for that specific session
+  id before the claim is treated as gone -- so a crashed/killed session
+  cannot wedge finalize forever, same invariant every other claim kind
+  already gets from this sweep.
+- [ ] Register a `userPromptSubmit` hook in `hooks.json` alongside the
+  existing `sessionStart`/`sessionEnd` entries (`hooks.json:20-33`): a new
+  lightweight command hook invoking a new CLI subcommand (e.g.
+  `session-reopen-nudge`, mirroring `bind-nudge`'s shape at
+  `__main__.py:24455-24458`) that, when the current session's own claim
+  exists and is not live, calls `add_resource_claim(...)` to reactivate it
+  -- composing with the existing `add_resource_claim`/
+  `reopen_finalized_owner` path (the second bullet above), not a new
+  reopen mechanism. The hook's own text output is not relied upon:
+  `userPromptSubmitted`'s `modifiedPrompt` field is documented as honored
+  only for SDK programmatic hooks, never for command hooks, so this design
+  only depends on the command's side effect (the CLI call), matching the
+  effort's "runs with real side effects even though text output is
+  discarded" framing.
+- [x] Confirmed (2026-09-16, this design session, replacing "operator-
+  asserted, not yet independently confirmed"): the public GitHub Copilot
+  CLI hooks reference documents `userPromptSubmitted` as firing on every
+  submitted prompt on live CLI hosts ("Fires ... for the prompt supplied");
+  a command-type entry runs with real side effects regardless of whether
+  its output is applied. Separately, neither `/new` nor `/clear` fires
+  `sessionEnd`/`sessionStart` -- only real process start/exit do -- which
+  is exactly why the "user keeps talking after finalize, same process,
+  same session id" case is real: the session claim's `sessionStart`/
+  `sessionEnd` boundary already spans across `/new`/`/clear`, so no
+  separate `/clear`-vs-`/new` special-casing is needed anywhere in this
+  design; the `userPromptSubmit` reopen hook above is the sole and
+  sufficient reopen path.
 
 ### Phase 9 - Decompose derived status into sub-state facts with pursued freshness
 
@@ -703,11 +784,19 @@ either.
   sub-line) carries the marker suffix, freed up by iconifying the
   `RELATION` column (7 truncated text cells -> 1 icon cell). Every Phase 9
   Plan bullet is now checked off.
-- [ ] **Session-claim lifecycle** (Phase 8, proposed): a worktree's own live
-  Copilot session is a held claim; it settles on finalize, settles on a
-  successful handoff cutover, releases on `sessionEnd`, and reopens on a
-  `userPromptSubmitted` event after a premature settle; `finalize` names any
-  OTHER live session claims and asks before proceeding. Not started.
+- [ ] **Session-claim lifecycle** (Phase 8, designed 2026-09-16, not yet
+  built): a worktree's own live Copilot session is a held `kind="session"`
+  claim; `register_session` opens it, `settle_resource_claim` settles it on
+  finalize and on successful handoff cutover, a new `release_resource_claim`
+  releases it on `sessionEnd`, and a new `userPromptSubmit` hook reopens it
+  (via the existing `add_resource_claim`/`reopen_finalized_owner` path) after
+  a premature settle. `finalize`'s hard obligation gate excludes `session`
+  claims from `unsettled`; a new advisory-only `_advise_other_live_sessions`
+  names any OTHER live session claims via `output.warn` without blocking.
+  The never-wedge sweep (`sweep.py`'s `claim_gone`/`claim_safe`) gains a
+  `session` branch reusing `_maybe_reap_fsmonitor`'s liveness-transition
+  pattern. Not started -- design is reviewed/buildable; implementation is
+  the next slice.
 - [x] **Reopen:** adding a new claim to a retained finalized worktree succeeds,
   changes lifecycle state away from finalized (to `active`), and immediately
   removes prune eligibility (already covered by Phase 1's held-claims fix).
@@ -1676,4 +1765,59 @@ The approved design is the faceted model in [design.md](design.md):
   bullet is checked off. The effort's remaining open item is Phase 8
   (Session-claim lifecycle), still just a proposal (not reviewed or
   built).
+
+### 2026-09-16 - Phase 8 design session (resumed via handoff)
+
+- Resumed from a `context-handoff` baton (task `6da32566d54244b4be9ec26cab00b04f`)
+  whose job was specifically to design (not yet build) Phase 8. Created a
+  fresh `copilot-extensions` worktree for this session rather than reusing
+  any prior path, per the handoff's own instruction and this effort's
+  working pattern.
+- Read Phase 8's existing Plan and Validation Plan text in full (both
+  copies), then cross-referenced every piece of already-built machinery the
+  handoff named: `ResourceClaim`/`WorktreeRecord.resources`/
+  `pending_handoffs` and `SessionHandoff` (`tracking.py`); `register_session`/
+  `deregister_session` and the session-lifecycle CLI surface (`__main__.py`);
+  `_assert_obligations_settled`/`_pr_finalize_precondition` and the ordered
+  `validate_and_finalize` call sequence (`finalize.py`); the handoff-cutover
+  predecessor-retirement flow (`cmd_handoffs_check`/
+  `_handoff_cutover_retire_result` in `__main__.py`, and `sessions_pane_
+  retire.py`); and `session_catalog._maybe_reap_fsmonitor`'s liveness-
+  transition sweep pattern. Also found the actual never-wedge dispatch point
+  (`sweep.py`'s `claim_gone`/`claim_safe`/`make_resolvers`/`self_heal`),
+  which the handoff hadn't named explicitly.
+- Resolved both assumptions the 2026-09-14 entry flagged as unconfirmed:
+  (1) confirmed via the public GitHub Copilot CLI hooks reference that a
+  command-type `userPromptSubmitted` hook is real, fires on every submitted
+  prompt, and executes its side effects regardless of whether its output
+  (`modifiedPrompt`, SDK-only) is applied; (2) confirmed that neither `/new`
+  nor `/clear` fires `sessionEnd`/`sessionStart` on current CLI hosts --
+  only real process start/exit do -- which means the session claim's
+  hook-defined boundary already spans across both, so the "user keeps
+  talking after finalize" case is real and the `userPromptSubmit` reopen
+  hook is necessary and sufficient (no separate `/clear`-vs-`/new`
+  special-casing needed).
+- Replaced Phase 8's proposal-only Plan bullets with concrete, buildable
+  ones naming exact functions/files/line ranges for: the new `session`
+  `ResourceClaim` kind and its ref grammar; wiring session-claim open into
+  `register_session`; a new `release_resource_claim` for `sessionEnd`;
+  settle-on-finalize ahead of the hard obligation gate; excluding `session`
+  claims from that hard gate and adding a separate always-advisory
+  `_advise_other_live_sessions` check (deliberately **not** a hard block
+  with an `--abandon` escape, contrary to this handoff's own paraphrase --
+  the effort doc's authoritative Plan text says "advisory (not
+  hard-blocking)," and that governs); settle-on-handoff-cutover reusing
+  `settle_resource_claim`; extending the sweep's `claim_gone`/`claim_safe`
+  with a `session` branch; and the new `userPromptSubmit` hook plus a
+  `bind-nudge`-shaped `session-reopen-nudge` command. Updated the
+  Validation Plan's Phase 8 bullet to match.
+- Deliberately **not implemented** this session -- this was a design-only
+  handoff by explicit instruction ("Start designing that flow in a
+  handoff"). The design above is reviewed/buildable (concrete function
+  names, not vague intent, matching Phase 9's Plan style); implementation
+  is the next slice, following the same working pattern validated across
+  Phase 9's 8 slices (one small worktree per slice, targeted tests +
+  ruff-diff-vs-baseline, Plan/Validation-Plan checkbox + Journal entry per
+  slice, `create-pr` -> wait for review -> `pr-merge --now` -> `finalize`).
+  No PRs opened, no code touched outside this effort doc.
 
