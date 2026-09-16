@@ -31,6 +31,18 @@ lone dev box or against a designated coordinator host on a shared network:
 - ``AGENT_DISPATCH_NO_AUTOSTART`` -- set to any value to disable the CLI's
   lazy on-demand coordinator start (a client command that finds no live local
   coordinator otherwise starts one detached, then proceeds).
+- ``AGENT_DISPATCH_HANDOFF_FALLBACK`` -- **default-off** opt-in for the
+  coordinator's handoff-fallback reconciliation (an unclaimed
+  ``handoff``-labeled ``proposed``/``queued`` task past
+  ``AGENT_DISPATCH_HANDOFF_FALLBACK_GRACE`` triggers exactly one
+  ``agent-bridge create --reclaim`` launch attempt; see
+  ``efforts/active/context-handoff-overhaul``). Off by default because this is
+  the coordinator autonomously spawning a real Copilot process on a time
+  heuristic -- a genuinely safety-relevant action.
+- ``AGENT_DISPATCH_HANDOFF_FALLBACK_GRACE`` -- seconds an unclaimed handoff task
+  must sit idle before the fallback launch fires (default 1 hour: generous, so
+  a stored handoff whose successor is merely mid cold-start, or an operator who
+  simply hasn't looked yet, is never preempted).
 """
 
 from __future__ import annotations
@@ -52,6 +64,11 @@ DEFAULT_SWEEP_INTERVAL = 60.0
 #: handoff whose successor hasn't started is never reaped; ``0`` reaps as soon as
 #: the worktree is gone. Env override: ``AGENT_DISPATCH_ORPHAN_GRACE``.
 DEFAULT_ORPHAN_GRACE = 86400.0  # 24h
+
+#: Minimum age (seconds) before an unclaimed ``handoff``-labeled task is
+#: eligible for the coordinator's fallback launch. Env override:
+#: ``AGENT_DISPATCH_HANDOFF_FALLBACK_GRACE``.
+DEFAULT_HANDOFF_FALLBACK_GRACE = 3600.0  # 1h
 
 # Discovery: the coordinator advertises its bound endpoint in a rendezvous file
 # under this runtime dir; clients resolve it there (env override -> file -> the
@@ -152,10 +169,16 @@ class Config:
     control_token: str | None = None
     sweep_interval: float = DEFAULT_SWEEP_INTERVAL
     orphan_grace: float = DEFAULT_ORPHAN_GRACE
+    handoff_fallback_enabled: bool = False
+    handoff_fallback_grace: float = DEFAULT_HANDOFF_FALLBACK_GRACE
 
     @property
     def url(self) -> str:
         return f"http://{self.host}:{self.port}"
+
+
+def _truthy_env(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def load_config() -> Config:
@@ -173,6 +196,11 @@ def load_config() -> Config:
         ),
         orphan_grace=float(
             os.environ.get("AGENT_DISPATCH_ORPHAN_GRACE") or str(DEFAULT_ORPHAN_GRACE)
+        ),
+        handoff_fallback_enabled=_truthy_env("AGENT_DISPATCH_HANDOFF_FALLBACK"),
+        handoff_fallback_grace=float(
+            os.environ.get("AGENT_DISPATCH_HANDOFF_FALLBACK_GRACE")
+            or str(DEFAULT_HANDOFF_FALLBACK_GRACE)
         ),
     )
 

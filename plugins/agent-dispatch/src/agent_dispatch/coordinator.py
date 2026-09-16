@@ -37,7 +37,7 @@ from pydantic import (
 from pydantic_core import PydanticCustomError
 
 from . import __version__, telemetry
-from .config import DEFAULT_ORPHAN_GRACE
+from .config import DEFAULT_HANDOFF_FALLBACK_GRACE, DEFAULT_ORPHAN_GRACE
 from .coordinator_registries import register_registry_routes
 from .events import EventBus, sse_format
 from .loop_governance import LoopGovernance
@@ -49,11 +49,13 @@ from .queue import (
     ResultValidationError,
     RoutingAssignment,
     SpawnReservation,
+    Status,
     StructuredResult,
     Task,
     TaskError,
     TaskQueue,
     encode_result,
+    machine_matches,
     worker_id_for,
 )
 from .satellites import (
@@ -577,6 +579,144 @@ async def _orphan_reap_loop(
             bus.publish({"type": "task.reaped", "reaped": reaped})
 
 
+def _find_stale_handoff_tasks(
+    queue: TaskQueue, grace: float, machine: str, *, now: float | None = None
+) -> list[Task]:
+    """Unclaimed ``handoff``-labeled tasks past the bounded reconciliation
+    window, scoped to this machine (an unset ``target_machine`` matches any
+    machine, per :func:`machine_matches` -- same convention as claim
+    eligibility, unlike the orphan reaper's stricter machine-exact SQL).
+    """
+    ts = queue._now(now)
+    cutoff = ts - max(0.0, grace)
+    tasks = queue.list(status=[Status.PROPOSED, Status.QUEUED], label="handoff")
+    return [
+        task
+        for task in tasks
+        if machine_matches(task.target_machine, machine) and task.created_at < cutoff
+    ]
+
+
+def _attempt_handoff_fallback(
+    queue: TaskQueue,
+    task: Task,
+    *,
+    spawn_fn: Callable[..., Any] | None = None,
+) -> str:
+    """Attempt exactly one fallback launch for ``task``.
+
+    :meth:`TaskQueue.claim_handoff_fallback` is the fence: only the caller that
+    wins the atomic claim proceeds to spawn anything, so a racing reconciliation
+    cycle or a just-in-time human/tool pickup can never double-launch. Returns
+    ``skipped`` (lost the claim) / ``launched`` / ``failed`` (agent-bridge
+    non-zero) / ``unavailable`` (no agent-bridge CLI) / ``error`` (seed build or
+    unexpected exception).
+    """
+    if not queue.claim_handoff_fallback(task.id):
+        return "skipped"
+    from . import bridge
+    from .handoff_fallback_seed import build_fallback_seed
+
+    if spawn_fn is None:
+        spawn_fn = bridge.spawn_worker
+    try:
+        seed = build_fallback_seed(task.id, task.title)
+    except ValueError as exc:
+        queue.record_handoff_fallback_outcome(task.id, outcome="error", detail=str(exc))
+        return "error"
+    try:
+        result = spawn_fn(
+            task.id,
+            worker_id=f"handoff-fallback:{task.id}",
+            prompt=seed,
+            worktree_id=task.target_worktree,
+            reclaim=True,
+            wait=False,
+        )
+    except bridge.BridgeUnavailable as exc:
+        queue.record_handoff_fallback_outcome(task.id, outcome="unavailable", detail=str(exc))
+        return "unavailable"
+    except Exception as exc:
+        queue.record_handoff_fallback_outcome(task.id, outcome="error", detail=str(exc))
+        log.warning("handoff-fallback launch raised for task %s", task.id, exc_info=True)
+        return "error"
+    if result.returncode == 0:
+        queue.record_handoff_fallback_outcome(task.id, outcome="launched")
+        return "launched"
+    detail = (result.stderr or result.stdout or "").strip()[:500] or None
+    queue.record_handoff_fallback_outcome(task.id, outcome="failed", detail=detail)
+    return "failed"
+
+
+def _reconcile_handoff_fallback(queue: TaskQueue, grace: float) -> dict[str, int]:
+    """One reconciliation pass: find + attempt-launch every stale unclaimed
+    ``handoff`` task on this machine. Degrade-safe like :func:`_reap_orphans`:
+    an unresolved machine identity reconciles nothing. Returns counts:
+    ``checked``/``launched``/``skipped``/``unavailable``/``failed``/``error``.
+    """
+    from .identity import resolve_machine
+
+    counts = {
+        "checked": 0, "launched": 0, "skipped": 0,
+        "unavailable": 0, "failed": 0, "error": 0,
+    }
+    machine = resolve_machine()
+    if not machine:
+        return counts
+    for task in _find_stale_handoff_tasks(queue, grace, machine):
+        counts["checked"] += 1
+        outcome = _attempt_handoff_fallback(queue, task)
+        counts[outcome] = counts.get(outcome, 0) + 1
+    return counts
+
+
+async def _handoff_fallback_loop(
+    queue: TaskQueue,
+    interval: float,
+    bus: EventBus,
+    *,
+    grace: float,
+    health: LoopHealth,
+    cycle_timeout: float | None = None,
+    governance: LoopGovernance | None = None,
+) -> None:
+    """Periodically reconcile a stale unclaimed ``handoff`` task into a
+    fallback successor launch (opt-in -- ``AGENT_DISPATCH_HANDOFF_FALLBACK``).
+    agent-dispatch judges *staleness*; agent-bridge (``create --reclaim``)
+    performs the actual in-place replacement. Shares the supervised-cycle
+    contract with :func:`_gc_loop`/:func:`_orphan_reap_loop`.
+    """
+    while True:
+        await asyncio.sleep(health.current_interval)
+        if await _governance_backoff(
+            governance,
+            "iteration-boundary:handoff-fallback",
+            loop_name="handoff fallback",
+        ):
+            continue
+        if await _governance_backoff(
+            governance,
+            "pre-mutation:handoff-fallback",
+            loop_name="handoff fallback",
+        ):
+            continue
+        counts = await _run_supervised_cycle(
+            health,
+            lambda: _reconcile_handoff_fallback(queue, grace),
+            cycle_timeout=cycle_timeout or min(interval, 60.0),
+        )
+        counts = counts or {}
+        launched = counts.get("launched", 0)
+        if launched or counts.get("checked", 0):
+            log.info(
+                "handoff fallback: checked %d stale unclaimed handoff task(s), "
+                "launched %d, %s",
+                counts.get("checked", 0), launched, counts,
+            )
+        if launched:
+            bus.publish({"type": "task.handoff_fallback", "launched": launched, **counts})
+
+
 
 class ProducerScopeBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -962,6 +1102,8 @@ def create_app(
     control_token: str | None = None,
     sweep_interval: float = 0.0,
     orphan_grace: float = DEFAULT_ORPHAN_GRACE,
+    handoff_fallback_enabled: bool = False,
+    handoff_fallback_grace: float = DEFAULT_HANDOFF_FALLBACK_GRACE,
     enable_mcp: bool = True,
     wake_interval: float = 0.0,
     wake_deliver: Callable[[str, str, str, str | None, str], bool] | None = None,
@@ -974,6 +1116,11 @@ def create_app(
     When ``sweep_interval > 0`` the coordinator runs a background lease-recovery
     sweep every ``sweep_interval`` seconds so a crashed worker's held task
     automatically returns to ``queued`` without a manual ``recover`` call.
+
+    ``handoff_fallback_enabled`` (opt-in; see ``AGENT_DISPATCH_HANDOFF_FALLBACK``)
+    arms the handoff-fallback reconciliation loop on the same cadence -- off by
+    default, as this is the coordinator autonomously spawning a real Copilot
+    process on a time heuristic.
 
     When ``enable_mcp`` is set and the ``mcp`` extra is installed, a
     coordinator-hosted MCP endpoint is mounted at ``/mcp`` (identity via
@@ -1050,9 +1197,13 @@ def create_app(
         )
         sweeper_health = LoopHealth(name="liveness_gc", base_interval=sweep_interval or 0.0)
         orphan_health = LoopHealth(name="orphan_reap", base_interval=sweep_interval or 0.0)
+        handoff_fallback_health = LoopHealth(
+            name="handoff_fallback", base_interval=sweep_interval or 0.0
+        )
         _app.state.loop_health = {
             sweeper_health.name: sweeper_health,
             orphan_health.name: orphan_health,
+            handoff_fallback_health.name: handoff_fallback_health,
         }
         sweeper = (
             asyncio.create_task(
@@ -1079,6 +1230,20 @@ def create_app(
                 )
             )
             if sweep_interval and sweep_interval > 0
+            else None
+        )
+        handoff_fallback_reconciler = (
+            asyncio.create_task(
+                _handoff_fallback_loop(
+                    queue,
+                    sweep_interval,
+                    bus,
+                    grace=handoff_fallback_grace,
+                    health=handoff_fallback_health,
+                    governance=governance,
+                )
+            )
+            if handoff_fallback_enabled and sweep_interval and sweep_interval > 0
             else None
         )
         # Self-retire on supersession (owner-liveness tether). A coordinator that
@@ -1334,6 +1499,12 @@ def create_app(
                     orphan_reaper.cancel()
                     try:
                         await orphan_reaper
+                    except asyncio.CancelledError:
+                        pass
+                if handoff_fallback_reconciler is not None:
+                    handoff_fallback_reconciler.cancel()
+                    try:
+                        await handoff_fallback_reconciler
                     except asyncio.CancelledError:
                         pass
 

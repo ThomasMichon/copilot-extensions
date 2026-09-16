@@ -62,6 +62,8 @@ def _isolate_discovery(monkeypatch, tmp_path):
     monkeypatch.delenv(
         "AGENT_DISPATCH_SHARED_CONTROL_TOKEN_COMMAND", raising=False
     )
+    monkeypatch.delenv("AGENT_DISPATCH_HANDOFF_FALLBACK", raising=False)
+    monkeypatch.delenv("AGENT_DISPATCH_HANDOFF_FALLBACK_GRACE", raising=False)
 
 
 def test_sweep_interval_default(monkeypatch):
@@ -77,6 +79,33 @@ def test_sweep_interval_from_env(monkeypatch):
 def test_sweep_interval_zero_disables(monkeypatch):
     monkeypatch.setenv("AGENT_DISPATCH_SWEEP_INTERVAL", "0")
     assert load_config().sweep_interval == 0.0
+
+
+def test_handoff_fallback_disabled_by_default(monkeypatch):
+    assert load_config().handoff_fallback_enabled is False
+
+
+@pytest.mark.parametrize("value", ["1", "true", "True", "yes", "on"])
+def test_handoff_fallback_enabled_via_truthy_env(monkeypatch, value):
+    monkeypatch.setenv("AGENT_DISPATCH_HANDOFF_FALLBACK", value)
+    assert load_config().handoff_fallback_enabled is True
+
+
+@pytest.mark.parametrize("value", ["0", "false", "no", "off", ""])
+def test_handoff_fallback_disabled_via_falsy_env(monkeypatch, value):
+    monkeypatch.setenv("AGENT_DISPATCH_HANDOFF_FALLBACK", value)
+    assert load_config().handoff_fallback_enabled is False
+
+
+def test_handoff_fallback_grace_default(monkeypatch):
+    from agent_dispatch.config import DEFAULT_HANDOFF_FALLBACK_GRACE
+
+    assert load_config().handoff_fallback_grace == DEFAULT_HANDOFF_FALLBACK_GRACE
+
+
+def test_handoff_fallback_grace_from_env(monkeypatch):
+    monkeypatch.setenv("AGENT_DISPATCH_HANDOFF_FALLBACK_GRACE", "120")
+    assert load_config().handoff_fallback_grace == 120.0
 
 
 def test_control_tokens_are_separate_from_ordinary_client_tokens(monkeypatch):
