@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /*
- * ado/azure-auth-helper -- smart wrapper deployed by agent-codespaces.
+ * ado-auth-helper -- smart wrapper deployed by agent-codespaces.
  *
  * Relay-first: when the SSH credential relay is active (LC_GIT_CREDENTIAL_RELAY
  * set and live, a published port-mapping file points at a live channel, or the
@@ -25,10 +25,9 @@
  * window and then succeeds. On timeout we fail QUIETLY (git `get` -> `quit=1`)
  * so even the worst case can't trip an interactive prompt.
  *
- * Installed (by agent-codespaces, with the extension's node shebang) at both
- * ~/ado-auth-helper and ~/azure-auth-helper. The real auth-helper.js branches
- * on the invoked basename, which is preserved because this wrapper IS that
- * path -- so requiring it yields the correct ADO vs Azure behavior.
+ * Installed by agent-codespaces at ~/ado-auth-helper with the extension's node
+ * shebang. Azure CLI's ~/azure-auth-helper remains native and is never routed
+ * through this wrapper.
  *
  * marker: ado-auth-helper-relay  (used by the provisioner to detect our own
  * wrapper and avoid backing it up over the real native helper)
@@ -188,7 +187,6 @@ function resolveRelay() {
 function useRelay(r) {
   const env = Object.assign({}, process.env, {
     LC_GIT_CREDENTIAL_RELAY: r.port,
-    LC_GIT_CREDENTIAL_RELAY_HELPER: path.basename(process.argv[1] || ""),
   });
   if (r.token && !env.LC_GIT_CREDENTIAL_RELAY_TOKEN) {
     env.LC_GIT_CREDENTIAL_RELAY_TOKEN = r.token;
@@ -244,8 +242,8 @@ function findRealHelper() {
 function tryRealHelper() {
   const real = findRealHelper();
   if (!real) return false;
-  // process.argv[1] is this wrapper's path (~/ado-auth-helper or
-  // ~/azure-auth-helper), so the real helper sees the correct invoked name.
+  // process.argv[1] is this wrapper's ~/ado-auth-helper path, so the real
+  // helper sees the correct invoked name.
   require(real);
   return true;
 }

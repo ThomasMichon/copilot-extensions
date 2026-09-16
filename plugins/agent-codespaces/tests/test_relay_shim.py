@@ -228,7 +228,6 @@ class TestProvisioningAndClient:
     def test_relay_client_has_scoped_azure_branch(self):
         client = asset_text("ado-auth-helper-relay")
         assert 'SCOPE="${1:-}"' in client
-        assert 'HELPER_NAME="${LC_GIT_CREDENTIAL_RELAY_HELPER:-}"' in client
         assert 'RELAY_TOKEN="${LC_GIT_CREDENTIAL_RELAY_TOKEN:-}"' in client
         # Scoped get-access-token routes to the gated get-azure-token action.
         assert "get-azure-token" in client
@@ -255,7 +254,7 @@ class TestProvisioningAndClient:
         if not bash:
             pytest.skip("no non-WSL bash found for shell-script parsing test")
         prologue = asset_text("ado-auth-helper-relay").split(
-            'HELPER_NAME="${LC_GIT_CREDENTIAL_RELAY_HELPER:-}"', 1
+            'DEFAULT_RELAY_PORT=9857', 1
         )[0]
         script = prologue + '\necho "ACTION=$ACTION SCOPE=$SCOPE"\n'
         for args, expected_scope in (
@@ -280,11 +279,10 @@ class TestProvisioningAndClient:
         assert "no ADO access token available for host=" in client
         assert "no credential relay reachable and no cached" in client
 
-    def test_relay_client_defaults_unscoped_azure_helper_to_ado_resource(self):
+    def test_relay_client_does_not_impersonate_azure_helper(self):
         client = asset_text("ado-auth-helper-relay")
-        assert 'ADO_REST_RESOURCE="499b84ac-1321-427f-aa17-267ca6975798"' in client
-        assert '[ "$HELPER_NAME" = "azure-auth-helper" ]' in client
-        assert 'SCOPE="$ADO_REST_RESOURCE"' in client
+        assert "LC_GIT_CREDENTIAL_RELAY_HELPER" not in client
+        assert "azure-auth-helper" not in client
 
     def test_relay_client_discovers_ado_host_for_bare_token(self):
         """The host-less get-access-token path supplies an ADO host so the
@@ -382,9 +380,7 @@ class TestProvisioningAndClient:
         assert "unlinkSync" in wrapper  # prune a dead channel's stale mapping
         # A discovered token/host is restored into the relay client's env.
         assert "LC_GIT_CREDENTIAL_RELAY_TOKEN" in wrapper
-        # The relay client can distinguish ado-auth-helper from azure-auth-helper.
-        assert "LC_GIT_CREDENTIAL_RELAY_HELPER" in wrapper
-        assert "path.basename(process.argv[1]" in wrapper
+        assert "LC_GIT_CREDENTIAL_RELAY_HELPER" not in wrapper
 
 
 def _git_cache_python() -> str:
@@ -949,4 +945,3 @@ class TestGitCredentialCache:
         assert result.returncode == 0
         assert result.stdout == self.RESPONSE
         assert "fresh-token" in next(cache_dir.glob("*.gitcred")).read_text(encoding="utf-8")
-
