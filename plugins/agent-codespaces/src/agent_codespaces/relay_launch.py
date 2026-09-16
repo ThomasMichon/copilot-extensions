@@ -37,6 +37,44 @@ SCRUB_ENV_VARS: tuple[str, ...] = (
 # the same ``~/.agent-bridge`` dir the connect breadcrumb uses.
 RELAY_PORTMAP_DIR = "$HOME/.agent-bridge/relay-ports"
 
+# Directory the launch prelude symlinks the RushStack-facing bare
+# ``azure-auth-helper`` name into. It sits outside the default PATH and is
+# only reachable when THIS launch's prelude exports it inline (see
+# ``build_azure_auth_helper_compat_shim``) -- never persisted to a dotfile, so
+# it never survives past this one launch's shell.
+AZURE_AUTH_HELPER_COMPAT_DIR = "$HOME/.cache/agent-codespaces/compat-path"
+
+
+def build_azure_auth_helper_compat_shim() -> str:
+    """POSIX snippet exposing bare ``azure-auth-helper`` on PATH for one launch.
+
+    RushStack's ``@rushstack/rush-azure-storage-build-cache-plugin``
+    ``AdoCodespacesAuthCredential`` hard-codes
+    ``Executable.spawnSync("azure-auth-helper", ...)`` with no override, so it
+    resolves the bare name through the current process's ``PATH``. #404
+    correctly stopped *persistently* installing a same-named shadow at
+    ``~/azure-auth-helper`` / ``~/.local/bin/azure-auth-helper`` -- that shadow
+    broke Azure CLI's own native ``azure-auth-helper``, whose verbs the ADO
+    relay does not implement. A clean headless CodeSpace (no VS Code server)
+    then has no executable of that name at all, so ``AdoCodespacesAuth`` fails
+    before attempt 1 (#415).
+
+    This maps the bare name to the relay-first ``ado-auth-helper`` wrapper
+    (installed by ``codespace_assets.build_provision_command``) ONLY for the
+    duration of this one launch's shell: ``PATH`` is exported inline in the
+    returned snippet, never written to ``~/.bashrc``, ``~/.profile``, or any
+    persisted dotfile, so a fresh interactive VS Code session or a plain
+    ``az login`` never inherits it. ``AZURE_AUTH_HELPER_COMPAT_DIR`` itself
+    sits outside the default PATH, so it stays unreachable outside a launch
+    that includes this prelude.
+    """
+    d = AZURE_AUTH_HELPER_COMPAT_DIR
+    return (
+        f'mkdir -p "{d}"; '
+        f'ln -sf "{ADO_AUTH_HELPER}" "{d}/azure-auth-helper"; '
+        f'export PATH="{d}:$PATH"; '
+    )
+
 
 def relay_listening(port: int, timeout: float = 0.5) -> bool:
     """True if the host credential relay accepts TCP on 127.0.0.1:*port*."""
@@ -146,11 +184,15 @@ def build_relay_env(
     rather than starting an interactive broker in a headless ACP session. When
     ``use_relay``, also publishes a port-mapping file so the auth helpers can
     rediscover this relay channel by liveness probe even if the env is not
-    inherited by a later tool shell (see :func:`build_relay_portmap_write`), and
-    -- for any ``feed_token_env`` var names -- exports a feed-auth token minted
-    from the ADO auth helper so env-token feed auth (npm/nuget/rush) works over
-    the relay (dotfiles#1221). The feed-token exports come LAST so they can use
-    the just-exported ``LC_GIT_CREDENTIAL_RELAY``.
+    inherited by a later tool shell (see :func:`build_relay_portmap_write`),
+    exposes the bare ``azure-auth-helper`` name RushStack's
+    ``AdoCodespacesAuthCredential`` requires -- session/process-scoped only,
+    never a persisted shadow (see :func:`build_azure_auth_helper_compat_shim`,
+    #415) -- and -- for any ``feed_token_env`` var names -- exports a
+    feed-auth token minted from the ADO auth helper so env-token feed auth
+    (npm/nuget/rush) works over the relay (dotfiles#1221). The feed-token
+    exports come LAST so they can use the just-exported
+    ``LC_GIT_CREDENTIAL_RELAY``.
     """
     from .codespace_assets import build_auth_error_policy_command
 
@@ -169,6 +211,7 @@ def build_relay_env(
                 f"{shlex.quote(ado_host)}; "
             )
         env += build_relay_portmap_write(relay_port)
+        env += build_azure_auth_helper_compat_shim()
         env += build_feed_token_exports(feed_token_env)
     return env
 
