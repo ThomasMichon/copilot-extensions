@@ -130,20 +130,21 @@ Full audit (repo/file/what's restated) recorded in this session's transcript
       `tools/run-plugin-tests.py agent-worktrees` (targeted).
 
 ### Phase 2 -- odsp-web-harness: trim redundant restatement
-- [ ] `AGENTS.md` §"Drive every PR you open through to merge": keep only
+- [x] `AGENTS.md` §"Drive every PR you open through to merge": keep only
       genuinely unique policy (never-pre-patch-another's-PR,
       live-validation-exception, source-attribution-marker-reading); replace
       the generic wait/rebase/merge/finalize sequence with a pointer to the
       dynamic guidance.
-- [ ] `CONTRIBUTING.md` (4 spots) and `REVIEW.md` (1 spot): remove restated
-      Maintainer/Contributor self-merge facts; point at the dynamic guidance
-      instead.
-- [ ] `.agent-worktrees/config.yaml`: move comment prose that explains a
-      non-obvious *choice* (e.g. why `bypass_mode: pull_request` not
-      `always`/`exempt`) into `pr.notes` (Phase 1b) so it actually reaches a
-      calling agent; trim comment prose that only restates what's now
-      derivable/dynamic.
-- [ ] Run `python tools/validate_harness.py`; land via its own PR flow.
+- [x] `CONTRIBUTING.md` (4 spots) and `REVIEW.md` (1 spot): on closer read,
+      predominantly repo-specific (ACL tiers, fork-flow specifics, review
+      policy rationale) rather than restated generic mechanics -- left
+      unchanged; the originally-scoped audit slightly overstated their
+      redundancy.
+- [x] `.agent-worktrees/config.yaml`: moved the one genuinely useful,
+      non-obvious caution (don't trust a hardcoded review-count claim; check
+      live branch-protection state) into `pr.notes` (Phase 1b); trimmed the
+      top `pr:` block comment's restated mechanics.
+- [x] Run `python tools/validate_harness.py`; land via its own PR flow.
 
 ### Phase 3 -- dotfiles: trim redundant restatement
 - [ ] `AGENTS.md` §571-584 and `.agent-worktrees/config.yaml` comments: same
@@ -240,3 +241,21 @@ _Pending._
   failures).
 - Landed via its own PR, version bumped again per `CONTRIBUTING.md`.
 - Next: Phase 2, now using `pr.notes` for the carried-forward rationale.
+
+### 2026-09-16 -- Phase 2 landed
+- Trimmed odsp-web-harness `AGENTS.md`'s self-merge section: replaced the
+  numbered wait/rebase/merge/finalize sequence with a pointer to
+  agent-worktrees' own Default-conduct guidance, and fixed the actual stale
+  claim that caused the original incident ("GitHub branch protection here
+  requires zero approving reviews") with an explicit caution against
+  hardcoding a review count at all.
+- Added `pr.notes` to odsp-web-harness's `.agent-worktrees/config.yaml`
+  carrying that same caution.
+- On closer read, `CONTRIBUTING.md`/`REVIEW.md` turned out to be
+  predominantly repo-specific (ACL tiers, fork-flow mechanics, review
+  rationale) rather than restated generic PR mechanics -- left unchanged;
+  narrower actual redundancy than the original audit estimated.
+- Landed via PR gim-home/odsp-web-harness#436 (`pr-self-merge`).
+- Remaining: Phase 3 (dotfiles trim), Phase 4 (copilot-extensions dogfood
+  trim), Phase 5 (end-to-end validation). Paused here for operator check-in
+  after landing three PRs across two repos.
