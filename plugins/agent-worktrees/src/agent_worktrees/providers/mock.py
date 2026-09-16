@@ -281,8 +281,6 @@ class MockPRProvider:
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
         thread_ids: tuple[int, ...] = (),
     ) -> str:
-        from ..pr_contract import CommentThread
-
         pr = self._get(repo, number)
         targets = set(thread_ids) if thread_ids else None
         resolved = []
