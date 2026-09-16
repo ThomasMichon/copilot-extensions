@@ -127,12 +127,28 @@ Verbatim from the operator:
       `check-runbook-references.py` both pass.
 - [x] Capture the current pecking order snapshot and this effort's plan.
 
-### Phase 1 — pilot split
-- [ ] Split one of the top 3 CLI-registration offenders end-to-end using the
-      new skill, to validate the runbook against real repo scale before
-      broader rollout. `agent-worktrees/__main__.py` is the largest and most
-      CLI-registration-shaped; `agent-bridge/__main__.py` is a smaller,
-      faster proof if a lower-risk pilot is preferred.
+### Phase 1 — pilot split (done)
+- [x] Validate the `componentizing-modules` runbook against a real,
+      repo-scale split before touching a live orchestration CLI. Picked
+      `plugins/customizing-copilot/skills/reviewing-customizations/scripts/scan-customizations.py`
+      (2,714 lines) rather than one of the `__main__.py` CLI-registration
+      offenders originally proposed as the pilot: it has near 1:1 dedicated
+      test coverage (`test_scan_customizations.py`, 2,684 lines) and no
+      security/session-orchestration blast radius, unlike `agent-bridge`'s or
+      `agent-worktrees`' `__main__.py` — both of which this very effort's own
+      tooling runs on top of. Split into a 565-line shim (`Finding`/`Report` +
+      `run()`/`main()`) plus `scan_plugin_sources.py` (440),
+      `scan_session_context.py` (588), `scan_skills.py` (330),
+      `scan_agents.py` (262), and `scan_text_files.py` (144). Preserved the
+      hyphenated-filename `importlib.spec_from_file_location` loader contract
+      the test file depends on by importing every `scan.<name>` the test
+      touches into the shim, following the file's own pre-existing
+      `instruction_projections` sys.path pattern. Pure structural split, no
+      behavior change; `tools/run-plugin-tests.py customizing-copilot` passed
+      (154 tests, same single pre-existing unrelated failure as before/after);
+      `scan-customizations.py` dropped out of the baseline entirely (now
+      under the 1,000-line cap). The actual CLI-registration `__main__.py`
+      offenders remain queued in Phase 2, now informed by this proof.
 
 ### Phase 2 — top offenders
 - [ ] Work down `tools/rank-module-size.py`'s ranked list, prioritizing
@@ -158,6 +174,12 @@ Verbatim from the operator:
       `python tools/check-runbook-references.py`, and
       `ruff check --select F,E9 tools/rank-module-size.py tools/pytest_portfolio_guard.py`
       all pass.
+- [x] Phase 1 pilot: `python tools/run-plugin-tests.py customizing-copilot`
+      passes (same single pre-existing unrelated failure before/after),
+      `ruff check --select F,E9` on every touched/new file passes,
+      `check-module-size.py` stays green with `scan-customizations.py`
+      dropped from the baseline after `--refresh-baseline`, and a direct
+      `python scan-customizations.py . --strict` smoke invocation succeeds.
 - [ ] Each Phase 1/2 split: the touched plugin's
       `python tools/run-plugin-tests.py <plugin>` passes, `check-module-size.py`
       stays green, and `--refresh-baseline` is run (and its diff committed)
@@ -199,3 +221,11 @@ the Phase 0 runbook, picked up as capacity allows.
   than block on a full split. Added to the Phase 2 backlog: this file is
   already a CLI-registration-shaped `__main__.py` and a good next split
   candidate precisely because it's now grown twice while ungoverned.
+
+### 2026-09-16 — Phase 1 pilot split landed
+- Split `scan-customizations.py` per the plan above (see Phase 1). Delegated
+  the mechanical extraction (tracing ~80 cross-referenced names against the
+  test file's `scan.<name>` surface) to a sub-agent with a tightly bounded
+  spec; verified independently afterward (module sizes, ruff, the full
+  plugin test suite, docs/skill guards, and a direct CLI smoke invocation)
+  before committing. Bumped `customizing-copilot` to `0.1.0-dev71`.
