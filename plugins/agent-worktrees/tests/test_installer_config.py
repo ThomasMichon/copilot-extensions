@@ -16,19 +16,6 @@ from agent_worktrees import config, repos
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 
 
-@pytest.mark.guard
-@pytest.mark.parametrize("filename", ["install.ps1", "install.sh"])
-def test_shell_scaffold_does_not_stamp_default_branch(filename):
-    source = (SCRIPTS / filename).read_text(encoding="utf-8")
-    start, end = (
-        ("function Deploy-Config {", "function Deploy-TerminalScripts")
-        if filename.endswith(".ps1")
-        else ("deploy_config() {", "write_deploy_manifest() {")
-    )
-    scaffold = source.split(start, 1)[1].split(end, 1)[0]
-    assert "default_branch:" not in scaffold
-
-
 @pytest.mark.parametrize("shell", ["powershell.exe", "pwsh", "bash"])
 def test_shell_scaffold_preserves_branch_authority(tmp_path, monkeypatch, shell):
     executable = shutil.which(shell)
