@@ -118,6 +118,7 @@ def spawn_worker(
     route: str = "",
     target_dir: str | None = None,
     worktree_id: str | None = None,
+    reclaim: bool = False,
     wait: bool = True,
     json_output: bool = False,
     timeout: float | None = None,
@@ -141,6 +142,15 @@ def spawn_worker(
     of an orphaned reservation (see
     :func:`agent_dispatch.embody.parse_fleet_body_session` /
     :func:`agent_dispatch.embody.local_body_verdict`).
+
+    ``reclaim`` is agent-bridge's session-lifecycle head-guard break-glass
+    (``agent-bridge create --reclaim``): a create into ``worktree_id`` whose
+    ground-layer head is still active or whose numbered handoff is pending is
+    normally refused 409 by agent-bridge; ``reclaim=True`` takes it over in
+    place instead. agent-dispatch is the party that judges *staleness* (e.g.
+    an unclaimed handoff task past a bounded reconciliation window); it never
+    implements the actual in-place replacement itself -- that is agent-bridge's
+    job, headed or headless, on agent-dispatch's behalf.
 
     ``--caller`` (copilot-extensions#2202): without an explicit caller, `create`
     derives one from the *current process's own* worktree context -- meaningless
@@ -167,6 +177,8 @@ def spawn_worker(
         cmd += ["--target-dir", target_dir]
     if worktree_id:
         cmd += ["--worktree-id", worktree_id]
+    if reclaim:
+        cmd.append("--reclaim")
     cmd += [agent, prompt]
     cmd += ["--caller", f"agent-dispatch:{worker_id}"]
     if not wait:
