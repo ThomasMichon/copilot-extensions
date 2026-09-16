@@ -797,14 +797,27 @@ def interpret_descriptor_payload(payload: dict | None) -> dict:
     # exists to catch; never trust either half in isolation.
     if (label == "FINAL") != final_value:
         return _unsupported_descriptor("unsupported-descriptor:label-final-mismatch")
+    held_claims = _non_negative_int(claims.get("held", 0))
+    open_follow_ups = _non_negative_int(follow_ups.get("open", 0))
+    # ``assemble_closure_descriptor`` only ever sets ``final: True`` alongside
+    # zero held claims, zero open follow-ups, and a ``safe`` action -- a
+    # payload claiming FINAL with any of those inconsistent (e.g. `final:
+    # true` but `claims.held: 2`, or a non-`safe` action) is a contradictory,
+    # malformed shape the safety contract exists to catch; never render a
+    # green FINAL with markers still attached.
+    if final_value and (
+        held_claims != 0 or open_follow_ups != 0 or action_disposition != "safe"
+    ):
+        return _unsupported_descriptor(
+            "unsupported-descriptor:final-with-blockers")
     return {
         "supported": True,
         "final": final_value,
         "label": label,
         "style": style,
         "compact": compact,
-        "held_claims": _non_negative_int(claims.get("held", 0)),
-        "open_follow_ups": _non_negative_int(follow_ups.get("open", 0)),
+        "held_claims": held_claims,
+        "open_follow_ups": open_follow_ups,
         "action_disposition": action_disposition,
         "reason": None,
     }

@@ -956,3 +956,40 @@ class TestInterpretDescriptorPayload:
         interpreted = prune.interpret_descriptor_payload(payload)
         assert interpreted["supported"] is False
 
+    def test_final_with_held_claims_is_rejected(self):
+        # PR #2738 review response: assemble_closure_descriptor() only ever
+        # sets final=True alongside zero held/open counts and a safe action
+        # -- a payload claiming FINAL with a nonzero held-claim count is a
+        # contradictory, malformed shape that must never render a green
+        # FINAL with markers still attached.
+        payload = self._final_payload()
+        payload["claims"] = {"held": 2}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+        assert interpreted["label"] == "UNKNOWN"
+
+    def test_final_with_open_follow_ups_is_rejected(self):
+        payload = self._final_payload()
+        payload["follow_ups"] = {"open": 1}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_final_with_non_safe_action_is_rejected(self):
+        payload = self._final_payload()
+        payload["action"] = {"disposition": "blocked"}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_non_final_with_blockers_stays_supported(self):
+        # The cross-field invariant only constrains a FINAL claim -- a
+        # legitimate MERGED-with-blockers descriptor (the common case) must
+        # still be trusted.
+        payload = self._final_payload()
+        payload["label"] = "MERGED"
+        payload["closure"] = {"final": False}
+        payload["claims"] = {"held": 2}
+        payload["action"] = {"disposition": "blocked"}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is True
+        assert interpreted["held_claims"] == 2
+

@@ -484,6 +484,18 @@ below for the carved implementation plan.
   every real descriptor as a version mismatch. Bumped the shim's
   `DESCRIPTOR_VERSION` to `2` and switched every hardcoded `"version": 1`
   test fixture (both copies) to reference the live constant instead.
+  **Fourth review-response round (PR #2738):** one more real finding, fixed
+  in both `prune.py` copies: `interpret_descriptor_payload` validated
+  `label`/`closure.final` consistency but not the FULL cross-field
+  invariant `assemble_closure_descriptor` guarantees -- `final: True` is
+  only ever set alongside zero held claims, zero open follow-ups, AND a
+  `safe` action, but a payload could still claim `label: "FINAL"`,
+  `closure.final: true` with a nonzero `claims.held` (or a non-`safe`
+  action) and have it trusted, rendering a green FINAL with markers still
+  attached. Fixed: a `final: True` payload with any held claims, open
+  follow-ups, or a non-`safe` action disposition is now rejected as
+  unsupported. A non-FINAL payload (the common MERGED-with-blockers case)
+  is unaffected. 8 new tests (4 per copy).
 - [ ] Keep legends, filters, maintenance previews, and cleanup selections in
   parity with the same descriptor. **Narrowed, not fully done:** the
   Maintenance pivot's `CLEAN_SPECS` table got the same `markers` column +

@@ -81,6 +81,26 @@ class TestProductionShimInterpretDescriptorPayload:
         assert interpreted["supported"] is True
         assert interpreted["held_claims"] == 0
 
+    def test_final_with_held_claims_is_rejected(self):
+        # PR #2738 review response: a genuine descriptor only ever sets
+        # final=True alongside zero held/open counts and a safe action.
+        payload = _valid_final_payload(claims={"held": 2})
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_final_with_non_safe_action_is_rejected(self):
+        payload = _valid_final_payload(action={"disposition": "blocked"})
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_non_final_with_blockers_stays_supported(self):
+        payload = _valid_final_payload(
+            label="MERGED", style="merged-blocked", closure={"final": False},
+            claims={"held": 2}, action={"disposition": "blocked"})
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is True
+        assert interpreted["held_claims"] == 2
+
 
 class TestProductionDeriveNormThroughShim:
     """The transplanted ``derive.norm``, driven through THIS package's
