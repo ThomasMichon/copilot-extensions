@@ -182,10 +182,17 @@ def _state(w):
         return _STATE_LABEL.get(st, st.upper()[:6])
     pr = w.get("pr") or {}
     status = w.get("status")
-    if pr.get("state") == "merged":
-        return "FINAL"
-    if status == "finalized":
-        return "FINAL"
+    if pr.get("state") == "merged" or status == "finalized":
+        # worktree-finality-and-obligations Phase 5 (PR #2738 review
+        # response): the unclassified-legacy-row fallback (no canonical
+        # ``state`` field -- an older remote or a pre-``--classify`` row) must
+        # be gated through the same descriptor check as the classified
+        # ``completed`` path above; otherwise an absent/unsupported
+        # descriptor could still render FINAL through this back door.
+        interpreted = prune.interpret_descriptor_payload(w.get("closure"))
+        if interpreted["supported"] and interpreted["label"] in ("FINAL", "MERGED"):
+            return interpreted["label"]
+        return "MERGED"
     if status == "active":
         return "WIP" if w.get("turn_count", 0) > 0 else "UNUSED"
     return (status or "?").upper()[:6]

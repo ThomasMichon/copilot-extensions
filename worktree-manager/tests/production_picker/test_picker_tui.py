@@ -2788,11 +2788,15 @@ def test_maybe_repoll_gating(monkeypatch):
 
 def test_bucket_fallback_no_classify_finalized_is_clean_not_wip():
     """An old remote (no --classify -> no state) must not show FINAL + unmerged."""
-    # status finalized, no git classification -> display FINAL, bucket clean.
+    # status finalized, no git classification -> no closure descriptor either,
+    # so state degrades to MERGED (never FINAL -- worktree-finality-and-
+    # obligations Phase 5's PR #2738 review-response fix gates this legacy
+    # fallback through the same descriptor check as the classified path).
+    # cleanup_bucket is independent of state and still reads clean/SAFE.
     w = derive.norm(
         {"id": "emancipation-cube-wsl-1234", "status": "finalized",
          "started_at": "2026-06-25T10:00:00"}, "Emancipation-Cube", "WSL")
-    assert w["state"] == "FINAL"
+    assert w["state"] == "MERGED"
     assert w["cleanup_bucket"] == "clean"          # not 'wip'/'unmerged'
     assert derive.BUCKET_DISPO[w["cleanup_bucket"]] == "SAFE"
 

@@ -428,6 +428,32 @@ below for the carved implementation plan.
   priority -- added `test_picker_markers_column.py` (9 focused tests). Also
   bumped `.github/plugin/marketplace.json`'s top-level `metadata.version`
   (a low-severity but real catch -- same automation gap PR #2642 hit).
+  **Second review-response round (PR #2738):** four more real findings, all
+  fixed: (1) the nested-field guard from round one defaulted a
+  present-but-wrong-shaped OR entirely-absent `closure`/`action`/`claims`/
+  `follow_ups` to `{}` while still returning `supported: True`, so a bare
+  `{"version": 1, "label": "FINAL"}` payload still got its top-level `label`
+  trusted -- fixed to require all four as present mappings (a genuine
+  `assemble_closure_descriptor().to_dict()` always emits them), rejecting
+  the whole payload as unsupported otherwise, in both `prune.py` copies;
+  (2) `_state()`'s descriptor gate only applied to the classified
+  `state == "completed"` path -- an unclassified legacy row (no `state`
+  field, an older remote or pre-`--classify` row) with `status: "finalized"`
+  or `pr.state: "merged"` still hit the old unconditional `return "FINAL"`
+  fallback, bypassing the safety net entirely. Fixed: that fallback now
+  routes through the same `interpret_descriptor_payload` gate (degrading to
+  `MERGED` without a descriptor), in both `derive.py` copies, with the one
+  affected `worktree-manager` test
+  (`test_bucket_fallback_no_classify_finalized_is_clean_not_wip`) updated
+  (its `cleanup_bucket`/`BUCKET_DISPO` assertions are independent of
+  `state` and stayed unchanged); (3) the new marker/style unit tests only
+  exercised `agent_worktrees.picker_tui.engine` (the plugin copy) -- added
+  `worktree-manager/tests/production_picker/test_picker_markers_column.py`
+  (9 tests) against the actual Manager-owned production engine so the two
+  copies can't silently diverge while only one stays covered; (4) the PR
+  description's stated version numbers (`1.5.5-dev119`/catalog `dev104`)
+  no longer matched the final diff after several main-rebase version
+  collisions (`dev121`/catalog `dev107`) -- corrected in the PR body.
 - [ ] Keep legends, filters, maintenance previews, and cleanup selections in
   parity with the same descriptor. **Narrowed, not fully done:** the
   Maintenance pivot's `CLEAN_SPECS` table got the same `markers` column +
