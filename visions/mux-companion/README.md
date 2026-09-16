@@ -5,7 +5,7 @@
   any future custom Mux-side command.
 - **Scope:** leaf
 - **Status:** Draft
-- **Last revised:** 2026-09-14
+- **Last revised:** 2026-09-15
 - **Reality docs:** [plugins/agent-worktrees/docs/cli-reference.md](../../plugins/agent-worktrees/docs/cli-reference.md) (status-segment / status-updater), [plugins/agent-worktrees/docs/mux.md](../../plugins/agent-worktrees/docs/mux.md), [plugins/agent-worktrees/docs/worktree-lifecycle.md](../../plugins/agent-worktrees/docs/worktree-lifecycle.md)
 
 ## Purpose & Intent
@@ -66,9 +66,11 @@ the Worktree Manager, not to `agent-worktrees` directly.
 
 ### hotkey-summoned-status-explainer
 From inside any muxed worktree session, one hotkey summons a compact view
-showing the worktree's full id and a plain-language explanation of its current
-status — including, for a completed worktree, *why* it reads `FINAL` versus
-`MERGED` (which evidence is stale, which claims or follow-ups are still held).
+showing the worktree's full id and a plain-language explanation of its
+current status — the underlying sub-state facts (checkpoint activity,
+upstream-containment, dirtiness, open claims, pending handoff — see
+[plugins/agent-worktrees §Concepts & Components/Derived status](../plugins/agent-worktrees/README.md#derived-status))
+and, individually, which of them are currently confirmed versus stale.
 
 ### session-lineage-visibility
 The same view lists the worktree's session lineage — the durable chain of
@@ -149,6 +151,11 @@ not its only possible one.
 
 ## Provenance
 
+- **2026-09-15** — Updated *hotkey-summoned-status-explainer* to point at the
+  decomposed sub-state model (plugins/agent-worktrees §Derived status)
+  instead of naming the FINAL/MERGED split directly, following that vision's
+  refinement of a single completed/not-completed split into independently
+  named, independently freshness-marked facts.
 - **2026-09-14** — Conceived from an operator session exploring a Mux-summoned
   companion dialog (Ctrl+K) for worktree status/lineage and a raw,
   break-glass session-head override; mined into this vision, anchored on the
