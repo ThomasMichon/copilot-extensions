@@ -11,6 +11,13 @@ the multi-machine system interacts with its local checkout:
 - **worktree** -- full agent-worktrees lifecycle; concurrent-flow safe,
   with edits/stages/commits isolated in per-task worktrees until push.
   These are also adopted as ``projects.yaml`` projects.
+- **knowledge** -- same worktree-capable mechanics as ``worktree`` (eligible
+  for the ``-k`` paired-knowledge carve, see ``__main__._carve_paired_
+  knowledge``), but exists only to be carved as another project's paired
+  knowledge companion, never driven directly (no standalone ``create``, no
+  binstub, hidden from the Picker's top-level project list -- enforced via
+  the repo's own committed ``RepoConfig.knowledge_only`` flag in
+  ``config.py``; set both together).
 
 The registry also stores per-platform source roots (``srcroot``) so that
 adopt, WSL provision, and clone operations know where to put repos.
@@ -37,27 +44,7 @@ from . import git_ops, output, registry_paths
 # Data model
 # ---------------------------------------------------------------------------
 
-# A repo's management class -- how the multi-machine system interacts with its checkout:
-#
-#   reference  Read-only.  Tracked only for path resolution, cloning, and
-#              indexing (e.g. VEI).  Never edited locally.  (= external-repos
-#              relationship "consumer".)
-#   singleton  Editable as a single anchor checkout, with no worktree
-#              isolation.  Use when only one flow edits at a time, or when
-#              worktrees are overkill or unsupported.
-#   worktree   Full agent-worktrees lifecycle: concurrent-flow safe; edits,
-#              stages, and commits stay isolated in per-task worktrees until
-#              the final push.  (= an adopted agent-worktrees "project".)
-#   knowledge  Same worktree-capable mechanics as "worktree" (so it remains
-#              eligible for the ``-k`` paired-knowledge carve, see
-#              ``__main__._carve_paired_knowledge``), but the repo exists
-#              *only* to be carved as another project's paired knowledge
-#              companion -- never driven directly. The corresponding
-#              enforcement (refuse standalone ``create``, skip its binstub,
-#              hide it from the Picker's top-level project list) lives in the
-#              repo's own committed ``RepoConfig.knowledge_only`` flag (see
-#              config.py); this registry class is the discoverable/listing
-#              counterpart -- set both together.
+# See the module docstring above for what each management class means.
 VALID_CLASSES = ("reference", "singleton", "worktree", "knowledge")
 
 # Legacy ``type`` values mapped onto the new class taxonomy.
