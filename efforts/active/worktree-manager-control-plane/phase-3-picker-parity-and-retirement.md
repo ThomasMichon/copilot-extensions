@@ -89,10 +89,11 @@ picker_tui` site in `__main__.py` and classifying by the calling command:
 `agent_worktrees/picker_shared/` package, or merged into existing non-TUI modules) before
 `picker_tui/` can be deleted:**
 
-- `picker_tui/reciprocal.py` (`normalize`/`short_label`, ~140 lines, no further
-  `picker_tui` imports of its own) — imported by `reciprocal_presentation.py` (general
-  `--json` reciprocal-relation presentation, `cmd_status`/`cmd_list` output shape, #1705).
-  Small, self-contained, trivial to relocate.
+- ~~`picker_tui/reciprocal.py`~~ — **done (2026-09-16):** relocated to
+  `agent_worktrees/reciprocal_state.py` (top-level, non-TUI); `reciprocal_presentation.py`
+  and `picker_tui/derive.py` (the TUI's own compact label use) both now import from
+  there. Full `agent-worktrees` suite green (373/375, same 2 pre-existing unrelated
+  failures as before); `ruff check --select F,E9` clean.
 - `picker_tui/frame_health.py::append_launch_event` — called directly from `cmd_resolve`
   (the bare-invocation launch/resolve entry point, **not** only from the picker launch
   path) for launch-event telemetry independent of whether the TUI actually runs.
