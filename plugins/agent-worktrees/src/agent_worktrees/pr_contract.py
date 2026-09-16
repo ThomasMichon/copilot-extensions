@@ -897,6 +897,10 @@ class PRFlowProfile:
     branch_update_strategy: str = "rebase"   # rebase | merge
     merge_strategy: str = "squash"           # squash | merge | rebase
     prefer_auto_merge: bool = True
+    # Free-text repo-specific guidance (config: ``pr.notes``), surfaced as an
+    # extra ``Note:`` line by every pr_reminder(). See PRConfig.notes'
+    # docstring for why this exists (agents don't read config-file comments).
+    notes: str = ""
 
     def applies(self, verb: str) -> bool:
         """True when ``verb`` (e.g. ``"pr-merge"``) is part of this repo's flow."""
@@ -918,6 +922,7 @@ def classify_pr_flow(
     branch_update_strategy: str = "rebase",
     merge_strategy: str = "squash",
     prefer_auto_merge: bool = True,
+    notes: str = "",
 ) -> PRFlowProfile:
     """Derive a repo's :class:`PRFlowProfile` from its PR config values.
 
@@ -954,7 +959,7 @@ def classify_pr_flow(
         review_latency_hint=review_latency_hint, self_approve=self_approve,
         conflict_retriggers_review=conflict_retriggers_review, rebase_owner="submitter",
         branch_update_strategy=branch_update_strategy, merge_strategy=merge_strategy,
-        prefer_auto_merge=prefer_auto_merge,
+        prefer_auto_merge=prefer_auto_merge, notes=notes,
     )
     if not enabled:
         return PRFlowProfile(
@@ -964,7 +969,7 @@ def classify_pr_flow(
                      "worktree to the default branch."),
             reviewer="", review_blocking=False,
             review_latency_hint=review_latency_hint, self_approve=False,
-            conflict_retriggers_review=False, rebase_owner="",
+            conflict_retriggers_review=False, rebase_owner="", notes=notes,
         )
     if automerge_label:
         return PRFlowProfile(
@@ -1138,6 +1143,8 @@ def _cautions(flow: PRFlowProfile) -> tuple[str, ...]:
     policy = _policy_phrase(flow)
     if policy:
         out.append(policy)
+    if flow.notes:
+        out.append(flow.notes)
     return tuple(out)
 
 
@@ -1169,7 +1176,7 @@ def pr_reminder(
             headline="direct-push repo -- no PR flow",
             next_step="`finalize` lands the worktree to the default branch",
             waiting_on=(), use_instead=(("finalize",) if _pr_verb else ()),
-            cautions=(),
+            cautions=cautions,
         )
 
     # ---- error / refusal path (both outcomes are reminded) ----------------
