@@ -84,6 +84,34 @@ def test_apply_is_idempotent_and_version_gated(tmp_path, monkeypatch):
     assert again.action == "already-current"
 
 
+def test_stale_legacy_binstub_content_forces_redeploy(tmp_path, monkeypatch):
+    """Regression: a version-current marker + slot must not mask a stale or
+    legacy binstub. copilot-extensions#2788-adjacent report -- a prior
+    cutover left an old/incompatible ``worktree-manager`` file occupying the
+    binstub name, which then failed the consuming agent-worktrees seam's
+    ``--version`` health probe and silently fell back to the bundled picker.
+    Presence-only idempotency checking hid the problem; content must match.
+    """
+    pd = _fake_payload(tmp_path, "1.2.3")
+    root = tmp_path / "root"
+    lb = _patch_local_bin(monkeypatch, tmp_path)
+    self_install(pd, root=root, dry_run=False)
+
+    # Simulate a legacy/incompatible binstub clobbering the deployed one --
+    # e.g. left over from an ancient pre-versioned install attempt.
+    stub = lb / "worktree-manager"
+    stub.write_text("#!/usr/bin/env bash\necho legacy stub; exit 1\n")
+
+    # The marker + slot still say "1.2.3 is installed" -- but the binstub on
+    # disk no longer matches what this version would deploy.
+    assert needs_install("1.2.3", root) is True
+
+    res = self_install(pd, root=root, dry_run=False)
+    assert res.action == "installed"
+    assert "legacy stub" not in stub.read_text()
+    assert needs_install("1.2.3", root) is False
+
+
 def test_new_version_publishes_new_slot(tmp_path, monkeypatch):
     root = tmp_path / "root"
     _patch_local_bin(monkeypatch, tmp_path)
