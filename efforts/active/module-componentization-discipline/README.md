@@ -58,33 +58,52 @@ stops a file from growing right up against its existing ceiling commit by
 commit until it tips over) is exactly the failure mode a *proactive*
 discipline — not just the existing reactive guard — is meant to prevent.
 
-### Current pecking order (snapshot, 2026-09-16)
+### Current pecking order (snapshot, 2026-09-16, post-Phase-1)
 
-`python tools/rank-module-size.py --limit 15` (vendored duplicates folded in
-— re-run before starting a phase, this list moves):
+`python tools/rank-module-size.py --limit 20` (vendored duplicates folded in
+— re-run before starting a phase, this list moves; it already has once per
+PR merged during this effort — treat it as a live command, not a frozen
+table):
 
 | Lines | Over cap | File | Notes |
 |------:|---------:|------|-------|
-| 28,384 | +27,384 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | Worst offender by nearly 3x; a CLI registration surface — prime candidate for the `producers_cli.py`-style split |
+| 28,384 | +27,384 | `plugins/agent-worktrees/src/agent_worktrees/__main__.py` | Worst offender by nearly 3x; a CLI registration surface — prime candidate for the `producers_cli.py`-style split. **Not yet attempted**: this is the CLI this very session's `agent-worktrees`/`copilot-extensions` commands run through — split it in its own dedicated worktree with the full plugin test suite green before and after, not as a quick pass |
 | 9,169 | +8,169 | `libs/installation-context/installation_context.py` (+14 vendored copies) | Split the **canonical** copy only; `sync-installation-context.py` propagates |
 | 8,695 | +7,695 | `worktree-manager/.../picker_tui/engine.py` | The file that motivated this effort (#2788/#2794 regression) |
 | 6,721 | +5,721 | `plugins/agent-bridge/src/agent_bridge/session_manager.py` | |
-| 6,575 | +5,575 | `plugins/agent-bridge/src/agent_bridge/__main__.py` | Second CLI registration surface |
+| 6,595 | +5,595 | `plugins/agent-bridge/src/agent_bridge/__main__.py` | Grew again (6575→6595) during this effort's own Phase 1 PR rebase — a third live drift instance, same failure mode |
 | 5,201 | +4,201 | `plugins/agent-worktrees/src/agent_worktrees/tracking.py` | |
 | 5,161 | +4,161 | `plugins/agent-index/scripts/cell-runtime.py` | |
 | 4,691 | +3,691 | `plugins/agent-dispatch/src/agent_dispatch/__main__.py` | Already partially split (`producers_cli.py` et al. extracted) — a model for how far a `__main__.py` split can still go |
 | 4,636 | +3,636 | `plugins/agent-codespaces/src/agent_codespaces/__main__.py` | CLI registration surface |
-| 3,979 | +2,979 | `plugins/agent-dispatch/src/agent_dispatch/queue.py` | The original motivating case for the cap itself |
+| 3,982 | +2,982 | `plugins/agent-dispatch/src/agent_dispatch/queue.py` | The original motivating case for the cap itself |
 | 3,421 | +2,421 | `plugins/agent-dispatch/src/agent_dispatch/supervisor.py` | |
 | 2,917 | +1,917 | `plugins/agent-bridge/src/agent_bridge/agent_registry.py` | |
-| 2,714 | +1,714 | `plugins/customizing-copilot/skills/reviewing-customizations/scripts/scan-customizations.py` | |
 | 2,608 | +1,608 | `plugins/agent-worktrees/src/agent_worktrees/sessions.py` | |
 | 2,554 | +1,554 | `plugins/agent-codespaces/src/agent_codespaces/config.py` | |
+| 2,509 | +1,509 | `plugins/agent-dispatch/src/agent_dispatch/coordinator.py` | Grew 2338→2509 during this effort's Phase 1 PR rebase — a fourth live drift instance; good next candidate precisely because it's actively moving |
+| 2,437 | +1,437 | `plugins/agent-bridge/src/agent_bridge/db.py` | |
+| 2,429 | +1,429 | `tools/clean-room/scenarios/agent-index-installation-cells/scenario.py` | Clean-room fixture, not production code — lower urgency |
+| 2,369 | +1,369 | `tools/clean-room/scenarios/progressive-context-disclosure-baseline/fixture.py` | Clean-room fixture, not production code — lower urgency |
+| 2,195 | +1,195 | `plugins/agent-worktrees/src/agent_worktrees/reconcile.py` | |
+| 2,159 | +1,159 | `worktree-manager/.../picker_tui/pivots.py` | |
+
+**Suggested next pick (Phase 2, first slice):** `agent-dispatch/coordinator.py`
+or `agent-bridge/db.py` — both mid-sized (2,400–2,500 lines, so a single
+session can plausibly finish one, unlike the 28k/9k/8.7k/6.7k giants above),
+neither is this session's own control-plane CLI (unlike `agent-worktrees`/
+`agent-bridge`'s `__main__.py`), and `coordinator.py` in particular is a
+demonstrated repeat-drifter. Check each plugin's test coverage ratio (like
+Phase 1's near-1:1 `test_scan_customizations.py` check) before committing to
+one, and prefer whichever has the stronger regression net. Save the
+`__main__.py` CLI-registration giants for dedicated slices with the full
+plugin suite (not just guards) green before and after, given their
+live-orchestration blast radius.
 
 Full list: `python tools/rank-module-size.py --limit 70`. Files within a small
 margin of their own ceiling (most likely to tip over next from unrelated
-feature work, per the `engine.py` incident above):
-`python tools/rank-module-size.py --near-cap 25`.
+feature work, per the `engine.py`/`agent-bridge __main__.py`/`coordinator.py`
+incidents above): `python tools/rank-module-size.py --near-cap 25`.
 
 ## Request
 
@@ -154,6 +173,24 @@ Verbatim from the operator:
 - [ ] Work down `tools/rank-module-size.py`'s ranked list, prioritizing
       CLI-registration shapes and small `--near-cap` margins, one PR per
       module (pure split, no behavior change, per the skill's Step 2).
+      - [ ] `agent-dispatch/coordinator.py` (2,509, a demonstrated repeat
+            drifter) or `agent-bridge/db.py` (2,437) — pick whichever has
+            stronger test coverage; suggested next slice (see pecking-order
+            table above for full reasoning).
+      - [ ] The `tools/clean-room/scenarios/*` fixtures (2,429 / 2,369) —
+            lower urgency (not production code) but easy, low-risk wins.
+      - [ ] The `__main__.py` CLI-registration giants
+            (`agent-worktrees` 28,384; `agent-bridge` 6,595;
+            `agent-dispatch` 4,691; `agent-codespaces` 4,636) — each needs
+            its own dedicated slice with the full plugin test suite (not
+            just guards) green before and after, given their live-
+            orchestration blast radius. Do not rush these late in a long
+            session; each deserves a fresh-context pass.
+      - [ ] The vendored-copy canonical
+            `libs/installation-context/installation_context.py` (9,169,
+            +14 copies) — validate `sync-installation-context.py --check`
+            and `check-vendored-libs-sync.py` as part of this one's
+            re-validation, not just the owning plugin's tests.
 
 ### Phase 3 — cross-language cap
 - [ ] Design what "module size" means for `.sh`/`.ps1`/`.ts` (line count vs.
@@ -229,3 +266,39 @@ the Phase 0 runbook, picked up as capacity allows.
   spec; verified independently afterward (module sizes, ruff, the full
   plugin test suite, docs/skill guards, and a direct CLI smoke invocation)
   before committing. Bumped `customizing-copilot` to `0.1.0-dev71`.
+- Landing this PR required a manual rebase: `main` had drifted twice more in
+  the interim (`agent-bridge/__main__.py` 6575→6595,
+  `agent-dispatch/coordinator.py` 2338→2509) — a fourth and fifth live
+  occurrence of the exact regression class this effort exists to address,
+  now observed in three different plugins' CLI/coordination files within a
+  single working session. This is strong, repeated real-world evidence for
+  the Phase 2 backlog priority, not just a one-off incident.
+
+### 2026-09-16 — Checkpoint: pausing Phase 2 for a fresh-context continuation
+- Three PRs merged this session: #2807 (Phase 0: guidelines/skill/tooling/
+  marker), #2810 (trunk unblock, `worktree_manager/__main__.py`), #2813
+  (Phase 1 pilot: `scan-customizations.py` split).
+- While preparing *this* checkpoint PR, CI caught **two more** live drift
+  instances on `main` itself: `agent-worktrees/config.py` (2122→2133) and
+  `agent-worktrees/pr_contract.py` (1463→1470), from #2814 (unrelated,
+  already merged). Sixth and seventh occurrences of the same regression
+  class observed in a single session. Applied the same reviewed-widen to
+  both, bundled into this checkpoint PR since it was already open and small.
+- Deliberately stopping here rather than starting a Phase 2 slice late in an
+  already-long session: the remaining backlog's easier, safer items
+  (`coordinator.py`, `db.py`, the clean-room fixtures) still deserve a full
+  test-coverage check + independent verification pass like Phase 1 got, and
+  the remaining giants (`__main__.py` CLI-registration files, the vendored
+  `installation-context` canonical) carry real live-orchestration blast
+  radius that should never be rushed. Updated the pecking-order snapshot
+  above and Phase 2's checklist with a concrete, reasoned next-pick and
+  ordering rationale so a fresh session (or a handoff successor) can start
+  immediately without re-deriving this analysis.
+- **Next action for whoever picks this up:** read the "Suggested next pick"
+  note above, check `agent-dispatch/coordinator.py` vs. `agent-bridge/db.py`
+  test coverage ratios (same method as Phase 1: compare the module's line
+  count to its dedicated test file's), then follow the
+  `componentizing-modules` skill exactly as Phase 1 did — delegate the
+  mechanical trace-and-extract to a sub-agent with a bounded spec if the
+  file is large/cross-referenced, then independently re-verify before
+  committing.
