@@ -85,6 +85,16 @@ commands) reach into several of its submodules for logic that has nothing to do 
 rendering. Cataloged by grepping every `from .picker_tui...` / `from . import
 picker_tui` site in `__main__.py` and classifying by the calling command:
 
+**Watch for this on every extraction:** `worktree-manager/tests/
+test_production_picker_transplant.py::test_transplanted_picker_sources_match_production_
+copy` asserts most `picker_tui/*.py` files stay **byte-identical** between the two trees
+(only `data_local.py`/`data_ssh.py`/`engine.py`/`maintenance.py`/`pivots.py` were
+previously allowed to diverge). Any file you edit on the `agent-worktrees` side as part
+of an extraction needs adding to that exclusion set (with a comment explaining why), or
+this test fails in CI even though the local per-plugin suites look clean -- this bit the
+`reciprocal.py`/`frame_health.py` extraction below (derive.py, `__init__.py`, and
+`frame_health.py` itself all needed adding).
+
 **Load-bearing outside the TUI — must be extracted to a new home (e.g. a top-level
 `agent_worktrees/picker_shared/` package, or merged into existing non-TUI modules) before
 `picker_tui/` can be deleted:**
@@ -94,9 +104,24 @@ picker_tui` site in `__main__.py` and classifying by the calling command:
   and `picker_tui/derive.py` (the TUI's own compact label use) both now import from
   there. Full `agent-worktrees` suite green (373/375, same 2 pre-existing unrelated
   failures as before); `ruff check --select F,E9` clean.
-- `picker_tui/frame_health.py::append_launch_event` — called directly from `cmd_resolve`
-  (the bare-invocation launch/resolve entry point, **not** only from the picker launch
-  path) for launch-event telemetry independent of whether the TUI actually runs.
+- ~~`picker_tui/frame_health.py::append_launch_event`~~ — **done (2026-09-16):**
+  relocated `append_launch_event` (+ its `_timestamp`/`_launch_trace_path` helpers) to
+  `agent_worktrees/launch_trace.py`. `frame_health.py` keeps `FrameHealthReporter`
+  (confirmed TUI-render-loop-only, no external call sites) and imports the two helpers
+  back from `launch_trace` for its own use. Updated `cmd_resolve`, `_run_picker_housekeeping`,
+  and `picker_tui/__init__.py`'s launch call. Also fixed `worktree-manager/tests/
+  test_production_picker_transplant.py`'s byte-identical-copy guard (excluded
+  `frame_health.py`/`__init__.py`/`derive.py` from the comparison, alongside the
+  pre-existing `data_local.py`/`data_ssh.py`/`engine.py`/`maintenance.py`/`pivots.py`
+  set) -- this test asserts most `picker_tui/` submodules stay byte-identical between
+  the two trees, which the Step 0 audit didn't account for and which the CI run on
+  PR #2753 caught. Also found and fixed a genuinely pre-existing, unrelated bug while
+  running the full suite: `agent_worktrees.__main__` didn't re-export
+  `_infer_worktree_id_from_worktree_root` from `worktree_identity.py` the way its
+  siblings are re-exported, breaking `test_context_resolution.py`'s direct unit test
+  of it (confirmed pre-existing via `git stash`). All directly-touched test files
+  green; `worktree-manager`'s full `production_picker` suite green (515 passed, 2
+  skipped); `ruff check --select F,E9` clean on both sides.
 - `picker_tui/data_local.py::_stamp_from_raw` / `_overlay_cached_state` — called from
   `cmd_status_monitor` (the resident background status-JSON-stream daemon) and
   `cmd_list --classify`, to warm/read a "session-render cache" keyed for the picker's

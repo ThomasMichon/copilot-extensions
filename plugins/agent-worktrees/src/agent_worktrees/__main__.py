@@ -4064,7 +4064,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     id + path WITHOUT launching Copilot or a mux session -- then resume later
     with ``--json --worktree-id <id>``.
     """
-    from .picker_tui.frame_health import append_launch_event
+    from .launch_trace import append_launch_event
 
     append_launch_event("resolve_handler_start")
     use_json = getattr(args, "json", False)
@@ -5879,7 +5879,7 @@ def _machine_key_for_display(config: cfg.Config, name: str) -> str:
 
 def _run_picker_housekeeping() -> None:
     """Run each post-refresh sweep independently; one failure never stops peers."""
-    from .picker_tui.frame_health import append_launch_event
+    from .launch_trace import append_launch_event
 
     append_launch_event("housekeeping_start")
     for action in (
@@ -6457,6 +6457,7 @@ def _infer_worktree_id(
 from .worktree_identity import (  # noqa: E402 -- re-export position matches original definition site
     _adopt_linked_worktree,
     _infer_worktree_id_from_cwd,
+    _infer_worktree_id_from_worktree_root,  # noqa: F401 -- re-exported for unit tests
     _resolve_worktree_id,
     _worktree_id_from_git,
     _worktree_path_for_id,
