@@ -194,23 +194,20 @@ def _state(w):
 
 def _state_style(w):
     """The closure descriptor's validated ``style`` (e.g. ``merged-blocked``),
-    gated the same way as ``_state()`` -- only surfaced when the descriptor is
-    ``supported`` and its label is FINAL/MERGED, mirroring the exact case
-    ``_state()`` itself resolves through a descriptor. ``None`` otherwise
-    (absent/unsupported descriptor, or a state resolved by a path that never
-    consults the descriptor at all), so a consumer that keys color purely off
+    surfaced only when ``_state()`` itself actually resolved to FINAL/MERGED
+    through the descriptor. Reuses ``_state()``'s own resolution (rather than
+    re-deriving the same precedence) so a live mux/lock session -- which
+    ``_state()`` reports as ACTIVE regardless of a stale ``completed``/
+    ``finalized`` tracking field -- can never get a completed-descriptor style
+    here either. ``None`` for anything else (absent/unsupported descriptor, or
+    a state that never consults one), so a consumer that keys color purely off
     ``rec["state"]`` remains correct with no ``state_style`` present.
 
     Carried on the normalized record for a future renderer to key semantic
     styling off of; the engine does not yet consume this field to recolor a
     row -- it still colors by the plain ``state`` label alone.
     """
-    st = (w.get("state") or "").lower()
-    pr = w.get("pr") or {}
-    status = w.get("status")
-    is_descriptor_path = (st == "completed"
-                          or pr.get("state") == "merged" or status == "finalized")
-    if not is_descriptor_path:
+    if _state(w) not in ("FINAL", "MERGED"):
         return None
     interpreted = prune.interpret_descriptor_payload(w.get("closure"))
     if interpreted["supported"] and interpreted["label"] in ("FINAL", "MERGED"):

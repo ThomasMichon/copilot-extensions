@@ -814,8 +814,8 @@ def interpret_descriptor_payload(payload: dict | None) -> dict:
     # label/final consistency: never trust either half in isolation.
     if (label == "FINAL") != final_value:
         return _unsupported_descriptor("unsupported-descriptor:label-final-mismatch")
-    held_claims = _non_negative_int(claims.get("held", 0))
-    open_follow_ups = _non_negative_int(follow_ups.get("open", 0))
+    held_claims = _non_negative_int(claims.get("held"))
+    open_follow_ups = _non_negative_int(follow_ups.get("open"))
     if held_claims is None or open_follow_ups is None:
         return _unsupported_descriptor("unsupported-descriptor:invalid-count")
     # FINAL only ever combines with zero blockers + a safe action.

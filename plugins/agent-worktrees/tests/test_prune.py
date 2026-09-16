@@ -975,6 +975,21 @@ class TestInterpretDescriptorPayload:
         interpreted = prune.interpret_descriptor_payload(payload)
         assert interpreted["supported"] is False
 
+    def test_missing_held_count_is_unsupported_not_defaulted(self):
+        # Regression: `claims={}` must not default `held` to a verified 0 --
+        # a truncated payload missing the count is not evidence of no
+        # blockers.
+        payload = self._final_payload()
+        payload["claims"] = {}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_missing_open_follow_ups_count_is_unsupported_not_defaulted(self):
+        payload = self._final_payload()
+        payload["follow_ups"] = {}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
     def test_non_mapping_action_is_unsupported_not_defaulted(self):
         payload = self._final_payload()
         payload["action"] = "blocked"

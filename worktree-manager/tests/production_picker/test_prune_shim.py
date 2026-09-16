@@ -78,6 +78,19 @@ class TestProductionShimInterpretDescriptorPayload:
         interpreted = prune.interpret_descriptor_payload(payload)
         assert interpreted["supported"] is False
 
+    def test_missing_held_count_is_never_trusted(self):
+        # Regression: `claims={}` must not default `held` to a verified 0 --
+        # a truncated payload missing the count is not evidence of no
+        # blockers.
+        payload = _valid_final_payload(claims={})
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_missing_open_follow_ups_count_is_never_trusted(self):
+        payload = _valid_final_payload(follow_ups={})
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
     def test_wrong_shaped_closure_is_never_trusted(self):
         payload = _valid_final_payload(closure=[])
         interpreted = prune.interpret_descriptor_payload(payload)

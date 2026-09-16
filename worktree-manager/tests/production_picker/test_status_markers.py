@@ -79,6 +79,19 @@ def test_state_style_absent_for_unsupported_descriptor() -> None:
     assert row["state_style"] is None
 
 
+def test_state_style_never_describes_a_live_active_row_as_completed() -> None:
+    # Regression: a live mux session takes ACTIVE precedence over a stale
+    # tracking `state=completed` -- state_style must not still surface a
+    # completed-descriptor style for that same row.
+    row = derive.norm(_raw(
+        state="completed",
+        mux_session=True,
+        closure=_closure(),
+    ), "host", "windows")
+    assert row["state"] == "ACTIVE"
+    assert row["state_style"] is None
+
+
 def test_merged_with_held_claim_and_unconfirmed_facts() -> None:
     row = derive.norm(_raw(
         state="completed",
