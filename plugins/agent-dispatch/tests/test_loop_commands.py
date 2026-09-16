@@ -19,18 +19,20 @@ import types
 from agent_dispatch import loop_commands
 from agent_dispatch.loop_commands import (
     _cmd_repository_issue_loop,
-    _cmd_reviewer_loop,
     _repository_issue_loop_declarations,
     _repository_issue_loop_health_path,
     _repository_issue_loop_registrations,
     _repository_issue_loop_setup,
     _repository_issue_loop_status,
     _resolve_cli_module,
+    _spawn_attempt_projection,
+)
+from agent_dispatch.reviewer_loop_commands import (
+    _cmd_reviewer_loop,
     _reviewer_loop_declarations,
     _reviewer_loop_registrations,
     _reviewer_loop_setup,
     _reviewer_loop_status,
-    _spawn_attempt_projection,
 )
 
 
