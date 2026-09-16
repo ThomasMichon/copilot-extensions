@@ -2080,12 +2080,7 @@ async def _warm_remote_auth_cache(
     hosts plus the ADO REST/feed bare-token helpers. Failures are debug-only and
     never block the connect.
     """
-    from .auth_preflight import (
-        ADO_REST_RESOURCE,
-        REMOTE_LIST_COMMAND,
-        host_from_url,
-        parse_remote_hosts,
-    )
+    from . import auth_preflight as auth
 
     async def _run_remote(cmd: str, *, command_timeout: float) -> str:
         wrapped = f"bash -l -c {shlex.quote(cmd)}"
@@ -2096,16 +2091,14 @@ async def _warm_remote_auth_cache(
 
     hosts: list[str] = []
     try:
-        remote_output = await _run_remote(REMOTE_LIST_COMMAND, command_timeout=10.0)
-        hosts.extend(parse_remote_hosts(remote_output))
+        remote_output = await _run_remote(auth.REMOTE_LIST_COMMAND, command_timeout=10.0)
+        hosts.extend(auth.parse_remote_hosts(remote_output))
     except Exception as exc:
         log.debug("Auth-cache warm-up remote host discovery on %s failed: %s", name, exc)
-
     if config.dotfiles_repo:
-        dotfiles_host = host_from_url(f"https://github.com/{config.dotfiles_repo}")
+        dotfiles_host = auth.host_from_url(f"https://github.com/{config.dotfiles_repo}")
         if dotfiles_host:
             hosts.append(dotfiles_host)
-
     deduped_hosts = list(dict.fromkeys(h for h in hosts if h))
     commands = ["set +e"]
     for host in deduped_hosts:
@@ -2116,7 +2109,7 @@ async def _warm_remote_auth_cache(
         )
     commands.extend([
         "ado-auth-helper get-access-token "
-        f"--resource {shlex.quote(ADO_REST_RESOURCE)} "
+        f"--resource {shlex.quote(auth.ADO_REST_RESOURCE)} "
         ">/dev/null 2>/dev/null || true",
         "ado-auth-helper get-access-token >/dev/null 2>/dev/null || true",
     ])
