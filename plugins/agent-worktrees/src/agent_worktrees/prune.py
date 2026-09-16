@@ -432,9 +432,11 @@ DESCRIPTOR_VERSION = 2
 #:   PR/blocker state that depends on a provider lookup; ``confirmed`` when
 #:   that lookup is fresh (mirrors ``upstream_containment``'s freshness input
 #:   until the Phase 9 repo-scoped ledger lets them diverge).
-#: * ``pending_handoff`` -- an unclaimed context-handoff baton for this
-#:   worktree. **Not yet wired**: always reports ``confirmed=False`` with a
-#:   ``None`` value until read-only baton wiring lands (Phase 9 follow-up).
+#: * ``pending_handoff`` -- opened-but-unlinked session handoffs on this
+#:   worktree (``rec.pending_handoffs``: a predecessor recorded a token, no
+#:   successor session linked yet). Read-only, always confirmed (a local
+#:   tracking-record read, no fetch/staleness concept); purely informational
+#:   -- does not gate FINAL.
 FACT_NAMES = (
     "checkpoint_activity", "upstream_containment", "local_dirtiness",
     "open_claims", "pending_handoff",
@@ -587,8 +589,15 @@ def assemble_closure_descriptor(
       call's own evidence is fresh -- the repo-scoped ledger covers git
       upstream refs specifically, not provider/claim state, so it does not
       extend to this fact.
-    * ``pending_handoff`` is not yet wired (Phase 9 follow-up): always
-      reports ``confirmed=False`` with a ``None`` value.
+    * ``pending_handoff`` reads ``rec.pending_handoffs`` (agent-worktrees'
+      own cooperative, already-tracked record of opened-but-not-yet-linked
+      session handoffs -- a predecessor recorded a token with no successor
+      session linked yet) -- read-only here, never composed or consumed by
+      this function. Always ``confirmed`` (a local tracking-record read, no
+      fetch/staleness concept), and purely informational: it does NOT gate
+      ``FINAL`` -- a pending handoff signals someone intends to resume this
+      worktree, but that is a distinct concern from whether its CONTENT is
+      safely landed.
 
     ``FINAL`` requires ALL of: the ``upstream_containment`` AND ``open_claims``
     facts BOTH independently ``confirmed``, Git upstream-complete (git state
@@ -664,8 +673,9 @@ def assemble_closure_descriptor(
             "open_follow_ups": open_follow_ups,
         },
         "pending_handoff": {
-            "confirmed": False,
-            "value": None,
+            "confirmed": True,
+            "count": len(rec.pending_handoffs),
+            "tokens": [h.token for h in rec.pending_handoffs],
         },
     }
 

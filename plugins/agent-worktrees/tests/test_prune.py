@@ -828,7 +828,27 @@ class TestClosureDescriptor:
         assert payload["facts"]["open_claims"]["confirmed"] is True
         assert payload["facts"]["checkpoint_activity"]["confirmed"] is True
         assert payload["facts"]["local_dirtiness"]["confirmed"] is True
-        assert payload["facts"]["pending_handoff"]["confirmed"] is False
+        assert payload["facts"]["pending_handoff"]["confirmed"] is True
+        assert payload["facts"]["pending_handoff"]["count"] == 0
+
+    def test_pending_handoff_reads_the_record_and_is_always_confirmed(self):
+        rec, info, disposition = self._final_inputs()
+        rec.handoffs = [
+            tracking.SessionHandoff(
+                ordinal=1, token="tok-1", predecessor="sess-a",
+                state="pending", opened_at="2026-09-16T00:00:00",
+            ),
+        ]
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=0, open_follow_ups=0)
+        assert d.facts["pending_handoff"]["confirmed"] is True
+        assert d.facts["pending_handoff"]["count"] == 1
+        assert d.facts["pending_handoff"]["tokens"] == ["tok-1"]
+        # Purely informational: does not gate FINAL/safe.
+        assert d.final is True
+        assert d.action_disposition == "safe"
+        # Never marked in `compact` -- always confirmed, so no asterisk.
+        assert "*" not in d.compact
 
 
 # --- interpret_descriptor_payload (mixed-version fleet safety, Phase 5) -----
