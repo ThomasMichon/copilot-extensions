@@ -156,7 +156,7 @@ realized in `main`; unchecked items are the remaining delta.
 - [x] Pin the engine ↔ Picker `--json` contract
       ([`docs/engine-picker-contract.md`](../../../plugins/agent-worktrees/docs/engine-picker-contract.md));
       client tolerates an older engine by degrading a request rather than failing.
-- [ ] Bring the Manager Picker to **feature parity** with the bundled Picker:
+- [x] Bring the Manager Picker to **feature parity** with the bundled Picker:
       full worktree list interaction (filter · sort · select), resume/join/create
       actions, multi-machine at-a-glance, session/PR status columns. Closes picker
       §`front-door-entry`, §`decision-support-before-cost`, §`programmatic-parity`,
@@ -357,8 +357,8 @@ realized in `main`; unchecked items are the remaining delta.
 - [ ] Visual configurator surface (beyond today's read-only state views). Closes
       installer §`visual-configurator`.
 
-### Phase 6 — Retire the bundled Picker (Planned — the operator-visible end-state)
-- [ ] Once the Manager Picker reaches parity (Phase 3), remove the in-plugin
+### Phase 6 — Retire the bundled Picker (Done — the operator-visible end-state)
+- [x] Once the Manager Picker reaches parity (Phase 3), remove the in-plugin
       Textual `picker_tui`. The seam's fallback then flips **automatically**
       (detected by the absence of the `picker_tui` package): with no Manager
       installed, a bare launch surfaces the **install trigger** instead of any
@@ -913,4 +913,27 @@ claiming discipline alone.
   opt-out toggle) -- Phase 6 now covers deleting the whole module, not just
   its toggle. Docs-only; no code changed. Slice claimed on #352 before
   landing, per this effort's own Coordination-section discipline.
-
+- **2026-09-15** — Re-ran the full `picker_tui/` divergence audit across both
+  trees before retirement. Classified the old-only history as: already present
+  or superseded (`#1412`'s old Bare Resume warning path, `#1938`'s last-good row
+  preservation, `#2453/#2499` superseded by Worktree Manager's `#2586`,
+  `#2590` as the reverse-port of that same draft-semantics work, and `#1589`'s
+  shared frame-health/reporting additions already landed on both sides), with
+  one real remaining Manager gap: the bundled Pickers' later first-paint /
+  uncached-local-identity hardening (`#1511`, `#1562`, `#2589`). Ported that
+  parity slice into `worktree-manager` (chrome-first live startup, bootstrap row
+  preservation until the roster becomes authoritative, lazy config-backed local
+  metadata, and neutral placeholders instead of `None` crashes), then retired
+  the last rollback-only surface by removing the old `AGENT_WORKTREES_PICKER_NATIVE_LIST`
+  toggle so the native list is the sole remaining body. With parity proven by
+  the Worktree Manager capture/TUI corpus, checked Phase 3's parity box, deleted
+  `plugins/agent-worktrees/src/agent_worktrees/picker_tui/`, moved the
+  plugin-still-needed non-UI support into `picker_support/`, updated the
+  no-Manager seam/docs/installers to the install-trigger-only end-state, and
+  superseded [#117](https://github.com/ThomasMichon/copilot-extensions/issues/117)
+  by completion rather than a smaller toggle cleanup. Validation: full
+  `worktree-manager` suite green (`843 passed, 2 skipped`), full
+  `agent-worktrees` runner suite green, `ruff check --select F,E9`
+  clean on both trees, `python tools/check-install-contract.py` still reports
+  12 plugins, and a direct bare-launch smoke with no `worktree-manager` on
+  `PATH` produced the documented install trigger instead of a crash.

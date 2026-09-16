@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import git_ops, sessions, tracking
-from agent_worktrees.picker_tui import derive
+from agent_worktrees.picker_support import derive
 
 
 def _record(**kw):

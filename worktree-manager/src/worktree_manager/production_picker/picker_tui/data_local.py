@@ -54,7 +54,19 @@ def _project_repo() -> tuple[str, str]:
         return "", ""
 
 
-REPO, BRANCH = _project_repo()
+# Import-time ``load_config`` blocked first paint on the bundled Picker side
+# (#1504). Keep the same lazy contract here so the transplanted Manager copy
+# does not reintroduce that startup I/O regression.
+_REPO_BRANCH: tuple[str, str] | None = None
+
+
+def __getattr__(name: str):
+    global _REPO_BRANCH
+    if name in ("REPO", "BRANCH"):
+        if _REPO_BRANCH is None:
+            _REPO_BRANCH = _project_repo()
+        return _REPO_BRANCH[0] if name == "REPO" else _REPO_BRANCH[1]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def machines():

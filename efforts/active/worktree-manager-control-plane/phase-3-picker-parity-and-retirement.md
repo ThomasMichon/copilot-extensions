@@ -21,12 +21,9 @@
   parity-restored by #2391). The decision on #6764 makes Worktree Manager canonical, but
   does not by itself guarantee every agent-worktrees-only fix actually made it across before
   the bundled Picker is deleted.
-- **Status:** Step 0 executed and closed (2026-09-15/16, this session) — findings below.
-  Step 2 (delete the bundled Picker) is **not yet safe**: a fresh dependency audit found
-  the `picker_tui/` package is not a self-contained, cleanly-deletable unit — several of
-  its submodules are load-bearing for `agent-worktrees`' own non-TUI CLI commands. See
-  **Step 0 result** and the new **Step 1.5 — Extract-before-delete** section below before
-  attempting Step 2.
+- **Status:** Completed (2026-09-15/16) — the fresh audit closed Step 0, the required
+  extraction closed Step 1.5, the bundled Picker deletion in Step 2 landed safely, and
+  Step 3 validation passed.
 
 ## Step 0 — Audit: what is old-only / new-only since the transplant
 
@@ -77,7 +74,7 @@ worktree`) are in the unrelated AHP session-backend CLI, not `picker_tui/`, and 
 pre-existing on a clean checkout (reproduced with zero local changes). Tracked
 separately, not a blocker for this effort.
 
-## Step 1.5 — Extract-before-delete (found 2026-09-16, blocks Step 2)
+## Step 1.5 — Extract-before-delete (found and closed 2026-09-16)
 
 `picker_tui/` is not a pure TUI package: `agent_worktrees/__main__.py` and
 `agent_worktrees/reciprocal_presentation.py` (both used by non-TUI, non-optional CLI
@@ -167,11 +164,9 @@ this test fails in CI even though the local per-plugin suites look clean -- this
   above — a module used by non-`cmd_picker` code — means "not found yet" isn't the same
   as "confirmed absent").
 
-**Do not attempt Step 2 (delete) until this list is closed out** — either by relocating
-each load-bearing piece, or by re-scoping the specific CLI command that depends on it
-(e.g. deciding `cmd_status_monitor`'s picker-cache warm-up is itself dead weight worth
-dropping, rather than porting it forward) with its own explicit decision, not a silent
-behavior change.
+This list is now closed: the remaining non-TUI pieces were relocated into retained
+`agent_worktrees` modules, and the bundled `picker_tui/` package was then deleted in
+Step 2 without leaving live non-TUI dependencies behind.
 
 *(Original per-file audit method retained below for re-runs; superseded in substance by
 the "Step 0 result" above.)* Compare `plugins/agent-worktrees/src/agent_worktrees/
@@ -200,10 +195,9 @@ exists" isn't the same as "verified true end-to-end" per this step's original ba
 
 ## Step 2 — Execute Phase 6: delete the bundled Picker
 
-**Blocked on Step 1.5 above** — do not delete `picker_tui/` while `frame_health.py`,
-`data_local.py`'s cache-stamping, `pivots.py`, `reciprocal.py`, and (pending
-confirmation) `roster.py` are still load-bearing for non-TUI CLI commands. Once Step 1.5
-is closed out:
+**Completed 2026-09-16.** Once Step 1.5 extracted the remaining non-TUI surfaces, this
+slice deleted the bundled `picker_tui/` package and left `agent-worktrees` using the
+Worktree Manager seam or the install trigger instead of any fallback to dead code:
 
 1. Delete `plugins/agent-worktrees/src/agent_worktrees/picker_tui/` (the whole package) and
    its test tree (`plugins/agent-worktrees/tests/test_picker_tui.py`,
@@ -243,10 +237,7 @@ is closed out:
   transition window).
 - Per the parent effort's Coordination section: **re-confirm no one else has claimed this
   slice on #352 before starting**, and post progress there as you go.
-- **2026-09-16 update:** Step 0 (cross-port audit) is closed — no fixes need porting.
-  Step 2 is blocked on the new Step 1.5 (extract-before-delete); do not attempt the
-  deletion until that list is closed out module-by-module. This was found by grepping
-  every `from .picker_tui...` site in `__main__.py`, not by inspecting `picker_tui/`
-  itself — the same technique should be used to finish classifying `roster.py`,
-  `data_ssh.py`, and `capture.py`, and to double check the "confirmed TUI-only" list
-  before deleting each file.
+- **2026-09-16 update:** The cross-port audit is closed, the extract-before-delete list
+  was worked to completion, and the bundled `picker_tui/` package has now been removed.
+  Keep the audit method above as the repeatable playbook for future copy-then-retire
+  migrations: grep callers first, extract any non-UI survivors, then delete the UI tree.

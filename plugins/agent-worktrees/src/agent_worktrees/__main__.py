@@ -5906,147 +5906,21 @@ def _run_picker_housekeeping() -> None:
 
 
 def _run_new_picker(config: cfg.Config | None, args: argparse.Namespace) -> int:
-    """Run the Textual worktree picker and resolve its launch decision.
+    """Compatibility shim after the bundled picker retired.
 
-    Maps the picker's decision dict onto the existing resume/create/remote
-    code paths. Cleanup/Sync/Stop/profiles actions run **for real** in-TUI
-    (they mutate worktrees / terminal profiles) and never emit a launch
-    decision, so they never reach here. (Their simulated no-op counterparts run
-    only in the explicit ``picker mock`` dev sandbox.)
+    Bare invocations now hand off to the standalone Worktree Manager before
+    this function is ever considered; keep the helper fail-closed if some older
+    path reaches it directly.
     """
-    from . import picker_tui
-
-    # Reap orphaned mux sessions (finalized / gone / untracked) so a dead
-    # worktree is never presented as a live, resumable session (issue #713).
-    # Run it on a background thread so the mux enumeration never delays the
-    # picker appearing -- interaction must not wait on startup housekeeping
-    # (#1432). Best-effort: a reap hiccup never touches the picker.
-    # Avoid a confusing double hop: when this picker is itself running over SSH,
-    # don't fan out to other machines -- show only the local source (no remote
-    # tabs / handoffs). See issue: "a process should know it's accessed via SSH."
-    live = not _in_ssh_session()
-    decision = picker_tui.run_tui_picker(
-        live=live,
-        after_first_refresh=_run_picker_housekeeping,
-    )
-    if not decision:
-        print("Cancelled.")
-        _emit_plan({"action": "none", "exit_code": 0})
-        return 0
-
-    if config is None:
-        config = cfg.load_config()
-    action = decision.get("action")
-    profile = _resolve_profile(config, args)
-
-    if action == "refresh":
-        # The picker's refresh icon (#1430): apply the staged update and
-        # relaunch. The picker runs from the runtime venv the update replaces,
-        # so it can't apply in place -- hand back to the launcher, which applies
-        # then re-execs resolve on the new version.
-        _emit_plan({"action": "refresh"})
-        return 0
-
-    # A selection on another machine hands off over SSH. The picker's target
-    # carries machine *and* env, so resolve the env-specific SSH alias (not the
-    # machine's primary -- see ``_emit_remote_plan_for_env``). The selected
-    # action is forwarded as binstub args so the remote launches **straight
-    # through** into that worktree's interactive session instead of re-opening
-    # its own picker (resume -> ``--worktree-id <id>``; new -> ``--new``).
-    if not decision.get("is_local", True):
-        machine = decision.get("machine") or ""
-        env_label = decision.get("env") or ""
-        opts = decision.get("options") or {}
-        remote_args: list[str] = []
-        if action in ("resume", "restore"):
-            wt_id = decision.get("worktree_id")
-            if wt_id:
-                remote_args = ["--worktree-id", str(wt_id)]
-                if action == "restore":
-                    remote_args.append("--restore")
-                if opts.get("no_mux"):
-                    remote_args.append("--no-mux")
-                if opts.get("bare_resume"):
-                    remote_args.append("--bare-resume")
-        elif action == "new":
-            remote_args = ["--new"]
-            if opts.get("no_mux"):
-                remote_args.append("--no-mux")
-        # Other actions (or a resume with no id) fall back to opening the
-        # remote picker (empty remote_args).
-        rc = _emit_remote_plan_for_env(config, machine, env_label, remote_args)
-        if rc is not None:
-            return rc
-        output.err(f"Unknown or unreachable remote machine: {machine} {env_label}".strip())
-        return 1
-
-    if action in ("resume", "restore"):
-        wt_id = decision.get("worktree_id")
-        if not wt_id:
-            output.err(f"Picker returned a {action} decision with no worktree id.")
-            return 1
-        # The Open sub-menu's No-mux toggle (picker #1343) launches without the
-        # PSMux/TMux wrapper.
-        opts = decision.get("options") or {}
-        if opts.get("no_mux"):
-            args.no_mux = True
-        # Deprecated advanced "Bare resume": create the worktree's mux, but
-        # launch Copilot in HOME with no --resume. The operator finishes with a
-        # manual ``/resume <id>`` (the sub-menu shows the id).
-        if opts.get("bare_resume"):
-            args.bare_resume = True
-        wt_id = _resolve_worktree_id(wt_id)
-        if _relocate_active_project_for_worktree(wt_id):
-            try:
-                config = cfg.load_config()
-            except Exception as e:
-                output.err(str(e))
-                return 1
-        yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
-        if not yaml_path.exists():
-            output.err(f"Worktree not found: {wt_id}")
-            return 1
-        record = tracking.load_record(yaml_path)
-        try:
-            _validate_profile_assignment_config(config)
-        except profile_assignment.ProfileAssignmentError as exc:
-            output.err(str(exc))
-            _emit_plan(
-                {
-                    "action": "error",
-                    "error": str(exc),
-                    "exit_code": 3,
-                }
-            )
-            return 3
-        plan_work_dir = (
-            os.path.expanduser("~")
-            if getattr(args, "bare_resume", False)
-            else record.worktree_path
-        )
-        launch_preflight = _preflight_launch(config, args, plan_work_dir)
-        if launch_preflight.error:
-            return _launch_preflight_error(launch_preflight)
-        if action == "restore" and not _restore_before_resume(record):
-            return 1
-        return _resolve_resume(
-            record,
-            config,
-            args,
-            profile=profile,
-            launch_preflight=launch_preflight,
-        )
-    if action == "new":
-        opts = decision.get("options") or {}
-        if opts.get("no_mux"):
-            args.no_mux = True
-        if opts.get("anchor"):
-            return _resolve_base_repo(config, args, profile=profile)
-        # 'bare' and 'local_model' have no backend yet -- ignored for now.
-        return _resolve_new(config, args, profile=profile)
-
-    output.err(f"Picker returned an unsupported decision: {action!r}")
-    return 1
+    mgr = _usable_worktree_manager()
+    project = None
+    try:
+        project = cfg.active_project()
+    except Exception:
+        project = None
+    if mgr:
+        return _exec_worktree_manager(mgr, project)
+    return cmd_manager_install_trigger(project)
 
 
 def _start_picker_monitor_root():
@@ -11796,7 +11670,7 @@ def _cmd_list_stream(args: argparse.Namespace, records) -> int:
         config = cfg.load_config()
         repo = config.default_repo
         active_paths = _build_active_paths(records, session_ctx)
-        from .picker_tui.data_local import _stamp_from_raw
+        from .picker_support.data_local import _stamp_from_raw
 
         for rec in records:
             info = _classify_one_record(
@@ -12007,7 +11881,7 @@ def _build_list_json_payload(
     # authoritative classify pass, stamp each worktree's session-render cache
     # so a FUTURE --cache-only fast phase on THIS machine reads it directly.
     if getattr(args, "classify", False) and stamp_session_state:
-        from .picker_tui.data_local import _stamp_from_raw
+        from .picker_support.data_local import _stamp_from_raw
 
         for wt_dict, rec in zip(worktrees, records, strict=True):
             _stamp_from_raw(rec, wt_dict, session_ctx)
@@ -12082,7 +11956,7 @@ def cmd_list(args: argparse.Namespace) -> int:
         # so a remote SSH fast phase paints instantly and never re-reads
         # events.jsonl or scans processes. Never-populated -> Unknown.
         if getattr(args, "cache_only", False):
-            from .picker_tui.data_local import _overlay_cached_state
+            from .picker_support.data_local import _overlay_cached_state
 
             worktrees = []
             for rec in records:
@@ -16587,7 +16461,7 @@ def cmd_profiles(args: argparse.Namespace) -> int:
             # cross-machine), computed from the roster candidates. The Picker
             # keys off ``managed`` (False) and renders the default itself, so
             # these targets are for human/JSON legibility.
-            from .picker_tui import roster
+            from . import roster
 
             candidates = [
                 profiles_mod.TargetSel(m, e, kind)
@@ -16829,88 +16703,60 @@ def _terminal_fragment_doctor(machine: str, current: str | None) -> int:
 
 
 def cmd_picker(args: argparse.Namespace) -> int:
-    """Inspect the Textual picker for this machine.
-
-    The Textual picker is the **only supported picker, with no opt-out**.
-    ``status`` reports whether it's effectively in use here (it always is,
-    unless this session is blocked by the Windows-over-SSH ConPTY keyboard
-    limitation, in which case the legacy ANSI picker is used automatically).
-    ``mock`` launches the picker in the mock dev sandbox.
-    """
-    from . import picker_tui
-
+    """Inspect or hand off to the standalone Worktree Manager picker."""
     action = getattr(args, "picker_action", "status")
     as_json = getattr(args, "json", False)
+    mgr = _usable_worktree_manager()
 
     if action == "mock":
-        # Explicit dev sandbox: launch the picker in mock mode -- real data is
-        # shown but every mutating action (Cleanup / Sync / Stop / profiles
-        # Apply) is simulated with no side effects. This is the ONLY sanctioned
-        # way to run the picker's mock behaviors; a normal launch is always
-        # real. Prints the resulting launch decision instead of acting on it.
-        # ``--local`` forces the local-only source (data_local) instead of the
-        # multi-machine SSH source -- needed for an isolated sandbox preview,
-        # where no mesh repo/roster is resolvable (data_ssh would raise).
+        if not mgr:
+            return cmd_manager_install_trigger(cfg.active_project())
+        subcommand = ["picker", "mock"]
+        project = cfg.active_project()
+        if project:
+            subcommand.append(project)
         if getattr(args, "picker_local", False):
-            live = False
-        else:
-            live = not _in_ssh_session()
-        decision = picker_tui.run_tui_picker(live=live, mock_mode=True)
-        if as_json:
-            _json_output({"mock": True, "decision": decision})
-        else:
-            output.info(f"mock picker exited · decision: {decision!r}")
-        return 0
+            subcommand.append("--local")
+        return _exec_worktree_manager(mgr, None, subcommand=subcommand)
 
     if action == "screenshot":
-        # Deterministic headless capture of the picker for auditing: render the
-        # current worktree state to an SVG "screenshot" (or a character grid)
-        # with no live terminal and no human watching. Realizes visions/picker
-        # Features/auditable-testable-rendering.
-        import sys as _sys
-
-        from .picker_tui import capture as _capture
-
-        live = bool(getattr(args, "live", False))
-        fmt = getattr(args, "picker_format", "svg")
+        if not mgr:
+            return cmd_manager_install_trigger(cfg.active_project())
+        subcommand = [
+            "picker",
+            "screenshot",
+        ]
+        project = cfg.active_project()
+        if project:
+            subcommand.append(project)
+        subcommand += ["--format", getattr(args, "picker_format", "svg")]
         out = getattr(args, "out", None)
-        pivot = getattr(args, "picker_pivot", None)
-        wait_pivot = float(getattr(args, "picker_wait", 0.0) or 0.0)
-        if live:
-            from .picker_tui import data_ssh as _source
-        else:
-            from .picker_tui import data_local as _source
-        caps = _capture.capture(
-            _source,
-            live=live,
-            pivot=pivot,
-            wait_pivot=wait_pivot,
-        )
-        content = caps[fmt]
         if out:
-            Path(out).write_text(content, encoding="utf-8")
-            if as_json:
-                _json_output({"screenshot": out, "format": fmt, "bytes": len(content)})
-            else:
-                output.ok(f"picker {fmt} screenshot -> {out} ({len(content)} bytes)")
-        else:
-            _sys.stdout.write(content)
-            if not content.endswith("\n"):
-                _sys.stdout.write("\n")
-        return 0
+            subcommand += ["--out", out]
+        if getattr(args, "live", False):
+            subcommand.append("--live")
+        pivot = getattr(args, "picker_pivot", None)
+        if pivot:
+            subcommand += ["--pivot", pivot]
+        wait_pivot = float(getattr(args, "picker_wait", 0.0) or 0.0)
+        if wait_pivot > 0:
+            subcommand += ["--wait", str(wait_pivot)]
+        return _exec_worktree_manager(mgr, None, subcommand=subcommand)
 
     # status
-    ssh_blocked = _new_picker_blocked_by_ssh()
-    effective = not ssh_blocked
+    effective = mgr is not None
     if as_json:
-        _json_output({"effective": effective, "ssh_fallback": ssh_blocked})
+        _json_output(
+            {
+                "effective": effective,
+                "manager_available": effective,
+                "bundled": False,
+                "install_trigger": not effective,
+            }
+        )
     else:
         print(f"effective:    {str(effective).lower()}")
-        if ssh_blocked:
-            print(
-                "              (Windows-over-SSH auto-fallback to the legacy "
-                "ANSI picker; not user-configurable)"
-            )
+        print("owner:        Worktree Manager" if effective else "owner:        install trigger")
     return 0
 
 
@@ -24011,23 +23857,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Repair only project binstubs (default: both terminal and binstubs)",
     )
 
-    # picker (Textual picker is the only supported picker; no opt-out)
+    # picker (compatibility shim onto the standalone Worktree Manager)
     p = sub.add_parser(
         "picker",
-        help="Inspect the Textual worktree picker for this machine (no opt-out)",
+        help="Inspect or hand off to the standalone Worktree Manager picker",
     )
     p.add_argument(
         "picker_action",
         choices=["status", "mock", "screenshot"],
         nargs="?",
         default="status",
-        help="the Textual picker is the only supported picker, everywhere, "
-        "with no opt-out; status (default) reports whether it's effectively "
-        "in use here (always, unless this session hits the Windows-over-SSH "
-        "ConPTY keyboard limitation, which auto-falls-back to the legacy "
-        "picker); mock launches the picker in the mock dev sandbox (real "
-        "data, simulated actions, no side effects); screenshot renders the "
-        "picker headlessly and captures it for auditing",
+        help="status (default) reports whether the standalone Worktree Manager "
+        "owns the picker seam here; mock and screenshot hand off to that "
+        "manager when it is installed, otherwise the install trigger is shown",
     )
     p.add_argument("--json", action="store_true", help="Emit a JSON result")
     p.add_argument(
@@ -26156,7 +25998,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         runtime_lag = []
 
     from . import config_dropins
-    from .picker_tui import pivots as pivot_registry
+    from .picker_support import pivots as pivot_registry
 
     pivot_report = pivot_registry.scan_pivot_registry(materialize=False)
     pivot_pruned: list[dict[str, object]] = []
@@ -26808,6 +26650,7 @@ _all_tracking_dirs = session_tracking_cli._all_tracking_dirs
 _find_tracking_file = session_tracking_cli._find_tracking_file
 _find_tracking_file_exact = session_tracking_cli._find_tracking_file_exact
 _find_tracking_file_by_session = session_tracking_cli._find_tracking_file_by_session
+_project_for_tracking_file = session_tracking_cli._project_for_tracking_file
 _relocate_active_project_for_worktree = session_tracking_cli._relocate_active_project_for_worktree
 cmd_list_sessions = session_tracking_cli.cmd_list_sessions
 cmd_head_session = session_tracking_cli.cmd_head_session
@@ -27933,14 +27776,10 @@ def _bundled_picker_available() -> bool:
     front-end 6c removes) rather than a version flag, so the fallback flips
     automatically the moment the Picker is gone -- no dispatch change needed.
     """
-    import importlib.util
-
     try:
-        return importlib.util.find_spec("agent_worktrees.picker_tui") is not None
+        return (Path(__file__).resolve().parent / "picker_tui" / "__init__.py").exists()
     except Exception:
-        # A parent-package import error is not a clean "absent"; keep today's
-        # Picker behavior rather than surfacing the install trigger spuriously.
-        return True
+        return False
 
 
 def cmd_manager_install_trigger(project: str | None) -> int:

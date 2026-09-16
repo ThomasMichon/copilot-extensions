@@ -67,7 +67,14 @@ def test_remove_system_retains_record_when_worktree_removal_fails(
              return_value=[record.worktree_path],
          ), \
          patch("agent_worktrees.git_ops.remove_worktree", return_value=False), \
-         patch("agent_worktrees.__main__._json_output") as json_output:
+         patch("agent_worktrees.__main__._json_output") as json_output, \
+         patch(
+             "agent_worktrees.__main__._json_error",
+             side_effect=lambda message, exit_code=1: (
+                 json_output({"version": 1, "error": message}),
+                 exit_code,
+             )[1],
+         ):
         result = cli.cmd_remove_system(args)
 
     assert result == 1

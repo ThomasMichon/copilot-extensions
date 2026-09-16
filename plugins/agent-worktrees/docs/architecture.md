@@ -1967,10 +1967,9 @@ tracked the manual `sel` cursor. NF5-5 replaces it with a genuine native
 `OptionList` -- built the same swap-behind-a-toggle way NF1-NF5 were, so it can be
 soaked before it becomes the default.
 
-- **Toggle.** `AGENT_WORKTREES_PICKER_NATIVE_LIST` (default OFF). `compose()` yields
-  `_PickerNativeData` (an `OptionList` subclass) in place of the text-line
-  `_PickerBodyData` for the `nf-body-data` region; default OFF keeps the text-line
-  body authoritative (golden byte-identical, full suite green).
+- **Historical toggle.** During the soak this shipped behind an opt-in
+  environment toggle, swapping `_PickerNativeData` (an `OptionList` subclass)
+  in place of the text-line `_PickerBodyData` for the `nf-body-data` region.
 - **Options from the same rows.** `_PickerNativeData` builds its options from a new
   `_build_data_vrows(width, sel)` (data-only -- it renders no chrome, so it never
   drives `build_chrome`/`tab_bar` before `setup()`), passing a *sentinel* sel so the
@@ -1997,9 +1996,8 @@ soaked before it becomes the default.
   soaked, later slices port sections/multiselect/pulse and flip the default.
 
 **NF5-5 slice 2 -- byte-identical grid parity + width fix.** A parity pass
-(`test_native_list_grid_parity`) captures the home screen with the native list OFF
-(text-line) and ON (OptionList) and asserts the normalized character grids are
-**identical** -- and equal to the golden. It surfaced one real bug: the native
+captured the home screen in both implementations and asserted the normalized
+character grids were **identical** -- and equal to the golden. It surfaced one real bug: the native
 options were first built at the `size.width or 100` *fallback* (the screen wasn't
 sized yet) and never rebuilt at the real width, so the full-width section rules were
 100 cols vs 118. Fixed by adding `size.width` to the rebuild **signature** and
@@ -2023,18 +2021,15 @@ native behaviours to weigh at the flip: single-click **activates**
 (native select) vs the text body's select-then-double-click, and arrow-up from the
 top data row stays in the list (Tab reaches the chrome) rather than crossing up. Per-row **checkboxes are now always shown** (`WorktreesView.build_data` no longer hides the glyph until multi-select is active) -- with mouse support the box is a discoverable, clickable multi-select affordance at rest; the golden was regenerated and parity holds (both bodies share `build_data`). In the native list those checkboxes are also **clickable** (#88 NF5-5): a mouse press in the 2-cell gutter toggles that row's multi-select (`_on_mouse_down`) and suppresses the ensuing activation, while a click on the row body activates -- so single-click still opens a row, and the gutter is the mouse multi-select affordance (`test_native_list_checkbox_click_toggles`).
 
-**NF5-5 flip -- native list is the default.** `_native_list_enabled()` now defaults
-**ON**: `PickerScreen` composes `_PickerNativeData` (native focus/cursor/scroll/click,
-sticky section header, clickable checkbox gutter) for the data region unless
-`AGENT_WORKTREES_PICKER_NATIVE_LIST` is falsey (the rollback hatch -> the legacy
-text-line `_PickerBodyData`). Because the native list was built to byte-identical grid
-parity, the flip is seamless: the full suite is green in the default (native) mode
-(1719). The forced-ON parity run surfaced the exact test migration -- eight tests: the
-text-line-specific NF3/NF4/compose tests pin `NATIVE_LIST=0` (they still validate the
-opt-out body), the tasks/registered tests gained an explicit `refresh()` (the native
-list rebuilds on refresh, where the text-line body always re-rendered) and the rebuild
-signature became pivot-aware (tasks/maintenance row counts), the "disabled by default"
-test became `test_native_list_default_with_opt_out`, and `on_option_list_option_highlighted`
-now ignores highlight events fired while the list isn't focused (so a modal close can't
-clobber a programmatic `sel`). The text-line body remains as the opt-out until it is
-retired.
+**NF5-5 flip -- native list became the default.** Once parity was proven, the
+native body became the standard render path: `_PickerNativeData` owns focus,
+cursor, scroll, sticky section headers, and clickable checkbox gutters. The
+temporary rollback hatch and the legacy text-line body were later retired when
+the Picker moved to `worktree-manager/`.
+
+> **Retirement note (Phase 6).** These NF sections remain as the design record
+> for the original bundled Picker implementation. The canonical Picker code now
+> lives in `worktree-manager/src/worktree_manager/production_picker/picker_tui/`,
+> and the bundled `plugins/agent-worktrees/src/agent_worktrees/picker_tui/`
+> package was deleted after parity landed. agent-worktrees now owns only the
+> engine boundary and the non-UI support primitives.

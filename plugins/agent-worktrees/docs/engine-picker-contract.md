@@ -1,11 +1,11 @@
 # The engine ↔ Picker `--json` contract
 
-The interactive front-end (the **Worktree Manager**'s Picker, Phase 6b — and the
-still-bundled Picker until Phase 6c) reaches the `agent-worktrees` engine **only**
-by shelling out to its machine-readable CLI verbs: `<project> <verb> --json`,
-never `import agent_worktrees`. That process boundary is what keeps the coupling
-one-way and dependency-free (the Picker owns no worktree logic or state), and it
-is why the TUI framework (Textual) stays entirely out of the plugin engine.
+The interactive front-end (the **Worktree Manager**'s Picker) reaches the
+`agent-worktrees` engine **only** by shelling out to its machine-readable CLI
+verbs: `<project> <verb> --json`, never `import agent_worktrees`. That process
+boundary is what keeps the coupling one-way and dependency-free (the Picker owns
+no worktree logic or state), and it is why the TUI framework (Textual) stays
+entirely out of the plugin engine.
 
 ## Provider-backed source registry
 
