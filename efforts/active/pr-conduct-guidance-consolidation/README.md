@@ -80,7 +80,7 @@ Full audit (repo/file/what's restated) recorded in this session's transcript
 ## Plan
 
 ### Phase 1 -- agent-worktrees: dynamic PR-conduct guidance assembly
-- [ ] Add a sessionStart computation (new script, e.g.
+- [x] Add a sessionStart computation (new script, e.g.
       `scripts/write-pr-conduct-guidance.{ps1,sh}` + Python body) that
       resolves, for the current repo: `pr.enabled`, `pr.required`,
       `pr.merge_actor`/resolved `pr-profile`, `pr.roles` (if role-aware), and
@@ -89,15 +89,23 @@ Full audit (repo/file/what's restated) recorded in this session's transcript
       naming the resolved facts and the default-conduct rule (already
       documented statically in `pr-workflow.md` as of today; this phase makes
       the *per-repo resolved facts* dynamic, not the policy prose itself).
-- [ ] Register the session-state destination via a static pointer
+      Landed as a `PR:` line in the existing `session_context.py` bounded
+      context (no new hook needed -- reused the plugin's existing
+      Checkout/State/Related sessionStart writer). Role-aware `pr.roles`
+      overlay and `related.yaml` relationship were deferred (they need a
+      live caller-identity/network resolution the rest of this module
+      deliberately avoids); noted as a Phase 5 follow-on candidate.
+- [x] Register the session-state destination via a static pointer
       instruction (same `instruction-projections.json` pattern as existing
       plugins), so every repo that has `agent-worktrees` active gets it
-      without per-repo authoring.
-- [ ] Unit tests for the resolution + rendering (mirroring
+      without per-repo authoring. N/A -- reused the existing
+      `worktree-context-guide` projection/pointer already wired for this
+      context writer; no new projection needed.
+- [x] Unit tests for the resolution + rendering (mirroring
       `dotfiles-harness`'s `test_contribution_boundary_hook.py` shape:
       manifest/hook contract, payload emission, budget enforcement, unsafe
       session-id rejection).
-- [ ] Bump `plugin.json`/`pyproject.toml`/`marketplace.json` versions per
+- [x] Bump `plugin.json`/`pyproject.toml`/`marketplace.json` versions per
       `CONTRIBUTING.md`; run `tools/check-version-bump.py` +
       `tools/run-plugin-tests.py agent-worktrees`.
 
@@ -165,3 +173,24 @@ _Pending._
   `pr-workflow.md`/`SKILL.md` default-conduct update, PR #2796).
 - Not started: no implementation yet. Next session should begin Phase 1
   (sessionStart PR-conduct guidance computation in agent-worktrees).
+
+### 2026-09-16 -- Phase 1 landed
+- Extended `session_context.render_registry_context` with a `PR:` line
+  (profile + enabled/required/merge_actor) resolved live via the existing
+  `pr_config._pr_flow_profile`/`.pr` config -- no new hook plumbing needed;
+  the plugin already had a bounded sessionStart context writer
+  (Checkout/State/Related), so this reuses it rather than adding a parallel
+  mechanism.
+- Added unit tests (`_pr_summary` resolution, graceful empty on no
+  `default_repo`, full-render inclusion) plus a regression check that
+  existing `SimpleNamespace()`-config tests are unaffected (empty PR line).
+- Validated: `python tools/run-plugin-tests.py agent-worktrees` -- targeted
+  suite green (11 passed/3 skipped); full suite hit two **pre-existing**,
+  unrelated issues confirmed present on unmodified `main` (a sub-suite
+  wall-clock-limit timeout and a flaky `test_handoff_trace.py` concurrency
+  assertion) -- not caused by this change.
+- Landed via PR #2811 (`pr-self-merge`), version bumped
+  1.5.5-dev129 -> dev130 / marketplace 1.7.7-dev114 -> dev115.
+- Next: Phase 2 (trim odsp-web-harness's `AGENTS.md`/`CONTRIBUTING.md`
+  /`REVIEW.md`/`.agent-worktrees/config.yaml` restatement down to genuinely
+  unique policy, pointing at the now-dynamic PR-conduct line instead).
