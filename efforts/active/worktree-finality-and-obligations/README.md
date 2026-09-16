@@ -494,39 +494,79 @@ Grounding (confirmed before proposing, not assumed):
   CLI host -- confirm before relying on it, since building a reclaim path on a
   wrong assumption here would misfire.
 
-Plan (not started):
-- [ ] Add a `session` `ResourceClaim` kind (alongside
-  `worktree|codespace|container|ssh|workdir|pr`) that a worktree holds on its
-  own live Copilot session id -- outbound, not a second `sessions:` list.
-- [ ] `sessionStart` opens/refreshes the claim (active) for the current
-  session id when CWD resolves to a tracked worktree.
-- [ ] Settle-on-finalize: a successful `finalize` settles (not releases) the
-  *current* session's claim as part of its existing cascade, mirroring how it
-  already settles the parent's claim on this worktree.
-- [ ] Settle-on-handoff: the handoff-cutover lifecycle (already tracks
-  predecessor/successor sessions) settles the predecessor's session claim on
-  successful cutover -- reuse that machinery rather than re-deriving handoff
-  completion here.
-- [ ] `sessionEnd` releases the claim outright (a clean process exit, not just
-  "safe").
-- [ ] A `userPromptSubmitted` hook: if a new prompt arrives on a session whose
-  claim was just settled/released (finalize completed, or handoff cut over),
-  reopen it -- this is the mechanism that resolves the "user starts another
-  turn after finalizing" case the operator flagged, and composes with the
-  existing `reopen_finalized_owner` transaction (Phase 2) rather than
-  duplicating it.
-- [ ] `finalize` gains an advisory (not hard-blocking) check: if OTHER live
-  session claims exist on this worktree besides the current one, name them
-  (session ids) and ask the operator whether to ignore or sweep for
-  follow-ups, rather than silently finalizing out from under a second live
-  session or silently ignoring it.
-- [ ] Reuse (not duplicate) the existing `claims sweep` never-wedge reclaim for
-  a session claim whose process is confirmed gone -- a crashed/killed session
-  must not wedge finalize forever, same invariant as every other claim kind.
-- [ ] Confirm the `/clear`-vs-`/new` assumption above against the current host
-  before relying on it for the reclaim path; degrade to "leave it active,
-  surface it at finalize time" if unconfirmed, per the never-fabricate-a-
-  verdict discipline the claim ledger already follows elsewhere.
+Plan (designed 2026-09-16; not yet built -- see the matching Journal entry for
+the source references each bullet below is grounded against):
+- [ ] Add `"session"` to `tracking.ResourceKind` (`tracking.py:380`, currently
+  `worktree|codespace|container|ssh|workdir|pr|task`); reuse `ResourceClaim`
+  as-is (`kind="session"`, `ref=<session_id>`, `state` cycling
+  `active -> at-rest -> released` exactly like every other kind) -- no new
+  dataclass, no second `sessions:`-shaped list.
+- [ ] `tracking.register_session()` (tracking.py:4823) opens a `session` claim
+  (`state="active"`, `created_at` = the call's `started_at`) on
+  `record.resources` the first time a session id appears with no existing
+  `session`-kind claim for that `ref`, alongside its existing `SessionEntry`
+  append/update -- not a second registration path.
+- [ ] `tracking.deregister_session()` (tracking.py:5115) releases
+  (`state="released"`) the matching `session`-kind claim exactly when
+  `_end_session_activation` reports a real end -- the same guard that today
+  only triggers `stop_fsmonitor_daemon`; a clean process exit, not just "safe".
+- [ ] `tracking.link_handoff()` (tracking.py:~3567, the
+  `predecessor.state = "handed-off"` assignment) also settles
+  (`state="at-rest"`) the predecessor's `session`-kind claim in the same
+  mutation, before `save_record` -- reuses the existing handoff-cutover
+  completion point instead of a new hook or a re-derivation of handoff
+  completion.
+- [ ] `finalize.validate_and_finalize()` gains a new step,
+  `_settle_current_session_claim(record, current_session_id)`, called right
+  after `tracking.seal_worktree_identity()` and before
+  `_assert_obligations_settled()`: settles (`at-rest`) the *current* session's
+  own `session`-kind claim. Current session id resolves the same way
+  `session_projection`/`hook_client` already do (`COPILOT_AGENT_SESSION_ID`
+  first, falling back to `record.resolved_head_session`). This makes
+  finalize's own settlement responsible for its own claim, matching
+  "settles on finalize" without an extra operator step.
+- [ ] `finalize._assert_obligations_settled()` (finalize.py:1136) excludes
+  `kind == "session"` from its general hard-blocking
+  `unsettled = [c for c in record.resources if c.is_unsettled]` check (every
+  other resource kind keeps blocking exactly as today). A new, separate,
+  **advisory-only** helper, `_warn_other_live_session_claims(record,
+  current_session_id)`, lists any OTHER still-`active` `session`-kind claim by
+  session id via `output.warn` and never returns `False` -- matches the
+  Plan's "advisory (not hard-blocking)" wording precisely, and is not gated
+  behind `--abandon` (there is nothing to abandon; it is informational).
+- [ ] Register a new `userPromptSubmitted` hook entry in
+  `plugins/agent-worktrees/hooks.json` (there is none today -- confirmed by
+  reading the file; this is new plumbing, not a rewire), dispatched through
+  `scripts/hook_client.py` the same way `sessionStart`/`sessionEnd` already
+  are, to a new command (extend `session-lifecycle` rather than adding a
+  sibling top-level verb) that: resolves worktree + session id from CWD/env
+  exactly like `register_session` does; if the matching `session`-kind claim
+  reads `at-rest`/`released` (a just-settled/just-ended session receiving a
+  further prompt with the SAME session id -- i.e. arriving before a genuinely
+  new `sessionStart` fires), flips it back to `active`, and if
+  `record.status` is `finalized`, calls the existing Phase 2
+  `reopen_finalized_owner` transaction rather than re-deriving worktree-level
+  reopen.
+- [ ] Before wiring the reopen path to fire automatically, independently
+  confirm the operator-asserted `/clear`-vs-`/new` semantics (does `/new`
+  truly suppress `sessionEnd`, and does `userPromptSubmitted` truly still fire
+  with the SAME session id after a bare `/clear`?) against the current CLI
+  host -- `docs/architecture.md`'s `additionalContext` resume-robustness note
+  is adjacent evidence, not confirmation. If still unconfirmed when this
+  phase is implemented, ship the claim state machinery (open/settle/release)
+  without the auto-reopen hook, and instead let a settled-but-still-active
+  session surface at the next `finalize`'s advisory check -- degrade to
+  "leave it active, surface it at finalize time," never fabricate the verdict.
+- [ ] `sweep.claim_gone()` / `sweep.claim_safe()` (sweep.py:397/415) add a
+  `kind == "session"` branch that is **local**, not lease-mirrored (unlike
+  `_LEASEABLE_KINDS`, since a Copilot session's process lives on the same
+  machine as the worktree that claims it): both resolve to `True` when the
+  referenced session id's `SessionEntry` has no live process (a
+  `sessions.worktree_has_live_session`-shaped pid check, scoped to that one
+  entry rather than "any session on the record"). This is the never-wedge
+  path for the crashed/killed-session case the Plan calls out -- a claim from
+  a session that never got to fire `sessionEnd` must not wedge finalize
+  forever, same invariant as every other claim kind.
 
 ### Phase 9 - Decompose derived status into sub-state facts with pursued freshness
 
@@ -703,11 +743,23 @@ either.
   sub-line) carries the marker suffix, freed up by iconifying the
   `RELATION` column (7 truncated text cells -> 1 icon cell). Every Phase 9
   Plan bullet is now checked off.
-- [ ] **Session-claim lifecycle** (Phase 8, proposed): a worktree's own live
-  Copilot session is a held claim; it settles on finalize, settles on a
-  successful handoff cutover, releases on `sessionEnd`, and reopens on a
-  `userPromptSubmitted` event after a premature settle; `finalize` names any
-  OTHER live session claims and asks before proceeding. Not started.
+- [ ] **Session-claim lifecycle** (Phase 8, designed 2026-09-16): a fresh
+  `sessionStart` in a tracked worktree yields exactly one `active`
+  `session`-kind `ResourceClaim` whose `ref` is that session id;
+  `finalize` always settles (never blocks on) its OWN session's claim to
+  `at-rest`, leaving session-claims on other worktrees untouched; a handoff
+  cutover (`link_handoff`) settles the predecessor's claim to `at-rest` in the
+  same transaction that flips `SessionEntry.state` to `handed-off`; a clean
+  `sessionEnd` releases the claim to `released`; `finalize` run while a second
+  `session`-kind claim is still `active` prints an advisory naming it and
+  still completes (non-blocking, no `--abandon` needed); `sweep`'s
+  never-wedge reclaim resolves a crashed session's stale `active` claim to
+  gone/safe locally (no cross-machine lease mirror, unlike `codespace`/
+  `container`/`task`) without operator confirmation, same invariant as every
+  other claim kind; the `userPromptSubmitted` reopen hook only ships once the
+  `/clear`-vs-`/new` semantics are independently confirmed against the
+  current CLI host, and degrades to a finalize-time advisory otherwise. Not
+  started (design only; see Plan and the 2026-09-16 Journal entry).
 - [x] **Reopen:** adding a new claim to a retained finalized worktree succeeds,
   changes lifecycle state away from finalized (to `active`), and immediately
   removes prune eligibility (already covered by Phase 1's held-claims fix).
@@ -1676,4 +1728,64 @@ The approved design is the faceted model in [design.md](design.md):
   bullet is checked off. The effort's remaining open item is Phase 8
   (Session-claim lifecycle), still just a proposal (not reviewed or
   built).
+
+### 2026-09-16 - Phase 8 (Session-claim lifecycle) designed, not yet built
+
+- Read Phase 8's Plan bullet and its Validation Plan bullet in full before
+  designing (both existed from the 2026-09-14 proposal). Cross-referenced
+  every piece of already-built machinery the proposal names:
+  - `tracking.ResourceClaim`/`ResourceKind` (`tracking.py:380,499`) --
+    confirmed `"task"` was already added as a recent kind, making `"session"`
+    a straightforward sibling addition rather than a new mechanism.
+  - `tracking.register_session`/`deregister_session` (tracking.py:4823,5115)
+    -- confirmed exactly where a fresh `SessionEntry` is appended/updated and
+    where `_end_session_activation` detects a real end (today only used to
+    call `stop_fsmonitor_daemon`).
+  - `tracking.link_handoff` (~line 3567) -- confirmed this is the single
+    place `predecessor.state` flips to `"handed-off"` on a successful
+    cutover; the natural settle-on-handoff point.
+  - `finalize._assert_obligations_settled` (finalize.py:1136) and
+    `validate_and_finalize` (finalize.py:1334) -- confirmed the existing
+    resource-obligation gate is unconditionally hard-blocking with no
+    kind-specific carve-out today; session claims need one, since finalize
+    must settle its OWN session's claim rather than being blocked by it, and
+    must only *advise* (not block) on other sessions' claims.
+  - `plugins/agent-worktrees/hooks.json` -- confirmed there is genuinely no
+    `userPromptSubmitted` entry today (read the full file), matching the
+    proposal's "new plumbing, not a rewire" framing.
+  - `session_catalog._maybe_reap_fsmonitor` -- read as the precedent pattern
+    for "a resident sweep settles/releases a claim-like thing on an observed
+    liveness transition"; concluded the session-claim reopen is better
+    modeled as a hook-triggered edge transition (`userPromptSubmitted`) than
+    a resident-sweep level check, since the trigger is a specific host event
+    the operator described, not a periodic tick.
+  - `sweep.claim_gone`/`claim_safe` (sweep.py:397,415) and
+    `lease_disposition_of` -- confirmed the existing kind dispatch
+    distinguishes a `"worktree"` kind (locally provable), `_LEASEABLE_KINDS`
+    (cross-machine, lease-mirrored: `codespace`/`container`/`task`), and
+    `"pr"`. A `session` claim is local like `"worktree"`, not
+    lease-mirrored -- a Copilot session's process lives on the same machine
+    as the worktree holding the claim, so its never-wedge reclaim needs a new
+    local branch, not a `_LEASEABLE_KINDS` addition.
+- Wrote the concrete design directly into this doc's Plan (replacing the
+  2026-09-14 proposal bullets with specific function/file-name bullets,
+  mirroring Phase 9's bullet style) and Validation Plan (replacing the
+  restated-proposal bullet with concrete acceptance criteria). Key design
+  choices: reuse `ResourceClaim` as-is for the new `session` kind (no new
+  dataclass); make the CURRENT session's finalize-time settlement a new,
+  narrow helper rather than folding it into the existing all-resources
+  hard-block; keep the OTHER-live-session check strictly advisory per the
+  proposal's own wording; gate the `userPromptSubmitted` auto-reopen behind
+  an explicit `/clear`-vs-`/new` confirmation step still outstanding from the
+  original proposal, with an explicit degrade path if that confirmation never
+  lands before implementation.
+- Did **not** implement any code this session -- the operator's own framing
+  ("start designing that flow in a handoff") scoped this session to design,
+  written into the effort doc, not full implementation. Left the Plan/
+  Validation Plan bullets unchecked; Phase 8 remains the effort's only open
+  phase. A follow-up handoff should pick up at "implement in the same
+  small-slice pattern as Phase 9," per the Plan's own ordering, starting with
+  the `ResourceKind` addition and `register_session`/`deregister_session`
+  wiring (the two lowest-risk, most mechanical bullets) before the
+  `finalize` gate split and the new `userPromptSubmitted` hook.
 
