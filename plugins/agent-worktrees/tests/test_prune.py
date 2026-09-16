@@ -911,3 +911,44 @@ class TestInterpretDescriptorPayload:
         assert interpreted["final"] is False
         assert interpreted["action_disposition"] == "blocked"
 
+    def test_realistic_v1_shaped_payload_is_never_trusted(self):
+        # worktree-finality-and-obligations Phase 9: a GENUINE pre-Phase-9
+        # (v1) descriptor -- top-level evidence_mode/evidence_complete, no
+        # facts key at all -- simulates an older agent-worktrees instance's
+        # descriptor reaching a newer consumer in a mixed-version fleet.
+        # Must degrade the same way a version-number-only mismatch does,
+        # not just when the version field happens to differ.
+        v1_payload = {
+            "version": 1,
+            "computed_at": "2026-01-01T00:00:00",
+            "evidence_mode": "refreshed",
+            "evidence_complete": True,
+            "base_state": "COMPLETED",
+            "label": "FINAL",
+            "style": "final",
+            "compact": "FINAL",
+            "git": {"upstream_complete": True, "dirty": 0, "ahead": 0},
+            "claims": {"held": 0},
+            "follow_ups": {"open": 0},
+            "blockers": [],
+            "closure": {"final": True},
+            "action": {"disposition": "safe", "bucket": "clean"},
+        }
+        interpreted = prune.interpret_descriptor_payload(v1_payload)
+        assert interpreted["supported"] is False
+        assert interpreted["final"] is False
+        assert interpreted["action_disposition"] == "blocked"
+        assert "unsupported-descriptor" in interpreted["reason"]
+
+    def test_v2_payload_missing_facts_key_still_interprets_via_closure_action(self):
+        # interpret_descriptor_payload only ever reads version/closure/action
+        # -- it never inspects `facts` -- so a facts-less v2 payload is not,
+        # by itself, a new hazard: the version check is the whole mixed-
+        # version safety net here, not per-field validation. Documents this
+        # invariant explicitly rather than leaving it implicit.
+        payload = self._final_payload()
+        del payload["facts"]
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is True
+        assert interpreted["final"] is True
+
