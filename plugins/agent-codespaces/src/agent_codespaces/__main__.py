@@ -2080,7 +2080,12 @@ async def _warm_remote_auth_cache(
     hosts plus the ADO REST/feed bare-token helpers. Failures are debug-only and
     never block the connect.
     """
-    from .auth_preflight import REMOTE_LIST_COMMAND, host_from_url, parse_remote_hosts
+    from .auth_preflight import (
+        ADO_REST_RESOURCE,
+        REMOTE_LIST_COMMAND,
+        host_from_url,
+        parse_remote_hosts,
+    )
 
     async def _run_remote(cmd: str, *, command_timeout: float) -> str:
         wrapped = f"bash -l -c {shlex.quote(cmd)}"
@@ -2110,7 +2115,9 @@ async def _warm_remote_auth_cache(
             "| ado-auth-helper get >/dev/null 2>/dev/null || true"
         )
     commands.extend([
-        "azure-auth-helper get-access-token >/dev/null 2>/dev/null || true",
+        "ado-auth-helper get-access-token "
+        f"--resource {shlex.quote(ADO_REST_RESOURCE)} "
+        ">/dev/null 2>/dev/null || true",
         "ado-auth-helper get-access-token >/dev/null 2>/dev/null || true",
     ])
     command = relay_env + " " + "; ".join(commands)

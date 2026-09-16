@@ -9,8 +9,8 @@ tunnel:
   tunnel to the host's credential relay (and on to Git Credential
   Manager). Installed to ``~/.local/bin/ado-auth-helper-relay``.
 
-- ``ado-auth-helper-wrapper`` -- a smart **Node** shim installed as both
-  ``~/ado-auth-helper`` and ``~/azure-auth-helper``. When
+- ``ado-auth-helper-wrapper`` -- a smart **Node** shim installed as
+  ``~/ado-auth-helper``. When
   ``LC_GIT_CREDENTIAL_RELAY`` is set (or the tunnel port is reachable) it
   delegates to ``ado-auth-helper-relay``; otherwise it ``require()``s the
   REAL VS Code extension ``auth-helper.js`` (discovered at runtime), mirroring
@@ -222,6 +222,7 @@ def _azure_auth_helper_repair_command() -> str:
         'else rm -f "$HOME/azure-auth-helper"; fi; '
         'fi; '
         'if [ "$_repaired_azure_helper" = 1 ] && '
+        '[ ! -f "$HOME/azure-auth-helper" ] && '
         '[ -L "$HOME/.local/bin/azure-auth-helper" ] && '
         '[ "$(readlink "$HOME/.local/bin/azure-auth-helper")" = "$HOME/azure-auth-helper" ]; then '
         'rm -f "$HOME/.local/bin/azure-auth-helper"; fi'

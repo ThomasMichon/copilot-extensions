@@ -90,6 +90,7 @@ class TestProvisionCommand:
             '"$HOME/azure-auth-helper"'
         ) in cmd
         assert 'else rm -f "$HOME/azure-auth-helper"; fi' in cmd
+        assert '[ ! -f "$HOME/azure-auth-helper" ]' in cmd
         assert '[ -L "$HOME/.local/bin/azure-auth-helper" ]' in cmd
         assert 'rm -f "$HOME/.local/bin/azure-auth-helper"' in cmd
 
@@ -118,12 +119,14 @@ class TestProvisionCommand:
             check=True,
         )
 
-        assert not link.is_symlink()
         if with_backup:
             assert helper.read_text(encoding="utf-8") == "#!/native/node\nnative\n"
             assert os.access(helper, os.X_OK)
+            assert link.is_symlink()
+            assert link.resolve() == helper.resolve()
         else:
             assert not helper.exists()
+            assert not link.is_symlink()
 
     @pytest.mark.skipif(
         os.name == "nt" or shutil.which("bash") is None,
