@@ -29,6 +29,17 @@ _LIVE_RETRY_STEPS = 4
 _FSMONITOR_REAP_COOLDOWN_S = 300.0
 _MAX_FSMONITOR_REAP_TRACKED = 2048
 
+# Repo-scoped freshness sweep throttling (worktree-finality-and-obligations
+# Phase 9; see _maybe_refresh_repo_freshness): bound how often ANY record of
+# the same repo triggers a real `git fetch` for the freshness ledger, and cap
+# the per-repo cooldown map the same way the fsmonitor reap cooldown map is
+# capped.
+_REPO_FRESHNESS_SWEEP_COOLDOWN_S = 60.0
+_MAX_REPO_FRESHNESS_TRACKED = 512
+#: Bound each sweep fetch so one stalled `git fetch` (network down, a slow
+#: remote) cannot hang the resident monitor's tick.
+_REPO_FRESHNESS_FETCH_TIMEOUT_S = 15.0
+
 
 def _path_key(path: str) -> str:
     return os.path.normcase(os.path.normpath(path))
@@ -132,6 +143,7 @@ class ResidentSessionReconciler:
         self._projection_cooldown: dict[tuple[str, str, str], int] = {}
         self._step_number = 0
         self._fsmonitor_reap_checked: dict[str, float] = {}
+        self._repo_freshness_checked: dict[str, float] = {}
 
     def observe_mux(self, session_names: set[str]) -> None:
         """Publish a successful full mux observation for later record stamps."""
@@ -404,6 +416,63 @@ class ResidentSessionReconciler:
             return
         tracking.stop_fsmonitor_daemon(record.worktree_path)
 
+    def _maybe_refresh_repo_freshness(
+        self, record: tracking.WorktreeRecord,
+    ) -> None:
+        """Best-effort, cooldown-throttled per-repo freshness-ledger sweep
+        (worktree-finality-and-obligations Phase 9).
+
+        Complements the ad hoc writer wired into `__main__.py`'s
+        closure-descriptor call sites (a fetch that happens to occur there
+        because a caller asked for `--fetch`) with an ACTIVE sweep: this
+        resident monitor proactively fetches once per repo per cooldown
+        window, so a repo's `upstream_containment` freshness stays current
+        for every one of its worktrees even when none of them ever pass
+        `--fetch` themselves (the default `status-interval` poll never
+        does). An addition to the existing resident accelerator's own tick,
+        not a second daemon or thread.
+
+        Unlike `_maybe_reap_fsmonitor`, this does NOT gate on mux liveness --
+        git-fetch freshness has nothing to do with session liveness, and
+        gating it the same way would silently stop sweeping whenever a mux
+        observation goes stale, defeating the point of an ACTIVE sweep.
+        Throttled per-REPO (not per-worktree-id, unlike the fsmonitor reap
+        cooldown) via `_repo_freshness_checked`, so N worktrees of the same
+        repo cost one `git fetch` per cooldown window, not N. Skips the
+        fetch entirely when the ledger is already fresh (another sweep tick,
+        or a `__main__.py` call, beat this one to it), so this never adds a
+        redundant fetch on top of one that already happened moments ago.
+        Never raises -- a missing/timed-out git, a removed directory, or a
+        failed fetch are all silently fine outcomes; the ledger entry simply
+        stays (or goes) stale until a later successful attempt.
+        """
+        repo = record.repo
+        if not repo or not record.worktree_path:
+            return
+        now = time.monotonic()
+        last = self._repo_freshness_checked.get(repo)
+        if last is not None and now - last < _REPO_FRESHNESS_SWEEP_COOLDOWN_S:
+            return
+        self._repo_freshness_checked[repo] = now
+        while len(self._repo_freshness_checked) > _MAX_REPO_FRESHNESS_TRACKED:
+            self._repo_freshness_checked.pop(
+                next(iter(self._repo_freshness_checked)))
+        if tracking.is_repo_fetch_fresh(repo):
+            return
+        if not os.path.isdir(record.worktree_path):
+            return
+        from . import git_ops
+        try:
+            result = git_ops.git(
+                "fetch", "origin", "--quiet",
+                cwd=record.worktree_path, check=False, capture=True,
+                timeout=_REPO_FRESHNESS_FETCH_TIMEOUT_S,
+            )
+        except Exception:
+            return
+        if result.returncode == 0:
+            tracking.record_repo_fetch_confirmed(repo)
+
     def _index_record(self, project: str, yaml_path: Path) -> dict:
         result = {"records": 0, "heads": 0, "mux": 0, "registered_mux": 0}
         try:
@@ -412,6 +481,11 @@ class ResidentSessionReconciler:
             return result
         if record.platform != cfg.detect_platform() or not record.worktree_path:
             return result
+
+        # Phase 9: unconditional (not mux-gated -- see the method's own
+        # docstring for why) per-repo freshness sweep, runs for every record
+        # regardless of status/mux freshness.
+        self._maybe_refresh_repo_freshness(record)
 
         mux_fresh = (
             self._live_mux is not None

@@ -345,6 +345,200 @@ def test_fsmonitor_reap_is_cooldown_throttled(tmp_path, monkeypatch):
     assert stopped == [rec.worktree_path, rec.worktree_path]  # cooldown elapsed
 
 
+# --- repo-scoped freshness sweep (worktree-finality-and-obligations Phase 9) -
+
+def _fake_git_result(returncode: int):
+    class _Result:
+        pass
+    r = _Result()
+    r.returncode = returncode
+    return r
+
+
+def test_repo_freshness_sweep_fetches_and_records_when_stale(
+    tmp_path, monkeypatch
+):
+    from agent_worktrees import git_ops
+
+    wt_dir = tmp_path / "wt-a"
+    wt_dir.mkdir()
+    rec = _record("wt-a", str(wt_dir), sessions_list=[])
+    rec.repo = "owner/repo"
+    _wire(tmp_path, monkeypatch, [rec])
+    monkeypatch.setattr(sessions, "worktree_has_live_session", lambda record: False)
+    monkeypatch.setattr(tracking, "is_repo_fetch_fresh", lambda repo: False)
+    fetch_calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        git_ops, "git",
+        lambda *args, **kw: (
+            fetch_calls.append((args, kw.get("cwd"))) or _fake_git_result(0)
+        ),
+    )
+    recorded: list[str] = []
+    monkeypatch.setattr(
+        tracking, "record_repo_fetch_confirmed", lambda repo: recorded.append(repo))
+
+    reconciler = session_catalog.ResidentSessionReconciler(
+        record_budget=8, session_budget=8)
+    reconciler.step()
+
+    assert len(fetch_calls) == 1
+    assert fetch_calls[0][1] == str(wt_dir)
+    assert recorded == ["owner/repo"]
+
+
+def test_repo_freshness_sweep_skips_when_already_fresh(tmp_path, monkeypatch):
+    from agent_worktrees import git_ops
+
+    wt_dir = tmp_path / "wt-a"
+    wt_dir.mkdir()
+    rec = _record("wt-a", str(wt_dir), sessions_list=[])
+    rec.repo = "owner/repo"
+    _wire(tmp_path, monkeypatch, [rec])
+    monkeypatch.setattr(sessions, "worktree_has_live_session", lambda record: False)
+    monkeypatch.setattr(tracking, "is_repo_fetch_fresh", lambda repo: True)
+    fetch_calls: list = []
+    monkeypatch.setattr(
+        git_ops, "git", lambda *a, **kw: fetch_calls.append(1) or _fake_git_result(0))
+
+    reconciler = session_catalog.ResidentSessionReconciler(
+        record_budget=8, session_budget=8)
+    reconciler.step()
+
+    assert fetch_calls == []
+
+
+def test_repo_freshness_sweep_does_not_record_on_fetch_failure(
+    tmp_path, monkeypatch
+):
+    from agent_worktrees import git_ops
+
+    wt_dir = tmp_path / "wt-a"
+    wt_dir.mkdir()
+    rec = _record("wt-a", str(wt_dir), sessions_list=[])
+    rec.repo = "owner/repo"
+    _wire(tmp_path, monkeypatch, [rec])
+    monkeypatch.setattr(sessions, "worktree_has_live_session", lambda record: False)
+    monkeypatch.setattr(tracking, "is_repo_fetch_fresh", lambda repo: False)
+    monkeypatch.setattr(git_ops, "git", lambda *a, **kw: _fake_git_result(1))
+    recorded: list[str] = []
+    monkeypatch.setattr(
+        tracking, "record_repo_fetch_confirmed", lambda repo: recorded.append(repo))
+
+    reconciler = session_catalog.ResidentSessionReconciler(
+        record_budget=8, session_budget=8)
+    reconciler.step()
+
+    assert recorded == []
+
+
+def test_repo_freshness_sweep_skips_missing_directory(tmp_path, monkeypatch):
+    from agent_worktrees import git_ops
+
+    rec = _record("wt-a", str(tmp_path / "does-not-exist"), sessions_list=[])
+    rec.repo = "owner/repo"
+    _wire(tmp_path, monkeypatch, [rec])
+    monkeypatch.setattr(sessions, "worktree_has_live_session", lambda record: False)
+    monkeypatch.setattr(tracking, "is_repo_fetch_fresh", lambda repo: False)
+    fetch_calls: list = []
+    monkeypatch.setattr(
+        git_ops, "git", lambda *a, **kw: fetch_calls.append(1) or _fake_git_result(0))
+
+    reconciler = session_catalog.ResidentSessionReconciler(
+        record_budget=8, session_budget=8)
+    reconciler.step()
+
+    assert fetch_calls == []
+
+
+def test_repo_freshness_sweep_runs_without_any_mux_observation(
+    tmp_path, monkeypatch
+):
+    """Unlike the fsmonitor reap, the repo-freshness sweep is NOT mux-gated:
+    it must still fetch even when `observe_mux` was never called this
+    session (mux unavailable/not yet observed)."""
+    from agent_worktrees import git_ops
+
+    wt_dir = tmp_path / "wt-a"
+    wt_dir.mkdir()
+    rec = _record("wt-a", str(wt_dir), sessions_list=[])
+    rec.repo = "owner/repo"
+    _wire(tmp_path, monkeypatch, [rec])
+    monkeypatch.setattr(sessions, "worktree_has_live_session", lambda record: False)
+    monkeypatch.setattr(tracking, "is_repo_fetch_fresh", lambda repo: False)
+    fetch_calls: list = []
+    monkeypatch.setattr(
+        git_ops, "git", lambda *a, **kw: fetch_calls.append(1) or _fake_git_result(0))
+    recorded: list[str] = []
+    monkeypatch.setattr(
+        tracking, "record_repo_fetch_confirmed", lambda repo: recorded.append(repo))
+
+    reconciler = session_catalog.ResidentSessionReconciler(
+        record_budget=8, session_budget=8)
+    # NOTE: no reconciler.observe_mux(...) call at all.
+    reconciler.step()
+
+    assert recorded == ["owner/repo"]
+
+
+def test_repo_freshness_sweep_is_per_repo_not_per_worktree(tmp_path, monkeypatch):
+    """Two worktrees of the SAME repo cost one fetch per cooldown window
+    total, not one per worktree."""
+    from agent_worktrees import git_ops
+
+    wt_a = tmp_path / "wt-a"
+    wt_b = tmp_path / "wt-b"
+    wt_a.mkdir()
+    wt_b.mkdir()
+    rec_a = _record("wt-a", str(wt_a), sessions_list=[])
+    rec_a.repo = "owner/repo"
+    rec_b = _record("wt-b", str(wt_b), sessions_list=[])
+    rec_b.repo = "owner/repo"
+    _wire(tmp_path, monkeypatch, [rec_a, rec_b])
+    monkeypatch.setattr(sessions, "worktree_has_live_session", lambda record: False)
+    monkeypatch.setattr(tracking, "is_repo_fetch_fresh", lambda repo: False)
+    fetch_calls: list = []
+    monkeypatch.setattr(
+        git_ops, "git", lambda *a, **kw: fetch_calls.append(1) or _fake_git_result(0))
+
+    reconciler = session_catalog.ResidentSessionReconciler(
+        record_budget=8, session_budget=8)
+    reconciler.step()
+
+    assert len(fetch_calls) == 1
+
+
+def test_repo_freshness_sweep_is_cooldown_throttled(tmp_path, monkeypatch):
+    from agent_worktrees import git_ops
+
+    wt_dir = tmp_path / "wt-a"
+    wt_dir.mkdir()
+    rec = _record("wt-a", str(wt_dir), sessions_list=[])
+    rec.repo = "owner/repo"
+    _wire(tmp_path, monkeypatch, [rec])
+    monkeypatch.setattr(sessions, "worktree_has_live_session", lambda record: False)
+    monkeypatch.setattr(tracking, "is_repo_fetch_fresh", lambda repo: False)
+    fetch_calls: list = []
+    monkeypatch.setattr(
+        git_ops, "git", lambda *a, **kw: fetch_calls.append(1) or _fake_git_result(0))
+    now = {"value": 1000.0}
+    monkeypatch.setattr(
+        session_catalog.time, "monotonic", lambda: now["value"])
+
+    reconciler = session_catalog.ResidentSessionReconciler(
+        record_budget=8, session_budget=8)
+    reconciler.step()
+    now["value"] += 1.0  # well within the cooldown window
+    reconciler.step()
+
+    assert len(fetch_calls) == 1  # only the first tick fetched
+
+    now["value"] += session_catalog._REPO_FRESHNESS_SWEEP_COOLDOWN_S + 1.0
+    reconciler.step()
+
+    assert len(fetch_calls) == 2  # cooldown elapsed
+
+
 def test_stale_mux_observation_is_not_restamped(tmp_path, monkeypatch):
     rec = _record("wt-mux", str(tmp_path / "wt-mux"), sessions_list=[])
     tracking_dir, _state_dir = _wire(tmp_path, monkeypatch, [rec])
