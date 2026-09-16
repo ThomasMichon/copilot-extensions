@@ -6,7 +6,7 @@ from typing import Any
 
 from . import controller_lineage
 from . import tracking
-from .picker_tui import reciprocal as picker_reciprocal
+from . import reciprocal_state as picker_reciprocal
 
 _ACTIONABLE_CONTROLLER_STATUSES = frozenset({"resolved", "remote"})
 _NONBLOCKING_CONTROLLER_STATUSES = frozenset({

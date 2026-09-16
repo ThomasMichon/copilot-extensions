@@ -1,4 +1,13 @@
-"""Non-blocking frame-gap diagnostics for the Textual Picker."""
+"""Non-blocking frame-gap diagnostics for the Textual Picker.
+
+``append_launch_event`` (and its ``_timestamp``/``_launch_trace_path``
+helpers) moved to ``agent_worktrees.launch_trace`` (2026-09-16,
+worktree-manager-control-plane Phase 3/6 Step 1.5) -- it's used by
+``__main__.py``'s launch/resolve flow independent of the TUI, so it can't be
+deleted along with the rest of this package. Re-imported here for the
+existing internal call sites (``from_env``/``_enqueue``) and for
+backward-compatible re-export.
+"""
 from __future__ import annotations
 
 import json
@@ -6,49 +15,13 @@ import os
 import queue
 import threading
 import time
-from datetime import datetime, timezone
 from pathlib import Path
+
+from ..launch_trace import _launch_trace_path, _timestamp
 
 _STOP = object()
 _DEFAULT_THRESHOLD_SECONDS = 0.5
 _QUEUE_SIZE = 128
-
-
-def _timestamp() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _launch_trace_path() -> Path | None:
-    raw = os.environ.get("AGENT_WORKTREES_LAUNCH_TRACE", "").strip()
-    if not raw or raw.lower() in ("0", "false", "no", "off"):
-        return None
-    if raw.lower() in ("1", "true", "yes", "on"):
-        return (
-            Path.home()
-            / ".agent-worktrees"
-            / "logs"
-            / "picker-launches.jsonl"
-        )
-    return Path(raw).expanduser()
-
-
-def append_launch_event(event: str, **fields) -> None:
-    """Append one pre-render launch checkpoint. Best-effort and fail-silent."""
-    path = _launch_trace_path()
-    if path is None:
-        return
-    payload = {
-        "timestamp": _timestamp(),
-        "event": event,
-        "launch_id": os.environ.get("AGENT_WORKTREES_LAUNCH_ID", ""),
-        **fields,
-    }
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as stream:
-            stream.write(json.dumps(payload, separators=(",", ":")) + "\n")
-    except OSError:
-        return
 
 
 class FrameHealthReporter:

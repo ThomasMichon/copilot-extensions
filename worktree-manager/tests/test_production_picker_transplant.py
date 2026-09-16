@@ -60,6 +60,26 @@ def test_transplanted_picker_sources_match_production_copy():
                 "engine.py",
                 "maintenance.py",
                 "pivots.py",
+                # derive.py now imports agent_worktrees.reciprocal_state
+                # (relocated out of agent-worktrees' picker_tui/, 2026-09-16,
+                # worktree-manager-control-plane Phase 3/6 Step 1.5 -- that
+                # module is load-bearing for agent-worktrees' non-TUI CLI and
+                # can't live inside a package Worktree Manager also vendors
+                # byte-for-byte). Worktree Manager keeps its own local
+                # picker_tui/reciprocal.py sibling instead, so derive.py's
+                # import line necessarily diverges between the two copies.
+                "derive.py",
+                # __init__.py's launch call now imports
+                # agent_worktrees.launch_trace for the same Step 1.5 reason
+                # (append_launch_event moved out of picker_tui/frame_health.py
+                # on the agent-worktrees side; Worktree Manager keeps its own
+                # local frame_health.append_launch_event untouched).
+                "__init__.py",
+                # frame_health.py's own _timestamp/_launch_trace_path helpers
+                # now import from agent_worktrees.launch_trace instead of
+                # defining them locally (same Step 1.5 relocation); Worktree
+                # Manager's copy keeps its original self-contained version.
+                "frame_health.py",
             }
         ),
     ]

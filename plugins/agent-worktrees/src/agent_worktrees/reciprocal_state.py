@@ -1,4 +1,12 @@
-"""Compatibility normalization for reciprocal presentation rows."""
+"""Compatibility normalization for reciprocal presentation rows.
+
+Relocated out of ``picker_tui/`` (2026-09-16, worktree-manager-control-plane
+Phase 3/6 Step 1.5): consumed by ``reciprocal_presentation.py``'s general
+``--json`` output shape, not just the Picker TUI, so it can't be deleted with
+the rest of the bundled Picker. ``picker_tui/derive.py`` still uses it too
+(the TUI's own compact reciprocal label), imported from here now instead of
+a sibling module.
+"""
 
 from __future__ import annotations
 

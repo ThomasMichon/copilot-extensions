@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import datetime as _dt
 
-from . import reciprocal
 from . import source_identity
+from .. import reciprocal_state as reciprocal
 
 # The "now" derived ages are measured against. Data sources refresh this to the
 # real clock before normalizing a batch (see ``data_local``).
