@@ -852,3 +852,55 @@ class TestInterpretDescriptorPayload:
         assert interpreted["final"] is False
         assert interpreted["action_disposition"] == "blocked"
 
+    def test_non_mapping_closure_is_unsupported_not_defaulted(self):
+        # A well-formed version-1 payload whose ``closure`` is a wrong-shaped
+        # value (a list, not a mapping) must be treated as unsupported --
+        # never silently defaulted to ``{}`` and then have the top-level
+        # ``label``/``style`` trusted as if the payload were sound (PR #2738
+        # review response).
+        payload = self._final_payload()
+        payload["closure"] = []
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+        assert interpreted["final"] is False
+        assert interpreted["label"] == "UNKNOWN"
+        assert "closure" in interpreted["reason"]
+
+    def test_non_mapping_action_is_unsupported_not_defaulted(self):
+        payload = self._final_payload()
+        payload["action"] = "blocked"
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+        assert "action" in interpreted["reason"]
+
+    def test_non_mapping_claims_is_unsupported_not_defaulted(self):
+        payload = self._final_payload()
+        payload["claims"] = []
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+        assert "claims" in interpreted["reason"]
+
+    def test_non_mapping_follow_ups_is_unsupported_not_defaulted(self):
+        payload = self._final_payload()
+        payload["follow_ups"] = "none"
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+        assert "follow_ups" in interpreted["reason"]
+
+    def test_non_numeric_held_claims_degrades_to_zero(self):
+        # The mapping shape is valid, but the count inside it is malformed --
+        # this degrades the count to zero rather than raising or rejecting
+        # the whole payload (unlike a wrong-shaped container above).
+        payload = self._final_payload()
+        payload["claims"] = {"held": "not-a-number"}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is True
+        assert interpreted["held_claims"] == 0
+
+    def test_negative_open_follow_ups_degrades_to_zero(self):
+        payload = self._final_payload()
+        payload["follow_ups"] = {"open": -3}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is True
+        assert interpreted["open_follow_ups"] == 0
+

@@ -773,10 +773,26 @@ def interpret_descriptor_payload(payload: dict | None) -> dict:
     action = payload.get("action")
     claims = payload.get("claims")
     follow_ups = payload.get("follow_ups")
-    closure = closure if isinstance(closure, dict) else {}
-    action = action if isinstance(action, dict) else {}
-    claims = claims if isinstance(claims, dict) else {}
-    follow_ups = follow_ups if isinstance(follow_ups, dict) else {}
+    # A present-but-wrong-shaped nested field (e.g. ``closure: []``) is a
+    # malformed payload, not merely an absent one -- treat it the same as an
+    # unsupported version rather than silently defaulting to ``{}`` and then
+    # trusting the top-level ``label``/``style`` as if the payload were sound.
+    for field_name, field_value in (
+        ("closure", closure), ("action", action),
+        ("claims", claims), ("follow_ups", follow_ups),
+    ):
+        if field_value is not None and not isinstance(field_value, dict):
+            return {
+                "supported": False, "final": False, "label": "UNKNOWN",
+                "style": "unknown", "compact": "UNKNOWN",
+                "held_claims": 0, "open_follow_ups": 0,
+                "action_disposition": "blocked",
+                "reason": f"unsupported-descriptor:{field_name}-not-a-mapping",
+            }
+    closure = closure or {}
+    action = action or {}
+    claims = claims or {}
+    follow_ups = follow_ups or {}
     return {
         "supported": True,
         "final": bool(closure.get("final", False)),
