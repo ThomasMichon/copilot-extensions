@@ -75,11 +75,12 @@ class TestProductionShimInterpretDescriptorPayload:
         interpreted = prune.interpret_descriptor_payload(payload)
         assert interpreted["supported"] is False
 
-    def test_non_numeric_claim_count_degrades_to_zero(self):
+    def test_non_numeric_claim_count_is_rejected(self):
+        # PR #2738 review response: a malformed count must never be
+        # laundered into a coerced zero (false evidence of no blockers).
         payload = _valid_final_payload(claims={"held": "not-a-number"})
         interpreted = prune.interpret_descriptor_payload(payload)
-        assert interpreted["supported"] is True
-        assert interpreted["held_claims"] == 0
+        assert interpreted["supported"] is False
 
     def test_final_with_held_claims_is_rejected(self):
         # PR #2738 review response: a genuine descriptor only ever sets

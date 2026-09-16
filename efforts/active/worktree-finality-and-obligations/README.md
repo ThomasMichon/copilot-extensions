@@ -496,6 +496,27 @@ below for the carved implementation plan.
   follow-ups, or a non-`safe` action disposition is now rejected as
   unsupported. A non-FINAL payload (the common MERGED-with-blockers case)
   is unaffected. 8 new tests (4 per copy).
+  **Fifth review-response round (PR #2738):** three more real findings,
+  all fixed: (1) `_non_negative_int` (both copies) silently coerced a
+  malformed count -- e.g. `claims.held: "not-a-number"` -- to `0`, which
+  the round-four FINAL invariant then read as verified evidence "no held
+  claims exist", letting a contradictory payload slip through as FINAL
+  after all. Renamed to a strict validator returning `None` for anything
+  that isn't a genuine non-negative `int` (explicitly excluding `bool`,
+  which is an `int` subclass in Python) instead of coercing; the caller
+  now rejects the whole payload as unsupported when either count is
+  invalid -- unconditionally, not only under the FINAL branch, so a
+  MERGED-with-malformed-count payload is rejected too. 7 renamed/new tests
+  per copy; (2) `worktree-manager` is a standalone package with its OWN
+  version surfaces (`pyproject.toml` + `src/worktree_manager/__init__.py`,
+  independent of the `agent-worktrees` plugin triplet) -- editing its
+  runtime source (`picker_tui/engine.py`, `prune.py`) without bumping
+  those left `needs_install()` a no-op against the installed
+  `current-version` marker, so a deployed Manager would never receive
+  these Picker changes. Bumped both to `0.1.0-dev44` (no automated
+  `check-version-bump.py` coverage exists for this standalone package --
+  a real gap, caught only by manual review); (3) the PR description's
+  version numbers had drifted again after more rebases -- corrected.
 - [ ] Keep legends, filters, maintenance previews, and cleanup selections in
   parity with the same descriptor. **Narrowed, not fully done:** the
   Maintenance pivot's `CLEAN_SPECS` table got the same `markers` column +

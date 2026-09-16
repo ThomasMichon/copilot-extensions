@@ -91,6 +91,11 @@ def interpret_descriptor_payload(payload: dict | None) -> dict:
         return _unsupported_descriptor("unsupported-descriptor:label-final-mismatch")
     held_claims = _non_negative_int(claims.get("held", 0))
     open_follow_ups = _non_negative_int(follow_ups.get("open", 0))
+    if held_claims is None or open_follow_ups is None:
+        # A malformed count must never be laundered into ``0`` -- that would
+        # become false evidence "no blockers exist" for the FINAL invariant
+        # just below. Kept in sync with ``agent_worktrees/prune.py``'s copy.
+        return _unsupported_descriptor("unsupported-descriptor:invalid-count")
     # A genuine descriptor only ever sets ``final: True`` alongside zero held
     # claims, zero open follow-ups, and a ``safe`` action -- a payload
     # claiming FINAL with any of those inconsistent is a contradictory,
@@ -126,15 +131,16 @@ def _unsupported_descriptor(reason: str) -> dict:
     }
 
 
-def _non_negative_int(value) -> int:
-    """Coerce a claim/follow-up count from an untrusted descriptor payload to
-    a non-negative int, never raising on a malformed value (e.g. a string, a
-    list, ``None``, or a negative number) -- degrades to ``0`` instead of
-    crashing the caller. Kept in sync with ``agent_worktrees/prune.py``'s
+def _non_negative_int(value) -> int | None:
+    """Validate a claim/follow-up count as a non-negative int, returning
+    ``None`` for anything else (a string, a list, ``None``, a bool, or a
+    negative number) rather than silently coercing it to ``0`` -- a coerced
+    ``0`` would be indistinguishable from a verified zero count and could
+    launder a malformed payload into apparent evidence that no blockers
+    exist. The caller rejects the whole payload as unsupported when this
+    returns ``None``. Kept in sync with ``agent_worktrees/prune.py``'s
     copy."""
-    try:
-        n = int(value)
-    except (TypeError, ValueError):
-        return 0
-    return n if n > 0 else 0
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if value >= 0 else None
 

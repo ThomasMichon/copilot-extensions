@@ -887,22 +887,41 @@ class TestInterpretDescriptorPayload:
         assert interpreted["supported"] is False
         assert "follow_ups" in interpreted["reason"]
 
-    def test_non_numeric_held_claims_degrades_to_zero(self):
-        # The mapping shape is valid, but the count inside it is malformed --
-        # this degrades the count to zero rather than raising or rejecting
-        # the whole payload (unlike a wrong-shaped container above).
+    def test_non_numeric_held_claims_is_rejected(self):
+        # PR #2738 review response: a malformed count must never be
+        # laundered into a coerced zero -- that would become false evidence
+        # "no blockers exist" and could let a contradictory payload slip
+        # through the FINAL invariant. The whole payload is rejected instead.
         payload = self._final_payload()
         payload["claims"] = {"held": "not-a-number"}
         interpreted = prune.interpret_descriptor_payload(payload)
-        assert interpreted["supported"] is True
+        assert interpreted["supported"] is False
         assert interpreted["held_claims"] == 0
 
-    def test_negative_open_follow_ups_degrades_to_zero(self):
+    def test_negative_open_follow_ups_is_rejected(self):
         payload = self._final_payload()
         payload["follow_ups"] = {"open": -3}
         interpreted = prune.interpret_descriptor_payload(payload)
-        assert interpreted["supported"] is True
-        assert interpreted["open_follow_ups"] == 0
+        assert interpreted["supported"] is False
+
+    def test_boolean_held_claims_is_rejected(self):
+        # ``bool`` is technically an ``int`` subclass in Python -- must be
+        # excluded explicitly, never treated as a valid count.
+        payload = self._final_payload()
+        payload["claims"] = {"held": True}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_malformed_count_is_rejected_even_when_not_final(self):
+        # The invalid-count guard applies unconditionally, not just under
+        # the FINAL invariant -- a MERGED-with-malformed-count payload is
+        # also rejected rather than silently defaulting the count.
+        payload = self._final_payload()
+        payload["label"] = "MERGED"
+        payload["closure"] = {"final": False}
+        payload["claims"] = {"held": "bad"}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
 
     def test_empty_closure_with_final_label_is_rejected(self):
         # PR #2738 review response: a top-level ``label: "FINAL"`` alongside
