@@ -128,6 +128,20 @@ wired -- it always reports `confirmed: false` until read-only
 effort renders each fact's own freshness marker (rather than today's single
 label) across `list --json`, this status segment, and the Picker.
 
+##### Per-fact freshness markers (Phase 9)
+
+`compact` additionally carries an `U*`/`OC*` marker whenever
+`upstream_containment`/`open_claims` (respectively) is unconfirmed --
+independent of each other and of the `C<N>`/`F<N>` held-claim/follow-up
+markers above, and independent of the base label (a `DIRTY`/`WIP`/etc.
+worktree can carry either marker too, not just `MERGED`). This is the
+general marker convention the Plan calls for: an unconfirmed fact is marked
+**in place**, never spawning a separate whole state. `FINAL` never carries
+either marker (both facts are confirmed by construction whenever `final` is
+true). The mux/PSMux status segment (below) renders `compact` directly, so
+it picks up both markers automatically; the Picker does not yet consume
+`compact` (still a separate, unstarted slice -- see the 2026-09-15 Journal
+entry on Picker label parity).
 
 ### The status core — an orthogonal disposition layer
 

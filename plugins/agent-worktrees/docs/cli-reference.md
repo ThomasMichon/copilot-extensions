@@ -215,7 +215,10 @@ followed by a colored state block:
 
 A trailing `↑ahead`/`↓behind` tag mirrors the picker's inline sync status.
 `MERGED` may carry a compact `C<N>`/`F<N>` marker suffix for held claims / open
-follow-ups; see
+follow-ups, plus an independent `U*`/`OC*` suffix (any state, not just
+`MERGED`) for an unconfirmed `upstream_containment`/`open_claims` fact
+respectively (worktree-finality-and-obligations Phase 9's per-fact freshness
+markers); see
 [worktree-lifecycle.md § FINAL vs MERGED](worktree-lifecycle.md#final-vs-merged----the-closure-descriptor-split)
 for the full closure-descriptor rules that decide `FINAL` vs `MERGED`. The
 `CONVO` state refines `UNUSED` using session turn-count detection: a worktree
