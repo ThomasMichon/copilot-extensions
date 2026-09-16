@@ -243,6 +243,7 @@ class _EventsMixin:
             ),
         }
 
+    @staticmethod
     def _event_continuity(session_id: str, origin: float | None) -> str | None:
         if origin is None:
             return None
