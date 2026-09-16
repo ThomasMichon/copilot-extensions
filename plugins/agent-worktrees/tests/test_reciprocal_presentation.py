@@ -3,8 +3,7 @@ from __future__ import annotations
 from agent_worktrees import reciprocal_presentation
 from agent_worktrees import tracking
 from agent_worktrees import __main__ as cli
-from agent_worktrees.picker_tui import derive
-from agent_worktrees.picker_tui.engine import PickerScreen
+from agent_worktrees.picker_support import derive
 
 
 def _record(
@@ -370,29 +369,3 @@ def test_worktree_json_exposes_normalized_relation(monkeypatch) -> None:
         "session_id": "controller",
     }
 
-
-def test_picker_navigation_requires_one_exact_loaded_target() -> None:
-    target = {
-        "raw": {"id": "parent", "repo": "example"},
-        "machine": "host",
-        "source_id": "machine-ssh:host:windows",
-    }
-    rec = {
-        "reciprocal_relation": {
-            "actions": [{
-                "kind": "navigate-worktree",
-                "target": {
-                    "project": "example",
-                    "worktree_id": "parent",
-                    "machine": "host",
-                },
-            }],
-        },
-    }
-    picker = object.__new__(PickerScreen)
-    picker.data = [target]
-
-    assert picker._reciprocal_target_row(rec) is target
-
-    picker.data.append(dict(target))
-    assert picker._reciprocal_target_row(rec) is None

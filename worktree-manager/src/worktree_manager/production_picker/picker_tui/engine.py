@@ -520,14 +520,8 @@ def _resolve_mock_mode(explicit=None):
 
 
 def _native_list_enabled() -> bool:
-    """NF5-5 (#88): the native ``OptionList`` data body is now the **default**.
-    ``PickerScreen`` composes ``_PickerNativeData`` (native focus/cursor/scroll/
-    click, sticky section header, clickable checkbox gutter) for the data region.
-    Set ``AGENT_WORKTREES_PICKER_NATIVE_LIST`` to a falsey value
-    (``0``/``false``/``no``/``off``) to force the legacy text-line
-    ``_PickerBodyData`` -- a temporary rollback escape hatch until it is retired."""
-    val = os.environ.get("AGENT_WORKTREES_PICKER_NATIVE_LIST", "1").strip().lower()
-    return val not in ("0", "false", "no", "off")
+    """The native ``OptionList`` body is the only remaining data-body surface."""
+    return True
 
 
 class _PickerSegment(Widget):
@@ -764,9 +758,7 @@ class _PickerStickyHeader(Widget):
 class _PickerNativeData(OptionList):
     """NF5-5 (#88): swappable *native* data body -- the pivot's data rows as real
     ``OptionList`` options (native focus, cursor, up/down, click, scroll, a11y)
-    instead of painted text lines driven by the manual ``sel`` cursor. This is
-    the **default** body since dev351; set ``AGENT_WORKTREES_PICKER_NATIVE_LIST``
-    to a falsey value to fall back to the legacy text-line body.
+    instead of painted text lines driven by the manual ``sel`` cursor.
 
     Bridged to the engine ``sel`` model both ways so the rest of the picker
     (chrome, activation, tests) is unchanged: native cursor moves mirror into
@@ -1190,7 +1182,10 @@ class PickerScreen(Widget):
         # _open_cfgmenu. (The overlay left the manual registry entirely.)
         self._pivot_runtimes = {}     # pivot name -> RegisteredPivotRuntime (lazy)
         self._last_pivot_poll = 0.0   # registered-pivot repoll gate (#staleness)
-        self._load_pivots()
+        self._roster_ready = True     # False only during live chrome-first paint
+        # Built-ins only here: scanning the pivot registry is I/O and must not
+        # run before the first frame. ``setup()`` / live async fill scan later.
+        self._load_pivots(scan=False)
         self.machine_idx = 0          # selected machine sub-pivot (Worktrees/Maint)
         self.sel = ("N", 0)           # (zone, index) -> default New Worktree
         self.top = 0                  # scroll offset into body vrows
@@ -1251,6 +1246,8 @@ class PickerScreen(Widget):
         self.t0 = 0.0
         self.load_delay = {}
         self._frame_health = None
+        self._source_local = None
+        self._source_repo_branch = ("", "")
         self._after_first_refresh_callback = after_first_refresh
         # Injected data source (local / SSH / fixture). ``live`` enables the
         # async per-machine loader the source supplies via ``make_loader()``.
@@ -1352,27 +1349,36 @@ class PickerScreen(Widget):
         self.profiles_view._prof_loaded = value
 
     # ---- pivot registry (built-ins + cross-plugin registered pivots) ----
-    def _load_pivots(self):
+    def _load_pivots(self, *, scan: bool = True):
         """(Re)scan the manifest registry and rebuild the ordered pivot list.
 
         Defensive: any discovery failure degrades to the built-ins alone, so a
         bad manifest can never keep the picker from opening. Clamps ``htab`` in
         case a rescan shrank the list.
-        """
-        try:
-            from . import pivots as pivots_mod
 
-            report = pivots_mod.scan_pivot_registry()
-            pivots_mod.warn_pivot_findings(report)
-            registered = report.pivots
-            descriptors = pivots_mod.order_pivots(BUILTIN_PIVOTS, registered)
-            wt_actions = report.worktree_actions
-            config_sections = report.config_sections
-        except Exception:
+        ``scan=False`` installs built-ins only (no plugin-dir I/O) so first
+        paint is not blocked on the registry.
+        """
+        if not scan:
             registered, descriptors, wt_actions = [], [
                 {"label": b, "kind": b.lower(), "pivot": None} for b in BUILTIN_PIVOTS
             ], []
             config_sections = []
+        else:
+            try:
+                from . import pivots as pivots_mod
+
+                report = pivots_mod.scan_pivot_registry()
+                pivots_mod.warn_pivot_findings(report)
+                registered = report.pivots
+                descriptors = pivots_mod.order_pivots(BUILTIN_PIVOTS, registered)
+                wt_actions = report.worktree_actions
+                config_sections = report.config_sections
+            except Exception:
+                registered, descriptors, wt_actions = [], [
+                    {"label": b, "kind": b.lower(), "pivot": None} for b in BUILTIN_PIVOTS
+                ], []
+                config_sections = []
         self.registered_pivots = registered
         self.pivots = descriptors
         # Cross-plugin worktree-row actions (a layer augmenting the Worktrees
@@ -1386,6 +1392,38 @@ class PickerScreen(Widget):
         # Tag each pivot with its placement (left cycle / config menu / hidden
         # anchor) so nav machinery can partition them without disturbing the
         # ``order_pivots`` weave that registered ``after`` hints rely on (#1426).
+        for d in self.pivots:
+            d["placement"] = PIVOT_PLACEMENT.get(d["kind"], "left")
+        self.htabs = [d["label"] for d in descriptors]
+        if self.htab >= len(self.pivots):
+            self.htab = 0
+
+    @staticmethod
+    def _scan_pivot_payload():
+        """Filesystem pivot scan with no widget mutation (safe off the UI thread)."""
+        try:
+            from . import pivots as pivots_mod
+
+            report = pivots_mod.scan_pivot_registry()
+            pivots_mod.warn_pivot_findings(report)
+            return (
+                report.pivots,
+                pivots_mod.order_pivots(BUILTIN_PIVOTS, report.pivots),
+                report.worktree_actions,
+                report.config_sections,
+            )
+        except Exception:
+            return None
+
+    def _install_pivot_payload(self, payload):
+        if payload is None:
+            self._load_pivots(scan=False)
+            return
+        registered, descriptors, wt_actions, config_sections = payload
+        self.registered_pivots = registered
+        self.pivots = descriptors
+        self.wt_actions = wt_actions
+        self.config_sections = config_sections
         for d in self.pivots:
             d["placement"] = PIVOT_PLACEMENT.get(d["kind"], "left")
         self.htabs = [d["label"] for d in descriptors]
@@ -1495,24 +1533,18 @@ class PickerScreen(Widget):
         return rt
 
     def on_mount(self):
-        self.setup()
-        self.sel = self.default_sel()
-        # NF: focus the region widget that owns the default sel (deferred until
-        # the children are mounted). ``_nf_mounted`` stays False until then so the
-        # framework's mount-time auto-focus can't move sel.
-        self.call_after_refresh(self._nf_initial_focus)
-        # Update indicator (#1430): the launcher stages the marketplace update
-        # in the background; the picker polls its status file to show a
-        # spinner -> checkmark (current) / refresh (update available) next to
-        # the version. Poll immediately so the first paint is accurate.
-        self.update_state = "idle"
-        self._upd_poll_frame = -1
-        self._poll_update_state()
-        # ~10 fps drives the SSH spinner and the slower live-glyph pulse.
-        self.set_interval(0.1, self._tick)
-        self.call_after_refresh(self._record_first_refresh)
+        if self.live:
+            # Chrome first: paint built-in tabs + empty lists, then run the
+            # roster/pivot/worktree fill off the UI thread.
+            self._setup_skeleton()
+        else:
+            self.setup()
+        self._finish_mount()
+        # Record the completed first refresh in every Picker mode. Live data
+        # startup also waits for this boundary so it cannot contend with paint.
+        self.call_after_refresh(self._after_first_refresh)
 
-    def _record_first_refresh(self):
+    def _after_first_refresh(self):
         if (
             os.environ.get("AGENT_WORKTREES_PICKER_FRAME_HEALTH")
             or os.environ.get("AGENT_WORKTREES_LAUNCH_TRACE")
@@ -1529,6 +1561,327 @@ class PickerScreen(Widget):
                 name="picker-after-first-refresh",
                 daemon=True,
             ).start()
+        if not self.live:
+            return
+        threading.Thread(
+            target=self._setup_live_async,
+            name="picker-setup",
+            daemon=True,
+        ).start()
+
+    def _record_first_refresh(self):
+        """Compatibility alias for older tests and launch-trace call sites."""
+        self._after_first_refresh()
+
+    def _finish_mount(self):
+        self.sel = self.default_sel()
+        # NF: focus the region widget that owns the default sel (deferred until
+        # the children are mounted). ``_nf_mounted`` stays False until then so the
+        # framework's mount-time auto-focus can't move sel.
+        self.call_after_refresh(self._nf_initial_focus)
+        # Update indicator (#1430): the launcher stages the marketplace update
+        # in the background; the picker polls its status file to show a
+        # spinner -> checkmark (current) / refresh (update available) next to
+        # the version. Poll immediately so the first paint is accurate.
+        self.update_state = "idle"
+        self._upd_poll_frame = -1
+        self._poll_update_state()
+        # ~10 fps drives the SSH spinner and the slower live-glyph pulse.
+        self.set_interval(0.1, self._tick)
+
+    def _setup_skeleton(self):
+        """First-paint chrome with no config, roster, or registry I/O."""
+        self._roster_ready = False
+        self._load_pivots(scan=False)
+        self.data = []
+        self.loader = None
+        self.debug = "loading"
+        self._busy_label = "Loading…"
+        self._last_poll = time.monotonic()
+        self._last_pivot_poll = time.monotonic()
+        try:
+            from . import data_local
+
+            machine, env = data_local.LOCAL
+            label = f"{machine} {env}"
+        except Exception:
+            machine, env, label = None, None, "local"
+        self.source_tabs = [
+            {
+                "label": "All",
+                "machine": None,
+                "env": None,
+                "ready": True,
+                "source_kind": "all",
+                "source_id": None,
+                "capabilities": {},
+            },
+            {
+                "label": label,
+                "machine": machine,
+                "env": env,
+                "ready": True,
+                "source_kind": "machine-ssh",
+                "source_id": None,
+                "capabilities": {},
+            },
+        ]
+        self.machines = [
+            (tab["label"], tab.get("machine"), tab.get("env"), bool(tab.get("ready")))
+            for tab in self.source_tabs
+        ]
+        self._source_local = (machine, env)
+        self.machine_idx = 1 if len(self.machines) > 1 else 0
+        self.maint_sel = ListSelection()
+        self.host_cols = list(_DEFAULT_HOST_COLS)
+        self.targets = target_rows(_DEFAULT_TARGET_ENVS)
+        self.grid = {}
+        self.applied = {}
+        self._prof_unavailable = set()
+
+    def _setup_live_async(self):
+        """Publish bootstrap rows, then fill roster and pivots independently."""
+        bootstrap_fn = getattr(self.src, "bootstrap_rows", None)
+        if callable(bootstrap_fn):
+            try:
+                bootstrap_rows = bootstrap_fn()
+            except Exception:
+                bootstrap_rows = None
+            if bootstrap_rows is not None:
+
+                def apply_bootstrap():
+                    if not self._roster_ready and self.loader is None:
+                        self.data = bootstrap_rows
+                        self.refresh()
+
+                self._apply_from_worker(apply_bootstrap)
+
+        threading.Thread(
+            target=self._setup_live_pivots,
+            name="picker-pivots",
+            daemon=True,
+        ).start()
+
+        err = None
+        loader = None
+        prepared = None
+        try:
+            snapshot_fn = getattr(self.src, "source_snapshot", None)
+            snapshot = snapshot_fn() if callable(snapshot_fn) else None
+            prepared = self._prepare_live_source(snapshot)
+            loader = (
+                self.src.make_loader(snapshot)
+                if snapshot is not None
+                else self.src.make_loader()
+            )
+            loader.start()
+        except Exception as exc:
+            err = exc
+
+        def apply():
+            if err is not None:
+                self.debug = f"setup-failed: {err}"
+                self._busy_label = "Load failed"
+                self.refresh()
+                return
+            self._apply_live_source(prepared, loader)
+            self._busy_label = None
+            self.refresh()
+
+        self._apply_from_worker(apply)
+
+    def _setup_live_pivots(self):
+        """Scan contributed pivots without delaying local or fleet rows."""
+        pivot_payload = self._scan_pivot_payload()
+
+        def apply():
+            self._install_pivot_payload(pivot_payload)
+            for runtime in getattr(self, "_pivot_runtimes", {}).values():
+                try:
+                    runtime.invalidate()
+                except Exception:
+                    pass
+            self.refresh()
+
+        self._apply_from_worker(apply)
+
+    def _apply_from_worker(self, callback):
+        """Apply on Textual's thread; inline only for direct main-thread tests."""
+        try:
+            self.app.call_from_thread(callback)
+        except Exception:
+            if threading.current_thread() is threading.main_thread():
+                callback()
+
+    def _prepare_live_source(self, snapshot):
+        """Resolve source/config-derived values on the setup worker."""
+        source_tabs = getattr(self.src, "source_tabs", None)
+        if callable(source_tabs):
+            tabs = list(
+                source_tabs(snapshot)
+                if snapshot is not None
+                else source_tabs()
+            )
+        else:
+            machine_tabs = (
+                self.src.machines(snapshot)
+                if snapshot is not None
+                else self.src.machines()
+            )
+            tabs = [
+                {
+                    "label": label,
+                    "machine": machine,
+                    "env": env,
+                    "ready": ready,
+                    "source_kind": "machine-ssh",
+                    "source_id": None,
+                    "capabilities": {},
+                }
+                for label, machine, env, ready in machine_tabs
+            ]
+        metadata_fn = getattr(self.src, "setup_metadata", None)
+        if callable(metadata_fn):
+            metadata = metadata_fn(snapshot)
+        else:
+            hc = getattr(self.src, "host_cols", None)
+            te = getattr(self.src, "target_envs", None)
+            metadata = {
+                "host_cols": hc() if callable(hc) else None,
+                "target_envs": te() if callable(te) else None,
+            }
+        local = next(
+            (
+                (tab.get("machine"), tab.get("env"))
+                for tab in tabs
+                if tab.get("local")
+            ),
+            None,
+        )
+        if local is None:
+            try:
+                local = self.src.LOCAL
+            except Exception:
+                local = None
+        try:
+            repo_branch = (
+                getattr(self.src, "REPO", "") or "",
+                getattr(self.src, "BRANCH", "") or "",
+            )
+        except Exception:
+            repo_branch = ("", "")
+        return {
+            "tabs": tabs,
+            "local": local,
+            "repo_branch": repo_branch,
+            **(metadata or {}),
+        }
+
+    def _apply_live_source(self, prepared, loader):
+        """Install fully-prefetched live state. UI-thread only; no source I/O."""
+        tabs = prepared.get("tabs") or []
+        self.source_tabs = [{
+            "label": "All",
+            "machine": None,
+            "env": None,
+            "ready": True,
+            "source_kind": "all",
+            "source_id": None,
+            "capabilities": {},
+        }, *tabs]
+        self.machines = [
+            (
+                tab["label"],
+                tab.get("machine"),
+                tab.get("env"),
+                bool(tab.get("ready")),
+            )
+            for tab in self.source_tabs
+        ]
+        self.loader = loader
+        self._apply_loader_records()
+        self._source_local = prepared.get("local") or self._source_local
+        self._source_repo_branch = prepared.get("repo_branch") or ("", "")
+        self._roster_ready = True
+        self.machine_idx = next(
+            (
+                index
+                for index, tab in enumerate(self.source_tabs)
+                if index and tab.get("local")
+            ),
+            1 if len(self.source_tabs) > 1 else 0,
+        )
+        self.maint_sel = ListSelection()
+        self._last_poll = time.monotonic()
+        self._last_pivot_poll = time.monotonic()
+        self.host_cols = prepared.get("host_cols") or list(_DEFAULT_HOST_COLS)
+        target_env_list = prepared.get("target_envs") or _DEFAULT_TARGET_ENVS
+        self.targets = target_rows(target_env_list)
+        self.grid = {}
+        for ti, target in enumerate(self.targets):
+            for hi in range(len(self.host_cols)):
+                self.grid[(ti, hi)] = self.cell_locked(ti, hi)
+        self.applied = dict(self.grid)
+        self._prof_unavailable = set()
+        self._prof_load = getattr(self.src, "load_profile_column", None)
+        self._prof_apply = getattr(self.src, "apply_profile_column", None)
+        self._prof_loaded = False
+        if callable(self._prof_load):
+            self.profiles_view.start_load()
+        self._pr_reconciled = False
+        rec_fn = getattr(self.src, "reconcile_prs", None)
+        if callable(rec_fn):
+            self._start_pr_reconcile(rec_fn)
+        self._bound_live_reconciled = False
+        blr_fn = getattr(self.src, "reconcile_bound_live", None)
+        if callable(blr_fn):
+            self._start_bound_live_reconcile(blr_fn)
+        self._reconcile_wt_sel()
+
+    def _apply_loader_records(self):
+        """Merge incomplete stream prefixes over cached rows."""
+        if self.loader is None:
+            return
+        records = self.loader.records()
+        authoritative_fn = getattr(self.loader, "authoritative_source_ids", None)
+        if not callable(authoritative_fn):
+            _ready, loading, failed = self.loader.counts()
+            if records or (loading == 0 and failed == 0):
+                self.data = records
+            return
+
+        authoritative = set(authoritative_fn())
+        current_sources = {
+            rec.get("source_id") for rec in self.data if rec.get("source_id")
+        }
+        incoming_sources = {
+            rec.get("source_id") for rec in records if rec.get("source_id")
+        }
+        if current_sources | incoming_sources <= authoritative:
+            self.data = records
+            return
+
+        incoming = {
+            self._row_key(rec): rec
+            for rec in records
+            if self._row_key(rec) is not None
+        }
+        merged = []
+        seen = set()
+        for rec in self.data:
+            key = self._row_key(rec)
+            if key in incoming:
+                merged.append(incoming[key])
+                seen.add(key)
+            elif rec.get("source_id") not in authoritative:
+                merged.append(rec)
+        for rec in records:
+            key = self._row_key(rec)
+            if key is None or key not in seen:
+                merged.append(rec)
+                if key is not None:
+                    seen.add(key)
+        self.data = merged
 
     def on_unmount(self):
         # Picker is tearing down (a launch decision, cancel, or quit). Signal
@@ -1668,7 +2021,7 @@ class PickerScreen(Widget):
             busy = True
         # In live mode, stream in worktrees as each machine's load resolves.
         if self.live and self.loader is not None:
-            self.data = self.loader.records()
+            self._apply_loader_records()
             _ready, loading, _failed = self.loader.counts()
             busy = busy or loading > 0
             self._maybe_repoll()
@@ -1799,6 +2152,27 @@ class PickerScreen(Widget):
             )
             for tab in self.source_tabs
         ]
+        local = next(
+            (
+                (tab.get("machine"), tab.get("env"))
+                for tab in self.source_tabs
+                if tab.get("local")
+            ),
+            None,
+        )
+        if local is None:
+            try:
+                local = self.src.LOCAL
+            except Exception:
+                local = self._source_local
+        self._source_local = local or self._source_local
+        try:
+            self._source_repo_branch = (
+                getattr(self.src, "REPO", "") or "",
+                getattr(self.src, "BRANCH", "") or "",
+            )
+        except Exception:
+            self._source_repo_branch = ("", "")
         self.machine_idx = self.local_index()
         self.maint_sel = ListSelection()  # drop any stale Maintenance selection
         # Worktrees selection persists across reload (#2258 P3-7): it is NOT
@@ -1829,7 +2203,7 @@ class PickerScreen(Widget):
             self.load_delay = {}
             d = 1.4
             for i, (label, m, e, ok) in enumerate(self.machines):
-                if label == "All" or (m, e) == self.src.LOCAL or not ok:
+                if label == "All" or (m, e) == self._src_local() or not ok:
                     self.load_delay[i] = 0.0
                 else:
                     self.load_delay[i] = d
@@ -1876,6 +2250,7 @@ class PickerScreen(Widget):
         # Reconcile the persisted Worktrees selection against the freshly loaded
         # records (#2258 P3-7): keep survivors, drop rows that vanished, re-seat
         # a now-invalid range anchor. A no-op while records are still streaming.
+        self._roster_ready = True
         self._reconcile_wt_sel()
 
     def _start_pr_reconcile(self, rec_fn):
@@ -1930,7 +2305,7 @@ class PickerScreen(Widget):
         Mirrors the post-maintenance reload (#1421): in live mode the local
         source re-threads and the render tick picks up the fresh records; in the
         non-live path the data is reloaded in-place."""
-        m, e = self.src.LOCAL
+        m, e = self._src_local()
         if self.live and self.loader is not None:
             self.loader.reload(m, e)
         elif not self.live:
@@ -1981,11 +2356,14 @@ class PickerScreen(Widget):
         if not ok:
             return "disabled"
         if self.live:
+            loader = self.loader
+            if loader is None:
+                return "loading"
             source_id = self.source_tabs[i].get("source_id")
-            if source_id and hasattr(self.loader, "state_for_source"):
-                return self.loader.state_for_source(source_id)
-            return self.loader.state(m, e)
-        if (m, e) == self.src.LOCAL:
+            if source_id and hasattr(loader, "state_for_source"):
+                return loader.state_for_source(source_id)
+            return loader.state(m, e)
+        if (m, e) == self._src_local():
             return "ready"
         return "ready" if (time.monotonic() - self.t0) >= self.load_delay[i] else "loading"
 
@@ -2011,9 +2389,21 @@ class PickerScreen(Widget):
     def spin(self):
         return SPINNER[self.frame % len(SPINNER)]
 
+    def _src_local(self):
+        """Cached local identity; rendering never resolves source/config I/O."""
+        if self._source_local is not None:
+            return self._source_local
+        return (None, None)
+
+    def _src_repo_branch(self):
+        """Cached repo/branch labels; rendering never resolves source/config I/O."""
+        return self._source_repo_branch
+
     def local_index(self):
+        if not getattr(self, "_roster_ready", True) or not self.machines:
+            return 1 if len(self.machines) > 1 else 0
         for i, (label, m, e, ok) in enumerate(self.machines):
-            if (m, e) == self.src.LOCAL:
+            if (m, e) == self._src_local():
                 return i
         return 1 if len(self.machines) > 1 else 0
 
@@ -2212,7 +2602,7 @@ class PickerScreen(Widget):
         """Where '+ New Worktree' lands: the active machine, or LOCAL when on
         'All'."""
         if self.is_all():
-            return self.src.LOCAL
+            return self._src_local()
         m, e, _ = self.cur_machine()
         return (m, e)
 
@@ -2739,8 +3129,12 @@ class PickerScreen(Widget):
             ctx.append(" bridge / system worktree(s)", style=C_DIM)
         else:                                   # New worktree (default)
             ctx.append("    creates on ", style=C_DIM)
-            ctx.append(f"{tm} ", style=C_META)
-            ctx.append(te, style=C_ENV.get(te, C_META))
+            if tm is None:
+                ctx.append("…", style=C_DIM)
+            else:
+                ctx.append(f"{tm} ", style=C_META)
+                if te:
+                    ctx.append(te, style=C_ENV.get(te, C_META))
             if host_tag:
                 ctx.append(host_tag, style=C_DIM)
         return ctx
@@ -2753,7 +3147,7 @@ class PickerScreen(Widget):
         so adding a button never needs a hardcoded index."""
         bset = self.button_set()
         tm, te = self.create_target()
-        host_tag = "  (this host)" if (tm, te) == self.src.LOCAL else ""
+        host_tag = "  (this host)" if (tm, te) == self._src_local() else ""
         labels = {"N": " + New worktree… ", "K": " ✕ Clean ", "SY": " ⟳ Sync "}
 
         t = Text("  ")
@@ -3440,17 +3834,16 @@ class PickerScreen(Widget):
         # Right-side segments, dropped in this order as width shrinks:
         # version, branch, env, repo. Always kept: "Worktree Manager" + machine.
         ver = f" · v{VERSION}"
-        m, e = self.src.LOCAL
-        host = f"{m.lower()}"
+        m, e = self._src_local()
+        host = m.lower() if m else "…"
         # Repo name + default branch are project config, surfaced by the data
         # source (data_local/data_ssh expose REPO/BRANCH from the resolved
         # config); never hardcoded. Empty when a source omits them (e.g. a
         # fixture source) so the segment is dropped rather than showing a
         # fabricated name.
-        repo = getattr(self.src, "REPO", "") or ""
-        branch = getattr(self.src, "BRANCH", "") or ""
+        repo, branch = self._src_repo_branch()
         present = {"update_text": True, "version": True, "repo": bool(repo),
-                   "env": True, "branch": bool(branch)}
+                   "env": bool(e), "branch": bool(branch)}
         upd_focused = self.sel[0] == "UPD"
 
         def build():
@@ -8227,8 +8620,7 @@ class PickerApp(App):
     PickerScreen > #nf-buttons { width: 100%; height: auto; }
     PickerScreen > #nf-body-data   { width: 100%; height: 1fr; }
     PickerScreen > #nf-footer { width: 100%; height: 2; }
-    /* NF5-5 native OptionList data body (opt-in via
-       AGENT_WORKTREES_PICKER_NATIVE_LIST): picker palette + the amber cursor
+    /* NF5-5 native OptionList data body: picker palette + the amber cursor
        used by the native modals; matches the base type so it targets the
        _PickerNativeData subclass. */
     PickerScreen > OptionList#nf-body-data {

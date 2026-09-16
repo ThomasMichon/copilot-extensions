@@ -3,39 +3,13 @@
 from __future__ import annotations
 
 import argparse
-import io
 import json
 from pathlib import Path
-import sys
 from types import SimpleNamespace
 
 import pytest
 
 from agent_worktrees import __main__ as m
-
-
-@pytest.mark.parametrize(
-    "stdin",
-    [None, io.StringIO(), object(), SimpleNamespace(isatty=True)],
-)
-def test_picker_rejects_noninteractive_stdin(monkeypatch, stdin):
-    from agent_worktrees import picker_tui
-
-    monkeypatch.setattr(sys, "stdin", stdin)
-
-    with pytest.raises(RuntimeError, match="interactive terminal"):
-        picker_tui.run_tui_picker(source=object())
-
-
-def test_picker_rejects_closed_stdin(monkeypatch):
-    from agent_worktrees import picker_tui
-
-    stdin = io.StringIO()
-    stdin.close()
-    monkeypatch.setattr(sys, "stdin", stdin)
-
-    with pytest.raises(RuntimeError, match="interactive terminal"):
-        picker_tui.run_tui_picker(source=object())
 
 
 def test_extract_project_flag_space():
@@ -191,16 +165,20 @@ def test_extract_project_flag_trailing_value_missing():
     assert rest == []
 
 
-def test_bare_no_project_routes_to_help(monkeypatch, capsys):
+def test_bare_no_project_uses_install_trigger(monkeypatch):
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
     monkeypatch.setattr(m, "_usable_worktree_manager", lambda: None)
     monkeypatch.setattr(m.inst, "read_projects_registry", lambda: {"projects": {}})
     monkeypatch.setattr(m, "_git_toplevel", lambda p: None)
+    seen = {}
+    monkeypatch.setattr(
+        m,
+        "cmd_manager_install_trigger",
+        lambda project: seen.__setitem__("project", project) or 0,
+    )
     rc = m.main([])
-    assert rc == 1
-    err = capsys.readouterr().err
-    assert "Could not resolve a project" in err
-    assert "register" in err
+    assert rc == 0
+    assert seen == {"project": None}
 
 
 def test_project_requiring_command_no_project_routes_to_help(monkeypatch, capsys):
@@ -279,20 +257,18 @@ def test_installer_registry_commands_run_without_project(
     assert len(called) == 1
 
 
-def test_project_flag_bypasses_help(monkeypatch):
+def test_project_flag_bare_invocation_uses_install_trigger_without_manager(monkeypatch):
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
     monkeypatch.setattr(m, "_usable_worktree_manager", lambda: None)
     called = {}
-
-    def fake_launch(argv):
-        called["launched"] = True
-        return 0
-
-    # With a project set via flag and no subcommand, should launch, not help.
-    monkeypatch.setattr(m, "cmd_launch", fake_launch)
+    monkeypatch.setattr(
+        m,
+        "cmd_manager_install_trigger",
+        lambda project: called.__setitem__("project", project) or 0,
+    )
     rc = m.main(["--project", "demo"])
     assert rc == 0
-    assert called.get("launched") is True
+    assert called == {"project": "demo"}
     assert m.cfg.active_project() == "demo"
     import os
     # identity is threaded in-process, never round-tripped through the env
@@ -378,13 +354,16 @@ def test_router_worktrees_folds_back_to_launch(monkeypatch):
             AssertionError("worktrees must not route to a sibling")),
     )
     called = {}
-    monkeypatch.setattr(m, "cmd_launch",
-                        lambda argv: called.__setitem__("launched", True) or 0)
+    monkeypatch.setattr(
+        m,
+        "cmd_manager_install_trigger",
+        lambda project: called.__setitem__("project", project) or 0,
+    )
     # `--project demo worktrees` strips to a bare launch, exactly like
     # `--project demo` with no subcommand.
     rc = m.main(["--project", "demo", "worktrees"])
     assert rc == 0
-    assert called.get("launched") is True
+    assert called == {"project": "demo"}
 
 
 def test_router_dispatches_codespaces_project_pinned(monkeypatch):
@@ -486,11 +465,14 @@ def test_router_worktree_singular_folds_back(monkeypatch):
             AssertionError("worktree(s) must not route to a sibling")),
     )
     called = {}
-    monkeypatch.setattr(m, "cmd_launch",
-                        lambda argv: called.__setitem__("launched", True) or 0)
+    monkeypatch.setattr(
+        m,
+        "cmd_manager_install_trigger",
+        lambda project: called.__setitem__("project", project) or 0,
+    )
     rc = m.main(["--project", "demo", "worktree"])
     assert rc == 0
-    assert called.get("launched") is True
+    assert called == {"project": "demo"}
 
 
 def test_router_non_project_slug_omits_project(monkeypatch):
@@ -658,40 +640,45 @@ def test_profiles_apply_rejects_bad_json(monkeypatch, tmp_path):
     assert rc == 2
 
 
-def test_picker_status_reports_ssh_fallback(monkeypatch):
-    """`picker status` reports effective=false only when the Windows-over-SSH
-    ConPTY fallback applies; there is no persisted opt-out any more."""
+def test_picker_status_reports_manager_availability(monkeypatch, capsys):
+    """`picker status` reports whether the standalone Worktree Manager owns the
+    picker seam now that the bundled copy is gone."""
     import argparse
 
-    monkeypatch.setattr(m, "_new_picker_blocked_by_ssh", lambda: False)
+    monkeypatch.setattr(m, "_usable_worktree_manager", lambda: "/usr/bin/worktree-manager")
     rc = m.cmd_picker(argparse.Namespace(picker_action="status", json=True))
     assert rc == 0
 
-    monkeypatch.setattr(m, "_new_picker_blocked_by_ssh", lambda: True)
+    monkeypatch.setattr(m, "_usable_worktree_manager", lambda: None)
     rc = m.cmd_picker(argparse.Namespace(picker_action="status", json=True))
     assert rc == 0
+    rc = m.cmd_picker(argparse.Namespace(picker_action="status", json=False))
+    assert rc == 0
+    assert "install trigger" in capsys.readouterr().out
 
 
-def test_picker_mock_launches_in_mock_mode(monkeypatch):
-    """`picker mock` launches the TUI in explicit mock mode (mock_mode=True) and
-    reports the decision without acting on it."""
+def test_picker_mock_delegates_to_manager(monkeypatch):
+    """`picker mock` is now a Worktree Manager passthrough."""
     import argparse
 
-    from agent_worktrees import picker_tui
-
+    monkeypatch.setattr(m, "_usable_worktree_manager", lambda: "/usr/bin/worktree-manager")
+    monkeypatch.setattr(m.cfg, "active_project", lambda: "demo")
     seen = {}
-
-    def _fake_run(live=False, mock_mode=None):
-        seen["live"] = live
-        seen["mock_mode"] = mock_mode
-        return {"action": "cancel"}
-
-    monkeypatch.setattr(picker_tui, "run_tui_picker", _fake_run)
-    monkeypatch.setattr(m, "_in_ssh_session", lambda: False)
+    monkeypatch.setattr(
+        m,
+        "_exec_worktree_manager",
+        lambda mgr, project, *, subcommand=None: seen.update(
+            mgr=mgr, project=project, subcommand=subcommand
+        ) or 0,
+    )
 
     rc = m.cmd_picker(argparse.Namespace(picker_action="mock", json=True))
     assert rc == 0
-    assert seen["mock_mode"] is True
+    assert seen == {
+        "mgr": "/usr/bin/worktree-manager",
+        "project": "demo",
+        "subcommand": ["picker", "mock"],
+    }
 
 
 def test_project_flag_sets_active_project_and_ignores_worktree_id(monkeypatch):
@@ -975,21 +962,20 @@ def test_bare_headless_project_lists_not_launches(monkeypatch):
     assert dispatched["v"] == ["list"]
 
 
-def test_bare_non_headless_project_launches(monkeypatch):
+def test_bare_non_headless_project_uses_install_trigger_without_manager(monkeypatch):
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
     monkeypatch.setattr(m, "_usable_worktree_manager", lambda: None)
     monkeypatch.setattr(m, "_resolve_active_project", lambda proj: ("demo", None))
     monkeypatch.setattr(m, "_is_headless_project", lambda: False)
-    launched = {"v": False}
-
-    def fake_launch(argv):
-        launched["v"] = True
-        return 0
-
-    monkeypatch.setattr(m, "cmd_launch", fake_launch)
+    launched = {}
+    monkeypatch.setattr(
+        m,
+        "cmd_manager_install_trigger",
+        lambda project: launched.__setitem__("project", project) or 0,
+    )
     rc = m.main([])
     assert rc == 0
-    assert launched["v"] is True
+    assert launched == {"project": "demo"}
 
 
 # ── the binstub seam (Phase 6 / DQ7 / DQ8) ────────────────────────────
@@ -1002,7 +988,7 @@ def test_bare_prefers_manager_after_production_ux_transplant(monkeypatch):
     monkeypatch.setattr(m, "_is_headless_project", lambda: False)
     monkeypatch.setattr(m.cfg, "active_project", lambda: "demo")
     monkeypatch.setattr(m, "_usable_worktree_manager", lambda: "/usr/bin/worktree-manager")
-    monkeypatch.setattr(m, "_bundled_picker_available", lambda: True)
+    monkeypatch.setattr(m, "_bundled_picker_available", lambda: False)
 
     monkeypatch.setattr(
         m,
@@ -1051,25 +1037,6 @@ def test_manager_handoff_binds_exact_engine_runtime(monkeypatch):
     assert json.loads(
         seen["env"][m._WORKTREE_MANAGER_ENGINE_ARGV_ENV]
     ) == [r"C:\runtime\python.exe", "-m", "agent_worktrees"]
-
-
-def test_bare_falls_back_to_picker_without_manager(monkeypatch):
-    """No Manager on PATH → the bundled Picker is the fallback while it ships."""
-    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
-    monkeypatch.setattr(m, "_resolve_active_project", lambda proj: ("demo", None))
-    monkeypatch.setattr(m, "_is_headless_project", lambda: False)
-    monkeypatch.setattr(m, "_worktree_manager_path", lambda: None)
-    monkeypatch.setattr(m, "_bundled_picker_available", lambda: True)
-
-    launched = {"v": False}
-    monkeypatch.setattr(m, "cmd_launch", lambda argv: launched.__setitem__("v", True) or 0)
-    monkeypatch.setattr(m, "_exec_worktree_manager",
-                        lambda mgr, project: pytest.fail("should not exec manager"))
-    monkeypatch.setattr(m, "cmd_manager_install_trigger",
-                        lambda project: pytest.fail("picker present: no install trigger"))
-    rc = m.main([])
-    assert rc == 0
-    assert launched["v"] is True
 
 
 def test_bare_shows_install_trigger_when_picker_retired(monkeypatch):
@@ -1149,8 +1116,8 @@ def test_install_trigger_shows_source_and_platform_command(monkeypatch, capsys):
 
 
 def test_bundled_picker_available_detects_package():
-    """While picker_tui ships, the fallback resolves to the bundled Picker."""
-    assert m._bundled_picker_available() is True
+    """Phase 6: the bundled picker package is gone."""
+    assert m._bundled_picker_available() is False
 
 
 # ── _usable_worktree_manager health gate (DQ8: never dead-end bare launch) ────

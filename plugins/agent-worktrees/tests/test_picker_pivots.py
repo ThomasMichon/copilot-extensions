@@ -6,7 +6,7 @@ import json
 
 from dropin_registry import ScanAuthority, ScanSnapshot
 
-from agent_worktrees.picker_tui import pivots
+from agent_worktrees.picker_support import pivots
 
 
 def _write(directory, name, data):

@@ -109,4 +109,3 @@ def local_host():
         if is_local_machine and name == plat:
             return (m.key, elabel)
     return data_local.LOCAL
-
