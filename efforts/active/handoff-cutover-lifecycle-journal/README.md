@@ -83,7 +83,13 @@ both plugins:
     `_monitor_claim_handoff_cutover()` (claim, using an exclusive-create file
     under `~/.agent-worktrees/status-monitor-handoffs.d/<worktree>/<token>.json`),
     `_handoff_cutover_spawn_result()` (spawn), `_wait_for_handoff_candidate()`
-    (waits for the successor's sessionStart to associate the token).
+    (waits for the successor's sessionStart to associate the token, **or**
+    -- since #7072, `sessions_pane_retire.associate_pane_matched_candidate()`
+    -- for agent-worktrees itself to confirm a live session's process
+    ancestry matches the exact pane the cutover opened; the latter needs no
+    env var and is the only path that works on psmux/Windows, where `-e`
+    custom environment propagation into the pane's actual child process is
+    not reliable).
   - `health.py` — `find_orphaned_handoffs()` already detects "claimed but no
     live successor pane" as a class of bug — this is the exact reported
     symptom.

@@ -115,6 +115,7 @@ from . import (
     reciprocal_presentation,
     reclaim,
     sessions,
+    sessions_pane_retire,
     tracking,
 )
 from . import claimant as claimant_mod
@@ -2924,25 +2925,18 @@ def _wait_for_handoff_candidate(
     pane_id: str | None,
     *,
     timeout: float = 30.0,
+    mux_session: str | None = None,
+    predecessor_session_id: str | None = None,
 ) -> tuple[str | None, str]:
-    """Wait until sessionStart associates the exact handoff token."""
-    deadline = time.monotonic() + timeout
-    mux_bin = sessions._mux_bin()
-    while time.monotonic() < deadline:
-        try:
-            candidate_record = tracking.load_record(record_path)
-            handoff = next(
-                (item for item in candidate_record.handoffs if item.token == token),
-                None,
-            )
-        except (OSError, ValueError):
-            handoff = None
-        if handoff is not None and handoff.candidate:
-            return handoff.candidate, "session-associated"
-        if pane_id and not sessions._mux_pane_alive(pane_id, mux_bin):
-            return None, "pane-exited-before-session"
-        time.sleep(0.05)
-    return None, "session-association-timeout"
+    """Wait until a successor is confirmed for the exact handoff token.
+
+    See ``sessions_pane_retire.wait_for_handoff_candidate`` (moved there to
+    keep this grandfathered module's shrink-only size baseline).
+    """
+    return sessions_pane_retire.wait_for_handoff_candidate(
+        record_path, token, pane_id, timeout=timeout, mux_session=mux_session,
+        predecessor_session_id=predecessor_session_id,
+    )
 
 
 def _resolve_handoff_cutover_target(
@@ -3308,6 +3302,8 @@ def _handoff_cutover_spawn_result(
             record_path,
             handoff_token,
             new_pane,
+            mux_session=expected_mux_session,
+            predecessor_session_id=session_id,
         )
         if not candidate_session:
             failure = dict(result)
