@@ -63,6 +63,12 @@ Optional. Only what is specific to **this machine**, or overrides. The installer
 writes a slim version (project marker + anchor); machine-wide fields live in the
 global config.
 
+The Python and shell installers do not seed `default_branch` into this overlay.
+The loader uses the in-repo setting, then the registry fallback, without freezing
+either value into a higher-priority machine-local override. An explicit
+user-authored override still wins; existing files are preserved unless config
+regeneration is explicitly forced.
+
 ```yaml
 repo_name: my-project             # which repos.<name> is the active/default repo
 headless: false                   # CLI-only project (bare binstub lists worktrees)

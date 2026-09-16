@@ -2170,7 +2170,6 @@ repos:
     # worktree_root defaults to $worktreeRoot -- a sibling
     # <anchor>.worktrees dir, matching Copilot CLI's /worktree layout.
     # Uncomment and set an absolute path to override.
-    default_branch: master
     remote: origin
 
 # terminal_profiles -- this machine's terminal-profile column (the Picker's
