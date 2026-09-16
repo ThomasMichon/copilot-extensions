@@ -697,15 +697,15 @@ class SpawnReservationMixin:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute("SELECT * FROM spawn_reservations WHERE key = ?", (key,)).fetchone()
             if row is None:
-                conn.execute("COMMIT")
+                conn.execute("ROLLBACK")
                 raise TaskError(f"no such reservation: {key}")
             if row["state"] not in SpawnState.ACTIVE:
-                conn.execute("COMMIT")
+                conn.execute("ROLLBACK")
                 raise TaskError(
                     f"reservation {key} is {row['state']!r}, not active (cannot request release)"
                 )
             if worktree and row["worktree"] and row["worktree"] != worktree:
-                conn.execute("COMMIT")
+                conn.execute("ROLLBACK")
                 raise TaskError(
                     f"reservation {key} worktree is {row['worktree']!r}, "
                     f"not {worktree!r}"

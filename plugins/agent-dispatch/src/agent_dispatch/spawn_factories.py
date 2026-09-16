@@ -18,6 +18,7 @@ import stat
 import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Protocol
 
 
 class SpawnPreparationRetained(RuntimeError):
@@ -313,13 +314,40 @@ def _failed_bridge_session(result: object) -> str | None:
     return None
 
 
-def _request_failed_created_spawn_release(
-    client: object,
+class _SpawnReleaseClient(Protocol):
+    """The narrow slice of :class:`DispatchClient` this module depends on.
+
+    A structural ``Protocol`` (not an import of ``DispatchClient`` itself)
+    keeps this module free of a dependency back on ``client.py``, while still
+    giving callers real static checking in place of a bare ``object``.
+    """
+
+    def request_spawn_release(
+        self,
+        key: str,
+        *,
+        detail: str | None = None,
+        disposition: str = "failed",
+        session_handle: str | None = None,
+        worktree: str | None = None,
+    ) -> object: ...
+
+
+def request_failed_created_spawn_release(
+    client: _SpawnReleaseClient,
     key: str,
     handle: dict,
     spawn_task: dict,
     detail: str,
 ) -> None:
+    """Fence a failed headless spawn, retaining its body identity if known.
+
+    Companion to :func:`_failed_bridge_session` above: a headless spawn that
+    already created its own worktree must retain any bridge session identity
+    it managed to capture *before* fencing the reservation for release, so
+    the supervisor's exact-absence liveness/cleanup path (not a permanent
+    fence with no recovery handle) resolves the attempt.
+    """
     failed_session = handle.get("session")
     client.request_spawn_release(
         key,

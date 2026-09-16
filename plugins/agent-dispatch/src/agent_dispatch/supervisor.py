@@ -88,7 +88,6 @@ from .spawn_factories import (  # noqa: F401 -- re-exported for existing call si
     _parse_fleet_body_handle,
     _parse_local_body_handle,
     _reservation_made_progress,
-    _request_failed_created_spawn_release,
     _target_directory_missing,
     _tracking,
     _worktree_from_owner,
@@ -97,6 +96,7 @@ from .spawn_factories import (  # noqa: F401 -- re-exported for existing call si
     make_headless_spawn,
     make_label_routed_spawn,
     make_redrive_sender,
+    request_failed_created_spawn_release,
 )
 from .supervisor_conclusion import (  # noqa: F401 -- re-exported for existing call sites/tests
     _CONCLUSION_COMPLETE,
@@ -3337,7 +3337,7 @@ class Supervisor:
                             handle.get("error"),
                         )
                     elif spawn_task.get("spawn_worktree_ownership") == "created":
-                        _request_failed_created_spawn_release(
+                        request_failed_created_spawn_release(
                             self.client, key, handle, spawn_task, detail
                         )
                         log.warning(

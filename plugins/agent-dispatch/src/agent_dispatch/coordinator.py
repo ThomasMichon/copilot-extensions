@@ -809,9 +809,11 @@ class ReservationDetailBody(BaseModel):
     claim_token: str | None = None
 
 
-class RequestSpawnReleaseBody(RecordSpawnBody):
+class RequestSpawnReleaseBody(BaseModel):
     detail: str | None = None
     disposition: str = "failed"
+    session_handle: str | None = None
+    worktree: str | None = None
 
 
 class RetireSpawnBody(ReservationDetailBody):
