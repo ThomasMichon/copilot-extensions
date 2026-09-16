@@ -65,6 +65,8 @@ def build_app(cfg: Config | None = None):
         queue, token=cfg.token, control_token=cfg.control_token,
         sweep_interval=cfg.sweep_interval,
         orphan_grace=cfg.orphan_grace, wake_interval=0.25,
+        handoff_fallback_enabled=cfg.handoff_fallback_enabled,
+        handoff_fallback_grace=cfg.handoff_fallback_grace,
         wake_is_active=_owns_active_route,
     )
 

@@ -46,6 +46,7 @@ from typing import Any
 
 from .identity import canonical_reviewer_target, canonicalize_remote
 from .payload import PayloadStore, is_blob_ref
+from .queue_handoff_fallback import HandoffFallbackMixin
 from .queue_liveness import LivenessMixin
 from .queue_producer_fences import (  # noqa: F401 -- re-exported for existing call sites/tests
     ProducerFenceError,
@@ -544,6 +545,7 @@ class TaskQueue(
     SpawnReservationMixin,
     ProducerFenceMixin,
     LivenessMixin,
+    HandoffFallbackMixin,
 ):
     """A leased, capability-gated task queue over a SQLite database file.
 
@@ -1083,6 +1085,7 @@ class TaskQueue(
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_registrations_kind ON registrations(kind)"
             )
+            self._ensure_handoff_fallback_schema(conn)
             self._migrate_producer_schema(conn)
 
     @staticmethod

@@ -3249,6 +3249,7 @@ def _resolve_target(
     effort: str | None = None,
     target_dir: str | None = None,
     worktree_id: str | None = None,
+    reclaim: bool = False,
 ) -> str:
     """Resolve a target string to a session ID.
 
@@ -3263,7 +3264,9 @@ def _resolve_target(
     ``force_new`` (``create``) skips caller-affinity reuse and always asks
     the server for a fresh session; ``refuse_on_conflict`` turns the
     one-session-per-CodeSpace guard into an ``_AgentSessionConflict`` raise
-    instead of reusing the existing session.
+    instead of reusing the existing session. ``reclaim`` is the head-guard
+    break-glass (mirrors ``resume --reclaim``): threaded through so a create
+    into an occupied ``worktree_id`` takes over instead of a 409.
     """
     from .client import BridgeClientError
 
@@ -3348,6 +3351,7 @@ def _resolve_target(
             effort=effort,
             target_dir=target_dir,
             worktree_id=worktree_id,
+            reclaim=reclaim,
         )
 
     # Not in the cached agent list -- hand the target to the server as-is so its
@@ -3363,6 +3367,7 @@ def _resolve_target(
             effort=effort,
             target_dir=target_dir,
             worktree_id=worktree_id,
+            reclaim=reclaim,
         )
     except BridgeClientError as exc:
         if exc.status != 404:
@@ -3449,6 +3454,7 @@ def _cmd_create(args: argparse.Namespace) -> None:
             effort=getattr(args, "effort", None),
             target_dir=getattr(args, "target_dir", None),
             worktree_id=getattr(args, "worktree_id", None),
+            reclaim=bool(getattr(args, "reclaim", False)),
         )
     except _AgentSessionConflict as conflict:
         sid = conflict.existing_session_id
@@ -4002,6 +4008,7 @@ def _start_agent_session(
     effort: str | None = None,
     target_dir: str | None = None,
     worktree_id: str | None = None,
+    reclaim: bool = False,
 ) -> str:
     """Start or reuse a session for a named agent.
 
@@ -4016,6 +4023,11 @@ def _start_agent_session(
     ``refuse_on_conflict=True`` this raises ``_AgentSessionConflict`` (so
     ``create`` can tell the user to end the existing session first) instead of
     silently reusing it.
+
+    ``reclaim`` is the session-lifecycle head-guard break-glass: passed
+    through to ``client.start_session`` so a create into an occupied
+    ``worktree_id`` takes over in place instead of being refused 409 (see
+    ``_render_head_guard_refusal``).
     """
     from .client import BridgeClientError
 
@@ -4065,6 +4077,7 @@ def _start_agent_session(
             sender_repo=_sender_repo(), force_new=force_new,
             caller_owner_ref=_worktrees_get("owner-ref"),
             worktree_id=worktree_id,
+            reclaim=reclaim,
             model=model, effort=effort,
             request_timeout=_startup_request_timeout(),
         )
@@ -6202,6 +6215,13 @@ def build_parser() -> argparse.ArgumentParser:
     create_p.add_argument(
         "--worktree-id", dest="worktree_id", default=None, metavar="ID",
         help="Bind the created session to an existing agent-worktrees worktree id.",
+    )
+    create_p.add_argument(
+        "--reclaim", action="store_true",
+        help=(
+            "Break-glass take-over: create into --worktree-id even if occupied "
+            "(bypasses the 409 worktree-head guard). Mirrors 'resume --reclaim'."
+        ),
     )
     _add_stream_args(create_p)
     create_p.set_defaults(func=_cmd_create)

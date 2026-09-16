@@ -247,12 +247,25 @@ Verbatim from the operator:
   falsely green (by lucky "tmux not found -> OSError -> False" coincidence)
   or failing outright -- retargeted the monkeypatches to the module that
   actually owns the functions now.
-- [ ] Extend `agent-dispatch`'s coordinator to reconcile an unclaimed
+- [x] Extend `agent-dispatch`'s coordinator to reconcile an unclaimed
   `proposed`/`handoff` task past a bounded window into a fallback headless
   successor launch, per `redesign.md` §4.3 (reusing already-supervised
-  infrastructure rather than a new standing watchdog). **Next slice** --
-  wire the coordinator's existing liveness-GC-style polling loop to call
-  the new `handoff-cutover --headless` path.
+  infrastructure rather than a new standing watchdog). **PR #2808.**
+  **Design pivot mid-slice (operator steer):** agent-dispatch is the
+  *holder* of the handoff task, not the *implementor* of the handoff
+  mechanism -- the coordinator judges staleness and asks the associated
+  bridge to replace the stale occupant in place; it never shells to
+  `agent-worktrees handoff-cutover` itself. Implemented via agent-bridge's
+  existing session-lifecycle `--reclaim` break-glass (the request-body flag
+  and server guard bypass already existed from an earlier effort; only the
+  `create` CLI plumbing was missing) -- added `agent-bridge create
+  --reclaim`, threaded `bridge.spawn_worker(reclaim=...)`, a new
+  `handoff_fallback_seed.py` (pure Python port of `cutover-seed.mjs`'s short
+  seed contract), `queue_handoff_fallback.py`'s atomic single-attempt claim
+  fence (never double-launches), and `coordinator.py`'s
+  `_handoff_fallback_loop` (same supervised-cycle shape as
+  `_gc_loop`/`_orphan_reap_loop`), gated **default-off**
+  (`AGENT_DISPATCH_HANDOFF_FALLBACK`) with a 1h default grace window.
 - [ ] Evaluate a `userPromptSubmitted` hook that greps the successor's first
   submitted prompt for the expected handoff token, as a deterministic
   "pickup actually happened" signal feeding the lineage trace (complements,
@@ -506,3 +519,60 @@ gate land._
   unclaimed `proposed`/`handoff`-labeled task past a bounded window and
   launch `agent-worktrees handoff-cutover --headless`, guarded against
   double-launch).
+
+### 2026-09-15/16 — Phase 3 slice 2 (coordinator handoff-fallback reconciliation)
+
+- **PR #2683 merged** (context-handoff awareness fix from the prior detour).
+- Investigated status, then per operator direction re-derived the real
+  design: **agent-dispatch is the holder of the handoff task, not the
+  implementor of the handoff mechanism.** The coordinator's job is only to
+  judge staleness and say "this handoff looks stale, please claim it" -- the
+  associated bridge (headed or headless) is responsible for actually
+  replacing the old session with a new one in place. This corrects the
+  original plan (coordinator shelling directly to `agent-worktrees
+  handoff-cutover`) -- that would have made agent-dispatch reimplement
+  cutover mechanics agent-bridge already owns, and would have blocked any
+  future non-Worktree-Manager control plane from reusing the same
+  primitives. Investigated agent-bridge's existing session-lifecycle head
+  guard (`worktree_head.py`/`_enforce_worktree_head_guard`) and found the
+  `reclaim` break-glass **already existed** at the request-body/client
+  layer (from an earlier, unrelated effort) but was never wired to the
+  `create` CLI subcommand -- so the actual gap was much smaller than
+  originally scoped.
+- Implemented: `agent-bridge create --reclaim` (CLI flag threaded through
+  `_resolve_target`/`_start_agent_session` to `client.start_session`);
+  `agent_dispatch.bridge.spawn_worker(reclaim=...)`; a new
+  `handoff_fallback_seed.py` (pure Python port of `cutover-seed.mjs`'s short
+  successor-seed contract, so the coordinator never needs a Node.js
+  runtime); a new `queue_handoff_fallback.py` (`HandoffFallbackMixin`) whose
+  `claim_handoff_fallback()` is the atomic single-attempt fence -- an
+  `INSERT` into a dedicated table keyed by task id, so a racing
+  reconciliation cycle, a second coordinator process, or a legitimate
+  just-in-time human/tool pickup can never double-launch (deliberately
+  simpler than `spawn_reservations`' retry/attempt-budget machinery: a
+  stale handoff gets exactly one fallback attempt, ever); and
+  `coordinator.py`'s `_handoff_fallback_loop`, following the exact
+  `_gc_loop`/`_orphan_reap_loop` supervised-cycle shape (bounded,
+  `/health`-recorded, backed off). Wired into `create_app`/`server.py`
+  behind a **default-off** opt-in (`AGENT_DISPATCH_HANDOFF_FALLBACK`,
+  1h default grace `AGENT_DISPATCH_HANDOFF_FALLBACK_GRACE`) -- a
+  coordinator autonomously spawning a real Copilot process on a time
+  heuristic is genuinely safety-relevant, so it ships disabled and
+  reviewable rather than default-on.
+- Investigated three unrelated open PRs (#1585/#2156/#2311, a third-party
+  "Herdr" live-handoff mechanism) per the operator's curiosity about #2311
+  specifically: confirmed it is unmergeable (CONFLICTING against `main`),
+  has no reported CI, and carries 7 unresolved automated review findings
+  (incl. one flagged High severity) with no human approval -- not something
+  to build on or wait for; this slice proceeded independently.
+- 25 new tests (`test_handoff_fallback.py`) plus reclaim-threading tests in
+  both plugins' existing suites plus two new coordinator `/health`
+  integration tests. Full targeted regression: agent-dispatch 329 passed (2
+  pre-existing/unrelated skips); agent-bridge 56 passed. Guards
+  (module-size, version-bump, and the full pre-push suite) all green.
+  Bumped `agent-dispatch` to `0.1.2-dev110`, `agent-bridge` to
+  `0.4.0-dev490`. **PR #2808** opened.
+- **Remaining for a follow-up slice:** the `userPromptSubmitted` pickup
+  hook (Phase 3 item 3) and closing `handoff-live-cutover`'s remaining
+  Phase 3 items (item 4). Once those land, Phases 4 (configurability) and 5
+  (lineage/diagnostics) remain.
