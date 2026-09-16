@@ -99,6 +99,18 @@ all of it to the `installer` and `picker` visions. It records **delta-closure
 state only** — the visions themselves state the target and are not edited to log
 progress.
 
+## Request
+
+Build the standalone, out-of-plugin **Worktree Manager** app so the harness is
+turnkey even before any plugin's own installer can run, and make it the single
+home for the interactive Picker and Mux/session-multiplexer management —
+extracted out of the `agent-worktrees` plugin, not duplicated alongside it.
+Keep every plugin (including `agent-worktrees`) fully self-sufficient without
+the Manager; a bare invocation hands off to it when present and offers a
+trustworthy install/onboarding trigger when absent. Retire the bundled,
+in-plugin Picker once the extracted one reaches parity — this is the
+operator-visible end-state, not an indefinite dual-implementation state.
+
 ## Plan
 
 Phases are ordered by dependency, not calendar. Checked items are already
@@ -148,7 +160,10 @@ realized in `main`; unchecked items are the remaining delta.
       full worktree list interaction (filter · sort · select), resume/join/create
       actions, multi-machine at-a-glance, session/PR status columns. Closes picker
       §`front-door-entry`, §`decision-support-before-cost`, §`programmatic-parity`,
-      §`render-derive-not-own`, §`live-not-snapshot`.
+      §`render-derive-not-own`, §`live-not-snapshot`. **Ordered plan, including the
+      2026-09-15 divergence audit (which agent-worktrees-only Picker fixes since the
+      #1244 transplant still need porting before this box is honestly checked):**
+      [`phase-3-picker-parity-and-retirement.md`](phase-3-picker-parity-and-retirement.md).
 - [x] Add an engine-owned **manual mux restoration** operation for a worktree
       whose bound Copilot process remains live but unreachable after its terminal
       or mux wrapper disappears. The engine must refuse an existing live mux or
@@ -349,6 +364,11 @@ realized in `main`; unchecked items are the remaining delta.
       installed, a bare launch surfaces the **install trigger** instead of any
       in-plugin Picker. This is the behavior a user currently expects but does not
       yet get, because the bundled Picker is deliberately retained until parity.
+      Deletion + validation steps:
+      [`phase-3-picker-parity-and-retirement.md`](phase-3-picker-parity-and-retirement.md)
+      § Step 2/3. Closes
+      [#117](https://github.com/ThomasMichon/copilot-extensions/issues/117) (the
+      smaller opt-out-toggle cleanup this supersedes).
 
 ### Phase 7 — Health, updating & presets (Ongoing)
 - [ ] `doctor`/validation breadth, plugin updating & alignment, and
@@ -367,7 +387,7 @@ realized in `main`; unchecked items are the remaining delta.
       extending this plan before implementation when necessary.
 - [ ] Keep configuration examples synthetic and repository-neutral.
 
-## Validation
+## Validation Plan
 
 - **Headless render + golden checks.** The Manager Picker's `capture_svg` renders
   with no terminal, so list/interaction states are asserted as fixtures — closes
@@ -878,3 +898,19 @@ claiming discipline alone.
   Worktree Manager Picker fix above -- affects other sibling plugins, not
   this effort's own Picker/Mux surface -- and is a candidate for whoever
   picks it up next.
+- **2026-09-15** — Audited the Picker/Mux duplicate-implementation problem
+  aperture-labs #6764 was filed against, from the `agent-worktrees` (bundled
+  Picker) side: `git log` comparison of the two `engine.py` files since the
+  `#1244` transplant shows both sides have continued receiving independent
+  commits (agent-worktrees-only: #1938, #2453/#2499, #2589, #2590;
+  Worktree-Manager-only: #2355, #2586). Recorded the audit + an ordered
+  reconciliation-then-retirement plan (closing Phase 3's parity checklist item
+  honestly, then executing Phase 6's deletion of the bundled `picker_tui`) in
+  [`phase-3-picker-parity-and-retirement.md`](phase-3-picker-parity-and-retirement.md),
+  linked from both phases. This also formally supersedes
+  [#117](https://github.com/ThomasMichon/copilot-extensions/issues/117) (a
+  smaller, earlier-filed cleanup of just the bundled Picker's native-list
+  opt-out toggle) -- Phase 6 now covers deleting the whole module, not just
+  its toggle. Docs-only; no code changed. Slice claimed on #352 before
+  landing, per this effort's own Coordination-section discipline.
+
