@@ -7,7 +7,7 @@ without the optional TUI dep installed.
 
 from __future__ import annotations
 
-from agent_worktrees.picker_tui import derive
+from agent_worktrees.picker_support import derive
 
 
 def _raw(**kw):

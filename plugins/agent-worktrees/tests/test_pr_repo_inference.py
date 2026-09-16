@@ -22,6 +22,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from agent_worktrees import __main__ as m
+from agent_worktrees import pr_cli
+from agent_worktrees import pr_merge_cli
 from agent_worktrees import config as cfg
 from agent_worktrees import git_ops
 
@@ -153,7 +155,7 @@ class TestPrMergeDispatcherInference:
         def _infer(config):
             calls["n"] += 1
             return None
-        monkeypatch.setattr(m, "_infer_active_repo_slug", _infer)
+        monkeypatch.setattr(pr_merge_cli, "_infer_active_repo_slug", _infer)
 
         rc = m.cmd_pr_merge_dispatch(["2333486"])
         assert rc == 2
@@ -165,7 +167,7 @@ class TestPrMergeDispatcherInference:
 
         def _must_not_call(config):
             raise AssertionError("inference must not run when a slug is explicit")
-        monkeypatch.setattr(m, "_infer_active_repo_slug", _must_not_call)
+        monkeypatch.setattr(pr_merge_cli, "_infer_active_repo_slug", _must_not_call)
         # Halt just past the inference point so we never hit the network.
         monkeypatch.setattr(m, "_pr_flow_profile",
                             lambda repo_cfg: (_ for _ in ()).throw(_Stop()))
@@ -184,7 +186,7 @@ class TestPrResearchDispatcherInference:
         def _infer(config):
             calls["n"] += 1
             return None
-        monkeypatch.setattr(m, "_infer_active_repo_slug", _infer)
+        monkeypatch.setattr(pr_cli, "_infer_active_repo_slug", _infer)
 
         rc = m.cmd_pr_research_dispatch([])
         assert rc == 1
@@ -201,7 +203,7 @@ class TestPrWatchDispatcherInference:
         def _infer(config):
             calls["n"] += 1
             return None
-        monkeypatch.setattr(m, "_infer_active_repo_slug", _infer)
+        monkeypatch.setattr(pr_cli, "_infer_active_repo_slug", _infer)
 
         rc = m.cmd_pr_watch_dispatch(["wait", "123"])
         assert rc == 2

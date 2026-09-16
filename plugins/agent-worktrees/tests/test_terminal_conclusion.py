@@ -9,6 +9,7 @@ import pytest
 import yaml
 
 from agent_worktrees import __main__ as cli
+from agent_worktrees import session_tracking_cli
 from agent_worktrees import git_ops, sessions, tracking
 from agent_worktrees import terminal_conclusion as tc
 
@@ -636,7 +637,9 @@ def test_cli_remove_is_idempotent_when_record_is_already_gone(
     monkeypatch,
     capfd,
 ):
-    monkeypatch.setattr(cli, "_find_tracking_file_exact", lambda _raw: None)
+    monkeypatch.setattr(
+        session_tracking_cli, "_find_tracking_file_exact", lambda _raw: None
+    )
     args = types.SimpleNamespace(
         worktree_id="worker-gone",
         remove=True,
@@ -678,10 +681,10 @@ def test_exact_tracking_lookup_rejects_cross_project_collision(
             "worktree_id: worker-collision\n",
             encoding="utf-8",
         )
-    monkeypatch.setattr(cli, "_all_tracking_dirs", lambda: [first, second])
+    monkeypatch.setattr(session_tracking_cli, "_all_tracking_dirs", lambda: [first, second])
 
     with pytest.raises(RuntimeError, match="ambiguous across projects"):
-        cli._find_tracking_file_exact("worker-collision")
+        session_tracking_cli._find_tracking_file_exact("worker-collision")
 
 
 def test_terminal_conclusion_rejects_embedded_identity_mismatch(
@@ -704,12 +707,12 @@ def test_cli_remove_rejects_embedded_identity_mismatch(
     record_path = tmp_path / "requested-worker.yaml"
     record_path.write_text("worktree_id: other-worker\n", encoding="utf-8")
     monkeypatch.setattr(
-        cli,
+        session_tracking_cli,
         "_find_tracking_file_exact",
         lambda _raw: record_path,
     )
     monkeypatch.setattr(
-        cli,
+        session_tracking_cli,
         "_project_for_tracking_file",
         lambda _path: "demo",
     )
@@ -742,12 +745,12 @@ def test_cli_remove_is_idempotent_when_record_disappears_after_lookup(
     record_path = tmp_path / "worker-gone.yaml"
     record_path.write_text("worktree_id: worker-gone\n", encoding="utf-8")
     monkeypatch.setattr(
-        cli,
+        session_tracking_cli,
         "_find_tracking_file_exact",
         lambda _raw: record_path,
     )
     monkeypatch.setattr(
-        cli,
+        session_tracking_cli,
         "_project_for_tracking_file",
         lambda _path: "demo",
     )
@@ -780,12 +783,12 @@ def test_cli_remove_is_idempotent_when_record_disappears_during_conclusion(
     repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
     config = types.SimpleNamespace(repo_name="demo")
     monkeypatch.setattr(
-        cli,
+        session_tracking_cli,
         "_find_tracking_file_exact",
         lambda _raw: record_path,
     )
     monkeypatch.setattr(
-        cli,
+        session_tracking_cli,
         "_project_for_tracking_file",
         lambda _path: "demo",
     )
@@ -824,12 +827,12 @@ def test_cli_remove_runs_exact_managed_sweep_after_eligibility(
     config = types.SimpleNamespace(repo_name="demo")
     captured = {}
     monkeypatch.setattr(
-        cli,
+        session_tracking_cli,
         "_find_tracking_file_exact",
         lambda _raw: record_path,
     )
     monkeypatch.setattr(
-        cli,
+        session_tracking_cli,
         "_project_for_tracking_file",
         lambda _path: "demo",
     )
@@ -885,12 +888,12 @@ def test_cli_remove_surfaces_fresh_managed_sweep_skip(
     repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
     config = types.SimpleNamespace(repo_name="demo")
     monkeypatch.setattr(
-        cli,
+        session_tracking_cli,
         "_find_tracking_file_exact",
         lambda _raw: record_path,
     )
     monkeypatch.setattr(
-        cli,
+        session_tracking_cli,
         "_project_for_tracking_file",
         lambda _path: "demo",
     )
@@ -942,12 +945,12 @@ def test_cli_remove_accepts_concurrent_exact_removal(
     repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
     config = types.SimpleNamespace(repo_name="demo")
     monkeypatch.setattr(
-        cli,
+        session_tracking_cli,
         "_find_tracking_file_exact",
         lambda _raw: record_path,
     )
     monkeypatch.setattr(
-        cli,
+        session_tracking_cli,
         "_project_for_tracking_file",
         lambda _path: "demo",
     )
@@ -1019,9 +1022,9 @@ def test_reused_pid_does_not_keep_a_stale_lifecycle_lock(
 ):
     lock_path = tmp_path / ".finalize.lock"
     lock_path.write_text("123:111:token", encoding="utf-8")
-    monkeypatch.setattr("agent_worktrees.finalize.locks.pid_alive", lambda _pid: True)
+    monkeypatch.setattr("agent_worktrees.finalize_lock.locks.pid_alive", lambda _pid: True)
     monkeypatch.setattr(
-        "agent_worktrees.finalize.locks.process_start_time",
+        "agent_worktrees.finalize_lock.locks.process_start_time",
         lambda _pid: "222",
     )
     lock = tc.finalize.FinalizeLock(

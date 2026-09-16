@@ -4,9 +4,9 @@ from __future__ import annotations
 import importlib
 
 PICKER_PREWARM_MODULES = (
-    "agent_worktrees.picker_tui.engine",
-    "agent_worktrees.picker_tui.data_ssh",
-    "agent_worktrees.picker_tui.frame_health",
+    "worktree_manager.production_picker.picker_tui.engine",
+    "worktree_manager.production_picker.picker_tui.data_ssh",
+    "worktree_manager.production_picker.picker_tui.frame_health",
 )
 
 

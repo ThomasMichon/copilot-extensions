@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+from agent_worktrees import __main__ as cli
+from agent_worktrees import session_tracking_cli
 from agent_worktrees import tracking
 from agent_worktrees.tracking import (
     HeadTransition,
@@ -655,18 +657,14 @@ class TestFindTrackingFileAcrossProjects:
     def test_exact_match_found_via_registry_dir(
         self, tmp_path: Path, monkeypatch
     ):
-        from agent_worktrees import __main__ as m
-
         proj = tmp_path / ".proj-a" / "worktrees"
         proj.mkdir(parents=True)
         _rec(proj)  # writes proj/wt-1.yaml
         # No active-project fast path; resolution must come from the registry dir.
-        monkeypatch.setattr(m, "_all_tracking_dirs", lambda: [proj])
-        assert m._find_tracking_file("wt-1") == proj / "wt-1.yaml"
+        monkeypatch.setattr(session_tracking_cli, "_all_tracking_dirs", lambda: [proj])
+        assert session_tracking_cli._find_tracking_file("wt-1") == proj / "wt-1.yaml"
 
     def test_unique_suffix_match(self, tmp_path: Path, monkeypatch):
-        from agent_worktrees import __main__ as m
-
         proj = tmp_path / ".proj-a" / "worktrees"
         proj.mkdir(parents=True)
         rec = WorktreeRecord(
@@ -676,12 +674,10 @@ class TestFindTrackingFileAcrossProjects:
             title=None, status="active", completed_at=None, sessions=[],
         )
         save_record(rec, proj / f"{rec.worktree_id}.yaml")
-        monkeypatch.setattr(m, "_all_tracking_dirs", lambda: [proj])
-        assert m._find_tracking_file("abcd") == proj / f"{rec.worktree_id}.yaml"
+        monkeypatch.setattr(session_tracking_cli, "_all_tracking_dirs", lambda: [proj])
+        assert session_tracking_cli._find_tracking_file("abcd") == proj / f"{rec.worktree_id}.yaml"
 
     def test_ambiguous_suffix_fails_open(self, tmp_path: Path, monkeypatch):
-        from agent_worktrees import __main__ as m
-
         a = tmp_path / ".proj-a" / "worktrees"
         b = tmp_path / ".proj-b" / "worktrees"
         for d, wid in ((a, "aaa-dup"), (b, "bbb-dup")):
@@ -693,15 +689,13 @@ class TestFindTrackingFileAcrossProjects:
                 status="active", completed_at=None, sessions=[],
             )
             save_record(rec, d / f"{wid}.yaml")
-        monkeypatch.setattr(m, "_all_tracking_dirs", lambda: [a, b])
+        monkeypatch.setattr(session_tracking_cli, "_all_tracking_dirs", lambda: [a, b])
         # Two records end in "dup" -> ambiguous -> None (never guess).
-        assert m._find_tracking_file("dup") is None
+        assert session_tracking_cli._find_tracking_file("dup") is None
 
     def test_path_traversal_rejected(self, monkeypatch):
-        from agent_worktrees import __main__ as m
-
         # A traversal/glob id never touches the filesystem.
-        assert m._find_tracking_file("../etc/passwd") is None
+        assert session_tracking_cli._find_tracking_file("../etc/passwd") is None
 
 
 class TestConcludeAndLinkCommands:
@@ -712,12 +706,10 @@ class TestConcludeAndLinkCommands:
 
     @staticmethod
     def _run(monkeypatch, tracking_dir: Path, fn_name: str, **ns) -> dict:
-        from agent_worktrees import __main__ as m
-
         captured: dict = {}
-        monkeypatch.setattr(m, "_all_tracking_dirs", lambda: [tracking_dir])
-        monkeypatch.setattr(m, "_json_output", lambda data: captured.update(data))
-        rc = getattr(m, fn_name)(argparse.Namespace(json=True, **ns))
+        monkeypatch.setattr(session_tracking_cli, "_all_tracking_dirs", lambda: [tracking_dir])
+        monkeypatch.setattr(cli, "_json_output", lambda data: captured.update(data))
+        rc = getattr(session_tracking_cli, fn_name)(argparse.Namespace(json=True, **ns))
         captured["_rc"] = rc
         return captured
 
@@ -883,7 +875,7 @@ class TestListSessionsEnvelopeHead:
         )
         save_record(first, project_a / "wt-a.yaml")
         save_record(second, project_b / "wt-b.yaml")
-        monkeypatch.setattr(m, "_all_tracking_dirs", lambda: [project_a, project_b])
+        monkeypatch.setattr(session_tracking_cli, "_all_tracking_dirs", lambda: [project_a, project_b])
         monkeypatch.setattr(
             S,
             "list_worktree_sessions",
@@ -892,7 +884,7 @@ class TestListSessionsEnvelopeHead:
         captured: dict = {}
         monkeypatch.setattr(m, "_json_output", lambda data: captured.update(data))
 
-        rc = m.cmd_list_sessions(argparse.Namespace(
+        rc = session_tracking_cli.cmd_list_sessions(argparse.Namespace(
             worktree_id=None,
             all_projects=True,
             json=True,
@@ -945,7 +937,7 @@ class TestListSessionsEnvelopeHead:
                 kind=kind,
             )
             save_record(record, project / f"{worktree_id}.yaml")
-        monkeypatch.setattr(m, "_all_tracking_dirs", lambda: [project_a, project_b])
+        monkeypatch.setattr(session_tracking_cli, "_all_tracking_dirs", lambda: [project_a, project_b])
         monkeypatch.setattr(
             S,
             "list_worktree_sessions",
@@ -954,7 +946,7 @@ class TestListSessionsEnvelopeHead:
         captured: dict = {}
         monkeypatch.setattr(m, "_json_output", lambda data: captured.update(data))
 
-        rc = m.cmd_list_sessions(argparse.Namespace(
+        rc = session_tracking_cli.cmd_list_sessions(argparse.Namespace(
             worktree_id=None,
             all_projects=True,
             json=True,

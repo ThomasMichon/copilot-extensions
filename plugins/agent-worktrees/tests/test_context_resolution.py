@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from agent_worktrees import __main__ as m
+from agent_worktrees import worktree_identity
 from agent_worktrees import config as cfg
 from agent_worktrees import git_ops
 from agent_worktrees import installer as inst
@@ -245,7 +246,9 @@ def test_worktree_id_resolves_under_foreign_worktree_root(adopted_repo, monkeypa
     monkeypatch.setattr(cfg, "load_config", lambda *a, **k: bad_conf)
     monkeypatch.chdir(wt_path)
     # Legacy root scan would fail (cwd not under foreign root); git identity wins.
-    assert m._infer_worktree_id_from_worktree_root(bad_conf, Path(wt_path)) is None
+    assert worktree_identity._infer_worktree_id_from_worktree_root(
+        bad_conf, Path(wt_path)
+    ) is None
     assert m._infer_worktree_id(None, bad_conf) == wt_id
 
 

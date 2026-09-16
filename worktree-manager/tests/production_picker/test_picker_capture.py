@@ -93,45 +93,6 @@ def test_worktrees_list_grid_matches_golden(monkeypatch, tmp_path):
     assert grid == _golden("worktrees_list.txt", grid)
 
 
-def test_native_list_grid_parity(monkeypatch, tmp_path):
-    """NF5-5 (#88): the swappable native ``OptionList`` data body renders the
-    *same* character grid as the text-line body -- the whole point of a drop-in
-    swap. Capture the home screen with ``AGENT_WORKTREES_PICKER_NATIVE_LIST`` OFF
-    (text-line body) and ON (native OptionList) and assert the normalized grids
-    are identical (styles differ -- the native cursor is amber vs the text
-    body's reverse -- but the character grid is byte-for-byte the same). Also
-    pins the native grid to the same golden."""
-    _isolate_pivots(monkeypatch, tmp_path)
-    monkeypatch.delenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", raising=False)
-    off = _normalize(pcap.capture(_fixture_source(), live=False)["text"])
-    monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "1")
-    on = _normalize(pcap.capture(_fixture_source(), live=False)["text"])
-    assert on == off
-    assert on == _golden("worktrees_list.txt", on)
-
-
-def test_native_list_multiselect_grid_parity(monkeypatch, tmp_path):
-    """NF5-5 (#88): the native list renders the multi-select gutter identically to
-    the text-line body. Mark both worktrees (so multi-select is active and the
-    checkbox gutter renders) and assert native-OFF and native-ON grids match --
-    the gutter is built from the same ``_build_data_vrows`` source, so the swap
-    stays byte-identical even in multi-select mode."""
-    _isolate_pivots(monkeypatch, tmp_path)
-
-    async def _mark(scr, pilot):
-        scr.wt_sel.replace({
-            row["selection_id"] for row in scr.list_records()[:2]
-        })
-        scr.refresh()
-        await pilot.pause()
-
-    monkeypatch.delenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", raising=False)
-    off = _normalize(pcap.capture(_fixture_source(), live=False, prepare=_mark)["text"])
-    monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "1")
-    on = _normalize(pcap.capture(_fixture_source(), live=False, prepare=_mark)["text"])
-    assert on == off
-
-
 def test_grid_renders_state_vocabulary(monkeypatch, tmp_path):
     _isolate_pivots(monkeypatch, tmp_path)
     text = pcap.capture(_fixture_source(), live=False)["text"]

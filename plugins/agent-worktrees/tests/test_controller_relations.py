@@ -10,7 +10,7 @@ import pytest
 from agent_worktrees import __main__ as cli
 from agent_worktrees import controller_lineage
 from agent_worktrees import session_projection, sessions, tracking
-from agent_worktrees.picker_tui import derive
+from agent_worktrees.picker_support import derive
 
 
 def _session_root(

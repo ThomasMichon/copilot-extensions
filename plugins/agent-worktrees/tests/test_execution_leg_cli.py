@@ -42,6 +42,13 @@ def _configure(monkeypatch, tmp_path, outputs) -> None:
     monkeypatch.setattr(cli.cfg, "tracking_dir", lambda: tmp_path)
     monkeypatch.setattr(cli, "_resolve_worktree_id", lambda value: value)
     monkeypatch.setattr(cli, "_json_output", outputs.append)
+    monkeypatch.setattr(
+        cli,
+        "_json_error",
+        lambda message, exit_code=1: outputs.append(
+            {"version": 1, "error": message}
+        ) or exit_code,
+    )
 
 
 def _args(action: str, **overrides):

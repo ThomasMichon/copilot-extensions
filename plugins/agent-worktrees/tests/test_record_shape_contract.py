@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import datetime as _dt
 
-from agent_worktrees.picker_tui import derive
+from agent_worktrees.picker_support import derive
 
 # Fields each effort depends on, asserted present on the single shared record.
 _SESSION_STATE_SIGNAL_KEYS = (

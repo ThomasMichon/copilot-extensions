@@ -54,8 +54,8 @@ host_cols = roster.host_cols
 target_envs = roster.target_envs
 # Repo name + default branch for the top bar -- project config, not hardcoded
 # (shared with data_local; both resolve the same active-project config).
-REPO = data_local.REPO
-BRANCH = data_local.BRANCH
+# Bound lazily so importing this module cannot pull config/roster I/O before
+# the first picker frame paints.
 
 # machines.yaml environment name -> the picker's short env label (and C_ENV key).
 _ENV_LABEL = {"windows": "Win", "wsl": "WSL", "linux": "Linux"}
@@ -796,6 +796,11 @@ def source_snapshot():
     return tuple(_build_sources())
 
 
+def bootstrap_rows():
+    """Return cache-only rows for this host without loading config or roster."""
+    return data_local.load(classify=False)
+
+
 def machines(sources=None):
     """Ordered machine-tab descriptors: (label, machine, env, reachable).
 
@@ -824,6 +829,7 @@ def source_tabs(sources=None):
             "machine": source.machine,
             "env": source.env,
             "ready": source.ready,
+            "local": source.local,
             "source_kind": source.source_kind,
             "source_id": source.source_id,
             "source_label": source.source_label,
@@ -936,8 +942,18 @@ def _resolve_local() -> tuple[str, str]:
         pass
     return data_local.LOCAL
 
+_LOCAL: tuple[str, str] | None = None
 
-LOCAL = _resolve_local()
+
+def __getattr__(name: str):
+    global _LOCAL
+    if name in ("REPO", "BRANCH"):
+        return getattr(data_local, name)
+    if name == "LOCAL":
+        if _LOCAL is None:
+            _LOCAL = _resolve_local()
+        return _LOCAL
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def load(machine: str | None = None, env: str | None = None):
@@ -946,7 +962,8 @@ def load(machine: str | None = None, env: str | None = None):
     Provided so this source stays swap-compatible with ``data_local`` for the
     non-live code path; returns just this host's worktrees.
     """
-    return data_local.load(LOCAL[0], LOCAL[1])
+    local = __getattr__("LOCAL")
+    return data_local.load(local[0], local[1])
 
 
 def make_loader(sources=None):
@@ -1304,6 +1321,11 @@ class LiveLoader:
         # repoll that started earlier never commits stale rows over a newer
         # intentional reload (#1421, ordering fix).
         self._gen: dict = {}
+        # A streaming source becomes usable after its first row, before its
+        # roster is authoritative. Track that distinction so the picker can
+        # merge the prefix over bootstrap rows instead of treating omitted
+        # identities as removals during the first paint.
+        self._stream_incomplete: dict = {}
         for s in all_sources:
             self._state[s.cache_key] = "loading" if s.ready else "failed"
             self._records[s.cache_key] = []
@@ -1453,6 +1475,8 @@ class LiveLoader:
                 ):
                     self._records[source.cache_key] = recs
                     self._state[source.cache_key] = "ready"
+                    if self._stream_incomplete.get(source.cache_key) == gen:
+                        self._stream_incomplete.pop(source.cache_key, None)
         finally:
             with self._lock:
                 self._refreshing.discard(source.cache_key)
@@ -1522,6 +1546,8 @@ class LiveLoader:
                         and self._state.get(source.cache_key) == "ready"
                         and self._gen.get(source.cache_key, 0) == gen):
                     self._records[source.cache_key] = recs
+                    if self._stream_incomplete.get(source.cache_key) == gen:
+                        self._stream_incomplete.pop(source.cache_key, None)
         finally:
             with self._lock:
                 self._refreshing.discard(source.cache_key)
@@ -1759,6 +1785,7 @@ class LiveLoader:
                             break
                         if self._gen.get(source.cache_key, 0) != gen:
                             break   # superseded by a reload()
+                        self._stream_incomplete[source.cache_key] = gen
                         if rid not in by_id:
                             order.append(rid)
                         by_id[rid] = rec
@@ -1768,6 +1795,9 @@ class LiveLoader:
                             ready = True
                 elif typ == "done":
                     done = True
+                    with self._lock:
+                        if self._stream_incomplete.get(source.cache_key) == gen:
+                            self._stream_incomplete.pop(source.cache_key, None)
         finally:
             timer.cancel()
             try:
@@ -2013,6 +2043,21 @@ class LiveLoader:
         """Return a copy of one canonical source's current rows."""
         with self._lock:
             return list(self._records.get(source_id, []))
+
+    def authoritative_source_ids(self):
+        """Sources whose current rows describe a complete roster.
+
+        Streaming sources intentionally flip to ``ready`` on their first row so
+        the picker can render and interact with that prefix. ``ready`` alone
+        therefore does not mean identities absent from the prefix are gone.
+        """
+        with self._lock:
+            return {
+                key
+                for key, state in self._state.items()
+                if state == "ready"
+                and self._stream_incomplete.get(key) != self._gen.get(key, 0)
+            }
 
     def counts(self):
         """(ready, loading, failed) machine counts for the status note."""

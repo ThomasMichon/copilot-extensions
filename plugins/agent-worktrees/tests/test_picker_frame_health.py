@@ -6,14 +6,14 @@ import threading
 
 import pytest
 
-from agent_worktrees.picker_tui.frame_health import FrameHealthReporter
+from agent_worktrees.picker_support.frame_health import FrameHealthReporter
 
 
 def test_frame_health_reports_only_threshold_gaps(tmp_path, monkeypatch):
     path = tmp_path / "frame-health.jsonl"
     times = iter([10.0, 10.1, 10.8])
     monkeypatch.setattr(
-        "agent_worktrees.picker_tui.frame_health.time.monotonic",
+        "agent_worktrees.picker_support.frame_health.time.monotonic",
         lambda: next(times),
     )
     reporter = FrameHealthReporter(path, threshold_seconds=0.5)
@@ -96,7 +96,7 @@ def test_launch_trace_only_tick_does_not_read_clock(tmp_path, monkeypatch):
         report_gaps=False,
     )
     monkeypatch.setattr(
-        "agent_worktrees.picker_tui.frame_health.time.monotonic",
+        "agent_worktrees.picker_support.frame_health.time.monotonic",
         lambda: (_ for _ in ()).throw(AssertionError("clock read")),
     )
 

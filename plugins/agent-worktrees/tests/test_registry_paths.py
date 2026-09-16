@@ -25,7 +25,7 @@ from agent_worktrees import (
     registry_paths,
     repos,
 )
-from agent_worktrees.picker_tui import pivots
+from agent_worktrees.picker_support import pivots
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 CONTEXT_HELPER = (

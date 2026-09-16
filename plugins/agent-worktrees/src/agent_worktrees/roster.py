@@ -90,7 +90,7 @@ def local_host():
     """
     import socket
 
-    from .picker_tui import data_local
+    from .picker_support import data_local
 
     host_key = socket.gethostname().split(".")[0].lower()
     plat = cfg.detect_platform()
@@ -109,4 +109,3 @@ def local_host():
         if is_local_machine and name == plat:
             return (m.key, elabel)
     return data_local.LOCAL
-

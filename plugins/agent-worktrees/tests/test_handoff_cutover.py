@@ -253,7 +253,7 @@ class TestMuxNewWindow:
             sessions_pane_retire,
             "mux_retire_pane",
             lambda pane, **k: retired.update(pane=pane)
-            or {"ok": True, "method": "test-retire"},
+            or {"ok": True, "gone": True, "method": "test-retire"},
         )
         monkeypatch.setattr(
             sessions,

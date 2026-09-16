@@ -139,8 +139,9 @@ while retaining a typed cross-cutting `Worktree` model for launch/session
 integration. This is the migration seam for moving the declaration into the
 agent-worktrees payload without pretending the Manager cannot understand
 worktrees.
-Streaming, actions, cards/forms, and configuration sections remain subsequent
-parity slices; the bundled Picker stays in place until those are complete.
+Streaming, actions, cards/forms, and configuration sections landed through the
+subsequent parity slices, and the bundled Picker was retired once that parity
+work completed.
 
 ## Production Picker transplant
 
