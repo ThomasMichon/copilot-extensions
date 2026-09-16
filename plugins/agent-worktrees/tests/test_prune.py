@@ -952,3 +952,121 @@ class TestInterpretDescriptorPayload:
         assert interpreted["supported"] is True
         assert interpreted["final"] is True
 
+    def test_non_mapping_closure_is_unsupported_not_defaulted(self):
+        payload = self._final_payload()
+        payload["closure"] = []
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+        assert interpreted["label"] == "UNKNOWN"
+        assert "closure" in interpreted["reason"]
+
+    def test_missing_closure_is_unsupported_not_defaulted(self):
+        payload = self._final_payload()
+        del payload["closure"]
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_non_mapping_action_is_unsupported_not_defaulted(self):
+        payload = self._final_payload()
+        payload["action"] = "blocked"
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_non_mapping_claims_is_unsupported_not_defaulted(self):
+        payload = self._final_payload()
+        payload["claims"] = []
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_non_mapping_follow_ups_is_unsupported_not_defaulted(self):
+        payload = self._final_payload()
+        payload["follow_ups"] = "none"
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_empty_closure_with_final_label_is_rejected(self):
+        payload = self._final_payload()
+        payload["closure"] = {}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+        assert interpreted["label"] == "UNKNOWN"
+
+    def test_string_final_is_never_truthy_coerced(self):
+        # bool("false") is True in Python -- a string value for closure.final
+        # must be rejected outright, never truthiness-coerced.
+        payload = self._final_payload()
+        payload["closure"] = {"final": "false"}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_non_string_label_is_rejected(self):
+        payload = self._final_payload()
+        payload["label"] = 1
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_non_string_style_is_rejected(self):
+        payload = self._final_payload()
+        payload["style"] = ["final"]
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_non_string_action_disposition_is_rejected(self):
+        payload = self._final_payload()
+        payload["action"] = {"disposition": 1}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_non_string_compact_is_rejected(self):
+        payload = self._final_payload()
+        payload["compact"] = 42
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_final_with_held_claims_is_rejected(self):
+        payload = self._final_payload()
+        payload["claims"] = {"held": 2}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+        assert interpreted["label"] == "UNKNOWN"
+
+    def test_final_with_open_follow_ups_is_rejected(self):
+        payload = self._final_payload()
+        payload["follow_ups"] = {"open": 1}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_final_with_non_safe_action_is_rejected(self):
+        payload = self._final_payload()
+        payload["action"] = {"disposition": "blocked"}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_non_final_with_blockers_stays_supported(self):
+        payload = self._final_payload()
+        payload["label"] = "MERGED"
+        payload["closure"] = {"final": False}
+        payload["claims"] = {"held": 2}
+        payload["action"] = {"disposition": "blocked"}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is True
+        assert interpreted["held_claims"] == 2
+
+    def test_non_numeric_held_claims_is_rejected(self):
+        payload = self._final_payload()
+        payload["claims"] = {"held": "not-a-number"}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_negative_open_follow_ups_is_rejected(self):
+        payload = self._final_payload()
+        payload["follow_ups"] = {"open": -3}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_boolean_held_claims_is_rejected(self):
+        payload = self._final_payload()
+        payload["claims"] = {"held": True}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+

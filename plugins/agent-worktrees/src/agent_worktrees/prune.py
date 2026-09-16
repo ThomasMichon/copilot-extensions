@@ -760,43 +760,106 @@ def assemble_closure_descriptor(
 
 def interpret_descriptor_payload(payload: dict | None) -> dict:
     """Mixed-version fleet safety (Phase 5): interpret a raw closure-descriptor
-    payload from a remote/cached source (e.g. a machine running an older or
-    newer `agent-worktrees`) without trusting fields it may not understand.
+    payload from a remote/cached source without trusting fields it may not
+    understand. An absent/malformed/version-mismatched payload is NEVER
+    final or prune-safe, regardless of what its own fields claim. Only an
+    EXACT ``version == DESCRIPTOR_VERSION`` match is trusted.
 
-    An absent (``None``/non-mapping), malformed, or version-mismatched
-    payload is NEVER final or prune-safe -- it renders as an explicit
-    ``unsupported-descriptor`` review state regardless of what the payload's
-    own ``closure.final``/``action.disposition`` claim, so an out-of-version
-    consumer degrades safely instead of guessing. Only an EXACT
-    ``version == DESCRIPTOR_VERSION`` match is trusted (both an older and a
-    newer version are rejected the same way -- neither side of a version
-    skew can safely interpret the other's shape).
+    A matched payload is further validated before being trusted:
+    ``closure``/``action``/``claims``/``follow_ups`` must each be present
+    mappings; ``label``/``style``/``action.disposition``/``compact`` must be
+    ``str`` and ``closure.final`` a ``bool`` (never truthiness-coerced);
+    ``label == "FINAL"`` must agree with ``closure.final``; a ``final: True``
+    payload must carry zero held claims, zero open follow-ups, and a
+    ``safe`` action (the only combination :func:`assemble_closure_descriptor`
+    ever produces for FINAL); and the claim/follow-up counts must be genuine
+    non-negative ints (never laundered from a malformed value into a ``0``
+    that would look like verified evidence of no blockers). Any violation
+    degrades the whole payload to unsupported.
 
-    Returns a normalized, minimal view:
-    ``{"supported": bool, "final": bool, "label": str,
-    "action_disposition": str, "reason": str | None}``.
+    Returns ``{"supported": bool, "final": bool, "label": str, "style": str,
+    "compact": str, "held_claims": int, "open_follow_ups": int,
+    "action_disposition": str, "reason": str | None}`` -- an unsupported
+    payload degrades every field to a neutral/zero value.
     """
     if not isinstance(payload, dict):
-        return {
-            "supported": False, "final": False, "label": "UNKNOWN",
-            "action_disposition": "blocked", "reason": "unsupported-descriptor",
-        }
+        return _unsupported_descriptor("unsupported-descriptor")
     version = payload.get("version")
     if version != DESCRIPTOR_VERSION:
-        return {
-            "supported": False, "final": False, "label": "UNKNOWN",
-            "action_disposition": "blocked",
-            "reason": f"unsupported-descriptor:version={version!r}",
-        }
+        return _unsupported_descriptor(f"unsupported-descriptor:version={version!r}")
     closure = payload.get("closure")
     action = payload.get("action")
+    claims = payload.get("claims")
+    follow_ups = payload.get("follow_ups")
+    # A missing/wrong-shaped required nested field is a malformed/truncated
+    # payload -- a genuine descriptor always emits all four sections.
+    for field_name, field_value in (
+        ("closure", closure), ("action", action),
+        ("claims", claims), ("follow_ups", follow_ups),
+    ):
+        if not isinstance(field_value, dict):
+            return _unsupported_descriptor(
+                f"unsupported-descriptor:{field_name}-missing-or-not-a-mapping")
+    label = payload.get("label")
+    style = payload.get("style")
+    final_value = closure.get("final")
+    action_disposition = action.get("disposition")
+    if (not isinstance(label, str) or not isinstance(style, str)
+            or not isinstance(final_value, bool)
+            or not isinstance(action_disposition, str)):
+        return _unsupported_descriptor("unsupported-descriptor:scalar-field-type")
+    compact = payload.get("compact", label)
+    if not isinstance(compact, str):
+        return _unsupported_descriptor("unsupported-descriptor:scalar-field-type")
+    # label/final consistency: never trust either half in isolation.
+    if (label == "FINAL") != final_value:
+        return _unsupported_descriptor("unsupported-descriptor:label-final-mismatch")
+    held_claims = _non_negative_int(claims.get("held", 0))
+    open_follow_ups = _non_negative_int(follow_ups.get("open", 0))
+    if held_claims is None or open_follow_ups is None:
+        return _unsupported_descriptor("unsupported-descriptor:invalid-count")
+    # FINAL only ever combines with zero blockers + a safe action.
+    if final_value and (
+        held_claims != 0 or open_follow_ups != 0 or action_disposition != "safe"
+    ):
+        return _unsupported_descriptor(
+            "unsupported-descriptor:final-with-blockers")
     return {
         "supported": True,
-        "final": bool((closure or {}).get("final", False)),
-        "label": str(payload.get("label", "UNKNOWN")),
-        "action_disposition": str((action or {}).get("disposition", "blocked")),
+        "final": final_value,
+        "label": label,
+        "style": style,
+        "compact": compact,
+        "held_claims": held_claims,
+        "open_follow_ups": open_follow_ups,
+        "action_disposition": action_disposition,
         "reason": None,
     }
+
+
+def _unsupported_descriptor(reason: str) -> dict:
+    """The shared degrade-to-neutral result for any ``interpret_descriptor_
+    payload`` rejection path -- every field renders as if there were no
+    descriptor at all, never partially trusting a malformed payload."""
+    return {
+        "supported": False, "final": False, "label": "UNKNOWN",
+        "style": "unknown", "compact": "UNKNOWN",
+        "held_claims": 0, "open_follow_ups": 0,
+        "action_disposition": "blocked", "reason": reason,
+    }
+
+
+def _non_negative_int(value) -> int | None:
+    """Validate a claim/follow-up count from an untrusted descriptor payload
+    as a non-negative int, returning ``None`` for anything else (a string, a
+    list, ``None``, a bool, or a negative number) rather than silently
+    coercing it to ``0`` -- a coerced ``0`` would be indistinguishable from a
+    verified zero count and could launder a malformed payload into apparent
+    evidence that no blockers exist. The caller rejects the whole payload as
+    unsupported when this returns ``None``."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if value >= 0 else None
 
 
 def default_paired_sibling_final(

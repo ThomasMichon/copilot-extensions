@@ -6,6 +6,7 @@ surfaced on the worktree list's always-on second (detail) row."""
 from __future__ import annotations
 
 from worktree_manager.production_picker.picker_tui import derive
+from worktree_manager.production_picker import prune
 
 
 def _raw(**values):
@@ -19,6 +20,21 @@ def _raw(**values):
     return row
 
 
+def _closure(**overrides):
+    payload = {
+        "version": prune.DESCRIPTOR_VERSION,
+        "label": "FINAL",
+        "style": "final",
+        "compact": "FINAL",
+        "claims": {"held": 0},
+        "follow_ups": {"open": 0},
+        "closure": {"final": True},
+        "action": {"disposition": "safe"},
+    }
+    payload.update(overrides)
+    return payload
+
+
 def test_no_closure_yields_no_markers() -> None:
     row = derive.norm(_raw(), "host", "windows")
     assert row["status_markers"] == ""
@@ -27,7 +43,7 @@ def test_no_closure_yields_no_markers() -> None:
 def test_final_label_has_no_markers() -> None:
     row = derive.norm(_raw(
         state="completed",
-        closure={"label": "FINAL", "compact": "FINAL"},
+        closure=_closure(),
     ), "host", "windows")
     assert row["status_markers"] == ""
 
@@ -35,7 +51,10 @@ def test_final_label_has_no_markers() -> None:
 def test_merged_with_held_claim_and_unconfirmed_facts() -> None:
     row = derive.norm(_raw(
         state="completed",
-        closure={"label": "MERGED", "compact": "MERGED C1 U* OC*"},
+        closure=_closure(
+            label="MERGED", style="merged-blocked", compact="MERGED C1 U* OC*",
+            claims={"held": 1}, closure={"final": False},
+            action={"disposition": "blocked"}),
     ), "host", "windows")
     assert row["status_markers"] == "C1 U* OC*"
 
@@ -43,7 +62,9 @@ def test_merged_with_held_claim_and_unconfirmed_facts() -> None:
 def test_markers_never_include_the_base_label_itself() -> None:
     row = derive.norm(_raw(
         state="completed",
-        closure={"label": "MERGED", "compact": "MERGED OC*"},
+        closure=_closure(
+            label="MERGED", style="merged-blocked", compact="MERGED OC*",
+            closure={"final": False}, action={"disposition": "blocked"}),
     ), "host", "windows")
     assert "MERGED" not in row["status_markers"]
     assert row["status_markers"] == "OC*"
@@ -55,6 +76,19 @@ def test_mismatched_compact_prefix_degrades_to_no_markers() -> None:
     # degrade to no markers rather than guessing.
     row = derive.norm(_raw(
         state="completed",
-        closure={"label": "MERGED", "compact": "UNEXPECTED"},
+        closure=_closure(
+            label="MERGED", style="merged-blocked", compact="UNEXPECTED",
+            closure={"final": False}, action={"disposition": "blocked"}),
     ), "host", "windows")
     assert row["status_markers"] == ""
+
+
+def test_unsupported_descriptor_yields_no_markers() -> None:
+    # An absent/malformed/version-skewed descriptor must never be laundered
+    # into markers -- only a fully validated, supported payload can.
+    row = derive.norm(_raw(
+        state="completed",
+        closure={"label": "MERGED", "compact": "MERGED C1"},
+    ), "host", "windows")
+    assert row["status_markers"] == ""
+

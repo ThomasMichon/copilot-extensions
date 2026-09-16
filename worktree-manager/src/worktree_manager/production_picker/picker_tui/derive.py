@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime as _dt
 
+from .. import prune
 from . import reciprocal
 from . import source_identity
 
@@ -164,19 +165,28 @@ def _state(w):
             # status segment's FINAL vs MERGED split via the same canonical
             # closure descriptor (`list --json --classify`'s additive
             # ``closure`` field), instead of always collapsing COMPLETED to
-            # FINAL. Falls back to the legacy FINAL label when a descriptor
-            # is unavailable (an older remote without Phase 4's `closure`).
-            closure_label = (w.get("closure") or {}).get("label")
-            if closure_label in ("FINAL", "MERGED"):
-                return closure_label
-            return "FINAL"
+            # FINAL. Routed through ``prune.interpret_descriptor_payload`` for
+            # mixed-version fleet safety (a remote on an older/newer
+            # ``agent-worktrees`` never gets its raw ``closure.label`` trusted
+            # directly) -- degrades to MERGED (never FINAL) when the
+            # descriptor is absent or unsupported.
+            interpreted = prune.interpret_descriptor_payload(w.get("closure"))
+            if interpreted["supported"] and interpreted["label"] in ("FINAL", "MERGED"):
+                return interpreted["label"]
+            return "MERGED"
         return _STATE_LABEL.get(st, st.upper()[:6])
     pr = w.get("pr") or {}
     status = w.get("status")
-    if pr.get("state") == "merged":
-        return "FINAL"
-    if status == "finalized":
-        return "FINAL"
+    if pr.get("state") == "merged" or status == "finalized":
+        # The unclassified-legacy-row fallback (no canonical ``state`` field --
+        # an older remote or a pre-``--classify`` row) must be gated through
+        # the same descriptor check as the classified ``completed`` path
+        # above; otherwise an absent/unsupported descriptor could still
+        # render FINAL through this back door.
+        interpreted = prune.interpret_descriptor_payload(w.get("closure"))
+        if interpreted["supported"] and interpreted["label"] in ("FINAL", "MERGED"):
+            return interpreted["label"]
+        return "MERGED"
     if status == "active":
         return "WIP" if w.get("turn_count", 0) > 0 else "UNUSED"
     return (status or "?").upper()[:6]
@@ -189,11 +199,16 @@ def _status_markers(w):
     Everything in ``compact`` AFTER the base label, which is already rendered
     separately via ``_state()``/the ``state`` column -- never duplicate the
     label itself. Empty string when there's nothing to show (no descriptor,
-    or a clean/confirmed one) rather than repeating the bare label.
+    an unsupported/mixed-version one, or a clean/confirmed one) rather than
+    repeating the bare label. Routed through
+    ``prune.interpret_descriptor_payload`` for the same mixed-version fleet
+    safety as ``_state()`` -- never reads the raw ``closure`` dict directly.
     """
-    closure = w.get("closure") or {}
-    compact = str(closure.get("compact") or "")
-    label = str(closure.get("label") or "")
+    interpreted = prune.interpret_descriptor_payload(w.get("closure"))
+    if not interpreted["supported"]:
+        return ""
+    compact = interpreted["compact"]
+    label = interpreted["label"]
     if not compact or not label or not compact.startswith(label):
         return ""
     return compact[len(label):].strip()
