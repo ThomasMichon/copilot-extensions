@@ -186,3 +186,16 @@ the Phase 0 runbook, picked up as capacity allows.
   skill, `tools/rank-module-size.py`, and the `@pytest.mark.contract` marker
   + `TESTING.md` documentation. All Phase 0 validation passing (see
   Validation Plan). Opened umbrella issue #2805.
+
+### 2026-09-16 — Trunk unblock (second live incident, same failure mode)
+- After merging Phase 0 (#2807), `main`'s CI showed `guards + lint` failing
+  again — this time `worktree-manager/src/worktree_manager/__main__.py` had
+  grown from 1426 to 1432 lines, over its own grandfathered ceiling, from an
+  unrelated already-merged change. A second live occurrence of exactly the
+  failure mode motivating this effort, independent of the `engine.py`/
+  #2788/#2794 incident.
+- Applied the manual, reviewed baseline widen `tools/check-module-size.py`
+  itself directs for this case (1426 → 1432) to restore trunk-green, rather
+  than block on a full split. Added to the Phase 2 backlog: this file is
+  already a CLI-registration-shaped `__main__.py` and a good next split
+  candidate precisely because it's now grown twice while ungoverned.
