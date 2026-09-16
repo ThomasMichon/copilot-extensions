@@ -246,8 +246,11 @@ class TestMuxNewWindow:
             lambda token: tmp_path / token,
         )
         retired = {}
+        # _retire_failed_successor (sessions_pane_retire.py) calls
+        # mux_retire_pane unqualified from its OWN module namespace, not
+        # sessions.py's re-export -- patch the real call site.
         monkeypatch.setattr(
-            sessions,
+            sessions_pane_retire,
             "mux_retire_pane",
             lambda pane, **k: retired.update(pane=pane)
             or {"ok": True, "method": "test-retire"},
@@ -685,6 +688,97 @@ class TestCmdHandoffCutover:
         assert m._wait_for_handoff_candidate(
             tmp_path / "wt.yaml", "task-123", "%5", timeout=0.1,
         ) == (None, "pane-exited-before-session")
+
+    def test_wait_for_handoff_candidate_confirms_via_pane_process_match(
+        self, monkeypatch, tmp_tracking_dir, monkeypatch_config,
+    ):
+        """No env-var self-report required (#5252 follow-up): a session
+        already registered on this worktree (ordinary sessionStart
+        registration, unconditional on any handoff token) is confirmed as the
+        candidate purely because agent-worktrees itself sees -- via
+        ``mux_binding_for_session``'s process-ancestry match, never an env var
+        -- that it is running under the exact pane this cutover just opened.
+        This is the psmux/Windows-safe path: ``-e``-propagated env values are
+        never trusted for candidacy."""
+        from agent_worktrees import tracking as _tracking
+
+        worktree_id = "wt-pane-match"
+        rec = _tracking.WorktreeRecord(
+            worktree_id=worktree_id, branch=f"worktree/{worktree_id}",
+            worktree_path=f"/tmp/src/{worktree_id}", repo="test-repo",
+            machine="test", platform="windows", started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00", resume_count=0, title=None,
+            status="active", completed_at=None, sessions=[],
+        )
+        path = tmp_tracking_dir / f"{worktree_id}.yaml"
+        _tracking.save_record(rec, path)
+        _tracking.register_session(worktree_id, "predecessor-1")
+        _tracking.register_session(worktree_id, "successor-1")
+        loaded = _tracking.load_record(path)
+        _tracking.open_handoff(loaded, "predecessor-1", "task-pane-match")
+
+        def _fake_binding(session_id, *, expected_session_name=None, **_k):
+            if session_id == "successor-1":
+                return {"pane_id": "%9", "session_name": expected_session_name}
+            return None
+
+        monkeypatch.setattr(sessions, "mux_binding_for_session", _fake_binding)
+
+        result = m._wait_for_handoff_candidate(
+            path, "task-pane-match", "%9",
+            timeout=0.5, mux_session="wt-pane-match",
+            predecessor_session_id="predecessor-1",
+        )
+        assert result == ("successor-1", "pane-process-associated")
+        assert (
+            _tracking.load_record(path)
+            .handoffs[0].candidate == "successor-1"
+        )
+
+    def test_wait_for_handoff_candidate_skips_predecessor_and_wrong_pane(
+        self, monkeypatch, tmp_tracking_dir, monkeypatch_config,
+    ):
+        """A live predecessor session and a live session under a different
+        pane must never be mistaken for the successor."""
+        from agent_worktrees import tracking as _tracking
+
+        worktree_id = "wt-pane-mismatch"
+        rec = _tracking.WorktreeRecord(
+            worktree_id=worktree_id, branch=f"worktree/{worktree_id}",
+            worktree_path=f"/tmp/src/{worktree_id}", repo="test-repo",
+            machine="test", platform="windows", started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00", resume_count=0, title=None,
+            status="active", completed_at=None, sessions=[],
+        )
+        path = tmp_tracking_dir / f"{worktree_id}.yaml"
+        _tracking.save_record(rec, path)
+        _tracking.register_session(worktree_id, "predecessor-2")
+        _tracking.register_session(worktree_id, "unrelated-2")
+        loaded = _tracking.load_record(path)
+        _tracking.open_handoff(loaded, "predecessor-2", "task-pane-mismatch")
+
+        def _fake_binding(session_id, *, expected_session_name=None, **_k):
+            # predecessor is (still) alive under the OLD pane; the unrelated
+            # session is alive under some other, irrelevant pane -- neither
+            # is the successor under the pane this cutover just opened.
+            if session_id == "predecessor-2":
+                return {"pane_id": "%1", "session_name": expected_session_name}
+            if session_id == "unrelated-2":
+                return {"pane_id": "%2", "session_name": expected_session_name}
+            return None
+
+        monkeypatch.setattr(sessions, "mux_binding_for_session", _fake_binding)
+        monkeypatch.setattr(sessions, "_mux_bin", lambda: "psmux")
+        monkeypatch.setattr(sessions, "_mux_pane_alive", lambda *a: False)
+
+        result = m._wait_for_handoff_candidate(
+            path, "task-pane-mismatch", "%9",
+            timeout=0.2, mux_session="wt-pane-mismatch",
+            predecessor_session_id="predecessor-2",
+        )
+        assert result == (None, "pane-exited-before-session")
+        assert _tracking.load_record(path).handoffs[0].candidate is None
+
     @pytest.fixture(autouse=True)
     def _use_local_session_backend(self, monkeypatch):
         monkeypatch.setattr(
