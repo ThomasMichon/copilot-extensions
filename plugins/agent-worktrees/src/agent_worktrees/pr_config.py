@@ -64,4 +64,5 @@ def _pr_flow_profile(repo: cfg.RepoConfig):
         branch_update_strategy=getattr(prc, "branch_update_strategy", "rebase"),
         merge_strategy=getattr(prc, "merge_strategy", "squash"),
         prefer_auto_merge=getattr(prc, "prefer_auto_merge", True),
+        notes=getattr(prc, "notes", ""),
     )

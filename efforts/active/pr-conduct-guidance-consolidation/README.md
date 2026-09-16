@@ -109,6 +109,26 @@ Full audit (repo/file/what's restated) recorded in this session's transcript
       `CONTRIBUTING.md`; run `tools/check-version-bump.py` +
       `tools/run-plugin-tests.py agent-worktrees`.
 
+### Phase 1b -- agent-worktrees: `pr.notes` free-text guidance channel
+- [x] Operator correction mid-effort: agents are expected to access PR config
+      via `agent-worktrees repos get`/the `pr-*` verbs, not by reading
+      `.agent-worktrees/config.yaml` directly -- so a repo's own comments
+      (e.g. "why `bypass_mode: pull_request` not `always`/`exempt`") never
+      reach a calling agent. Added `PRConfig.notes: str` (parsed from
+      `pr.notes`), threaded through `PRFlowProfile.notes` and
+      `classify_pr_flow(..., notes=...)`, and surfaced as an extra `Note:`
+      line by `_cautions()` (consumed by every `pr_reminder()` -- the
+      "Reminder [...]" text every `pr-*` verb and `push-changes` already
+      print, including the direct-profile early-return path, which
+      previously hardcoded `cautions=()`).
+- [x] Unit tests: `classify_pr_flow`/config-parsing pass-through, empty
+      default, and reminder-text inclusion (including the direct-profile
+      path).
+- [x] Documented in `docs/config-reference.md` (new `pr.notes` row) and
+      `pr-workflow.md` (pointer in the Default-conduct section).
+- [x] Bump versions; `tools/check-version-bump.py` +
+      `tools/run-plugin-tests.py agent-worktrees` (targeted).
+
 ### Phase 2 -- odsp-web-harness: trim redundant restatement
 - [ ] `AGENTS.md` §"Drive every PR you open through to merge": keep only
       genuinely unique policy (never-pre-patch-another's-PR,
@@ -118,10 +138,11 @@ Full audit (repo/file/what's restated) recorded in this session's transcript
 - [ ] `CONTRIBUTING.md` (4 spots) and `REVIEW.md` (1 spot): remove restated
       Maintainer/Contributor self-merge facts; point at the dynamic guidance
       instead.
-- [ ] `.agent-worktrees/config.yaml`: trim comment prose that only restates
-      what's now derivable/dynamic; keep comments that explain a
+- [ ] `.agent-worktrees/config.yaml`: move comment prose that explains a
       non-obvious *choice* (e.g. why `bypass_mode: pull_request` not
-      `always`/`exempt`).
+      `always`/`exempt`) into `pr.notes` (Phase 1b) so it actually reaches a
+      calling agent; trim comment prose that only restates what's now
+      derivable/dynamic.
 - [ ] Run `python tools/validate_harness.py`; land via its own PR flow.
 
 ### Phase 3 -- dotfiles: trim redundant restatement
@@ -194,3 +215,28 @@ _Pending._
 - Next: Phase 2 (trim odsp-web-harness's `AGENTS.md`/`CONTRIBUTING.md`
   /`REVIEW.md`/`.agent-worktrees/config.yaml` restatement down to genuinely
   unique policy, pointing at the now-dynamic PR-conduct line instead).
+
+### 2026-09-16 -- Phase 1b: operator correction, `pr.notes` added
+- Operator caught a real design gap before Phase 2 started: agents access PR
+  config via `agent-worktrees repos get`/the `pr-*` verbs, not by reading
+  `.agent-worktrees/config.yaml` directly, so a repo's own YAML comments
+  (the exact kind of rationale Phase 2 was about to "trim down to only
+  genuinely unique policy") would simply stop reaching agents once removed
+  from the file, with nowhere else for them to live.
+- Added `PRConfig.notes` (parsed from `pr.notes`), threaded through
+  `PRFlowProfile.notes`/`classify_pr_flow`, surfaced as an extra `Note:`
+  line by `_cautions()` -- which every `pr_reminder()` call already renders
+  as part of the "Reminder [...]" text every `pr-*` verb/`push-changes`
+  prints. Also fixed the direct-profile early-return path in `pr_reminder`,
+  which had hardcoded `cautions=()` and would have silently dropped notes
+  for `pr.enabled: false` repos.
+- This changes Phase 2's shape: instead of just deleting config-comment
+  prose, genuinely repo-specific rationale (e.g. why a bypass mode is
+  `pull_request` and not `always`/`exempt`) moves into `pr.notes` so it
+  keeps reaching agents, rather than being lost.
+- Validated: targeted `tools/run-plugin-tests.py agent-worktrees` runs green
+  across `pr_contract`/`pr_reminder`/`pr_config`/`test_config`/
+  `session_context` selectors (278 + 143 passed across two runs, no
+  failures).
+- Landed via its own PR, version bumped again per `CONTRIBUTING.md`.
+- Next: Phase 2, now using `pr.notes` for the carried-forward rationale.
