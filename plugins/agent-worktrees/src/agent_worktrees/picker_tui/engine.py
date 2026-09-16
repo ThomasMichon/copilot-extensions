@@ -3781,22 +3781,16 @@ class PickerScreen(Widget):
         return t
 
     def _update_seg(self, focused: bool):
-        """Version-indicator glyph for the launcher's update stage (#1430).
-
-        paused -> ‖; checking -> animated spinner; current -> ✓; available -> ↻
-        (focusable, Enter applies + restarts). Returns a Text segment, or None
-        when idle.
-        """
+        """Render the launcher's idle/paused/checking/current/available state."""
         st = getattr(self, "update_state", "idle")
         if st == "idle":
             return None
         t = Text()
-        if st == "paused":
-            t.append(" ‖", style=C_DIM)
-        elif st == "checking":
+        if st == "checking":
             t.append(" " + self.spin(), style=C_SPIN)
-        elif st == "current":
-            t.append(" ✓", style=C_READY)
+        elif st in ("current", "paused"):
+            t.append(" ✓" if st == "current" else " ‖",
+                     style=C_READY if st == "current" else C_DIM)
         elif st == "available":
             t.append(" ↻", style=(C_BTN_SEL if focused else C_HINT_ON))
         return t
@@ -3831,12 +3825,11 @@ class PickerScreen(Widget):
             seg = self._update_seg(upd_focused)
             if seg is not None:
                 left.append_text(seg)
-                if present["update_text"]:
-                    if self.update_state == "available":
-                        left.append(" Update available…",
-                                    style=(C_BTN_SEL if upd_focused else C_HINT_ON))
-                    elif self.update_state == "paused":
-                        left.append(" Updates paused", style=C_DIM)
+                if present["update_text"] and self.update_state in ("available", "paused"):
+                    left.append(" Update available…" if self.update_state == "available"
+                                else " Updates paused",
+                                style=(C_BTN_SEL if upd_focused else C_HINT_ON)
+                                if self.update_state == "available" else C_DIM)
             right = Text("host ", style=C_DIM)
             right.append(host, style=C_META)
             if present["env"]:
