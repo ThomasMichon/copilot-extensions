@@ -40,6 +40,21 @@ def _raw(**kw):
     return base
 
 
+class TestProductionShimTrackedCanonicalVersion:
+    """PR #2738 review response: the shim's own hardcoded ``DESCRIPTOR_VERSION``
+    can silently drift from ``agent_worktrees.prune``'s -- if the plugin bumps
+    its schema and this copy doesn't follow, a deployed Manager would reject
+    every real descriptor as unsupported. This guard fails CI immediately on
+    that drift (both packages are importable in this monorepo dev/CI
+    environment, even though the deployed Manager runtime doesn't depend on
+    ``agent_worktrees`` at runtime -- see the module docstring)."""
+
+    def test_descriptor_version_matches_the_canonical_copy(self):
+        from agent_worktrees import prune as canonical_prune
+
+        assert prune.DESCRIPTOR_VERSION == canonical_prune.DESCRIPTOR_VERSION
+
+
 class TestProductionShimInterpretDescriptorPayload:
     def test_valid_final_payload_is_trusted(self):
         interpreted = prune.interpret_descriptor_payload(_valid_final_payload())

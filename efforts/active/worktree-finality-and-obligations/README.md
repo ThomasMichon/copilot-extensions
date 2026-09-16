@@ -517,6 +517,19 @@ below for the carved implementation plan.
   `check-version-bump.py` coverage exists for this standalone package --
   a real gap, caught only by manual review); (3) the PR description's
   version numbers had drifted again after more rebases -- corrected.
+  **Sixth review-response round (PR #2738):** one more real finding,
+  fixed: the shim's own hardcoded `DESCRIPTOR_VERSION` can silently drift
+  from `agent_worktrees.prune`'s (the fifth round's Manager-version-bump
+  fix covers *shipping* the current value, but nothing previously
+  guarded against a FUTURE plugin schema bump landing without a matching
+  shim bump). Added
+  `TestProductionShimTrackedCanonicalVersion.test_descriptor_version_matches_the_canonical_copy`
+  to `test_prune_shim.py`, importing `agent_worktrees.prune` directly (both
+  packages are importable side-by-side in this monorepo's dev/CI
+  environment even though the deployed Manager runtime has no such
+  dependency) -- this fails CI immediately the next time the two values
+  diverge, rather than only being caught by manual review as happened
+  this round.
 - [ ] Keep legends, filters, maintenance previews, and cleanup selections in
   parity with the same descriptor. **Narrowed, not fully done:** the
   Maintenance pivot's `CLEAN_SPECS` table got the same `markers` column +
