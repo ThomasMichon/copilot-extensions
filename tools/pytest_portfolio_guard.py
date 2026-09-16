@@ -114,6 +114,12 @@ def pytest_configure(config: pytest.Config) -> None:
         "effect(name): declared filesystem/process/network/service/host-state/"
         "external-system effect",
     )
+    config.addinivalue_line(
+        "markers",
+        "contract(name): attribution tag naming the behavioral contract a test "
+        "covers (e.g. 'agent_worktrees.pr_ops.merge'), for filtering across a "
+        "split test suite -- informational, not policy-enforced",
+    )
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:

@@ -81,6 +81,20 @@ scenario-style test that validates several related observable features over
 many process-launching micro-tests that repeat the same setup and failure
 boundary.
 
+Tag the behavioral contract a test (or test class) belongs to with
+`@pytest.mark.contract("<component>.<behavior>")` — e.g.
+`@pytest.mark.contract("agent_worktrees.pr_ops.merge")`. This is attribution,
+not policy: unlike `portfolio_tier`/`effect`, nothing rejects a missing or
+unrecognized value. Its purpose is to make the contract a test module was
+split along an explicit, filterable, greppable fact instead of something only
+inferable from a file's name or a docstring — `pytest -m 'contract("agent_worktrees.pr_ops")'`
+selects every test attributed to that contract regardless of which file it
+now lives in, which is exactly what a future re-split needs: proof that
+moving tests between files didn't silently drop or duplicate a contract's
+coverage. When splitting an existing oversized test module, assign one
+contract per resulting file as you go; retrofitting the marker onto
+already-small, single-contract files is not required.
+
 ## Local Windows SSH proxy regression
 
 After preparing the isolated `agent-bridge` test environment with the turn-key

@@ -574,6 +574,38 @@ binstub in `~/.local/bin/`.
   `conftest.py`) are exempt — `TESTING.md` already directs splitting those by
   behavioral contract, not arbitrary line count, a different rule for a
   different failure mode.
+  - **The cap is a backstop, not a target.** Treat "a couple of related
+    classes/functions per module" as the working ceiling in normal
+    development, and split proactively as a module grows toward it — waiting
+    for `check-module-size.py` to fail is already too late; by then the
+    module has usually accreted several unrelated responsibilities that are
+    now entangled and harder to separate than if each had landed in its own
+    file from the start.
+  - **CLI/registration surfaces are a named recurring shape, not a special
+    case.** A large `__main__.py` (or any command/route/handler registry) is
+    almost always several independent subcommands sharing one dispatch table,
+    not one cohesive module. Split it into one module per subcommand (or
+    cohesive subcommand family) plus a thin registrar that only imports and
+    wires them — `agent-dispatch`'s extraction of `producers_cli.py`,
+    `recipes_cli.py`, and `supervise_cli.py` out of its `__main__.py` is the
+    model to follow for any other CLI that's grown the same way.
+  - **This is a language-agnostic discipline**, not a Python-only rule. The
+    same "one cohesive responsibility, split proactively, no giant CLI
+    registration blob" standard applies to `.sh`, `.ps1`, and `.ts` sources
+    even though `tools/check-module-size.py` currently only scans tracked
+    `*.py` files — extending the guard to other extensions is tracked
+    separately (see the `module-componentization-discipline` effort); do not
+    treat the tool's current Python-only scope as license to let a large
+    shell/PowerShell/TypeScript file grow unchecked in the meantime.
+  - **How to actually do a split safely:** see the
+    `customizing-copilot:componentizing-modules` skill (a runbook for
+    identifying seams, extracting them, and re-validating — including the
+    `--refresh-baseline` step once a baselined file shrinks below its prior
+    ceiling). Use `python tools/rank-module-size.py` to find which
+    already-grandfathered files are the biggest offenders (it folds identical
+    vendored copies — e.g. the `installation-context`/`versioned-runtime`
+    sync targets — into one row so the ranking reflects distinct real work,
+    not duplicated line counts).
 
 ### Git Hooks
 
