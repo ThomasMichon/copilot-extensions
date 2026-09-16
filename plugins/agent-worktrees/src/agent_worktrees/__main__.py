@@ -16535,7 +16535,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
 
 def _profiles_host() -> tuple[str, str]:
     """This machine's (display_name, env_label) in roster vocabulary."""
-    from .picker_tui import roster
+    from . import roster
 
     return roster.local_host()
 
