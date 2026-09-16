@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from agent_codespaces.relay_launch import (
+    AZURE_AUTH_HELPER_COMPAT_DIR,
     SCRUB_ENV_VARS,
+    build_azure_auth_helper_compat_shim,
     build_feed_token_exports,
     build_relay_env,
 )
@@ -38,6 +40,39 @@ def test_build_relay_env_no_relay_still_scrubs():
     assert "LC_GIT_CREDENTIAL_RELAY" not in env
     assert "auth-error-policy.instructions.md" in env
     assert "COPILOT_CUSTOM_INSTRUCTIONS_DIRS" in env
+
+
+def test_build_azure_auth_helper_compat_shim_maps_bare_name():
+    # #415: RushStack's AdoCodespacesAuthCredential hard-codes the bare
+    # "azure-auth-helper" name; map it to the relay-first ado-auth-helper
+    # wrapper via a compat directory, never a persisted dotfile.
+    snippet = build_azure_auth_helper_compat_shim()
+    assert f'mkdir -p "{AZURE_AUTH_HELPER_COMPAT_DIR}"; ' in snippet
+    assert (
+        f'ln -sf "$HOME/.local/bin/ado-auth-helper" '
+        f'"{AZURE_AUTH_HELPER_COMPAT_DIR}/azure-auth-helper"; ' in snippet
+    )
+    assert f'export PATH="{AZURE_AUTH_HELPER_COMPAT_DIR}:$PATH"; ' in snippet
+    # Session/process-scoped only -- never persisted to a dotfile.
+    assert ".bashrc" not in snippet
+    assert ".profile" not in snippet
+
+
+def test_build_relay_env_includes_azure_auth_helper_shim_when_relay_used():
+    env = build_relay_env(9857, "tok123", use_relay=True)
+    assert AZURE_AUTH_HELPER_COMPAT_DIR in env
+    assert "azure-auth-helper" in env
+    # Comes after the relay export (the wrapper resolves the relay via
+    # LC_GIT_CREDENTIAL_RELAY at runtime, matching the feed-token ordering).
+    assert env.index("LC_GIT_CREDENTIAL_RELAY=") < env.index(
+        AZURE_AUTH_HELPER_COMPAT_DIR
+    )
+
+
+def test_build_relay_env_no_relay_omits_azure_auth_helper_shim():
+    env = build_relay_env(9857, "tok", use_relay=False)
+    assert "azure-auth-helper" not in env
+    assert AZURE_AUTH_HELPER_COMPAT_DIR not in env
 
 
 def test_build_feed_token_exports_emits_helper_backed_export():
@@ -78,7 +113,10 @@ def test_build_relay_env_exports_feed_token_after_relay():
 def test_build_relay_env_no_feed_token_by_default():
     env = build_relay_env(9857, "tok123", use_relay=True)
     assert "EXAMPLE_NPM_AUTH_TOKEN" not in env
-    assert "ado-auth-helper" not in env
+    # No feed-token export is emitted by default; the ado-auth-helper
+    # reference that remains comes solely from the azure-auth-helper compat
+    # shim (#415), not from a feed-token export.
+    assert "get-access-token" not in env
 
 
 def test_build_relay_env_no_relay_omits_feed_token():
