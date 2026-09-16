@@ -1224,18 +1224,22 @@ def _worktree_to_dict(
         # attempted (every current caller here classifies with
         # `fetch=False`), which would otherwise let an ordinary fetch-free
         # `list --json --classify` masquerade as refreshed evidence.
+        _fetch_fresh = state_info.fetch_requested and not state_info.fetch_failed
+        if _fetch_fresh:
+            # Phase 9: this call's own fresh fetch also counts as current
+            # evidence for every OTHER worktree of this repo -- record it in
+            # the repo-scoped ledger rather than letting only this call
+            # benefit from it.
+            tracking.record_repo_fetch_confirmed(rec.repo)
         d["closure"] = prune.assemble_closure_descriptor(
             rec,
             state_info,
             _disposition,
             held_claims=sum(1 for c in rec.resources if c.is_live),
             open_follow_ups=tracking.effective_open_follow_up_count(rec),
-            evidence_mode=(
-                "refreshed"
-                if state_info.fetch_requested and not state_info.fetch_failed
-                else "cached"
-            ),
+            evidence_mode="refreshed" if _fetch_fresh else "cached",
             turn_count=_turns,
+            repo_fetch_fresh=tracking.is_repo_fetch_fresh(rec.repo),
         ).to_dict()
         d["ff_eligible"] = (
             git_ops.can_fast_forward(state_info)
@@ -8444,13 +8448,17 @@ def _render_status_segment(
             claimant_alive=_local_claimant_alive,
             paired_sibling_final=prune.default_paired_sibling_final,
         )
+        _fetch_fresh = info.fetch_requested and not info.fetch_failed
+        if _fetch_fresh:
+            # Phase 9: share this fetch's freshness with every other
+            # worktree of this repo via the repo-scoped ledger.
+            tracking.record_repo_fetch_confirmed(rec.repo)
         descriptor = prune.assemble_closure_descriptor(
             rec, refined_info, disposition,
             held_claims=held_claims, open_follow_ups=open_follow_ups,
-            evidence_mode=(
-                "refreshed" if info.fetch_requested and not info.fetch_failed else "cached"
-            ),
+            evidence_mode="refreshed" if _fetch_fresh else "cached",
             turn_count=turns,
+            repo_fetch_fresh=tracking.is_repo_fetch_fresh(rec.repo),
         )
         bg = _DESCRIPTOR_STYLE_BG.get(descriptor.style, "colour238")
         block_label = descriptor.compact
@@ -8567,13 +8575,17 @@ def _status_segment_json(path: str | None = None, fetch: bool = False) -> dict |
             claimant_alive=_local_claimant_alive,
             paired_sibling_final=prune.default_paired_sibling_final,
         )
+        _fetch_fresh = info.fetch_requested and not info.fetch_failed
+        if _fetch_fresh:
+            # Phase 9: share this fetch's freshness with every other
+            # worktree of this repo via the repo-scoped ledger.
+            tracking.record_repo_fetch_confirmed(rec.repo)
         descriptor = prune.assemble_closure_descriptor(
             rec, refined_info, disposition,
             held_claims=held_claims, open_follow_ups=open_follow_ups,
-            evidence_mode=(
-                "refreshed" if info.fetch_requested and not info.fetch_failed else "cached"
-            ),
+            evidence_mode="refreshed" if _fetch_fresh else "cached",
             turn_count=turns,
+            repo_fetch_fresh=tracking.is_repo_fetch_fresh(rec.repo),
         )
         closure = descriptor.to_dict()
 
