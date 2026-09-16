@@ -539,17 +539,23 @@ in place rather than spawning a parallel state. Builds on the existing
 accelerator (`classify_daemon.py`/`cmd_status_monitor`) rather than replacing
 either.
 
-- [ ] Name the sub-state facts explicitly in the descriptor: checkpoint
+- [x] Name the sub-state facts explicitly in the descriptor: checkpoint
   activity (turns since last checkpoint), upstream-containment (branch at or
   ahead of `origin/[main|master]`), local dirtiness, open downstream claims,
   and pending unclaimed handoff. Each fact keeps its own value independent of
-  the others (no collapsing into a single label until render time).
-- [ ] Add a per-fact freshness flag (confirmed vs. unconfirmed/asterisked) to
+  the others (no collapsing into a single label until render time). Landed:
+  `prune.FACT_NAMES`/`ClosureDescriptor.facts`, PR TBD.
+- [x] Add a per-fact freshness flag (confirmed vs. unconfirmed/asterisked) to
   the descriptor, replacing the current all-or-nothing
   `evidence_mode`/`evidence_complete` pair that only ever gates the single
   FINAL/MERGED distinction. `FINAL` requires upstream-containment AND
   claims-clear to both be independently confirmed; either one alone being
-  stale marks only that fact, not the whole verdict.
+  stale marks only that fact, not the whole verdict. Landed alongside the
+  above (`DESCRIPTOR_VERSION` bumped 1 -> 2); `checkpoint_activity` and
+  `local_dirtiness` are always-confirmed (locally computed), while
+  `upstream_containment`/`open_claims` share the existing fetch-freshness
+  input for now (independent per-fact tracking, not yet independent
+  SOURCES of freshness -- that's the repo-scoped ledger below).
 - [ ] Add a repo-scoped freshness ledger (last-confirmed-fetch timestamp per
   repo, not per worktree) that any worktree's classify pass can read without
   itself having fetched -- so a fetch performed by any sibling worktree's
@@ -581,11 +587,14 @@ either.
 - [ ] Mixed-version safety: an older/newer descriptor version (or a payload
   missing the new per-fact freshness fields) degrades the same way Phase 4's
   `interpret_descriptor_payload` already degrades an unsupported version --
-  never silently promoted to confirmed.
+  never silently promoted to confirmed. Partially covered: bumping
+  `DESCRIPTOR_VERSION` to 2 makes `interpret_descriptor_payload`'s existing
+  exact-version check reject a v1 payload automatically (no code change
+  needed there); not yet exercised by a dedicated v1-vs-v2 payload test.
 
 ## Validation Plan
 
-- [ ] **Sub-state decomposition** (Phase 9, proposed): the descriptor names
+- [~] **Sub-state decomposition** (Phase 9): the descriptor names
   each of the five facts (checkpoint activity, upstream-containment, local
   dirtiness, open claims, pending handoff) independently, with its own
   freshness; `FINAL` requires upstream-containment and claims-clear both
@@ -593,7 +602,11 @@ either.
   worktree's finalize/pr-merge) counts as fresh evidence for every worktree
   of that repo without each needing its own fetch; an unconfirmed fact
   renders with a marker on that fact alone, never as a separate whole state.
-  Not started.
+  Named facts + per-fact `confirmed` landed (`prune.py`); the repo-scoped
+  ledger (so a fetch performed elsewhere counts as fresh evidence without a
+  new fetch) is NOT yet built -- `upstream_containment`/`open_claims` still
+  share this call's own `evidence_mode` input. Marker rendering across
+  surfaces also not yet built (still Phase 9 follow-up work).
 - [ ] **Session-claim lifecycle** (Phase 8, proposed): a worktree's own live
   Copilot session is a held claim; it settles on finalize, settles on a
   successful handoff cutover, releases on `sessionEnd`, and reopens on a
@@ -1187,4 +1200,55 @@ The approved design is the faceted model in [design.md](design.md):
   continuation of Phase 4/5's "one canonical descriptor, every surface
   consumes it" intent, not a new subject. Not started; handed off for
   implementation.
+
+### 2026-09-15 (continued) - Phase 9 slice 1: named facts + per-fact freshness landed
+
+- Landed the first two Plan bullets: `prune.ClosureDescriptor` now carries a
+  `facts` dict (`prune.FACT_NAMES`: `checkpoint_activity`,
+  `upstream_containment`, `local_dirtiness`, `open_claims`,
+  `pending_handoff`), each with its own `confirmed` freshness flag, replacing
+  the old top-level `evidence_mode`/`evidence_complete` pair entirely.
+  `checkpoint_activity`/`local_dirtiness` are always locally computed (always
+  `confirmed`); `upstream_containment`/`open_claims` share the existing
+  fetch-freshness input (independent per-fact tracking, not yet independent
+  freshness SOURCES -- that's the repo-scoped ledger, still unstarted).
+  `pending_handoff` always reports `confirmed: false`/`value: None` (not yet
+  wired, per Plan). `FINAL` now derives from
+  `facts["upstream_containment"]["confirmed"] and
+  facts["open_claims"]["confirmed"]` instead of the old single
+  `fresh_and_complete` flag. `DESCRIPTOR_VERSION` bumped 1 -> 2 (an
+  incompatible shape change per its own doc comment); `interpret_
+  descriptor_payload`'s existing exact-version check rejects a v1 payload
+  automatically, no code change needed there for Plan item 8's mixed-version
+  safety (not yet covered by a dedicated test, though).
+- Wired `turn_count` into `assemble_closure_descriptor` (new optional kwarg,
+  default 0) so `checkpoint_activity` has a real value; all three
+  `__main__.py` call sites (`_worktree_to_dict`, the mux/PSMux status
+  segment, and the `status-context` JSON path) already had a `turns`/`_turns`
+  variable in scope and now pass it through.
+- Updated `tests/test_prune.py` and `tests/test_closure_descriptor_wiring.py`
+  for the new `facts` shape (removed all `evidence_mode`/`evidence_complete`
+  assertions, added `facts[...]["confirmed"]` ones); added a
+  `test_to_dict_shape` assertion that `set(payload["facts"]) ==
+  set(prune.FACT_NAMES)`. `tests/test_prune.py`,
+  `tests/test_closure_descriptor_wiring.py`, `tests/test_status_segment.py`
+  (119 tests) all pass; a full-suite run hit only the same pre-existing,
+  unrelated `test_ahp_command.py::test_direct_backend_refuses_active_hosted_
+  binding` failure confirmed present on the unmodified checkout too (not
+  this change's regression). `ruff check` finding counts are identical
+  before/after (46, all pre-existing).
+- Updated `docs/worktree-lifecycle.md` with an additive "Decomposed
+  sub-state facts (Phase 9, in progress)" subsection describing the new
+  `facts` shape; explicitly notes the `FINAL`/`MERGED` label rules on the
+  surfaces are unchanged by this slice (rendering the per-fact marker is
+  still unstarted, per Plan item 6).
+- **Not done this session** (remaining Phase 9 Plan items, unstarted): the
+  repo-scoped freshness ledger, the resident status-monitor's periodic
+  per-repo revalidation sweep, operation-triggered recompute signals from
+  `pr-merge`/`finalize`/`sync`/claim settle-release, `pending_handoff`'s
+  real (read-only, context-handoff-baton-backed) wiring, the per-fact marker
+  rendering across `list --json`/the status segment/the Picker, `docs/
+  cli-reference.md`/`docs/mux.md` updates, the `mux-companion` vision's
+  Companion explainer update, and a dedicated mixed-version-safety test for
+  a v1 payload against the new v2 shape.
 

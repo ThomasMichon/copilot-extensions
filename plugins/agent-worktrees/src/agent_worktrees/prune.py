@@ -410,7 +410,35 @@ def cleanup_disposition(
 
 #: Descriptor schema version. Bump on any incompatible shape change; older
 #: consumers must treat an unrecognized version as provisional, never FINAL.
-DESCRIPTOR_VERSION = 1
+#: Bumped to 2 for worktree-finality-and-obligations Phase 9: the top-level
+#: ``evidence_mode``/``evidence_complete`` pair (a single all-or-nothing
+#: freshness flag for the whole descriptor) is replaced by ``facts``, a named
+#: sub-state map where each fact carries its OWN ``confirmed`` freshness --
+#: see :data:`FACT_NAMES` and :func:`assemble_closure_descriptor`.
+DESCRIPTOR_VERSION = 2
+
+#: The fixed, named sub-state facts a closure descriptor decomposes into
+#: (worktree-finality-and-obligations Phase 9). Each fact is tracked and
+#: freshness-marked independently -- an unconfirmed fact is marked in place,
+#: never collapsed into (or spawning) a separate whole state.
+#:
+#: * ``checkpoint_activity`` -- turns since the last checkpoint; always
+#:   locally computed, so always confirmed.
+#: * ``upstream_containment`` -- whether the branch's content is at or ahead
+#:   of ``origin/[main|master]``; requires a fresh fetch to be ``confirmed``.
+#: * ``local_dirtiness`` -- uncommitted change count; always locally
+#:   computed, so always confirmed.
+#: * ``open_claims`` -- held resource claims, open follow-ups, and any
+#:   PR/blocker state that depends on a provider lookup; ``confirmed`` when
+#:   that lookup is fresh (mirrors ``upstream_containment``'s freshness input
+#:   until the Phase 9 repo-scoped ledger lets them diverge).
+#: * ``pending_handoff`` -- an unclaimed context-handoff baton for this
+#:   worktree. **Not yet wired**: always reports ``confirmed=False`` with a
+#:   ``None`` value until read-only baton wiring lands (Phase 9 follow-up).
+FACT_NAMES = (
+    "checkpoint_activity", "upstream_containment", "local_dirtiness",
+    "open_claims", "pending_handoff",
+)
 
 #: The closed blocker-code vocabulary (design.md). A future code requires a
 #: version bump. NOTE: this module only ever emits a SUBSET of this set (the
@@ -478,17 +506,18 @@ class ClosureDescriptor:
 
     Preserves Git settlement, held-claim count, and open-follow-up count as
     INDEPENDENT facts (never re-derived per surface); ``closure.final`` and
-    ``action`` are computed FROM them, not stored opinions. ``evidence_mode``
-    /``evidence_complete`` carry provenance: only a ``refreshed`` +
-    ``complete`` descriptor may report a *current* FINAL or a ``safe`` action
-    -- a cached/fetch-free descriptor is downgraded defensively (see
-    :func:`assemble_closure_descriptor`).
+    ``action`` are computed FROM them, not stored opinions. ``facts`` (Phase
+    9) carries per-fact provenance: ``FINAL`` requires the
+    ``upstream_containment`` and ``open_claims`` facts to BOTH be
+    independently ``confirmed`` -- a fact that isn't is marked unconfirmed in
+    place, and the whole descriptor is downgraded defensively (see
+    :func:`assemble_closure_descriptor`), never collapsed into a separate
+    whole state.
     """
 
     version: int
     computed_at: str
-    evidence_mode: str
-    evidence_complete: bool
+    facts: dict
     base_state: str
     label: str
     style: str
@@ -505,8 +534,7 @@ class ClosureDescriptor:
         return {
             "version": self.version,
             "computed_at": self.computed_at,
-            "evidence_mode": self.evidence_mode,
-            "evidence_complete": self.evidence_complete,
+            "facts": self.facts,
             "base_state": self.base_state,
             "label": self.label,
             "style": self.style,
@@ -532,19 +560,36 @@ def assemble_closure_descriptor(
     open_follow_ups: int,
     evidence_mode: str = "refreshed",
     evidence_complete: bool = True,
+    turn_count: int = 0,
     now: str | None = None,
 ) -> ClosureDescriptor:
     """Assemble the canonical closure descriptor from already-computed facts.
 
     Pure -- no I/O; the caller supplies fresh (or cached) ``info``/
-    ``disposition``/counts. ``FINAL`` requires ALL of: ``evidence_mode ==
-    "refreshed"`` and ``evidence_complete``, Git upstream-complete (git state
+    ``disposition``/counts. Decomposes into the named :data:`FACT_NAMES`
+    sub-states (worktree-finality-and-obligations Phase 9), each carrying its
+    own ``confirmed`` freshness rather than one all-or-nothing flag:
+
+    * ``checkpoint_activity``/``local_dirtiness`` are always locally computed,
+      so always ``confirmed``.
+    * ``upstream_containment``/``open_claims`` depend on evidence that can go
+      stale (a fetch, a provider PR lookup); each is ``confirmed`` only when
+      ``evidence_mode == "refreshed"`` and ``evidence_complete`` -- today both
+      share that single input (the repo-scoped freshness ledger that lets
+      them diverge is a Phase 9 follow-up), but are tracked as independent
+      facts so a future caller can confirm one without the other.
+    * ``pending_handoff`` is not yet wired (Phase 9 follow-up): always
+      reports ``confirmed=False`` with a ``None`` value.
+
+    ``FINAL`` requires ALL of: the ``upstream_containment`` AND ``open_claims``
+    facts BOTH independently ``confirmed``, Git upstream-complete (git state
     ``completed`` or the disposition bucket is already ``clean``), zero held
     claims, zero open follow-ups, no other blocker, and the worktree is not
-    live (``ACTIVE`` has display precedence -- see design.md). A cached or
-    fetch-free descriptor NEVER reports FINAL or a ``safe`` action, even if
-    the underlying facts would otherwise qualify -- destructive authorization
-    always requires a fresh recomputation immediately before acting.
+    live (``ACTIVE`` has display precedence -- see design.md). An unconfirmed
+    ``upstream_containment`` or ``open_claims`` fact NEVER lets the descriptor
+    report FINAL or a ``safe`` action, even if the underlying values would
+    otherwise qualify -- destructive authorization always requires a fresh
+    recomputation immediately before acting.
 
     ``rec.status == "finalizing"`` is surfaced as an explicit ``finalizing``
     blocker so a wedged record self-reports rather than rendering as
@@ -581,8 +626,34 @@ def assemble_closure_descriptor(
         blockers.append({"code": "open-follow-ups", "count": open_follow_ups})
 
     fresh_and_complete = evidence_mode == "refreshed" and evidence_complete
+
+    facts = {
+        "checkpoint_activity": {
+            "confirmed": True,
+            "turns_since_checkpoint": turn_count,
+        },
+        "upstream_containment": {
+            "confirmed": fresh_and_complete,
+            "complete": upstream_complete,
+        },
+        "local_dirtiness": {
+            "confirmed": True,
+            "dirty": info.dirty,
+        },
+        "open_claims": {
+            "confirmed": fresh_and_complete,
+            "held": held_claims,
+            "open_follow_ups": open_follow_ups,
+        },
+        "pending_handoff": {
+            "confirmed": False,
+            "value": None,
+        },
+    }
+
     final = (
-        fresh_and_complete
+        facts["upstream_containment"]["confirmed"]
+        and facts["open_claims"]["confirmed"]
         and upstream_complete
         and held_claims == 0
         and open_follow_ups == 0
@@ -622,8 +693,7 @@ def assemble_closure_descriptor(
     return ClosureDescriptor(
         version=DESCRIPTOR_VERSION,
         computed_at=now or tracking._now_iso(),
-        evidence_mode=evidence_mode,
-        evidence_complete=evidence_complete,
+        facts=facts,
         base_state=base_label,
         label=label,
         style=style,
