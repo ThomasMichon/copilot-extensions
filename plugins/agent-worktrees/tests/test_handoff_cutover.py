@@ -682,8 +682,8 @@ class TestCmdHandoffCutover:
     ):
         record = type("_Record", (), {"handoffs": []})()
         monkeypatch.setattr(m.tracking, "load_record", lambda path: record)
-        monkeypatch.setattr(sessions, "_mux_bin", lambda: "psmux")
-        monkeypatch.setattr(sessions, "_mux_pane_alive", lambda *a: False)
+        monkeypatch.setattr(sessions_pane_retire, "_mux_bin", lambda: "psmux")
+        monkeypatch.setattr(sessions_pane_retire, "_mux_pane_alive", lambda *a: False)
 
         assert m._wait_for_handoff_candidate(
             tmp_path / "wt.yaml", "task-123", "%5", timeout=0.1,
@@ -768,8 +768,8 @@ class TestCmdHandoffCutover:
             return None
 
         monkeypatch.setattr(sessions, "mux_binding_for_session", _fake_binding)
-        monkeypatch.setattr(sessions, "_mux_bin", lambda: "psmux")
-        monkeypatch.setattr(sessions, "_mux_pane_alive", lambda *a: False)
+        monkeypatch.setattr(sessions_pane_retire, "_mux_bin", lambda: "psmux")
+        monkeypatch.setattr(sessions_pane_retire, "_mux_pane_alive", lambda *a: False)
 
         result = m._wait_for_handoff_candidate(
             path, "task-pane-mismatch", "%9",

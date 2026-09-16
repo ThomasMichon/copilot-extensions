@@ -141,6 +141,7 @@ def wait_for_handoff_candidate(
     timeout: float = 30.0,
     mux_session: str | None = None,
     predecessor_session_id: str | None = None,
+    pane_scan_interval: float = 1.0,
 ) -> tuple[str | None, str]:
     """Wait until a successor is confirmed for the exact handoff token.
 
@@ -148,7 +149,12 @@ def wait_for_handoff_candidate(
     self-report (needs the mux to propagate ``-e`` env, e.g. tmux), and
     agent-worktrees' own pane-process-ancestry match (env-var-free; see
     :func:`associate_pane_matched_candidate` -- the only path that works on
-    psmux/Windows, where env propagation is not trusted).
+    psmux/Windows, where env propagation is not trusted). The pane/process
+    scan is throttled to ``pane_scan_interval`` -- each attempt spawns a
+    ``list-panes`` subprocess and rebuilds process ancestry per live session,
+    so running it on every 50ms poll tick would multiply into hundreds of
+    subprocess spawns over a 30s wait (worse on a record with several stacked
+    successors -- the exact failure mode this is recovering from).
     """
     import time
 
@@ -156,6 +162,7 @@ def wait_for_handoff_candidate(
 
     deadline = time.monotonic() + timeout
     mux_bin = _mux_bin()
+    next_pane_scan = 0.0
     while time.monotonic() < deadline:
         try:
             candidate_record = tracking.load_record(record_path)
@@ -167,7 +174,9 @@ def wait_for_handoff_candidate(
             handoff = None
         if handoff is not None and handoff.candidate:
             return handoff.candidate, "session-associated"
-        if pane_id and mux_session:
+        now = time.monotonic()
+        if pane_id and mux_session and now >= next_pane_scan:
+            next_pane_scan = now + pane_scan_interval
             matched = associate_pane_matched_candidate(
                 record_path, token, mux_session, pane_id, predecessor_session_id,
             )
@@ -211,7 +220,7 @@ def associate_pane_matched_candidate(
     for entry in record.sessions or []:
         if entry.session_id == predecessor_session_id:
             continue
-        if entry.ended_at:
+        if entry.ended_at or entry.state != "active":
             continue
         try:
             binding = sessions.mux_binding_for_session(
@@ -228,9 +237,19 @@ def associate_pane_matched_candidate(
                     locked_record, token, entry.session_id, save=True,
                 )
         except tracking.SessionLifecycleError:
-            # Already associated (possibly by the successor's own self-report
-            # racing this check) or otherwise not applicable.
-            pass
+            # Someone else (the successor's own self-report, or a concurrent
+            # call) already associated a DIFFERENT candidate for this token, or
+            # the handoff is no longer pending -- re-read the authoritative
+            # state rather than trusting our own attempted association.
+            try:
+                current = tracking.load_record(record_path)
+                won = next(
+                    (h for h in current.handoffs if h.token == token), None,
+                )
+            except (OSError, ValueError):
+                won = None
+            if won is None or won.candidate != entry.session_id:
+                return None
         except (OSError, ValueError):
             return None
         return entry.session_id
