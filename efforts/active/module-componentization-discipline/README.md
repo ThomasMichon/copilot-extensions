@@ -173,12 +173,32 @@ Verbatim from the operator:
 - [ ] Work down `tools/rank-module-size.py`'s ranked list, prioritizing
       CLI-registration shapes and small `--near-cap` margins, one PR per
       module (pure split, no behavior change, per the skill's Step 2).
+      - [x] `agent-bridge/db.py` (2,437 lines, single `Database` class) —
+            split via **mixin classes** (`db_core.py`, `db_schema.py`,
+            `db_sessions.py`, `db_live_sessions.py`, `db_events.py`,
+            `db_prompts.py`, `db_maintenance.py`), composed back into one
+            `Database(...)` in a 45-line `db.py` shim. A new decomposition
+            pattern beyond Phase 1's free-function split: safe for a single
+            large class because `self.<method>()` resolves through the MRO
+            regardless of which mixin file defines it, so no call-graph
+            tracing was needed, only grouping by responsibility.
+            `agent-dispatch/coordinator.py` was considered but deferred —
+            its `create_app()` is a FastAPI factory with routes closing over
+            local variables (`queue`, `bus`, `directory`, ...), a genuinely
+            harder/riskier shape than either Phase 1 or this mixin split;
+            it needs its own dedicated design pass, not a quick mechanical
+            move. Bumped `agent-bridge` to `0.4.0-dev491`.
       - [ ] `agent-dispatch/coordinator.py` (2,509, a demonstrated repeat
-            drifter) or `agent-bridge/db.py` (2,437) — pick whichever has
-            stronger test coverage; suggested next slice (see pecking-order
-            table above for full reasoning).
+            drifter) — FastAPI app-factory shape (see above); needs a
+            dedicated design pass for how to split routes that close over
+            shared local state (extract as `APIRouter`s taking that state
+            as explicit constructor args, most likely), not a direct
+            reuse of either prior pattern.
       - [ ] The `tools/clean-room/scenarios/*` fixtures (2,429 / 2,369) —
-            lower urgency (not production code) but easy, low-risk wins.
+            lower urgency (not production code), but validating a split
+            means actually running the Docker-based clean-room scenario
+            (confirmed available on this machine), which is slow — budget
+            real time for it rather than treating it as a quick win.
       - [ ] The `__main__.py` CLI-registration giants
             (`agent-worktrees` 28,384; `agent-bridge` 6,595;
             `agent-dispatch` 4,691; `agent-codespaces` 4,636) — each needs
@@ -302,3 +322,25 @@ the Phase 0 runbook, picked up as capacity allows.
   mechanical trace-and-extract to a sub-agent with a bounded spec if the
   file is large/cross-referenced, then independently re-verify before
   committing.
+
+### 2026-09-16 — Phase 2 continued: `agent-bridge/db.py` mixin split
+- Context utilization was still low (~34%) after the checkpoint above, so
+  continued rather than waiting for a handoff. Compared `coordinator.py`
+  (FastAPI app factory, routes closing over local `queue`/`bus`/`directory`
+  state — genuinely harder to split safely) against `db.py` (one `Database`
+  class, ~75 methods, all operating through `self` — safe to split via
+  **mixin classes**, a new decomposition shape this effort hadn't used yet:
+  `self.<method>()` resolves through the MRO regardless of which mixin file
+  defines it, so no call-graph tracing is needed, only grouping by
+  responsibility). Picked `db.py` as lower-risk.
+- Delegated the extraction to a sub-agent (same pattern as Phase 1): split
+  into `db_core.py`, `db_schema.py`, `db_sessions.py`, `db_live_sessions.py`
+  (split out of the sessions group once it proved too large on its own),
+  `db_events.py`, `db_prompts.py`, `db_maintenance.py`, composed into a
+  45-line `db.py` shim. Independently verified: `check-module-size.py`,
+  ruff, docs/skill guards, and `run-plugin-tests.py agent-bridge` (580
+  passed, same 2 pre-existing unrelated failures in
+  `test_bootstrap_check_reconcile_opt_in.py` before and after — confirmed
+  unrelated to `db.py`). Bumped `agent-bridge` to `0.4.0-dev491`. Deferred
+  `coordinator.py` to its own future slice given the FastAPI-closure
+  complexity noted above.

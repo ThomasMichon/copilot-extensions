@@ -60,12 +60,35 @@ responsibilities pulled apart. Look for:
 - **An adapter per external system/shell.** Code branching heavily on
   "which backend/shell/platform" is a sign each branch wants its own adapter
   module behind a shared interface.
+- **A single large class with many methods, all sharing instance state
+  (a connection, a lock, a cache).** Free-function extraction doesn't fit
+  here — the methods need `self`. Split via **mixin classes** instead: group
+  methods by responsibility into `_XMixin` classes in separate files, then
+  compose them back with `class Foo(_AMixin, _BMixin, ...): ...` in the
+  original module. This is safe without call-graph tracing because
+  `self.<method>()` resolves through the instance's MRO at runtime
+  regardless of which mixin file defines it — unlike splitting a CLI's
+  free functions, you don't need to prove which module each caller should
+  import from. Keep `__init__` (and any other state-establishing method) in
+  whichever mixin comes first in the base-class list. `agent-bridge`'s
+  `db.py` (one `Database` class, ~75 methods) split into `db_core.py`,
+  `db_schema.py`, `db_sessions.py`, `db_live_sessions.py`, `db_events.py`,
+  `db_prompts.py`, and `db_maintenance.py` this way — read that split as the
+  worked example.
 - **A vendored/synced copy.** Before splitting a file, check whether it's one
   of several *identical* copies kept in sync by a tool like
   `tools/sync-installation-context.py`, `tools/sync-versioned-runtime.py`, or
   `tools/check-vendored-libs-sync.py`. If so, split the **canonical** source
   (see that tool's `CANONICAL_DIR`/`_lib_copies()`), not a downstream copy —
   the sync step propagates the split to every adopter automatically.
+- **A framework app-factory with routes/handlers closing over local state**
+  (e.g. a FastAPI `create_app()` building routes inline that close over
+  `queue`, `bus`, or similar locals). This is the hardest shape — neither
+  free-function extraction nor mixins apply cleanly, since each route needs
+  that closed-over state. Don't rush it: design an explicit way to carry the
+  state across the split first (e.g. an `APIRouter` factory function taking
+  the state as constructor arguments), and treat it as its own dedicated
+  slice rather than reusing another shape's mechanics by rote.
 
 This same seam-finding logic applies to `.sh`, `.ps1`, and `.ts` sources, even
 though the automated cap currently only scans `*.py` (see CONTRIBUTING.md) —
