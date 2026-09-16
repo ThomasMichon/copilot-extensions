@@ -133,6 +133,158 @@ def _mux_pane_alive(pane_id: str, mux_bin: str) -> bool:
         return False
 
 
+def wait_for_handoff_candidate(
+    record_path,
+    token: str,
+    pane_id: str | None,
+    *,
+    timeout: float = 30.0,
+    mux_session: str | None = None,
+    predecessor_session_id: str | None = None,
+    pane_scan_interval: float = 1.0,
+) -> tuple[str | None, str]:
+    """Wait until a successor is confirmed for the exact handoff token.
+
+    Races two confirmation paths: the successor's own sessionStart-hook
+    self-report (needs the mux to propagate ``-e`` env, e.g. tmux), and
+    agent-worktrees' own pane-process-ancestry match (env-var-free; see
+    :func:`associate_pane_matched_candidate` -- the only path that works on
+    psmux/Windows, where env propagation is not trusted). The pane/process
+    scan is throttled to ``pane_scan_interval`` -- each attempt spawns a
+    ``list-panes`` subprocess and rebuilds process ancestry per live session,
+    so running it on every 50ms poll tick would multiply into hundreds of
+    subprocess spawns over a 30s wait (worse on a record with several stacked
+    successors -- the exact failure mode this is recovering from).
+    """
+    import time
+
+    from . import tracking
+
+    deadline = time.monotonic() + timeout
+    mux_bin = _mux_bin()
+    next_pane_scan = 0.0
+    while time.monotonic() < deadline:
+        try:
+            candidate_record = tracking.load_record(record_path)
+            handoff = next(
+                (item for item in candidate_record.handoffs if item.token == token),
+                None,
+            )
+        except (OSError, ValueError):
+            handoff = None
+        if handoff is not None and handoff.candidate:
+            if not mux_session:
+                return handoff.candidate, "session-associated"
+            # Pane-aware wait: `handoff.candidate` is a record-wide field, not
+            # proof it belongs to *this* pane -- a racing/earlier attempt's
+            # self-report could have set it. Confirm via the same
+            # process-ancestry check before trusting it. Without a known
+            # `pane_id` to check against, fail closed (keep polling) rather
+            # than accept an unverifiable candidate.
+            binding = None
+            if pane_id:
+                try:
+                    from . import sessions
+
+                    binding = sessions.mux_binding_for_session(
+                        handoff.candidate, expected_session_name=mux_session,
+                    )
+                except Exception:
+                    binding = None
+            if binding and binding.get("pane_id") == pane_id:
+                return handoff.candidate, "session-associated"
+        now = time.monotonic()
+        if pane_id and mux_session and now >= next_pane_scan:
+            next_pane_scan = now + pane_scan_interval
+            matched = associate_pane_matched_candidate(
+                record_path, token, mux_session, pane_id, predecessor_session_id,
+            )
+            if matched:
+                return matched, "pane-process-associated"
+        if pane_id and not _mux_pane_alive(pane_id, mux_bin):
+            return None, "pane-exited-before-session"
+        time.sleep(0.05)
+    return None, "session-association-timeout"
+
+
+def associate_pane_matched_candidate(
+    record_path,
+    token: str,
+    mux_session: str,
+    pane_id: str,
+    predecessor_session_id: str | None,
+) -> str | None:
+    """Confirm handoff candidacy by process ancestry alone -- no env var.
+
+    Self-registration via ``AGENT_WORKTREES_HANDOFF_TOKEN`` requires the mux to
+    propagate a custom ``-e`` environment value into the new pane's actual child
+    process environment. psmux (Windows) does not guarantee this the way tmux's
+    ``-e`` does, so a Windows successor can never self-report the token even
+    though it is a perfectly live, correct successor -- the exact shape of the
+    stacking-panes bug this guards against. This is the reverse, spawner-side
+    check: for every session already registered against this worktree (ordinary
+    ``register-session`` on sessionStart, which needs no token at all -- only
+    cwd/mux-ancestry resolution), ask :func:`sessions.mux_binding_for_session`
+    -- itself pure process-ancestry against the live ``inuse.<pid>.lock``, no
+    env var -- whether that session is the one actually running under the pane
+    this spawn just opened. A match means agent-worktrees itself confirms
+    candidacy; the successor never needs to cooperate.
+    """
+    from . import sessions, tracking
+
+    try:
+        record = tracking.load_record(record_path)
+    except (OSError, ValueError):
+        return None
+    for entry in record.sessions or []:
+        if entry.session_id == predecessor_session_id:
+            continue
+        if entry.ended_at or entry.state != "active":
+            continue
+        try:
+            binding = sessions.mux_binding_for_session(
+                entry.session_id, expected_session_name=mux_session,
+            )
+        except Exception:
+            binding = None
+        if not binding or binding.get("pane_id") != pane_id:
+            continue
+        try:
+            with tracking._RecordLock(record_path):
+                locked_record = tracking.load_record(record_path)
+                # Revalidate against the locked snapshot: the unlocked binding
+                # check above can race a concurrent deregistration/conclusion
+                # between that check and taking the lock.
+                locked_entry = locked_record.session_entry(entry.session_id)
+                if (
+                    locked_entry is None
+                    or locked_entry.ended_at
+                    or locked_entry.state != "active"
+                ):
+                    continue
+                tracking.associate_handoff_candidate(
+                    locked_record, token, entry.session_id, save=True,
+                )
+        except tracking.SessionLifecycleError:
+            # Someone else (the successor's own self-report, or a concurrent
+            # call) already associated a DIFFERENT candidate for this token, or
+            # the handoff is no longer pending -- re-read the authoritative
+            # state rather than trusting our own attempted association.
+            try:
+                current = tracking.load_record(record_path)
+                won = next(
+                    (h for h in current.handoffs if h.token == token), None,
+                )
+            except (OSError, ValueError):
+                won = None
+            if won is None or won.candidate != entry.session_id:
+                return None
+        except (OSError, ValueError):
+            return None
+        return entry.session_id
+    return None
+
+
 def _mux_pane_session_name(pane_id: str, mux_bin: str) -> str | None:
     """Return the mux session name containing ``pane_id``."""
     import subprocess
