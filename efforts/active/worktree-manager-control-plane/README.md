@@ -849,3 +849,32 @@ claiming discipline alone.
   Coordination-section link to #2530 (the related `agent-bridge`
   session-discovery gap this effort's own Phase 3b duplicate-implementation
   history motivates). Docs-only.
+- **2026-09-15** — Fixed [#2426](https://github.com/ThomasMichon/copilot-extensions/issues/2426)
+  ("Worktree Manager/Picker can show/act on the wrong project's content"),
+  candidate #1 of its two code-confirmed leads, in
+  [#2732](https://github.com/ThomasMichon/copilot-extensions/pull/2732):
+  `worktree-manager`'s `_cmd_picker` silently fell back to `projects[0].name`
+  -- an arbitrary, registration-order-dependent project, not tied to caller
+  intent -- whenever invoked with no explicit project and 2+ projects were
+  registered, with no visible error. Confirmed live (via code trace) that the
+  common `agent-worktrees` → `worktree-manager` binstub handoff seam always
+  threads `--project` explicitly and never hits this path; the bug is only
+  reachable via a more direct `worktree-manager picker` invocation with no
+  positional project. Fixed by refusing with the full list of registered
+  project names instead of guessing, when ambiguous; exactly one registered
+  project remains a safe, unambiguous default. Also fixed a real module-size-
+  baseline overage this fix itself introduced in `worktree_manager/__main__.py`
+  (deliberately bumped the grandfathered ceiling in
+  `tools/module-size-baseline.json` to match, per the guard's own documented
+  escape hatch) -- unrelated to the two other pre-existing, already-tracked
+  module-size failures on `main` (#2572/#2614) confirmed present independent
+  of this PR. 4 new regression tests + full `worktree-manager` suite (322
+  passed) + golden Picker-capture suite (12 passed, no rendering
+  regression). **Candidate #2 from #2426 remains open**: the `<repo> <slug>`
+  command-surface router in `agent-worktrees` only threads `--project` for
+  `bridge`/`codespaces` (`_PROJECT_ARG_SLUGS`); every other routed sibling
+  slug falls back to CWD-based project resolution, which could act on the
+  wrong project if invoked from a foreign checkout's CWD. Distinct from the
+  Worktree Manager Picker fix above -- affects other sibling plugins, not
+  this effort's own Picker/Mux surface -- and is a candidate for whoever
+  picks it up next.
