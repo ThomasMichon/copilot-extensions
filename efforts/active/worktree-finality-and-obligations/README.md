@@ -625,7 +625,7 @@ either.
   ahead of `origin/[main|master]`), local dirtiness, open downstream claims,
   and pending unclaimed handoff. Each fact keeps its own value independent of
   the others (no collapsing into a single label until render time). Landed:
-  `prune.FACT_NAMES`/`ClosureDescriptor.facts`, PR TBD.
+  `prune.FACT_NAMES`/`ClosureDescriptor.facts`, PR #2754.
 - [x] Add a per-fact freshness flag (confirmed vs. unconfirmed/asterisked) to
   the descriptor, replacing the current all-or-nothing
   `evidence_mode`/`evidence_complete` pair that only ever gates the single
@@ -1811,7 +1811,7 @@ The approved design is the faceted model in [design.md](design.md):
   with a `session` branch; and the new `userPromptSubmit` hook plus a
   `bind-nudge`-shaped `session-reopen-nudge` command. Updated the
   Validation Plan's Phase 8 bullet to match.
-- Deliberately **not implemented** this session -- this was a design-only
+- **Not implemented** this session -- this was a design-only
   handoff by explicit instruction ("Start designing that flow in a
   handoff"). The design above is reviewed/buildable (concrete function
   names, not vague intent, matching Phase 9's Plan style); implementation
@@ -1820,4 +1820,48 @@ The approved design is the faceted model in [design.md](design.md):
   ruff-diff-vs-baseline, Plan/Validation-Plan checkbox + Journal entry per
   slice, `create-pr` -> wait for review -> `pr-merge --now` -> `finalize`).
   No PRs opened, no code touched outside this effort doc.
+
+### 2026-09-16 (continued) - Status sweep across the whole handoff chain
+
+- A separate infrastructure incident occurred while the Phase 8 design
+  handoff (task `6da32566d54244b4be9ec26cab00b04f`) was in flight: a
+  retry-storm bug in the harness's own cutover/resume mechanism (unrelated
+  to this effort's technical content) respawned a fresh session against the
+  same stale handoff seed repeatedly -- 14 sessions total across ~55
+  minutes -- producing **three independent Phase 8 design drafts**, not
+  two as first assumed:
+  1. PR #2790 (merged) -- the version reflected in this doc today.
+  2. PR #2792 (closed as duplicate once #2790 landed).
+  3. A **third draft, never pushed or reviewed**, sitting as a local,
+     unpushed commit in a since-finalized scratch worktree
+     (`tmichon-book2-win-20260916-111901-9750`). Discovered during this
+     sweep; confirmed via `git merge-base --is-ancestor` that its content
+     never reached `main` through any path. Diffed against the merged
+     #2790 text and found genuinely different wording/structure (not a
+     mechanical rebase artifact) -- each retry-storm session designed
+     Phase 8 independently rather than one continuing another's work.
+     **Deliberately not reconciled into this doc** -- the merged #2790
+     design is already reviewed/buildable and is what this doc carries;
+     folding a second, never-reviewed draft's wording in on top of it
+     without operator direction would be an unrequested redesign, not a
+     cleanup. Flagging here for the record rather than silently
+     discarding it. The retry-storm bug itself is filed as
+     [gim-home/odsp-web-harness#431](https://github.com/gim-home/odsp-web-harness/issues/431)
+     (separately tracked; not this effort's concern to fix).
+  - The scratch worktree holding that third draft, plus one unrelated idle
+    stray worktree from the same busy window, were finalized/cleaned up as
+    part of this sweep -- neither held any content not already on `main`
+    or already superseded.
+- Verified every Phase 9 PR (#2750, #2754, #2760, #2764, #2771, #2775,
+  #2780, #2781, #2786) and the Phase 8 design PR (#2790) are actually
+  `MERGED` on GitHub (not just claimed merged in a prior Journal entry),
+  and that duplicate PR #2792 is `CLOSED`. Fixed one stale placeholder
+  this doc had carried since Phase 9 slice 1's own entry ("PR TBD" ->
+  "PR #2754"). No other content drift found -- every other Plan/Validation
+  Plan checkbox and Journal claim checked out against the real PRs.
+- Closed tracking issue
+  [#2744](https://github.com/ThomasMichon/copilot-extensions/issues/2744)
+  (Phase 9) as complete, and posted a status comment on umbrella issue
+  [#1312](https://github.com/ThomasMichon/copilot-extensions/issues/1312):
+  Phase 9 fully done, Phase 8 designed but not yet built.
 
