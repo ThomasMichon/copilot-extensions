@@ -6,6 +6,7 @@ tracking its lifecycle state.
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import re
@@ -5013,6 +5014,102 @@ def stop_fsmonitor_daemon(worktree_path: str) -> None:
         )
     except Exception:
         pass
+
+
+# ── Repo-scoped freshness ledger (worktree-finality-and-obligations Phase 9) ─
+# A single machine-wide, repo-keyed record of "when was this repo's
+# remote-tracking refs last confirmed fresh by a real fetch". Lets any
+# worktree's classify pass treat a fetch performed by a SIBLING worktree of
+# the same repo (its own classify pass, `finalize`/`pr-merge`, or the
+# resident status-monitor's periodic sweep) as current upstream-containment
+# evidence, without paying for its own fetch -- see
+# `prune.assemble_closure_descriptor`'s `repo_fetch_fresh` parameter.
+
+_REPO_FRESHNESS_FILENAME = "repo-freshness.json"
+
+#: Default freshness window: a confirmed fetch older than this no longer
+#: counts as current evidence for a caller that didn't fetch itself. On the
+#: same order of magnitude as the resident status-monitor's planned periodic
+#: per-repo revalidation sweep (still unstarted -- a separate Phase 9 Plan
+#: item), plus slack for a classify pass that runs slightly behind it.
+REPO_FRESHNESS_MAX_AGE_S = 120.0
+
+
+def _repo_freshness_path() -> Path:
+    from . import registry_paths
+    return registry_paths.registry_path(_REPO_FRESHNESS_FILENAME)
+
+
+def _load_repo_freshness(path: Path) -> dict:
+    try:
+        raw = json.loads(path.read_text("utf-8"))
+    except (FileNotFoundError, OSError, ValueError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def record_repo_fetch_confirmed(repo: str, *, at: str | None = None) -> None:
+    """Record that ``repo``'s remote-tracking refs were just confirmed fresh
+    (a successful fetch), in the machine-wide repo freshness ledger.
+
+    Best-effort background writer semantics (mirrors
+    :class:`_RecordLock`'s ``blocking=False`` contract): a single non-blocking
+    attempt at the ledger's lock; skips silently if another process holds it
+    -- the next successful fetch self-heals the entry, so a skipped write here
+    is never a correctness problem, only a missed opportunity to share
+    freshness one pass earlier. Never raises.
+    """
+    if not repo:
+        return
+    path = _repo_freshness_path()
+    try:
+        with _RecordLock(path, blocking=False) as lock:
+            if not lock.acquired:
+                return
+            data = _load_repo_freshness(path)
+            data[repo] = {"confirmed_at": at or _now_iso()}
+            _atomic_write(path, json.dumps(data))
+    except Exception:
+        pass
+
+
+def repo_fetch_confirmed_at(repo: str) -> str | None:
+    """Best-effort read of ``repo``'s last-confirmed-fetch timestamp from the
+    freshness ledger, or ``None`` if never recorded / unreadable. Never
+    raises."""
+    if not repo:
+        return None
+    try:
+        entry = _load_repo_freshness(_repo_freshness_path()).get(repo)
+    except Exception:
+        return None
+    if not isinstance(entry, dict):
+        return None
+    value = entry.get("confirmed_at")
+    return value if isinstance(value, str) else None
+
+
+def is_repo_fetch_fresh(
+    repo: str,
+    *,
+    max_age_seconds: float = REPO_FRESHNESS_MAX_AGE_S,
+    now: str | None = None,
+) -> bool:
+    """Whether ``repo``'s freshness-ledger entry is within ``max_age_seconds``
+    of ``now`` (default: current time). ``False`` for no entry, an unparsable
+    timestamp, or one older than the window -- never raises."""
+    confirmed_at = repo_fetch_confirmed_at(repo)
+    if not confirmed_at:
+        return False
+    try:
+        confirmed_dt = datetime.strptime(confirmed_at, "%Y-%m-%dT%H:%M:%S")
+        now_dt = (
+            datetime.strptime(now, "%Y-%m-%dT%H:%M:%S") if now
+            else datetime.now()
+        )
+    except ValueError:
+        return False
+    return (now_dt - confirmed_dt).total_seconds() <= max_age_seconds
 
 
 def deregister_session(

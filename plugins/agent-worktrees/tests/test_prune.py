@@ -700,6 +700,35 @@ class TestClosureDescriptor:
         assert d.final is False
         assert d.action_disposition == "blocked"
 
+    def test_repo_fetch_fresh_confirms_upstream_containment_alone(self):
+        # worktree-finality-and-obligations Phase 9: a repo-scoped ledger hit
+        # (a fetch performed by a SIBLING worktree of the same repo) confirms
+        # upstream_containment even when THIS call's own evidence is cached
+        # -- but open_claims stays unconfirmed (the ledger covers git
+        # upstream refs, not claim/provider state), so FINAL still requires
+        # a real fetch for claim-bearing worktrees.
+        rec, info, disposition = self._final_inputs()
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=0, open_follow_ups=0,
+            evidence_mode="cached", evidence_complete=True,
+            repo_fetch_fresh=True)
+        assert d.facts["upstream_containment"]["confirmed"] is True
+        assert d.facts["open_claims"]["confirmed"] is False
+        assert d.final is False
+        assert d.action_disposition == "blocked"
+
+    def test_repo_fetch_fresh_alone_is_not_enough_without_claims_confirmed(self):
+        # Even with repo_fetch_fresh, FINAL/safe are gated on open_claims
+        # ALSO being confirmed -- the ledger doesn't retroactively confirm
+        # claim/follow-up state.
+        rec, info, disposition = self._final_inputs()
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=1, open_follow_ups=0,
+            evidence_mode="cached", evidence_complete=True,
+            repo_fetch_fresh=True)
+        assert d.final is False
+        assert d.label == "MERGED"
+
     def test_active_worktree_never_final_even_if_otherwise_clean(self):
         rec = _rec(status="active")
         info = _info(S.ACTIVE)

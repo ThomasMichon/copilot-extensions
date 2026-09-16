@@ -556,11 +556,24 @@ either.
   `upstream_containment`/`open_claims` share the existing fetch-freshness
   input for now (independent per-fact tracking, not yet independent
   SOURCES of freshness -- that's the repo-scoped ledger below).
-- [ ] Add a repo-scoped freshness ledger (last-confirmed-fetch timestamp per
+- [x] Add a repo-scoped freshness ledger (last-confirmed-fetch timestamp per
   repo, not per worktree) that any worktree's classify pass can read without
   itself having fetched -- so a fetch performed by any sibling worktree's
   finalize/pr-merge, or the periodic sweep below, immediately counts as
-  current evidence for every worktree of that repo.
+  current evidence for every worktree of that repo. Landed:
+  `tracking.record_repo_fetch_confirmed`/`repo_fetch_confirmed_at`/
+  `is_repo_fetch_fresh` (a single machine-wide `repo-freshness.json` under
+  the validated registry root, keyed by repo, guarded by `_RecordLock`'s
+  best-effort/non-blocking mode); wired into `assemble_closure_descriptor`'s
+  new `repo_fetch_fresh` parameter, which extends ONLY
+  `upstream_containment`'s confirmation (not `open_claims` -- the ledger
+  covers git upstream refs specifically, not claim/provider state). The
+  THREE existing `__main__.py` closure-descriptor call sites now both READ
+  `is_repo_fetch_fresh(rec.repo)` and WRITE
+  `record_repo_fetch_confirmed(rec.repo)` whenever that call's own fetch
+  just succeeded -- this is the "wherever a fetch already happens" writer,
+  not yet the dedicated periodic sweep or the `pr-merge`/`finalize`/`sync`
+  operation-triggered writers below (still separate, unstarted Plan items).
 - [ ] Extend the resident status-monitor (`cmd_status_monitor`) with a
   periodic per-repo revalidation sweep (default on the order of once a
   minute, configurable) that fetches and reclassifies upstream-containment
@@ -603,10 +616,16 @@ either.
   of that repo without each needing its own fetch; an unconfirmed fact
   renders with a marker on that fact alone, never as a separate whole state.
   Named facts + per-fact `confirmed` landed (`prune.py`); the repo-scoped
-  ledger (so a fetch performed elsewhere counts as fresh evidence without a
-  new fetch) is NOT yet built -- `upstream_containment`/`open_claims` still
-  share this call's own `evidence_mode` input. Marker rendering across
-  surfaces also not yet built (still Phase 9 follow-up work).
+  ledger now lets a fetch performed by ANY worktree of a repo confirm
+  `upstream_containment` for every other worktree of that repo without a new
+  fetch (`tracking.is_repo_fetch_fresh`/`record_repo_fetch_confirmed`,
+  wired into the 3 existing `__main__.py` closure-descriptor call sites) --
+  but only the ad hoc "wherever a fetch already happens" writer, not yet the
+  dedicated periodic sweep or `pr-merge`/`finalize`/`sync` triggered writers
+  (separate, unstarted Plan items); `open_claims` still shares this call's
+  own `evidence_mode` input (the ledger is git-upstream-specific, does not
+  extend to claim/provider freshness). Marker rendering across surfaces
+  also not yet built (still Phase 9 follow-up work).
 - [ ] **Session-claim lifecycle** (Phase 8, proposed): a worktree's own live
   Copilot session is a held claim; it settles on finalize, settles on a
   successful handoff cutover, releases on `sessionEnd`, and reopens on a
@@ -1251,4 +1270,54 @@ The approved design is the faceted model in [design.md](design.md):
   cli-reference.md`/`docs/mux.md` updates, the `mux-companion` vision's
   Companion explainer update, and a dedicated mixed-version-safety test for
   a v1 payload against the new v2 shape.
+
+### 2026-09-15 (continued) - Phase 9 slice 2: repo-scoped freshness ledger landed
+
+- Landed the repo-scoped freshness ledger Plan item. New
+  `tracking.record_repo_fetch_confirmed(repo, at=...)` /
+  `repo_fetch_confirmed_at(repo)` / `is_repo_fetch_fresh(repo,
+  max_age_seconds=REPO_FRESHNESS_MAX_AGE_S, now=...)`: a single
+  machine-wide, repo-keyed JSON file (`repo-freshness.json`, under
+  `registry_paths.registry_path` -- the same validated root as the global
+  config/projects/repos registries, NOT a per-project `tracking_dir()`,
+  since `rec.repo` -- "owner/name" -- is a different namespace than a
+  project's short name). Writes reuse `_RecordLock`'s existing
+  ``blocking=False`` best-effort contract (a skipped write under contention
+  just means slightly less shared freshness this pass; the next successful
+  fetch self-heals it) plus `_atomic_write` for the replace itself. Default
+  freshness window 120s (`REPO_FRESHNESS_MAX_AGE_S`), on the same order of
+  magnitude as the still-unstarted periodic sweep's planned cadence.
+- Wired a new `assemble_closure_descriptor(..., repo_fetch_fresh: bool =
+  False)` parameter: it extends ONLY `upstream_containment`'s `confirmed`
+  (`fresh_and_complete or repo_fetch_fresh`) -- deliberately NOT
+  `open_claims`, since the ledger is specifically about git upstream refs,
+  not claim/provider state (a repo-wide fetch says nothing about whether a
+  held claim or a PR's merged-state was also just rechecked). `FINAL` and
+  the `action_disposition == "safe"` gate both still require BOTH facts
+  independently confirmed (unchanged two-fact rule from slice 1) -- so a
+  repo-ledger hit alone confirms upstream-containment but cannot alone earn
+  FINAL/safe for a worktree that still has real held claims/follow-ups.
+- Wired the READ (`is_repo_fetch_fresh`) and WRITE
+  (`record_repo_fetch_confirmed`, called whenever THAT call's own
+  `fetch_requested and not fetch_failed`) into all three existing
+  `__main__.py` closure-descriptor call sites (`_worktree_to_dict`, the
+  mux/PSMux status segment, `status-context`'s JSON path) -- so any one of
+  them fetching for its own worktree now immediately un-staleness every
+  OTHER worktree of that repo, closing the exact gap the 2026-09-15 Journal
+  entry above diagnosed (an operator's worktrees reading MERGED forever
+  because `evidence_mode` was scoped to one call, never shared).
+  Intentionally NOT yet done (separate Plan items): the resident
+  status-monitor's own dedicated periodic per-repo sweep, and
+  `pr-merge`/`finalize`/`sync`/claim-settle-triggered writes -- those still
+  only benefit passively from whichever of the 3 wired call sites happens
+  to run with `--fetch` first.
+- Added `tests/test_repo_freshness.py` (9 cases: unrecorded/fresh/aged-out/
+  per-repo-independence/empty-repo-no-op/corrupt-file/missing-parent-dir)
+  and 2 new `TestClosureDescriptor` cases in `tests/test_prune.py`
+  (`repo_fetch_fresh` confirms `upstream_containment` alone; does not alone
+  earn FINAL when real claims are held). All of `test_repo_freshness.py` +
+  `test_prune.py` + `test_closure_descriptor_wiring.py` +
+  `test_status_segment.py` (129 tests), plus `test_tracking.py` +
+  `test_status_context.py` (182 tests), pass. `ruff check` line-shift-only
+  diff confirmed via before/after comparison (no new findings).
 
