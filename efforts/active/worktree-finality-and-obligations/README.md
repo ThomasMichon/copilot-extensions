@@ -580,7 +580,14 @@ Plan (not started; reviewed/buildable, replaces the prior proposal-only list):
   corroborated against a real PID/process check for that specific session
   id before the claim is treated as gone -- so a crashed/killed session
   cannot wedge finalize forever, same invariant every other claim kind
-  already gets from this sweep.
+  already gets from this sweep. `claim_safe` for `kind == "session"` mirrors
+  `claim_gone`'s own verdict (gone implies safe) rather than running a
+  second, separate probe: unlike the `worktree` kind (which must prove the
+  child's branch landed upstream before calling it safe), a session claim
+  carries no separate at-risk payload of its own -- any uncommitted work the
+  session left behind is exactly what Phase 9's `local_dirtiness`/
+  `open_claims` facts already surface independently, so there is nothing
+  further for this claim kind's own `safe_of` to check.
 - [ ] Register a `userPromptSubmit` hook in `hooks.json` alongside the
   existing `sessionStart`/`sessionEnd` entries (`hooks.json:20-33`): a new
   lightweight command hook invoking a new CLI subcommand (e.g.
@@ -607,7 +614,14 @@ Plan (not started; reviewed/buildable, replaces the prior proposal-only list):
   `sessionEnd` boundary already spans across `/new`/`/clear`, so no
   separate `/clear`-vs-`/new` special-casing is needed anywhere in this
   design; the `userPromptSubmit` reopen hook above is the sole and
-  sufficient reopen path.
+  sufficient reopen path. Worth noting explicitly: the reopen hook's own
+  trigger condition (the claim is not currently `active`) is *already*
+  invariant to which slash command a host reports -- the confirmation above
+  is corroborating evidence that the case genuinely arises, not something
+  the reopen mechanism itself depends on. A future host whose `/clear`/
+  `/new` behavior differs from what was confirmed here would not require
+  any design change, only a different frequency of the same reopen path
+  firing.
 
 ### Phase 9 - Decompose derived status into sub-state facts with pursued freshness
 
@@ -1864,4 +1878,46 @@ The approved design is the faceted model in [design.md](design.md):
   (Phase 9) as complete, and posted a status comment on umbrella issue
   [#1312](https://github.com/ThomasMichon/copilot-extensions/issues/1312):
   Phase 9 fully done, Phase 8 designed but not yet built.
+- Cleaned up this effort's own worktree-tracking fallout on the odsp-web-
+  harness worktree that drove the retry storm: both stale
+  `pending_handoffs` ordinals (tokens `6da32566d54244b4be9ec26cab00b04f`
+  and a third, separately-saved `8566349f91a644f4b262d4c4e9ca9ab5` baton
+  that was never picked up) marked `cancelled` rather than left dangling;
+  `head_session` was already correctly pointing at the live resuming
+  session, so left untouched. Both corresponding agent-dispatch tasks
+  resolved (`completed`/`abandoned`) to match. Unrelated to this effort's
+  own technical content, but the direct cause of the duplicate-PR
+  situation above, so recorded here for the same reason.
+
+### 2026-09-16 (continued) - Reconciled the orphaned third Phase 8 draft
+
+- Diffed the orphaned third draft (recovered from the still-reachable git
+  object of the finalized scratch worktree's commit
+  `985ecd31bf85ecd16c9cd3135510d51354e4cc5e`) against this doc's current,
+  merged Phase 8 design line-by-line rather than assuming either
+  "identical" or "worth replacing." Conclusion: the two designs are
+  functionally equivalent on every substantive point (same claim kind,
+  same open/settle/release/reopen call sites in spirit, same reopen
+  trigger condition) -- neither supersedes the other, so **no wholesale
+  replacement was warranted**.
+- Found exactly one genuine content gap the orphaned draft filled that
+  this doc's merged version left implicit: an explicit `safe_of` rationale
+  for the sweep's new `kind == "session"` branch (gone implies safe, since
+  a session claim carries no separate at-risk payload beyond what Phase
+  9's `local_dirtiness`/`open_claims` facts already track). Folded that
+  single clarification into the sweep Plan bullet above -- a future
+  implementer no longer has to independently re-derive it.
+- Also folded in one strengthening observation (not a new mechanism): the
+  reopen hook's trigger condition (claim not currently `active`) is
+  already invariant to which slash command a host reports, so the
+  `/clear`-vs-`/new` confirmation this doc already carries is
+  corroborating evidence the case arises, not something the design itself
+  depends on. Added as a note on the existing `[x] Confirmed` bullet,
+  not a new bullet -- it doesn't change what gets built.
+- Deliberately did NOT merge in the orphaned draft's alternative citation
+  of `tracking.link_handoff` (vs. this doc's `__main__.py`'s
+  `_handoff_cutover_retire_result`) as the settle-on-cutover call site --
+  both are plausible integration points for the same behavior, choosing
+  between them is an implementation decision for whoever builds this
+  slice, not a documentation gap to resolve now.
 
