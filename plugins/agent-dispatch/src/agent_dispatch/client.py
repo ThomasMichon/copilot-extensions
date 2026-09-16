@@ -720,17 +720,17 @@ class DispatchClient(RegistrationClientMixin):
         )
 
     def request_spawn_release(
-        self,
-        key: str,
-        *,
-        detail: str | None = None,
-        disposition: str = "failed",
+        self, key: str, *, detail: str | None = None,
+        disposition: str = "failed", session_handle: str | None = None,
+        worktree: str | None = None,
     ) -> dict:
+        payload = {"detail": detail, "disposition": disposition}
+        if session_handle is not None:
+            payload["session_handle"] = session_handle
+        if worktree is not None:
+            payload["worktree"] = worktree
         return self._unwrap(
-            self._http.post(
-                f"/spawn-reservations/{key}/release",
-                json={"detail": detail, "disposition": disposition},
-            )
+            self._http.post(f"/spawn-reservations/{key}/release", json=payload)
         )
 
     def retire_spawn(
