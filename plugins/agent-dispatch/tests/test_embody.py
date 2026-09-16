@@ -825,3 +825,111 @@ def test_remote_registered_agent_names_parses_over_ssh(monkeypatch):
     assert seen["cmd"][0] == "/usr/bin/ssh"
     assert "pool-a" in seen["cmd"]
     assert seen["cmd"][-1] == "agent-bridge --json agents"
+
+
+def test_spawn_embodied_worker_scrubs_env(monkeypatch):
+    """Every direct agent-worktrees spawn must pass an explicitly scrubbed
+    environment, not inherit agent-dispatch's ambient one verbatim (the class
+    of leak already fixed for peer-plugin delegation in peer_launch.py)."""
+    sentinel = {"SCRUBBED": "1"}
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["env"] = kwargs.get("env")
+        return types.SimpleNamespace(returncode=0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(
+        embody, "_agent_worktrees_launch_prefix", lambda: ["/usr/bin/agent-worktrees"]
+    )
+    monkeypatch.setattr(embody, "agent_worktrees_environment", lambda: sentinel)
+    monkeypatch.setattr(embody.subprocess, "run", fake_run)
+
+    embody.spawn_embodied_worker("task-9", worker_id="embody-1")
+    assert captured["env"] is sentinel
+
+
+def test_create_worktree_scrubs_env(monkeypatch):
+    sentinel = {"SCRUBBED": "1"}
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["env"] = kwargs.get("env")
+        return types.SimpleNamespace(
+            returncode=0,
+            stdout='{"worktree": {"id": "wt-new", "path": "/tmp/wt-new"}}',
+            stderr="",
+        )
+
+    monkeypatch.setattr(
+        embody, "_agent_worktrees_launch_prefix", lambda: ["/usr/bin/agent-worktrees"]
+    )
+    monkeypatch.setattr(embody, "agent_worktrees_environment", lambda: sentinel)
+    monkeypatch.setattr(embody.subprocess, "run", fake_run)
+
+    embody.create_worktree(
+        project="widgets",
+        interface="acp",
+        task_id="task-1",
+        reservation_key="dispatch-task:task-1:1",
+        attempt=1,
+        driver="agent-dispatch",
+        supervisor="supervisor-1",
+    )
+    assert captured["env"] is sentinel
+
+
+def test_resolve_worktree_scrubs_env(monkeypatch):
+    sentinel = {"SCRUBBED": "1"}
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["env"] = kwargs.get("env")
+        return types.SimpleNamespace(
+            returncode=0, stdout='{"worktrees": []}', stderr=""
+        )
+
+    monkeypatch.setattr(
+        embody, "_agent_worktrees_launch_prefix", lambda: ["/usr/bin/agent-worktrees"]
+    )
+    monkeypatch.setattr(embody, "agent_worktrees_environment", lambda: sentinel)
+    monkeypatch.setattr(embody.subprocess, "run", fake_run)
+
+    with pytest.raises(embody.WorktreeNotFound):
+        embody.resolve_worktree("wt-1")
+    assert captured["env"] is sentinel
+
+
+def test_conclude_disposable_worker_scrubs_env(monkeypatch):
+    sentinel = {"SCRUBBED": "1"}
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["env"] = kwargs.get("env")
+        return types.SimpleNamespace(returncode=0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(
+        embody, "_agent_worktrees_launch_prefix", lambda: ["/usr/bin/agent-worktrees"]
+    )
+    monkeypatch.setattr(embody, "agent_worktrees_environment", lambda: sentinel)
+    monkeypatch.setattr(embody.subprocess, "run", fake_run)
+
+    embody.conclude_disposable_worker("wt-1", "session-1")
+    assert captured["env"] is sentinel
+
+
+def test_conclude_dispatch_attempt_scrubs_env(monkeypatch):
+    sentinel = {"SCRUBBED": "1"}
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["env"] = kwargs.get("env")
+        return types.SimpleNamespace(returncode=0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(
+        embody, "_agent_worktrees_launch_prefix", lambda: ["/usr/bin/agent-worktrees"]
+    )
+    monkeypatch.setattr(embody, "agent_worktrees_environment", lambda: sentinel)
+    monkeypatch.setattr(embody.subprocess, "run", fake_run)
+
+    embody.conclude_dispatch_attempt("wt-1", "session-1", "dispatch-task:task-1:1")
+    assert captured["env"] is sentinel
