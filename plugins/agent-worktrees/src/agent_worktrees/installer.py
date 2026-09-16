@@ -1038,17 +1038,41 @@ def prune_reserved_projects() -> list[str]:
         return _prune_reserved_projects_unlocked()
 
 
+def _project_is_knowledge_only(project: str) -> bool:
+    """Best-effort check of a registered project's own ``knowledge_only`` flag.
+
+    Reads the project's layered config (its committed
+    ``<anchor>/.agent-worktrees/config.yaml`` plus machine-local overrides) via
+    :func:`cfg.load_config`. Fail-safe: any error (unregistered anchor, bad
+    config, missing repo) degrades to ``False`` so a broken/foreign project
+    never loses its binstub as a side effect of this check.
+    """
+    try:
+        project_config = cfg.load_config(project=project)
+        return bool(project_config.default_repo.knowledge_only)
+    except Exception:
+        return False
+
+
 def _reconcile_binstubs_unlocked() -> dict:
     """Reconcile project binstubs against the projects registry.
 
     Deploys receipt-owned binstubs for registered projects and removes stale
-    files only when their receipt and hashes still prove ownership.
+    files only when their receipt and hashes still prove ownership. A
+    registered project whose own config declares ``knowledge_only: true`` (see
+    :attr:`config.RepoConfig.knowledge_only`) is treated as **not** eligible
+    for a binstub -- it is skipped on deploy and its existing binstub (if any)
+    is reclaimed by the stale-removal pass below, same as an unregistered one.
     """
     # Self-heal: a reserved runtime name must never be a registered project.
     _prune_reserved_projects_unlocked()
 
     registered = set(read_projects_registry().get("projects", {}).keys())
-    registered_keys = {_stub_key(project) for project in registered}
+    knowledge_only_projects = {
+        project for project in registered if _project_is_knowledge_only(project)
+    }
+    deployable = registered - knowledge_only_projects
+    registered_keys = {_stub_key(project) for project in deployable}
     if platform.system() == "Windows":
         seen: dict[str, str] = {}
         for project in sorted(registered):
@@ -1063,7 +1087,7 @@ def _reconcile_binstubs_unlocked() -> dict:
     added = 0
     migrated: list[str] = []
     preserved: list[str] = []
-    for project in sorted(registered):
+    for project in sorted(deployable):
         command_key = (
             project.casefold() if platform.system() == "Windows" else project
         )
@@ -1129,14 +1153,14 @@ def _reconcile_binstubs_unlocked() -> dict:
 
     if added:
         output.ok(f"Binstubs: deployed/refreshed {added} file(s) for "
-                  f"{len(registered)} registered project(s)")
+                  f"{len(deployable)} registered project(s)")
     if removed:
         output.changed(
             "Binstubs: removed "
             f"{len(removed)} stale file(s): {', '.join(p.name for p in removed)}"
         )
     if not added and not removed:
-        output.skipped(f"Binstubs: in sync ({len(registered)} project(s))")
+        output.skipped(f"Binstubs: in sync ({len(deployable)} project(s))")
 
     return {
         "registered": sorted(registered),
@@ -1144,6 +1168,7 @@ def _reconcile_binstubs_unlocked() -> dict:
         "migrated": migrated,
         "removed": [str(p) for p in removed],
         "preserved": sorted(set(preserved)),
+        "knowledge_only": sorted(knowledge_only_projects),
     }
 
 
