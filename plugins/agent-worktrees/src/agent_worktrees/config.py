@@ -438,6 +438,29 @@ class RepoConfig:
     marketplaces/plugins into the harness session overlay (retiring any
     prior composition) -- state (:attr:`requires_external_state_root`) is
     unaffected. **Default true**; declare in ``~/.<project>/config.yaml``."""
+    knowledge_only: bool = False
+    """When true, this repo is a **knowledge-only companion**: it exists
+    solely to be carved as the paired ``-k`` knowledge worktree of some other
+    project's **stateless harness** (see :attr:`stateless` /
+    :attr:`Config.knowledge_repo`), never to be driven directly. Declaring it
+    (in the repo's own committed ``<anchor>/.agent-worktrees/config.yaml``):
+
+    * ``cmd_create``/the interactive new-worktree flow **refuses** a
+      standalone worktree for this repo (the internal pairing carve in
+      :func:`_carve_paired_knowledge` bypasses this gate, so pairing is
+      unaffected).
+    * binstub install/reconcile **skips** installing this repo's own
+      ``<repo>`` binstub.
+    * the Picker/Worktree Manager's top-level launchable project list
+      **excludes** it (a paired ``-k`` sibling row -- the existing ``⚭``
+      marker -- still renders it).
+
+    **Default false.** Orthogonal to :attr:`stateless`/
+    :attr:`requires_external_state_root` (those describe the *harness* side of
+    a pairing; this describes the *knowledge* side). The registry-level
+    ``repo_class`` counterpart is ``"knowledge"`` (see
+    ``agent_worktrees.repos.VALID_CLASSES``) -- set that too via
+    ``repos add/update --class knowledge`` so ``repos list`` reflects it."""
 
 
 @dataclass(frozen=True)
@@ -1593,6 +1616,7 @@ def _build_repo_config(
         compose_knowledge_plugins=bool(
             data.get("compose_knowledge_plugins", True)
         ),
+        knowledge_only=bool(data.get("knowledge_only", False)),
     )
 
 

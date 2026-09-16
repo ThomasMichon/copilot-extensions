@@ -2022,7 +2022,9 @@ def _carve_paired_knowledge(
     pair_id = f"{timestamp}-{suffix}"
     harness_ref = tracking.format_claim_ref(config.machine, config.repo_name or "?", harness_id)
     entry = repos_mod.find_repo(knowledge_name)
-    is_worktree_class = bool(entry) and repos_mod.normalize_class(entry.repo_class) == "worktree"
+    is_worktree_class = bool(entry) and repos_mod.normalize_class(entry.repo_class) in (
+        "worktree", "knowledge",
+    )
     remote = git_ops.resolve_remote_name(
         (entry.remote or "origin") if entry else "origin",
         cwd=knowledge_anchor,
@@ -2283,6 +2285,14 @@ def _create_worktree_core(
     Raises ``RuntimeError`` on failure.
     """
     repo = config.default_repo
+    if kind != "system" and getattr(repo, "knowledge_only", False):
+        raise RuntimeError(
+            f"'{config.repo_name}' is a knowledge-only companion repo "
+            "(knowledge_only: true) -- it cannot be driven directly. "
+            "It is carved automatically as a paired '-k' worktree when the "
+            "stateless harness bound to it (see its knowledge_repo config) "
+            "creates its own worktree; work there instead."
+        )
     plat = cfg.detect_platform()
     plat_short = "win" if plat == "windows" else plat
 
@@ -20136,7 +20146,7 @@ def _repos_usage() -> None:
     print(f"Usage: {project} repos <command>")
     print()
     print("Commands:")
-    print("  list [--class reference|singleton|worktree]   List known repositories")
+    print("  list [--class reference|singleton|worktree|knowledge]   List known repositories")
     print("  find <name>                         Resolve a repo to its local path")
     print("  add <name> <path>                   Register a repo at a known path")
     print("     [--class C] [--remote URL] [--default-branch B]")
@@ -20328,7 +20338,7 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
         if len(rest) < 2:
             output.err(
                 "Usage: repos add <name> <path> "
-                "[--class reference|singleton|worktree] [--remote URL] "
+                "[--class reference|singleton|worktree|knowledge] [--remote URL] "
                 "[--default-branch B] [--account LOGIN] [--tags a,b] "
                 "[--contributing PATH] [--agent|--no-agent]"
             )

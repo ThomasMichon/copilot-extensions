@@ -42,6 +42,8 @@ def _init_repo(path: Path, branch: str = "main") -> None:
     ("singleton", "singleton"),
     ("worktree", "worktree"),
     ("WORKTREE", "worktree"),
+    ("knowledge", "knowledge"),
+    ("KNOWLEDGE", "knowledge"),
     ("project", "worktree"),   # legacy
     ("repo", "reference"),     # legacy
     ("bogus", "reference"),    # unknown -> safe default
