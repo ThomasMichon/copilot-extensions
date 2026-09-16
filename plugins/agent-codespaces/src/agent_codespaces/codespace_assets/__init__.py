@@ -9,8 +9,8 @@ tunnel:
   tunnel to the host's credential relay (and on to Git Credential
   Manager). Installed to ``~/.local/bin/ado-auth-helper-relay``.
 
-- ``ado-auth-helper-wrapper`` -- a smart **Node** shim installed as both
-  ``~/ado-auth-helper`` and ``~/azure-auth-helper``. When
+- ``ado-auth-helper-wrapper`` -- a smart **Node** shim installed as
+  ``~/ado-auth-helper``. When
   ``LC_GIT_CREDENTIAL_RELAY`` is set (or the tunnel port is reachable) it
   delegates to ``ado-auth-helper-relay``; otherwise it ``require()``s the
   REAL VS Code extension ``auth-helper.js`` (discovered at runtime), mirroring
@@ -209,15 +209,38 @@ def build_auth_error_policy_command() -> str:
     )
 
 
+def _azure_auth_helper_repair_command() -> str:
+    return (
+        '_repaired_azure_helper=0; '
+        'if [ -f "$HOME/azure-auth-helper" ] && '
+        'grep -q ado-auth-helper-relay "$HOME/azure-auth-helper" 2>/dev/null; then '
+        '_repaired_azure_helper=1; '
+        'if [ -f "$HOME/.azure-auth-helper-vscode" ] && '
+        '! grep -q ado-auth-helper-relay "$HOME/.azure-auth-helper-vscode" 2>/dev/null; then '
+        'cp -f "$HOME/.azure-auth-helper-vscode" "$HOME/azure-auth-helper"; '
+        'chmod +x "$HOME/azure-auth-helper"; '
+        'else rm -f "$HOME/azure-auth-helper"; fi; '
+        'fi; '
+        'if [ "$_repaired_azure_helper" = 1 ] && '
+        '[ ! -f "$HOME/azure-auth-helper" ] && '
+        '[ -L "$HOME/.local/bin/azure-auth-helper" ] && '
+        '[ "$(readlink "$HOME/.local/bin/azure-auth-helper")" = "$HOME/azure-auth-helper" ]; then '
+        'rm -f "$HOME/.local/bin/azure-auth-helper"; fi'
+    )
+
+
 def build_provision_command(ado_host: str | None = None) -> str:
     """Build an idempotent bash command that installs the relay helpers.
 
     The returned command is safe to run on every SSH connect:
 
     - writes ``~/.local/bin/ado-auth-helper-relay`` (the relay client)
-    - installs the smart Node wrapper as BOTH ``~/ado-auth-helper`` and
-      ``~/azure-auth-helper``, backing up each native helper to
-      ``~/.<name>-vscode`` the first time (never backing up our own wrapper)
+    - installs the smart Node wrapper as ``~/ado-auth-helper``, backing up the
+      native helper to ``~/.ado-auth-helper-vscode`` (never backing up our own
+      wrapper)
+    - removes a legacy relay wrapper from ``~/azure-auth-helper``, restoring a
+      preserved native helper when available, so Azure CLI login keeps its
+      native authentication contract
     - writes the wrapper with the **extension's own node shebang** (taken from
       the backed-up native shim) so it runs under the same node the extension
       used; falls back to ``/usr/bin/env node``.
@@ -276,8 +299,13 @@ def build_provision_command(ado_host: str | None = None) -> str:
             ".agent-codespaces-auth-wrapper.b64",
             '> "$HOME/.agent-codespaces-auth-wrapper"',
         ),
-        # Install for both ado-auth-helper and azure-auth-helper
-        'for _n in ado-auth-helper azure-auth-helper; do '
+        # Older releases also installed the relay wrapper as
+        # ~/azure-auth-helper. That shadows Azure CLI's native login helper,
+        # whose verbs the ADO relay does not implement. Repair that state
+        # before installing only the ADO-specific wrapper.
+        _azure_auth_helper_repair_command(),
+        # Install the relay wrapper only for ado-auth-helper.
+        'for _n in ado-auth-helper; do '
         # Back up the native helper once (skip if it is already our wrapper)
         'if [ -f "$HOME/$_n" ] && '
         '! grep -q ado-auth-helper-relay "$HOME/$_n" 2>/dev/null; then '
