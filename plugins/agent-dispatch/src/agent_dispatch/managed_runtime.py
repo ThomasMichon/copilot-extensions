@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -185,11 +186,67 @@ def _runtime_dir(cell: Path, *, layout_version: int) -> Path:
     return cell / _RUNTIME_DIRS[layout_version]
 
 
+def _governed_uv_index_url() -> str | None:
+    """Read this machine's governed default package index, if one is configured.
+
+    On a network-restricted (e.g. CFS-enforced) work machine, uv's own default
+    index (files.pythonhosted.org) is unreachable; ``dotfiles``' ``uv-feed``
+    agent-machines resource (``tools/restore/Restore-UvFeed.ps1`` /
+    ``restore-uv-feed.sh``) writes uv's *user-level* config -- the same file uv
+    itself reads by default -- pointing at the sanctioned proxy. That file is a
+    trusted, machine-governed artifact (not an arbitrary ambient env var), so
+    reading its already-resolved default index here does not reintroduce the
+    "ambient package-manager authority" this environment is otherwise bounded
+    against (contrast: an ambient ``UV_INDEX_URL``/``PIP_INDEX_URL`` env var,
+    which any process could set, is deliberately dropped below).
+
+    Looks only for a ``[[index]] ... default = true`` table (uv.toml's own
+    shape for this file, matching what the restore script writes) and returns
+    its ``url``, or ``None`` when no such file/table exists.
+    """
+    if os.name == "nt":
+        base = os.environ.get("APPDATA")
+        candidate = Path(base) / "uv" / "uv.toml" if base else None
+    else:
+        base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+        candidate = Path(base) / "uv" / "uv.toml" if base else None
+    if candidate is None or not candidate.is_file():
+        return None
+    try:
+        text = candidate.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    url: str | None = None
+    default = False
+    in_index_table = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[["):
+            in_index_table = stripped == "[[index]]"
+            if in_index_table:
+                url, default = None, False
+            continue
+        if stripped.startswith("["):
+            in_index_table = False
+            continue
+        if not in_index_table:
+            continue
+        match = re.match(r'url\s*=\s*"([^"]+)"', stripped)
+        if match:
+            url = match.group(1)
+        elif re.match(r"default\s*=\s*true\b", stripped):
+            default = True
+        if url and default:
+            return url
+    return None
+
+
 def _subprocess_environment(
     *, base_python: Path, package_manager: Path
 ) -> dict[str, str]:
     """Build a bounded environment without ambient package-manager authority."""
     allowed = {
+        "APPDATA",
         "COMSPEC",
         "HOME",
         "HOMEDRIVE",
@@ -203,6 +260,7 @@ def _subprocess_environment(
         "TMP",
         "USERPROFILE",
         "WINDIR",
+        "XDG_CONFIG_HOME",
     }
     environment = {
         key: value
@@ -222,6 +280,9 @@ def _subprocess_environment(
     environment["PYTHONNOUSERSITE"] = "1"
     environment["PIP_CONFIG_FILE"] = os.devnull
     environment["UV_NO_CONFIG"] = "1"
+    governed_index = _governed_uv_index_url()
+    if governed_index:
+        environment["UV_DEFAULT_INDEX"] = governed_index
     return environment
 
 
