@@ -177,6 +177,29 @@ C_STATE = {
 
 PAD = "   "  # inter-column padding (3 spaces -> info breathes)
 
+# worktree-finality-and-obligations Phase 9 / iconify-relation: the RELATION
+# column's enum vocabulary (reciprocal.short_label's output) collapsed to one
+# scannable glyph each, so the column can shrink from 7 cells (still
+# truncated to "RELATI…" even at that width) to 2 -- the freed width goes to
+# the flex `title` column via `fit()`. The full word rides the row's second
+# (detail) line instead, so no information is actually lost.
+_RELATION_ICON = {
+    "BOUND": "●",
+    "CONTROL": "◐",
+    "HANDOFF": "⇒",
+    "TERM": "■",
+    "AMBIG": "?",
+    "": " ",
+}
+_RELATION_STYLE = {
+    "BOUND": C_STATE["ACTIVE"],
+    "CONTROL": "grey58",
+    "HANDOFF": C_STATE["WIP"],
+    "TERM": "grey35",
+    "AMBIG": C_WARN,
+    "": "",
+}
+
 # Named palettes for a registered pivot's declarative per-value cell colouring
 # (Column.palette). The ``state`` palette REUSES the Worktrees state vocabulary
 # (``C_STATE``) so a contributed pivot's status column reads with the same colours
@@ -295,6 +318,8 @@ def row_text(rec, cols, width, selected, indent=1, pulse=0, mark=None):
         if i:
             t.append(PAD)
         val = str(rec.get(k, ""))
+        if k == "relation":
+            val = _RELATION_ICON.get(val, "?" if val else " ")
         if k == "machine_env":
             if rec.get("source_kind") != "machine-ssh":
                 t.append(_clip(val, w, a))
@@ -313,6 +338,8 @@ def row_text(rec, cols, width, selected, indent=1, pulse=0, mark=None):
         style = ""
         if k == "state":
             style = C_STATE.get(rec.get("state", ""), "")
+        elif k == "relation":
+            style = _RELATION_STYLE.get(rec.get("relation", ""), "")
         elif k == "env":
             style = C_ENV.get(rec.get("env", ""), "")
         elif k == "dispo":
@@ -345,14 +372,14 @@ def header_text(cols, width, label_style=C_HEADER, indent=1):
 
 ACTIVE_SPECS = [
     ("id4", "id", 4, "l", 2), ("state", "state", 6, "l", 4),
-    ("relation", "relation", 7, "l", 6),
+    ("relation", "r", 1, "l", 6),
     ("machine_env", "source", 19, "l", 5),
     ("age", "age", 4, "l", 7), ("sess", "live", 4, "l", 8),
     ("pr", "pr", 8, "l", 3), ("title", "title", 10, "l", 1),
 ]
 LIST_SPECS = [
     ("id4", "id", 4, "l", 2), ("state", "state", 6, "l", 4),
-    ("relation", "relation", 7, "l", 5),
+    ("relation", "r", 1, "l", 5),
     ("age", "age", 4, "l", 6), ("sess", "live", 4, "l", 7),
     ("turns", "t", 3, "r", 8), ("pr", "pr", 8, "l", 3),
     ("title", "title", 10, "l", 1),
@@ -7772,27 +7799,48 @@ class WorktreesView:
                 add(self._row_text(rec, li, sel, width, lcols,
                                    preview, preview_ids),
                     stop=("L", li), data=rec)
-                # worktree-status-core live pulse (#2917): a dim, expiring
-                # sub-line carrying the agent's current intent, derived from
-                # the assistant.intent stream. Decorative (no stop) so it is
-                # never focusable and never affects selection. copilot-extensions
-                # #228: the line no longer expires -- ``live_pulse`` grades its
-                # colour/glyph: 'awaiting' renders an amber ⏳ ("this needs me"),
-                # 'fresh' a dim ⟳, 'stale' a dimmer ⟳; the last intent lingers
-                # (greyed) so a dormant worktree still shows what it was doing.
+                # Second (detail) row, always rendered -- one worktree, two
+                # lines. Decorative (no stop) so it is never focusable and
+                # never affects selection. Carries whatever the first row's
+                # narrower columns had no room for:
+                # 1. `status_markers` -- the closure descriptor's per-fact
+                #    freshness markers (worktree-finality-and-obligations
+                #    Phase 9: C<N>/F<N> held-claim/follow-up counts, dim;
+                #    U*/OC* unconfirmed-fact markers, warn-styled so a stale
+                #    fact stays scannable).
+                # 2. The live-pulse agent-intent sub-line (#2917/copilot-
+                #    extensions#228) -- unchanged glyph/colour rules, just no
+                #    longer gated on its own line's existence.
+                # A row with neither renders a single dim placeholder glyph
+                # rather than an empty line, so the two-line rhythm reads as
+                # deliberate spacing everywhere, not a blank gap on some rows.
                 _pulse = rec.get("live_pulse")
                 _intent = (rec.get("live_intent") or "").strip()
+                _markers = (rec.get("status_markers") or "").strip()
+                pline = Text("      ")
+                has_content = False
+                if _markers:
+                    for j, tok in enumerate(_markers.split()):
+                        if j:
+                            pline.append(" ")
+                        tok_style = C_WARN if tok.endswith("*") else C_DIM
+                        pline.append(tok, style=tok_style)
+                    has_content = True
                 if _pulse and _intent:
+                    if has_content:
+                        pline.append("  ")
                     if _pulse == "awaiting":
                         _pstyle, _pglyph = C_PULSE_AWAIT, "⏳ "
                     else:
                         _pstyle = C_DIM if _pulse == "fresh" else "grey30"
                         _pglyph = "⟳ "
-                    pline = Text("      ", style=_pstyle)
                     pline.append(_pglyph, style=_pstyle)
-                    pline.append(_clip(_intent, max(1, width - 9), "l"),
-                                 style=_pstyle)
-                    add(pline)
+                    avail = max(1, width - pline.cell_len - 1)
+                    pline.append(_clip(_intent, avail, "l"), style=_pstyle)
+                    has_content = True
+                if not has_content:
+                    pline.append("·", style="grey30")
+                add(pline)
                 li += 1
 
     def _row_text(self, rec, li, sel, width, lcols, preview, preview_ids):
