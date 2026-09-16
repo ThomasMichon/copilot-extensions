@@ -610,16 +610,27 @@ either.
   baton schema (read-only; agent-worktrees does not compose or consume a
   handoff -- see the `mux-companion` vision's schema-read-only boundary for
   the same rule applied to a different consumer).
-- [ ] Render the marker convention (an asterisk, or the compact-text
+- [~] Render the marker convention (an asterisk, or the compact-text
   equivalent) on any individual unconfirmed fact across `list --json`, the
   mux/PSMux status segment, and the Picker -- replacing today's implicit
   "COMPLETED reads MERGED unless freshly fetched" special case with the
-  general per-fact marker.
+  general per-fact marker. Landed for `list --json` and the mux/PSMux
+  status segment: `ClosureDescriptor.compact` now appends `U*`/`OC*` for an
+  unconfirmed `upstream_containment`/`open_claims` fact respectively,
+  independent of each other, of the `C<N>`/`F<N>` markers, and of the base
+  label (not just `MERGED` -- any state can carry either marker). The mux
+  segment already renders `compact` directly, so it inherited this for
+  free. The Picker does NOT yet consume `compact` at all (a separate,
+  already-flagged-unstarted slice per the 2026-09-15 Picker-label-parity
+  Journal entry) -- still open.
 - [ ] Update `docs/cli-reference.md`, `docs/mux.md`, and
   `docs/worktree-lifecycle.md` (all touched by PR #2679/#2681 for the old
   FINAL/MERGED split) for the decomposed model, and update the
   `mux-companion` vision's Companion explainer view to render the named
-  facts and their individual freshness rather than a single label.
+  facts and their individual freshness rather than a single label. Partial:
+  `docs/cli-reference.md` and `docs/worktree-lifecycle.md` updated for the
+  marker convention; `docs/mux.md` and the `mux-companion` vision explainer
+  still unstarted.
 - [ ] Mixed-version safety: an older/newer descriptor version (or a payload
   missing the new per-fact freshness fields) degrades the same way Phase 4's
   `interpret_descriptor_payload` already degrades an unsupported version --
@@ -660,6 +671,11 @@ either.
   happening and the periodic sweep's own 60s cadence noticing it.
   Claim-settle/release triggered writes remain explicitly out of scope (a
   different, worktree-scoped axis -- see that Plan bullet's own note).
+  `compact` now also renders the `U*`/`OC*` per-fact marker (independent of
+  each other, of the `C<N>`/`F<N>` markers, and of the base label) whenever
+  the corresponding fact is unconfirmed; the mux/PSMux status segment
+  inherits this automatically (it already renders `compact` directly), but
+  the Picker does not yet consume `compact` at all -- still open.
 - [ ] **Session-claim lifecycle** (Phase 8, proposed): a worktree's own live
   Copilot session is a held claim; it settles on finalize, settles on a
   successful handoff cutover, releases on `sessionEnd`, and reopens on a
@@ -1463,4 +1479,45 @@ The approved design is the faceted model in [design.md](design.md):
   test. Claim-settle/release triggered writes are now explicitly scoped OUT
   of this bullet rather than left ambiguously "still pending" (see the Plan
   bullet's own note).
+
+### 2026-09-16 (continued) - Phase 9 slice 5: per-fact freshness markers rendered
+
+- Landed the visible payoff of the whole decomposition: `compact` now
+  appends `U*`/`OC*` whenever `upstream_containment`/`open_claims`
+  (respectively) is unconfirmed -- independent of each other, of the
+  existing `C<N>`/`F<N>` held-claim/follow-up markers, and of the base
+  label (a `DIRTY`/`WIP`/etc. worktree can carry either marker too, not
+  only `MERGED`). `pending_handoff` is deliberately excluded from marker
+  rendering: it always reports `confirmed=False` until wired, so marking it
+  now would put a meaningless asterisk on every single row.
+  `checkpoint_activity`/`local_dirtiness` are always confirmed, so never
+  marked either.
+- The mux/PSMux status segment (`__main__.py`'s status-segment path)
+  already renders `descriptor.compact` directly as `block_label`, so it
+  inherited both markers for free -- no code change needed there. `list
+  --json`'s `closure.compact` field inherits the same way (same
+  descriptor). The Picker does NOT yet consume `compact` at all (confirmed
+  via `grep` -- only `prune.py`, `__main__.py`, and this slice's own tests
+  reference `.compact`); rendering it there remains a separate, explicitly
+  still-open Plan item, matching the 2026-09-15 Picker-label-parity entry's
+  own scoping (label/color landed then, the compact marker/column layout
+  did not).
+- Updated `docs/worktree-lifecycle.md` (new "Per-fact freshness markers"
+  subsection under the decomposed-facts section) and `docs/cli-reference.md`
+  (status-segment table's marker description) for the new convention.
+  `docs/mux.md` and the `mux-companion` vision's Companion explainer remain
+  unstarted (both still read whatever `label`/`style` the descriptor
+  produces today, not `compact`, so they are not WRONG, just not yet
+  updated to mention the marker).
+- Added 4 new `tests/test_prune.py::TestClosureDescriptor` cases: cached
+  evidence marks both facts (`"MERGED U* OC*"`), a repo-ledger hit marks
+  only `open_claims` (`"MERGED OC*"`), held claims and markers combine
+  (`"MERGED C1 U* OC*"`), and `FINAL` never carries a marker. All of
+  `test_prune.py` + `test_closure_descriptor_wiring.py` +
+  `test_status_segment.py` (125 tests) pass; `ruff check` diff on
+  `prune.py` confirmed identical before/after.
+- **Not done this session** (remaining Phase 9 Plan items, unstarted):
+  `pending_handoff`'s real wiring, the Picker's own `compact`-marker
+  rendering (a separate, larger frontend slice), `docs/mux.md` +
+  `mux-companion` vision updates, and the mixed-version-safety test.
 
