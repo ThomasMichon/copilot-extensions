@@ -600,6 +600,14 @@ def assemble_closure_descriptor(
     otherwise qualify -- destructive authorization always requires a fresh
     recomputation immediately before acting.
 
+    ``compact`` renders an ``U*``/``OC*`` marker for an unconfirmed
+    ``upstream_containment``/``open_claims`` fact respectively (independent
+    of each other and of the base label) -- the general per-fact marker
+    convention that replaces the old implicit "COMPLETED reads MERGED unless
+    freshly fetched" special case. Neither marker ever appears when the
+    corresponding fact is confirmed, and ``FINAL`` never carries either
+    (both facts are confirmed by construction whenever ``final`` is True).
+
     ``rec.status == "finalizing"`` is surfaced as an explicit ``finalizing``
     blocker so a wedged record self-reports rather than rendering as
     blocked-for-no-visible-reason.
@@ -691,6 +699,19 @@ def assemble_closure_descriptor(
         compact_parts.append(f"C{held_claims}")
     if open_follow_ups:
         compact_parts.append(f"F{open_follow_ups}")
+    # worktree-finality-and-obligations Phase 9: render the marker on the
+    # SPECIFIC unconfirmed fact, not a whole separate state -- replaces the
+    # old implicit "COMPLETED reads MERGED unless freshly fetched" special
+    # case with a general per-fact marker that applies regardless of base
+    # state. `checkpoint_activity`/`local_dirtiness` are always confirmed
+    # (see `facts` above), so never marked; `pending_handoff` is
+    # deliberately excluded here too -- it always reports `confirmed=False`
+    # until wired (a later Phase 9 slice), so marking it now would put a
+    # meaningless asterisk on every single row.
+    if not facts["upstream_containment"]["confirmed"]:
+        compact_parts.append("U*")
+    if not facts["open_claims"]["confirmed"]:
+        compact_parts.append("OC*")
     compact = " ".join(compact_parts)
 
     action_disposition = _BUCKET_TO_ACTION_DISPOSITION.get(

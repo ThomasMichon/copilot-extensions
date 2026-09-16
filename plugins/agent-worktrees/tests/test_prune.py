@@ -700,6 +700,45 @@ class TestClosureDescriptor:
         assert d.final is False
         assert d.action_disposition == "blocked"
 
+    def test_cached_evidence_marks_both_facts_in_compact(self):
+        # worktree-finality-and-obligations Phase 9: the per-fact marker
+        # convention -- an unconfirmed fact is marked IN PLACE, never a
+        # separate whole state. Both facts share the same cached evidence
+        # input here, so both markers appear.
+        rec, info, disposition = self._final_inputs()
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=0, open_follow_ups=0,
+            evidence_mode="cached", evidence_complete=True)
+        assert d.compact == "MERGED U* OC*"
+
+    def test_repo_fetch_fresh_marks_only_open_claims(self):
+        # upstream_containment is confirmed via the ledger, so only the
+        # open_claims marker remains -- proving the two markers are
+        # independent, not a single "not fresh" flag.
+        rec, info, disposition = self._final_inputs()
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=0, open_follow_ups=0,
+            evidence_mode="cached", evidence_complete=True,
+            repo_fetch_fresh=True)
+        assert d.compact == "MERGED OC*"
+
+    def test_held_claims_and_unconfirmed_markers_combine(self):
+        rec = _rec(status="finalized")
+        info = _info(S.COMPLETED)
+        disposition = prune.cleanup_disposition(rec, info)
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=1, open_follow_ups=0,
+            evidence_mode="cached", evidence_complete=True)
+        assert d.compact == "MERGED C1 U* OC*"
+
+    def test_final_never_carries_a_marker(self):
+        rec, info, disposition = self._final_inputs()
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=0, open_follow_ups=0)
+        assert d.final is True
+        assert d.compact == "FINAL"
+        assert "*" not in d.compact
+
     def test_repo_fetch_fresh_confirms_upstream_containment_alone(self):
         # worktree-finality-and-obligations Phase 9: a repo-scoped ledger hit
         # (a fetch performed by a SIBLING worktree of the same repo) confirms
