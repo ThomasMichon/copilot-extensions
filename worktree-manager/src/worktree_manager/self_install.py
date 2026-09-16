@@ -134,6 +134,54 @@ def binstub_present() -> Path | None:
     return None
 
 
+def _expected_binstub_contents() -> dict[str, str]:
+    """The exact binstub file contents this version would (re)deploy.
+
+    Factored out of :func:`_deploy_binstubs` so :func:`_binstubs_are_stale`
+    can compare against the same expectation without writing anything.
+    """
+    contents = {"worktree-manager": _sh_binstub()}
+    if os.name == "nt":
+        contents = {
+            "worktree-manager.cmd": _cmd_binstub(),
+            "worktree-manager.ps1": _ps1_binstub(),
+            "worktree-manager": _sh_binstub(),  # for git-bash on Windows
+        }
+    return contents
+
+
+def _binstubs_are_stale() -> bool:
+    """True when a deployed binstub is missing or its content doesn't match.
+
+    ``binstub_present()`` only proves *some* file with an expected name
+    exists -- it says nothing about what's actually in it. A machine can
+    carry a **legacy, pre-versioned, or otherwise incompatible**
+    ``worktree-manager`` (e.g. left over from an earlier install attempt or
+    prototype) that happens to occupy the exact binstub filename. Content-less
+    presence-checking then makes :func:`needs_install` report "already
+    installed" and skip re-deploying, silently leaving that stale/broken file
+    in place -- which then fails the consuming ``agent-worktrees`` seam's
+    ``--version`` health probe and falls back to the bundled picker instead of
+    handing off to this Manager. Comparing content closes that gap: any
+    mismatch (or absence) means the binstub needs (re)deploying.
+    """
+    lb = local_bin()
+    for name, expected in _expected_binstub_contents().items():
+        p = lb / name
+        try:
+            # newline="" preserves exact line endings on read (matches how
+            # _deploy_binstubs writes them) -- otherwise universal-newline
+            # translation would normalize a freshly-written \r\n binstub back
+            # to \n on read, making an up-to-date file look "stale".
+            with p.open(encoding="utf-8", newline="") as f:
+                actual = f.read()
+        except OSError:
+            return True
+        if actual != expected:
+            return True
+    return False
+
+
 @dataclass(frozen=True)
 class SelfInstallStatus:
     installed_version: str | None
@@ -161,6 +209,7 @@ def needs_install(version: str, root: Path | None = None) -> bool:
         current_version(r) == version
         and version_slot(version, r).is_dir()
         and binstub_present() is not None
+        and not _binstubs_are_stale()
     )
 
 
@@ -203,14 +252,7 @@ def _deploy_binstubs() -> list[Path]:
     lb = local_bin()
     lb.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
-    contents = {"worktree-manager": _sh_binstub()}
-    if os.name == "nt":
-        contents = {
-            "worktree-manager.cmd": _cmd_binstub(),
-            "worktree-manager.ps1": _ps1_binstub(),
-            "worktree-manager": _sh_binstub(),  # for git-bash on Windows
-        }
-    for name, body in contents.items():
+    for name, body in _expected_binstub_contents().items():
         p = lb / name
         p.write_text(body, encoding="utf-8", newline="")
         if os.name != "nt":

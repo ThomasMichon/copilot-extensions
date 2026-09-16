@@ -446,7 +446,13 @@ In **PR mode**, sign-off becomes `create-pr` -> review -> merge ->
 the default branch.
 **An opened PR is final by default** -- land everything before `create-pr` (or
 open it as a draft with `--draft`, then `pr-ready` when ready for review), since
-a late push races the merge.
+a late push races the merge. **Driving the PR through to actual merge -- not
+just opening it -- is the default conduct for every profile**, using whichever
+waiting policy fits (self-merge: brief CI/review wait then `pr-merge --now`;
+human-merge: poll and address feedback; agent-merge: signal consent once
+approved). The only sanctioned deviations are an explicit operator instruction
+or a specific alternate charter that governs differently -- see
+references/pr-workflow.md's *Default conduct* section.
 
 The full PR-mode reference -- profiles + verb applicability, config resolution
 (machine-local vs in-repo), `create-pr` auto-open + attribution + labels, the
