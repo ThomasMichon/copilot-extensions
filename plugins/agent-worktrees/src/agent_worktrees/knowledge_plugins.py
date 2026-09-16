@@ -25,6 +25,7 @@ from plugin_resolve.conventions import (
 
 from . import config as cfg
 from . import knowledge_composition_policy as policy
+from . import knowledge_plugin_committed as committed_settings
 from . import repos as repos_mod
 from . import state_root, tracking
 
@@ -155,58 +156,6 @@ def _read_harness_settings(
         ignored_native_marketplaces=ignored_native_marketplaces,
         ignored_native_enabled=ignored_native_enabled,
     )
-
-
-def _read_harness_committed_marketplaces(repo_dir: Path) -> dict[str, dict]:
-    """Read only the harness's committed (non-local) marketplace declarations.
-
-    Used to tell apart a knowledge-repo marketplace-name collision that is
-    purely with the harness's own *committed* definition (well-defined: the
-    committed value always wins, and this must not gate ``name@...``
-    enabledPlugins overrides for that marketplace) from one where an
-    operator's own local/native override also participates (genuinely
-    ambiguous, so it must still gate plugin overrides). Malformed committed
-    settings are treated as absent here; ``_read_harness_settings`` already
-    surfaces that as a hard error elsewhere in the same compose pass.
-    """
-    marketplaces: dict[str, dict] = {}
-    for rel in SETTINGS_RELS:
-        if rel[-1] == "settings.local.json":
-            continue
-        path = repo_dir.joinpath(*rel)
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (FileNotFoundError, OSError, ValueError):
-            continue
-        if not isinstance(data, dict):
-            continue
-        raw_marketplaces = data.get("extraKnownMarketplaces")
-        if isinstance(raw_marketplaces, dict):
-            for name, definition in raw_marketplaces.items():
-                if isinstance(definition, dict):
-                    marketplaces[name] = definition
-    return marketplaces
-
-
-def _read_harness_committed_enabled(repo_dir: Path) -> dict[str, bool]:
-    """Read only the harness's committed (non-local) enabledPlugins values."""
-    enabled: dict[str, bool] = {}
-    for rel in SETTINGS_RELS:
-        if rel[-1] == "settings.local.json":
-            continue
-        path = repo_dir.joinpath(*rel)
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (FileNotFoundError, OSError, ValueError):
-            continue
-        if not isinstance(data, dict):
-            continue
-        raw_enabled = data.get("enabledPlugins")
-        if isinstance(raw_enabled, dict):
-            for name, value in raw_enabled.items():
-                if isinstance(name, str) and isinstance(value, bool):
-                    enabled[name] = value
-    return enabled
 
 
 def _normalized_checkout_path(path: Path) -> str:
@@ -649,7 +598,9 @@ def _compose_locked(
     candidates: dict[str, dict] = {}
     conflicting_marketplaces: list[str] = []
     harness_owned_marketplaces: set[str] = set()
-    harness_committed_marketplaces = _read_harness_committed_marketplaces(harness)
+    harness_committed_marketplaces = (
+        committed_settings.read_harness_committed_marketplaces(harness)
+    )
     for name, definition in sorted(desired_marketplaces.items()):
         if name in local_names and name in marketplaces:
             if not markerless_legacy or name not in proven_legacy_names:
@@ -693,7 +644,9 @@ def _compose_locked(
     conflicting_enabled: list[str] = []
     excluded_enabled: list[str] = []
     conflicting_names = set(conflicting_marketplaces)
-    harness_committed_enabled = _read_harness_committed_enabled(harness)
+    harness_committed_enabled = committed_settings.read_harness_committed_enabled(
+        harness
+    )
     if markerless_legacy:
         for source, on in enabled.items():
             _, marketplace = split_source(source)
