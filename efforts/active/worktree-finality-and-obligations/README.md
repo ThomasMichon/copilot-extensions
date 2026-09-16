@@ -454,6 +454,36 @@ below for the carved implementation plan.
   description's stated version numbers (`1.5.5-dev119`/catalog `dev104`)
   no longer matched the final diff after several main-rebase version
   collisions (`dev121`/catalog `dev107`) -- corrected in the PR body.
+  **Third review-response round (PR #2738):** two more real findings, both
+  fixed: (1) round two's nested-mapping guard still let a hollow-but-
+  present descriptor through -- `closure: {}` alongside a top-level
+  `label: "FINAL"` (so `closure.get("final")` was `None`, never actually
+  checked against `label`) was accepted as `supported: True` and trusted the
+  raw `FINAL` claim; a string `closure.final: "false"` was also accepted
+  because `bool("false")` is `True` in Python. Fixed: `interpret_descriptor_
+  payload` now requires `label`/`style`/`action.disposition`/`compact` to be
+  actual `str` and `closure.final` to be an actual `bool` (rejecting any
+  wrong-type value outright, never truthiness-coercing it), AND requires
+  `(label == "FINAL") == closure.final` -- an inconsistent combination is
+  rejected as unsupported rather than trusting either half in isolation.
+  Applied identically to both `prune.py` copies, refactored through a shared
+  `_unsupported_descriptor()` helper, with 8 new tests per copy; (2) the new
+  `worktree-manager/production_picker/prune.py` shim had zero direct test
+  coverage -- the added Picker tests only exercised the legacy no-descriptor
+  fallback through pre-normalized records, so the shim's own validation
+  (version skew, malformed shapes, scalar-type/consistency checks) could
+  silently drift from the plugin's copy. Added
+  `worktree-manager/tests/production_picker/test_prune_shim.py` (13 tests
+  covering the shim directly AND the transplanted `derive.norm` driven
+  through it, including the unclassified-legacy-row gate). This exact test
+  file caught a real, live drift while writing it: `main` advanced
+  `DESCRIPTOR_VERSION` from 1 to 2 (Phase 9's sub-state-facts decomposition)
+  mid-review, and the shim's own hardcoded copy of that constant hadn't
+  followed -- exactly the silent-divergence risk the review comment warned
+  about, caught immediately rather than shipping a shim that would reject
+  every real descriptor as a version mismatch. Bumped the shim's
+  `DESCRIPTOR_VERSION` to `2` and switched every hardcoded `"version": 1`
+  test fixture (both copies) to reference the live constant instead.
 - [ ] Keep legends, filters, maintenance previews, and cleanup selections in
   parity with the same descriptor. **Narrowed, not fully done:** the
   Maintenance pivot's `CLEAN_SPECS` table got the same `markers` column +

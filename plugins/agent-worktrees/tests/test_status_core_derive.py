@@ -8,6 +8,7 @@ without the optional TUI dep installed.
 from __future__ import annotations
 
 from agent_worktrees.picker_tui import derive
+from agent_worktrees import prune
 
 
 def _raw(**kw):
@@ -252,7 +253,7 @@ class TestClosureDescriptorMarkers:
 
     def _closure(self, **overrides):
         payload = {
-            "version": 1,
+            "version": prune.DESCRIPTOR_VERSION,
             "label": "MERGED",
             "style": "merged-blocked",
             "compact": "MERGED C2 F1",

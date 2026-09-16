@@ -754,21 +754,10 @@ def interpret_descriptor_payload(payload: dict | None) -> dict:
     counts), never fabricating a claim/follow-up count it can't verify.
     """
     if not isinstance(payload, dict):
-        return {
-            "supported": False, "final": False, "label": "UNKNOWN",
-            "style": "unknown", "compact": "UNKNOWN",
-            "held_claims": 0, "open_follow_ups": 0,
-            "action_disposition": "blocked", "reason": "unsupported-descriptor",
-        }
+        return _unsupported_descriptor("unsupported-descriptor")
     version = payload.get("version")
     if version != DESCRIPTOR_VERSION:
-        return {
-            "supported": False, "final": False, "label": "UNKNOWN",
-            "style": "unknown", "compact": "UNKNOWN",
-            "held_claims": 0, "open_follow_ups": 0,
-            "action_disposition": "blocked",
-            "reason": f"unsupported-descriptor:version={version!r}",
-        }
+        return _unsupported_descriptor(f"unsupported-descriptor:version={version!r}")
     closure = payload.get("closure")
     action = payload.get("action")
     claims = payload.get("claims")
@@ -785,23 +774,51 @@ def interpret_descriptor_payload(payload: dict | None) -> dict:
         ("claims", claims), ("follow_ups", follow_ups),
     ):
         if not isinstance(field_value, dict):
-            return {
-                "supported": False, "final": False, "label": "UNKNOWN",
-                "style": "unknown", "compact": "UNKNOWN",
-                "held_claims": 0, "open_follow_ups": 0,
-                "action_disposition": "blocked",
-                "reason": f"unsupported-descriptor:{field_name}-missing-or-not-a-mapping",
-            }
+            return _unsupported_descriptor(
+                f"unsupported-descriptor:{field_name}-missing-or-not-a-mapping")
+    # Required scalar fields must be the exact type a genuine descriptor
+    # always emits -- a truthy-but-wrong-type value (e.g. ``closure.final:
+    # "false"``, a non-empty string that ``bool()`` would treat as True) must
+    # never slip through as if it were sound.
+    label = payload.get("label")
+    style = payload.get("style")
+    final_value = closure.get("final")
+    action_disposition = action.get("disposition")
+    if (not isinstance(label, str) or not isinstance(style, str)
+            or not isinstance(final_value, bool)
+            or not isinstance(action_disposition, str)):
+        return _unsupported_descriptor("unsupported-descriptor:scalar-field-type")
+    compact = payload.get("compact", label)
+    if not isinstance(compact, str):
+        return _unsupported_descriptor("unsupported-descriptor:scalar-field-type")
+    # ``label == "FINAL"`` and ``closure.final`` must agree -- an inconsistent
+    # combination (e.g. an empty ``closure: {}`` alongside a top-level
+    # ``label: "FINAL"``) is exactly the malformed shape the safety contract
+    # exists to catch; never trust either half in isolation.
+    if (label == "FINAL") != final_value:
+        return _unsupported_descriptor("unsupported-descriptor:label-final-mismatch")
     return {
         "supported": True,
-        "final": bool(closure.get("final", False)),
-        "label": str(payload.get("label", "UNKNOWN")),
-        "style": str(payload.get("style", "unknown")),
-        "compact": str(payload.get("compact", payload.get("label", "UNKNOWN"))),
+        "final": final_value,
+        "label": label,
+        "style": style,
+        "compact": compact,
         "held_claims": _non_negative_int(claims.get("held", 0)),
         "open_follow_ups": _non_negative_int(follow_ups.get("open", 0)),
-        "action_disposition": str(action.get("disposition", "blocked")),
+        "action_disposition": action_disposition,
         "reason": None,
+    }
+
+
+def _unsupported_descriptor(reason: str) -> dict:
+    """The shared degrade-to-neutral result for any ``interpret_descriptor_
+    payload`` rejection path -- every field renders as if there were no
+    descriptor at all, never partially trusting a malformed payload."""
+    return {
+        "supported": False, "final": False, "label": "UNKNOWN",
+        "style": "unknown", "compact": "UNKNOWN",
+        "held_claims": 0, "open_follow_ups": 0,
+        "action_disposition": "blocked", "reason": reason,
     }
 
 

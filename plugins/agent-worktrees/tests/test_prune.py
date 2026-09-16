@@ -904,3 +904,55 @@ class TestInterpretDescriptorPayload:
         assert interpreted["supported"] is True
         assert interpreted["open_follow_ups"] == 0
 
+    def test_empty_closure_with_final_label_is_rejected(self):
+        # PR #2738 review response: a top-level ``label: "FINAL"`` alongside
+        # an empty ``closure: {}`` (so ``closure.get("final")`` is ``None``,
+        # not ``True``) is an inconsistent, malformed combination -- never
+        # trust the label in isolation from the closure it should agree with.
+        payload = self._final_payload()
+        payload["closure"] = {}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+        assert interpreted["label"] == "UNKNOWN"
+
+    def test_string_final_is_never_truthy_coerced(self):
+        # ``bool("false")`` is ``True`` in Python -- a string value for
+        # ``closure.final`` must be rejected outright, never truthiness-
+        # coerced.
+        payload = self._final_payload()
+        payload["closure"] = {"final": "false"}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_final_true_with_non_final_label_is_rejected(self):
+        payload = self._final_payload()
+        payload["label"] = "MERGED"
+        # closure.final is still True from the real FINAL payload -- an
+        # inconsistent label/final combination either direction is rejected.
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_non_string_label_is_rejected(self):
+        payload = self._final_payload()
+        payload["label"] = 1
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_non_string_style_is_rejected(self):
+        payload = self._final_payload()
+        payload["style"] = ["final"]
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_non_string_action_disposition_is_rejected(self):
+        payload = self._final_payload()
+        payload["action"] = {"disposition": 1}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_non_string_compact_is_rejected(self):
+        payload = self._final_payload()
+        payload["compact"] = 42
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
