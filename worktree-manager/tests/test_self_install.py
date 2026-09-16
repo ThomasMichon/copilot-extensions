@@ -112,6 +112,64 @@ def test_stale_legacy_binstub_content_forces_redeploy(tmp_path, monkeypatch):
     assert needs_install("1.2.3", root) is False
 
 
+def test_known_legacy_prerename_binstub_is_recognized_and_cleaned(tmp_path, monkeypatch):
+    """The pre-rename ``worktree-manager`` plugin prototype (before it became
+    agent-worktrees, commit ab0716e28..6512114be) shipped this exact
+    ``~/.local/bin/worktree-manager`` (+ ``.cmd``) content and a non-versioned
+    ``~/.worktree-manager/.venv`` + ``.../lib`` runtime -- both colliding with
+    this Manager's own binstub name and root. A machine that installed that
+    prototype before the rename can still carry these exact artifacts; a real
+    self-install must positively recognize and remove them, not just
+    overwrite the binstub incidentally.
+    """
+    pd = _fake_payload(tmp_path, "1.2.3")
+    root = tmp_path / "root"
+    lb = _patch_local_bin(monkeypatch, tmp_path)
+
+    lb.mkdir(parents=True)
+    (lb / "worktree-manager").write_text(si._LEGACY_PRERENAME_SH, encoding="utf-8", newline="")
+    (lb / "worktree-manager.cmd").write_text(
+        si._LEGACY_PRERENAME_CMD, encoding="utf-8", newline=""
+    )
+    legacy_venv = root / ".venv" / "bin"
+    legacy_venv.mkdir(parents=True)
+    (legacy_venv / "python").write_text("#!/usr/bin/env python\n")
+    (root / "lib").mkdir(parents=True)
+
+    # Dry-run reports, but never touches, the recognized legacy artifacts.
+    planned = si.plan_legacy_cleanup(root)
+    assert any("legacy binstub" in p and "worktree-manager" in p for p in planned)
+    assert any("legacy binstub" in p and "worktree-manager.cmd" in p for p in planned)
+    assert any("legacy root artifact" in p and ".venv" in p for p in planned)
+    assert any("legacy root artifact" in p and str(root / "lib") in p for p in planned)
+    assert (root / ".venv").exists() and (root / "lib").exists()
+
+    res = self_install(pd, root=root, dry_run=False)
+    assert res.action == "installed"
+    assert len(res.cleaned) == 4
+    assert not (root / ".venv").exists()
+    assert not (root / "lib").exists()
+    # The binstub is now this version's own content, not the legacy one.
+    assert (lb / "worktree-manager").read_text() != si._LEGACY_PRERENAME_SH
+
+
+def test_unrecognized_binstub_content_is_never_attributed_as_legacy(tmp_path, monkeypatch):
+    """Only the byte-exact known prototype signature is auto-attributed as
+    legacy and named in ``cleaned`` -- an operator's own unrelated file at
+    the same path is still replaced (the general staleness fix), but never
+    mislabeled or specially called out as a *recognized* legacy artifact."""
+    pd = _fake_payload(tmp_path, "1.2.3")
+    root = tmp_path / "root"
+    lb = _patch_local_bin(monkeypatch, tmp_path)
+    lb.mkdir(parents=True)
+    (lb / "worktree-manager").write_text("#!/usr/bin/env bash\necho mine\n")
+
+    assert si.plan_legacy_cleanup(root) == []
+    res = self_install(pd, root=root, dry_run=False)
+    assert res.action == "installed"
+    assert res.cleaned == ()
+
+
 def test_new_version_publishes_new_slot(tmp_path, monkeypatch):
     root = tmp_path / "root"
     _patch_local_bin(monkeypatch, tmp_path)
