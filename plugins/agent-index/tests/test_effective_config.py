@@ -280,6 +280,62 @@ def test_required_external_state_without_config_is_inactive(
     assert result["reason"] == "external-state-root-config-absent"
 
 
+def test_external_state_root_falls_back_to_project_flag_for_bare_repo(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # A bare anchor checkout (agent-worktrees' own anchor, deliberately
+    # work-tree-less) can't be discovered by cwd, but it IS a known,
+    # registered project -- state-root must retry with an explicit
+    # `--project` instead of giving up.
+    module = _module()
+    home = tmp_path / "home"
+    (home / ".agent-worktrees").mkdir(parents=True)
+    bare = tmp_path / "bare-anchor"
+    bare.mkdir()
+    (home / ".agent-worktrees" / "repos.yaml").write_text(
+        "repos:\n"
+        f"  odsp-web-harness:\n"
+        f"    windows: {json.dumps(str(bare))}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(module.Path, "home", lambda: home)
+    monkeypatch.setattr(module, "_platform_key", lambda: "windows")
+    monkeypatch.setattr(module, "_worktrees_command", lambda: "agent-worktrees")
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        if "--project" not in argv:
+            return subprocess.CompletedProcess(
+                argv, 1, stdout="", stderr="Could not resolve a project"
+            )
+        return subprocess.CompletedProcess(
+            argv,
+            0,
+            stdout=json.dumps(
+                {
+                    "state_root": str(tmp_path / "knowledge"),
+                    "source": "knowledge_repo",
+                    "repo": "dotfiles",
+                    "requires_external": True,
+                    "bound": True,
+                    "error": None,
+                }
+            ),
+            stderr="",
+        )
+
+    (tmp_path / "knowledge").mkdir()
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    state, path = module._external_state_root(bare)
+
+    assert state == "ready"
+    assert path == (tmp_path / "knowledge").resolve()
+    assert len(calls) == 2
+    assert "--project" in calls[1] and "odsp-web-harness" in calls[1]
+
+
 def test_external_state_root_suppresses_console_for_resolved_command(
     tmp_path: Path, monkeypatch
 ) -> None:
