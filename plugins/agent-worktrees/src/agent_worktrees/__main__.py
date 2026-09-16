@@ -1235,6 +1235,7 @@ def _worktree_to_dict(
                 if state_info.fetch_requested and not state_info.fetch_failed
                 else "cached"
             ),
+            turn_count=_turns,
         ).to_dict()
         d["ff_eligible"] = (
             git_ops.can_fast_forward(state_info)
@@ -8449,6 +8450,7 @@ def _render_status_segment(
             evidence_mode=(
                 "refreshed" if info.fetch_requested and not info.fetch_failed else "cached"
             ),
+            turn_count=turns,
         )
         bg = _DESCRIPTOR_STYLE_BG.get(descriptor.style, "colour238")
         block_label = descriptor.compact
@@ -8571,6 +8573,7 @@ def _status_segment_json(path: str | None = None, fetch: bool = False) -> dict |
             evidence_mode=(
                 "refreshed" if info.fetch_requested and not info.fetch_failed else "cached"
             ),
+            turn_count=turns,
         )
         closure = descriptor.to_dict()
 

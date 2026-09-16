@@ -111,6 +111,23 @@ always requires a fresh fetch immediately before acting. Pass `--fetch` to
 `agent-worktrees status-segment` (or trigger a picker refresh) to let a
 genuinely clean, claim-free, follow-up-free worktree earn `FINAL`.
 
+##### Decomposed sub-state facts (Phase 9, in progress)
+
+Internally, `prune.assemble_closure_descriptor` (schema `version: 2`)
+decomposes the descriptor into five named, independently freshness-tracked
+`facts` rather than one all-or-nothing `evidence_mode`/`evidence_complete`
+pair: `checkpoint_activity`, `upstream_containment`, `local_dirtiness`,
+`open_claims`, and `pending_handoff`. Each carries its own `confirmed` flag.
+`checkpoint_activity` and `local_dirtiness` are always locally computed, so
+always `confirmed`; `upstream_containment` and `open_claims` require fresh
+evidence (a fetch, a provider PR lookup) to be `confirmed`, and `FINAL`
+requires BOTH to be independently confirmed. `pending_handoff` is not yet
+wired -- it always reports `confirmed: false` until read-only
+`context-handoff` baton wiring lands. This is additive plumbing: the
+`FINAL`/`MERGED` label rules above are unchanged; a later slice of this
+effort renders each fact's own freshness marker (rather than today's single
+label) across `list --json`, this status segment, and the Picker.
+
 
 ### The status core — an orthogonal disposition layer
 
