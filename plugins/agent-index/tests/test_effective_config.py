@@ -72,6 +72,22 @@ def test_absent_config_is_inactive(tmp_path: Path) -> None:
     assert result["reason"] == "repository-config-absent"
 
 
+def test_bare_repository_is_config_absent_not_unavailable(tmp_path: Path) -> None:
+    # A bare anchor checkout (e.g. an agent-worktrees anchor, which
+    # deliberately has no attached work tree) must resolve like any other
+    # repository lacking a local config -- "repository-config-absent" -- not
+    # "repository-unavailable", which the companion provider treats as fatal
+    # across every activation scope it resolves (see companion-provider.py).
+    module = _module()
+    bare = tmp_path / "bare-repo"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+
+    result = module.resolve(bare)
+
+    assert result["opted_in"] is False
+    assert result["reason"] == "repository-config-absent"
+
+
 def test_valid_repository_config_is_effective(tmp_path: Path) -> None:
     module = _module()
     repo = _repo(tmp_path / "repo")
