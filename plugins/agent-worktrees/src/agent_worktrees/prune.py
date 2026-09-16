@@ -561,23 +561,32 @@ def assemble_closure_descriptor(
     evidence_mode: str = "refreshed",
     evidence_complete: bool = True,
     turn_count: int = 0,
+    repo_fetch_fresh: bool = False,
     now: str | None = None,
 ) -> ClosureDescriptor:
     """Assemble the canonical closure descriptor from already-computed facts.
 
     Pure -- no I/O; the caller supplies fresh (or cached) ``info``/
-    ``disposition``/counts. Decomposes into the named :data:`FACT_NAMES`
+    ``disposition``/counts (including ``repo_fetch_fresh``, itself sourced
+    from :func:`tracking.is_repo_fetch_fresh` -- this function does not read
+    the ledger itself). Decomposes into the named :data:`FACT_NAMES`
     sub-states (worktree-finality-and-obligations Phase 9), each carrying its
     own ``confirmed`` freshness rather than one all-or-nothing flag:
 
     * ``checkpoint_activity``/``local_dirtiness`` are always locally computed,
       so always ``confirmed``.
-    * ``upstream_containment``/``open_claims`` depend on evidence that can go
-      stale (a fetch, a provider PR lookup); each is ``confirmed`` only when
-      ``evidence_mode == "refreshed"`` and ``evidence_complete`` -- today both
-      share that single input (the repo-scoped freshness ledger that lets
-      them diverge is a Phase 9 follow-up), but are tracked as independent
-      facts so a future caller can confirm one without the other.
+    * ``upstream_containment`` is ``confirmed`` when THIS call's own evidence
+      is fresh (``evidence_mode == "refreshed"`` and ``evidence_complete``)
+      OR ``repo_fetch_fresh`` is true -- a fetch performed by any sibling
+      worktree of the same repo (its own classify pass, `finalize`/
+      `pr-merge`, or the resident status-monitor's periodic sweep) counts as
+      current evidence for every worktree of that repo, without each needing
+      its own fetch.
+    * ``open_claims`` depends on evidence that can go stale (held claims,
+      open follow-ups, a provider PR lookup); ``confirmed`` only when THIS
+      call's own evidence is fresh -- the repo-scoped ledger covers git
+      upstream refs specifically, not provider/claim state, so it does not
+      extend to this fact.
     * ``pending_handoff`` is not yet wired (Phase 9 follow-up): always
       reports ``confirmed=False`` with a ``None`` value.
 
@@ -626,6 +635,7 @@ def assemble_closure_descriptor(
         blockers.append({"code": "open-follow-ups", "count": open_follow_ups})
 
     fresh_and_complete = evidence_mode == "refreshed" and evidence_complete
+    upstream_confirmed = fresh_and_complete or repo_fetch_fresh
 
     facts = {
         "checkpoint_activity": {
@@ -633,7 +643,7 @@ def assemble_closure_descriptor(
             "turns_since_checkpoint": turn_count,
         },
         "upstream_containment": {
-            "confirmed": fresh_and_complete,
+            "confirmed": upstream_confirmed,
             "complete": upstream_complete,
         },
         "local_dirtiness": {
@@ -685,9 +695,14 @@ def assemble_closure_descriptor(
 
     action_disposition = _BUCKET_TO_ACTION_DISPOSITION.get(
         disposition.bucket, "blocked")
-    if action_disposition == "safe" and not fresh_and_complete:
+    if action_disposition == "safe" and not (
+        upstream_confirmed and facts["open_claims"]["confirmed"]
+    ):
         # Cached/fetch-free evidence never authorizes a destructive action,
-        # even when the underlying facts look clean.
+        # even when the underlying facts look clean -- unless BOTH facts
+        # are independently confirmed (a repo-scoped ledger hit alone
+        # confirms upstream_containment, not open_claims -- see FINAL's own
+        # identical two-fact gate above).
         action_disposition = "blocked"
 
     return ClosureDescriptor(
