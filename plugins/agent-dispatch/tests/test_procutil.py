@@ -1310,3 +1310,66 @@ def test_resolve_own_runtime_python_falls_back_to_sys_executable_when_unresolved
     root = tmp_path / ".agent-dispatch-empty"
     monkeypatch.setattr("agent_dispatch.runtime_version.install_dir", lambda: root)
     assert procutil.resolve_own_runtime_python() == procutil.sys.executable
+
+
+def test_agent_worktrees_environment_scrubs_unsafe_vars(monkeypatch):
+    monkeypatch.setenv("COPILOT_PLUGIN_ROOT", r"C:\payload\agent-dispatch")
+    monkeypatch.setenv("PYTHONHOME", r"C:\some\x64\python")
+    monkeypatch.setenv("PYTHONPATH", r"C:\injected")
+    monkeypatch.setenv("VIRTUAL_ENV", r"C:\some\.venv")
+    monkeypatch.setenv("__PYVENV_LAUNCHER__", r"C:\some\python.exe")
+    monkeypatch.setenv("KEEP_ME", "1")
+
+    environment = procutil.agent_worktrees_environment()
+
+    assert "COPILOT_PLUGIN_ROOT" not in environment
+    assert "PYTHONHOME" not in environment
+    assert "PYTHONPATH" not in environment
+    assert "VIRTUAL_ENV" not in environment
+    assert "__PYVENV_LAUNCHER__" not in environment
+    assert environment["KEEP_ME"] == "1"
+    assert environment["PATH"] == os.environ["PATH"]
+
+
+def test_run_background_capture_passes_explicit_env(monkeypatch):
+    captured = {}
+
+    class _FakeProc:
+        def communicate(self, timeout=None):
+            return "", ""
+
+        returncode = 0
+
+    def fake_popen(args, **kwargs):
+        captured["env"] = kwargs.get("env")
+        return _FakeProc()
+
+    monkeypatch.setattr(procutil.subprocess, "Popen", fake_popen)
+
+    procutil.run_background_capture(
+        ["agent-worktrees", "status"], timeout=5, env={"ONLY": "this"}
+    )
+
+    assert captured["env"] == {"ONLY": "this"}
+
+
+def test_run_background_capture_inherits_ambient_env_by_default(monkeypatch):
+    captured = {}
+
+    class _FakeProc:
+        def communicate(self, timeout=None):
+            return "", ""
+
+        returncode = 0
+
+    def fake_popen(args, **kwargs):
+        captured["env"] = kwargs.get("env")
+        return _FakeProc()
+
+    monkeypatch.setattr(procutil.subprocess, "Popen", fake_popen)
+
+    procutil.run_background_capture(["some-probe"], timeout=5)
+
+    # None means "inherit the ambient environment" (subprocess's own default),
+    # preserving prior behavior for callers that don't opt into an explicit env.
+    assert captured["env"] is None
