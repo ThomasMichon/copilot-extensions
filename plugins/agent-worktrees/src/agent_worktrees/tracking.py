@@ -694,6 +694,48 @@ class ControllerRelationError(ValueError):
     """A controller relation is invalid or cannot be mutated safely."""
 
 
+def _owning_tracking_dir(worktree_id: str, repo: str | None = None) -> Path:
+    """Resolve the tracking directory that actually owns ``worktree_id``.
+
+    ``cfg.tracking_dir()`` is ambient: it reflects whichever project the
+    *current process* resolved (``-p``/CWD), not the project that actually
+    owns ``worktree_id``. A caller that knows the record's own ``repo``
+    (e.g. an already-loaded :class:`WorktreeRecord`) gets an exact answer.
+    Otherwise, prefer the ambient project's tracking dir (the fast, common
+    case), and only fall back to scanning every other adopted project's
+    tracking dir when the ambient one doesn't have the file -- so a
+    cross-project caller (notably the machine-wide resident status-monitor,
+    which sweeps every ``wt-*`` session from one process) can't silently
+    duplicate a foreign project's record into its own ambient directory
+    (see copilot-extensions#2788).
+    """
+    if repo:
+        return cfg.project_dir(repo) / "worktrees"
+
+    ambient = cfg.tracking_dir()
+    if (ambient / f"{worktree_id}.yaml").exists():
+        return ambient
+
+    try:
+        from . import repos as repos_mod
+
+        candidate_names = repos_mod._adopted_project_names()
+    except Exception:
+        candidate_names = set()
+
+    for name in candidate_names:
+        try:
+            candidate_dir = cfg.project_dir(name) / "worktrees"
+        except Exception:
+            continue
+        if candidate_dir == ambient:
+            continue
+        if (candidate_dir / f"{worktree_id}.yaml").exists():
+            return candidate_dir
+
+    return ambient
+
+
 @dataclass
 class WorktreeRecord:
     """Parsed worktree tracking record."""
@@ -1119,10 +1161,21 @@ class WorktreeRecord:
 
     @property
     def yaml_path(self) -> Path:
-        """Path to this record's YAML file in the tracking directory."""
-        from . import config as cfg
+        """Path to this record's YAML file in the tracking directory.
 
-        return cfg.tracking_dir() / f"{self.worktree_id}.yaml"
+        Prefers the exact file this record was loaded from (set by
+        :func:`load_record`/:func:`save_record`), so a read-modify-write via
+        a bare ``save_record(record)`` always writes back to the same file
+        it came from -- even one found via :func:`_owning_tracking_dir`'s
+        cross-project fallback scan. Only a record that was never loaded or
+        saved (e.g. freshly constructed, not yet persisted) falls back to
+        resolving from its own ``repo``, never the ambient/current process's
+        project -- see copilot-extensions#2788.
+        """
+        loaded_from = getattr(self, "_loaded_from", None)
+        if loaded_from is not None:
+            return loaded_from
+        return _owning_tracking_dir(self.worktree_id, self.repo) / f"{self.worktree_id}.yaml"
 
 
 from .tracking_controller_relations import (
@@ -2053,6 +2106,7 @@ def load_record(path: Path) -> WorktreeRecord:
                    if data.get("pair_kind") in ("worktree", "anchor") else None),
         reaped_at=(str(data["reaped_at"]) if data.get("reaped_at") else None),
     )
+    record._loaded_from = path
     return record
 
 
@@ -2699,6 +2753,7 @@ def save_record(
             path,
             preserve_handoff_reservations=preserve_handoff_reservations,
         )
+    record._loaded_from = path
     _flush_session_projections(record)
 
 
@@ -3054,7 +3109,7 @@ def _stamp_liveness(
     stamp has aged past ``throttle_secs`` (a value CHANGE always writes). See the
     public wrappers for the semantics.
     """
-    yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+    yaml_path = _owning_tracking_dir(worktree_id) / f"{worktree_id}.yaml"
     if not yaml_path.exists():
         return
     try:
@@ -3192,7 +3247,7 @@ def _apply_session_state_stamp(
     run by the async writer thread (or inline when ``sync=True``). Serialized
     per path (``_RecordLock`` -> in-process lock) and best-effort; returns True
     iff the record was rewritten."""
-    yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+    yaml_path = _owning_tracking_dir(worktree_id) / f"{worktree_id}.yaml"
     if not yaml_path.exists():
         return False
     try:
@@ -4838,7 +4893,7 @@ def register_session(
     authoritatively transferred to ``session_id``), or ``None`` when no fresh
     link happened -- callers use this to emit Stage 10/11 events exactly once.
     """
-    yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+    yaml_path = _owning_tracking_dir(worktree_id) / f"{worktree_id}.yaml"
     if not yaml_path.exists():
         return None
 
@@ -5121,7 +5176,7 @@ def deregister_session(
     recorded_at: str | None = None,
 ) -> None:
     """Mark a session as ended on a worktree (called from sessionEnd hook)."""
-    yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+    yaml_path = _owning_tracking_dir(worktree_id) / f"{worktree_id}.yaml"
     if not yaml_path.exists():
         return
 
