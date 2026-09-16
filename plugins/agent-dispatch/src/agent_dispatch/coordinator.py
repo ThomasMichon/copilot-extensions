@@ -812,6 +812,8 @@ class ReservationDetailBody(BaseModel):
 class RequestSpawnReleaseBody(BaseModel):
     detail: str | None = None
     disposition: str = "failed"
+    session_handle: str | None = None
+    worktree: str | None = None
 
 
 class RetireSpawnBody(ReservationDetailBody):
@@ -2169,11 +2171,7 @@ def create_app(
     @app.post("/spawn-reservations/{key}/release")
     def request_spawn_release(key: str, body: RequestSpawnReleaseBody) -> dict:
         result = _reservation_guard(
-            lambda: queue.request_spawn_release(
-                key,
-                detail=body.detail,
-                disposition=body.disposition,
-            )
+            lambda: queue.request_spawn_release(key, **body.model_dump())
         )
         bus.publish({"type": "spawn.release_requested", "reservation": result})
         return result

@@ -96,6 +96,7 @@ from .spawn_factories import (  # noqa: F401 -- re-exported for existing call si
     make_headless_spawn,
     make_label_routed_spawn,
     make_redrive_sender,
+    request_failed_created_spawn_release,
 )
 from .supervisor_conclusion import (  # noqa: F401 -- re-exported for existing call sites/tests
     _CONCLUSION_COMPLETE,
@@ -3336,10 +3337,8 @@ class Supervisor:
                             handle.get("error"),
                         )
                     elif spawn_task.get("spawn_worktree_ownership") == "created":
-                        self.client.request_spawn_release(
-                            key,
-                            detail=detail,
-                            disposition="failed",
+                        request_failed_created_spawn_release(
+                            self.client, key, handle, spawn_task, detail
                         )
                         log.warning(
                             "spawn failed for task %s (%s): %s",

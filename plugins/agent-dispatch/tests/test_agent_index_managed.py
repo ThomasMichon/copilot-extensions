@@ -196,8 +196,6 @@ def test_shipped_index_declaration_preserves_version_and_source_authority(index_
                 "profile": "host",
                 "python_env": "AGENT_INDEX_MANAGED_PYTHON",
                 "projects": [
-                    {"path": "libs/zdd"},
-                    {"path": "libs/agent-procutil"},
                     {"path": ".", "extras": ["store"]},
                 ],
                 "imports": [
