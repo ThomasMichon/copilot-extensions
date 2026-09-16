@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
 
+from .issue_loop_markers import _marker, _parse_marker
 from .registrar import (
     Filters,
     ProfileDeclaration,
@@ -54,10 +55,6 @@ _KNOWN_KEYS = frozenset(
 _FORGE_KEYS = frozenset({"provider", "producer_login"})
 _SUPPORTED_FORGE_PROVIDERS = frozenset({"github", "azure-devops"})
 _RESERVATION_KEYS = frozenset({"label", "comment", "orphan_after_seconds"})
-_MARKER_RE = re.compile(
-    r"<!-- agent-dispatch:repository-issue-loop:v1 "
-    r"(?P<payload>\{.*\}) -->"
-)
 _GITHUB_ISSUE_PAGE_SIZE = 100
 _GITHUB_MAX_ISSUE_PAGES = 10
 _GITHUB_COMMENT_LIMIT = 100
@@ -509,81 +506,6 @@ def _parse_time(value: str) -> float:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
 
 
-def _marker(payload: dict[str, Any]) -> str:
-    return (
-        "<!-- agent-dispatch:repository-issue-loop:v1 "
-        + json.dumps(payload, sort_keys=True, separators=(",", ":"))
-        + " -->"
-    )
-
-
-def _parse_marker(
-    body: str,
-    *,
-    author: str,
-    expected_author: str,
-    issue_number: int,
-) -> dict[str, Any] | None:
-    if author.casefold() != expected_author.casefold():
-        return None
-    match = _MARKER_RE.search(body)
-    if not match:
-        return None
-    try:
-        value = json.loads(match.group("payload"))
-    except ValueError:
-        return None
-    if not isinstance(value, dict):
-        return None
-    if set(value) - {
-        "loop",
-        "occurrence",
-        "state",
-        "at",
-        "label",
-        "issue",
-        "task_id",
-        "reason",
-    }:
-        return None
-    loop = value.get("loop")
-    occurrence = value.get("occurrence")
-    state = value.get("state")
-    at = value.get("at")
-    label = value.get("label")
-    issue = value.get("issue")
-    task_id = value.get("task_id")
-    reason = value.get("reason")
-    if (
-        not isinstance(loop, str)
-        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", loop)
-        or isinstance(occurrence, bool)
-        or not isinstance(occurrence, int)
-        or occurrence < 0
-        or state not in {"reserved", "claimed", "released"}
-        or isinstance(at, bool)
-        or not isinstance(at, (int, float))
-        or not isinstance(label, str)
-        or not label
-        or isinstance(issue, bool)
-        or issue != issue_number
-    ):
-        return None
-    if state == "claimed" and (
-        not isinstance(task_id, str) or not task_id
-    ):
-        return None
-    if state == "released" and (
-        not isinstance(reason, str)
-        or not reason
-        or (task_id is not None and (not isinstance(task_id, str) or not task_id))
-    ):
-        return None
-    if state == "reserved" and (task_id is not None or reason is not None):
-        return None
-    return {**value, "comment_author": author}
-
-
 class GitHubProvider:
     """Narrow GitHub issue adapter implemented through the authenticated gh CLI."""
 
@@ -724,7 +646,28 @@ class GitHubProvider:
             f"Repository issue loop `{payload.get('loop')}` marked this issue "
             f"`{state}` for occurrence `{payload.get('occurrence')}`."
         )
+        body = f"{summary}\n\n{_marker(payload)}"
         self._verify_identity(repo, allow_cache=False)
+        existing_id = self._find_own_occurrence_comment(repo, issue, payload)
+        if existing_id is not None:
+            # Edit the same occurrence's own prior comment in place
+            # (reserved -> claimed -> released) instead of always posting a
+            # new one: one evolving, clearly-marked comment per occurrence
+            # is exactly as visible/distinguishable as three separate ones
+            # (reservation.comment's own validated requirement), just far
+            # less noisy in the issue's visible history and notifications.
+            self._gh(
+                "api",
+                "graphql",
+                "-f",
+                "query=mutation($id:ID!,$body:String!){"
+                "updateIssueComment(input:{id:$id,body:$body}){issueComment{id}}}",
+                "-f",
+                f"id={existing_id}",
+                "-f",
+                f"body={body}",
+            )
+            return
         self._gh(
             "issue",
             "comment",
@@ -732,8 +675,46 @@ class GitHubProvider:
             "--repo",
             repo,
             "--body",
-            f"{summary}\n\n{_marker(payload)}",
+            body,
         )
+
+    def _find_own_occurrence_comment(
+        self, repo: str, issue: Issue, payload: dict[str, Any]
+    ) -> str | None:
+        """Return the GraphQL node id of this exact occurrence's own prior
+        marker comment (same ``loop`` + ``occurrence``, authored by us), if
+        one exists -- so ``_comment`` edits it instead of posting a new one.
+        A fresh fetch (not ``issue.reservations``, which may already be
+        stale by the time a later transition like ``claim``/``release``
+        runs) since another transition may have landed a comment since the
+        caller last discovered this issue.
+        """
+        viewed = self._gh(
+            "issue",
+            "view",
+            str(issue.number),
+            "--repo",
+            repo,
+            "--json",
+            "comments",
+        )
+        comments = json.loads(viewed.stdout or "{}").get("comments") or []
+        for comment in comments:
+            marker = _parse_marker(
+                str(comment.get("body") or ""),
+                author=str((comment.get("author") or {}).get("login") or ""),
+                expected_author=self.expected_login,
+                issue_number=issue.number,
+            )
+            if (
+                marker is not None
+                and marker.get("loop") == payload.get("loop")
+                and marker.get("occurrence") == payload.get("occurrence")
+            ):
+                comment_id = comment.get("id")
+                if isinstance(comment_id, str) and comment_id:
+                    return comment_id
+        return None
 
     def reserve(
         self, repo: str, issue: Issue, reservation: dict[str, Any]

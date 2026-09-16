@@ -1218,6 +1218,7 @@ def test_reserve_rechecks_identity_before_each_mutation():
             SimpleNamespace(
                 returncode=0, stdout="example/project\n", stderr=""
             ),
+            SimpleNamespace(returncode=0, stdout='{"comments":[]}', stderr=""),
             SimpleNamespace(returncode=0, stdout="", stderr=""),
             SimpleNamespace(returncode=0, stdout="other-user\n", stderr=""),
         ]
@@ -1253,6 +1254,7 @@ def test_claim_does_not_reuse_a_prior_mutation_identity_check():
             SimpleNamespace(
                 returncode=0, stdout="example/project\n", stderr=""
             ),
+            SimpleNamespace(returncode=0, stdout='{"comments":[]}', stderr=""),
             SimpleNamespace(returncode=0, stdout="", stderr=""),
             SimpleNamespace(returncode=0, stdout="other-user\n", stderr=""),
         ]
@@ -1301,6 +1303,20 @@ def test_loser_release_preserves_another_loops_visible_label():
             SimpleNamespace(returncode=0, stdout="issue-bot\n", stderr=""),
             SimpleNamespace(
                 returncode=0, stdout="example/project\n", stderr=""
+            ),
+            SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps(
+                    {
+                        "comments": [
+                            {
+                                "author": {"login": "issue-bot"},
+                                "body": _marker(winner),
+                            },
+                        ]
+                    }
+                ),
+                stderr="",
             ),
             SimpleNamespace(returncode=0, stdout="", stderr=""),
             SimpleNamespace(
@@ -1364,6 +1380,20 @@ def test_loser_release_removes_only_its_distinct_label():
             SimpleNamespace(returncode=0, stdout="issue-bot\n", stderr=""),
             SimpleNamespace(
                 returncode=0, stdout="example/project\n", stderr=""
+            ),
+            SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps(
+                    {
+                        "comments": [
+                            {
+                                "author": {"login": "issue-bot"},
+                                "body": _marker(winner),
+                            }
+                        ]
+                    }
+                ),
+                stderr="",
             ),
             SimpleNamespace(returncode=0, stdout="", stderr=""),
             SimpleNamespace(
