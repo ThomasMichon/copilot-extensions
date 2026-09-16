@@ -402,7 +402,32 @@ below for the carved implementation plan.
   resolves cell color via a new `_DESCRIPTOR_STYLE` style-token palette
   (falling back to the legacy label-keyed `C_STATE` lookup when no descriptor
   is present) -- a style adapter, not a state redefinition, per this item's
-  own wording.
+  own wording. **Review-response round (PR #2738):** Copilot review caught
+  five real issues, all fixed: (1) the no-descriptor fallback still
+  resolved COMPLETED to `FINAL` in both `derive.py` copies (the plugin's and
+  the transplanted `worktree-manager` one), contradicting this very item's
+  "never FINAL"/"never guessed" wording -- fixed to degrade to `MERGED` in
+  both, mirroring PR #2642's identical mux-side fix, with every affected test
+  (plugin + `worktree-manager`, including a `bucket()` sections test and a
+  live-TUI-render test) updated to match; (2)
+  `prune.interpret_descriptor_payload` crashed on a well-formed-version-1-but
+  -malformed-nested-field payload (`claims=[]`, `claims={"held": "bad"}`,
+  etc.) instead of degrading to zero as its own docstring promised -- added
+  a `_non_negative_int` coercion helper and nested-mapping guards, applied
+  identically to both the plugin's `prune.py` and the `worktree-manager`
+  shim; (3) the Maintenance pivot's `markers` column had a lower fit()
+  priority than `age`/`mib`, so it was dropped LAST instead of first under
+  width pressure, contradicting the PR's own "dropped first" claim -- fixed
+  in both engines; (4) `worktree-manager`'s OWN Manager-owned
+  `picker_tui/engine.py` (excluded from the byte-identical transplant guard)
+  had no `markers`/`state_style` handling at all, so production silently
+  never rendered them -- mirrored the same `_DESCRIPTOR_STYLE`/column/
+  `row_text` changes there too (regenerating the `worktrees_list.txt` golden
+  and fixing three now-real test regressions this exposed); (5) no test
+  exercised `engine.row_text`'s markers cell or the three specs' fit
+  priority -- added `test_picker_markers_column.py` (9 focused tests). Also
+  bumped `.github/plugin/marketplace.json`'s top-level `metadata.version`
+  (a low-severity but real catch -- same automation gap PR #2642 hit).
 - [ ] Keep legends, filters, maintenance previews, and cleanup selections in
   parity with the same descriptor. **Narrowed, not fully done:** the
   Maintenance pivot's `CLEAN_SPECS` table got the same `markers` column +

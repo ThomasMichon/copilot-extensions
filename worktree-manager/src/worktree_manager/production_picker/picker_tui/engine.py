@@ -195,6 +195,28 @@ _STATE_PALETTE = {
 _STATE_PALETTE.update(C_STATE)      # also honour raw worktree state names
 _PALETTES = {"state": _STATE_PALETTE}
 
+# worktree-finality-and-obligations Phase 5: the closure descriptor's own
+# semantic ``style`` token (``prune.interpret_descriptor_payload``, mirrored
+# here via ``production_picker/prune.py``) mapped to the Picker's native
+# palette -- the same translation the PSMux/TMux status segment's
+# ``_DESCRIPTOR_STYLE_BG`` already performs for its terminal-256 palette. A
+# style adapter never redefines state; it only chooses colour. An
+# unrecognized/empty token (no descriptor, or one an old/new remote emitted
+# that this build doesn't know) falls back to the legacy label-keyed
+# ``C_STATE`` lookup in ``row_text``.
+_DESCRIPTOR_STYLE = {
+    "final": C_STATE["FINAL"],
+    "merged-blocked": C_STATE["MERGED"],
+    "active": C_STATE["ACTIVE"],
+    "dirty": C_STATE["DIRTY"],
+    "wip": C_STATE["WIP"],
+    "unused": C_STATE["UNUSED"],
+    "convo": C_STATE["CONVO"],
+    "orphan": C_STATE["ORPHAN"],
+    "gone": C_STATE["GONE"],
+    "unknown": C_STATE["?"],
+}
+
 
 def _palette_style(name, value):
     """The per-value style for palette ``name`` and cell ``value`` (upper-cased
@@ -312,7 +334,12 @@ def row_text(rec, cols, width, selected, indent=1, pulse=0, mark=None):
         cell = _clip(val, w, a)
         style = ""
         if k == "state":
-            style = C_STATE.get(rec.get("state", ""), "")
+            style = (_DESCRIPTOR_STYLE.get(rec.get("state_style") or "")
+                     or C_STATE.get(rec.get("state", ""), ""))
+        elif k == "markers":
+            cell = _clip(rec.get("state_markers", ""), w, a)
+            style = (_DESCRIPTOR_STYLE.get(rec.get("state_style") or "")
+                     or C_STATE.get(rec.get("state", ""), ""))
         elif k == "env":
             style = C_ENV.get(rec.get("env", ""), "")
         elif k == "dispo":
@@ -345,6 +372,7 @@ def header_text(cols, width, label_style=C_HEADER, indent=1):
 
 ACTIVE_SPECS = [
     ("id4", "id", 4, "l", 2), ("state", "state", 6, "l", 4),
+    ("markers", "flag", 5, "l", 9),
     ("relation", "relation", 7, "l", 6),
     ("machine_env", "source", 19, "l", 5),
     ("age", "age", 4, "l", 7), ("sess", "live", 4, "l", 8),
@@ -352,6 +380,7 @@ ACTIVE_SPECS = [
 ]
 LIST_SPECS = [
     ("id4", "id", 4, "l", 2), ("state", "state", 6, "l", 4),
+    ("markers", "flag", 5, "l", 9),
     ("relation", "relation", 7, "l", 5),
     ("age", "age", 4, "l", 6), ("sess", "live", 4, "l", 7),
     ("turns", "t", 3, "r", 8), ("pr", "pr", 8, "l", 3),
@@ -5849,6 +5878,7 @@ def _size_mb(w):
 
 CLEAN_SPECS = [
     ("id4", "id", 4, "l", 2), ("state", "state", 6, "l", 6),
+    ("markers", "flag", 5, "l", 10),
     ("machine_env", "source", 19, "l", 7),
     ("dispo", "disposition", 18, "l", 3), ("pr", "pr", 8, "l", 5),
     ("age", "age", 4, "l", 9), ("mib", "size", 6, "r", 9),

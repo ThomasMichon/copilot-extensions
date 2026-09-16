@@ -168,12 +168,17 @@ def _state(w):
             # FINAL. Routed through ``prune.interpret_descriptor_payload`` for
             # mixed-version fleet safety (a remote on an older/newer
             # ``agent-worktrees`` never gets its raw ``closure.label`` trusted
-            # directly) -- falls back to the legacy FINAL label when the
+            # directly) -- degrades to MERGED (never FINAL) when the
             # descriptor is absent or unsupported.
             interpreted = prune.interpret_descriptor_payload(w.get("closure"))
             if interpreted["supported"] and interpreted["label"] in ("FINAL", "MERGED"):
                 return interpreted["label"]
-            return "FINAL"
+            # Absent or unsupported (mixed-version) descriptor: never claim
+            # FINAL -- held claims/open follow-ups are unprovable without a
+            # trusted descriptor. Mirrors the same fix already landed for the
+            # PSMux/TMux status segment (worktree-finality-and-obligations,
+            # PR #2642's no-tracking-record fallback).
+            return "MERGED"
         return _STATE_LABEL.get(st, st.upper()[:6])
     pr = w.get("pr") or {}
     status = w.get("status")

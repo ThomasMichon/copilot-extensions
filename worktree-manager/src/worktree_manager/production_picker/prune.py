@@ -64,14 +64,32 @@ def interpret_descriptor_payload(payload: dict | None) -> dict:
     action = payload.get("action")
     claims = payload.get("claims")
     follow_ups = payload.get("follow_ups")
+    closure = closure if isinstance(closure, dict) else {}
+    action = action if isinstance(action, dict) else {}
+    claims = claims if isinstance(claims, dict) else {}
+    follow_ups = follow_ups if isinstance(follow_ups, dict) else {}
     return {
         "supported": True,
-        "final": bool((closure or {}).get("final", False)),
+        "final": bool(closure.get("final", False)),
         "label": str(payload.get("label", "UNKNOWN")),
         "style": str(payload.get("style", "unknown")),
         "compact": str(payload.get("compact", payload.get("label", "UNKNOWN"))),
-        "held_claims": int((claims or {}).get("held", 0) or 0),
-        "open_follow_ups": int((follow_ups or {}).get("open", 0) or 0),
-        "action_disposition": str((action or {}).get("disposition", "blocked")),
+        "held_claims": _non_negative_int(claims.get("held", 0)),
+        "open_follow_ups": _non_negative_int(follow_ups.get("open", 0)),
+        "action_disposition": str(action.get("disposition", "blocked")),
         "reason": None,
     }
+
+
+def _non_negative_int(value) -> int:
+    """Coerce a claim/follow-up count from an untrusted descriptor payload to
+    a non-negative int, never raising on a malformed value (e.g. a string, a
+    list, ``None``, or a negative number) -- degrades to ``0`` instead of
+    crashing the caller. Kept in sync with ``agent_worktrees/prune.py``'s
+    copy."""
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return n if n > 0 else 0
+

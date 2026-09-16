@@ -6168,7 +6168,7 @@ def _size_mb(w):
 
 CLEAN_SPECS = [
     ("id4", "id", 4, "l", 2), ("state", "state", 6, "l", 6),
-    ("markers", "flag", 5, "l", 8),
+    ("markers", "flag", 5, "l", 10),
     ("machine_env", "source", 19, "l", 7),
     ("dispo", "disposition", 18, "l", 3), ("pr", "pr", 8, "l", 5),
     ("age", "age", 4, "l", 9), ("mib", "size", 6, "r", 9),

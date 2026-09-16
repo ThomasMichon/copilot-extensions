@@ -2562,8 +2562,12 @@ def test_bucket_sections_key_off_state():
            rec("wip", 2), rec("unused", 3)]
     active, recent, completed = derive.bucket(wts)
     assert [w["state"] for w in active] == ["ACTIVE"]
-    # Both FINALs land in Completed regardless of age (1h and 60h).
-    assert sorted(w["state"] for w in completed) == ["FINAL", "FINAL"]
+    # Both completed rows land in Completed regardless of age (1h and 60h).
+    # No ``closure`` descriptor here, so ``_state()`` degrades to MERGED
+    # rather than trusting a raw FINAL claim (worktree-finality-and-
+    # obligations Phase 5's PR #2738 review-response fix) -- ``bucket()``
+    # still treats FINAL and MERGED alike as "completed".
+    assert sorted(w["state"] for w in completed) == ["MERGED", "MERGED"]
     # Recent is whatever is neither in-session nor final.
     assert sorted(w["state"] for w in recent) == ["UNUSED", "WIP"]
 
@@ -2812,7 +2816,11 @@ def test_tui_renders_local_worktrees():
             # Canonical state vocabulary (test-chamber #1290).
             assert "ACTIVE" in out
             assert "UNUSED" in out
-            assert "FINAL" in out
+            # "Done work" is COMPLETED with no closure descriptor in this
+            # fixture, so ``_state()`` degrades to MERGED rather than
+            # trusting a raw FINAL claim (worktree-finality-and-obligations
+            # Phase 5's PR #2738 review-response fix).
+            assert "MERGED" in out
             # Real machine identity from the source.
             assert "anomalous-potato" in out
 

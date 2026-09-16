@@ -38,8 +38,11 @@ class TestDispositionGlyph:
 
     def test_state_stays_pure_for_bucketing(self):
         # The glyph never leaks into ``state`` (bucket()/prune key off it).
+        # No ``closure`` descriptor here, so ``_state()`` never trusts a raw
+        # FINAL claim; it degrades to MERGED (worktree-finality-and-obligations
+        # Phase 5's PR #2738 review-response fix, mirroring PR #2642's mux fix).
         n = derive.norm(_raw(follow_up=True, summary="x"), "anomalous-potato", "win")
-        assert n["state"] == "FINAL"
+        assert n["state"] == "MERGED"
 
 
 class TestPairMarker:
@@ -76,10 +79,13 @@ class TestPairMarker:
         assert n["title"].startswith("\u26a0 \u26ad \u271a ")
 
     def test_pair_marker_does_not_leak_into_state(self):
+        # No ``closure`` descriptor here, so ``_state()`` degrades to MERGED
+        # rather than trusting a raw FINAL claim (see
+        # test_state_stays_pure_for_bucketing above).
         n = derive.norm(
             _raw(pair_id="p", pair_role="harness"), "anomalous-potato", "win"
         )
-        assert n["state"] == "FINAL"
+        assert n["state"] == "MERGED"
 
 
 class TestAnnotatePairs:
@@ -274,24 +280,27 @@ class TestClosureDescriptorMarkers:
 
     def test_no_closure_is_blank_markers_and_style(self):
         n = derive.norm(_raw(state="completed"), "anomalous-potato", "win")
-        assert n["state"] == "FINAL"
+        # No descriptor at all -- never claim FINAL (held claims/open
+        # follow-ups are unprovable without a trusted descriptor); degrades
+        # to MERGED, mirroring the mux/PSMux status segment's own fix.
+        assert n["state"] == "MERGED"
         assert n["state_markers"] == ""
         assert n["state_style"] == ""
 
     def test_unsupported_version_never_trusted(self):
         # A version-mismatched descriptor is never treated as authoritative --
-        # markers/style fall back to blank, and the label stays the legacy
-        # FINAL fallback (never the raw payload's own claim).
+        # markers/style fall back to blank, and the label degrades to MERGED
+        # (never the raw payload's own FINAL/MERGED claim).
         closure = self._closure(version=999)
         n = derive.norm(_raw(state="completed", closure=closure),
                         "anomalous-potato", "win")
-        assert n["state"] == "FINAL"
+        assert n["state"] == "MERGED"
         assert n["state_markers"] == ""
         assert n["state_style"] == ""
 
     def test_malformed_closure_never_trusted(self):
         n = derive.norm(_raw(state="completed", closure="not-a-dict"),
                         "anomalous-potato", "win")
-        assert n["state"] == "FINAL"
+        assert n["state"] == "MERGED"
         assert n["state_markers"] == ""
         assert n["state_style"] == ""

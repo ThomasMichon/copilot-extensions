@@ -104,6 +104,6 @@
   "worktree-manager/src/worktree_manager/__main__.py": 1419,
   "worktree-manager/src/worktree_manager/_installation_context.py": 9169,
   "worktree-manager/src/worktree_manager/production_picker/picker_tui/data_ssh.py": 2033,
-  "worktree-manager/src/worktree_manager/production_picker/picker_tui/engine.py": 8282,
+  "worktree-manager/src/worktree_manager/production_picker/picker_tui/engine.py": 8311,
   "worktree-manager/src/worktree_manager/production_picker/picker_tui/pivots.py": 2159
 }

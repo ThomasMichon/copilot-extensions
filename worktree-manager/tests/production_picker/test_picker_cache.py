@@ -108,7 +108,11 @@ class TestOverlayCachedState:
         assert raw["session_lock_stale"] is True
         assert raw["stale_lock_pids"] == [999]
         normalized = derive.norm(raw, "m", "win")
-        assert normalized["state"] == "FINAL"
+        # No ``closure`` descriptor in ``raw`` here, so ``_state()`` degrades
+        # to MERGED rather than trusting a raw FINAL claim
+        # (worktree-finality-and-obligations Phase 5's PR #2738
+        # review-response fix).
+        assert normalized["state"] == "MERGED"
         assert normalized["sess"] == "LOCK"
 
 
