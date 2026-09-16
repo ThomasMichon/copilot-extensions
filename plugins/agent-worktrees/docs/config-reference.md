@@ -262,6 +262,10 @@ agent-worktrees ≥ 1.5.3-dev113.)
 | `post_install_hook` | map(platform→list) | `{}` | Command run after install, per platform. |
 | `pr` | map | *(disabled)* | PR-workflow policy — see below. **Can also live in-repo.** |
 | `base_repo` | bool | `false` | Drive the anchor directly with **no worktrees** (for repos that can't use worktrees, e.g. enlistment-based monorepos). Pair with `env_script` (Windows enlistment env) or a custom `launch`. |
+| `stateless` | bool | `false` | This repo is a stateless harness routing personal state to a bound knowledge repo (see `Config.knowledge_repo`). Implies `requires_external_state_root`. |
+| `requires_external_state_root` | bool | `false` | Personal state (efforts/visions/logs) must be written to a separately-bound knowledge repo; the resolver refuses rather than falling back to this repo. |
+| `compose_knowledge_plugins` | bool | `true` | When false, never graft the paired knowledge repo's marketplaces/plugins into the harness session overlay. |
+| `knowledge_only` | bool | `false` | This repo is a **knowledge-only companion**: it exists solely to be carved as another project's paired `-k` knowledge worktree, never driven directly. `create` (and the interactive new-worktree flow) refuses a standalone worktree for it; binstub reconcile skips/reclaims its `<repo>` binstub; the Worktree Manager excludes it from implicit-default/ambiguous-selection project listings. The internal pairing carve is unaffected. Set the matching registry `repos add/update --class knowledge` too so `repos list`/the Manager's repo view reflect it. See the `knowledge-only-repos` effort. |
 
 **Platform-keyed maps** (`launch`, `launch_recovery`, `validate_hook`,
 `post_install_hook`) use the keys `windows`, `wsl`, `linux`, each mapping to a

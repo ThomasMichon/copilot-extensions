@@ -1056,7 +1056,8 @@ class TestLayeredConfig:
         anchor = tmp_path / "owner"
         anchor.mkdir()
         (anchor / cfg.INREPO_CONFIG_FILENAME).write_text(
-            "stateless: true\nrequires_external_state_root: true\n",
+            "stateless: true\nrequires_external_state_root: true\n"
+            "knowledge_only: false\n",
             encoding="utf-8",
         )
         from agent_worktrees import repos as repos_mod
@@ -1094,7 +1095,36 @@ class TestLayeredConfig:
 
         assert conf.repo_name == "owner"
         assert conf.default_repo.stateless is True
+        assert conf.default_repo.knowledge_only is False
         assert cfg.active_project() == "provider"
+
+    def test_knowledge_only_defaults_false_and_parses_true(
+        self, tmp_path: Path, monkeypatch
+    ):
+        anchor = tmp_path / "companion"
+        anchor.mkdir()
+        from agent_worktrees import repos as repos_mod
+
+        registry = repos_mod.ReposRegistry(
+            repos={
+                "companion": repos_mod.RepoEntry(
+                    name="companion",
+                    repo_class="knowledge",
+                    paths={"windows": str(anchor), "wsl": str(anchor),
+                           "linux": str(anchor)},
+                )
+            }
+        )
+        monkeypatch.setattr(repos_mod, "read_registry", lambda: registry)
+        cfg.set_active_project("companion")
+
+        missing = tmp_path / "no-machine-config.yaml"
+        assert cfg.load_config(missing).default_repo.knowledge_only is False
+
+        (anchor / cfg.INREPO_CONFIG_FILENAME).write_text(
+            "knowledge_only: true\n", encoding="utf-8",
+        )
+        assert cfg.load_config(missing).default_repo.knowledge_only is True
 
     def test_foreign_repo_machine_local_only(self, tmp_path: Path):
         # A foreign repo with no in-repo config loads purely from machine-local.

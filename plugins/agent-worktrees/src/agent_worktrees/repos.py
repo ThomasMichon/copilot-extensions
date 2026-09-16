@@ -48,7 +48,17 @@ from . import git_ops, output, registry_paths
 #   worktree   Full agent-worktrees lifecycle: concurrent-flow safe; edits,
 #              stages, and commits stay isolated in per-task worktrees until
 #              the final push.  (= an adopted agent-worktrees "project".)
-VALID_CLASSES = ("reference", "singleton", "worktree")
+#   knowledge  Same worktree-capable mechanics as "worktree" (so it remains
+#              eligible for the ``-k`` paired-knowledge carve, see
+#              ``__main__._carve_paired_knowledge``), but the repo exists
+#              *only* to be carved as another project's paired knowledge
+#              companion -- never driven directly. The corresponding
+#              enforcement (refuse standalone ``create``, skip its binstub,
+#              hide it from the Picker's top-level project list) lives in the
+#              repo's own committed ``RepoConfig.knowledge_only`` flag (see
+#              config.py); this registry class is the discoverable/listing
+#              counterpart -- set both together.
+VALID_CLASSES = ("reference", "singleton", "worktree", "knowledge")
 
 # Legacy ``type`` values mapped onto the new class taxonomy.
 _LEGACY_TYPE_MAP = {"project": "worktree", "repo": "reference"}

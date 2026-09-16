@@ -553,13 +553,20 @@ def _cmd_picker(rest: list[str]) -> int:
             print()
             return 1
         projects = build_projects()
+        # A knowledge-only repo (repo class "knowledge", see #knowledge_only)
+        # exists solely to be carved as another project's paired "-k"
+        # companion -- it must never be silently picked as an implicit
+        # default or offered in the ambiguous-selection prompt below.
+        launchable = [
+            p for p in projects if not (p.repo and p.repo.klass == "knowledge")
+        ]
         if positionals:
             project = positionals[0]
-        elif len(projects) == 1:
-            # Exactly one registered project is an unambiguous default -- no
-            # risk of silently opening the wrong one.
-            project = projects[0].name
-        elif not projects:
+        elif len(launchable) == 1:
+            # Exactly one registered launchable project is an unambiguous
+            # default -- no risk of silently opening the wrong one.
+            project = launchable[0].name
+        elif not launchable:
             project = ""
         else:
             # #2426: multiple registered projects with no explicit selection
@@ -570,7 +577,7 @@ def _cmd_picker(rest: list[str]) -> int:
             print(
                 "error: multiple projects are registered and none was "
                 "specified. Pass a project name: "
-                f"{', '.join(p.name for p in projects)}"
+                f"{', '.join(p.name for p in launchable)}"
             )
             return 2
         if not project:
