@@ -7,6 +7,7 @@ import argparse
 import base64
 import json
 import os
+import platform
 import shutil
 import stat
 import subprocess
@@ -630,6 +631,78 @@ def _worktrees_argv(command: str, *arguments: str) -> list[str]:
     return [command, *arguments]
 
 
+def _platform_key() -> str:
+    if platform.system() == "Windows":
+        return "windows"
+    if os.environ.get("WSL_DISTRO_NAME"):
+        return "wsl"
+    return "linux"
+
+
+def _project_name_for_root(root: Path) -> str | None:
+    """Reverse-lookup ``root``'s adopted project name from the repository
+    registry, for the ``--project`` fallback below.
+
+    ``agent-worktrees state-root`` normally discovers its project from the
+    current directory, like git -- but a *bare* anchor checkout (an
+    ``agent-worktrees``-managed repo's own anchor, which deliberately has no
+    work tree; see the harness's worktree policy) carries none of the
+    markers that walk-up discovery looks for, so cwd-based discovery always
+    fails there even though the repo is perfectly well-known by name.
+    """
+    state, registry = _load_yaml_mapping(Path.home() / ".agent-worktrees" / "repos.yaml")
+    if state != "ready" or registry is None:
+        return None
+    repos = registry.get("repos")
+    if not isinstance(repos, dict):
+        return None
+    key = _platform_key()
+    try:
+        target = root.resolve(strict=True)
+    except OSError:
+        target = root
+    for name, entry in repos.items():
+        if not isinstance(name, str) or not isinstance(entry, dict):
+            continue
+        candidate = entry.get(key)
+        if not isinstance(candidate, str) or not candidate.strip():
+            continue
+        try:
+            candidate_path = Path(candidate).expanduser().resolve(strict=True)
+        except OSError:
+            continue
+        if candidate_path == target:
+            return name
+    return None
+
+
+def _run_state_root(
+    command: str, environment: dict[str, str], *, cwd: Path | None, project: str | None
+) -> subprocess.CompletedProcess[str] | None:
+    arguments = ("state-root", "--json") if project is None else (
+        "--project", project, "state-root", "--json",
+    )
+    try:
+        return subprocess.run(
+            _worktrees_argv(command, *arguments),
+            cwd=str(cwd) if cwd is not None else None,
+            env=environment,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=20,
+            check=False,
+            # `command` can resolve to the PATH `.cmd` binstub (shutil.which
+            # prefers .cmd over .ps1 on Windows), which Windows must interpret
+            # through a fresh cmd.exe -- CREATE_NO_WINDOW keeps that console
+            # invisible instead of flashing on every companion-provider probe.
+            creationflags=(0x08000000 if os.name == "nt" else 0),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 def _external_state_root(root: Path) -> tuple[str, Path | None]:
     command = _worktrees_command()
     if not command:
@@ -647,27 +720,19 @@ def _external_state_root(root: Path) -> tuple[str, Path | None]:
             "PYTHONPATH",
         }
     }
-    try:
-        result = subprocess.run(
-            _worktrees_argv(command, "state-root", "--json"),
-            cwd=str(root),
-            env=environment,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=20,
-            check=False,
-            # `command` can resolve to the PATH `.cmd` binstub (shutil.which
-            # prefers .cmd over .ps1 on Windows), which Windows must interpret
-            # through a fresh cmd.exe -- CREATE_NO_WINDOW keeps that console
-            # invisible instead of flashing on every companion-provider probe.
-            creationflags=(0x08000000 if os.name == "nt" else 0),
-        )
-    except (OSError, subprocess.SubprocessError):
+    result = _run_state_root(command, environment, cwd=root, project=None)
+    if result is None:
         return "unavailable", None
     if result.returncode != 0:
-        return "unavailable", None
+        # cwd-based discovery fails outright for a bare anchor checkout (no
+        # work tree, so no walk-up markers) -- retry by explicit project name
+        # instead of giving up on the whole scope.
+        project = _project_name_for_root(root)
+        if project is None:
+            return "unavailable", None
+        result = _run_state_root(command, environment, cwd=None, project=project)
+        if result is None or result.returncode != 0:
+            return "unavailable", None
     try:
         payload = json.loads(result.stdout, object_pairs_hook=_strict_object)
     except (ConfigError, TypeError, ValueError):
