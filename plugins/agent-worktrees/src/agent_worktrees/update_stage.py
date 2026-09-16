@@ -397,6 +397,7 @@ def indicator_state(
     """Picker-facing update state for the version indicator (#1430).
 
     Returns one of:
+      "paused"    -- this launch explicitly disabled updates;
       "checking"  -- a background stage is in flight (live, fresh lock, or the
                      last stage recorded ``skipped: locked`` because a peer
                      stage owns the lock);
@@ -407,6 +408,9 @@ def indicator_state(
 
     Read-only and cheap (two small files); safe to poll on the render tick.
     """
+    if os.environ.get("WORKTREE_NO_UPDATE") == "1":
+        return "paused"
+
     lk = lock or lock_path()
     try:
         if lk.exists():
