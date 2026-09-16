@@ -618,7 +618,7 @@ either.
   this function (never composed/mutated here); always `confirmed` (a local
   tracking-record read, no fetch/staleness concept); purely informational
   -- does NOT gate `FINAL`.
-- [~] Render the marker convention (an asterisk, or the compact-text
+- [x] Render the marker convention (an asterisk, or the compact-text
   equivalent) on any individual unconfirmed fact across `list --json`, the
   mux/PSMux status segment, and the Picker -- replacing today's implicit
   "COMPLETED reads MERGED unless freshly fetched" special case with the
@@ -628,9 +628,14 @@ either.
   independent of each other, of the `C<N>`/`F<N>` markers, and of the base
   label (not just `MERGED` -- any state can carry either marker). The mux
   segment already renders `compact` directly, so it inherited this for
-  free. The Picker does NOT yet consume `compact` at all (a separate,
-  already-flagged-unstarted slice per the 2026-09-15 Picker-label-parity
-  Journal entry) -- still open.
+  free. The Picker now consumes it too: `worktree-manager`'s picker_tui
+  gained an always-on second (detail) row per worktree (generalizing the
+  pre-existing, previously-conditional live-pulse sub-line), which carries
+  the `compact` suffix (everything after the base label); freed the
+  `RELATION` column from 7 truncated text cells to a single icon
+  (`●`/`◐`/`⇒`/`■`/`?`/` `) to make room, with the full word now only ever
+  needed on that second row (though not currently repeated there -- see
+  Journal for what was deliberately left out).
 - [x] Update `docs/cli-reference.md`, `docs/mux.md`, and
   `docs/worktree-lifecycle.md` (all touched by PR #2679/#2681 for the old
   FINAL/MERGED split) for the decomposed model, and update the
@@ -655,7 +660,7 @@ either.
 
 ## Validation Plan
 
-- [~] **Sub-state decomposition** (Phase 9): the descriptor names
+- [x] **Sub-state decomposition** (Phase 9): the descriptor names
   each of the five facts (checkpoint activity, upstream-containment, local
   dirtiness, open claims, pending handoff) independently, with its own
   freshness; `FINAL` requires upstream-containment and claims-clear both
@@ -688,12 +693,16 @@ either.
   `compact` now also renders the `U*`/`OC*` per-fact marker (independent of
   each other, of the `C<N>`/`F<N>` markers, and of the base label) whenever
   the corresponding fact is unconfirmed; the mux/PSMux status segment
-  inherits this automatically (it already renders `compact` directly), but
-  the Picker does not yet consume `compact` at all -- still open.
+  inherits this automatically (it already renders `compact` directly).
   `pending_handoff` now reads `rec.pending_handoffs` (agent-worktrees' own
   already-tracked opened-but-unlinked session handoffs), always confirmed,
   purely informational (does not gate `FINAL`) -- all 5 facts are now
-  real, none are stub placeholders.
+  real, none are stub placeholders. The Picker now renders `compact` too:
+  an always-on second (detail) row per worktree in `worktree-manager`'s
+  picker_tui (generalizing the pre-existing conditional live-pulse
+  sub-line) carries the marker suffix, freed up by iconifying the
+  `RELATION` column (7 truncated text cells -> 1 icon cell). Every Phase 9
+  Plan bullet is now checked off.
 - [ ] **Session-claim lifecycle** (Phase 8, proposed): a worktree's own live
   Copilot session is a held claim; it settles on finalize, settles on a
   successful handoff cutover, releases on `sessionEnd`, and reopens on a
@@ -1607,4 +1616,64 @@ The approved design is the faceted model in [design.md](design.md):
   one in this phase (touches rendered-text golden files in a UI I cannot
   visually verify from here) -- deliberately not attempted in this same
   pass; left as the final piece for a dedicated follow-up slice.
+
+### 2026-09-16 (continued) - Phase 9 slice 8: Picker renders the markers too -- Phase 9 done
+
+- Landed the last open Phase 9 Plan bullet, on operator direction: every
+  worktree row in the Picker's native list is now TWO rows, not one --
+  generalizing the pre-existing, previously-CONDITIONAL live-pulse
+  sub-line (`build_data`'s decorative second `add()` call, gated on
+  `live_pulse and live_intent`) into an always-rendered second (detail)
+  line. That existing mechanism already proved variable per-row height was
+  safe (the list's incremental/scroll code addresses rows by a `stop=("L",
+  li)` tag, not a fixed line-height assumption) -- generalizing it was a
+  much lower-risk path than inventing new multi-row list infrastructure.
+- The second row now carries `derive._status_markers(w)` (new function:
+  everything in `closure.compact` AFTER the base label -- so `"MERGED C1
+  U* OC*"` yields `"C1 U* OC*"`, never re-showing the label itself, and
+  degrading to `""` if `compact` doesn't actually start with `label`,
+  e.g. a mixed-version payload) -- `C<N>`/`F<N>` tokens dim, `U*`/`OC*`
+  tokens warn-styled so a stale fact stays scannable -- then the
+  live-pulse glyph+intent as before, in that order. A row with neither
+  renders a single dim `·` placeholder so the two-line rhythm is uniform
+  across every row, not just the ones with something to say.
+- Iconified the `RELATION` column (operator direction: "the RELATION
+  column is enum values, so we could iconify it to make room") --
+  `reciprocal.short_label`'s 6-value vocabulary (`BOUND`/`CONTROL`/
+  `HANDOFF`/`TERM`/`AMBIG`/`""`) collapsed to one glyph each (`●`/`◐`/`⇒`/
+  `■`/`?`/` `), shrinking the column from 7 cells (already truncated to
+  "RELATI…" even at that width, per the pre-change golden) to 1. The
+  freed width flows to the flex `title` column via the existing `fit()`
+  column-fitter, same as before. Deliberately did NOT change the
+  underlying `row["relation"]` data field (still the full text label) --
+  only added an engine-side icon/style lookup at render time -- so
+  `test_reciprocal_relation.py`'s existing `row["relation"] == "CONTROL"`-
+  style assertions needed no change.
+- The golden-snapshot risk that stopped the prior session turned out to be
+  much lower than feared: `tests/production_picker/goldens/picker/
+  worktrees_list.txt` is a PLAIN TEXT capture (not a pixel screenshot), so
+  regenerating it via `AGENT_WORKTREES_UPDATE_GOLDENS=1` and reading the
+  result directly was sufficient visual verification -- no separate
+  rendering/screenshot tool was needed after all.
+- Added `tests/production_picker/test_status_markers.py` (5 cases: no
+  closure -> no markers, `FINAL` -> no markers, `MERGED` with a held claim
+  and both unconfirmed facts -> `"C1 U* OC*"`, markers never repeat the
+  base label, a mismatched `compact`/`label` pair degrades to no markers
+  rather than mis-slicing) and 2 new cases in `test_reciprocal_relation.py`
+  (the relation column is exactly 1 cell wide in both `ACTIVE_SPECS`/
+  `LIST_SPECS`; every possible `short_label()` output maps to a defined
+  icon AND style, cross-checked against the real function rather than a
+  duplicated literal set).
+- Verified: `test_status_markers.py` + `test_reciprocal_relation.py` +
+  `test_picker_capture.py` (25 tests) pass; the FULL
+  `tests/production_picker/` suite (525 passed, 2 skipped, plus 3
+  pre-existing unrelated failures in `test_data_ssh_sources.py` --
+  confirmed present on the unmodified checkout too, a Windows-path
+  assumption unrelated to this change) also passes. `ruff check` diff on
+  every touched file confirmed identical before/after (one new I001 in a
+  test file's import order, fixed with `--fix` rather than left).
+- **Phase 9 is now fully complete** -- every Plan and Validation Plan
+  bullet is checked off. The effort's remaining open item is Phase 8
+  (Session-claim lifecycle), still just a proposal (not reviewed or
+  built).
 

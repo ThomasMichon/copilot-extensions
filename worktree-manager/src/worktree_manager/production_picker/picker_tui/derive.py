@@ -182,6 +182,23 @@ def _state(w):
     return (status or "?").upper()[:6]
 
 
+def _status_markers(w):
+    """The closure descriptor's per-fact freshness markers (worktree-finality-
+    and-obligations Phase 9), e.g. ``"C1 U* OC*"`` -- held-claim/follow-up
+    counts plus an unconfirmed upstream-containment/open-claims marker.
+    Everything in ``compact`` AFTER the base label, which is already rendered
+    separately via ``_state()``/the ``state`` column -- never duplicate the
+    label itself. Empty string when there's nothing to show (no descriptor,
+    or a clean/confirmed one) rather than repeating the bare label.
+    """
+    closure = w.get("closure") or {}
+    compact = str(closure.get("compact") or "")
+    label = str(closure.get("label") or "")
+    if not compact or not label or not compact.startswith(label):
+        return ""
+    return compact[len(label):].strip()
+
+
 def _sess(w):
     if w.get("mux_attached"):
         return f"●{w.get('mux_clients', 1)}"
@@ -450,6 +467,7 @@ def norm(
         "kind": kind,
         "tracking": w.get("status", ""),
         "state": _state(w),
+        "status_markers": _status_markers(w),
         "relation": reciprocal.short_label(reciprocal_relation),
         "reciprocal_relation": reciprocal_relation,
         "age": _age(

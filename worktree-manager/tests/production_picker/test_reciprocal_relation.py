@@ -139,6 +139,35 @@ def test_relation_column_is_present_in_both_grids() -> None:
     assert any(spec[0] == "relation" for spec in LIST_SPECS)
 
 
+def test_relation_column_is_iconified_to_one_cell() -> None:
+    # iconify-relation: freed width goes to the flex `title` column instead
+    # of a 7-cell "RELATI…"-truncated text column.
+    active_spec = next(spec for spec in ACTIVE_SPECS if spec[0] == "relation")
+    list_spec = next(spec for spec in LIST_SPECS if spec[0] == "relation")
+    assert active_spec[2] == 1
+    assert list_spec[2] == 1
+
+
+def test_every_relation_short_label_has_an_icon() -> None:
+    from worktree_manager.production_picker.picker_tui import reciprocal
+    from worktree_manager.production_picker.picker_tui.engine import (
+        _RELATION_ICON,
+        _RELATION_STYLE,
+    )
+
+    # Every possible short_label() output (including the empty "unbound"
+    # string) must resolve to a defined icon/style -- an unmapped state would
+    # silently fall through to the generic "?" fallback in row_text.
+    possible_labels = {"BOUND", "CONTROL", "HANDOFF", "TERM", "AMBIG", ""}
+    assert set(_RELATION_ICON) == possible_labels
+    assert set(_RELATION_STYLE) == possible_labels
+    # Cross-check against the actual function, not just a duplicated set.
+    for state in ("bound-here", "controlled-elsewhere", "handed-off",
+                   "terminal", "ambiguous", "unbound"):
+        label = reciprocal.short_label({"state": state})
+        assert label in _RELATION_ICON
+
+
 def test_controller_navigation_requires_exact_loaded_target() -> None:
     target = {
         "raw": {"id": "parent", "repo": "example"},
