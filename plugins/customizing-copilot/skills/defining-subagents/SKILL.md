@@ -124,6 +124,16 @@ tools with `'server-name/*'` or `'server-name/tool-name'` in the tools list.
 > — including as the `task` tool's `agent_type`. A bare name is reserved for an
 > agent defined in the *same* plugin. The identical convention covers cross-plugin
 > **skill** references (see the authoring-skills skill).
+>
+> **Known runtime limitation.** On some Copilot CLI runtime versions, the
+> `task` tool's `agent_type` is validated against a fixed built-in allowlist
+> with no plugin/marketplace-agent slot at all, so a delegated/background
+> sub-agent cannot reach a `plugin:name` agent through `task` regardless of
+> qualification, and a freshly spawned nested `copilot` process does not
+> inherit the parent session's resolved `enabledPlugins` either. If a
+> delegated/background sub-agent needs to reach a plugin-defined agent on an
+> affected version, see **`hoisting-plugin-agents`** for a repo-local
+> mechanical workaround.
 
 ## Execution contract
 
