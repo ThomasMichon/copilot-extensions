@@ -519,11 +519,6 @@ def _resolve_mock_mode(explicit=None):
     return False
 
 
-def _native_list_enabled() -> bool:
-    """The native ``OptionList`` body is the only remaining data-body surface."""
-    return True
-
-
 class _PickerSegment(Widget):
     """One NF2 screen segment (or a row-slice of one) -- a leaf widget that
     renders its slice of ``PickerScreen._frame_segments()`` (#88 NF2/NF3).
@@ -654,66 +649,6 @@ class _PickerButtons(_FocusRegion):
         chrome = scr._build_chrome_vrows(W)
         _machine, buttons = scr._chrome_split(chrome)
         return scr._join_lines([vr.text for vr in buttons], W)
-
-
-class _PickerBodyData(_FocusRegion):
-    """The scrolling data body as a focusable region (#88 NF3) -- windows just the
-    pivot's data rows (the fixed chrome renders above), scrolling with the
-    selection while the chrome stays put. ``height: 1fr`` so it fills the space
-    below the chrome; the window is sized to its own height. Its ``_zone`` is a
-    placeholder -- the data region's head is resolved per-pivot via
-    ``region_head`` on focus."""
-
-    _zone = "L"
-
-    def on_focus(self) -> None:
-        scr = self._screen
-        if scr._nf_syncing or not scr._nf_mounted:
-            return
-        # The data region's head zone varies by pivot (L / C / T / PR); land on
-        # the current pivot's default body stop rather than a fixed zone.
-        if scr._widget_for_zone(scr.sel[0]) != "nf-body-data":
-            scr.sel = scr.default_sel()
-            scr.refresh()
-
-    def render(self):
-        scr = self._screen
-        W = scr.size.width or 100
-        _chrome, data = scr._build_body_split(W)
-        h = max(1, self.size.height or 1)
-        return scr._join_lines(scr._data_lines(data, h), W)
-
-    def on_click(self, event) -> None:
-        # Click-to-select a data row (#88 NF4); double-click activates it (opens
-        # the row's action -- the submenu for a worktree, etc.), the natural
-        # pointer parallel to Enter. Maps the click's row offset onto the drawn
-        # window and, if it lands on a real data row, points sel there.
-        scr = self._screen
-        event.stop()
-        W = scr.size.width or 100
-        _chrome, data = scr._build_body_split(W)
-        h = max(1, self.size.height or 1)
-        stop = scr._data_stop_at(data, h, int(event.y))
-        if stop is not None:
-            scr.sel = stop
-            scr._wt_track_focus()
-            if getattr(event, "chain", 1) >= 2:
-                scr._activate()
-            scr.refresh()
-
-    def on_mouse_scroll_down(self, event) -> None:
-        scr = self._screen
-        event.stop()
-        scr._dispatch_key("down")
-        scr._sync_focus_to_sel()
-        scr.refresh()
-
-    def on_mouse_scroll_up(self, event) -> None:
-        scr = self._screen
-        event.stop()
-        scr._dispatch_key("up")
-        scr._sync_focus_to_sel()
-        scr.refresh()
 
 
 class _PickerStickyHeader(Widget):
@@ -1799,6 +1734,7 @@ class PickerScreen(Widget):
             for tab in self.source_tabs
         ]
         self.loader = loader
+        self._reconcile_bootstrap_source_ids(tabs, prepared.get("local"))
         self._apply_loader_records()
         self._source_local = prepared.get("local") or self._source_local
         self._source_repo_branch = prepared.get("repo_branch") or ("", "")
@@ -1882,6 +1818,46 @@ class PickerScreen(Widget):
                 if key is not None:
                     seen.add(key)
         self.data = merged
+
+    def _reconcile_bootstrap_source_ids(self, tabs, local):
+        """Rewrite bootstrap rows onto the canonical local source identity.
+
+        The cache-only bootstrap rows can land before roster resolution, so they
+        are normalized with the hostname-based local source identity from
+        ``data_local``. Once the authoritative roster arrives we know the real
+        local tab identity (for example a machine key that differs from the
+        hostname). Re-key those temporary rows before merging loader records so
+        the authoritative local rows replace them instead of duplicating them.
+        """
+        if not self.data or not local:
+            return
+        local_tab = next((tab for tab in tabs if tab.get("local")), None)
+        canonical_source_id = (
+            local_tab.get("source_id")
+            if isinstance(local_tab, dict)
+            else None
+        )
+        if not canonical_source_id:
+            return
+        updated = []
+        changed = False
+        for rec in self.data:
+            if (
+                (rec.get("machine"), rec.get("env")) != local
+                or rec.get("source_id") == canonical_source_id
+            ):
+                updated.append(rec)
+                continue
+            patched = dict(rec)
+            patched["source_id"] = canonical_source_id
+            selection_id = patched.get("selection_id")
+            if isinstance(selection_id, str) and "\x1f" in selection_id:
+                _old_source, row_id = selection_id.split("\x1f", 1)
+                patched["selection_id"] = f"{canonical_source_id}\x1f{row_id}"
+            updated.append(patched)
+            changed = True
+        if changed:
+            self.data = updated
 
     def on_unmount(self):
         # Picker is tearing down (a launch decision, cancel, or quit). Signal
@@ -3734,13 +3710,11 @@ class PickerScreen(Widget):
         yield _PickerSegment(self, "chrome", id="nf-chrome")
         yield _PickerMachine(self, id="nf-machine")
         yield _PickerButtons(self, id="nf-buttons")
-        if _native_list_enabled():
-            # NF5-5 (#88): swappable native OptionList data body (opt-in), with a
-            # pinned section header above it (hidden until scrolled).
-            yield _PickerStickyHeader(id="nf-body-sticky")
-            yield _PickerNativeData(self, id="nf-body-data")
-        else:
-            yield _PickerBodyData(self, id="nf-body-data")
+        # NF5-5 (#88): the native OptionList data body is the only remaining
+        # body path, with a pinned section header above it (hidden until
+        # scrolled).
+        yield _PickerStickyHeader(id="nf-body-sticky")
+        yield _PickerNativeData(self, id="nf-body-data")
         yield _PickerSegment(self, "footer", id="nf-footer")
 
     def _refresh_nf_segments(self) -> None:

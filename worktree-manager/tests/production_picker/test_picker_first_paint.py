@@ -268,8 +268,8 @@ def test_partial_stream_merges_over_bootstrap_until_roster_is_authoritative():
     class Loader:
         records_value = [{
             "id4": "cached-a",
-            "selection_id": "local\x1fcached-a",
-            "source_id": "local",
+            "selection_id": "machine-ssh:host:win\x1fcached-a",
+            "source_id": "machine-ssh:host:win",
             "title": "live-a",
         }]
         authoritative = set()
@@ -313,15 +313,19 @@ def test_partial_stream_merges_over_bootstrap_until_roster_is_authoritative():
     screen.data = [
         {
             "id4": "cached-a",
-            "selection_id": "local\x1fcached-a",
-            "source_id": "local",
+            "selection_id": "machine-ssh:host:win\x1fcached-a",
+            "source_id": "machine-ssh:host:win",
             "title": "cached-a",
+            "machine": "host",
+            "env": "Win",
         },
         {
             "id4": "cached-b",
-            "selection_id": "local\x1fcached-b",
-            "source_id": "local",
+            "selection_id": "machine-ssh:host:win\x1fcached-b",
+            "source_id": "machine-ssh:host:win",
             "title": "cached-b",
+            "machine": "host",
+            "env": "Win",
         },
     ]
     screen.update_state = "idle"
@@ -334,7 +338,7 @@ def test_partial_stream_merges_over_bootstrap_until_roster_is_authoritative():
 
     assert [row["title"] for row in screen.data] == ["live-a", "cached-b"]
 
-    Loader.authoritative = {"local"}
+    Loader.authoritative = {"machine-ssh:host:win"}
     screen._tick()
 
     assert [row["title"] for row in screen.data] == ["live-a"]
