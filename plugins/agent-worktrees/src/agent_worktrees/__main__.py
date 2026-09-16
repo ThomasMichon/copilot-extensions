@@ -16521,6 +16521,16 @@ def cmd_sync(args: argparse.Namespace) -> int:
             git_ops.fetch(repo.remote, cwd=repo.anchor)
         except Exception:
             pass
+        else:
+            # worktree-finality-and-obligations Phase 9: this IS the
+            # "sync" operation-triggered freshness signal -- record it for
+            # every distinct repo represented among the records just synced
+            # (normally exactly one, since tracking_dir() is per-project),
+            # so the closure descriptor's upstream_containment fact reflects
+            # this fetch immediately rather than waiting for the next
+            # periodic sweep.
+            for _synced_repo in {r.repo for r in records if r.repo}:
+                tracking.record_repo_fetch_confirmed(_synced_repo)
 
     session_ctx = sessions.scan_sessions_fast(records)
     active_paths = _build_active_paths(records, session_ctx)
