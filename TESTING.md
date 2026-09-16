@@ -210,10 +210,6 @@ python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fix
 - **agent-worktrees:** a large suite covering worktree lifecycle, the
   status/tracking model, PR flow, activation-preserving installed-inventory
   updates, and the Picker-facing engine contracts.
-  The focused `-k psmux_verification` lane exercises the real NoProfile
-  verification child from Windows PowerShell 5.1 and PowerShell 7 parents,
-  including exact-version acceptance, mismatch rejection, and environment
-  cleanup without touching installed PSMux packages or persistent PATH.
 - **Worktree Manager:** its standalone suite includes the production Textual
   **Picker** UX, golden, cache, pivot, streaming, steering, profile, SSH-source,
   selection, capture, mock, and PNG-validation corpus under

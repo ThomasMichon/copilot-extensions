@@ -20,8 +20,6 @@ def test_psmux_no_profile_verification_preserves_regex(tmp_path, parent):
     if not executable or not shutil.which("pwsh.exe"):
         pytest.skip("Both the requested parent shell and PowerShell 7 are required")
 
-    # A native test command supplies help text; the verifier and both shell
-    # processes are real. No installed package, profile, or persistent PATH changes.
     bin_dir = tmp_path / "bin with spaces"
     bin_dir.mkdir()
     (bin_dir / "psmux.cmd").write_text(

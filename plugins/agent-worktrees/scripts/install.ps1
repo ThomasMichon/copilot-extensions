@@ -2283,7 +2283,6 @@ function Ensure-PsmuxSshSafe {
             '$out = (& $cmd.Source --help 2>&1 | Select-Object -First 1) | Out-String; ' +
             '$pattern = "(?<![0-9.])" + [regex]::Escape($env:AW_PSMUX_EXPECTED_VERSION) + "(?![0-9.])"; ' +
             'if ($out -notmatch $pattern) { exit 1 }'
-        # Windows PowerShell 5.1 strips embedded quotes from native -Command argv.
         $encodedVerify = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($verify))
         & pwsh.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand $encodedVerify
         if ($LASTEXITCODE -ne 0) {
