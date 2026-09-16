@@ -266,13 +266,44 @@ Verbatim from the operator:
   `_handoff_fallback_loop` (same supervised-cycle shape as
   `_gc_loop`/`_orphan_reap_loop`), gated **default-off**
   (`AGENT_DISPATCH_HANDOFF_FALLBACK`) with a 1h default grace window.
-- [ ] Evaluate a `userPromptSubmitted` hook that greps the successor's first
+- [x] Evaluate a `userPromptSubmitted` hook that greps the successor's first
   submitted prompt for the expected handoff token, as a deterministic
   "pickup actually happened" signal feeding the lineage trace (complements,
   does not replace, Phase 3's coordinator fallback).
-- [ ] Close `handoff-live-cutover`'s remaining Phase 3 items (armed
+  **Built (not just evaluated):** the runtime has no separate
+  `userPromptSubmitted` hook type -- the equivalent live signal is
+  `extension.mjs`'s existing `session.on("user.message", ...)` SDK event
+  (already used for turn counting). Added a one-shot check there: on the
+  session's first turn, `cutover-seed.mjs`'s new
+  `extractRecoveryLocatorFromPrompt()` (pure regex grep, no LLM judgment)
+  looks for the exact `Recovery: context-handoff <kind>:<id>` clause every
+  cutover seed carries; on a match, `handoff-core.mjs`'s new
+  `logHandoffPromptReceived()` best-effort logs a
+  `context_handoff_prompt_received` event via `agent-worktrees
+  activity-log` (a distinct event/field name from agent-worktrees' own
+  numbered-handoff `handoff_token` space, to avoid any identity collision).
+  The predecessor's existing `pickupSignals()` gained a matching
+  `worktreePromptReceived()` reader, folded in as a new `"prompt-received"`
+  entry in the `via` array -- a stronger, more direct proof of pickup than
+  the existing `spawnInFlight` marker (which only proves a process was
+  created, not that Copilot itself received the seed), and immune to the
+  skill-load race a mid-session reload can cause (see this effort's own
+  awareness-nudge incident). 13 new tests (7 pure-function +
+  `logHandoffPromptReceived` + an end-to-end `triggerHandoff` pickup test).
+- [x] Close `handoff-live-cutover`'s remaining Phase 3 items (armed
   `session.idle` retirement finish, non-mux/successor-start-failure
   fallback) now that the effort lives in this repo.
+  **Reconciled, not rebuilt:** re-verified against current code and found
+  two of the three items were already satisfied -- just by a different,
+  deliberately-superseded-in-place mechanism (agent-bridge +
+  agent-worktrees' resident status-monitor own mux/retire, not the
+  extension, per `context-handoff`'s own process-manager-agnostic
+  boundary). The third (non-mux/boot-failure fallback) was closed by this
+  effort's own Phase 3 slice 1 (`--headless`) plus the pre-existing
+  `manualFallbackInstructions` path. Updated that effort's Phase 3
+  checklist + journal in place with per-item provenance notes rather than
+  leaving it stale. Only its private, non-resolvable stretch validation
+  (a live tmux pass) remains open there, unchanged.
 
 ### Phase 4 — Configurability (Goal 4)
 - [ ] Add a `mode` config key (`auto` / `manual-only` / `off`) to
@@ -571,8 +602,55 @@ gate land._
   pre-existing/unrelated skips); agent-bridge 56 passed. Guards
   (module-size, version-bump, and the full pre-push suite) all green.
   Bumped `agent-dispatch` to `0.1.2-dev110`, `agent-bridge` to
-  `0.4.0-dev490`. **PR #2808** opened.
+  `0.4.0-dev490`. **PR #2808** opened, later CI-blocked by two unrelated
+  drift bugs surfaced while it sat open (worktree-manager module-size
+  baseline, agent-index-service.json version lag) -- both pre-existing on
+  `main`, fixed in the same PR per the established pattern, then merged.
 - **Remaining for a follow-up slice:** the `userPromptSubmitted` pickup
   hook (Phase 3 item 3) and closing `handoff-live-cutover`'s remaining
   Phase 3 items (item 4). Once those land, Phases 4 (configurability) and 5
   (lineage/diagnostics) remain.
+
+### 2026-09-16 — Phase 3 slice 3 (deterministic pickup signal + closing handoff-live-cutover)
+
+- **Item 3 (`userPromptSubmitted` signal), built:** the runtime has no
+  distinct `userPromptSubmitted` hook type -- the live equivalent is
+  `extension.mjs`'s existing `session.on("user.message", ...)` SDK event
+  (already wired for turn counting). Added a one-shot, first-turn-only
+  check: `cutover-seed.mjs`'s new `extractRecoveryLocatorFromPrompt()`
+  (pure regex grep for the exact `Recovery: context-handoff <kind>:<id>`
+  clause every cutover seed carries -- no LLM judgment) detects a handoff
+  pickup; on a match, `handoff-core.mjs`'s new `logHandoffPromptReceived()`
+  best-effort logs a `context_handoff_prompt_received` event via
+  `agent-worktrees activity-log` (a deliberately distinct event/field name
+  from agent-worktrees' own numbered-handoff `handoff_token` identity space,
+  to avoid any collision). The predecessor's `pickupSignals()` gained a
+  matching reader (`worktreePromptReceived()`), folded in as a new
+  `"prompt-received"` entry in the `via` array -- more direct proof of
+  pickup than the existing `spawnInFlight` marker (which only proves a
+  process was created, not that Copilot itself received the seed), and
+  immune to the skill-load race a mid-session reload can cause (the same
+  class of bug this effort's PR #2683 fixed for the awareness nudge).
+- **Item 4 (closing `handoff-live-cutover`'s Phase 3), reconciled not
+  rebuilt:** re-verified its three-item checklist against current code.
+  Two items were already satisfied by a *different* mechanism than
+  originally described -- the extension was deliberately kept
+  process-manager-agnostic (never touches mux, never spawns a successor,
+  never retires panes), so mux-detect/self-retire-arm and pane retirement
+  are handled by `agent-bridge` (`requestAgentBridgeHandoff`) and
+  agent-worktrees' resident status-monitor daemon instead. The third
+  (non-mux/boot-failure fallback) was already covered by
+  `manualFallbackInstructions` plus this effort's own Phase 3 slice 1
+  (`--headless`). Updated `handoff-live-cutover`'s README checklist +
+  journal in place with per-item provenance notes rather than leaving it
+  stale -- only its private, non-resolvable stretch validation (a live
+  tmux pass, #2261†/#2262†) remains open there, unchanged from migration.
+- 13 new tests (7 pure `extractRecoveryLocatorFromPrompt` cases in
+  `cutover-seed.test.mjs`, 3 `logHandoffPromptReceived` cases, and an
+  end-to-end `triggerHandoff` test proving the real (unmocked)
+  `pickupSignals` path surfaces `"prompt-received"`). Full
+  `context-handoff` JS suite: 91 passed, 2 pre-existing/unrelated skips.
+  Python suite: 24 passed, 4 skipped, 3 pre-existing/unrelated local-
+  environment failures (confirmed identical before this change).
+- **Phase 3 is now fully closed.** Remaining work: Phase 4 (configurability)
+  and Phase 5 (lineage/diagnostics closure).
