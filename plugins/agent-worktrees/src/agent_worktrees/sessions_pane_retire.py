@@ -173,7 +173,22 @@ def wait_for_handoff_candidate(
         except (OSError, ValueError):
             handoff = None
         if handoff is not None and handoff.candidate:
-            return handoff.candidate, "session-associated"
+            if not (pane_id and mux_session):
+                return handoff.candidate, "session-associated"
+            # Pane-aware wait: `handoff.candidate` is a record-wide field, not
+            # proof it belongs to *this* pane -- a racing/earlier attempt's
+            # self-report could have set it. Confirm via the same
+            # process-ancestry check before trusting it.
+            try:
+                from . import sessions
+
+                binding = sessions.mux_binding_for_session(
+                    handoff.candidate, expected_session_name=mux_session,
+                )
+            except Exception:
+                binding = None
+            if binding and binding.get("pane_id") == pane_id:
+                return handoff.candidate, "session-associated"
         now = time.monotonic()
         if pane_id and mux_session and now >= next_pane_scan:
             next_pane_scan = now + pane_scan_interval
