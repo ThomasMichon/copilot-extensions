@@ -3964,6 +3964,13 @@ def test_update_indicator_focus_glyph_and_refresh():
     assert not s._update_actionable()
     assert "\u2713" in s._update_seg(False).plain          # ✓
 
+    # paused: truthful informational state with no refresh action.
+    s.update_state = "paused"
+    assert ("UPD", 0) not in s.stops()
+    assert not s._update_actionable()
+    assert "\u2016" in s._update_seg(False).plain          # ‖
+    assert "Updates paused" in "".join(row.plain for row in s.topbar(118))
+
     # available: focusable refresh stop, refresh glyph.
     s.update_state = "available"
     assert ("UPD", 0) in s.stops()

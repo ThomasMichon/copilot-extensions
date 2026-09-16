@@ -419,6 +419,20 @@ def test_indicator_current_and_available(tmp_path: Path):
     assert us.indicator_state(status=status, lock=lock) == "available"
 
 
+def test_indicator_paused_ignores_stale_available_status(
+    tmp_path: Path, monkeypatch
+):
+    status = tmp_path / "status.json"
+    lock = tmp_path / "lock"
+    status.write_text(json.dumps({"stage_done": True, "plugin_changed": True}),
+                      encoding="utf-8")
+    lock.write_text(json.dumps({"pid": os.getpid(), "started": us.time.time()}),
+                    encoding="utf-8")
+    monkeypatch.setenv("WORKTREE_NO_UPDATE", "1")
+
+    assert us.indicator_state(status=status, lock=lock) == "paused"
+
+
 def test_indicator_locked_skip_reads_as_checking(tmp_path: Path):
     status = tmp_path / "status.json"
     status.write_text(json.dumps({"stage_done": True, "skipped": "locked",

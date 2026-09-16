@@ -934,7 +934,9 @@ self-update and a plugin reconcile. This path is deliberately lightweight -- it
 only touches agent-worktrees -- so it is **not** relied on to fully update
 sibling plugins or modules.
 
-Skip with `--no-update` or `WORKTREE_NO_UPDATE=1`.
+Skip with `--no-update` or `WORKTREE_NO_UPDATE=1`. The Picker reports
+**Updates paused** for that launch and suppresses the refresh action, regardless
+of a shared staged-update status written by another launch.
 
 ### Optional Machine Settings Reconciliation
 

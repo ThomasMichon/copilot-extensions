@@ -69,7 +69,8 @@ never work against a stale tree or runtime:
 
 - **Pre-flight auto-update** — if the anchor repo has new commits affecting the
   worktree manager, the launcher re-runs the installer. Skip with `--no-update`
-  or `WORKTREE_NO_UPDATE=1`.
+  or `WORKTREE_NO_UPDATE=1`; the Picker then shows **Updates paused** and does
+  not expose a refresh action from another launch's staged-update status.
 - **Repo-adopted plugin reconciliation** — for each `<name>@copilot-extensions`
   in the anchor's `.github/copilot/settings.json`, the launcher ensures the
   payload is installed and its runtime matches (version-keyed, so an unchanged
