@@ -4,6 +4,31 @@ Dated, append-only running log of the effort.
 
 Part of the [handoff-live-cutover effort](README.md).
 
+## 2026-09-16 — Phase 3 checklist reconciled against reality (closed out by `context-handoff-overhaul`)
+- Re-verified this effort's Phase 3 checklist (opt-in gesture/mux-detect/
+  self-retire-arm; `session.idle` retire handler; graceful non-mux/boot-
+  failure fallback) against the current `context-handoff` + `agent-worktrees`
+  code, as `efforts/active/context-handoff-overhaul`'s Phase 3 (Challenge
+  2/3) instructed. Two of three items were already satisfied -- just not by
+  the mechanism originally described: the extension itself was deliberately
+  kept process-manager-agnostic (never touches mux, never spawns a
+  successor, never retires panes -- see the `context-handoff` README's own
+  boundary section), and that work moved to `agent-bridge`
+  (`requestAgentBridgeHandoff`) + `agent-worktrees`' resident status-monitor
+  daemon + `handoff-cutover`'s retire mode instead. The third (graceful
+  fallback) was already covered by `triggerHandoff`'s
+  `manualFallbackInstructions`, and the genuinely-missing non-mux case was
+  closed by `context-handoff-overhaul` Phase 3 slice 1's `handoff-cutover
+  --headless` (PR #2669).
+- Updated the Phase 3 checklist in-place with per-item notes on where each
+  capability actually lives; left the literal "extension-side `session.idle`
+  handler" item unchecked since that specific design was superseded, not
+  completed, and future readers should see the distinction rather than a
+  checkbox with no explanation.
+- This closes `context-handoff-overhaul`'s Phase 3 item 4. Only the private,
+  non-resolvable stretch validation (#2261†/#2262†, a live tmux pass) remains
+  open on this effort, unchanged from its migrated status.
+
 ## 2026-07-10 — Phase 5 (cont.): complete-on-consume via `agent-dispatch consume` (dev17/dev22)
 - **Operator probe:** "For handoffs, we expect them to be completed the moment
   they are consumed." A queue check proved the gap: the private facility

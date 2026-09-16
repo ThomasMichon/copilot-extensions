@@ -289,13 +289,44 @@ Resolved with the operator up front:
 > time. Preserved as originally migrated rather than guessed at — treat the
 > Status/Journal as the authoritative record of what actually shipped, and
 > this checklist as a historical snapshot that fell out of sync with it.
-- [ ] Opt-in gesture (`/handoff --continue` or a distinct gesture) that: stores the
+> **Update (2026-09-16, closed out by `context-handoff-overhaul` Phase 3):**
+> re-verified against current code. All three items below are satisfied --
+> not by the extension directly (that design was deliberately superseded; see
+> `context-handoff`'s README boundary: "It does not spawn a successor,
+> inspect mux state, retire panes... If a control plane is present, it can
+> watch the pending handoff state this plugin leaves behind and perform the
+> actual cutover"), but by the collaborating components that boundary hands
+> off to:
+- [x] Opt-in gesture (`/handoff --continue` or a distinct gesture) that: stores the
       task (existing path) → detects mux → shells to `handoff-cutover` → arms
       self-retire.
+      **Satisfied by agent-bridge + the resident status-monitor**, not the
+      extension: `trigger_handoff`/`handoff-core.mjs`'s `triggerHandoff`
+      stores the task then best-effort pings `agent-bridge handoff-request`
+      (`requestAgentBridgeHandoff`), which is what actually detects mux
+      state and shells to `agent-worktrees handoff-cutover` on the
+      extension's behalf -- the extension itself never touches mux.
 - [ ] `session.idle` handler: on the armed post-cutover idle, `send-keys` `/exit`
       then `C-c` fallback to the old pane.
-- [ ] Graceful fallback to store-task-and-reply when not under mux or the successor
+      **Satisfied by `agent-worktrees handoff-cutover`'s retire mode**
+      (`--retire-pane`, double-Ctrl-C), driven by the resident status-monitor
+      daemon (`classify_daemon.py`/`monitor_roots.py`), not a `session.idle`
+      handler inside the extension -- the extension's own `session.idle`
+      handler is scoped to context-pressure nudges only (see
+      `extensions/context-handoff/extension.mjs`). Left unchecked because the
+      *literal* mechanism described (an extension-side `session.idle`
+      handler) genuinely was not built -- it was replaced by a better one,
+      not completed as originally specified.
+- [x] Graceful fallback to store-task-and-reply when not under mux or the successor
       fails to boot.
+      **Satisfied two ways:** (1) `handoff-core.mjs`'s `triggerHandoff` always
+      falls back to `manualFallbackInstructions` when nothing picks up the
+      handoff within the wait window, distinguishing "nothing happened" from
+      "a spawn is merely in flight" (`spawnInFlight`); (2) the genuinely
+      mux-less case is now covered by `context-handoff-overhaul` Phase 3
+      slice 1's `agent-worktrees handoff-cutover --headless` (PR #2669) --
+      confirmed neither `handoff-cutover` nor `embody` supported a truly
+      mux-less launch before that slice.
 
 ### Phase 4 — End-to-end validation + docs
 - [~] **Mux-layer validation — partial + safety finding (2026-07-10).** The pure

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   MAX_CUTOVER_SEED_LENGTH,
   buildCutoverSeed,
+  extractRecoveryLocatorFromPrompt,
   leadFrom,
   parseRecoveryLocator,
   recoveryLocatorFor,
@@ -94,4 +95,49 @@ test("recovery locators reject non-ASCII instead of corrupting it", () => {
     ),
     /single-line ASCII/,
   );
+});
+
+// -- Phase 3 item 3: the deterministic "did my launch actually land" signal --
+
+test("extractRecoveryLocatorFromPrompt finds the locator in a real seed", () => {
+  const seed = buildCutoverSeed("task", "abc123", leadFrom("Fix the XSS bug"));
+  assert.deepEqual(extractRecoveryLocatorFromPrompt(seed), { kind: "task", id: "abc123" });
+});
+
+test("extractRecoveryLocatorFromPrompt finds the locator embedded in a longer message", () => {
+  const seed = buildCutoverSeed("file", "handoff-1", leadFrom("Continue"));
+  const message = `Some preamble text.\n\n${seed}\n\nSome trailing text.`;
+  assert.deepEqual(
+    extractRecoveryLocatorFromPrompt(message),
+    { kind: "file", id: "handoff-1" },
+  );
+});
+
+test("extractRecoveryLocatorFromPrompt returns null for ordinary conversation", () => {
+  assert.equal(extractRecoveryLocatorFromPrompt("please fix the login bug"), null);
+  assert.equal(extractRecoveryLocatorFromPrompt(""), null);
+  assert.equal(extractRecoveryLocatorFromPrompt(null), null);
+  assert.equal(extractRecoveryLocatorFromPrompt(undefined), null);
+});
+
+test("extractRecoveryLocatorFromPrompt rejects a malformed locator rather than throwing", () => {
+  assert.equal(
+    extractRecoveryLocatorFromPrompt("Recovery: context-handoff not-a-real-kind:abc"),
+    null,
+  );
+});
+
+test("extractRecoveryLocatorFromPrompt stops at the first whitespace (never captures trailing text)", () => {
+  assert.deepEqual(
+    extractRecoveryLocatorFromPrompt("Recovery: context-handoff task:abc trailing words"),
+    { kind: "task", id: "abc" },
+  );
+});
+
+test("extractRecoveryLocatorFromPrompt round-trips recoveryLocatorFor", () => {
+  const locator = recoveryLocatorFor("task", "8b270b8e-c165-494a");
+  const message = `Recovery: context-handoff ${locator}`;
+  assert.deepEqual(extractRecoveryLocatorFromPrompt(message), {
+    kind: "task", id: "8b270b8e-c165-494a",
+  });
 });

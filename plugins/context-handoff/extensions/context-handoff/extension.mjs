@@ -47,12 +47,14 @@ import {
   findHandoffTask,
   findTaskDeliveryCheckpoint,
   formatConsumeResult,
+  logHandoffPromptReceived,
   markDeliveryPromptInjected,
   normalizeHandoffTitle,
   runCli,
   storeHandoff,
   triggerHandoff,
 } from "./handoff-core.mjs";
+import { extractRecoveryLocatorFromPrompt, recoveryLocatorFor } from "./cutover-seed.mjs";
 import { loadContextHandoffConfig } from "./config.mjs";
 import {
   FORCE_TIER_DENY_FEEDBACK,
@@ -75,6 +77,11 @@ const state = {
   handoffGenerated: false,
   pendingHandoff: null,
   firstUserPrompt: null,          // first user message (for topic bias)
+  // Phase 3 item 3: guards the one-shot first-turn pickup-signal check
+  // (extractRecoveryLocatorFromPrompt) so it never re-fires on a reforked
+  // module (this module is reimported on every reconnect, not just true
+  // session start -- see the top-level session-lifecycle comment below).
+  pickupSignalChecked: false,
   // Force tier (Goal 1): once true, an auto-handoff has been drafted/stored/
   // triggered without waiting for the agent, and onPermissionRequest below
   // denies further mutating tool calls for the remainder of the session
@@ -890,6 +897,36 @@ session.on("user.message", (event) => {
   state.turnCount++;
   if (!state.firstUserPrompt && event.data?.content) {
     state.firstUserPrompt = event.data.content;
+  }
+  // Phase 3 item 3 (efforts/active/context-handoff-overhaul): the
+  // deterministic "did my launch actually land" signal. On the very first
+  // turn only, grep for the exact recovery locator every cutover seed
+  // carries (see cutover-seed.mjs's extractRecoveryLocatorFromPrompt) --
+  // no LLM judgment, just a plain string match -- and best-effort log a
+  // confirmed-receipt event the predecessor's pickupSignals can read. This
+  // fires before any tool/skill call, so it is immune to the skill-load
+  // race a mid-session reload can otherwise cause.
+  if (state.turnCount === 1 && !state.pickupSignalChecked) {
+    state.pickupSignalChecked = true;
+    const locator = extractRecoveryLocatorFromPrompt(event.data?.content);
+    if (locator) {
+      try {
+        const cwd = state.cwd || process.cwd();
+        const wtDir = agentWorktreesGet("worktree-dir", cwd, state.sessionId);
+        const worktreeId = wtDir ? basename(wtDir) : null;
+        if (worktreeId) {
+          logHandoffPromptReceived(
+            cwd, worktreeId, state.sessionId,
+            recoveryLocatorFor(locator.kind, locator.id),
+          );
+        }
+      } catch (e) {
+        session.log(
+          `[Context Handoff] pickup-signal log failed: ${e.message}`,
+          { level: "warning" },
+        );
+      }
+    }
   }
 });
 

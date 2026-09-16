@@ -134,3 +134,26 @@ export function buildCutoverSeed(
   }
   return seed;
 }
+
+// The deterministic "a real prompt reached the successor" signal (Phase 3
+// item 3, efforts/active/context-handoff-overhaul): a plain grep over the
+// FIRST submitted prompt for the exact "Recovery: context-handoff <locator>"
+// clause every cutover seed carries (see buildCutoverSeed above), with no LLM
+// judgment involved. This complements, not replaces, the coordinator-fallback
+// reconciliation (Phase 3 slice 2): it closes the "did my launch actually
+// land" observability gap by confirming the successor's own extension saw the
+// exact expected token arrive as a real user turn -- before any tool/skill
+// call, so it is immune to the skill-load race a mid-reload can otherwise
+// cause (see the awareness-nudge incident this effort's journal records).
+const RECOVERY_LOCATOR_IN_PROMPT = /Recovery:\s*context-handoff\s+(\S+)/;
+
+export function extractRecoveryLocatorFromPrompt(promptText) {
+  const text = String(promptText || "");
+  const match = text.match(RECOVERY_LOCATOR_IN_PROMPT);
+  if (!match) return null;
+  try {
+    return parseRecoveryLocator(match[1]);
+  } catch {
+    return null;
+  }
+}

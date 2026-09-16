@@ -1561,6 +1561,73 @@ function worktreeSpawnInFlight(cwd, stored, execute = runCli) {
   return { inFlight: false, worktreeId };
 }
 
+// The deterministic "did my launch actually land" signal (Phase 3 item 3):
+// the successor's own extension.mjs greps its first submitted prompt for the
+// exact recovery locator (see cutover-seed.mjs's extractRecoveryLocatorFromPrompt)
+// and best-effort logs a `context_handoff_prompt_received` activity event --
+// distinct from agent-worktrees' own numbered-handoff `handoff_token` identity
+// space (used by `handoff_cutover_spawn`), so this uses its own `locator`
+// field carrying context-handoff's own task/file id, unambiguously.
+export function logHandoffPromptReceived(
+  cwd,
+  worktreeId,
+  sid,
+  locator,
+  execute = runCli,
+) {
+  if (!worktreeId || !locator) return { logged: false };
+  try {
+    execute("agent-worktrees", [
+      "activity-log",
+      "context_handoff_prompt_received",
+      "--worktree-id", worktreeId,
+      "--session-id", sid || "",
+      "--source", "context-handoff",
+      "--field", `locator=${locator}`,
+    ], { cwd, timeout: 5000, stdio: "ignore" });
+    return { logged: true };
+  } catch (error) {
+    return { logged: false, error: describeCliError(error) };
+  }
+}
+
+// Predecessor-side read: has the successor's own extension already confirmed
+// receipt of exactly this handoff's recovery locator as a real submitted
+// prompt? A stronger, more direct signal than `worktreeSpawnInFlight` (which
+// only proves a pane/process was created, not that Copilot itself received
+// the seed) -- feeds `pickupSignals` below.
+function worktreePromptReceived(cwd, stored, execute = runCli) {
+  const worktreeId = stored.metadata?.worktree || null;
+  if (!worktreeId) return { received: false, worktreeId };
+  const expected = `${stored.storage === "agent-dispatch" ? "task" : "file"}:${stored.id}`;
+  let raw;
+  try {
+    raw = execute(
+      "agent-worktrees",
+      [
+        "activity", "--worktree-id", worktreeId,
+        "--event", "context_handoff_prompt_received", "--json",
+      ],
+      { cwd, timeout: 10000 },
+    );
+  } catch (error) {
+    return { received: false, worktreeId, error: describeCliError(error) };
+  }
+  const lines = String(raw || "").split("\n").map((line) => line.trim()).filter(Boolean);
+  for (const line of lines) {
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (String(event?.locator || "") === expected) {
+      return { received: true, worktreeId, event };
+    }
+  }
+  return { received: false, worktreeId };
+}
+
 function dispatchTaskConsumed(cwd, taskId) {
   if (!taskId) return { consumed: false, task: null };
   const task = agentDispatchJson(["show", taskId], cwd);
@@ -1622,6 +1689,13 @@ function pickupSignals(cwd, sid, stored, sessionStatePath, execute = runCli) {
   if (sessionConsumed) via.push("session-state-consumed");
   if (worktree.pickedUp) via.push("worktree-successor");
   if (dispatch.consumed) via.push("dispatch-consumed");
+  let promptReceived = { received: false, worktreeId: worktree.worktreeId };
+  if (via.length === 0) {
+    // Only worth a separate CLI round-trip when full pickup isn't already
+    // confirmed some other way.
+    promptReceived = worktreePromptReceived(cwd, stored, execute);
+    if (promptReceived.received) via.push("prompt-received");
+  }
   const pickedUp = via.length > 0;
   // Only worth a separate CLI round-trip when full pickup hasn't already
   // been confirmed -- the spawn marker is strictly implied by pickedUp.
@@ -1638,6 +1712,7 @@ function pickupSignals(cwd, sid, stored, sessionStatePath, execute = runCli) {
     },
     worktree,
     dispatch,
+    promptReceived,
     spawn,
   };
 }
