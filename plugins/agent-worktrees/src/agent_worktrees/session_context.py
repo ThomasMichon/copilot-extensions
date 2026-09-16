@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import related, state_root
+from . import pr_config, related, state_root
 
 
 MAX_TOPOLOGY_BYTES = 1_250
@@ -77,6 +77,29 @@ def _related_summary(
     return primary, "; ".join(rendered)
 
 
+def _pr_summary(config: Any) -> str:
+    """Render this repo's resolved PR-conduct facts (profile + key knobs).
+
+    Static/local-only (no network), matching the rest of this module's
+    session-start budget discipline. Role-aware overlays (``pr.roles``) are
+    resolved from the *caller's* live permission at PR-creation time
+    elsewhere, not here -- this line reports the repo's base configuration.
+    """
+    try:
+        repo = config.default_repo
+        flow = pr_config._pr_flow_profile(repo)
+    except Exception:
+        return ""
+    prc = repo.pr
+    return (
+        "PR: "
+        f"profile={_clean(flow.profile, 'unknown')}; "
+        f"enabled={'true' if prc.enabled else 'false'}; "
+        f"required={'true' if prc.required else 'false'}; "
+        f"merge_actor={_clean(prc.merge_actor, 'none')}."
+    )
+
+
 def render_registry_context(
     config: Any,
     record: Any,
@@ -86,7 +109,7 @@ def render_registry_context(
     mux_session: str | None = None,
     plugin_related_anchors: list[str] | None = None,
 ) -> str:
-    """Render current checkout, state pairing, and bounded related topology."""
+    """Render current checkout, state pairing, PR conduct, and bounded related topology."""
 
     resolved_state = state_root.resolve_state_root(config, cwd=cwd)
     pair = state_root.resolve_pair(config, cwd=cwd)
@@ -166,10 +189,20 @@ def render_registry_context(
         related_line += f"; important={entries}"
     related_line += "."
 
+    pr_line = _pr_summary(config)
+
     required = "\n".join((checkout, state))
-    candidate = "\n".join((checkout, state, related_line))
+    lines = [checkout, state]
+    if pr_line:
+        lines.append(pr_line)
+    lines.append(related_line)
+    candidate = "\n".join(lines)
     if len(candidate.encode("utf-8")) <= MAX_TOPOLOGY_BYTES:
         return candidate
+    if pr_line:
+        candidate_no_related = "\n".join((checkout, state, pr_line))
+        if len(candidate_no_related.encode("utf-8")) <= MAX_TOPOLOGY_BYTES:
+            return candidate_no_related
     if len(required.encode("utf-8")) <= MAX_TOPOLOGY_BYTES:
         return required
     return _bounded_prefix("\n".join((checkout, state)))

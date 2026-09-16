@@ -21,6 +21,75 @@ def _record(path: Path, role: str = "harness") -> SimpleNamespace:
     )
 
 
+def _pr_repo(**overrides: object) -> SimpleNamespace:
+    """Minimal repo-config double satisfying pr_config._pr_flow_profile's needs."""
+    defaults = dict(
+        enabled=True,
+        required=True,
+        provider="github",
+        automerge_label="",
+        reviewer="",
+        review_blocking=False,
+        review_latency_hint="",
+        self_approve=False,
+        merge_actor="submitter-direct",
+        conflict_retriggers_review=True,
+        branch_update_strategy="rebase",
+        merge_strategy="squash",
+        prefer_auto_merge=True,
+    )
+    defaults.update(overrides)
+    return SimpleNamespace(pr=SimpleNamespace(**defaults))
+
+
+def test_pr_summary_reports_resolved_profile_and_key_knobs() -> None:
+    config = SimpleNamespace(default_repo=_pr_repo())
+
+    line = session_context._pr_summary(config)
+
+    assert line.startswith("PR: profile=")
+    assert "profile=pr-self-merge" in line
+    assert "enabled=true" in line
+    assert "required=true" in line
+    assert "merge_actor=submitter-direct" in line
+
+
+def test_pr_summary_is_empty_when_config_has_no_default_repo() -> None:
+    assert session_context._pr_summary(SimpleNamespace()) == ""
+
+
+def test_context_includes_pr_line_when_config_resolves_a_repo(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    checkout = tmp_path / "control"
+    checkout.mkdir()
+    monkeypatch.setattr(
+        session_context.state_root,
+        "resolve_state_root",
+        lambda *_a, **_k: state_root.StateRoot(
+            None, "knowledge_repo", "state", True, True, False,
+            error="unavailable",
+        ),
+    )
+    monkeypatch.setattr(
+        session_context.state_root,
+        "resolve_pair",
+        lambda *_a, **_k: state_root.StatePair(paired=False, error="not paired"),
+    )
+    monkeypatch.setattr(session_context, "_related_summary", lambda *_a: ("-", ""))
+
+    config = SimpleNamespace(default_repo=_pr_repo(merge_actor="", self_approve=False))
+    context = session_context.render_registry_context(
+        config,
+        _record(checkout),
+        cwd=str(checkout),
+    )
+
+    assert "PR: profile=" in context
+    assert "enabled=true; required=true" in context
+
+
 def test_related_summary_uses_supplied_plugin_related_anchors(
     monkeypatch,
 ) -> None:
