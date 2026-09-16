@@ -16712,9 +16712,12 @@ def cmd_picker(args: argparse.Namespace) -> int:
         if not mgr:
             return cmd_manager_install_trigger(cfg.active_project())
         subcommand = ["picker", "mock"]
+        project = cfg.active_project()
+        if project:
+            subcommand.append(project)
         if getattr(args, "picker_local", False):
             subcommand.append("--local")
-        return _exec_worktree_manager(mgr, cfg.active_project(), subcommand=subcommand)
+        return _exec_worktree_manager(mgr, None, subcommand=subcommand)
 
     if action == "screenshot":
         if not mgr:
@@ -16722,9 +16725,11 @@ def cmd_picker(args: argparse.Namespace) -> int:
         subcommand = [
             "picker",
             "screenshot",
-            "--format",
-            getattr(args, "picker_format", "svg"),
         ]
+        project = cfg.active_project()
+        if project:
+            subcommand.append(project)
+        subcommand += ["--format", getattr(args, "picker_format", "svg")]
         out = getattr(args, "out", None)
         if out:
             subcommand += ["--out", out]
@@ -16736,7 +16741,7 @@ def cmd_picker(args: argparse.Namespace) -> int:
         wait_pivot = float(getattr(args, "picker_wait", 0.0) or 0.0)
         if wait_pivot > 0:
             subcommand += ["--wait", str(wait_pivot)]
-        return _exec_worktree_manager(mgr, cfg.active_project(), subcommand=subcommand)
+        return _exec_worktree_manager(mgr, None, subcommand=subcommand)
 
     # status
     effective = mgr is not None

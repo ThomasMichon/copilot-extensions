@@ -676,8 +676,8 @@ def test_picker_mock_delegates_to_manager(monkeypatch):
     assert rc == 0
     assert seen == {
         "mgr": "/usr/bin/worktree-manager",
-        "project": "demo",
-        "subcommand": ["picker", "mock"],
+        "project": None,
+        "subcommand": ["picker", "mock", "demo"],
     }
 
 
