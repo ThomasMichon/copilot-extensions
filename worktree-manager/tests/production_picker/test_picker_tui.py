@@ -2562,8 +2562,11 @@ def test_bucket_sections_key_off_state():
            rec("wip", 2), rec("unused", 3)]
     active, recent, completed = derive.bucket(wts)
     assert [w["state"] for w in active] == ["ACTIVE"]
-    # Both FINALs land in Completed regardless of age (1h and 60h).
-    assert sorted(w["state"] for w in completed) == ["FINAL", "FINAL"]
+    # Both completed rows land in Completed regardless of age (1h and 60h).
+    # No ``closure`` descriptor here, so ``_state()`` degrades to MERGED
+    # rather than trusting a raw FINAL claim -- ``bucket()`` still treats
+    # FINAL and MERGED alike as "completed".
+    assert sorted(w["state"] for w in completed) == ["MERGED", "MERGED"]
     # Recent is whatever is neither in-session nor final.
     assert sorted(w["state"] for w in recent) == ["UNUSED", "WIP"]
 
@@ -2784,11 +2787,13 @@ def test_maybe_repoll_gating(monkeypatch):
 
 def test_bucket_fallback_no_classify_finalized_is_clean_not_wip():
     """An old remote (no --classify -> no state) must not show FINAL + unmerged."""
-    # status finalized, no git classification -> display FINAL, bucket clean.
+    # status finalized, no git classification -> no closure descriptor either,
+    # so state degrades to MERGED (never FINAL). cleanup_bucket is independent
+    # of state and still reads clean/SAFE.
     w = derive.norm(
         {"id": "emancipation-cube-wsl-1234", "status": "finalized",
          "started_at": "2026-06-25T10:00:00"}, "Emancipation-Cube", "WSL")
-    assert w["state"] == "FINAL"
+    assert w["state"] == "MERGED"
     assert w["cleanup_bucket"] == "clean"          # not 'wip'/'unmerged'
     assert derive.BUCKET_DISPO[w["cleanup_bucket"]] == "SAFE"
 
@@ -2812,7 +2817,10 @@ def test_tui_renders_local_worktrees():
             # Canonical state vocabulary (test-chamber #1290).
             assert "ACTIVE" in out
             assert "UNUSED" in out
-            assert "FINAL" in out
+            # "Done work" is COMPLETED with no closure descriptor in this
+            # fixture, so ``_state()`` degrades to MERGED rather than
+            # trusting a raw FINAL claim.
+            assert "MERGED" in out
             # Real machine identity from the source.
             assert "anomalous-potato" in out
 
