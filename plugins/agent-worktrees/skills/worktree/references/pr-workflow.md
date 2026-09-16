@@ -13,6 +13,7 @@ rules.
 ## Contents
 - Check the target repo's PR flow first (profiles + verb applicability)
 - Detecting PR mode + where PR config lives (machine-local vs in-repo)
+- Default conduct: drive every PR through to merge (waiting policy + sanctioned deviations)
 - `create-pr` (auto-open, attribution marker, labels)
 - Dispositions: keep-alive vs detach
 - Draft PRs (`--draft` / `pr-ready`)
@@ -166,6 +167,38 @@ If `<agent-worktrees catalog argv[0]> get pr-required` returns `true`, **do not*
 direct `push-changes`/`finalize` for unmerged work — it will be refused. Go
 straight to the end-to-end PR loop below.
 
+### Default conduct: drive every PR you open through to merge
+
+This is the default for **every** PR an agent opens through `create-pr`,
+regardless of whether the target repo sets `pr.required: true` — not only the
+mandatory-PR case. Opening a PR and stopping (or reporting it as "landed") is
+not the end state; **merged** is. Apply whichever waiting policy actually
+fits the target repo's configured flow — they are not interchangeable:
+
+- **Self-merge repos** (`merge_actor: submitter-direct` / `pr-self-merge`):
+  wait briefly for CI and any non-blocking automated review, check real
+  status rather than assuming, rebase if the head goes stale, then merge
+  once the repo's own gates allow it.
+- **Human-review repos**: poll for review state and comments (the
+  end-to-end loop below); address feedback in the same worktree and
+  re-request review; repeat until approved and merged.
+- **Auto-complete providers** (e.g. Azure DevOps): set the provider's
+  auto-complete affordance at PR-open time so the platform lands it once its
+  gate clears, rather than polling forever in-session.
+
+**The only sanctioned deviations** from driving a PR through to merge:
+
+1. **The operator explicitly says otherwise** for this PR/session (e.g. "just
+   open it, don't merge yet").
+2. **A specific alternate charter governs differently** — a task, skill, or
+   recurring cycle that itself defines an async hand-off (e.g. a triage cycle
+   that records status and lets a later cycle or a human pick up a stalled
+   PR) supersedes the default, but only for the scope that charter actually
+   covers.
+
+Absent one of those two, do not silently settle for "PR opened" — see it
+through, using the waiting policy above.
+
 ### End-to-end PR loop (when PRs are required)
 
 The normal, expected flow for a worktree with work to land:
@@ -190,10 +223,11 @@ The normal, expected flow for a worktree with work to land:
    disposition deliberately (keep-alive to babysit review, detach to let it
    ride).
 
-**Rare opt-out — submit and detach without babysitting review.** An agent may,
-when the operator approves, open the PR and immediately `finalize` (detach
-disposition), leaving the open PR for asynchronous review + auto-merge rather
-than waiting in-session. This still goes through a PR — it is **not** a
+**Rare opt-out — submit and detach without babysitting review.** Per the
+sanctioned-deviations list above: an agent may, when the operator approves (or
+a specific alternate charter says so), open the PR and immediately `finalize`
+(detach disposition), leaving the open PR for asynchronous review + auto-merge
+rather than waiting in-session. This still goes through a PR — it is **not** a
 direct-to-default-branch bypass. Use it sparingly: the default is to see the PR
 through to merge. Never skip the PR entirely when `pr-required` is `true`.
 
