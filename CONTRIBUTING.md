@@ -276,6 +276,16 @@ file is out of sync:
 - After a set of changes is committed and ready to push.
 - Before pushing to GitHub — the push is the "release."
 - One bump per push is fine; don't bump on every commit.
+- **On a hot plugin with concurrent agents** (several agents landing PRs to the
+  same plugin within minutes of each other — `agent-worktrees` is the frequent
+  case), the version you read is stale the moment another PR merges. Don't
+  precompute the bump early and carry it through several commits: re-fetch
+  `origin/main` and set the version to *(current main's version) + 1*
+  immediately before your final push, and again after any rebase the
+  `check-version-bump` CI gate forces on you. A collision here isn't
+  data loss — `check-version-bump`/`check-version-consistency` catch it every
+  time and force a quick re-bump — but re-checking right before push avoids
+  the wasted round trip.
 
 ## Deploying: one command — `<repo> update`
 

@@ -1351,7 +1351,7 @@ def test_picker_mock_uses_production_transplant_without_acting(monkeypatch, caps
     monkeypatch.setattr(
         entrypoint,
         "build_projects",
-        lambda: [type("Project", (), {"name": "demo"})()],
+        lambda: [type("Project", (), {"name": "demo", "repo": None})()],
     )
     calls = []
     monkeypatch.setattr(
@@ -1381,7 +1381,7 @@ def test_picker_screenshot_uses_production_capture(monkeypatch, tmp_path):
     monkeypatch.setattr(
         entrypoint,
         "build_projects",
-        lambda: [type("Project", (), {"name": "demo"})()],
+        lambda: [type("Project", (), {"name": "demo", "repo": None})()],
     )
     calls = []
     monkeypatch.setattr(
@@ -1421,7 +1421,7 @@ def test_picker_screenshot_keeps_relative_output_at_caller_cwd(monkeypatch, tmp_
     monkeypatch.setattr(
         entrypoint,
         "build_projects",
-        lambda: [type("Project", (), {"name": "demo"})()],
+        lambda: [type("Project", (), {"name": "demo", "repo": None})()],
     )
 
     def capture(*args, **kwargs):
@@ -1447,7 +1447,7 @@ def test_legacy_screenshot_flag_uses_production_capture(monkeypatch, tmp_path):
     monkeypatch.setattr(
         entrypoint,
         "build_projects",
-        lambda: [type("Project", (), {"name": "demo"})()],
+        lambda: [type("Project", (), {"name": "demo", "repo": None})()],
     )
     monkeypatch.setattr(
         runner,
