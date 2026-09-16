@@ -40,24 +40,24 @@ from .config import (
     producer_capability as producer_capability_value,
 )
 
-# Re-exported for backward compatibility: these reviewer-loop and
-# repository-issue-loop command implementations live in loop_commands.py now
-# (see that module's docstring), but build_parser's set_defaults() and
-# tests below still reference them by their agent_dispatch.__main__
-# attribute path.
+# Re-exported for backward compatibility: repository-issue-loop commands
+# live in loop_commands.py, reviewer-loop ones in reviewer_loop_commands.py;
+# build_parser/tests below still reference them by this attribute path.
 from .loop_commands import (  # noqa: F401 -- re-exported for existing call sites/tests
     _cmd_repository_issue_loop,
-    _cmd_reviewer_loop,
     _repository_issue_loop_declarations,
     _repository_issue_loop_health_path,
     _repository_issue_loop_registrations,
     _repository_issue_loop_setup,
     _repository_issue_loop_status,
+    _spawn_attempt_projection,
+)
+from .reviewer_loop_commands import (  # noqa: F401 -- re-exported for existing call sites/tests
+    _cmd_reviewer_loop,
     _reviewer_loop_declarations,
     _reviewer_loop_registrations,
     _reviewer_loop_setup,
     _reviewer_loop_status,
-    _spawn_attempt_projection,
 )
 from .producers_cli import (  # noqa: F401 -- re-exported for existing call sites/tests
     _cmd_emitter,

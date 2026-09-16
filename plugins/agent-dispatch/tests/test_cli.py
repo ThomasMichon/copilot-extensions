@@ -532,6 +532,63 @@ def test_reviewer_loop_status_rejects_fresh_snapshot_after_daemon_exit(
     assert "declared-but-unserved" in output["diagnoses"]
 
 
+
+
+
+def test_reviewer_loop_doctor_reports_supervisor_stalled_not_merely_unserved(
+    tmp_path, monkeypatch, capsys
+):
+    """The daemon is alive (running=True, is_locked=True) and its last-known
+    ``running`` list is fresh, but a reconcile cycle started long ago and
+    never finished -- the exact live-incident signature (a wedged single-
+    threaded reconcile call), distinct from a genuinely dead daemon."""
+    from agent_dispatch import __main__ as m
+    from agent_dispatch.supervisor_daemon import supervisor_lease_scope
+
+    declaration = tmp_path / "repo" / ".agent-dispatch" / "registrar" / "review.json"
+    _write_reviewer_loop(declaration)
+    monkeypatch.setenv("AGENT_DISPATCH_REGISTRAR_DIR", str(tmp_path / "state"))
+    monkeypatch.setattr(
+        "agent_dispatch.remote_dispatch.local_machine", lambda: "host-a"
+    )
+    assert main(["reviewer-loop", "setup", str(declaration)]) == 0
+    capsys.readouterr()
+    monkeypatch.setattr(m, "_client", lambda _args, **_kwargs: _LoopClient())
+    monkeypatch.setattr("agent_dispatch.single_instance.is_locked", lambda _path: True)
+    status_path = m._supervisor_runtime_status_path(
+        supervisor_lease_scope("host-a", "default")
+    )
+    status_path.parent.mkdir(parents=True, exist_ok=True)
+    stuck_cycle_started = time.time() - 400  # well past the stall threshold
+    status_path.write_text(
+        json.dumps(
+            {
+                # A prior, completed cycle -- older than the stuck one below,
+                # exactly what a wedge leaves behind: the daemon's own last
+                # *successful* finish, frozen while a new cycle hangs.
+                "updated_at": stuck_cycle_started - 30,
+                "cycle_started_at": stuck_cycle_started,
+                "cycle_id": 42,
+                "running": [
+                    "declared:repo:repo:example-review-source",
+                    "declared:repo:repo:example-review-evaluator",
+                    "declared:repo:repo:example-review-workers",
+                ],
+                "backing_off": [],
+                "dead": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert main(["reviewer-loop", "doctor", str(declaration)]) == 1
+
+    output = json.loads(capsys.readouterr().out)
+    assert "supervisor-stalled" in output["diagnoses"]
+    assert "declared-but-unserved" not in output["diagnoses"]
+    assert output["service"]["runtime_stall_seconds"] >= 400
+
+
 def test_reviewer_loop_status_canonicalizes_repository_filter(
     tmp_path, monkeypatch, capsys
 ):

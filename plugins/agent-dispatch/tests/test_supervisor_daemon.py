@@ -934,6 +934,68 @@ def test_serve_unguarded_skips_election():
     assert launcher.proc_for("a")  # ran despite a held lock
 
 
+def test_serve_calls_on_cycle_start_before_reconcile_with_a_monotonic_id():
+    """The heartbeat-start hook fires before the cycle body runs, carrying a
+    per-process-lifetime monotonic cycle id -- what a caller persists so a
+    hang shows up as a start with no matching finish."""
+    client = FakeClient([_reg("a")])
+    launcher = FakeLauncher()
+    lock = FakeLock(granted=True)
+    starts = []
+    d = _daemon(client, launcher, lock=lock)
+    d.serve(once=True, on_cycle_start=lambda cycle_id, started_at: starts.append(
+        (cycle_id, started_at)
+    ))
+    assert len(starts) == 1
+    cycle_id, started_at = starts[0]
+    assert cycle_id == 1
+    assert started_at == 0.0  # the fake Clock()'s fixed value
+
+
+def test_serve_on_cycle_start_id_advances_across_cycles():
+    client = FakeClient([_reg("a")])
+    launcher = FakeLauncher()
+    lock = FakeLock(granted=True)
+    d = _daemon(client, launcher, lock=lock)
+    ids = []
+    calls = {"n": 0}
+
+    def _stop_after_two(_cycle_id, _started_at):
+        ids.append(_cycle_id)
+        calls["n"] += 1
+        if calls["n"] >= 2:
+            raise KeyboardInterrupt
+
+    d.serve(once=False, on_cycle_start=_stop_after_two)
+    assert ids == [1, 2]
+
+
+def test_serve_logs_a_heartbeat_at_both_cycle_boundaries(caplog):
+    client = FakeClient([_reg("a")])
+    launcher = FakeLauncher()
+    lock = FakeLock(granted=True)
+    d = _daemon(client, launcher, lock=lock)
+    with caplog.at_level("INFO", logger="agent-dispatch.supervisor-daemon"):
+        d.serve(once=True)
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("cycle 1 starting" in m for m in messages)
+    assert any("cycle 1 finished" in m for m in messages)
+
+
+def test_serve_on_cycle_start_failure_never_aborts_the_cycle():
+    client = FakeClient([_reg("a")])
+    launcher = FakeLauncher()
+    lock = FakeLock(granted=True)
+    d = _daemon(client, launcher, lock=lock)
+
+    def _boom(_cycle_id, _started_at):
+        raise RuntimeError("blip")
+
+    rc = d.serve(once=True, on_cycle_start=_boom)
+    assert rc == 0
+    assert launcher.proc_for("a")  # the cycle's own work still ran
+
+
 # -- reconnect (coordinator restart / moved port, #3825) ---------------------
 
 

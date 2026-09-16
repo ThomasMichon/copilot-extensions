@@ -75,12 +75,43 @@ def _supervisor_runtime_status_path(scope: str) -> Path:
 def _write_supervisor_runtime_status(scope: str, summary: Any) -> None:
     path = _supervisor_runtime_status_path(scope)
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Preserve cycle_started_at from the just-finished cycle's own start-marker
+    # write (below) rather than recomputing it, so a reader can diff
+    # updated_at (this, the finish time) against cycle_started_at to see the
+    # last cycle's own duration, not just "when did anything last happen."
+    previous, _err = _read_supervisor_runtime_status(scope)
     payload = {
         "updated_at": time.time(),
+        "cycle_started_at": (previous or {}).get("cycle_started_at"),
+        "cycle_id": (previous or {}).get("cycle_id"),
         "running": summary.running,
         "backing_off": summary.backing_off,
         "dead": getattr(summary, "dead", []),
     }
+    temporary = path.with_suffix(f".{os.getpid()}.tmp")
+    temporary.write_text(json.dumps(payload), encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def _write_supervisor_cycle_start(scope: str, cycle_id: int, started_at: float) -> None:
+    """Mark a reconcile cycle as started, *before* it runs.
+
+    Written and read independently of :func:`_write_supervisor_runtime_status`
+    (which only lands after a cycle **finishes**) so a stuck cycle is
+    detectable while it is still stuck: ``cycle_started_at`` advances every
+    cycle regardless of outcome, while ``updated_at`` only advances on a
+    completed one. A large, growing gap between the two -- not just an old
+    ``updated_at`` alone -- is the specific, unambiguous signature of a wedge
+    (the process alive but blocked inside one reconcile call), distinct from a
+    dead process (no writer at all) or a genuinely idle one (both advance
+    together, cheaply, every ``poll_interval``).
+    """
+    path = _supervisor_runtime_status_path(scope)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    previous, _err = _read_supervisor_runtime_status(scope)
+    payload = dict(previous or {})
+    payload["cycle_started_at"] = started_at
+    payload["cycle_id"] = cycle_id
     temporary = path.with_suffix(f".{os.getpid()}.tmp")
     temporary.write_text(json.dumps(payload), encoding="utf-8")
     os.replace(temporary, path)
@@ -371,6 +402,13 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
             self_update_argv=list(sys.argv[1:]) if _su_enabled else None,
         )
 
+        def _on_cycle_start(cycle_id: int, started_at: float) -> None:
+            _write_supervisor_cycle_start(
+                supervisor_lease_scope(machine, env),
+                cycle_id,
+                started_at,
+            )
+
         def _on_cycle(summary) -> None:
             _write_supervisor_runtime_status(
                 supervisor_lease_scope(machine, env),
@@ -390,6 +428,7 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
             once=getattr(args, "once", False),
             single_instance=not getattr(args, "no_single_instance", False),
             on_cycle=_on_cycle,
+            on_cycle_start=_on_cycle_start,
         )
 
 
