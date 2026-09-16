@@ -574,11 +574,19 @@ either.
   just succeeded -- this is the "wherever a fetch already happens" writer,
   not yet the dedicated periodic sweep or the `pr-merge`/`finalize`/`sync`
   operation-triggered writers below (still separate, unstarted Plan items).
-- [ ] Extend the resident status-monitor (`cmd_status_monitor`) with a
+- [x] Extend the resident status-monitor (`cmd_status_monitor`) with a
   periodic per-repo revalidation sweep (default on the order of once a
   minute, configurable) that fetches and reclassifies upstream-containment
   for every repo it is tracking, publishing the refreshed ledger entry -- an
-  addition to the existing resident accelerator, not a second daemon.
+  addition to the existing resident accelerator, not a second daemon. Landed:
+  `session_catalog.ResidentSessionReconciler._maybe_refresh_repo_freshness`,
+  called unconditionally (NOT mux-gated, unlike the fsmonitor reap) from
+  `_index_record` for every record on every `step()`. Throttled per-repo
+  (60s cooldown, `_REPO_FRESHNESS_SWEEP_COOLDOWN_S`) so N worktrees of one
+  repo cost one `git fetch` per window, not N; skips the fetch entirely when
+  `tracking.is_repo_fetch_fresh` already says current (avoids a redundant
+  fetch on top of one the ad hoc slice-2 writer, or an earlier sweep tick,
+  just performed).
 - [ ] Add operation-triggered recompute signals from `pr-merge`, `finalize`'s
   own fetch, `sync`, and claim settle/release, so the affected repo's (or
   worktree's, for worktree-scoped facts) freshness is refreshed promptly
@@ -625,7 +633,12 @@ either.
   (separate, unstarted Plan items); `open_claims` still shares this call's
   own `evidence_mode` input (the ledger is git-upstream-specific, does not
   extend to claim/provider freshness). Marker rendering across surfaces
-  also not yet built (still Phase 9 follow-up work).
+  also not yet built (still Phase 9 follow-up work). The resident
+  status-monitor's periodic per-repo sweep now ALSO refreshes the ledger
+  proactively (`session_catalog._maybe_refresh_repo_freshness`, 60s
+  cooldown, unconditional/not mux-gated), so a repo stays fresh even when
+  no worktree of it ever passes `--fetch` itself; `pr-merge`/`finalize`/
+  `sync`/claim-settle triggered writes remain unstarted.
 - [ ] **Session-claim lifecycle** (Phase 8, proposed): a worktree's own live
   Copilot session is a held claim; it settles on finalize, settles on a
   successful handoff cutover, releases on `sessionEnd`, and reopens on a
@@ -1320,4 +1333,44 @@ The approved design is the faceted model in [design.md](design.md):
   `test_status_segment.py` (129 tests), plus `test_tracking.py` +
   `test_status_context.py` (182 tests), pass. `ruff check` line-shift-only
   diff confirmed via before/after comparison (no new findings).
+
+### 2026-09-15 (continued) - Phase 9 slice 3: periodic per-repo freshness sweep landed
+
+- Landed the resident status-monitor's periodic per-repo revalidation sweep
+  Plan item. New `session_catalog.ResidentSessionReconciler.
+  _maybe_refresh_repo_freshness(record)`, called from `_index_record` for
+  EVERY record on every `step()` tick -- unconditionally, unlike
+  `_maybe_reap_fsmonitor`: git-fetch freshness has nothing to do with
+  session/mux liveness, so gating it on `mux_fresh` would silently stop the
+  sweep whenever a mux observation goes stale, defeating the point of an
+  ACTIVE sweep (this matters concretely: the fsmonitor reap's own gate was
+  exactly the kind of silent gap this effort chased down twice already).
+- Throttled per-REPO (not per-worktree-id) via a new
+  `_repo_freshness_checked` cooldown map, `_REPO_FRESHNESS_SWEEP_COOLDOWN_S
+  = 60.0` -- so N worktrees of the same repo cost one `git fetch` per
+  cooldown window, not N (mirrors the fsmonitor reap cooldown's own
+  capped-map pattern, `_MAX_REPO_FRESHNESS_TRACKED = 512`). Before spawning
+  a fetch, checks `tracking.is_repo_fetch_fresh(repo)` and skips entirely if
+  already fresh -- so this sweep never adds a redundant fetch on top of one
+  the slice-2 ad hoc `__main__.py` writer (or an earlier sweep tick) just
+  performed a moment ago. On a successful fetch (`git fetch origin --quiet`
+  against the record's own `worktree_path`, bounded to 15s), calls
+  `tracking.record_repo_fetch_confirmed(repo)`; a failed/timed-out/missing
+  fetch or a missing directory is silently fine (self-heals next window).
+- Added 7 new tests to `tests/test_session_catalog.py`: fetches+records when
+  stale, skips when already fresh, does not record on fetch failure, skips a
+  missing directory, **runs with no `observe_mux` call at all** (proving the
+  no-mux-gate claim), one fetch total for two worktrees of the same repo
+  (per-repo not per-worktree throttling), and cooldown-throttled across
+  ticks (mirroring the existing fsmonitor cooldown test's pattern exactly).
+  `test_session_catalog.py` (25 tests) + `test_repo_freshness.py` +
+  `test_prune.py` + `test_tracking.py` (293 tests total) pass; `ruff check`
+  diff on `session_catalog.py` confirmed identical before/after (2
+  pre-existing findings, unrelated to this change).
+- **Not done this session** (remaining Phase 9 Plan items, unstarted):
+  `pr-merge`/`finalize`/`sync`/claim-settle triggered ledger writes (these
+  currently only benefit passively from the periodic sweep's own 60s
+  cadence, not immediately on the operation itself), `pending_handoff`'s
+  real wiring, per-fact marker rendering across surfaces, the remaining doc/
+  vision updates, and the mixed-version-safety test.
 
