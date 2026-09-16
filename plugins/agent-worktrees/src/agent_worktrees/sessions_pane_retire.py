@@ -173,20 +173,24 @@ def wait_for_handoff_candidate(
         except (OSError, ValueError):
             handoff = None
         if handoff is not None and handoff.candidate:
-            if not (pane_id and mux_session):
+            if not mux_session:
                 return handoff.candidate, "session-associated"
             # Pane-aware wait: `handoff.candidate` is a record-wide field, not
             # proof it belongs to *this* pane -- a racing/earlier attempt's
             # self-report could have set it. Confirm via the same
-            # process-ancestry check before trusting it.
-            try:
-                from . import sessions
+            # process-ancestry check before trusting it. Without a known
+            # `pane_id` to check against, fail closed (keep polling) rather
+            # than accept an unverifiable candidate.
+            binding = None
+            if pane_id:
+                try:
+                    from . import sessions
 
-                binding = sessions.mux_binding_for_session(
-                    handoff.candidate, expected_session_name=mux_session,
-                )
-            except Exception:
-                binding = None
+                    binding = sessions.mux_binding_for_session(
+                        handoff.candidate, expected_session_name=mux_session,
+                    )
+                except Exception:
+                    binding = None
             if binding and binding.get("pane_id") == pane_id:
                 return handoff.candidate, "session-associated"
         now = time.monotonic()
@@ -248,6 +252,16 @@ def associate_pane_matched_candidate(
         try:
             with tracking._RecordLock(record_path):
                 locked_record = tracking.load_record(record_path)
+                # Revalidate against the locked snapshot: the unlocked binding
+                # check above can race a concurrent deregistration/conclusion
+                # between that check and taking the lock.
+                locked_entry = locked_record.session_entry(entry.session_id)
+                if (
+                    locked_entry is None
+                    or locked_entry.ended_at
+                    or locked_entry.state != "active"
+                ):
+                    continue
                 tracking.associate_handoff_candidate(
                     locked_record, token, entry.session_id, save=True,
                 )

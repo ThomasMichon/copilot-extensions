@@ -779,6 +779,93 @@ class TestCmdHandoffCutover:
         assert result == (None, "pane-exited-before-session")
         assert _tracking.load_record(path).handoffs[0].candidate is None
 
+    def test_wait_for_handoff_candidate_rejects_stale_candidate_in_another_pane(
+        self, monkeypatch, tmp_tracking_dir, monkeypatch_config,
+    ):
+        """A ``handoff.candidate`` already recorded for a *different* live pane
+        (e.g. set by a racing/earlier spawn attempt's self-report) must never
+        be trusted just because the field is non-empty -- this wait is scoped
+        to one specific pane."""
+        from agent_worktrees import tracking as _tracking
+
+        worktree_id = "wt-pane-stale-candidate"
+        rec = _tracking.WorktreeRecord(
+            worktree_id=worktree_id, branch=f"worktree/{worktree_id}",
+            worktree_path=f"/tmp/src/{worktree_id}", repo="test-repo",
+            machine="test", platform="windows", started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00", resume_count=0, title=None,
+            status="active", completed_at=None, sessions=[],
+        )
+        path = tmp_tracking_dir / f"{worktree_id}.yaml"
+        _tracking.save_record(rec, path)
+        _tracking.register_session(worktree_id, "predecessor-3")
+        _tracking.register_session(worktree_id, "other-pane-successor")
+        loaded = _tracking.load_record(path)
+        _tracking.open_handoff(loaded, "predecessor-3", "task-stale-candidate")
+        _tracking.associate_handoff_candidate(
+            loaded, "task-stale-candidate", "other-pane-successor",
+        )
+
+        def _fake_binding(session_id, *, expected_session_name=None, **_k):
+            if session_id == "other-pane-successor":
+                # Alive, but under a DIFFERENT pane than the one being waited on.
+                return {"pane_id": "%OTHER", "session_name": expected_session_name}
+            return None
+
+        monkeypatch.setattr(sessions, "mux_binding_for_session", _fake_binding)
+        monkeypatch.setattr(sessions_pane_retire, "_mux_bin", lambda: "psmux")
+        monkeypatch.setattr(sessions_pane_retire, "_mux_pane_alive", lambda *a: True)
+
+        result = m._wait_for_handoff_candidate(
+            path, "task-stale-candidate", "%9",
+            timeout=0.15, mux_session="wt-pane-stale-candidate",
+            predecessor_session_id="predecessor-3",
+        )
+        assert result == (None, "session-association-timeout")
+
+    def test_associate_pane_matched_candidate_does_not_report_a_race_loser(
+        self, monkeypatch, tmp_tracking_dir, monkeypatch_config,
+    ):
+        """When another session already won the token (associated between
+        this call's unlocked pane check and its own locked association
+        attempt), the loser must never be returned as the confirmed
+        candidate, and the winner's association must be left intact."""
+        from agent_worktrees import tracking as _tracking
+
+        worktree_id = "wt-pane-race-loser"
+        rec = _tracking.WorktreeRecord(
+            worktree_id=worktree_id, branch=f"worktree/{worktree_id}",
+            worktree_path=f"/tmp/src/{worktree_id}", repo="test-repo",
+            machine="test", platform="windows", started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00", resume_count=0, title=None,
+            status="active", completed_at=None, sessions=[],
+        )
+        path = tmp_tracking_dir / f"{worktree_id}.yaml"
+        _tracking.save_record(rec, path)
+        _tracking.register_session(worktree_id, "predecessor-4")
+        _tracking.register_session(worktree_id, "winner-session")
+        _tracking.register_session(worktree_id, "loser-session")
+        loaded = _tracking.load_record(path)
+        _tracking.open_handoff(loaded, "predecessor-4", "task-race")
+        # The winner already claimed the token before this call runs -- e.g.
+        # the successor's own token self-report landed first.
+        _tracking.associate_handoff_candidate(loaded, "task-race", "winner-session")
+
+        def _fake_binding(session_id, *, expected_session_name=None, **_k):
+            if session_id == "loser-session":
+                return {"pane_id": "%9", "session_name": expected_session_name}
+            return None
+
+        monkeypatch.setattr(sessions, "mux_binding_for_session", _fake_binding)
+
+        result = sessions_pane_retire.associate_pane_matched_candidate(
+            path, "task-race", "wt-pane-race-loser", "%9", "predecessor-4",
+        )
+        assert result is None
+        assert (
+            _tracking.load_record(path).handoffs[0].candidate == "winner-session"
+        )
+
     @pytest.fixture(autouse=True)
     def _use_local_session_backend(self, monkeypatch):
         monkeypatch.setattr(
