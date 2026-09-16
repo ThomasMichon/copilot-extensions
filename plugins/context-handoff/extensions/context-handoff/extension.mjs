@@ -1067,26 +1067,10 @@ session.on("session.usage_info", (event) => {
     pendingNudge = "soft";
   }
 
-  // Soft reminder at threshold (user-visible log only -- agent nudged via session.send on idle)
-  if (pressure.soft &&
-      !state.softLogShown && !state.handoffGenerated) {
-    state.softLogShown = true;
-    session.log(
-      `[Context Handoff] Context utilization ${usage.utilization} ` +
-      `(${usage.tokens}; ` +
-      `conversation ${(d.conversationTokens ?? 0).toLocaleString()}, ` +
-      `system ${(d.systemTokens ?? 0).toLocaleString()}, ` +
-      `tool-defs ${(d.toolDefinitionsTokens ?? 0).toLocaleString()}). ` +
-      `Configured ${pressure.softPercent}% threshold ` +
-      `${Math.round(pressure.softThreshold).toLocaleString()} ` +
-      `tokens reached. Preserve the baton at the next clean boundary and, if ` +
-      `work still remains, trigger the handoff directly (invoke the ` +
-      `context-handoff skill).`,
-      { level: "warning" }
-    );
-  }
-
-  // Hard reminder at threshold (user-visible log only -- agent nudged via session.send on idle)
+  // Hard/soft reminders (user-visible log only -- agent nudged via
+  // session.send on idle). Mirrors the pendingNudge mutual-exclusion above:
+  // if a single event crosses both thresholds at once (e.g. a large jump in
+  // usage), only the superseding hard message is shown, not both.
   if (pressure.hard &&
       !state.hardLogShown && !state.handoffGenerated) {
     state.hardLogShown = true;
@@ -1102,6 +1086,22 @@ session.on("session.usage_info", (event) => {
       `tokens reached; auto-compaction still triggers at ~80%. ` +
       `Hand off NOW -- invoke the context-handoff skill and trigger the handoff ` +
       `directly without asking first.`,
+      { level: "warning" }
+    );
+  } else if (pressure.soft &&
+      !state.softLogShown && !state.handoffGenerated) {
+    state.softLogShown = true;
+    session.log(
+      `[Context Handoff] Context utilization ${usage.utilization} ` +
+      `(${usage.tokens}; ` +
+      `conversation ${(d.conversationTokens ?? 0).toLocaleString()}, ` +
+      `system ${(d.systemTokens ?? 0).toLocaleString()}, ` +
+      `tool-defs ${(d.toolDefinitionsTokens ?? 0).toLocaleString()}). ` +
+      `Configured ${pressure.softPercent}% threshold ` +
+      `${Math.round(pressure.softThreshold).toLocaleString()} ` +
+      `tokens reached. Preserve the baton at the next clean boundary and, if ` +
+      `work still remains, trigger the handoff directly (invoke the ` +
+      `context-handoff skill).`,
       { level: "warning" }
     );
   }
