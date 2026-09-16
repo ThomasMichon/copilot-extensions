@@ -21,6 +21,7 @@ from agent_dispatch.managed_runtime import (
     ManagedRuntimeMaterializer,
     RECEIPT_NAME,
     _cell_key,
+    _governed_uv_index_url,
     _is_reparse,
     _layout_version,
     _python_path,
@@ -650,6 +651,10 @@ def test_build_environment_drops_ambient_package_authority(tmp_path, monkeypatch
     monkeypatch.setenv("UV_INDEX_URL", "https://secret.example")
     monkeypatch.setenv("PYTHONPATH", str(tmp_path / "injected"))
     monkeypatch.setenv("AGENT_DISPATCH_TOKEN", "secret")
+    # No governed uv-feed config at this (empty) config home -- deterministic
+    # across machines regardless of whether the real box has one.
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
     python = tmp_path / "python"
     uv = tmp_path / "uv"
 
@@ -660,6 +665,62 @@ def test_build_environment_drops_ambient_package_authority(tmp_path, monkeypatch
     assert "PYTHONPATH" not in environment
     assert "AGENT_DISPATCH_TOKEN" not in environment
     assert environment["PIP_CONFIG_FILE"]
+    assert environment["UV_NO_CONFIG"] == "1"
+    assert "UV_DEFAULT_INDEX" not in environment
+
+
+def test_governed_uv_index_url_absent_without_config(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+    assert _governed_uv_index_url() is None
+
+
+def test_governed_uv_index_url_reads_managed_uv_toml(tmp_path, monkeypatch):
+    """Mirrors dotfiles' Restore-UvFeed.ps1 / restore-uv-feed.sh output shape."""
+    config_home = tmp_path / "config-home"
+    monkeypatch.setenv("APPDATA", str(config_home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+    uv_dir = config_home / "uv"
+    uv_dir.mkdir(parents=True)
+    (uv_dir / "uv.toml").write_text(
+        "# Managed by dotfiles agent-machines (governed-feeds / uv-feed).\n"
+        "[[index]]\n"
+        'url = "https://packagefeedproxy.microsoft.io/pypi/simple/"\n'
+        "default = true\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        _governed_uv_index_url()
+        == "https://packagefeedproxy.microsoft.io/pypi/simple/"
+    )
+
+
+def test_build_environment_forwards_governed_uv_index(tmp_path, monkeypatch):
+    monkeypatch.delenv("PIP_INDEX_URL", raising=False)
+    monkeypatch.delenv("UV_INDEX_URL", raising=False)
+    config_home = tmp_path / "config-home"
+    monkeypatch.setenv("APPDATA", str(config_home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+    uv_dir = config_home / "uv"
+    uv_dir.mkdir(parents=True)
+    (uv_dir / "uv.toml").write_text(
+        "[[index]]\n"
+        'url = "https://packagefeedproxy.microsoft.io/pypi/simple/"\n'
+        "default = true\n",
+        encoding="utf-8",
+    )
+    python = tmp_path / "python"
+    uv = tmp_path / "uv-bin"
+
+    environment = _subprocess_environment(base_python=python, package_manager=uv)
+
+    assert (
+        environment["UV_DEFAULT_INDEX"]
+        == "https://packagefeedproxy.microsoft.io/pypi/simple/"
+    )
+    # Still bounded: config-file discovery stays off, only the one resolved
+    # value is forwarded.
     assert environment["UV_NO_CONFIG"] == "1"
 
 

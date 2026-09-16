@@ -42,7 +42,7 @@
   "plugins/agent-dispatch/src/agent_dispatch/client.py": 1038,
   "plugins/agent-dispatch/src/agent_dispatch/companion.py": 1412,
   "plugins/agent-dispatch/src/agent_dispatch/coordinator.py": 2340,
-  "plugins/agent-dispatch/src/agent_dispatch/managed_runtime.py": 1375,
+  "plugins/agent-dispatch/src/agent_dispatch/managed_runtime.py": 1436,
   "plugins/agent-dispatch/src/agent_dispatch/queue.py": 3979,
   "plugins/agent-dispatch/src/agent_dispatch/registrar_registry.py": 1007,
   "plugins/agent-dispatch/src/agent_dispatch/repository_issue_loops.py": 1801,
