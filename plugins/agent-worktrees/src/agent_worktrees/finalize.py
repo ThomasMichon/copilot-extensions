@@ -193,6 +193,12 @@ def push_changes(
         # 1. Fetch
         print(f"Fetching from {repo.remote}...")
         git_ops.fetch(repo.remote, cwd=anchor)
+        # worktree-finality-and-obligations Phase 9: this fetch just made the
+        # repo's remote-tracking refs current -- share that with every OTHER
+        # worktree of this repo via the freshness ledger, instead of only
+        # this call benefiting.
+        if record and record.repo:
+            tracking.record_repo_fetch_confirmed(record.repo)
 
         # 2. Dirty check
         wt_exists = Path(worktree_path).exists()
@@ -408,6 +414,8 @@ def push_changes(
             if attempt < max_retries:
                 output.warn("Non-fast-forward -- fetching and retrying...")
                 git_ops.fetch(repo.remote, cwd=anchor)
+                if record and record.repo:
+                    tracking.record_repo_fetch_confirmed(record.repo)
                 if not git_ops.rebase(upstream, cwd=anchor):
                     output.err("Rebase after push rejection failed")
                     if record:
@@ -705,6 +713,8 @@ def _push_changes_pr(
     try:
         print(f"Fetching from {remote}...")
         git_ops.fetch(remote, cwd=worktree_path)
+        if record.repo:
+            tracking.record_repo_fetch_confirmed(record.repo)
 
         if git_ops.ref_exists(upstream, cwd=worktree_path):
             if on_wt:
@@ -857,6 +867,8 @@ def _push_changes_pr_refspec(
     try:
         print(f"Fetching from {remote}...")
         git_ops.fetch(remote, cwd=worktree_path)
+        if record.repo:
+            tracking.record_repo_fetch_confirmed(record.repo)
 
         # Rebase the worktree branch forward onto the default branch; feedback
         # commits ride on top. HEAD stays on wt_branch throughout.
@@ -1419,6 +1431,8 @@ def validate_and_finalize(
     # Fetch to get current upstream state
     print(f"Fetching from {repo.remote}...")
     git_ops.fetch(repo.remote, cwd=anchor)
+    if record and record.repo:
+        tracking.record_repo_fetch_confirmed(record.repo)
 
     if pr_mode:
         # PR mode: finalize is decoupled from merge. Work is safe to prune as
