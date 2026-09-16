@@ -29,7 +29,8 @@ def test_closure_present_and_final_when_clean():
     assert "closure" in row
     assert row["closure"]["closure"] == {"final": True}
     assert row["closure"]["label"] == "FINAL"
-    assert row["closure"]["evidence_mode"] == "refreshed"
+    assert row["closure"]["facts"]["upstream_containment"]["confirmed"] is True
+    assert row["closure"]["facts"]["open_claims"]["confirmed"] is True
 
 
 def test_closure_reports_merged_when_held_claim_present():
@@ -64,7 +65,7 @@ def test_closure_downgrades_to_cached_when_fetch_failed():
         fetch_requested=True, fetch_failed=True,
     )
     row = cli._worktree_to_dict(rec, state_info=info)
-    assert row["closure"]["evidence_mode"] == "cached"
+    assert row["closure"]["facts"]["upstream_containment"]["confirmed"] is False
     assert row["closure"]["label"] == "MERGED"
     assert row["closure"]["closure"] == {"final": False}
 
@@ -79,7 +80,7 @@ def test_closure_downgrades_to_cached_when_no_fetch_requested():
     rec = _rec()
     info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
     row = cli._worktree_to_dict(rec, state_info=info)
-    assert row["closure"]["evidence_mode"] == "cached"
+    assert row["closure"]["facts"]["upstream_containment"]["confirmed"] is False
     assert row["closure"]["label"] == "MERGED"
     assert row["closure"]["closure"] == {"final": False}
 

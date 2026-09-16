@@ -689,6 +689,8 @@ class TestClosureDescriptor:
         assert d.final is False
         assert d.label == "MERGED"
         assert d.action_disposition == "blocked"
+        assert d.facts["upstream_containment"]["confirmed"] is False
+        assert d.facts["open_claims"]["confirmed"] is False
 
     def test_incomplete_evidence_never_reports_final_or_safe(self):
         rec, info, disposition = self._final_inputs()
@@ -753,6 +755,12 @@ class TestClosureDescriptor:
         assert payload["action"] == {"disposition": "safe", "bucket": "clean"}
         assert payload["claims"] == {"held": 0}
         assert payload["follow_ups"] == {"open": 0}
+        assert set(payload["facts"]) == set(prune.FACT_NAMES)
+        assert payload["facts"]["upstream_containment"]["confirmed"] is True
+        assert payload["facts"]["open_claims"]["confirmed"] is True
+        assert payload["facts"]["checkpoint_activity"]["confirmed"] is True
+        assert payload["facts"]["local_dirtiness"]["confirmed"] is True
+        assert payload["facts"]["pending_handoff"]["confirmed"] is False
 
 
 # --- interpret_descriptor_payload (mixed-version fleet safety, Phase 5) -----
