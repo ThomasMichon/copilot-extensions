@@ -606,10 +606,18 @@ either.
   fetch/staleness concept, so there is no ledger write for them to trigger;
   if a cache-invalidation gap turns out to matter there, it is a distinct,
   still-unscoped follow-up, not silently folded into this bullet.
-- [ ] Add pending-handoff as a descriptor fact, read from context-handoff's
+- [x] Add pending-handoff as a descriptor fact, read from context-handoff's
   baton schema (read-only; agent-worktrees does not compose or consume a
   handoff -- see the `mux-companion` vision's schema-read-only boundary for
-  the same rule applied to a different consumer).
+  the same rule applied to a different consumer). Landed via
+  `rec.pending_handoffs` -- agent-worktrees' own already-existing,
+  already-tested, cooperative tracking of opened-but-unlinked session
+  handoffs (a predecessor recorded a token, no successor session linked
+  yet), populated by the existing `note-handoff`/`bind-nudge` commands, not
+  a NEW coupling to context-handoff's own baton file format. Read-only in
+  this function (never composed/mutated here); always `confirmed` (a local
+  tracking-record read, no fetch/staleness concept); purely informational
+  -- does NOT gate `FINAL`.
 - [~] Render the marker convention (an asterisk, or the compact-text
   equivalent) on any individual unconfirmed fact across `list --json`, the
   mux/PSMux status segment, and the Picker -- replacing today's implicit
@@ -676,6 +684,10 @@ either.
   the corresponding fact is unconfirmed; the mux/PSMux status segment
   inherits this automatically (it already renders `compact` directly), but
   the Picker does not yet consume `compact` at all -- still open.
+  `pending_handoff` now reads `rec.pending_handoffs` (agent-worktrees' own
+  already-tracked opened-but-unlinked session handoffs), always confirmed,
+  purely informational (does not gate `FINAL`) -- all 5 facts are now
+  real, none are stub placeholders.
 - [ ] **Session-claim lifecycle** (Phase 8, proposed): a worktree's own live
   Copilot session is a held claim; it settles on finalize, settles on a
   successful handoff cutover, releases on `sessionEnd`, and reopens on a
@@ -1520,4 +1532,36 @@ The approved design is the faceted model in [design.md](design.md):
   `pending_handoff`'s real wiring, the Picker's own `compact`-marker
   rendering (a separate, larger frontend slice), `docs/mux.md` +
   `mux-companion` vision updates, and the mixed-version-safety test.
+
+### 2026-09-16 (continued) - Phase 9 slice 6: pending_handoff wired to a real fact
+
+- Landed `pending_handoff`, the last of the five named facts that was still
+  a stub. Reads `rec.pending_handoffs` -- agent-worktrees' own pre-existing,
+  already-tested `WorktreeRecord` property (opened-but-unlinked session
+  handoffs: a predecessor recorded a token, no successor session linked
+  yet, populated cooperatively by the existing `note-handoff`/`bind-nudge`
+  commands) -- rather than inventing a NEW coupling to context-handoff's
+  own baton file format. This still satisfies the Plan's "read-only, never
+  composed/consumed" boundary: `assemble_closure_descriptor` only READS
+  `rec.pending_handoffs`, never mutates it.
+- Always `confirmed` (a local tracking-record read has no fetch/staleness
+  concept, same as `checkpoint_activity`/`local_dirtiness`) and purely
+  informational -- deliberately does NOT gate `FINAL`: a pending handoff
+  signals someone intends to resume the worktree, which is a distinct
+  concern from whether its content is safely landed. Never renders a
+  `compact` marker either, for the same reason (always confirmed).
+- All 5 `FACT_NAMES` are now real, none are stub placeholders.
+- Updated 1 existing test (`test_to_dict_shape`'s `pending_handoff`
+  assertion flipped from the old stub's `confirmed is False` to the real
+  `confirmed is True`/`count == 0`) and added
+  `test_pending_handoff_reads_the_record_and_is_always_confirmed`
+  (populates `rec.handoffs` with a pending `SessionHandoff`, asserts the
+  fact's `count`/`tokens`, that `final`/`action_disposition` are
+  unaffected, and that `compact` never carries a marker for it).
+  `test_prune.py` + `test_closure_descriptor_wiring.py` +
+  `test_status_segment.py` (126 tests) pass; `ruff check` diff on
+  `prune.py`/`test_prune.py` confirmed identical before/after.
+- **Not done this session** (remaining Phase 9 Plan items, unstarted): the
+  Picker's own `compact`-marker rendering, `docs/mux.md` + `mux-companion`
+  vision updates, and the mixed-version-safety test.
 
