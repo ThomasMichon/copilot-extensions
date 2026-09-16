@@ -692,6 +692,9 @@ def create_pr(
             git_ops.fetch(remote, cwd=worktree_path)
         except git_ops.GitError:
             pass
+        else:
+            if record and record.repo:
+                tracking.record_repo_fetch_confirmed(record.repo)
 
     head_branch = git_ops._get_current_branch_safe(worktree_path)
 
@@ -1796,6 +1799,12 @@ def _pull_forward_recommendation(
             git_ops.fetch(remote, cwd=path)
         except Exception:
             pass
+        else:
+            # worktree-finality-and-obligations Phase 9: a merged PR's
+            # pull-forward check is exactly the "pr-merge" freshness trigger
+            # -- share this fetch with every other worktree of the repo.
+            if record.repo:
+                tracking.record_repo_fetch_confirmed(record.repo)
     behind: int | None = None
     branch = git_ops._get_current_branch_safe(path)
     if branch and git_ops.ref_exists(upstream, cwd=path):

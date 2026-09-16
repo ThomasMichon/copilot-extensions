@@ -587,10 +587,25 @@ either.
   `tracking.is_repo_fetch_fresh` already says current (avoids a redundant
   fetch on top of one the ad hoc slice-2 writer, or an earlier sweep tick,
   just performed).
-- [ ] Add operation-triggered recompute signals from `pr-merge`, `finalize`'s
+- [~] Add operation-triggered recompute signals from `pr-merge`, `finalize`'s
   own fetch, `sync`, and claim settle/release, so the affected repo's (or
   worktree's, for worktree-scoped facts) freshness is refreshed promptly
-  instead of waiting out the next periodic sweep.
+  instead of waiting out the next periodic sweep. Landed the repo-scoped
+  half: every existing `git_ops.fetch(...)` call site in `finalize.py`
+  (`push_changes`'s initial fetch + its non-fast-forward retry,
+  `_push_changes_pr`, `_push_changes_pr_refspec`, `validate_and_finalize`)
+  and `pr_ops.py` (`create_pr`'s pre-rebase fetch,
+  `_pull_forward_recommendation` -- fired specifically on a just-merged PR,
+  the literal "pr-merge" trigger) and `__main__.py`'s `cmd_sync` now call
+  `tracking.record_repo_fetch_confirmed(record.repo)` immediately after
+  their own fetch succeeds, instead of only the periodic sweep or an
+  incidental later `__main__.py` closure-descriptor call benefiting. NOT
+  landed: **claim settle/release** is a different axis entirely (worktree-
+  scoped `open_claims`/held-claims state, not the repo-scoped git-upstream
+  ledger) -- held claims and follow-ups are always locally accurate with no
+  fetch/staleness concept, so there is no ledger write for them to trigger;
+  if a cache-invalidation gap turns out to matter there, it is a distinct,
+  still-unscoped follow-up, not silently folded into this bullet.
 - [ ] Add pending-handoff as a descriptor fact, read from context-handoff's
   baton schema (read-only; agent-worktrees does not compose or consume a
   handoff -- see the `mux-companion` vision's schema-read-only boundary for
@@ -637,8 +652,14 @@ either.
   status-monitor's periodic per-repo sweep now ALSO refreshes the ledger
   proactively (`session_catalog._maybe_refresh_repo_freshness`, 60s
   cooldown, unconditional/not mux-gated), so a repo stays fresh even when
-  no worktree of it ever passes `--fetch` itself; `pr-merge`/`finalize`/
-  `sync`/claim-settle triggered writes remain unstarted.
+  no worktree of it ever passes `--fetch` itself. `finalize`'s own fetch,
+  `push-changes`, `create-pr`'s pre-rebase fetch, the post-merge
+  pull-forward check (literally "pr-merge"), and `sync` now ALL record the
+  ledger immediately on their own successful fetch too, closing most of the
+  "operation-triggered recompute" bullet's gap between an operation
+  happening and the periodic sweep's own 60s cadence noticing it.
+  Claim-settle/release triggered writes remain explicitly out of scope (a
+  different, worktree-scoped axis -- see that Plan bullet's own note).
 - [ ] **Session-claim lifecycle** (Phase 8, proposed): a worktree's own live
   Copilot session is a held claim; it settles on finalize, settles on a
   successful handoff cutover, releases on `sessionEnd`, and reopens on a
@@ -1373,4 +1394,73 @@ The approved design is the faceted model in [design.md](design.md):
   cadence, not immediately on the operation itself), `pending_handoff`'s
   real wiring, per-fact marker rendering across surfaces, the remaining doc/
   vision updates, and the mixed-version-safety test.
+
+### 2026-09-16 - Phase 9 slice 4: operation-triggered ledger writes (finalize/pr-merge/sync)
+
+- Landed the git-fetch half of the "operation-triggered recompute signals"
+  Plan bullet: every existing `git_ops.fetch(...)` call site that already
+  performs a real fetch as part of its own work now ALSO records the
+  repo-scoped freshness ledger immediately on success, instead of that
+  fetch's freshness only reaching other worktrees via the periodic sweep's
+  own 60s cadence (slice 3) or an incidental later `__main__.py`
+  closure-descriptor call (slice 2).
+  - `finalize.py`: `push_changes`'s initial fetch AND its non-fast-forward
+    retry-fetch, `_push_changes_pr`, `_push_changes_pr_refspec`, and
+    `validate_and_finalize`'s own fetch (the literal "finalize's own fetch"
+    Plan wording) -- 5 call sites total, all guarded by `record and
+    record.repo` (or just `record.repo` where the parameter type is
+    non-Optional) since a couple of these paths tolerate a missing tracking
+    record.
+  - `pr_ops.py`: `create_pr`'s best-effort pre-rebase fetch, and
+    `_pull_forward_recommendation` -- fired specifically when the active PR
+    has just merged, i.e. the literal "pr-merge" trigger the Plan bullet
+    names, even though `agent-worktrees pr-merge` itself calls a provider
+    API rather than a local `git fetch` (recording confirmed WITHOUT an
+    actual local fetch would be dishonest -- local remote-tracking refs
+    genuinely aren't current until something fetches; this pull-forward
+    check's own fetch is the closest real local-fetch trigger tied to a
+    merge event).
+  - `__main__.py`'s `cmd_sync`: records once per DISTINCT repo among the
+    synced records after its own shared fetch (normally exactly one repo,
+    since `tracking_dir()` is per-project) -- this function's own docstring
+    already said "One fetch refreshes the shared upstream ref for every
+    worktree of this repo," so this was the most literal match for the
+    Plan's "sync" trigger.
+  - Deliberately did NOT touch **claim settle/release**: it names a
+    different axis (worktree-scoped `open_claims`/held-claims state), not
+    the repo-scoped git-upstream ledger this slice is about. Held claims and
+    follow-ups are always locally computed/accurate -- there is no
+    fetch/staleness concept for the ledger to record there. Documented this
+    split explicitly in the Plan bullet's own text rather than silently
+    dropping it or half-implementing something speculative.
+- Added `tests/test_repo_freshness_wiring.py`: 3 `push_changes`/finalize
+  cases (records on the initial fetch even though squash later aborts;
+  records on BOTH the initial fetch and the non-ff retry fetch; a
+  record-less repo is tolerated, matching the pre-existing squash-abort
+  tests' own fixture shape), 1 `cmd_sync` case (two records of the same
+  repo -> exactly one ledger write), and 2 `_pull_forward_recommendation`
+  cases (records on a successful fetch; does NOT record when the fetch
+  raises). All via monkeypatched `git_ops.fetch`/spies on
+  `tracking.record_repo_fetch_confirmed`, reusing `test_squash_abort.py`'s
+  existing real-git-repo fixture helpers (`_make_repo`/`_git`) rather than
+  inventing new ones.
+- Verified: `test_repo_freshness_wiring.py` (6 tests) +
+  `test_squash_abort.py` + `test_finalize_gate.py` +
+  `test_finalize_precondition.py` + `test_finalize_rollback.py` +
+  `test_repo_freshness.py` + `test_session_catalog.py` + `test_prune.py`
+  (157 passed, 3 pre-existing POSIX-only skips on Windows) all pass.
+  `test_pr_ops.py` (113 tests) independently confirmed pre-existing/
+  environmental ~8-minute runtime on this machine BEFORE this change too
+  (same 113 passed on a stashed baseline run) -- not a regression, just a
+  slow file, so it wasn't re-run against the final diff. `ruff check`
+  findings on every touched source file are identical before/after (35);
+  the new test file's own findings (an unused import, an unused noqa, 2
+  unused-unpacked-variables, one long line) were all fixed, not suppressed.
+- **Not done this session** (remaining Phase 9 Plan items, unstarted):
+  `pending_handoff`'s real wiring, per-fact marker rendering across
+  surfaces, the remaining doc/vision updates (`docs/cli-reference.md`,
+  `docs/mux.md`, the `mux-companion` vision), and the mixed-version-safety
+  test. Claim-settle/release triggered writes are now explicitly scoped OUT
+  of this bullet rather than left ambiguously "still pending" (see the Plan
+  bullet's own note).
 
