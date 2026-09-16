@@ -31,6 +31,7 @@ import subprocess
 from . import bridge_remote
 from .embody_prompts import autopilot_worker_prompt, fleet_autopilot_worker_prompt
 from .procutil import (
+    agent_worktrees_environment,
     agent_worktrees_launch_prefix,
     no_window_kwargs,
     run_ssh_command,
@@ -155,6 +156,7 @@ def create_worktree(
         capture_output=True,
         text=True,
         timeout=timeout,
+        env=agent_worktrees_environment(),
         **no_window_kwargs(),
     )
     if result.returncode != 0:
@@ -191,6 +193,7 @@ def resolve_worktree(
         capture_output=True,
         text=True,
         timeout=timeout,
+        env=agent_worktrees_environment(),
         **no_window_kwargs(),
     )
     if result.returncode != 0:
@@ -366,6 +369,7 @@ def conclude_disposable_worker(
         capture_output=True,
         text=True,
         timeout=timeout,
+        env=agent_worktrees_environment(),
         **no_window_kwargs(),
     )
     try:
@@ -416,6 +420,7 @@ def conclude_dispatch_attempt(
         capture_output=True,
         text=True,
         timeout=timeout,
+        env=agent_worktrees_environment(),
         **no_window_kwargs(),
     )
     try:
@@ -494,6 +499,7 @@ def spawn_embodied_worker(
         capture_output=True,
         text=True,
         timeout=timeout,
+        env=agent_worktrees_environment(),
         **no_window_kwargs(),
     )
 
