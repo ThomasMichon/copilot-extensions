@@ -206,6 +206,47 @@ def test_spawn_worker_wait_omits_no_wait(monkeypatch):
     assert result.returncode == 0
 
 
+def test_spawn_worker_reclaim_appends_flag(monkeypatch):
+    """``reclaim=True`` threads ``--reclaim`` onto the ``create`` invocation --
+    agent-bridge's session-lifecycle head-guard break-glass, so a coordinator-
+    judged-stale worktree occupant (e.g. an unclaimed handoff past its
+    reconciliation window) is replaced in place instead of refused 409."""
+    calls = {}
+
+    def fake_run(cmd, **kwargs):
+        calls["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, "ok", "")
+
+    monkeypatch.setattr(
+        bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+    )
+    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+
+    bridge.spawn_worker(
+        "task42", agent="task-worker", worker_id="w1",
+        worktree_id="wt-1", reclaim=True, wait=False,
+    )
+    assert "--reclaim" in calls["cmd"]
+
+
+def test_spawn_worker_omits_reclaim_by_default(monkeypatch):
+    calls = {}
+
+    def fake_run(cmd, **kwargs):
+        calls["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, "ok", "")
+
+    monkeypatch.setattr(
+        bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+    )
+    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+
+    bridge.spawn_worker(
+        "task42", agent="task-worker", worker_id="w1", worktree_id="wt-1",
+    )
+    assert "--reclaim" not in calls["cmd"]
+
+
 def test_stop_worker_reaps_owned_session_host(monkeypatch):
     calls = {}
     monkeypatch.setattr(
