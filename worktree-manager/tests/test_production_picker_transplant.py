@@ -80,6 +80,13 @@ def test_transplanted_picker_sources_match_production_copy():
                 # defining them locally (same Step 1.5 relocation); Worktree
                 # Manager's copy keeps its original self-contained version.
                 "frame_health.py",
+                # profiles_io.py now imports agent_worktrees.roster (roster.py
+                # relocated out of picker_tui/ for the same Step 1.5 reason --
+                # local_host() is called from agent-worktrees' standalone
+                # cmd_profiles CLI command, not just the Picker's Profiles
+                # view). Worktree Manager keeps its own local
+                # picker_tui/roster.py sibling instead.
+                "profiles_io.py",
             }
         ),
     ]

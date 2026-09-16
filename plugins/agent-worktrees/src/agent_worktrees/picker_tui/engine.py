@@ -402,7 +402,7 @@ MAINT_GROUP_ORDER = ["DIRTY", "WIP", "ACTIVE", "ORPHAN", "CONVO", "UNUSED",
 BUTTON_SETS = {"maintenance": ["K", "SY"]}
 
 # ---- Profiles matrix model ----------------------------------------------------
-# Axes are config-bound from machines.yaml at runtime (see picker_tui.roster and
+# Axes are config-bound from machines.yaml at runtime (see agent_worktrees.roster and
 # PickerScreen.setup): the real data sources (data_local/data_ssh) expose
 # host_cols()/target_envs() derived from the roster. These fallbacks apply only
 # when a source omits those hooks (e.g. a fixture source with no
