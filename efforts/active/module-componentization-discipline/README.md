@@ -86,7 +86,7 @@ table):
 | 2,429 | +1,429 | `tools/clean-room/scenarios/agent-index-installation-cells/scenario.py` | Clean-room fixture, not production code — lower urgency |
 | 2,369 | +1,369 | `tools/clean-room/scenarios/progressive-context-disclosure-baseline/fixture.py` | Clean-room fixture, not production code — lower urgency |
 | 2,195 | +1,195 | `plugins/agent-worktrees/src/agent_worktrees/reconcile.py` | |
-| 2,159 | +1,159 | `worktree-manager/.../picker_tui/pivots.py` | |
+| 2,159 | +1,159 | `worktree-manager/.../picker_tui/pivots.py` | **Split 2026-09-17** (trunk unblock, see Journal) — now a 102-line facade |
 
 **Suggested next pick (Phase 2, first slice):** `agent-dispatch/coordinator.py`
 or `agent-bridge/db.py` — both mid-sized (2,400–2,500 lines, so a single
@@ -367,3 +367,38 @@ the Phase 0 runbook, picked up as capacity allows.
   the plugin has any pre-existing failure — use a `-k` filter targeting the
   changed area, or treat CI's full-matrix run as the real gate. This applies
   to every future Phase 2/3/4 split, not just this one.
+
+### 2026-09-17 — Trunk unblock (sixth+seventh live occurrence)
+- Discovered via an unrelated PR's CI failure: `main` had drifted past the
+  guard again, this time in two files at once —
+  `plugins/agent-worktrees/src/agent_worktrees/picker_support/pivot_registry_scan.py`
+  (1026, over the flat 1000-line cap) and
+  `worktree-manager/src/worktree_manager/production_picker/picker_tui/pivots.py`
+  (2411, over its 2159-line grandfathered ceiling, the file already flagged
+  unclaimed in the pecking-order table above). A seventh and eighth live
+  instance of the same regression class.
+- Fixed both as a trunk-unblock split rather than a baseline widen, since
+  `pivots.py` was already backlogged and `pivot_registry_scan.py` had no
+  baseline entry to widen (newly over cap, not grandfathered). Split
+  `pivot_registry_scan.py`'s classify/finding/remedy helpers into a new
+  `pivot_registry_classify.py` sibling (1026 → 453 lines); split
+  `pivots.py` along the same manifest/materialization/scan seams
+  `agent-worktrees` already established for the equivalent logic, into
+  `pivot_manifest.py` + `pivot_registry_materialization.py` +
+  `pivot_registry_scan.py` (2411 → 102-line facade).
+- Caught a real regression the split's own (mis-targeted) validation
+  missed: `run-plugin-tests.py worktree-manager` silently reports "no
+  registered suite" (worktree-manager is out-of-plugin and isn't wired into
+  that runner at all — see its dedicated CI job), so the actual
+  `worktree-manager` test suite never ran until invoked directly
+  (`cd worktree-manager && test-supervisor -- uv run --extra dev pytest -q`).
+  That run caught 8 failures: several tests monkeypatched private symbols
+  directly on the old `pivots` module object; once the split moved those
+  symbols' real definitions elsewhere, the old patch target silently
+  stopped intercepting the real call site. Fixed by retargeting each test's
+  monkeypatch to the symbol's new module home (not by re-adding a
+  re-export shim). Full `worktree-manager` suite: 916 passed after the fix.
+  Added to the running lesson list: **`run-plugin-tests.py` not covering a
+  target is itself a silent gap** — confirm the actual CI-equivalent
+  command for any out-of-plugin component before trusting a runner's report
+  that "nothing to test" means nothing broke.
