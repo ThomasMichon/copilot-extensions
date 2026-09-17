@@ -10,9 +10,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from agent_machines import reconcile as reconcile_module
 from agent_machines import resources as R
 from agent_machines.manifest import load_package
 from agent_machines.reconcile import plan, restore, restore_result_to_dict
+from agent_machines.surfaces import SurfaceResult
 
 from ._helpers import base_package, write_package
 
@@ -87,5 +89,158 @@ def test_restore_json_includes_resources(tmp_path):
     assert payload["plan"]["resources"][0]["id"] == "conf"
 
 
+def test_maintenance_safe_restore_still_applies_manage_entries(tmp_path, monkeypatch):
+    called: dict[str, object] = {}
+
+    def fake_apply_surfaces(resolved, *, home=None, dry_run=True, only=None):
+        called["packages"] = [pkg.name for pkg in resolved]
+        return [
+            SurfaceResult(
+                surface="copilot.settings",
+                file="settings.json",
+                changed=True,
+                dry_run=dry_run,
+                changes=[{"key": "model", "before": "old", "after": "new"}],
+            )
+        ]
+
+    monkeypatch.setattr("agent_machines.reconcile.apply_surfaces", fake_apply_surfaces)
+    pkg = _pkg(
+        tmp_path,
+        "acme/a",
+        [{"type": "file", "id": "conf", "path": "$HOME/.psmux.conf",
+          "strategy": "enforce", "content": "x\n"}],
+    )
+    result = restore(
+        [pkg],
+        "box-1",
+        dry_run=False,
+        plat="windows",
+        home=tmp_path,
+        maintenance_safe=True,
+    )
+    assert called["packages"] == ["acme/a"]
+    assert result.surface_results[0].surface == "copilot.settings"
+    assert result.resource_results[0].status == "skipped"
+
+
+def test_maintenance_safe_restore_skips_modules_entirely(tmp_path, monkeypatch):
+    """Regression: found while dogfooding the first real fleet-wide sweep --
+    `restore --apply --all-projects --maintenance-safe` ran every declared
+    module unconditionally (modules have no per-module safety opt-in), so a
+    module reporting legitimate unresolved drift (e.g. an unmanaged uv.toml)
+    made the whole unattended sweep report `error` even though every
+    maintenance-safe resource/surface step succeeded correctly. Modules must
+    stay out of a blanket maintenance-safe restore."""
+    from agent_machines import modules as _modules
+
+    executed: list[str] = []
+
+    def _fail_if_run(pkg, module, plat, dry_run):
+        executed.append(str(module.get("name")))
+        raise AssertionError("a module must never execute under a blanket maintenance-safe restore")
+
+    monkeypatch.setattr(_modules, "run_module", _fail_if_run)
+    data = base_package(
+        name="acme/a",
+        modules=[
+            {
+                "name": "uv-feed",
+                "windows": {"command": ["pwsh", "-File", "restore.ps1"], "dry_run_args": ["-DryRun"]},
+            }
+        ],
+    )
+    path = write_package(tmp_path / "acme_a", "pkg.yaml", data)
+    pkg = load_package(path, source_repo="acme")
+
+    result = restore([pkg], "box-1", dry_run=False, plat="windows", home=tmp_path, maintenance_safe=True)
+    assert executed == []
+    assert len(result.module_results) == 1
+    mod = result.module_results[0]
+    assert mod.ran is False
+    assert mod.ok is True  # a documented skip, not a failure
+    assert "not maintenance-safe" in (mod.skipped_reason or "")
+
+    # An explicit --only <module> request still executes normally even under
+    # --maintenance-safe (operator-directed, not a blanket unattended sweep).
+    monkeypatch.setattr(_modules, "run_module", lambda pkg, module, plat, dry_run: _modules.ModuleResult(
+        str(module.get("name")), pkg.source_repo, ran=True, dry_run=dry_run, returncode=0,
+    ))
+    only_result = restore(
+        [pkg], "box-1", dry_run=False, plat="windows", home=tmp_path,
+        maintenance_safe=True, only=["uv-feed"],
+    )
+    assert only_result.module_results[0].ran is True
+
+
+def test_runtime_spot_check_repairs_only_after_failed_readiness(tmp_path, monkeypatch):
+    monkeypatch.setattr(reconcile_module.shutil, "which", lambda binary: "pwsh" if binary == "pwsh" else None)
+    payload = tmp_path / ".copilot" / "installed-plugins" / "copilot-extensions" / "agent-machines"
+    (payload / "scripts").mkdir(parents=True)
+    (payload / "plugin.json").write_text(
+        '{"name":"agent-machines","runtimeScope":"machine-gated","installerReadiness":"installer-readiness.json"}',
+        encoding="utf-8",
+    )
+    (payload / "scripts" / "init.ps1").write_text("# noop\n", encoding="utf-8")
+    state = {"healthy": False}
+    calls: list[list[str]] = []
+
+    def runner(argv, *, timeout):
+        calls.append(list(argv))
+        if argv == ["agent-machines", "installer-readiness"]:
+            return R.RunOutcome(0, "", "") if state["healthy"] else R.RunOutcome(1, "", "broken")
+        if any(str(token).endswith("init.ps1") for token in argv):
+            state["healthy"] = True
+            return R.RunOutcome(0, "", "")
+        raise AssertionError(argv)
+
+    repaired = reconcile_module.runtime_spot_check_results(
+        home=tmp_path, plat="windows", dry_run=False, runner=runner
+    )
+    assert repaired[0].status == "changed"
+    assert repaired[0].action == "repair"
+    assert calls == [
+        ["agent-machines", "installer-readiness"],
+        ["pwsh", "-File", str(payload / "scripts" / "init.ps1")],
+        ["agent-machines", "installer-readiness"],
+    ]
+
+    calls.clear()
+    already_healthy = reconcile_module.runtime_spot_check_results(
+        home=tmp_path, plat="windows", dry_run=False, runner=runner
+    )
+    assert already_healthy[0].status == "ok"
+    assert already_healthy[0].action == "none"
+    assert calls == [["agent-machines", "installer-readiness"]]
+
+
 def _stub_result() -> R.ResourceResult:
     return R.ResourceResult("file", "conf", changed=False, dry_run=True, action="none")
+
+
+def test_runtime_command_runner_resolves_pathext_shim(monkeypatch):
+    """Regression: `_runtime_command_runner`'s default (non-test-injected)
+    subprocess call must resolve a bare plugin binstub name (a `.cmd` shim on
+    Windows) the same way self_update.default_command_runner does, or the
+    runtime spot-check silently fails with WinError 2 on every real Windows
+    machine despite the binstub genuinely being on PATH."""
+    captured: dict[str, list[str]] = {}
+
+    def fake_which(name):
+        return f"C:\\Users\\tmichon\\.local\\bin\\{name}.cmd" if name == "agent-machines" else None
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+
+        class _Proc:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        return _Proc()
+
+    monkeypatch.setattr(reconcile_module.shutil, "which", fake_which)
+    monkeypatch.setattr(reconcile_module.subprocess, "run", fake_run)
+    reconcile_module._runtime_command_runner(["agent-machines", "installer-readiness"], timeout=60)
+    assert captured["argv"][0] == "C:\\Users\\tmichon\\.local\\bin\\agent-machines.cmd"
+

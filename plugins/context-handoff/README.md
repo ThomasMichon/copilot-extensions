@@ -14,9 +14,9 @@ This plugin ships four cooperating payload pieces:
 | Piece | Type | Role |
 |-------|------|------|
 | **continuity guidance hook** | Declarative `sessionStart` hook | Writes the full owner-marked continuity contract to the exact session folder and emits only `{}` |
-| **context-handoff extension** | Copilot CLI session extension (`extension.mjs`) | Monitors `session.usage_info` for exact token counts; applies percentage-based soft/hard thresholds (55% / 70% by default) with optional repository overrides, delivered on the next idle; provides `generate_handoff_prompt`, `save_handoff_prompt`, `consume_handoff`, and `trigger_handoff` tools plus **`/handoff-continue`**, **`/consume-handoff`**, and the compatibility **`/resume-handoff`** alias |
+| **context-handoff extension** | Copilot CLI session extension (`extension.mjs`) | Monitors `session.usage_info` for exact token counts; applies percentage-based soft/hard/**force** thresholds (55% / 70% / 79% by default) with optional repository overrides, delivered on the next idle; the force tier auto-drafts/stores/triggers a handoff itself and denies further mutating tool calls (see § Thresholds); provides `generate_handoff_prompt`, `save_handoff_prompt`, `consume_handoff`, and `trigger_handoff` tools plus **`/handoff-continue`**, **`/consume-handoff`**, and the compatibility **`/resume-handoff`** alias |
 | **context-handoff skill** | Skill | Owns the `/handoff` workflow: compose the continuation prompt from the extension's structured facts and the agent's live context, decide when to store it, and decide whether to ask or trigger |
-| **payload-local fallback CLI** | Node script (`handoff-cli.mjs`) | Extension-free facts, save, trigger, and task/file consume. Invoked by exact verified plugin-root-relative path; it has no PATH binstub or install/runtime step and shares `handoff-core.mjs` with the extension |
+| **payload-local fallback CLI** | Node script (`handoff-cli.mjs`) | Extension-free facts, save, trigger, task/file consume, `check-heads` auditing, and a safe `retry-cutover` remediation for a superseded session. Invoked by exact verified plugin-root-relative path; it has no PATH binstub or install/runtime step and shares `handoff-core.mjs` with the extension |
 
 ## The boundary
 
@@ -213,6 +213,32 @@ the claimant session id to the user and offer to file a bug (do not file one
 automatically): repeated or racing consumption of the same handoff is
 typically a sign of a real defect upstream, not routine behavior.
 
+## Handoff-lifecycle observability
+
+`trigger_handoff` is stage 6 of a wider 13-stage cutover lifecycle spanning
+this plugin, the resident `agent-worktrees` status monitor, and the mux
+layer -- worktree creation through the predecessor's confirmed retirement.
+The full stage vocabulary, the two durable stores that record it
+(`activity.jsonl`'s rolling log and `handoff_trace.py`'s unrotated
+per-worktree store), and the diagnostic tools available today
+(`agent-worktrees handoffs-check`, `agent-bridge handoff-check`) are
+documented in
+[`agent-worktrees`'s architecture doc](../agent-worktrees/docs/architecture.md#handoff-cutover-lifecycle-the-13-stage-trace)
+-- read that first when a handoff appears to have gone sideways rather than
+re-deriving the sequence from scratch. `handoffs-check` diagnoses (and can
+repair) an **unretired predecessor after a spawn is recorded** -- a
+successor associated as a candidate *or* already linked, plus a recorded
+spawn event, with no confirmed retirement since. Its read-only report does
+**not** itself confirm the pane is still alive (no `_mux_pane_alive()` call
+in that path) -- it lists every such unretired case as a candidate, even one
+whose pane already exited without ever being logged as retired; `--execute`
+is the step that performs the live check and actually resolves it. It does
+**not** diagnose "ack but no pane at all" (a host acknowledgement with no
+successor ever recorded) -- that case has no dedicated diagnostic yet; a
+dedicated
+`handoff-trace` render command is
+still open follow-on work.
+
 ## Payload-local CLI fallback
 
 When the extension does not resolve or fails to load, the plugin's payload
@@ -231,6 +257,8 @@ CH="$CH_ROOT/extensions/context-handoff/handoff-cli.mjs"
 [ -f "$CH" ] || { echo "context-handoff payload-local CLI not found" >&2; exit 1; }
 
 node "$CH" facts --json --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
+node "$CH" check-heads --json --cwd "$PWD"
+node "$CH" retry-cutover --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 node "$CH" save --title "<topic>" --prompt-file "<handoff.md>" \
   --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 node "$CH" trigger --title "<topic>" --prompt-file "<handoff.md>" \
@@ -258,6 +286,8 @@ if (-not (Test-Path -LiteralPath "$chRoot\plugin.json")) {
 $ch = Join-Path $chRoot 'extensions\context-handoff\handoff-cli.mjs'
 if (-not (Test-Path -LiteralPath $ch -PathType Leaf)) { throw 'context-handoff payload-local CLI not found' }
 node $ch facts --json --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
+node $ch check-heads --json --cwd $PWD
+node $ch retry-cutover --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch save --title '<topic>' --prompt-file '<handoff.md>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch trigger --title '<topic>' --prompt-file '<handoff.md>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch trigger --handoff-token '<HANDOFF_TOKEN>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
@@ -265,22 +295,64 @@ node $ch consume --locator 'task:<task-id>' --session-id $env:COPILOT_AGENT_SESS
 node $ch consume --locator 'file:<handoff-id>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 ```
 
+## Auditing handoff head alignment
+
+`check-heads` compares the authoritative `agent-worktrees head-session --json`
+ledger view for each known worktree against the resident status-monitor's
+current registry of `wt-<id>` sessions. Its main failure mode is a pending
+handoff that still exists in the ledger but is not currently reachable through
+the monitor's served-session roster, which means a proactive cutover spawn will
+not visit that worktree.
+
+- `pending-handoff-unregistered` — the ledger still has one or more pending
+  handoffs, but the monitor currently has no registered `wt-<id>` target for
+  that worktree.
+- `pending-handoff-registry-path-mismatch` — the monitor has a registered
+  `wt-<id>` entry, but it points at a different checkout path than the worktree
+  inventory row being audited.
+
+Use the command directly:
+
+```bash
+node "$CH" check-heads --json --cwd "$PWD"
+```
+
+If you are looking at a superseded predecessor session and the worktree already
+has a live successor pane, use:
+
+```bash
+node "$CH" retry-cutover --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
+```
+
+That shells to `agent-worktrees handoff-cutover --retry --session-id <sid> --json`: it
+first checks whether the latest handoff already has a live successor pane and,
+if so, refocuses that existing pane instead of spawning a duplicate successor.
+Only when no live successor exists does it fall back to a fresh spawn attempt.
+
+If the ledger itself is stale, repair the underlying worktree state with
+`agent-worktrees doctor --fix`, or explicitly repoint the head with
+`agent-worktrees conclude-session` / `link-succession` once you know the exact
+predecessor and successor ids.
+
 ## Thresholds
 
 | Threshold | Behavior |
 |-----------|----------|
 | 55% of window | Soft reminder: compose/store a baton at the next clean boundary and trigger directly if work still remains |
 | 70% of window | Urgent reminder: preserve the baton now and trigger directly; compaction remains at ~80% |
+| 79% of window | **Force tier:** the extension does it *for* the agent -- auto-drafts a handoff from whatever session facts are available, stores and triggers it via the same path `save_handoff_prompt`/`trigger_handoff` use, and denies further mutating tool calls (read-only inspection still allowed) for the rest of the session. This is the last chance to capture state before the runtime's own auto-compaction (~80%) destroys it -- it does not wait for the agent to act. Lifted only by a successful compaction (the operator may then keep working in the same session instead of switching to the handed-off one); at most one auto-handoff per session |
 
-An owning repository may override either percentage in
+An owning repository may override any of the three percentages in
 `.context-handoff/config.yaml`:
 
 ```yaml
 thresholds:
   soft_percent: 65
   hard_percent: 75
+  force_percent: 78
 ```
 
-Invalid config produces a visible warning and uses the 55% / 70% defaults. If
-the runtime does not report a window size, the extension reports utilization as
-unknown and does not invent an absolute threshold.
+Invalid config produces a visible warning and uses the 55% / 70% / 79%
+defaults. If the runtime does not report a window size, the extension reports
+utilization as unknown and does not invent an absolute threshold (the force
+tier, like soft/hard, never fires in that case either).

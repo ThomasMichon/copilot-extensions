@@ -24,7 +24,7 @@ import shutil
 import signal
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from .install_paths import install_dir
@@ -43,6 +43,7 @@ from agent_procutil import (
 
 __all__ = [
     "agent_bridge_launch_prefix",
+    "agent_worktrees_environment",
     "agent_worktrees_launch_prefix",
     "detached_kwargs",
     "no_window_flags",
@@ -62,6 +63,40 @@ __all__ = [
     "windowless_python",
     "windowless_python_env",
 ]
+
+#: Env vars scrubbed before spawning the ``agent-worktrees`` CLI as a plain
+#: sibling binstub (not a full peer-plugin context handoff -- see
+#: ``peer_launch.peer_environment`` for that case). Mirrors the precedent in
+#: agent-bridge's ``worktree_head.py`` (``VIRTUAL_ENV``/``PYTHONHOME``/
+#: ``__PYVENV_LAUNCHER__``/``PYTHONPATH``, which otherwise trip an ``_sre``
+#: module mismatch in a uv-managed child interpreter), plus
+#: ``COPILOT_PLUGIN_ROOT``: agent-dispatch commonly runs as a long-lived daemon
+#: started with that var set to its OWN payload dir, and letting it leak into
+#: a spawned ``agent-worktrees`` process trips agent-worktrees's own
+#: payload-context guard (shim vs. inherited context mismatch) -- the same
+#: class of bug tracked for agent-bridge's peer-binstub delegation in #2268.
+_AGENT_WORKTREES_ENV_SCRUB = frozenset({
+    "COPILOT_PLUGIN_ROOT",
+    "PYTHONHOME",
+    "PYTHONPATH",
+    "VIRTUAL_ENV",
+    "__PYVENV_LAUNCHER__",
+})
+
+
+def agent_worktrees_environment() -> dict[str, str]:
+    """Ambient environment, minus the vars unsafe to leak into a spawned
+    ``agent-worktrees`` process (see :data:`_AGENT_WORKTREES_ENV_SCRUB`).
+
+    Every direct ``subprocess`` spawn of the ``agent-worktrees`` CLI should pass
+    ``env=agent_worktrees_environment()`` rather than inheriting the parent's
+    environment verbatim (the default when no ``env=`` is given at all).
+    """
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if key not in _AGENT_WORKTREES_ENV_SCRUB
+    }
 
 #: Slot-interpreter subpaths, POSIX then Windows (matches
 #: ``versioned_runtime.SLOT_PYTHON_SUBPATHS`` / ``resolve-runtime.ps1``).
@@ -228,11 +263,16 @@ def run_agent_worktrees_capture(
     prefix = agent_worktrees_launch_prefix()
     if prefix is None:
         return None
-    return run_background_capture([*prefix, *args], timeout=timeout)
+    return run_background_capture(
+        [*prefix, *args], timeout=timeout, env=agent_worktrees_environment()
+    )
 
 
 def run_background_capture(
-    argv: Sequence[str | os.PathLike[str]], *, timeout: float
+    argv: Sequence[str | os.PathLike[str]],
+    *,
+    timeout: float,
+    env: Mapping[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str] | None:
     """Run a short-lived captured process tree without a headed Windows console.
 
@@ -249,6 +289,11 @@ def run_background_capture(
     own ``conhost.exe``) running indefinitely. This was a real, observed leak:
     a periodic caller (e.g. a GC/reap loop) whose probe stalls past its timeout
     accumulates one orphaned process pair per cycle, unbounded.
+
+    ``env`` defaults to ``None`` (inherit the ambient environment verbatim, the
+    prior behavior) -- a caller spawning a specific sibling plugin (e.g.
+    :func:`run_agent_worktrees_capture`) should instead pass an explicitly
+    scrubbed environment (:func:`agent_worktrees_environment`).
     """
     args = [os.fspath(arg) for arg in argv]
     try:
@@ -258,6 +303,7 @@ def run_background_capture(
             stderr=subprocess.PIPE,
             stdin=subprocess.DEVNULL,
             text=True,
+            env=dict(env) if env is not None else None,
             **_process_tree_kwargs(),
         )
     except OSError:

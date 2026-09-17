@@ -11,14 +11,17 @@ import {
   agentWorktreesGetResult,
   buildResumePrompt,
   buildSeedForStored,
+  checkHeadAlignment,
   consumeDispatchHandoffTask,
   consumeFileHandoff,
   decodeHandoffPayload,
   encodeHandoffPayload,
   formatConsumeResult,
   isolatedPythonArgs,
+  logHandoffPromptReceived,
   manualFallbackInstructions,
   normalizeHandoffTitle,
+  retryStoredHandoffCutover,
   resolveSystemCli,
   runtimeEnvironment,
   safePathSegment,
@@ -29,6 +32,7 @@ import {
   readSessionStateHandoff,
   markSessionStateHandoffConsumed,
 } from "../extensions/context-handoff/handoff-core.mjs";
+import { extractRecoveryLocatorFromPrompt } from "../extensions/context-handoff/cutover-seed.mjs";
 
 function withTempHome(fn) {
   const dir = mkdtempSync(join(tmpdir(), "context-handoff-home-"));
@@ -184,6 +188,119 @@ test("resolveSystemCli resolves agent-bridge via its sibling payload, not bare P
     `expected a sibling-payload path, got: ${resolved}`,
   );
   assert.notEqual(resolved, "agent-bridge");
+});
+
+test("checkHeadAlignment flags pending handoffs missing from the monitor registry", () => {
+  withTempHome((home) => {
+    const repoRoot = join(home, "repo");
+    mkdirSync(repoRoot, { recursive: true });
+    mkdirSync(join(repoRoot, "wt-active"), { recursive: true });
+    mkdirSync(join(repoRoot, "wt-dormant"), { recursive: true });
+    const registryDir = join(home, ".agent-worktrees", "status-monitor.d");
+    mkdirSync(registryDir, { recursive: true });
+    writeFileSync(join(registryDir, "wt-active"), join(repoRoot, "wt-active"), "utf8");
+
+    const execute = (_bin, argv, opts = {}) => {
+      if (
+        argv[0] === "repos"
+        && argv[1] === "list"
+        && argv.includes("--class")
+        && argv.includes("worktree")
+        && argv.includes("--json")
+      ) {
+        return JSON.stringify({
+          repos: [{
+            name: "copilot-extensions",
+            paths: { windows: repoRoot },
+          }],
+        });
+      }
+      if (
+        argv[0] === "list"
+        && argv.includes("--all")
+        && argv.includes("--json")
+        && opts.cwd === repoRoot
+      ) {
+        return JSON.stringify({
+          worktrees: [
+            {
+              id: "active",
+              path: join(repoRoot, "wt-active"),
+              repo: "copilot-extensions",
+              machine: "host-a",
+              status: "active",
+            },
+            {
+              id: "dormant",
+              path: join(repoRoot, "wt-dormant"),
+              repo: "copilot-extensions",
+              machine: "host-a",
+              status: "active",
+            },
+          ],
+        });
+      }
+      if (
+        argv[0] === "head-session"
+        && argv[1] === "--worktree"
+        && argv[2] === "active"
+      ) {
+        return JSON.stringify({
+          tracked: true,
+          head_session: "session-active",
+          active: true,
+          occupied: true,
+          pending_handoffs: [],
+        });
+      }
+      if (
+        argv[0] === "head-session"
+        && argv[1] === "--worktree"
+        && argv[2] === "dormant"
+      ) {
+        return JSON.stringify({
+          tracked: true,
+          head_session: null,
+          active: false,
+          occupied: true,
+          pending_handoffs: [{ token: "handoff-1" }],
+        });
+      }
+      throw new Error(`unexpected command: ${argv.join(" ")} @ ${opts.cwd || ""}`);
+    };
+
+    const result = checkHeadAlignment(repoRoot, execute);
+    assert.equal(result.checked, 2);
+    assert.equal(result.findings.length, 1);
+    assert.equal(result.findings[0].reason, "pending-handoff-unregistered");
+    assert.equal(result.findings[0].worktree.id, "dormant");
+    assert.equal(result.findings[0].monitorSession, "wt-dormant");
+  });
+});
+
+test("retryStoredHandoffCutover shells to agent-worktrees handoff-cutover --retry", () => {
+  const calls = [];
+  const result = retryStoredHandoffCutover(
+    "C:\\repo",
+    "predecessor-1",
+    (bin, argv, opts) => {
+      calls.push({ bin, argv, opts });
+      return JSON.stringify({
+        ok: true,
+        outcome: "refocused",
+        session: "wt-demo",
+        successor_session: "successor-1",
+        successor_pane: "%5",
+      });
+    },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.outcome, "refocused");
+  assert.deepEqual(calls, [{
+    bin: "agent-worktrees",
+    argv: ["handoff-cutover", "--retry", "--session-id", "predecessor-1", "--json"],
+    opts: { cwd: "C:\\repo", timeout: 30000 },
+  }]);
 });
 
 test("session-state handoff records can be written and marked consumed", () => {
@@ -706,7 +823,7 @@ test("triggerHandoff logs the predecessor pid in the handoff_requested activity"
   );
   assert.ok(activityCall, "expected triggerHandoff to emit activity-log");
   assert.ok(
-    activityCall.argv.includes(`predecessor_pid=${process.pid}`),
+    activityCall.argv.includes(`predecessor_pid=${process.ppid}`),
     `expected predecessor_pid field in ${JSON.stringify(activityCall.argv)}`,
   );
 });
@@ -800,6 +917,92 @@ test("triggerHandoff reports when an explicit stored baton cannot be recovered",
   });
   assert.equal(result.ok, false);
   assert.equal(result.reason, "not-found");
+});
+
+// -- Phase 3 item 3: the deterministic "did my launch actually land" signal --
+
+test("logHandoffPromptReceived shells the exact activity-log invocation", () => {
+  const calls = [];
+  const execute = (bin, argv, opts) => {
+    calls.push({ bin, argv, opts });
+    return "";
+  };
+  const result = logHandoffPromptReceived(
+    "C:\\repo", "wt-example", "successor-1", "task:handoff-1", execute,
+  );
+  assert.equal(result.logged, true);
+  assert.equal(calls.length, 1);
+  const { bin, argv } = calls[0];
+  assert.equal(bin, "agent-worktrees");
+  assert.deepEqual(argv, [
+    "activity-log", "context_handoff_prompt_received",
+    "--worktree-id", "wt-example",
+    "--session-id", "successor-1",
+    "--source", "context-handoff",
+    "--field", "locator=task:handoff-1",
+  ]);
+});
+
+test("logHandoffPromptReceived is a no-op without a worktree id or locator", () => {
+  const execute = () => { throw new Error("must not be called"); };
+  assert.deepEqual(
+    logHandoffPromptReceived("C:\\repo", null, "sid", "task:handoff-1", execute),
+    { logged: false },
+  );
+  assert.deepEqual(
+    logHandoffPromptReceived("C:\\repo", "wt-example", "sid", null, execute),
+    { logged: false },
+  );
+});
+
+test("logHandoffPromptReceived degrades to logged:false on a CLI failure", () => {
+  const execute = () => { throw new Error("agent-worktrees not found"); };
+  const result = logHandoffPromptReceived(
+    "C:\\repo", "wt-example", "sid", "task:handoff-1", execute,
+  );
+  assert.equal(result.logged, false);
+  assert.match(result.error, /agent-worktrees not found/);
+});
+
+test("triggerHandoff's real pickupSignals path surfaces prompt-received deterministically", async () => {
+  const execute = (bin, argv) => {
+    if (bin === "agent-worktrees" && argv[0] === "head-session") {
+      return JSON.stringify({ tracked: false });
+    }
+    if (
+      bin === "agent-worktrees"
+      && argv[0] === "activity"
+      && argv.includes("context_handoff_prompt_received")
+    ) {
+      return `${JSON.stringify({ locator: "file:handoff-predecessor-1" })}\n`;
+    }
+    return "";
+  };
+
+  const result = await triggerHandoff({
+    promptText: "stored markdown",
+    sid: "predecessor-1",
+    cwd: "C:\\repo",
+    title: "Parser follow-up",
+    store: () => ({
+      storage: "file",
+      id: "handoff-predecessor-1",
+      path: "C:\\state\\handoff-predecessor-1.json",
+      metadata: { worktree: "wt-example", title: "Parser follow-up" },
+    }),
+    writeSessionState: ({ seed }) => (
+      { ok: true, path: "C:\\state\\handoff-request.json", seed }
+    ),
+    noteHandoff: () => {},
+    logActivity: () => ({ logged: true }),
+    requestBridge: () => ({ attempted: false, accepted: false }),
+    execute,
+    sleepFn: async () => {},
+    waitMs: 0,
+  });
+  assert.equal(result.pickup.pickedUp, true);
+  assert.ok(result.pickup.via.includes("prompt-received"));
+  assert.equal(result.pickup.promptReceived.received, true);
 });
 
 test("utility helpers preserve safe normalization and bounded CLI diagnostics", () => {

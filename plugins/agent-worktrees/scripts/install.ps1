@@ -675,15 +675,6 @@ function Invoke-VersionedActivate {
         Write-ServiceErr "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
         return $false
     }
-    $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-    & $VenvPython -m agent_worktrees.picker_tui.prewarm 2>$null
-    $pickerWarm = ($LASTEXITCODE -eq 0)
-    $ErrorActionPreference = $prevEAP
-    if (-not $pickerWarm) {
-        Write-ServiceErr "Fresh runtime slot failed its Picker prewarm gate (versions/$SrcVersion) -- not activating"
-        return $false
-    }
-    Write-ServiceOk "Picker import path prewarmed in runtime version $SrcVersion"
     Invoke-VersionedMarkComplete
     $prev = (& $py $vr --root $InstallDir --link-name '.venv' current 2>$null); $prev = ("$prev").Trim()
     & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
@@ -1119,8 +1110,19 @@ function Get-BootstrapPython {
 }
 
 function Get-PayloadHash {
-    <# Cheap payload fingerprint for the completion marker (#935): sha256 of
-       pyproject.toml + the vendored-lib version set. Never throws -> '' on error. #>
+    <# Payload fingerprint for the completion marker (#935, hardened #2609):
+       sha256 of pyproject.toml + the vendored-lib manifests + every actual
+       source file under src/ (this plugin's own package) and libs/*/src/
+       (its vendored path-dependencies). #2609: hashing only the manifests
+       missed any content change that didn't also bump the version string or
+       touch a dependency list -- exactly a plugin bug fix landing in .py
+       source with no pyproject.toml edit -- so `update`/`update --force`
+       reported "already at latest" and left the venv silently stale even
+       though the marketplace payload had genuinely changed. Deterministic
+       (sorted relative paths) and content-based (not size/mtime, which a
+       checkout/clone can rewrite without changing bytes). Never throws -> ''
+       on error, which Test-SlotAlreadyComplete already treats as "unknown,
+       force a rebuild" -- so a hashing failure fails toward correctness. #>
     try {
         $parts = @()
         $pp = Join-Path $PluginDir 'pyproject.toml'
@@ -1129,6 +1131,23 @@ function Get-PayloadHash {
         if (Test-Path $libs) {
             Get-ChildItem $libs -Recurse -Filter 'pyproject.toml' -ErrorAction SilentlyContinue |
                 Sort-Object FullName | ForEach-Object { $parts += (Get-Content $_.FullName -Raw) }
+        }
+        $sourceRoots = @(Join-Path $PluginDir 'src')
+        if (Test-Path $libs) {
+            Get-ChildItem $libs -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+                $candidate = Join-Path $_.FullName 'src'
+                if (Test-Path $candidate) { $sourceRoots += $candidate }
+            }
+        }
+        foreach ($root in $sourceRoots) {
+            if (-not (Test-Path $root)) { continue }
+            Get-ChildItem $root -Recurse -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Extension -notin @('.pyc', '.pyo') -and $_.Name -ne '__pycache__' } |
+                Sort-Object FullName | ForEach-Object {
+                    $rel = $_.FullName.Substring($PluginDir.ToString().Length).Replace('\', '/')
+                    $parts += $rel
+                    $parts += (Get-Content $_.FullName -Raw -ErrorAction SilentlyContinue)
+                }
         }
         $joined = [string]::Join("`n", $parts)
         $sha = [System.Security.Cryptography.SHA256]::Create()
@@ -1933,7 +1952,7 @@ function Deploy-Wrappers {
     if (-not (Deploy-RuntimeResolvers)) { return $false }
 
     # Deploy hook scripts, including the consolidated pre/post client and its fallback modules.
-    foreach ($script in @('session-conduct.ps1', 'session-conduct.sh', 'session-machine.ps1', 'session-machine.sh', 'bootstrap-check.ps1', 'bootstrap-check.sh', 'project-hooks.ps1', 'project-hooks.sh', 'register-nudge.ps1', 'register-nudge.sh', 'register-session.ps1', 'register-session.sh', 'deregister-session.ps1', 'deregister-session.sh', 'anchor-hygiene-check.ps1', 'anchor-hygiene-check.sh', 'marketplace-overrides.ps1', 'marketplace-overrides.sh', 'provision-check.ps1', 'provision-check.sh', 'statelessness_guard.py', 'cross_repo_guard.py', 'anchor_write_guard.py', 'pr_supersede_guard.py', 'registry_root.py', 'nudge_status.py', 'bind_nudge.py', 'hook_client.py', 'bind-nudge.sh', 'bind-nudge.ps1')) {
+    foreach ($script in @('session-conduct.ps1', 'session-conduct.sh', 'session-machine.ps1', 'session-machine.sh', 'bootstrap-check.ps1', 'bootstrap-check.sh', 'project-hooks.ps1', 'project-hooks.sh', 'register-nudge.ps1', 'register-nudge.sh', 'register-session.ps1', 'register-session.sh', 'deregister-session.ps1', 'deregister-session.sh', 'anchor-hygiene-check.ps1', 'anchor-hygiene-check.sh', 'provision-check.ps1', 'provision-check.sh', 'statelessness_guard.py', 'cross_repo_guard.py', 'anchor_write_guard.py', 'pr_supersede_guard.py', 'registry_root.py', 'nudge_status.py', 'bind_nudge.py', 'hook_client.py', 'bind-nudge.sh', 'bind-nudge.ps1')) {
         $src = Join-Path $ScriptDir $script
         $dst = Join-Path $BinDir $script
         if (Test-Path $src) {

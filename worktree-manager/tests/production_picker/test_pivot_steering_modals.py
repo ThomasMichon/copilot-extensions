@@ -3,7 +3,7 @@
 Covers the read-only ``PivotCardScreen`` and the redesigned ``PivotFormScreen``
 -- the docked card + tabbed-elicitation surface: card prose on top, a docked
 question section (single/multi-select with an "Other…" reveal, free-form
-auto-expanding boxes), single-line Confirm/Save/Cancel buttons, and resumable
+auto-expanding boxes), single-line Confirm/Save/Reset buttons, and resumable
 Save drafts. The screen only gathers the operator's answer (returned via
 ``dismiss``); it never runs a command and never carries a verdict.
 """
@@ -93,7 +93,7 @@ def test_form_text_field_is_single_line_input(monkeypatch, tmp_path):
             await pilot.pause()
 
     asyncio.run(run())
-    assert app.result == {"ref": "PR 42"}
+    assert app.result == {"action": "confirm", "values": {"ref": "PR 42"}}
 
 
 def test_card_renders_parts_and_closes():
@@ -177,10 +177,13 @@ def test_form_collect_all_types_on_confirm(monkeypatch, tmp_path):
 
     asyncio.run(run())
     assert app.result == {
-        "feedback": "looks good",
-        "decision": "revise",
-        "severity": "in between",
-        "tags": ["perf", "api"],
+        "action": "confirm",
+        "values": {
+            "feedback": "looks good",
+            "decision": "revise",
+            "severity": "in between",
+            "tags": ["perf", "api"],
+        },
     }
 
 
@@ -223,8 +226,11 @@ def test_choice_gated_followup_and_separate_verdict(monkeypatch, tmp_path):
 
     asyncio.run(run())
     assert app.result == {
-        "comments": "Reject",
-        "reason": "Drop comment 2.",
+        "action": "confirm",
+        "values": {
+            "comments": "Reject",
+            "reason": "Drop comment 2.",
+        },
     }
 
 
@@ -289,7 +295,7 @@ def test_form_multichoice_other_free_member(monkeypatch, tmp_path):
             await pilot.pause()
 
     asyncio.run(run())
-    assert app.result == {"tags": ["perf", "custom tag"]}
+    assert app.result == {"action": "confirm", "values": {"tags": ["perf", "custom tag"]}}
 
 
 # ---- Save / restore / cancel / escape ---------------------------------------
@@ -310,7 +316,12 @@ def test_form_save_writes_draft_and_restores(monkeypatch, tmp_path):
             await pilot.pause()
 
     asyncio.run(run())
-    assert app.result is None  # Save does not submit
+    # Save does not submit a steer, but it does return the collected values
+    # (envelope: {"action": "save", ...}) so the caller can persist them as
+    # the task's durable coordinator-side card_draft, not just this local file.
+    assert app.result["action"] == "save"
+    assert app.result["values"]["feedback"] == "partial answer"
+    assert app.result["values"]["decision"] == "post-approved"
     assert _steer_draft_path("t-draft").exists()
 
     scr2 = PivotFormScreen(_card(), _fields(), "Steer", task_id="t-draft")
@@ -325,7 +336,11 @@ def test_form_save_writes_draft_and_restores(monkeypatch, tmp_path):
     asyncio.run(run2())
 
 
-def test_form_confirm_clears_draft(monkeypatch, tmp_path):
+def test_form_confirm_writes_draft_and_leaves_it_for_the_caller(monkeypatch, tmp_path):
+    # Confirm dismisses immediately, but the actual submission runs
+    # asynchronously afterward -- so the draft must survive Confirm itself.
+    # Only the caller (once it confirms the submission genuinely succeeded)
+    # deletes it -- see _run_pivot_form_submit's success path.
     _drafts(monkeypatch, tmp_path)
     scr = PivotFormScreen(_card(), [{"name": "feedback", "type": "textarea"}],
                           "Steer", task_id="t-clear")
@@ -334,35 +349,41 @@ def test_form_confirm_clears_draft(monkeypatch, tmp_path):
     async def run():
         async with app.run_test(size=(120, 45)) as pilot:
             await pilot.pause()
-            scr._write_draft()  # persist a draft without closing
+            scr.query_one("#q-0", _AutoExpandTextArea).text = "ship it"
             await pilot.pause()
-            assert _steer_draft_path("t-clear").exists()
             scr._confirm()
             await pilot.pause()
 
     asyncio.run(run())
-    assert isinstance(app.result, dict)
-    assert not _steer_draft_path("t-clear").exists()
+    assert app.result == {"action": "confirm", "values": {"feedback": "ship it"}}
+    assert _steer_draft_path("t-clear").exists()
 
 
-def test_form_cancel_discards_draft(monkeypatch, tmp_path):
+def test_form_reset_confirmed_discards_draft_without_closing(monkeypatch, tmp_path):
     _drafts(monkeypatch, tmp_path)
     scr = PivotFormScreen(_card(), [{"name": "feedback", "type": "textarea"}],
-                          "Steer", task_id="t-cancel")
+                          "Steer", task_id="t-reset")
     app = _Host(scr)
+    remaining_text = None
 
     async def run():
+        nonlocal remaining_text
         async with app.run_test(size=(120, 45)) as pilot:
+            await pilot.pause()
+            scr.query_one("#q-0", _AutoExpandTextArea).text = "discard me"
             await pilot.pause()
             scr._write_draft()  # persist a draft without closing
             await pilot.pause()
-            assert _steer_draft_path("t-cancel").exists()
-            scr._cancel()
+            assert _steer_draft_path("t-reset").exists()
+            scr._perform_reset()
             await pilot.pause()
+            remaining_text = scr.query_one("#q-0", _AutoExpandTextArea).text
 
     asyncio.run(run())
-    assert app.result is None
-    assert not _steer_draft_path("t-cancel").exists()
+    # Reset never closes the dialog.
+    assert app.result == "UNSET"
+    assert not _steer_draft_path("t-reset").exists()
+    assert remaining_text == ""
 
 
 def test_form_escape_preserves_draft(monkeypatch, tmp_path):
@@ -380,7 +401,13 @@ def test_form_escape_preserves_draft(monkeypatch, tmp_path):
             await pilot.pause()
 
     asyncio.run(run())
-    assert app.result is None
+    # Escape behaves exactly like Save now: the answer is returned (envelope)
+    # so the caller can persist it as the task's durable card_draft, not just
+    # discard it -- while still auto-saving the local file too.
+    assert app.result == {
+        "action": "save",
+        "values": {"feedback": "unsaved but escaped"},
+    }
     path = _steer_draft_path("t-esc")
     assert path.exists()   # Escape auto-saves so nothing is lost
     import json
@@ -438,7 +465,7 @@ def test_button_row_confirm_via_row(monkeypatch, tmp_path):
             await pilot.pause()
 
     asyncio.run(run())
-    assert app.result == {"feedback": "x"}
+    assert app.result == {"action": "confirm", "values": {"feedback": "x"}}
 
 
 def test_textarea_auto_height(monkeypatch, tmp_path):

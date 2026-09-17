@@ -11,6 +11,13 @@ the multi-machine system interacts with its local checkout:
 - **worktree** -- full agent-worktrees lifecycle; concurrent-flow safe,
   with edits/stages/commits isolated in per-task worktrees until push.
   These are also adopted as ``projects.yaml`` projects.
+- **knowledge** -- same worktree-capable mechanics as ``worktree`` (eligible
+  for the ``-k`` paired-knowledge carve, see ``__main__._carve_paired_
+  knowledge``), but exists only to be carved as another project's paired
+  knowledge companion, never driven directly (no standalone ``create``, no
+  binstub, hidden from the Picker's top-level project list -- enforced via
+  the repo's own committed ``RepoConfig.knowledge_only`` flag in
+  ``config.py``; set both together).
 
 The registry also stores per-platform source roots (``srcroot``) so that
 adopt, WSL provision, and clone operations know where to put repos.
@@ -37,18 +44,8 @@ from . import git_ops, output, registry_paths
 # Data model
 # ---------------------------------------------------------------------------
 
-# A repo's management class -- how the multi-machine system interacts with its checkout:
-#
-#   reference  Read-only.  Tracked only for path resolution, cloning, and
-#              indexing (e.g. VEI).  Never edited locally.  (= external-repos
-#              relationship "consumer".)
-#   singleton  Editable as a single anchor checkout, with no worktree
-#              isolation.  Use when only one flow edits at a time, or when
-#              worktrees are overkill or unsupported.
-#   worktree   Full agent-worktrees lifecycle: concurrent-flow safe; edits,
-#              stages, and commits stay isolated in per-task worktrees until
-#              the final push.  (= an adopted agent-worktrees "project".)
-VALID_CLASSES = ("reference", "singleton", "worktree")
+# See the module docstring above for what each management class means.
+VALID_CLASSES = ("reference", "singleton", "worktree", "knowledge")
 
 # Legacy ``type`` values mapped onto the new class taxonomy.
 _LEGACY_TYPE_MAP = {"project": "worktree", "repo": "reference"}
@@ -140,9 +137,7 @@ def _current_platform() -> str:
 
 def _repos_yaml_path() -> Path:
     """Path to the repos registry file."""
-    return registry_paths.registry_path(
-        "repos.yaml", legacy_root=Path.home() / ".agent-worktrees"
-    )
+    return registry_paths.registry_path("repos.yaml", legacy_root=Path.home() / ".agent-worktrees")
 
 
 # ---------------------------------------------------------------------------
@@ -335,16 +330,47 @@ def github_owner(remote: str) -> str | None:
     """Extract the owner from a github.com remote URL (https or ssh form).
 
     Returns None for non-GitHub remotes (so ADO/gitea derive no account).
+    Host matching is boundary-aware: the host must actually *be*
+    ``github.com`` (optionally ``www.``, optionally with userinfo on HTTPS),
+    not merely contain that substring -- a remote on ``notgithub.com`` or
+    ``evilgithub.com`` must not be mistaken for GitHub.
     """
     if not remote:
         return None
     url = remote.strip()
-    m = re.match(r"https?://[^/]*github\.com/([^/]+)/", url)
+    m = re.match(r"https?://(?:[^@/]+@)?(?:www\.)?github\.com/([^/]+)/", url)
     if m:
         return m.group(1)
-    m = re.match(r"(?:ssh://)?git@[^:/]*github\.com[:/]([^/]+)/", url)
+    m = re.match(r"(?:ssh://)?git@github\.com[:/]([^/]+)/", url)
     if m:
         return m.group(1)
+    return None
+
+
+def github_slug(remote: str) -> str | None:
+    """Extract the ``owner/name`` slug from a github.com remote URL.
+
+    Unlike the registry key used to name a repo entry (which can be an
+    arbitrary alias, e.g. ``ce`` for ``github.com/example-org/proj``), this is
+    the canonical slug `gh`/the GitHub API actually expect as a repo target
+    (e.g. for ``repos gh <target> -- ...``). Returns None for a non-GitHub or
+    unparseable remote. Same host-boundary-aware matching as
+    :func:`github_owner` -- see its docstring.
+    """
+    if not remote:
+        return None
+    url = remote.strip()
+    m = re.match(
+        r"https?://(?:[^@/]+@)?(?:www\.)?github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$",
+        url,
+    )
+    if m:
+        return f"{m.group(1)}/{m.group(2)}"
+    m = re.match(
+        r"(?:ssh://)?git@github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?/?$", url
+    )
+    if m:
+        return f"{m.group(1)}/{m.group(2)}"
     return None
 
 

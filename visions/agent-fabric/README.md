@@ -199,6 +199,48 @@ untrusted command stream: a target-local agent re-derives the action from
 trusted repository state, preserves confirmation gates, verifies the
 postcondition, and only then closes the item.
 
+### unattended-tiered-self-convergence
+A machine that is reachable and logged-in keeps itself current **without** a
+live interactive agent session and without an operator connecting in to ask
+for it. This complements, rather than duplicates,
+*unreachable-machine-maintenance-handoff*: that feature is the fallback for
+when a machine cannot be reached at all; this feature is the default posture
+for a machine that *can* be reached but simply has nothing driving it forward
+between sessions. Whether a machine registers this at all is **declared
+config, not an unconditional default**: an operator or mesh opts a machine
+into self-convergence the same way any other declarative resource is
+selected — a shared default may be declared once, with a more specific
+local declaration free to override it — and only a machine whose resolved
+config says "opted in" ever attempts registration. Self-convergence is
+driven by the **platform's own scheduler** (a genuine OS-level scheduled
+task, not a fabric daemon whose own liveness would just relocate the same
+problem one layer down), registered through a **one-time, explicit,
+operator-approved elevation** — the same convention already used to
+register a durable fabric service — so that afterward the platform's own
+restart/retry guarantees are the reliability backstop, not another
+long-lived process the fabric must also keep alive. Opting back out removes
+the registration through the fabric's own ordinary convergence, not a
+second bespoke uninstall path.
+
+Self-convergence work is **tiered by risk and cadence**, not run as a single
+undifferentiated job: a narrow, cheap, frequent tier watches only the small
+set of things known to silently fail between sessions (starting with the
+mesh transport's own reachability) and heals them; a broader, costlier,
+infrequent tier pulls declared state forward and reconciles it through the
+machine's existing declarative convergence surface. The two tiers never share
+a cadence or a lock — a slow broad sweep must never delay or block the narrow
+tier's own tick. Because the platform scheduler invokes each tick fresh with
+no long-lived process to serialize them, every tier guards its own
+reentrancy explicitly: a named, tier-scoped lock records its holder and a
+timestamp so a genuinely stale run is reclaimed while a still-live run is
+never double-driven. Every tick that mutates state respects the same
+live-session deferral boundary the rest of the fabric already honors — an
+unattended tick never interrupts or force-closes work a person is actively
+doing — and every fast-forward-only pull skips loudly, never force-resets, a
+diverged or dirty checkout. Whether self-convergence ran, and when it last
+succeeded, is observable from the fabric's own existing status surfaces
+without needing to reach the machine directly to check.
+
 ### legible-live-state
 What every agent is doing is **observable** — from a coarse Active / Recent /
 Completed floor with no service, up to granular live status surfaced into the
@@ -603,8 +645,11 @@ opt-in, pressure changes nothing and the session behaves exactly as before.
   fabric's venue providers (agent-codespaces / agent-containers) are thin,
   symmetric SSH transports over one agent-bridge dispatch core, so a dispatched
   agent is the same in a CodeSpace or a local container. Further per-plugin leaves
-  live under `visions/plugins/<name>/` as authored (e.g. a future
-  `visions/plugins/agent-bridge/`).
+  live under `visions/plugins/<name>/` as authored (e.g.
+  [`visions/plugins/agent-bridge/`](../plugins/agent-bridge/README.md) and
+  [`visions/plugins/context-handoff/`](../plugins/context-handoff/README.md) —
+  the policy owner for continuing an agent's work across a context-window
+  boundary, host-agnostically).
 - Reality docs: [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/harness-runbook.md`](../../docs/harness-runbook.md) · each plugin's
   `docs/`.

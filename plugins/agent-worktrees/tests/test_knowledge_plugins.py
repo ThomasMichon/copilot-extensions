@@ -140,6 +140,92 @@ def test_paired_compose_uses_knowledge_worktree_and_carries_remote(
     assert overlay["enabledPlugins"]["mine@unmanaged"] is True
 
 
+def test_compose_excludes_knowledge_self_harness_plugin(tmp_path: Path):
+    """A knowledge repo's own `*-harness` plugin never grafts into the harness.
+
+    It is the knowledge repo's self-referential maintenance surface (same
+    convention as `<repo>-harness`),
+    not a generically graftable capability -- composing it in could introduce
+    an unclassified extra `sessionStart` producer into the harness's session.
+    """
+    harness = tmp_path / "harness"
+    knowledge = tmp_path / "knowledge"
+    harness.mkdir()
+    (knowledge / ".ai").mkdir(parents=True)
+    _write_settings(
+        knowledge,
+        {
+            "extraKnownMarketplaces": {
+                "personal": {
+                    "source": {"source": "directory", "path": "./.ai"}
+                }
+            },
+            "enabledPlugins": {
+                "notes@personal": True,
+                "knowledge-harness@personal": True,
+            },
+        },
+    )
+
+    summary = kp.compose(harness, knowledge)
+    overlay = _read_overlay(harness)
+
+    assert overlay["enabledPlugins"]["notes@personal"] is True
+    assert "knowledge-harness@personal" not in overlay.get("enabledPlugins", {})
+    assert summary["excluded_enabled_plugins"] == ["knowledge-harness@personal"]
+    assert "knowledge-harness@personal" not in summary["conflicts"]["enabled_plugins"]
+
+
+def test_compose_removes_stale_legacy_self_harness_enable(tmp_path: Path):
+    """A pre-fix, markerless-legacy overlay already carrying the knowledge
+    repo's `*-harness` plugin must be actively cleaned up, not merely never
+    re-added -- retirement-by-marker only clears marker-owned entries, so a
+    markerless legacy overlay would otherwise keep carrying it forever.
+    """
+    harness = tmp_path / "harness"
+    knowledge = tmp_path / "knowledge"
+    harness.mkdir()
+    (knowledge / ".ai").mkdir(parents=True)
+    _write_settings(
+        knowledge,
+        {
+            "extraKnownMarketplaces": {
+                "personal": {
+                    "source": {"source": "directory", "path": "./.ai"}
+                }
+            },
+            "enabledPlugins": {
+                "notes@personal": True,
+                "knowledge-harness@personal": True,
+            },
+        },
+    )
+    # Simulate a pre-fix overlay: no `_agentWorktreesKnowledgePluginOverlay`
+    # marker, already carrying the self-harness plugin from an old compose.
+    _write_settings(
+        harness,
+        {
+            "extraKnownMarketplaces": {
+                "personal": {
+                    "source": {
+                        "source": "directory",
+                        "path": (knowledge / ".ai").resolve().as_posix(),
+                    }
+                }
+            },
+            "enabledPlugins": {"knowledge-harness@personal": True},
+        },
+        local=True,
+    )
+
+    summary = kp.compose(harness, knowledge)
+    overlay = _read_overlay(harness)
+
+    assert "knowledge-harness@personal" not in overlay.get("enabledPlugins", {})
+    assert overlay["enabledPlugins"]["notes@personal"] is True
+    assert "knowledge-harness@personal" in summary["excluded_enabled_plugins"]
+
+
 def test_repointed_knowledge_retires_old_managed_entries(tmp_path: Path):
     harness = tmp_path / "harness"
     first = tmp_path / "knowledge-one"
@@ -535,6 +621,83 @@ def test_unmanaged_collision_is_preserved(tmp_path: Path):
     assert summary["conflicts"]["enabled_plugins"] == ["skill@mine"]
 
 
+def test_knowledge_true_overrides_harness_committed_opt_in_false(tmp_path: Path):
+    """A harness plugin shipped `defaultEnabled: false` (opt-in) is exactly what
+    a knowledge repo's own `true` should be able to turn on -- that's the whole
+    point of an opt-in flag (see AGENTS.md / CONTRIBUTING.md capability-design
+    principles). This must compose cleanly, not be dropped as a conflict."""
+    harness = tmp_path / "harness"
+    knowledge = tmp_path / "knowledge"
+    harness.mkdir()
+    knowledge.mkdir()
+    _write_settings(
+        harness,
+        {
+            "extraKnownMarketplaces": {
+                "odsp-web-harness": {
+                    "source": {"source": "directory", "path": "./.ai"}
+                }
+            },
+            "enabledPlugins": {
+                "generating-weekly-updates@odsp-web-harness": False,
+            },
+        },
+    )
+    _write_settings(
+        knowledge,
+        {
+            "enabledPlugins": {
+                "generating-weekly-updates@odsp-web-harness": True,
+            },
+        },
+    )
+
+    summary = kp.compose(harness, knowledge)
+    overlay = _read_overlay(harness)
+
+    assert (
+        overlay["enabledPlugins"]["generating-weekly-updates@odsp-web-harness"]
+        is True
+    )
+    assert summary["conflicts"]["enabled_plugins"] == []
+    assert summary["enabled_plugins"] == [
+        "generating-weekly-updates@odsp-web-harness"
+    ]
+
+
+def test_knowledge_true_does_not_duplicate_harness_committed_true(tmp_path: Path):
+    """A plugin already `true` in the harness's own committed settings needs no
+    duplicate entry in the overlay, and is not reported as a conflict either."""
+    harness = tmp_path / "harness"
+    knowledge = tmp_path / "knowledge"
+    harness.mkdir()
+    knowledge.mkdir()
+    _write_settings(
+        harness,
+        {
+            "extraKnownMarketplaces": {
+                "odsp-web-harness": {
+                    "source": {"source": "directory", "path": "./.ai"}
+                }
+            },
+            "enabledPlugins": {"ownership-insights@odsp-web-harness": True},
+        },
+    )
+    _write_settings(
+        knowledge,
+        {"enabledPlugins": {"ownership-insights@odsp-web-harness": True}},
+    )
+
+    summary = kp.compose(harness, knowledge)
+    overlay = _read_overlay(harness)
+
+    assert "ownership-insights@odsp-web-harness" not in overlay.get(
+        "enabledPlugins", {}
+    )
+    assert summary["conflicts"]["enabled_plugins"] == []
+    assert summary["enabled_plugins"] == []
+
+
 def test_claude_local_marketplace_and_disable_are_conflicts(tmp_path: Path):
     harness = tmp_path / "harness"
     knowledge = tmp_path / "knowledge"
@@ -625,6 +788,98 @@ def test_native_committed_settings_override_claude_local_conflicts(tmp_path: Pat
         "enabled_plugins": [],
     }
     assert summary["count"] == 0
+
+
+def test_harness_committed_marketplace_collision_still_allows_opt_in_override(
+    tmp_path: Path,
+):
+    """A knowledge-repo marketplace redeclaration that merely collides with the
+    harness's own *committed* marketplace name (no operator/native override
+    involved) must not block that marketplace's `name@...` enabledPlugins
+    overrides -- the harness's committed marketplace definition unambiguously
+    wins, and the plugin's own opt-in `false` -> knowledge `true` override
+    logic should still apply undisturbed.
+    """
+    harness = tmp_path / "harness"
+    knowledge = tmp_path / "knowledge"
+    harness.mkdir()
+    knowledge.mkdir()
+    _write_settings(
+        harness,
+        {
+            "extraKnownMarketplaces": {
+                "mine": {"source": {"source": "directory", "path": "./.ai"}}
+            },
+            "enabledPlugins": {"skill@mine": False},
+        },
+    )
+    _write_settings(
+        knowledge,
+        {
+            "extraKnownMarketplaces": {
+                "mine": {"source": {"source": "github", "repo": "stale/redeclare"}}
+            },
+            "enabledPlugins": {"skill@mine": True},
+        },
+    )
+
+    summary = kp.compose(harness, knowledge)
+    overlay = _read_overlay(harness)
+
+    assert overlay["enabledPlugins"]["skill@mine"] is True
+    assert "mine" not in overlay.get("extraKnownMarketplaces", {})
+    assert summary["conflicts"] == {"marketplaces": [], "enabled_plugins": []}
+    assert summary["harness_owned_marketplaces"] == ["mine"]
+    assert summary["enabled_plugins"] == ["skill@mine"]
+
+
+def test_operator_local_marketplace_collision_still_blocks_override(
+    tmp_path: Path,
+):
+    """Unlike a purely committed-tier collision, a collision where the
+    operator's own local/native settings.local.json also redefines the
+    marketplace remains a genuine, unresolved conflict and must still block
+    that marketplace's enabledPlugins overrides.
+    """
+    harness = tmp_path / "harness"
+    knowledge = tmp_path / "knowledge"
+    harness.mkdir()
+    knowledge.mkdir()
+    _write_settings(
+        harness,
+        {
+            "extraKnownMarketplaces": {
+                "mine": {"source": {"source": "directory", "path": "./.ai"}}
+            },
+            "enabledPlugins": {"skill@mine": False},
+        },
+    )
+    _write_settings(
+        harness,
+        {
+            "extraKnownMarketplaces": {
+                "mine": {"source": {"source": "github", "repo": "operator/override"}}
+            },
+        },
+        local=True,
+    )
+    _write_settings(
+        knowledge,
+        {
+            "extraKnownMarketplaces": {
+                "mine": {"source": {"source": "github", "repo": "stale/redeclare"}}
+            },
+            "enabledPlugins": {"skill@mine": True},
+        },
+    )
+
+    summary = kp.compose(harness, knowledge)
+    overlay = _read_overlay(harness)
+
+    assert "skill@mine" not in overlay.get("enabledPlugins", {})
+    assert summary["conflicts"]["marketplaces"] == ["mine"]
+    assert summary["conflicts"]["enabled_plugins"] == ["skill@mine"]
+    assert summary["harness_owned_marketplaces"] == []
 
 
 def test_unpaired_resolution_is_successful_noop_without_writing(
@@ -804,6 +1059,81 @@ def test_pair_requires_live_binding_and_knowledge_identity(
     )
     assert summary["action"] == "no-op"
     assert message in summary["pair_error"]
+    assert not (harness / ".github" / "copilot" / "settings.local.json").exists()
+
+
+def test_compose_from_pair_disabled_withholds_composition(
+    tmp_path: Path, monkeypatch
+):
+    """`compose_knowledge_plugins: false` withholds composition entirely.
+
+    The pair remains valid (`paired: True`) -- only plugin grafting is
+    skipped -- since state-root/knowledge binding is a separate concern.
+    """
+    harness = tmp_path / "harness"
+    knowledge = tmp_path / "knowledge"
+    harness.mkdir()
+    (knowledge / ".ai").mkdir(parents=True)
+    _write_settings(
+        knowledge,
+        {
+            "extraKnownMarketplaces": {
+                "personal": {"source": {"source": "directory", "path": "./.ai"}}
+            },
+            "enabledPlugins": {"notes@personal": True},
+        },
+    )
+    resolution = _pair_resolution(harness, knowledge)
+    monkeypatch.setattr(kp.state_root, "resolve_pair", lambda *_a, **_k: resolution)
+    config = SimpleNamespace(
+        knowledge_repo="private",
+        repos={"harness": SimpleNamespace(compose_knowledge_plugins=False)},
+    )
+
+    summary = kp.compose_from_pair(cwd=harness, config=config)
+
+    assert summary["action"] == "disabled"
+    assert summary["paired"] is True
+    assert not (harness / ".github" / "copilot" / "settings.local.json").exists()
+
+
+def test_compose_from_pair_disabled_retires_prior_composition(
+    tmp_path: Path, monkeypatch
+):
+    """Turning the toggle off after a prior compose retires what it added."""
+    harness = tmp_path / "harness"
+    knowledge = tmp_path / "knowledge"
+    harness.mkdir()
+    (knowledge / ".ai").mkdir(parents=True)
+    _write_settings(
+        knowledge,
+        {
+            "extraKnownMarketplaces": {
+                "personal": {"source": {"source": "directory", "path": "./.ai"}}
+            },
+            "enabledPlugins": {"notes@personal": True},
+        },
+    )
+    kp.compose(harness, knowledge, pair_id="pair-1", pair_kind="worktree")
+    assert (
+        "notes@personal"
+        in _read_overlay(harness).get("enabledPlugins", {})
+    )
+
+    resolution = _pair_resolution(harness, knowledge)
+    monkeypatch.setattr(kp.state_root, "resolve_pair", lambda *_a, **_k: resolution)
+    config = SimpleNamespace(
+        knowledge_repo="private",
+        repos={"harness": SimpleNamespace(compose_knowledge_plugins=False)},
+    )
+
+    summary = kp.compose_from_pair(cwd=harness, config=config)
+
+    assert summary["action"] == "disabled"
+    assert summary["changed"] is True
+    # Emptied overlay content is removed entirely, same as other retirement
+    # paths (e.g. `_retire_invalid_pair_overlay`) -- nothing left to carry
+    # `notes@personal` (or anything else) forward.
     assert not (harness / ".github" / "copilot" / "settings.local.json").exists()
 
 

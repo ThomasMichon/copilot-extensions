@@ -130,12 +130,14 @@ minimizes risk and unblocks the most Validation Plan items fastest:
 4. **Bridge machine into agent-bridge's live session/liveness reads.**
    `bridge_state_machine.py`'s hot/warm/cold liveness model and resume
    semantics need a live `live_probe` implementation reading real
-   agent-bridge session state (this plugin depends on agent-bridge for
-   this, per Phase 9's own note that agent-bridge owns the actual session-
-   host instances). Coordinate with whatever the agent-bridge vision's own
-   verb-vocabulary convergence has landed by the time this slice starts;
-   do not duplicate or compete with it (same caution Phase 9's bridge
-   module already carries).
+   agent-bridge session state. **Correction (this item does not depend on
+   agent-bridge-ahp-convergence):** an earlier note here conflated this
+   with the agent-bridge-ahp-convergence effort (an unrelated concern --
+   exposing an *external* Agent Host Protocol surface). The actual live
+   read this item needs already exists and is already in production use --
+   `embody.local_body_verdict`/`fleet_body_verdict` (`agent-bridge --json
+   status <session>`), the same read item 5's spawn-consistency sweep
+   already calls.
 5. **Spawn-reservation machine into `queue.py`'s real `SpawnReservation`
    lifecycle.** Same shape as (1): `spawn_reservation_machine.py`'s
    transition table is already sourced from the real
@@ -195,13 +197,137 @@ here but not blocking the start of 1/2/5.
   for every enabled method, a wrong-owner or wrong-state replay still
   raises, and the adoption-resume path never no-ops even on an
   otherwise-matching replay.
-- [ ] Build the first live provider adapter (GitHub) driving
+- [x] Build the first live provider adapter (GitHub) driving
   `provider_state_machine`'s declared dimensions from real PR state (item
   3 above). Expect this to be split into its own sequence of slices as
-  scope becomes clearer once adapter work starts.
+  scope becomes clearer once adapter work starts. **First slice landed:**
+  a read-only observer, `github_provider_adapter.py`. `observe_pr_state`
+  is a pure function classifying a raw GitHub GraphQL `pullRequest` node
+  into `ApprovalStatus`/`Mergeability`/`HoldReason` (via `reviewDecision`,
+  `mergeable` + `statusCheckRollup`, `isDraft`/title-or-label WIP markers/
+  unresolved review threads) plus the raw `Revision` fingerprints
+  (`headRefOid`/`baseRefOid`). `GitHubPRAdapter` is the thin `gh`-CLI
+  fetch wrapper (mirrors `repository_issue_loops.GitHubProvider`'s
+  injectable-runner + identity-verification pattern). Deliberately does
+  **not** decide `ApprovalStatus.STALE` (that needs a previously-recorded
+  `Revision` an evaluator holds, not a single snapshot), write anything
+  back to GitHub, or feed any task/coordinator loop -- a read model only,
+  same "declare/observe first, wire later" sequencing Phase 9 used for
+  the declared tables themselves. An unrecognized `reviewDecision`/
+  `mergeable`/`statusCheckRollup.state` value raises rather than guesses.
+  **Second slice landed:** `pr_polling_policy.py`, the trigger/cadence
+  policy for the "real polling/webhook-driven loop" the first slice left
+  open. Operator resolution: webhooks are the primary, low-latency
+  trigger; polling is only a fallback that fires once a PR's last
+  observed state (from *any* source) is older than a declared,
+  repository-tier-scoped interval -- `RepoTier.OWNED_PRIVATE` (5 min),
+  `QUICK_COLLAB` (30 min), `PUBLIC_UNOWNED` (60 min, and the default for
+  any undeclared repository -- the conservative choice to avoid tripping
+  a shared rate limit on a repo this identity does not control). The
+  repository -> tier mapping is caller-supplied config, not committed to
+  this public, organization-neutral repo (no specific repository name
+  belongs in plugin source here) -- same pattern
+  `provider_state_machine.REPOSITORY_OVERRIDES` already uses. `poll_due`
+  is the pure decision function; a fresh observation (webhook or poll)
+  simply pushes the next poll out, so polling never fires while webhooks
+  keep flowing.
+  Remaining slices for item 3: an evaluator that holds prior `Revision`
+  state and actually drives `APPROVAL_TRANSITIONS` (incl. `STALE`), a real
+  webhook receiver for review/check-status events (the existing
+  `producers/webhook.py` only handles PR-merge events), and the
+  persistent per-(repo, PR) state store both the evaluator and the
+  poll-fallback timer need.
+  **Third slice landed:** `pr_revision_evaluator.py`, the `STALE`
+  decision. `evaluate_observation(previous, current)` reuses the declared
+  `APPROVAL_TRANSITIONS` table directly (looks up
+  `revision_invalidates_approval` by name and checks `current`'s status
+  against its `from_states`) rather than re-deciding the staleness rule
+  inline -- same "the declared table is the actual governing data"
+  discipline items 1/2 established. A first-ever observation (no
+  `previous`) is returned unchanged: staleness needs two observations, not
+  one. Never applies `revalidate_stale` itself -- that recovery is simply
+  whatever the provider's own `reviewDecision` reports on the next
+  observation, since this evaluator always recomputes from the provider's
+  current raw status rather than a locally cached flag.
+  **Fourth slice landed:** `pr_observation_store.py` -- the persistent
+  per-(repo, PR) state the evaluator and the poll-fallback timer both need
+  to hold `previous`/`last_observed_at` across calls. Deliberately **not**
+  a new `queue.py` table: this repo now enforces a 1,000-line module-size
+  cap (`tools/check-module-size.py`), and `queue.py` is already
+  grandfathered at its current size -- growing it for an unrelated concern
+  (no owner/generation/claim semantics in common with task/spawn-
+  reservation/routing-assignment rows) is exactly the unbounded-growth
+  failure that guard exists to catch. Its own small SQLite file instead, a
+  self-contained `PRObservationStore` (get/put/last_observed_at, a plain
+  upsert -- no CAS/generation fencing, since exactly one writer touches a
+  given PR in every deployment this targets today). `record_observation()`
+  is the actual glue: reads the stored previous observation, evaluates via
+  `pr_revision_evaluator.evaluate_observation`, persists the result and the
+  observation timestamp, and returns it -- the one call site a future
+  polling/webhook loop needs.
+  **Fifth slice landed (item 3 complete):**
+  `pr_review_poll_loop.run_poll_cycle` -- the poll-fallback tick: iterates
+  every `(repo, number)` the store already tracks
+  (`PRObservationStore.tracked_keys()`, added this slice), refreshes
+  whichever are due per `pr_polling_policy.poll_due`, and persists via
+  `record_observation`. Never discovers new PRs itself -- a PR starts being
+  tracked the moment anything records its first observation.
+  `producers/github_pr_review_webhook.py` -- the reactive trigger: a
+  GitHub-specific FastAPI receiver (`extract_pr_ref`) for
+  `pull_request`/`pull_request_review`/`pull_request_review_thread`/
+  `check_suite`/`check_run` events, HMAC-signature-verified
+  (`X-Hub-Signature-256`, GitHub's own webhook-authenticity mechanism --
+  distinct from the forge-neutral `producers/webhook.py`'s bearer-token
+  `inbound_token`, since GitHub itself never sends a bearer token). A
+  webhook delivery is used only as a **trigger**: the fields
+  `observe_pr_state` needs (`reviewDecision` above all) are GraphQL-only
+  aggregates the REST webhook payload does not carry, so the receiver
+  re-fetches full state through the injected `observe` callable rather than
+  trying to reconstruct it from the webhook body -- which also makes a
+  late/duplicate/out-of-order delivery harmless (each just triggers a
+  fresh, idempotent re-observation).
+  Item 3's full pipeline is now built end-to-end: observe -> evaluate
+  (staleness) -> persist -> triggered by webhook, backstopped by cadence-
+  scoped polling. Not yet done: actually deploying/registering this
+  webhook receiver and scheduling the poll-cycle tick against a real
+  repository -- left to whoever operates a concrete deployment, since that
+  requires real webhook-secret provisioning and a real schedule, both
+  deployment-specific.
 - [ ] Wire the bridge machine's `resolve_liveness`/`resolve_resume` against
-  a real agent-bridge liveness read (item 4 above), coordinated with
-  agent-bridge's own verb-vocabulary convergence.
+  a real agent-bridge liveness read (item 4 above). **Not blocked on AHP
+  convergence** (corrected above -- unrelated). **First slice landed:**
+  `bridge_liveness_probe.py`, a real `local_body_liveness_probe(session_id)`
+  reading `agent-bridge --json status <session_id>` directly (this
+  machine's own daemon, no SSH) and mapping agent-bridge's own
+  `SessionStatus` values to `Liveness`: `running` -> HOT (a turn is
+  actively executing -- attaching a second controller now would race it),
+  `idle`/`created`/`starting` -> WARM (alive, no turn in flight, safe to
+  reattach), `stopping`/`stopped`/`failed`/`ended` -> COLD. Any not-found/
+  transport-failure/unparseable/unrecognized read resolves to HOT, never
+  guessed as WARM or COLD -- the deliberately conservative default: a
+  refused resume (HOT's outcome absent `force_takeover`) is always safe,
+  where wrongly resolving WARM or COLD risks a double-attached controller
+  or an orphaned duplicate spawn. Never raises.
+  Deliberately does **not** wire this probe into a real
+  `resume`/reconciliation call site yet: every plausible call site
+  (`supervisor.py`, `embody.py`) is already at its grandfathered
+  module-size ceiling (`tools/module-size-baseline.json`) -- adding a call
+  there means either splitting one of those modules first or a deliberate,
+  reviewed widening, a decision this slice does not make unilaterally.
+  A fleet (SSH) variant, following the same status-value mapping against
+  `fleet_body_verdict`'s underlying probe, is left for a follow-up slice --
+  also not blocked on anything.
+  **Second slice landed:** operator chose splitting over widening.
+  Extracted `embody.py`'s two large, pure autopilot seed-prompt builders
+  (`autopilot_worker_prompt`/`fleet_autopilot_worker_prompt`, ~250 lines)
+  into a new `embody_prompts.py` -- the safest possible cut (no shared
+  state, no I/O, nothing any test mocks). `embody.py` re-exports both
+  names, so every existing call site and test is unaffected; `embody.py`
+  is now 989 lines, **graduated off the baseline entirely** (not merely
+  re-grandfathered at a smaller size). This reopens headroom in `embody.py`
+  for the actual call-site wiring, a further slice. `supervisor.py`
+  (4,169 lines) remains a separate, much larger componentization target,
+  not attempted here.
 - [x] Call `spawn_reservation_machine.violating_assignment_groups` and
   `classify_consistency` from the supervisor's real reconciliation loop
   (item 5 above), with a live-behavior test proving an actual anomaly

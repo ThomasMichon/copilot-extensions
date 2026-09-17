@@ -2,7 +2,7 @@
 
 A **payload-only** Copilot CLI plugin that teaches an agent how to customize and
 extend the GitHub Copilot CLI. There is no runtime, service, venv, or binstub:
-**enable the plugin and restart the session** so the eight skills are available
+**enable the plugin and restart the session** so the nine skills are available
 on demand.
 
 The skills are standalone authoring guidance. They work in any repo that enables
@@ -25,6 +25,8 @@ skill name) and Copilot loads the matching skill:
 | [reviewing-customizations](skills/reviewing-customizations/SKILL.md) | reviewing a repo's customization surfaces | Mechanical scan + design critique over skills, project/`.ai` agents, origin/version-aware advisory checks for enabled external plugin agents, instructions, hooks, and MCP configs |
 | [authoring-harness-plugins](skills/authoring-harness-plugins/SKILL.md) | packaging a repo's operator guidance for other control repos | The payload-only `<repo>-harness` pattern: contribute/diagnose skills, README bar, marketplace wiring, and adoption |
 | [diagnosing-copilot-cli-startup](skills/diagnosing-copilot-cli-startup/SKILL.md) | an interactive CLI is stuck on `Loading` or `Resuming` | Mux capture, process/session correlation, persisted events and logs, startup-boundary classification, bridge differential diagnosis, and operator-authorized reproduction |
+| [hoisting-plugin-agents](skills/hoisting-plugin-agents/SKILL.md) | a delegated/background sub-agent or nested `copilot` process can't reach a marketplace-enabled plugin agent | Hoisting enabled directory-marketplace plugin agents into a repo-local `.github/agents/` fallback; generating, verifying, and retiring the hoisted copies |
+| [componentizing-modules](skills/componentizing-modules/SKILL.md) | a source or test file is oversized or growing toward its cap | Finding decomposition seams (CLI/route registration tables, policy vs. evaluator, vendored-copy canonicals), safely extracting, `--refresh-baseline`, splitting test modules by behavioral contract with `@pytest.mark.contract`, and prioritizing via `tools/rank-module-size.py` |
 
 Each skill supplements the base CLI documentation with this repo's authoring
 patterns, and points at authoritative GitHub Copilot CLI and Anthropic Agent
@@ -75,7 +77,7 @@ Extensions API is not yet fully replaceable.
 
 Provides:
 
-- Eight skills, the bundled `reviewing-customizations` scanner and instruction
+- Ten skills, the bundled `reviewing-customizations` scanner and instruction
   projection manager, and the cross-platform
   `installing-plugins/scripts/plugin-activation.py` state helper.
 - Source-aware agent validation: editable project, `.ai`, and suite agents are

@@ -76,7 +76,7 @@ The tracking state (seen in `list` / the picker) and its status-bar block:
 | `unused` | `UNUSED` (grey) | Clean; no commits **and** no conversation since the fork point |
 | `convo` | `CONVO` (teal) | Clean; no commits, but the session held conversation turns (`💬N`) |
 | `pushed` | — | Changes pushed to the default branch, awaiting finalization |
-| `completed` | `FINAL` (green) | All content landed on the default branch; safe to clean |
+| `completed` | `FINAL` (green) or `MERGED` (orange) | All content landed on the default branch -- see below for which label shows |
 | `finalized` | — | Landed and the worktree removed |
 | `gone` | — | Worktree directory missing |
 | `orphan` | `ORPHAN` (magenta) | No merge base with upstream |
@@ -84,6 +84,66 @@ The tracking state (seen in `list` / the picker) and its status-bar block:
 `unused` vs `convo` is why cleanup never auto-purges a commit-less worktree: it
 may hold planning or conversation. See
 [cli-reference.md § status-segment](cli-reference.md) for the bar detail.
+
+#### `FINAL` vs `MERGED` -- the closure descriptor split
+
+A `completed` worktree (its content is fully on the default branch) does not
+always render as `FINAL`. The canonical closure descriptor
+(`prune.assemble_closure_descriptor`, worktree-finality-and-obligations Phase
+5) splits it into two distinct labels, shared by the status bar, `list --json
+--classify`'s additive `closure` field, and the Picker/Worktree Manager table:
+
+- **`FINAL`** (green) -- a `completed` worktree that is genuinely, currently
+  *proven* safe to clean: the evidence came from a **refreshed** (fetched)
+  classification, it has **zero held claims**, **zero open follow-ups**, and
+  no other blocker (e.g. `rec.status == "finalizing"`).
+- **`MERGED`** (orange) -- `completed`, but not (yet) provably settled. Any of
+  the following forces `MERGED` instead of `FINAL`: no tracking record at all
+  (there is no evidence to prove `FINAL` with), a fetch-free/cached poll (the
+  default `status-interval` tick never fetches), a requested `--fetch` that
+  itself failed, one or more held claims, or one or more open follow-ups. A
+  `MERGED` block may carry a compact `C<N>`/`F<N>` marker suffix for held
+  claims / open follow-ups.
+
+A cached or fetch-free descriptor **never** reports `FINAL`, even when the
+underlying facts would otherwise qualify -- proving a worktree safe to clean
+always requires a fresh fetch immediately before acting. Pass `--fetch` to
+`agent-worktrees status-segment` (or trigger a picker refresh) to let a
+genuinely clean, claim-free, follow-up-free worktree earn `FINAL`.
+
+##### Decomposed sub-state facts (Phase 9)
+
+Internally, `prune.assemble_closure_descriptor` (schema `version: 2`)
+decomposes the descriptor into five named, independently freshness-tracked
+`facts` rather than one all-or-nothing `evidence_mode`/`evidence_complete`
+pair: `checkpoint_activity`, `upstream_containment`, `local_dirtiness`,
+`open_claims`, and `pending_handoff`. Each carries its own `confirmed` flag.
+`checkpoint_activity`, `local_dirtiness`, and `pending_handoff` are always
+locally computed (`pending_handoff` reads `rec.pending_handoffs` --
+agent-worktrees' own already-tracked opened-but-unlinked session
+handoffs), so always `confirmed` and purely informational (never gate
+`FINAL`); `upstream_containment` and `open_claims` require fresh evidence
+(a fetch, a provider PR lookup) to be `confirmed`, and `FINAL` requires
+BOTH to be independently confirmed. This is additive plumbing: the
+`FINAL`/`MERGED` label rules above are unchanged; the Picker does not yet
+render each fact's own freshness marker (still a separate, unstarted
+slice) the way `list --json` and this status segment already do (see
+below).
+
+##### Per-fact freshness markers (Phase 9)
+
+`compact` additionally carries an `U*`/`OC*` marker whenever
+`upstream_containment`/`open_claims` (respectively) is unconfirmed --
+independent of each other and of the `C<N>`/`F<N>` held-claim/follow-up
+markers above, and independent of the base label (a `DIRTY`/`WIP`/etc.
+worktree can carry either marker too, not just `MERGED`). This is the
+general marker convention the Plan calls for: an unconfirmed fact is marked
+**in place**, never spawning a separate whole state. `FINAL` never carries
+either marker (both facts are confirmed by construction whenever `final` is
+true). The mux/PSMux status segment (below) renders `compact` directly, so
+it picks up both markers automatically; the Picker does not yet consume
+`compact` (still a separate, unstarted slice -- see the 2026-09-15 Journal
+entry on Picker label parity).
 
 ### The status core — an orthogonal disposition layer
 
@@ -283,7 +343,11 @@ deleted only when its content is verified on the default branch.
 
 **Finalized is not terminal.** Until it is pruned, a finalized worktree still
 appears in the picker and can be resumed to carry follow-up work — open a fresh
-PR for the new change. If a PR-mode worktree was already torn down (the `detach`
+PR for the new change. It can also still journal a fresh outbound resource
+claim (`claims add`) or take part in a claim handoff: `finalized` only stamps
+"no obligations as of this validation," not "frozen." (Only the in-flight
+`finalizing` RMW window and a genuinely broken `orphaned` record refuse new
+claims.) If a PR-mode worktree was already torn down (the `detach`
 disposition), recover it via
 [`references/pr-workflow.md` § Recovering a PR after teardown](../skills/worktree/references/pr-workflow.md).
 When in doubt, just `create` a fresh worktree and continue there.
@@ -319,7 +383,7 @@ residue, and each **spares anything in use**:
 | `gc` | tracked reap (the cleanup verdict) **+ leaked system/bridge worktrees + on-disk orphan dirs + git prune** | see the managed-reap invariant below |
 | `reap-sessions` | leaked `wt-<id>` mux sessions whose worktree is finalized/gone/untracked **and** idle past grace | **attached, active, or recently-busy** sessions |
 | `reap-shells` | orphaned launcher shells (pwsh/python scaffolding stranded by a force-closed terminal) | anything with a live descendant; reports-only unless `--yes` |
-| `remove-system <id>` | one **system worktree** by id (the manual escape hatch) | — (explicit, targeted) |
+| `remove-system <id>` | one **system worktree** by id (the manual escape hatch) | dirty working tree, unmerged/unpushed branch content, branch drift or a detached HEAD, an unclassifiable git state, a live PR (open/creating/unpopulated), a live outbound resource claim, or (for a resource this worktree itself is, via `owner_ref`) a live/unconfirmed inbound claimant -- refused by default; an unadvertised `--force` overrides |
 
 ### System worktrees (`sys-*`, `[system]`/`[delegate]`)
 
@@ -332,8 +396,19 @@ finalizes without tearing its worktree down, they **leak**, and because their
 tracking status stays `active` (never marked complete) `gc`'s managed sweep
 records them as `not-final-or-unused` and keeps them — so they can accumulate.
 Clear a *provably dead* one with **`remove-system <id>`** (verify it isn't a live
-session first); the durable fix is for the owning service to `remove-system` on
-task completion.
+session first) -- it also independently guards against discarding real content:
+it refuses (by default) a worktree with uncommitted changes, unmerged/unpushed
+branch content (squash-merge-aware), checkout branch drift or a detached HEAD,
+an unclassifiable git state (a zombie checkout with no `.git`, an
+orphaned/unrelated-history checkout, or a timed-out probe), a live PR record, a
+live outbound resource claim, or -- when this worktree is itself another
+worktree's outbound resource (`owner_ref`) -- a live or liveness-unconfirmed
+inbound claimant (unless this resource has itself finished: `finalized` status,
+or its branch content is already merged upstream), naming the blocker so the
+caller can resolve it; an unadvertised `--force` exists for a caller that has
+already confirmed discarding is correct. The durable fix is for the owning
+service to `remove-system` on task
+completion.
 
 ### The managed-reap invariant — what `gc` will never touch
 

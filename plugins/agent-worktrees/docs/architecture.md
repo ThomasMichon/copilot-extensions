@@ -744,6 +744,14 @@ containers, bridge sessions) so finalizing never orphans unfinished work. (Effor
   cross-machine visibility — populated by the resource plugin at settle/release
   (agent-codespaces at clean disconnect → `at-rest`) and read back by the reclaim
   sweep.
+- **`session` claims are advisory, not gating (Phase 8, session-claim
+  lifecycle).** `register_session`/`deregister_session` journal a `kind ==
+  "session"` claim for the worktree's own live Copilot session, but this kind
+  is explicitly excluded from the hard-blocking `unsettled` computation in
+  `_assert_obligations_settled` — a live session never blocks finalize.
+  `validate_and_finalize` settles the invoking session's own claim to
+  `at-rest` before the gate runs, and `_advise_other_live_sessions` warns
+  (never blocks) about any OTHER live session claim in the same worktree.
 - **The gate is cheap + local + enforcing by default.** It reads only the owner's
   own `record.resources` for `is_unsettled` claims — O(claims), no traversal — and
   runs **before any destructive step**. `obligations.gate_mode()`
@@ -790,6 +798,112 @@ my-project --recovery   # Linux/WSL (also accepted on Windows)
 Skips vault credential loading for debugging broken bootstrap
 infrastructure.
 
+### Handoff cutover lifecycle: the 13-stage trace
+
+A handoff cutover (a worktree's Copilot session replaced by a successor
+without losing the operator's place) crosses `context-handoff` (arms the
+handoff), the resident status monitor (claims, spawns, and retires panes),
+and the mux/launcher layer -- three components, none of which alone can
+answer "what actually happened, in order, for this worktree?" (effort
+`handoff-cutover-lifecycle-journal`). `activity.py` defines a canonical
+13-stage vocabulary (`HANDOFF_STAGE_MAP`) layered on top of the existing wire
+event names, so no event was renamed:
+
+| # | Stage | Emitted by |
+|---|---|---|
+| 1 | `worktree_created` | `cmd_create` |
+| 2 | `mux_session_assigned` | `mux_attached` (launcher) / `mux_new_session`/`mux_new_window` (programmatic cutover) |
+| 3 | `copilot_invoked` | the setup launcher's final exec point, **or** `copilot_invocation_attempted` for config-driven/legacy setup paths that never reach that emitter (a coarser mark that does not itself prove Copilot was actually invoked) |
+| 4 | `session_start_bound` | `cmd_register_session` (sessionStart) |
+| 5 | `status_reported` | the first status-report write in a session |
+| 6 | `handoff_triggered` | context-handoff's `trigger_handoff` |
+| 7 | `handoff_host_acknowledged` | the status monitor's claim, gated to `outcome="acquired"` only |
+| 8 | `handoff_successor_spawn_started` | emitted before success/failure is known, so a killed spawn still leaves a trace; the terminal outcome stamps a distinct event name at the same stage -- `handoff_cutover_spawn` on success, `handoff_successor_spawn_failed` on failure |
+| 9 | `handoff_successor_session_start_bound` | the successor's own sessionStart |
+| 10 | `handoff_successor_claimed` | the successor declares itself new head |
+| 11 | `handoff_pickup_confirmed_predecessor_closing` | the predecessor retire path, gated to `outcome="gone"` only, **or** the successor-link path's own direct emission of this event name (ungated) |
+| 12 | `session_end_bound` | the predecessor's sessionEnd |
+| 13 | `handoff_complete` | the runner's final confirmation |
+
+Stage 7 is gated: `handoff_cutover_claim` only stamps `stage`/`stage_name`
+when `outcome="acquired"` -- a duplicate/failed claim attempt is recorded as
+its ordinary event but never misrepresented as that stage's success. Stage
+11 has two distinct emitters with different gating: `handoff_predecessor_retire`
+is gated to `outcome="gone"` only (a retire that left the pane running,
+`outcome="left-running"` or `"identity-mismatch"`, is recorded but not
+stamped as stage 11), while `handoff_pickup_confirmed_predecessor_closing`
+is a separate, ungated event emitted directly by the successor-link path
+and always stamps stage 11 when it fires.
+
+**Two stores, two lifetimes.** Every stage-mapped `log_event()` call writes
+to the machine-global rolling `activity.jsonl` (7-day retention, see
+`activity.py`); a record that actually gets stamped with `stage`/`stage_name`
+also write-throughs, best-effort, to `handoff_trace.py`'s durable,
+per-project/per-worktree, lock-guarded store at
+`~/.agent-worktrees/logs/handoff-traces/<project>/<worktree-id>.jsonl` --
+namespaced by project because worktree ids are only unique within one
+project. The write-through only fires when an active project and worktree
+id are resolvable at call time *and* the event was actually stamped -- a
+gated attempt (`handoff_cutover_claim` with `outcome != "acquired"`,
+`handoff_predecessor_retire` with `outcome != "gone"`) never carries a
+`stage` field, so it lands in `activity.jsonl` only and is lost once that
+rolling log rotates past it; an ambient context with no resolved project/
+worktree id likewise records `activity.jsonl` alone. The durable store is
+exempt from the rolling log's retention window for events that *do* reach
+it, so a slow-to-audit handoff's successful stages can still be re-traced
+after `activity.jsonl` has rotated past its stage-1 event -- but a gated
+failure/retry signal (already-claimed, left-running, identity-mismatch)
+is not among them. `remove_trace()` deletes a worktree's file when its
+tracking record
+is removed, so a reused worktree id never inherits a stale predecessor's
+trace.
+
+**Diagnosing a stuck cutover today.** A dedicated `agent-worktrees
+handoff-trace <worktree-id>` command that renders the ordered 13-stage
+sequence (reading `handoff_trace.read_trace()` plus both sessions'
+session-state trace files) is still open follow-on work
+(`efforts/active/handoff-cutover-lifecycle-journal` Phase 3). What exists
+today and is safe to reach for immediately:
+
+- `agent-worktrees handoffs-check [--worktree-id <id>|--all] [--execute] [--json]`
+  -- diagnoses (and, with `--execute`, retires) an unretired handoff: a
+  spawn is recorded with no matching successful `handoff_predecessor_retire`
+  event (`_pending_handoff_retire_requests` accepts either
+  `handoff.successor` -- linked/authoritative -- or `handoff.candidate` --
+  sessionStart-associated but the handoff still pending -- so this also
+  catches one that should retire before the cutover is fully linked, not
+  only a fully confirmed one). **The read-only report does not itself check
+  whether the pane is still alive** (no `_mux_pane_alive()` call in the
+  finding path) -- it reports every unretired-per-the-log case as a
+  candidate, including one where the pane already exited or was removed
+  without that event ever being logged; `--execute` is what actually
+  attempts the live retirement (using the resident monitor's own
+  choreography, which does check liveness) and is the step that resolves
+  whether a reported finding was real. Read-only without `--execute`. **It
+  does not diagnose a host acknowledgement with no successor pane at all**
+  (no `handoff_cutover_spawn` was ever recorded for the token) -- that "ack
+  but no pane" case has no dedicated diagnostic yet.
+- `agent-bridge handoff-check [--worktree-id <id>|--all] [--execute] [--json]`
+  -- a thin passthrough that shells out to `agent-worktrees handoffs-check`,
+  forwarding `--execute` the same way; only usable when `agent-worktrees` is
+  also resolvable on `PATH` (it fails closed with a clear error otherwise --
+  `agent-bridge` alone does not implement the check/repair logic itself).
+  **No usable project-scoping path for a neutral-CWD caller.**
+  `agent-bridge`'s top-level parser rejects an *explicit* `--project` for
+  `handoff-check` outright (`_guard_project_scope`: only `agents`, `create`,
+  `machines`, and `send` consume that flag) unless it was injected by the
+  `<repo> <slug>` router; and even a router-injected value is never
+  forwarded to the child `agent-worktrees handoffs-check` invocation (which
+  does have its own global `--project`/`-p`, but only when it precedes the
+  subcommand on *that* command line). From a neutral daemon CWD unrelated to
+  the target project, invoke `agent-worktrees handoffs-check --project
+  <name> ...` directly instead -- `agent-bridge handoff-check` cannot be
+  scoped that way.
+- `health.find_orphaned_handoffs()` already flags "claimed but no live
+  successor pane" as a class of bug; feeding it from the durable trace so it
+  can name the *exact* stalled stage (rather than just flagging that one
+  exists) is also open follow-on work.
+
 ## Terminal Integration
 
 | File | Platform | Description |
@@ -828,7 +942,9 @@ self-update and a plugin reconcile. This path is deliberately lightweight -- it
 only touches agent-worktrees -- so it is **not** relied on to fully update
 sibling plugins or modules.
 
-Skip with `--no-update` or `WORKTREE_NO_UPDATE=1`.
+Skip with `--no-update` or `WORKTREE_NO_UPDATE=1`. The Picker reports
+**Updates paused** for that launch and suppresses the refresh action, regardless
+of a shared staged-update status written by another launch.
 
 ### Optional Machine Settings Reconciliation
 
@@ -1859,10 +1975,9 @@ tracked the manual `sel` cursor. NF5-5 replaces it with a genuine native
 `OptionList` -- built the same swap-behind-a-toggle way NF1-NF5 were, so it can be
 soaked before it becomes the default.
 
-- **Toggle.** `AGENT_WORKTREES_PICKER_NATIVE_LIST` (default OFF). `compose()` yields
-  `_PickerNativeData` (an `OptionList` subclass) in place of the text-line
-  `_PickerBodyData` for the `nf-body-data` region; default OFF keeps the text-line
-  body authoritative (golden byte-identical, full suite green).
+- **Historical toggle.** During the soak this shipped behind an opt-in
+  environment toggle, swapping `_PickerNativeData` (an `OptionList` subclass)
+  in place of the text-line `_PickerBodyData` for the `nf-body-data` region.
 - **Options from the same rows.** `_PickerNativeData` builds its options from a new
   `_build_data_vrows(width, sel)` (data-only -- it renders no chrome, so it never
   drives `build_chrome`/`tab_bar` before `setup()`), passing a *sentinel* sel so the
@@ -1889,9 +2004,8 @@ soaked before it becomes the default.
   soaked, later slices port sections/multiselect/pulse and flip the default.
 
 **NF5-5 slice 2 -- byte-identical grid parity + width fix.** A parity pass
-(`test_native_list_grid_parity`) captures the home screen with the native list OFF
-(text-line) and ON (OptionList) and asserts the normalized character grids are
-**identical** -- and equal to the golden. It surfaced one real bug: the native
+captured the home screen in both implementations and asserted the normalized
+character grids were **identical** -- and equal to the golden. It surfaced one real bug: the native
 options were first built at the `size.width or 100` *fallback* (the screen wasn't
 sized yet) and never rebuilt at the real width, so the full-width section rules were
 100 cols vs 118. Fixed by adding `size.width` to the rebuild **signature** and
@@ -1915,18 +2029,15 @@ native behaviours to weigh at the flip: single-click **activates**
 (native select) vs the text body's select-then-double-click, and arrow-up from the
 top data row stays in the list (Tab reaches the chrome) rather than crossing up. Per-row **checkboxes are now always shown** (`WorktreesView.build_data` no longer hides the glyph until multi-select is active) -- with mouse support the box is a discoverable, clickable multi-select affordance at rest; the golden was regenerated and parity holds (both bodies share `build_data`). In the native list those checkboxes are also **clickable** (#88 NF5-5): a mouse press in the 2-cell gutter toggles that row's multi-select (`_on_mouse_down`) and suppresses the ensuing activation, while a click on the row body activates -- so single-click still opens a row, and the gutter is the mouse multi-select affordance (`test_native_list_checkbox_click_toggles`).
 
-**NF5-5 flip -- native list is the default.** `_native_list_enabled()` now defaults
-**ON**: `PickerScreen` composes `_PickerNativeData` (native focus/cursor/scroll/click,
-sticky section header, clickable checkbox gutter) for the data region unless
-`AGENT_WORKTREES_PICKER_NATIVE_LIST` is falsey (the rollback hatch -> the legacy
-text-line `_PickerBodyData`). Because the native list was built to byte-identical grid
-parity, the flip is seamless: the full suite is green in the default (native) mode
-(1719). The forced-ON parity run surfaced the exact test migration -- eight tests: the
-text-line-specific NF3/NF4/compose tests pin `NATIVE_LIST=0` (they still validate the
-opt-out body), the tasks/registered tests gained an explicit `refresh()` (the native
-list rebuilds on refresh, where the text-line body always re-rendered) and the rebuild
-signature became pivot-aware (tasks/maintenance row counts), the "disabled by default"
-test became `test_native_list_default_with_opt_out`, and `on_option_list_option_highlighted`
-now ignores highlight events fired while the list isn't focused (so a modal close can't
-clobber a programmatic `sel`). The text-line body remains as the opt-out until it is
-retired.
+**NF5-5 flip -- native list became the default.** Once parity was proven, the
+native body became the standard render path: `_PickerNativeData` owns focus,
+cursor, scroll, sticky section headers, and clickable checkbox gutters. The
+temporary rollback hatch and the legacy text-line body were later retired when
+the Picker moved to `worktree-manager/`.
+
+> **Retirement note (Phase 6).** These NF sections remain as the design record
+> for the original bundled Picker implementation. The canonical Picker code now
+> lives in `worktree-manager/src/worktree_manager/production_picker/picker_tui/`,
+> and the bundled `plugins/agent-worktrees/src/agent_worktrees/picker_tui/`
+> package was deleted after parity landed. agent-worktrees now owns only the
+> engine boundary and the non-UI support primitives.

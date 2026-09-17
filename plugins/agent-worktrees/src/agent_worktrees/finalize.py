@@ -38,16 +38,13 @@ from __future__ import annotations
 
 import os
 import shutil
-import sys
 import time
-import uuid
 from pathlib import Path
 
 from . import (
     activity,
     git_ops,
     hooks,
-    locks,
     obligations,
     output,
     permissions,
@@ -56,6 +53,7 @@ from . import (
     tracking,
 )
 from .config import Config
+from .finalize_lock import FinalizeLock
 
 
 def _has_live_session(record) -> bool:
@@ -81,142 +79,6 @@ def _has_live_session(record) -> bool:
         return True
     wt_id = getattr(record, "worktree_id", None)
     return bool(wt_id and sessions.has_mux_session(wt_id))
-
-
-class FinalizeLock:
-    """Simple file-based lock with timeout and stale detection."""
-
-    def __init__(
-        self,
-        lock_path: Path,
-        timeout: float = 120,
-        *,
-        stale_after: float | None = None,
-    ) -> None:
-        self.lock_path = lock_path
-        self.timeout = timeout
-        self.stale_after = timeout if stale_after is None else stale_after
-        self.owner_pid = os.getpid()
-        self.owner_start_time = locks.process_start_time(self.owner_pid) or ""
-        self.token = (
-            f"{self.owner_pid}:{self.owner_start_time}:{uuid.uuid4().hex}"
-        )
-        self.held = False
-        self.guard_path = lock_path.with_name(f"{lock_path.name}.guard")
-
-    def acquire(self) -> None:
-        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
-        start = time.monotonic()
-
-        while True:
-            remaining = self.timeout - (time.monotonic() - start)
-            if remaining <= 0:
-                raise TimeoutError("Timed out waiting for finalization lock.")
-            try:
-                with tracking._RecordLock(
-                    self.guard_path,
-                    timeout=max(0.01, remaining),
-                    require_sidecar=True,
-                ):
-                    if not self.lock_path.exists():
-                        fd = os.open(
-                            self.lock_path,
-                            os.O_CREAT | os.O_EXCL | os.O_WRONLY,
-                            0o600,
-                        )
-                        try:
-                            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                                handle.write(self.token)
-                        except BaseException:
-                            try:
-                                self.lock_path.unlink()
-                            except OSError:
-                                pass
-                            raise
-                        self.held = True
-                        return
-                    try:
-                        observed = self.lock_path.read_text(encoding="utf-8").strip()
-                        age = time.time() - self.lock_path.stat().st_mtime
-                    except OSError:
-                        if time.monotonic() - start > self.timeout:
-                            raise TimeoutError(
-                                "Timed out waiting for finalization lock."
-                            )
-                        time.sleep(min(0.1, max(0.01, self.timeout)))
-                        continue
-                    token_parts = observed.split(":")
-                    owner_text = token_parts[0]
-                    owner_start_time = (
-                        token_parts[1]
-                        if len(token_parts) >= 3 and token_parts[1].isdigit()
-                        else ""
-                    )
-                    try:
-                        owner_pid = int(owner_text)
-                    except ValueError:
-                        owner_pid = 0
-                    if owner_pid > 0:
-                        stale = not locks.pid_alive(owner_pid)
-                        if not stale and owner_start_time:
-                            current_start_time = locks.process_start_time(owner_pid)
-                            stale = bool(
-                                current_start_time
-                                and current_start_time != owner_start_time
-                            )
-                        elif not stale and age > self.stale_after:
-                            stale = True
-                    else:
-                        stale = age > self.stale_after
-                    if stale:
-                        try:
-                            output.warn(
-                                f"Stale lock detected (age: {int(age)}s) -- breaking."
-                            )
-                            self.lock_path.unlink()
-                            continue
-                        except OSError:
-                            if time.monotonic() - start > self.timeout:
-                                raise TimeoutError(
-                                    "Timed out waiting for finalization lock."
-                                )
-                            time.sleep(min(0.1, max(0.01, self.timeout)))
-                            continue
-            except TimeoutError:
-                pass
-
-            if time.monotonic() - start > self.timeout:
-                raise TimeoutError("Timed out waiting for finalization lock.")
-
-            print("Waiting for finalization lock...", file=sys.stderr)
-            time.sleep(min(2.0, max(0.01, self.timeout)))
-
-    def release(self) -> None:
-        if not self.held:
-            return
-        try:
-            with tracking._RecordLock(
-                self.guard_path,
-                timeout=min(2.0, max(0.01, self.timeout)),
-                require_sidecar=True,
-            ):
-                try:
-                    current = self.lock_path.read_text(encoding="utf-8").strip()
-                    if current == self.token:
-                        self.lock_path.unlink()
-                except OSError:
-                    pass
-        except (OSError, TimeoutError):
-            pass
-        finally:
-            self.held = False
-
-    def __enter__(self) -> FinalizeLock:
-        self.acquire()
-        return self
-
-    def __exit__(self, *_: object) -> None:
-        self.release()
 
 
 def push_changes(
@@ -332,6 +194,12 @@ def push_changes(
         # 1. Fetch
         print(f"Fetching from {repo.remote}...")
         git_ops.fetch(repo.remote, cwd=anchor)
+        # worktree-finality-and-obligations Phase 9: this fetch just made the
+        # repo's remote-tracking refs current -- share that with every OTHER
+        # worktree of this repo via the freshness ledger, instead of only
+        # this call benefiting.
+        if record and record.repo:
+            tracking.record_repo_fetch_confirmed(record.repo)
 
         # 2. Dirty check
         wt_exists = Path(worktree_path).exists()
@@ -547,6 +415,8 @@ def push_changes(
             if attempt < max_retries:
                 output.warn("Non-fast-forward -- fetching and retrying...")
                 git_ops.fetch(repo.remote, cwd=anchor)
+                if record and record.repo:
+                    tracking.record_repo_fetch_confirmed(record.repo)
                 if not git_ops.rebase(upstream, cwd=anchor):
                     output.err("Rebase after push rejection failed")
                     if record:
@@ -844,6 +714,8 @@ def _push_changes_pr(
     try:
         print(f"Fetching from {remote}...")
         git_ops.fetch(remote, cwd=worktree_path)
+        if record.repo:
+            tracking.record_repo_fetch_confirmed(record.repo)
 
         if git_ops.ref_exists(upstream, cwd=worktree_path):
             if on_wt:
@@ -996,6 +868,8 @@ def _push_changes_pr_refspec(
     try:
         print(f"Fetching from {remote}...")
         git_ops.fetch(remote, cwd=worktree_path)
+        if record.repo:
+            tracking.record_repo_fetch_confirmed(record.repo)
 
         # Rebase the worktree branch forward onto the default branch; feedback
         # commits ride on top. HEAD stays on wt_branch throughout.
@@ -1260,6 +1134,85 @@ def _settle_parent_obligation(
         return
 
 
+def _settle_current_session_claim(
+    yaml_path: Path,
+    record: tracking.WorktreeRecord | None,
+    current_session_id: str | None,
+) -> tuple[tracking.WorktreeRecord | None, str | None]:
+    """Settle the invoking session's own claim to ``at-rest``, lock-safe.
+
+    Reloads + settles inside a fresh ``_RecordLock`` transaction (rather than
+    mutating a stale pre-lock snapshot) so an interleaving
+    ``register_session``/``deregister_session`` -- each its own locked
+    read-modify-write -- can never be overwritten by this settlement. Never
+    resurrects an already-``released`` claim: a ``sessionEnd`` can race ahead
+    of a retried/late finalize for the SAME session id, and settling
+    unconditionally would flip a genuinely-torn-down claim back to
+    ``at-rest`` (held).
+
+    Returns ``(record, current_session_ref)`` -- ``record`` is the freshly
+    reloaded record when settlement ran, else the ``record`` passed in
+    unchanged; ``current_session_ref`` is ``None`` when no session id was
+    resolvable (a silent, best-effort no-op, not a failure).
+    """
+    if record is None or not current_session_id:
+        return record, None
+    current_session_ref = tracking.format_claim_ref(
+        record.machine, record.repo, record.worktree_id,
+        session=current_session_id,
+    )
+    try:
+        with tracking._RecordLock(yaml_path, require_sidecar=True):
+            fresh_record = tracking.load_record(yaml_path)
+            existing_claim = next(
+                (c for c in fresh_record.resources
+                 if c.ref == current_session_ref),
+                None,
+            )
+            if existing_claim is None or existing_claim.state != "released":
+                tracking.settle_resource_claim(
+                    fresh_record, current_session_ref,
+                    disposition=obligations.AT_REST,
+                )
+            record = fresh_record
+    except Exception:
+        pass
+    return record, current_session_ref
+
+
+def _advise_other_live_sessions(
+    record: tracking.WorktreeRecord | None,
+    current_session_ref: str | None,
+) -> None:
+    """Warn (never block) about OTHER live ``session`` claims on ``record``.
+
+    Advisory-only pass (Phase 8, worktree-finality-and-obligations): a
+    ``session`` claim never hard-blocks finalize (see the ``kind !=
+    "session"`` exclusion in :func:`_assert_obligations_settled`), but the
+    operator/agent invoking finalize should still be told when some OTHER
+    session is concurrently live in this worktree. Always returns (proceeds);
+    this is "name them and ask", not an interactive block, since most
+    finalize invocations here are non-interactive/agent-driven.
+    """
+    if record is None:
+        return
+    others = [
+        c for c in record.resources
+        if c.kind == "session" and c.is_live and c.ref != current_session_ref
+    ]
+    if not others:
+        return
+    output.warn(
+        f"Worktree {record.worktree_id} has {len(others)} other live Copilot "
+        "session claim(s) besides the one running finalize:"
+    )
+    for c in others:
+        label = f"  · {c.kind}: {c.ref}"
+        if c.note:
+            label += f" ({c.note})"
+        output.warn(label)
+
+
 def _assert_obligations_settled(
     record: tracking.WorktreeRecord | None,
     worktree_id: str,
@@ -1310,7 +1263,14 @@ def _assert_obligations_settled(
             + ", ".join(active_handoffs)
         )
         return False
-    unsettled = [c for c in record.resources if c.is_unsettled]
+    # A "session" claim (Phase 8, worktree-finality-and-obligations) never
+    # hard-blocks finalize -- it gets its own advisory-only pass
+    # (`_advise_other_live_sessions`), not this refusal gate. Finalize itself
+    # settles the invoking session's own claim before this check ever runs
+    # (see `validate_and_finalize`).
+    unsettled = [
+        c for c in record.resources if c.is_unsettled and c.kind != "session"
+    ]
     if not unsettled:
         return True
     pending = [c for c in unsettled if c.ref.startswith("pending-run:")]
@@ -1369,6 +1329,41 @@ def _assert_obligations_settled(
     return True
 
 
+def _rollback_finalizing_freeze(
+    yaml_path, prior_status: str | None, worktree_id: str,
+) -> None:
+    """Restore a mutable stable state after a post-freeze finalize failure.
+
+    worktree-finality-and-obligations (Ph2): once ``record.status`` is frozen
+    to ``finalizing``, a subsequent failure (lock timeout, an exception during
+    cleanup) must not leave the record wedged there permanently -- creator
+    ownership would stay frozen forever (``add_resource_claim`` hard-rejects
+    ``finalizing``) with no path back. Best-effort and defensive: only reverts
+    when the record is still exactly ``finalizing`` (a concurrent process may
+    have already resolved it) and only when a real prior status was captured.
+    """
+    if prior_status is None or not yaml_path.exists():
+        return
+    try:
+        with tracking._RecordLock(yaml_path, require_sidecar=True):
+            record = tracking.load_record(yaml_path)
+            if record.status != "finalizing":
+                return
+            record.status = prior_status
+            tracking.save_record(record, yaml_path)
+        output.warn(
+            f"Restored {worktree_id}'s tracking status to {prior_status!r} "
+            "after a finalize failure (was wedged at 'finalizing')."
+        )
+    except Exception as exc:
+        output.err(
+            f"Could not roll back {worktree_id}'s 'finalizing' freeze after a "
+            f"finalize failure ({exc}); run 'agent-worktrees doctor' or inspect "
+            f"the record manually -- creator ownership is at risk of being "
+            f"stuck."
+        )
+
+
 def _rehome_abandoned_obligations(
     record, worktree_id: str, config, *, handoff_to: str,
 ) -> bool:
@@ -1382,7 +1377,9 @@ def _rehome_abandoned_obligations(
     requested handoff target. A write/readback failure returns False so finalize
     preserves the creator worktree and its claims.
     """
-    abandoned = [c for c in record.resources if c.is_unsettled]
+    abandoned = [
+        c for c in record.resources if c.is_unsettled and c.kind != "session"
+    ]
     if not abandoned:
         return True
     tracking.rehome_abandoned_obligations(
@@ -1510,6 +1507,29 @@ def validate_and_finalize(
     except Exception:
         pass
 
+    # Session-claim lifecycle (Phase 8, worktree-finality-and-obligations):
+    # settle the invoking session's own outbound claim BEFORE the hard
+    # obligation gate runs, so finalize never leaves the operator to settle
+    # it by hand -- and it never blocks the gate either way (see the
+    # `kind != "session"` exclusion in `_assert_obligations_settled`).
+    #
+    # Scoping note: this reads ``COPILOT_AGENT_SESSION_ID`` from the CURRENT
+    # process's own environment, so it settles the invoking (interactive)
+    # session's claim. ``_post_exit_gate``'s backstop call (after the child
+    # Copilot process exits) runs in the *launcher's* environment, which
+    # never carries the exited child's session id -- so if that child's own
+    # `sessionEnd` hook was itself missed (a crash, not a clean exit), this
+    # step is a no-op and the orphaned claim is left `active`. That claim
+    # never blocks finalize (the `kind != "session"` exclusion above) and is
+    # exactly the still-deferred "sweep `claim_gone`/`claim_safe` session
+    # branch" Plan bullet's job to reclaim -- not solved here, to keep this
+    # slice's scope to the register/deregister/finalize wiring itself.
+    current_session_id = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
+    record, current_session_ref = _settle_current_session_claim(
+        yaml_path, record, current_session_id,
+    )
+    _advise_other_live_sessions(record, current_session_ref)
+
     # Obligation gate (resource-obligation-settlement Phase 2). A worktree
     # answers for the outbound resources it still owns before it may finalize.
     # Runs BEFORE any destructive step so a blocking gate refuses cleanly. Read
@@ -1523,6 +1543,8 @@ def validate_and_finalize(
     # Fetch to get current upstream state
     print(f"Fetching from {repo.remote}...")
     git_ops.fetch(repo.remote, cwd=anchor)
+    if record and record.repo:
+        tracking.record_repo_fetch_confirmed(record.repo)
 
     if pr_mode:
         # PR mode: finalize is decoupled from merge. Work is safe to prune as
@@ -1597,6 +1619,7 @@ def validate_and_finalize(
             + ", ".join(active_handoffs))
         return False
 
+    prior_status: str | None = None
     if yaml_path.exists():
         try:
             with tracking._RecordLock(yaml_path, require_sidecar=True):
@@ -1618,7 +1641,10 @@ def validate_and_finalize(
                         "claim-handoff bundles before cleanup; finalize is "
                         "refused: " + ", ".join(active_handoffs))
                     return False
-                unsettled = [c for c in record.resources if c.is_unsettled]
+                unsettled = [
+                    c for c in record.resources
+                    if c.is_unsettled and c.kind != "session"
+                ]
                 pending = [
                     c for c in unsettled if c.ref.startswith("pending-run:")
                 ]
@@ -1650,6 +1676,7 @@ def validate_and_finalize(
                     handoff_to=(handoff_to or "").strip(),
                 ):
                     return False
+                prior_status = record.status
                 record.status = "finalizing"
                 tracking.save_record(record, yaml_path)
         except Exception as exc:
@@ -1665,6 +1692,7 @@ def validate_and_finalize(
         lock.acquire()
     except TimeoutError:
         output.err("Timed out waiting for finalization lock.")
+        _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id)
         return False
 
     try:
@@ -1835,6 +1863,7 @@ def validate_and_finalize(
 
     except Exception as e:
         output.err(f"Finalization cleanup failed: {e}")
+        _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id)
         return False
     finally:
         lock.release()

@@ -5,7 +5,7 @@
   obligations, disposition, and source-control completion.
 - **Scope:** leaf (concrete component; child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-09-09
+- **Last revised:** 2026-09-15
 - **Reality docs:** the agent-worktrees plugin `docs/`
 - **Supersedes / superseded by:** none
 
@@ -46,6 +46,30 @@ guarantee, with agent-worktrees as its repo-identity anchor. A worktree
 checkout's own directory name is a per-session, per-machine identifier that
 must never be adopted downstream as if it were the repo's registered name.
 
+A registered repo's identity extends beyond its path to its **contribution
+posture**: the concrete answer to "how may I propose and land a change here,
+and what is my standing to do so." agent-worktrees is the single durable
+record of that posture for every repo a project relates to. A project never
+needs a second, parallel catalog of the repos it works with, their
+contribution rules, or an operator's standing in each — whatever such a
+project previously tracked on its own converges into this one record instead.
+
+### Related-repo relationship and contribution posture
+
+Beyond a registered repo's own identity, agent-worktrees records how a project
+**relates** to each other repo it touches: the relationship's nature (the
+project owns it, contributes to it, merely consumes it, and so on), where work
+on it happens, and who else mediates that work. A related repo's contribution
+posture is a first-class part of this record, derived primarily from the
+target repo's own authoritative signals (its stated branch/review contract,
+required approvals, fork-vs-branch requirement, and similar facts it already
+publishes about itself) rather than from a hand-maintained duplicate. Where a
+repo's real contribution etiquette cannot be read off any signal — a courtesy
+convention, an expected wait before self-merging, how to coordinate with other
+concurrent contributors — that nuance is layered on as curated narrative
+alongside the derived facts, never invented to fill a gap the signals leave
+open.
+
 ### The worktree as a unit of agency
 
 A worktree record carries the objective-facing state that should outlive any one
@@ -84,6 +108,15 @@ worktrees, pull requests, environments, sessions, connections, and other
 scarce resources. Exclusive access is fenced, ownership is answerable in both
 directions, and finalization is gated on settlement or an explicit transfer.
 
+### Pull-request capability
+
+A pull request is more than a claimed resource on a worktree's ledger: it is
+the subject of a provider-neutral capability in its own right, covering both
+the author's and the reviewer's side of its life, addressable for a repo
+regardless of local checkout, and verifiable against a fabricated provider
+with the same confidence as a real one. See
+[pull-requests](pull-requests/README.md) (child vision).
+
 ### Source-control completion
 
 Creation, isolation, contribution-policy enforcement, publication, finalization,
@@ -113,6 +146,22 @@ suite-wide
 [*process-count-scales-with-services-not-sessions*](../../plugin-services/README.md#process-count-scales-with-services-not-sessions)
 guarantee, generalized here from session-lifecycle hooks to every ordinary
 reader.
+
+The reduction's inputs are a fixed, small set of independently named facts —
+whether the session has held activity since its last checkpoint, whether the
+worktree's content is contained in its upstream default branch, whether the
+working tree is locally dirty, whether any claim against the worktree remains
+open, and whether a handoff is pending pickup — never a hand-authored combined
+enum that grows a new case per situation. The costliest of these,
+upstream-containment, depends on evidence (the repo's remote-tracking refs)
+shared by every sibling worktree of the same repo; the resident accelerator
+keeps that evidence current through its own periodic sweep and through
+prompt, operation-triggered recomputation (a merge landing, a push, a sync, a
+claim settling) — rather than trusting whichever individual caller happened
+to request a fetch on its own call. Any fact whose current truth cannot be
+confirmed is marked as such in the rendered result — never silently reported
+as certain, and never given a separate, whole state of its own standing in
+for "unverified."
 
 ### Declarative presentation contribution
 
@@ -156,6 +205,23 @@ exclusive, and visible until settled or explicitly transferred.
 Worktree publication and completion honor each repository's own contribution
 contract, preserve isolated editing, and prove content safe before cleanup.
 
+### auto-discovered-contribution-posture
+
+For each repo a project relates to, agent-worktrees derives its contribution
+posture — how a change may be proposed there, and what standing the operator
+has to land it — primarily from that repo's own authoritative signals rather
+than a hand-maintained duplicate a project curates separately. Curated
+narrative supplements only the etiquette a signal cannot express; it never
+substitutes for a derivable fact.
+
+### ambient-cross-repo-contribution-guidance
+
+A session working across related repos receives, unprompted, a concise brief
+of its role and contribution posture for every repo relevant to its current
+work — through the same ambient guidance channel that already carries other
+session-scoped context — rather than requiring an explicit lookup before the
+operator or agent can act correctly.
+
 ### provider-observation-ingestion
 
 Execution hosts may publish bounded, attributable lifecycle and activity
@@ -167,6 +233,43 @@ owner derives the aggregate.
 The Worktrees presentation surface is described through machine-readable
 semantics that any compatible control plane can render without importing the
 engine or persisting a second copy of its state.
+
+### decomposed-status-facts
+
+The status a worktree renders is a reduction over a fixed, small set of
+independently named facts — activity since the last checkpoint,
+upstream-containment, local dirtiness, open claims, and pending handoff —
+never a hand-authored combined enum that grows a new case per situation.
+
+### continuously-revalidated-freshness
+
+The costliest fact — whether a worktree's content is contained in its
+upstream default branch — is kept current by the resident accelerator itself:
+a periodic background sweep (on the order of once a minute, not once per
+render) plus prompt, operation-triggered recomputation, rather than trusting
+whichever caller happened to request a fetch on its own call.
+
+### repo-scoped-freshness
+
+Sibling worktrees of one repo share the same remote-tracking refs, so
+upstream-containment freshness is tracked once per repo, not once per
+worktree. Any fetch — a background sweep, a finalize, a merge — refreshes
+every sibling worktree's evidence at once.
+
+### operation-triggered-recompute
+
+Operations that plausibly change a sub-state's truth — a merge landing, a
+push, a sync or rebase, a claim settling or releasing, a handoff resolving —
+signal the resident accelerator to recompute promptly, rather than leaving
+the affected worktrees to wait out the next periodic sweep.
+
+### marked-not-multiplied-uncertainty
+
+When a specific fact's truth cannot currently be confirmed, the rendered
+status marks that one fact as unconfirmed rather than inventing a separate
+whole state for the unverified case — the vocabulary of possible statuses
+stays fixed size regardless of how many facts happen to be stale at any
+moment.
 
 ## Behaviors
 
@@ -200,11 +303,54 @@ When a provider is unreachable, agent-worktrees reports stale or unknown live
 state while preserving durable state. It does not infer that an objective is
 resolved, a session is dead, or a claim is abandoned from missing telemetry.
 
+### uncertainty-is-marked-not-multiplied
+
+An unconfirmed fact renders as that fact's real value plus an explicit
+marker, never as a different, separately-named state standing in for
+"unverified." A consumer sees one fixed vocabulary of facts and,
+independently, which of them are currently confirmed.
+
+### freshness-is-pursued-not-assumed
+
+No caller may treat a fact as confirmed merely because its own request
+happened to include a fetch. The system actively keeps shared evidence
+current — a periodic background sweep plus operation-triggered
+recomputation — so an ordinary reader benefits from freshness without
+personally requesting it.
+
+### one-fetch-serves-every-sibling
+
+A repo's upstream-containment evidence, once refreshed by any means, is
+immediately available to every worktree of that repo — never re-fetched
+independently per worktree for the same evidence.
+
+### contribution-posture-degrades-honestly
+
+When a related repo's contribution posture cannot be discovered from its own
+signals — the signal is unreachable, ambiguous, or simply doesn't exist —
+agent-worktrees says so rather than guessing a posture or silently omitting
+guidance. A gap in discovered fact is never quietly papered over with an
+invented default.
+
 ### finalization-joins-durable-obligations
 
 A worktree may complete only when its source-control content is safe and every
 durable obligation is settled or transferred. Interactive process exit is
 neither necessary nor sufficient evidence of completion.
+
+### finalization-is-reversible-under-live-resume
+
+A worktree's completed/finalized state is not a one-way trap for a session
+still actively resumed inside it. Finalization freezing the worktree's capacity
+to originate new claims, obligations, or child worktrees — while continuing to
+let the same live session read, write, and resume inside it — is an
+inconsistent middle state, not a safety boundary: nothing protected by refusing
+a new obligation is also protected by allowing the resumed session to keep
+acting otherwise. The owning live session can reactivate a finalized worktree,
+lifting exactly that frozen-ownership restriction, without discarding its
+existing durable record, lineage, claims, or history. A worktree that is
+genuinely done accepting new work is retired from active resumption entirely,
+not left resumable-but-silently-crippled.
 
 ### provider-replacement-preserves-agency
 
@@ -241,6 +387,10 @@ manager, or session-host implementation.
   session archive.
 - **Not the presentation host.** It contributes worktree semantics but does not
   render the operator experience.
+- **Not a second background service.** The periodic freshness sweep and
+  operation-triggered recomputation extend the existing resident accelerator
+  (already required to exist as a single process per host); they do not
+  introduce a second daemon.
 - **Not a specification.** This vision fixes ownership boundaries and durable
   guarantees, not schemas, commands, endpoints, file layouts, or provider APIs.
 
@@ -257,6 +407,49 @@ manager, or session-host implementation.
 
 ## Provenance
 
+- **2026-09-15** — Refined *Derived status* into a decomposed sub-state model:
+  a fixed set of independently named facts (checkpoint activity,
+  upstream-containment, dirtiness, open claims, pending handoff), freshness
+  actively and continuously maintained by the resident accelerator (a
+  periodic sweep plus operation-triggered recomputation) rather than trusted
+  from whichever caller's own request happened to pass a fetch flag, and
+  unconfirmed facts marked individually rather than each spawning a separate
+  whole state. Mined from an operator observation that every worktree read as
+  `MERGED`, never `FINAL`, because the closure descriptor's freshness signal
+  was scoped to a single call's own fetch rather than to the repo-wide
+  remote-tracking refs every sibling worktree actually shares — refined via
+  discussion into treating uncertainty as a per-fact marker instead of a
+  parallel state space, and freshness as an actively pursued, resident-owned
+  property instead of a passively hoped-for one.
+- **2026-09-14** — Added *pull-request capability* (Concepts & Components),
+  linking a new child leaf vision,
+  [`pull-requests`](pull-requests/README.md), that generalizes the PR concept
+  beyond "a claimed resource on the worktree's ledger" into its own
+  provider-neutral capability (author+reviewer symmetric, foreign-repo
+  addressable, mock-provider verifiable). Mined from a live odsp-web-harness
+  clean-room finding: a scenario-eval correctly reported BLOCKED for "no PR
+  available" rather than fabricate a review, surfacing that reviewer-side PR
+  operations, foreign-repo addressing, and a conformance-verified mock
+  provider have no first-class home today.
+- **2026-09-12** — Added *related-repo relationship and contribution posture*
+  (Concepts & Components), *auto-discovered-contribution-posture* and
+  *ambient-cross-repo-contribution-guidance* (Features), and
+  *contribution-posture-degrades-honestly* (Behaviors). Mined from an operator
+  observation that a project relating to several external repos had drifted
+  into hand-curating a second, parallel catalog of those repos' contribution
+  rules alongside agent-worktrees' own related-repo index — duplicating facts
+  a target repo already publishes about itself, and going stale as those rules
+  changed. Filed as
+  [#2562](https://github.com/ThomasMichon/copilot-extensions/issues/2562).
+- **2026-09-11** — Added *finalization-is-reversible-under-live-resume* after
+  a live-reproduced defect: an actively resumed worktree (session count 2,
+  resume count 6, still hosting the current session) was marked finalized —
+  apparently by a stale or premature completion signal, not by any deliberate
+  operator action — and this then blocked the same live session from creating
+  a new child worktree ("creator ownership is frozen"), with no supported
+  reversal short of abandoning the worktree entirely. The finalized state was
+  otherwise transparent: reads, writes, and resumption all still worked. Filed
+  as [#2467](https://github.com/ThomasMichon/copilot-extensions/issues/2467).
 - **2026-09-09** — Strengthened "Derived status" from an optional accelerator
   to an explicit thin-client/ref-counted-subscriber expectation: an ordinary
   reader (CLI invocation or Picker), not only a session-lifecycle hook, should

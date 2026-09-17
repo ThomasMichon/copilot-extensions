@@ -241,6 +241,25 @@ class TestCleanupDisposition:
         d = prune.cleanup_disposition(_rec(status="finalized"), _info(S.COMPLETED))
         assert d.cleanable is True and d.bucket == "clean"
 
+    def test_finalized_but_dirty_is_never_cleanable(self):
+        # A worktree finalized earlier and modified afterward: rec.status is
+        # still "finalized" (finalize doesn't get re-run on every edit), but
+        # the working tree now carries real, unlanded content. The raw
+        # rec.status == "finalized" shortcut must not treat this as cleanable
+        # -- that would let plain `cleanup --clean` delete unlanded work with
+        # no `--force` at all.
+        d = prune.cleanup_disposition(_rec(status="finalized"),
+                                      _info(S.DIRTY, dirty=1))
+        assert d.cleanable is False and d.bucket == "dirty"
+
+    def test_finalized_orphan_with_dirty_is_never_cleanable(self):
+        # git_ops._classify_git_state can report ORPHAN (no merge base) while
+        # still carrying a nonzero dirty count -- the dirty count, not just
+        # state == DIRTY, is what must gate cleanability.
+        d = prune.cleanup_disposition(_rec(status="finalized"),
+                                      _info(S.ORPHAN, dirty=2))
+        assert d.cleanable is False and d.bucket == "dirty"
+
     def test_empty_needs_include_unused(self):
         rec = _rec(status="unused")
         d0 = prune.cleanup_disposition(rec, _info(S.UNUSED), turn_count=0)
@@ -283,7 +302,7 @@ class TestCleanupDisposition:
         d = prune.cleanup_disposition(rec, _info(S.COMPLETED))
         assert d.cleanable is False
         assert d.bucket == "follow-up"
-        assert "follow-ups" in d.reason
+        assert "open follow-up" in d.reason
 
     def test_follow_up_downgrades_merged_pr(self):
         rec = _rec(status="active", prs=[_pr(21, "merged")])
@@ -302,6 +321,75 @@ class TestCleanupDisposition:
     def test_follow_up_no_effect_when_not_flagged(self):
         d = prune.cleanup_disposition(_rec(status="finalized"), _info(S.COMPLETED))
         assert d.cleanable is True and d.bucket == "clean"
+
+    def test_held_claim_downgrades_finalized_to_blocked(self):
+        # worktree-finality-and-obligations: an active outbound resource claim
+        # blocks cleanup even though the worktree's own status is `finalized`
+        # (finalize is not terminal -- a finalized owner can accept a new claim
+        # per tracking.add_resource_claim, and cleanup must not treat
+        # `status == finalized` alone as claim-free).
+        rec = _rec(status="finalized")
+        rec.resources = [
+            tracking.ResourceClaim(kind="codespace", ref="cs-1", state="active")
+        ]
+        d = prune.cleanup_disposition(rec, _info(S.COMPLETED))
+        assert d.cleanable is False
+        assert d.bucket == "held-claims"
+        assert "held resource claim" in d.reason
+
+    def test_at_rest_claim_also_blocks_cleanup(self):
+        # at-rest is still HELD (the work settled but the claim wasn't torn
+        # down); only released/abandoned claims are non-held.
+        rec = _rec(status="finalized")
+        rec.resources = [
+            tracking.ResourceClaim(kind="codespace", ref="cs-1", state="at-rest")
+        ]
+        d = prune.cleanup_disposition(rec, _info(S.COMPLETED))
+        assert d.cleanable is False and d.bucket == "held-claims"
+
+    def test_released_claim_does_not_block_cleanup(self):
+        rec = _rec(status="finalized")
+        rec.resources = [
+            tracking.ResourceClaim(kind="codespace", ref="cs-1", state="released")
+        ]
+        d = prune.cleanup_disposition(rec, _info(S.COMPLETED))
+        assert d.cleanable is True and d.bucket == "clean"
+
+    def test_held_claim_does_not_override_active(self):
+        rec = _rec(status="finalized")
+        rec.resources = [
+            tracking.ResourceClaim(kind="codespace", ref="cs-1", state="active")
+        ]
+        d = prune.cleanup_disposition(rec, _info(S.ACTIVE))
+        assert d.bucket == "active"
+
+    def test_itemized_open_follow_up_downgrades_finalized_to_blocked(self):
+        # worktree-finality-and-obligations Phase 3: an itemized open
+        # follow-up blocks cleanup the same way the legacy boolean did.
+        rec = _rec(status="finalized")
+        rec.follow_ups = [
+            tracking.FollowUpRecord(id="fu-1", summary="deploy it", state="open")
+        ]
+        d = prune.cleanup_disposition(rec, _info(S.COMPLETED))
+        assert d.cleanable is False and d.bucket == "follow-up"
+        assert "1 open follow-up" in d.reason
+
+    def test_resolved_follow_up_item_does_not_block_cleanup(self):
+        rec = _rec(status="finalized")
+        rec.follow_ups = [
+            tracking.FollowUpRecord(id="fu-1", summary="deploy it", state="resolved")
+        ]
+        d = prune.cleanup_disposition(rec, _info(S.COMPLETED))
+        assert d.cleanable is True and d.bucket == "clean"
+
+    def test_pending_transfer_follow_up_item_blocks_cleanup(self):
+        rec = _rec(status="finalized")
+        rec.follow_ups = [
+            tracking.FollowUpRecord(id="fu-1", summary="deploy it",
+                                    state="pending-transfer")
+        ]
+        d = prune.cleanup_disposition(rec, _info(S.COMPLETED))
+        assert d.cleanable is False and d.bucket == "follow-up"
 
 
 # --- citadel paired-worktree BOTH-gate (#957) -------------------------------
@@ -533,3 +621,476 @@ class TestCleanupDispositionClaimed:
         d = prune.cleanup_disposition(rec, _info(S.COMPLETED),
                                       claimant_alive=lambda ref: False)
         assert d.cleanable is True and d.bucket == "clean"
+
+
+# --- assemble_closure_descriptor (worktree-finality-and-obligations Phase 4) -
+
+class TestClosureDescriptor:
+    def _final_inputs(self):
+        rec = _rec(status="finalized")
+        info = _info(S.COMPLETED)
+        disposition = prune.cleanup_disposition(rec, info)
+        return rec, info, disposition
+
+    def test_clean_completed_worktree_is_final(self):
+        rec, info, disposition = self._final_inputs()
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=0, open_follow_ups=0)
+        assert d.final is True
+        assert d.label == "FINAL"
+        assert d.compact == "FINAL"
+        assert d.action_disposition == "safe"
+        assert d.blockers == []
+        assert d.version == prune.DESCRIPTOR_VERSION
+
+    def test_held_claim_downgrades_completed_to_merged(self):
+        rec = _rec(status="finalized")
+        rec.resources = [
+            tracking.ResourceClaim(kind="codespace", ref="cs-1", state="active")
+        ]
+        info = _info(S.COMPLETED)
+        disposition = prune.cleanup_disposition(rec, info)
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=1, open_follow_ups=0)
+        assert d.final is False
+        assert d.label == "MERGED"
+        assert d.compact == "MERGED C1"
+        assert d.action_disposition == "blocked"
+        assert {"code": "held-claims", "count": 1} in d.blockers
+
+    def test_open_follow_up_downgrades_completed_to_merged(self):
+        rec = _rec(status="finalized")
+        rec.follow_ups = [
+            tracking.FollowUpRecord(id="fu-1", summary="x", state="open")
+        ]
+        info = _info(S.COMPLETED)
+        disposition = prune.cleanup_disposition(rec, info)
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=0, open_follow_ups=1)
+        assert d.final is False
+        assert d.label == "MERGED"
+        assert d.compact == "MERGED F1"
+        assert {"code": "open-follow-ups", "count": 1} in d.blockers
+
+    def test_both_blockers_produce_both_markers(self):
+        rec = _rec(status="finalized")
+        info = _info(S.COMPLETED)
+        disposition = prune.cleanup_disposition(rec, info)
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=2, open_follow_ups=3)
+        assert d.compact == "MERGED C2 F3"
+        assert d.final is False
+
+    def test_cached_evidence_never_reports_final_or_safe(self):
+        rec, info, disposition = self._final_inputs()
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=0, open_follow_ups=0,
+            evidence_mode="cached", evidence_complete=True)
+        assert d.final is False
+        assert d.label == "MERGED"
+        assert d.action_disposition == "blocked"
+        assert d.facts["upstream_containment"]["confirmed"] is False
+        assert d.facts["open_claims"]["confirmed"] is False
+
+    def test_incomplete_evidence_never_reports_final_or_safe(self):
+        rec, info, disposition = self._final_inputs()
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=0, open_follow_ups=0,
+            evidence_mode="refreshed", evidence_complete=False)
+        assert d.final is False
+        assert d.action_disposition == "blocked"
+
+    def test_cached_evidence_marks_both_facts_in_compact(self):
+        # worktree-finality-and-obligations Phase 9: the per-fact marker
+        # convention -- an unconfirmed fact is marked IN PLACE, never a
+        # separate whole state. Both facts share the same cached evidence
+        # input here, so both markers appear.
+        rec, info, disposition = self._final_inputs()
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=0, open_follow_ups=0,
+            evidence_mode="cached", evidence_complete=True)
+        assert d.compact == "MERGED U* OC*"
+
+    def test_repo_fetch_fresh_marks_only_open_claims(self):
+        # upstream_containment is confirmed via the ledger, so only the
+        # open_claims marker remains -- proving the two markers are
+        # independent, not a single "not fresh" flag.
+        rec, info, disposition = self._final_inputs()
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=0, open_follow_ups=0,
+            evidence_mode="cached", evidence_complete=True,
+            repo_fetch_fresh=True)
+        assert d.compact == "MERGED OC*"
+
+    def test_held_claims_and_unconfirmed_markers_combine(self):
+        rec = _rec(status="finalized")
+        info = _info(S.COMPLETED)
+        disposition = prune.cleanup_disposition(rec, info)
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=1, open_follow_ups=0,
+            evidence_mode="cached", evidence_complete=True)
+        assert d.compact == "MERGED C1 U* OC*"
+
+    def test_final_never_carries_a_marker(self):
+        rec, info, disposition = self._final_inputs()
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=0, open_follow_ups=0)
+        assert d.final is True
+        assert d.compact == "FINAL"
+        assert "*" not in d.compact
+
+    def test_repo_fetch_fresh_confirms_upstream_containment_alone(self):
+        # worktree-finality-and-obligations Phase 9: a repo-scoped ledger hit
+        # (a fetch performed by a SIBLING worktree of the same repo) confirms
+        # upstream_containment even when THIS call's own evidence is cached
+        # -- but open_claims stays unconfirmed (the ledger covers git
+        # upstream refs, not claim/provider state), so FINAL still requires
+        # a real fetch for claim-bearing worktrees.
+        rec, info, disposition = self._final_inputs()
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=0, open_follow_ups=0,
+            evidence_mode="cached", evidence_complete=True,
+            repo_fetch_fresh=True)
+        assert d.facts["upstream_containment"]["confirmed"] is True
+        assert d.facts["open_claims"]["confirmed"] is False
+        assert d.final is False
+        assert d.action_disposition == "blocked"
+
+    def test_repo_fetch_fresh_alone_is_not_enough_without_claims_confirmed(self):
+        # Even with repo_fetch_fresh, FINAL/safe are gated on open_claims
+        # ALSO being confirmed -- the ledger doesn't retroactively confirm
+        # claim/follow-up state.
+        rec, info, disposition = self._final_inputs()
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=1, open_follow_ups=0,
+            evidence_mode="cached", evidence_complete=True,
+            repo_fetch_fresh=True)
+        assert d.final is False
+        assert d.label == "MERGED"
+
+    def test_active_worktree_never_final_even_if_otherwise_clean(self):
+        rec = _rec(status="active")
+        info = _info(S.ACTIVE)
+        disposition = prune.cleanup_disposition(rec, info)
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=0, open_follow_ups=0)
+        assert d.final is False
+        assert d.label == "ACTIVE"
+        assert d.style == "active"
+
+    def test_non_completed_base_states_preserve_their_label(self):
+        for state, expected in (
+            (S.DIRTY, "DIRTY"), (S.WIP, "WIP"), (S.UNUSED, "UNUSED"),
+            (S.ORPHAN, "ORPHAN"), (S.CONVO, "CONVO"),
+        ):
+            rec = _rec(status="active")
+            info = _info(state, dirty=(1 if state == S.DIRTY else 0))
+            disposition = prune.cleanup_disposition(rec, info, turn_count=1)
+            d = prune.assemble_closure_descriptor(
+                rec, info, disposition, held_claims=0, open_follow_ups=0)
+            assert d.label == expected, state
+
+    def test_finalizing_status_surfaces_as_a_blocker(self):
+        rec = _rec(status="finalizing")
+        info = _info(S.COMPLETED)
+        disposition = prune.cleanup_disposition(rec, info)
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=0, open_follow_ups=0)
+        assert {"code": "finalizing", "count": 1} in d.blockers
+        assert d.final is False
+
+    def test_all_emitted_blocker_codes_are_in_the_closed_set(self):
+        rec = _rec(status="finalized")
+        rec.resources = [
+            tracking.ResourceClaim(kind="codespace", ref="cs-1", state="active")
+        ]
+        rec.follow_ups = [
+            tracking.FollowUpRecord(id="fu-1", summary="x", state="open")
+        ]
+        info = _info(S.COMPLETED)
+        disposition = prune.cleanup_disposition(rec, info)
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=1, open_follow_ups=1)
+        for blocker in d.blockers:
+            assert blocker["code"] in prune.BLOCKER_CODES
+
+    def test_to_dict_shape(self):
+        rec, info, disposition = self._final_inputs()
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=0, open_follow_ups=0)
+        payload = d.to_dict()
+        assert payload["closure"] == {"final": True}
+        assert payload["action"] == {"disposition": "safe", "bucket": "clean"}
+        assert payload["claims"] == {"held": 0}
+        assert payload["follow_ups"] == {"open": 0}
+        assert set(payload["facts"]) == set(prune.FACT_NAMES)
+        assert payload["facts"]["upstream_containment"]["confirmed"] is True
+        assert payload["facts"]["open_claims"]["confirmed"] is True
+        assert payload["facts"]["checkpoint_activity"]["confirmed"] is True
+        assert payload["facts"]["local_dirtiness"]["confirmed"] is True
+        assert payload["facts"]["pending_handoff"]["confirmed"] is True
+        assert payload["facts"]["pending_handoff"]["count"] == 0
+
+    def test_pending_handoff_reads_the_record_and_is_always_confirmed(self):
+        rec, info, disposition = self._final_inputs()
+        rec.handoffs = [
+            tracking.SessionHandoff(
+                ordinal=1, token="tok-1", predecessor="sess-a",
+                state="pending", opened_at="2026-09-16T00:00:00",
+            ),
+        ]
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=0, open_follow_ups=0)
+        assert d.facts["pending_handoff"]["confirmed"] is True
+        assert d.facts["pending_handoff"]["count"] == 1
+        assert d.facts["pending_handoff"]["tokens"] == ["tok-1"]
+        # Purely informational: does not gate FINAL/safe.
+        assert d.final is True
+        assert d.action_disposition == "safe"
+        # Never marked in `compact` -- always confirmed, so no asterisk.
+        assert "*" not in d.compact
+
+
+# --- interpret_descriptor_payload (mixed-version fleet safety, Phase 5) -----
+
+class TestInterpretDescriptorPayload:
+    def _final_payload(self):
+        rec = _rec(status="finalized")
+        info = _info(S.COMPLETED)
+        disposition = prune.cleanup_disposition(rec, info)
+        return prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=0, open_follow_ups=0).to_dict()
+
+    def test_matching_version_trusted(self):
+        payload = self._final_payload()
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is True
+        assert interpreted["final"] is True
+        assert interpreted["label"] == "FINAL"
+        assert interpreted["action_disposition"] == "safe"
+        assert interpreted["reason"] is None
+
+    def test_missing_payload_is_never_final(self):
+        interpreted = prune.interpret_descriptor_payload(None)
+        assert interpreted["supported"] is False
+        assert interpreted["final"] is False
+        assert interpreted["action_disposition"] == "blocked"
+        assert interpreted["reason"] == "unsupported-descriptor"
+
+    def test_malformed_payload_is_never_final(self):
+        interpreted = prune.interpret_descriptor_payload("not-a-dict")  # type: ignore[arg-type]
+        assert interpreted["supported"] is False
+        assert interpreted["final"] is False
+
+    def test_older_version_is_never_trusted(self):
+        payload = self._final_payload()
+        payload["version"] = 0
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+        assert interpreted["final"] is False
+        assert "unsupported-descriptor" in interpreted["reason"]
+
+    def test_newer_version_is_never_trusted(self):
+        payload = self._final_payload()
+        payload["version"] = prune.DESCRIPTOR_VERSION + 1
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+        assert interpreted["final"] is False
+
+    def test_a_blocked_payload_reports_blocked_not_final(self):
+        rec = _rec(status="finalized")
+        rec.resources = [
+            tracking.ResourceClaim(kind="codespace", ref="cs-1", state="active")
+        ]
+        info = _info(S.COMPLETED)
+        disposition = prune.cleanup_disposition(rec, info)
+        payload = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=1, open_follow_ups=0).to_dict()
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is True
+        assert interpreted["final"] is False
+        assert interpreted["action_disposition"] == "blocked"
+
+    def test_realistic_v1_shaped_payload_is_never_trusted(self):
+        # worktree-finality-and-obligations Phase 9: a GENUINE pre-Phase-9
+        # (v1) descriptor -- top-level evidence_mode/evidence_complete, no
+        # facts key at all -- simulates an older agent-worktrees instance's
+        # descriptor reaching a newer consumer in a mixed-version fleet.
+        # Must degrade the same way a version-number-only mismatch does,
+        # not just when the version field happens to differ.
+        v1_payload = {
+            "version": 1,
+            "computed_at": "2026-01-01T00:00:00",
+            "evidence_mode": "refreshed",
+            "evidence_complete": True,
+            "base_state": "COMPLETED",
+            "label": "FINAL",
+            "style": "final",
+            "compact": "FINAL",
+            "git": {"upstream_complete": True, "dirty": 0, "ahead": 0},
+            "claims": {"held": 0},
+            "follow_ups": {"open": 0},
+            "blockers": [],
+            "closure": {"final": True},
+            "action": {"disposition": "safe", "bucket": "clean"},
+        }
+        interpreted = prune.interpret_descriptor_payload(v1_payload)
+        assert interpreted["supported"] is False
+        assert interpreted["final"] is False
+        assert interpreted["action_disposition"] == "blocked"
+        assert "unsupported-descriptor" in interpreted["reason"]
+
+    def test_v2_payload_missing_facts_key_still_interprets_via_closure_action(self):
+        # interpret_descriptor_payload only ever reads version/closure/action
+        # -- it never inspects `facts` -- so a facts-less v2 payload is not,
+        # by itself, a new hazard: the version check is the whole mixed-
+        # version safety net here, not per-field validation. Documents this
+        # invariant explicitly rather than leaving it implicit.
+        payload = self._final_payload()
+        del payload["facts"]
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is True
+        assert interpreted["final"] is True
+
+    def test_non_mapping_closure_is_unsupported_not_defaulted(self):
+        payload = self._final_payload()
+        payload["closure"] = []
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+        assert interpreted["label"] == "UNKNOWN"
+        assert "closure" in interpreted["reason"]
+
+    def test_missing_closure_is_unsupported_not_defaulted(self):
+        payload = self._final_payload()
+        del payload["closure"]
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_missing_compact_is_unsupported_not_defaulted(self):
+        # Regression: a truncated payload with a `label` but no `compact` must
+        # not default to the label -- that would let a truncated FINAL payload
+        # (label present, compact absent) still render as a supported FINAL.
+        payload = self._final_payload()
+        del payload["compact"]
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_missing_held_count_is_unsupported_not_defaulted(self):
+        # Regression: `claims={}` must not default `held` to a verified 0 --
+        # a truncated payload missing the count is not evidence of no
+        # blockers.
+        payload = self._final_payload()
+        payload["claims"] = {}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_missing_open_follow_ups_count_is_unsupported_not_defaulted(self):
+        payload = self._final_payload()
+        payload["follow_ups"] = {}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_non_mapping_action_is_unsupported_not_defaulted(self):
+        payload = self._final_payload()
+        payload["action"] = "blocked"
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_non_mapping_claims_is_unsupported_not_defaulted(self):
+        payload = self._final_payload()
+        payload["claims"] = []
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_non_mapping_follow_ups_is_unsupported_not_defaulted(self):
+        payload = self._final_payload()
+        payload["follow_ups"] = "none"
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_empty_closure_with_final_label_is_rejected(self):
+        payload = self._final_payload()
+        payload["closure"] = {}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+        assert interpreted["label"] == "UNKNOWN"
+
+    def test_string_final_is_never_truthy_coerced(self):
+        # bool("false") is True in Python -- a string value for closure.final
+        # must be rejected outright, never truthiness-coerced.
+        payload = self._final_payload()
+        payload["closure"] = {"final": "false"}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_non_string_label_is_rejected(self):
+        payload = self._final_payload()
+        payload["label"] = 1
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_non_string_style_is_rejected(self):
+        payload = self._final_payload()
+        payload["style"] = ["final"]
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_non_string_action_disposition_is_rejected(self):
+        payload = self._final_payload()
+        payload["action"] = {"disposition": 1}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_non_string_compact_is_rejected(self):
+        payload = self._final_payload()
+        payload["compact"] = 42
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_final_with_held_claims_is_rejected(self):
+        payload = self._final_payload()
+        payload["claims"] = {"held": 2}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+        assert interpreted["label"] == "UNKNOWN"
+
+    def test_final_with_open_follow_ups_is_rejected(self):
+        payload = self._final_payload()
+        payload["follow_ups"] = {"open": 1}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_final_with_non_safe_action_is_rejected(self):
+        payload = self._final_payload()
+        payload["action"] = {"disposition": "blocked"}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_non_final_with_blockers_stays_supported(self):
+        payload = self._final_payload()
+        payload["label"] = "MERGED"
+        payload["closure"] = {"final": False}
+        payload["claims"] = {"held": 2}
+        payload["action"] = {"disposition": "blocked"}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is True
+        assert interpreted["held_claims"] == 2
+
+    def test_non_numeric_held_claims_is_rejected(self):
+        payload = self._final_payload()
+        payload["claims"] = {"held": "not-a-number"}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_negative_open_follow_ups_is_rejected(self):
+        payload = self._final_payload()
+        payload["follow_ups"] = {"open": -3}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+
+    def test_boolean_held_claims_is_rejected(self):
+        payload = self._final_payload()
+        payload["claims"] = {"held": True}
+        interpreted = prune.interpret_descriptor_payload(payload)
+        assert interpreted["supported"] is False
+

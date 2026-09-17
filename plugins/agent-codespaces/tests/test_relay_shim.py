@@ -227,19 +227,62 @@ class TestProvisioningAndClient:
 
     def test_relay_client_has_scoped_azure_branch(self):
         client = asset_text("ado-auth-helper-relay")
-        assert 'SCOPE="${2:-}"' in client
-        assert 'HELPER_NAME="${LC_GIT_CREDENTIAL_RELAY_HELPER:-}"' in client
+        assert 'SCOPE="${1:-}"' in client
         assert 'RELAY_TOKEN="${LC_GIT_CREDENTIAL_RELAY_TOKEN:-}"' in client
         # Scoped get-access-token routes to the gated get-azure-token action.
         assert "get-azure-token" in client
         assert "scope=" in client
         assert "auth=" in client
 
-    def test_relay_client_defaults_unscoped_azure_helper_to_ado_resource(self):
+    def test_relay_client_parses_resource_flag_for_get_access_token(self):
+        """`get-access-token --resource <guid>` (odsp-npm-token.sh's exact
+        invocation) must resolve SCOPE to the guid, not the literal
+        ``--resource`` string (#384): a bare positional mis-parse silently
+        denied the allowlist lookup and returned empty output."""
+        def _is_shell_launcher_stub(path):
+            p = (path or "").lower()
+            return "windowsapps" in p or "system32" in p
+
+        bash = next(
+            (
+                b for b in _bash_candidates()
+                if _bash_runs(b) and not _is_wsl_bash(b)
+                and not _is_shell_launcher_stub(b)
+            ),
+            None,
+        )
+        if not bash:
+            pytest.skip("no non-WSL bash found for shell-script parsing test")
+        prologue = asset_text("ado-auth-helper-relay").split(
+            'DEFAULT_RELAY_PORT=9857', 1
+        )[0]
+        script = prologue + '\necho "ACTION=$ACTION SCOPE=$SCOPE"\n'
+        for args, expected_scope in (
+            (["get-access-token", "--resource", "499b84ac-guid"], "499b84ac-guid"),
+            (["get-access-token", "--scope", "https://x/.default"], "https://x/.default"),
+            (["get-access-token", "--resource=499b84ac-guid"], "499b84ac-guid"),
+            (["get-access-token", "bare-scope"], "bare-scope"),
+            (["get-access-token"], ""),
+        ):
+            result = subprocess.run(
+                [bash, "-c", script, "ado-auth-helper-relay", *args],
+                capture_output=True, text=True, timeout=10,
+            )
+            assert result.returncode == 0, result.stderr
+            assert f"SCOPE={expected_scope}" in result.stdout, result.stdout
+
+    def test_relay_client_fails_loudly_on_denied_azure_token(self):
+        """A denied/empty get-azure-token response prints a diagnostic instead
+        of silently exiting 1 (#384 direction 3)."""
         client = asset_text("ado-auth-helper-relay")
-        assert 'ADO_REST_RESOURCE="499b84ac-1321-427f-aa17-267ca6975798"' in client
-        assert '[ "$HELPER_NAME" = "azure-auth-helper" ]' in client
-        assert 'SCOPE="$ADO_REST_RESOURCE"' in client
+        assert "get-azure-token denied for scope=" in client
+        assert "no ADO access token available for host=" in client
+        assert "no credential relay reachable and no cached" in client
+
+    def test_relay_client_does_not_impersonate_azure_helper(self):
+        client = asset_text("ado-auth-helper-relay")
+        assert "LC_GIT_CREDENTIAL_RELAY_HELPER" not in client
+        assert "azure-auth-helper" not in client
 
     def test_relay_client_discovers_ado_host_for_bare_token(self):
         """The host-less get-access-token path supplies an ADO host so the
@@ -337,9 +380,7 @@ class TestProvisioningAndClient:
         assert "unlinkSync" in wrapper  # prune a dead channel's stale mapping
         # A discovered token/host is restored into the relay client's env.
         assert "LC_GIT_CREDENTIAL_RELAY_TOKEN" in wrapper
-        # The relay client can distinguish ado-auth-helper from azure-auth-helper.
-        assert "LC_GIT_CREDENTIAL_RELAY_HELPER" in wrapper
-        assert "path.basename(process.argv[1]" in wrapper
+        assert "LC_GIT_CREDENTIAL_RELAY_HELPER" not in wrapper
 
 
 def _git_cache_python() -> str:
@@ -904,4 +945,3 @@ class TestGitCredentialCache:
         assert result.returncode == 0
         assert result.stdout == self.RESPONSE
         assert "fresh-token" in next(cache_dir.glob("*.gitcred")).read_text(encoding="utf-8")
-

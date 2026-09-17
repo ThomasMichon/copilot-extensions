@@ -313,6 +313,30 @@ class TestEffectiveVerdict:
         reviews = (_rev(1, "REQUEST_CHANGES"),)
         assert pc.effective_verdict(reviews, "head", "author") == "CHANGES_REQUESTED"
 
+    def test_comment_becomes_verdict_when_review_blocking_false(self):
+        reviews = (_rev(1, "COMMENT"),)
+        assert pc.effective_verdict(
+            reviews, "head", "author", review_blocking=False,
+        ) == "COMMENTED"
+
+    def test_comment_still_not_a_verdict_when_review_blocking_true(self):
+        reviews = (_rev(1, "COMMENT"),)
+        assert pc.effective_verdict(
+            reviews, "head", "author", review_blocking=True,
+        ) == ""
+
+    def test_approved_still_wins_over_comment_when_review_blocking_false(self):
+        reviews = (_rev(1, "COMMENT"), _rev(2, "APPROVED", commit_id="head"))
+        assert pc.effective_verdict(
+            reviews, "head", "author", review_blocking=False,
+        ) == "APPROVED"
+
+    def test_author_own_comment_ignored_when_review_blocking_false(self):
+        reviews = (_rev(1, "COMMENT", user="alice"),)
+        assert pc.effective_verdict(
+            reviews, "head", "alice", review_blocking=False,
+        ) == ""
+
 
 # ---------------------------------------------------------------------------
 # title_is_wip / merge_state
@@ -464,6 +488,19 @@ class TestClassifyState:
         assert st.held == ()
         assert st.wip is False
 
+    def test_review_blocking_false_reports_comment_as_verdict(self):
+        snap = _approved(reviews=(_rev(1, "COMMENT"),))
+        st = pc.classify_state(snap, review_blocking=False, **_BINDING)
+        assert st.verdict == "COMMENTED"
+        # Still not an approval -- consent stays gated by approval_required.
+        assert st.consent_action == "skip"
+        assert st.reason == "not yet approved"
+
+    def test_review_blocking_true_default_ignores_comment(self):
+        snap = _approved(reviews=(_rev(1, "COMMENT"),))
+        st = pc.classify_state(snap, **_BINDING)
+        assert st.verdict == ""
+
 
 # ---------------------------------------------------------------------------
 # merge_readiness -- the caller-facing "what to do next" summary
@@ -499,6 +536,27 @@ class TestMergeReadiness:
         assert m["clear_to_merge"] is False
         assert m["consent_label"] == ""
         assert "no auto-merge label" in m["reason"]
+
+    def test_review_blocking_false_reports_comment_verdict(self):
+        snap = _approved(reviews=(_rev(1, "COMMENT"),))
+        m = pc.merge_readiness(snap, review_blocking=False, **_BINDING)
+        assert m["verdict"] == "COMMENTED"
+
+
+class TestDefaultUntil:
+    def test_blocking_true_is_default_until(self):
+        assert pc.default_until(True) == pc.DEFAULT_UNTIL
+
+    def test_blocking_false_swaps_verdict_events_for_commented(self):
+        until = pc.default_until(False)
+        assert until == pc.NONBLOCKING_DEFAULT_UNTIL
+        assert "commented" in until
+        assert "approved" not in until
+        assert "changes_requested" not in until
+        # Everything else (merge-state/lifecycle) is preserved unchanged.
+        for name in ("conflict", "mergeable", "checks_failed",
+                     "approval_dismissed", "merged", "closed"):
+            assert name in until
 
 
 # ---------------------------------------------------------------------------
@@ -571,6 +629,23 @@ class TestClassifyPRFlow:
             merge_actor="submitter-direct",
         )
         assert f.profile == pc.PROFILE_PR_SELF_MERGE
+
+    def test_notes_flow_through_to_profile_for_every_shape(self):
+        for kwargs in (
+            dict(enabled=False),
+            dict(enabled=True, required=True, automerge_label=""),
+            dict(enabled=True, required=True, automerge_label="",
+                 merge_actor="submitter-direct"),
+            dict(enabled=True, required=True, automerge_label="auto-merge"),
+        ):
+            f = pc.classify_pr_flow(notes="why this repo's flow is shaped this way",
+                                     **kwargs)
+            assert f.notes == "why this repo's flow is shaped this way"
+
+    def test_notes_default_to_empty(self):
+        f = pc.classify_pr_flow(enabled=True, required=True,
+                                 merge_actor="submitter-direct")
+        assert f.notes == ""
 
     def test_agent_merge_wins_over_self_approve(self):
         # An explicit consent label keeps the agent-consent shape even if
@@ -733,6 +808,23 @@ class TestPRReminder:
         assert "self-approve" not in r.next_step
         assert "cannot approve their own" in r.next_step
         assert r.waiting_on  # waits on the copilot review
+
+    def test_notes_surface_as_a_caution_line_in_reminder_text(self):
+        flow = _self_merge_flow(notes="ask the on-call before merging on Fridays")
+        r = pc.pr_reminder(flow, "create-pr")
+        assert "ask the on-call before merging on Fridays" in r.cautions
+        assert "Note: ask the on-call before merging on Fridays" in r.text()
+
+    def test_no_notes_line_when_notes_is_empty(self):
+        flow = _self_merge_flow()
+        r = pc.pr_reminder(flow, "create-pr")
+        assert "" not in r.cautions
+
+    def test_notes_surface_for_direct_profile_reminder_too(self):
+        flow = pc.classify_pr_flow(enabled=False, notes="commit small, commit often")
+        r = pc.pr_reminder(flow, "push-changes")
+        assert "commit small, commit often" in r.cautions
+        assert "Note: commit small, commit often" in r.text()
 
     def test_github_submitter_direct_waits_for_blocking_review(self):
         flow = _self_merge_flow(

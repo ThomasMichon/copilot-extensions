@@ -246,6 +246,77 @@ def test_list_worktree_rows_uses_supplied_cancellable_runner(monkeypatch):
     assert seen["timeout"] == ec._DEFAULT_TIMEOUT
 
 
+def test_current_worktree_status_uses_status_segment_json(monkeypatch):
+    payload = {"version": 1, "id": "wt-ab12", "state": "wip", "closure": None}
+
+    def handler(cmd, kw):
+        assert "status-segment" in cmd
+        assert "--json" in cmd
+        assert "--path" in cmd and "/w" in cmd
+        assert "--fetch" not in cmd
+        return _fake_completed(cmd, stdout=json.dumps(payload))
+
+    _install_fake(monkeypatch, handler)
+
+    result = ec.current_worktree_status(path="/w")
+
+    assert result == payload
+
+
+def test_current_worktree_status_passes_fetch_flag(monkeypatch):
+    def handler(cmd, kw):
+        assert "--fetch" in cmd
+        return _fake_completed(cmd, stdout=json.dumps({"version": 1, "id": None}))
+
+    _install_fake(monkeypatch, handler)
+
+    ec.current_worktree_status(path="/w", fetch=True)
+
+
+def test_find_worktree_for_path_matches_exact_path(monkeypatch, tmp_path):
+    wt_dir = tmp_path / "wt-ab12"
+    wt_dir.mkdir()
+    payload = {
+        "version": 1,
+        "worktrees": [{"id": "wt-ab12", "path": str(wt_dir)}],
+    }
+
+    def handler(cmd, kw):
+        assert "--cache-only" in cmd
+        assert "--classify" not in cmd
+        return _fake_completed(cmd, stdout=json.dumps(payload))
+
+    _install_fake(monkeypatch, handler)
+
+    row = ec.find_worktree_for_path(str(wt_dir))
+
+    assert row == payload["worktrees"][0]
+
+
+def test_find_worktree_for_path_matches_ancestor_directory(monkeypatch, tmp_path):
+    wt_dir = tmp_path / "wt-ab12"
+    nested = wt_dir / "sub" / "dir"
+    nested.mkdir(parents=True)
+    payload = {
+        "version": 1,
+        "worktrees": [{"id": "wt-ab12", "path": str(wt_dir)}],
+    }
+    _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(
+        cmd, stdout=json.dumps(payload)))
+
+    row = ec.find_worktree_for_path(str(nested))
+
+    assert row == payload["worktrees"][0]
+
+
+def test_find_worktree_for_path_returns_none_when_untracked(monkeypatch, tmp_path):
+    payload = {"version": 1, "worktrees": [{"id": "wt-ab12", "path": str(tmp_path / "other")}]}
+    _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(
+        cmd, stdout=json.dumps(payload)))
+
+    assert ec.find_worktree_for_path(str(tmp_path / "unrelated")) is None
+
+
 def test_repository_identity_uses_scoped_engine_commands(monkeypatch):
     calls = []
 

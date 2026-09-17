@@ -14,32 +14,23 @@ Keys:
 """
 from __future__ import annotations
 
-import json
+import logging
 import os
-import re
 import threading
 import time
-from pathlib import Path
 
 from rich.panel import Panel
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical, VerticalScroll
+from textual.containers import Vertical
 from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widget import Widget
 from textual.widgets import (
-    Input,
-    Markdown,
     OptionList,
-    RadioButton,
-    RadioSet,
     SelectionList,
     Static,
-    TabbedContent,
-    TabPane,
-    TextArea,
 )
 from textual.widgets.option_list import Option
 
@@ -47,6 +38,8 @@ from .. import profiles as profiles_mod
 from ..update_stage import indicator_state
 from . import derive
 from .selection import ListSelection
+
+log = logging.getLogger("agent-worktrees.picker")
 
 
 def _register_shift_enter_key() -> None:
@@ -169,7 +162,11 @@ C_STATE = {
     # status bar use one vocabulary + palette (test-chamber #1290).
     "DIRTY": "#d70000",    # red (colour160)
     "WIP": "#d7af00",      # amber (colour178)
-    "FINAL": "#00af00",    # green (colour034) -- COMPLETED
+    "FINAL": "#00af00",    # green (colour034) -- COMPLETED, refreshed + settled
+    "MERGED": "#ff8700",   # orange (colour208) -- COMPLETED but not yet
+                           # provably settled (Phase 5 closure descriptor);
+                           # distinct from WIP's amber so "landed but not
+                           # closed out" never reads as "still being written".
     "UNUSED": "grey58",    # grey (colour244)
     "CONVO": "#00afaf",    # teal (colour037) -- UNUSED + conversation
     "ORPHAN": "#af00ff",   # magenta (colour129)
@@ -179,6 +176,29 @@ C_STATE = {
 }
 
 PAD = "   "  # inter-column padding (3 spaces -> info breathes)
+
+# worktree-finality-and-obligations Phase 9 / iconify-relation: the RELATION
+# column's enum vocabulary (reciprocal.short_label's output) collapsed to one
+# scannable glyph each, so the column can shrink from 7 cells (still
+# truncated to "RELATI…" even at that width) to 2 -- the freed width goes to
+# the flex `title` column via `fit()`. The full word rides the row's second
+# (detail) line instead, so no information is actually lost.
+_RELATION_ICON = {
+    "BOUND": "●",
+    "CONTROL": "◐",
+    "HANDOFF": "⇒",
+    "TERM": "■",
+    "AMBIG": "?",
+    "": " ",
+}
+_RELATION_STYLE = {
+    "BOUND": C_STATE["ACTIVE"],
+    "CONTROL": "grey58",
+    "HANDOFF": C_STATE["WIP"],
+    "TERM": "grey35",
+    "AMBIG": C_WARN,
+    "": "",
+}
 
 # Named palettes for a registered pivot's declarative per-value cell colouring
 # (Column.palette). The ``state`` palette REUSES the Worktrees state vocabulary
@@ -298,6 +318,8 @@ def row_text(rec, cols, width, selected, indent=1, pulse=0, mark=None):
         if i:
             t.append(PAD)
         val = str(rec.get(k, ""))
+        if k == "relation":
+            val = _RELATION_ICON.get(val, "?" if val else " ")
         if k == "machine_env":
             if rec.get("source_kind") != "machine-ssh":
                 t.append(_clip(val, w, a))
@@ -316,6 +338,8 @@ def row_text(rec, cols, width, selected, indent=1, pulse=0, mark=None):
         style = ""
         if k == "state":
             style = C_STATE.get(rec.get("state", ""), "")
+        elif k == "relation":
+            style = _RELATION_STYLE.get(rec.get("relation", ""), "")
         elif k == "env":
             style = C_ENV.get(rec.get("env", ""), "")
         elif k == "dispo":
@@ -348,14 +372,14 @@ def header_text(cols, width, label_style=C_HEADER, indent=1):
 
 ACTIVE_SPECS = [
     ("id4", "id", 4, "l", 2), ("state", "state", 6, "l", 4),
-    ("relation", "relation", 7, "l", 6),
+    ("relation", "r", 1, "l", 6),
     ("machine_env", "source", 19, "l", 5),
     ("age", "age", 4, "l", 7), ("sess", "live", 4, "l", 8),
     ("pr", "pr", 8, "l", 3), ("title", "title", 10, "l", 1),
 ]
 LIST_SPECS = [
     ("id4", "id", 4, "l", 2), ("state", "state", 6, "l", 4),
-    ("relation", "relation", 7, "l", 5),
+    ("relation", "r", 1, "l", 5),
     ("age", "age", 4, "l", 6), ("sess", "live", 4, "l", 7),
     ("turns", "t", 3, "r", 8), ("pr", "pr", 8, "l", 3),
     ("title", "title", 10, "l", 1),
@@ -395,7 +419,7 @@ POLL_SECS = _poll_secs()
 # Maintenance groups worktrees by state; this is the display order (#1345).
 # Any state not listed is appended after these, in first-seen order.
 MAINT_GROUP_ORDER = ["DIRTY", "WIP", "ACTIVE", "ORPHAN", "CONVO", "UNUSED",
-                     "GONE", "CLEAN", "FINAL"]
+                     "GONE", "CLEAN", "FINAL", "MERGED"]
 # Per-tab button sets — Tab/Shift+Tab rotate within these when focused.
 # Worktrees has a single "New worktree…" entry that opens the options dialog
 # directly (test-chamber #1346); the old separate "More options…" is gone.
@@ -522,17 +546,6 @@ def _resolve_mock_mode(explicit=None):
     return False
 
 
-def _native_list_enabled() -> bool:
-    """NF5-5 (#88): the native ``OptionList`` data body is now the **default**.
-    ``PickerScreen`` composes ``_PickerNativeData`` (native focus/cursor/scroll/
-    click, sticky section header, clickable checkbox gutter) for the data region.
-    Set ``AGENT_WORKTREES_PICKER_NATIVE_LIST`` to a falsey value
-    (``0``/``false``/``no``/``off``) to force the legacy text-line
-    ``_PickerBodyData`` -- a temporary rollback escape hatch until it is retired."""
-    val = os.environ.get("AGENT_WORKTREES_PICKER_NATIVE_LIST", "1").strip().lower()
-    return val not in ("0", "false", "no", "off")
-
-
 class _PickerSegment(Widget):
     """One NF2 screen segment (or a row-slice of one) -- a leaf widget that
     renders its slice of ``PickerScreen._frame_segments()`` (#88 NF2/NF3).
@@ -548,8 +561,8 @@ class _PickerSegment(Widget):
 
     can_focus = False
 
-    def __init__(self, screen: "PickerScreen", seg_key: str,
-                 rows: "slice | None" = None, **kw) -> None:
+    def __init__(self, screen: PickerScreen, seg_key: str,
+                 rows: slice | None = None, **kw) -> None:
         super().__init__(**kw)
         self._screen = screen
         self._seg_key = seg_key
@@ -585,7 +598,7 @@ class _FocusRegion(Widget):
     can_focus = True
     _zone: str = ""
 
-    def __init__(self, screen: "PickerScreen", **kw) -> None:
+    def __init__(self, screen: PickerScreen, **kw) -> None:
         super().__init__(**kw)
         self._screen = screen
 
@@ -665,66 +678,6 @@ class _PickerButtons(_FocusRegion):
         return scr._join_lines([vr.text for vr in buttons], W)
 
 
-class _PickerBodyData(_FocusRegion):
-    """The scrolling data body as a focusable region (#88 NF3) -- windows just the
-    pivot's data rows (the fixed chrome renders above), scrolling with the
-    selection while the chrome stays put. ``height: 1fr`` so it fills the space
-    below the chrome; the window is sized to its own height. Its ``_zone`` is a
-    placeholder -- the data region's head is resolved per-pivot via
-    ``region_head`` on focus."""
-
-    _zone = "L"
-
-    def on_focus(self) -> None:
-        scr = self._screen
-        if scr._nf_syncing or not scr._nf_mounted:
-            return
-        # The data region's head zone varies by pivot (L / C / T / PR); land on
-        # the current pivot's default body stop rather than a fixed zone.
-        if scr._widget_for_zone(scr.sel[0]) != "nf-body-data":
-            scr.sel = scr.default_sel()
-            scr.refresh()
-
-    def render(self):
-        scr = self._screen
-        W = scr.size.width or 100
-        _chrome, data = scr._build_body_split(W)
-        h = max(1, self.size.height or 1)
-        return scr._join_lines(scr._data_lines(data, h), W)
-
-    def on_click(self, event) -> None:
-        # Click-to-select a data row (#88 NF4); double-click activates it (opens
-        # the row's action -- the submenu for a worktree, etc.), the natural
-        # pointer parallel to Enter. Maps the click's row offset onto the drawn
-        # window and, if it lands on a real data row, points sel there.
-        scr = self._screen
-        event.stop()
-        W = scr.size.width or 100
-        _chrome, data = scr._build_body_split(W)
-        h = max(1, self.size.height or 1)
-        stop = scr._data_stop_at(data, h, int(event.y))
-        if stop is not None:
-            scr.sel = stop
-            scr._wt_track_focus()
-            if getattr(event, "chain", 1) >= 2:
-                scr._activate()
-            scr.refresh()
-
-    def on_mouse_scroll_down(self, event) -> None:
-        scr = self._screen
-        event.stop()
-        scr._dispatch_key("down")
-        scr._sync_focus_to_sel()
-        scr.refresh()
-
-    def on_mouse_scroll_up(self, event) -> None:
-        scr = self._screen
-        event.stop()
-        scr._dispatch_key("up")
-        scr._sync_focus_to_sel()
-        scr.refresh()
-
-
 class _PickerStickyHeader(Widget):
     """NF5-5 (#88): the pinned section header for the native OptionList body.
 
@@ -767,9 +720,7 @@ class _PickerStickyHeader(Widget):
 class _PickerNativeData(OptionList):
     """NF5-5 (#88): swappable *native* data body -- the pivot's data rows as real
     ``OptionList`` options (native focus, cursor, up/down, click, scroll, a11y)
-    instead of painted text lines driven by the manual ``sel`` cursor. This is
-    the **default** body since dev351; set ``AGENT_WORKTREES_PICKER_NATIVE_LIST``
-    to a falsey value to fall back to the legacy text-line body.
+    instead of painted text lines driven by the manual ``sel`` cursor.
 
     Bridged to the engine ``sel`` model both ways so the rest of the picker
     (chrome, activation, tests) is unchanged: native cursor moves mirror into
@@ -1118,6 +1069,17 @@ class PickerScreen(Widget):
         # data-relative (indexes the scrolling data rows only, since the M/BTN
         # chrome is fixed above it), distinct from the monolith's ``top``.
         self._data_top = 0
+        # Cancellation for in-flight ``_run_bg`` pivot-action workers: set by
+        # ``on_unmount`` when the picker itself is tearing down (a launch
+        # decision, cancel, or quit) so a worker still running off-thread at that
+        # moment knows the render flow it would marshal its outcome onto is gone
+        # -- it drops quietly instead of racing ``app.call_from_thread`` and
+        # logging a "could not marshal" warning for what is actually an expected,
+        # intentional exit rather than an unforeseen failure. ``_bg_threads``
+        # tracks the live worker threads so the teardown path (and any future
+        # extension of it) has visibility into what is still outstanding.
+        self._bg_cancel = threading.Event()
+        self._bg_threads: set[threading.Thread] = set()
         # Per-refresh render caches (#169): in the NF compose tree every segment
         # widget (title / pivots / chrome / machine / buttons / footer) renders
         # from this one screen's derived frame in the SAME paint pass. Without a
@@ -1182,7 +1144,10 @@ class PickerScreen(Widget):
         # _open_cfgmenu. (The overlay left the manual registry entirely.)
         self._pivot_runtimes = {}     # pivot name -> RegisteredPivotRuntime (lazy)
         self._last_pivot_poll = 0.0   # registered-pivot repoll gate (#staleness)
-        self._load_pivots()
+        self._roster_ready = True     # False only during live chrome-first paint
+        # Built-ins only here: scanning the pivot registry is I/O and must not
+        # run before the first frame. ``setup()`` / live async fill scan later.
+        self._load_pivots(scan=False)
         self.machine_idx = 0          # selected machine sub-pivot (Worktrees/Maint)
         self.sel = ("N", 0)           # (zone, index) -> default New Worktree
         self.top = 0                  # scroll offset into body vrows
@@ -1243,6 +1208,8 @@ class PickerScreen(Widget):
         self.t0 = 0.0
         self.load_delay = {}
         self._frame_health = None
+        self._source_local = None
+        self._source_repo_branch = ("", "")
         self._after_first_refresh_callback = after_first_refresh
         # Injected data source (local / SSH / fixture). ``live`` enables the
         # async per-machine loader the source supplies via ``make_loader()``.
@@ -1344,27 +1311,36 @@ class PickerScreen(Widget):
         self.profiles_view._prof_loaded = value
 
     # ---- pivot registry (built-ins + cross-plugin registered pivots) ----
-    def _load_pivots(self):
+    def _load_pivots(self, *, scan: bool = True):
         """(Re)scan the manifest registry and rebuild the ordered pivot list.
 
         Defensive: any discovery failure degrades to the built-ins alone, so a
         bad manifest can never keep the picker from opening. Clamps ``htab`` in
         case a rescan shrank the list.
-        """
-        try:
-            from . import pivots as pivots_mod
 
-            report = pivots_mod.scan_pivot_registry()
-            pivots_mod.warn_pivot_findings(report)
-            registered = report.pivots
-            descriptors = pivots_mod.order_pivots(BUILTIN_PIVOTS, registered)
-            wt_actions = report.worktree_actions
-            config_sections = report.config_sections
-        except Exception:
+        ``scan=False`` installs built-ins only (no plugin-dir I/O) so first
+        paint is not blocked on the registry.
+        """
+        if not scan:
             registered, descriptors, wt_actions = [], [
                 {"label": b, "kind": b.lower(), "pivot": None} for b in BUILTIN_PIVOTS
             ], []
             config_sections = []
+        else:
+            try:
+                from . import pivots as pivots_mod
+
+                report = pivots_mod.scan_pivot_registry()
+                pivots_mod.warn_pivot_findings(report)
+                registered = report.pivots
+                descriptors = pivots_mod.order_pivots(BUILTIN_PIVOTS, registered)
+                wt_actions = report.worktree_actions
+                config_sections = report.config_sections
+            except Exception:
+                registered, descriptors, wt_actions = [], [
+                    {"label": b, "kind": b.lower(), "pivot": None} for b in BUILTIN_PIVOTS
+                ], []
+                config_sections = []
         self.registered_pivots = registered
         self.pivots = descriptors
         # Cross-plugin worktree-row actions (a layer augmenting the Worktrees
@@ -1378,6 +1354,38 @@ class PickerScreen(Widget):
         # Tag each pivot with its placement (left cycle / config menu / hidden
         # anchor) so nav machinery can partition them without disturbing the
         # ``order_pivots`` weave that registered ``after`` hints rely on (#1426).
+        for d in self.pivots:
+            d["placement"] = PIVOT_PLACEMENT.get(d["kind"], "left")
+        self.htabs = [d["label"] for d in descriptors]
+        if self.htab >= len(self.pivots):
+            self.htab = 0
+
+    @staticmethod
+    def _scan_pivot_payload():
+        """Filesystem pivot scan with no widget mutation (safe off the UI thread)."""
+        try:
+            from . import pivots as pivots_mod
+
+            report = pivots_mod.scan_pivot_registry()
+            pivots_mod.warn_pivot_findings(report)
+            return (
+                report.pivots,
+                pivots_mod.order_pivots(BUILTIN_PIVOTS, report.pivots),
+                report.worktree_actions,
+                report.config_sections,
+            )
+        except Exception:
+            return None
+
+    def _install_pivot_payload(self, payload):
+        if payload is None:
+            self._load_pivots(scan=False)
+            return
+        registered, descriptors, wt_actions, config_sections = payload
+        self.registered_pivots = registered
+        self.pivots = descriptors
+        self.wt_actions = wt_actions
+        self.config_sections = config_sections
         for d in self.pivots:
             d["placement"] = PIVOT_PLACEMENT.get(d["kind"], "left")
         self.htabs = [d["label"] for d in descriptors]
@@ -1487,24 +1495,18 @@ class PickerScreen(Widget):
         return rt
 
     def on_mount(self):
-        self.setup()
-        self.sel = self.default_sel()
-        # NF: focus the region widget that owns the default sel (deferred until
-        # the children are mounted). ``_nf_mounted`` stays False until then so the
-        # framework's mount-time auto-focus can't move sel.
-        self.call_after_refresh(self._nf_initial_focus)
-        # Update indicator (#1430): the launcher stages the marketplace update
-        # in the background; the picker polls its status file to show a
-        # spinner -> checkmark (current) / refresh (update available) next to
-        # the version. Poll immediately so the first paint is accurate.
-        self.update_state = "idle"
-        self._upd_poll_frame = -1
-        self._poll_update_state()
-        # ~10 fps drives the SSH spinner and the slower live-glyph pulse.
-        self.set_interval(0.1, self._tick)
-        self.call_after_refresh(self._record_first_refresh)
+        if self.live:
+            # Chrome first: paint built-in tabs + empty lists, then run the
+            # roster/pivot/worktree fill off the UI thread.
+            self._setup_skeleton()
+        else:
+            self.setup()
+        self._finish_mount()
+        # Record the completed first refresh in every Picker mode. Live data
+        # startup also waits for this boundary so it cannot contend with paint.
+        self.call_after_refresh(self._after_first_refresh)
 
-    def _record_first_refresh(self):
+    def _after_first_refresh(self):
         if (
             os.environ.get("AGENT_WORKTREES_PICKER_FRAME_HEALTH")
             or os.environ.get("AGENT_WORKTREES_LAUNCH_TRACE")
@@ -1521,12 +1523,381 @@ class PickerScreen(Widget):
                 name="picker-after-first-refresh",
                 daemon=True,
             ).start()
+        if not self.live:
+            return
+        threading.Thread(
+            target=self._setup_live_async,
+            name="picker-setup",
+            daemon=True,
+        ).start()
+
+    def _record_first_refresh(self):
+        """Compatibility alias for older tests and launch-trace call sites."""
+        self._after_first_refresh()
+
+    def _finish_mount(self):
+        self.sel = self.default_sel()
+        # NF: focus the region widget that owns the default sel (deferred until
+        # the children are mounted). ``_nf_mounted`` stays False until then so the
+        # framework's mount-time auto-focus can't move sel.
+        self.call_after_refresh(self._nf_initial_focus)
+        # Update indicator (#1430): the launcher stages the marketplace update
+        # in the background; the picker polls its status file to show a
+        # spinner -> checkmark (current) / refresh (update available) next to
+        # the version. Poll immediately so the first paint is accurate.
+        self.update_state = "idle"
+        self._upd_poll_frame = -1
+        self._poll_update_state()
+        # ~10 fps drives the SSH spinner and the slower live-glyph pulse.
+        self.set_interval(0.1, self._tick)
+
+    def _setup_skeleton(self):
+        """First-paint chrome with no config, roster, or registry I/O."""
+        self._roster_ready = False
+        self._load_pivots(scan=False)
+        self.data = []
+        self.loader = None
+        self.debug = "loading"
+        self._busy_label = "Loading…"
+        self._last_poll = time.monotonic()
+        self._last_pivot_poll = time.monotonic()
+        try:
+            from . import data_local
+
+            machine, env = data_local.LOCAL
+            label = f"{machine} {env}"
+        except Exception:
+            machine, env, label = None, None, "local"
+        self.source_tabs = [
+            {
+                "label": "All",
+                "machine": None,
+                "env": None,
+                "ready": True,
+                "source_kind": "all",
+                "source_id": None,
+                "capabilities": {},
+            },
+            {
+                "label": label,
+                "machine": machine,
+                "env": env,
+                "ready": True,
+                "source_kind": "machine-ssh",
+                "source_id": None,
+                "capabilities": {},
+            },
+        ]
+        self.machines = [
+            (tab["label"], tab.get("machine"), tab.get("env"), bool(tab.get("ready")))
+            for tab in self.source_tabs
+        ]
+        self._source_local = (machine, env)
+        self.machine_idx = 1 if len(self.machines) > 1 else 0
+        self.maint_sel = ListSelection()
+        self.host_cols = list(_DEFAULT_HOST_COLS)
+        self.targets = target_rows(_DEFAULT_TARGET_ENVS)
+        self.grid = {}
+        self.applied = {}
+        self._prof_unavailable = set()
+
+    def _setup_live_async(self):
+        """Publish bootstrap rows, then fill roster and pivots independently."""
+        bootstrap_fn = getattr(self.src, "bootstrap_rows", None)
+        if callable(bootstrap_fn):
+            try:
+                bootstrap_rows = bootstrap_fn()
+            except Exception:
+                bootstrap_rows = None
+            if bootstrap_rows is not None:
+
+                def apply_bootstrap():
+                    if not self._roster_ready and self.loader is None:
+                        self.data = bootstrap_rows
+                        self.refresh()
+
+                self._apply_from_worker(apply_bootstrap)
+
+        threading.Thread(
+            target=self._setup_live_pivots,
+            name="picker-pivots",
+            daemon=True,
+        ).start()
+
+        err = None
+        loader = None
+        prepared = None
+        try:
+            snapshot_fn = getattr(self.src, "source_snapshot", None)
+            snapshot = snapshot_fn() if callable(snapshot_fn) else None
+            prepared = self._prepare_live_source(snapshot)
+            loader = (
+                self.src.make_loader(snapshot)
+                if snapshot is not None
+                else self.src.make_loader()
+            )
+            loader.start()
+        except Exception as exc:
+            err = exc
+
+        def apply():
+            if err is not None:
+                self.debug = f"setup-failed: {err}"
+                self._busy_label = "Load failed"
+                self.refresh()
+                return
+            self._apply_live_source(prepared, loader)
+            self._busy_label = None
+            self.refresh()
+
+        self._apply_from_worker(apply)
+
+    def _setup_live_pivots(self):
+        """Scan contributed pivots without delaying local or fleet rows."""
+        pivot_payload = self._scan_pivot_payload()
+
+        def apply():
+            self._install_pivot_payload(pivot_payload)
+            for runtime in getattr(self, "_pivot_runtimes", {}).values():
+                try:
+                    runtime.invalidate()
+                except Exception:
+                    pass
+            self.refresh()
+
+        self._apply_from_worker(apply)
+
+    def _apply_from_worker(self, callback):
+        """Apply on Textual's thread; inline only for direct main-thread tests."""
+        try:
+            self.app.call_from_thread(callback)
+        except Exception:
+            if threading.current_thread() is threading.main_thread():
+                callback()
+
+    def _prepare_live_source(self, snapshot):
+        """Resolve source/config-derived values on the setup worker."""
+        source_tabs = getattr(self.src, "source_tabs", None)
+        if callable(source_tabs):
+            tabs = list(
+                source_tabs(snapshot)
+                if snapshot is not None
+                else source_tabs()
+            )
+        else:
+            machine_tabs = (
+                self.src.machines(snapshot)
+                if snapshot is not None
+                else self.src.machines()
+            )
+            tabs = [
+                {
+                    "label": label,
+                    "machine": machine,
+                    "env": env,
+                    "ready": ready,
+                    "source_kind": "machine-ssh",
+                    "source_id": None,
+                    "capabilities": {},
+                }
+                for label, machine, env, ready in machine_tabs
+            ]
+        metadata_fn = getattr(self.src, "setup_metadata", None)
+        if callable(metadata_fn):
+            metadata = metadata_fn(snapshot)
+        else:
+            hc = getattr(self.src, "host_cols", None)
+            te = getattr(self.src, "target_envs", None)
+            metadata = {
+                "host_cols": hc() if callable(hc) else None,
+                "target_envs": te() if callable(te) else None,
+            }
+        local = next(
+            (
+                (tab.get("machine"), tab.get("env"))
+                for tab in tabs
+                if tab.get("local")
+            ),
+            None,
+        )
+        if local is None:
+            try:
+                local = self.src.LOCAL
+            except Exception:
+                local = None
+        try:
+            repo_branch = (
+                getattr(self.src, "REPO", "") or "",
+                getattr(self.src, "BRANCH", "") or "",
+            )
+        except Exception:
+            repo_branch = ("", "")
+        return {
+            "tabs": tabs,
+            "local": local,
+            "repo_branch": repo_branch,
+            **(metadata or {}),
+        }
+
+    def _apply_live_source(self, prepared, loader):
+        """Install fully-prefetched live state. UI-thread only; no source I/O."""
+        tabs = prepared.get("tabs") or []
+        self.source_tabs = [{
+            "label": "All",
+            "machine": None,
+            "env": None,
+            "ready": True,
+            "source_kind": "all",
+            "source_id": None,
+            "capabilities": {},
+        }, *tabs]
+        self.machines = [
+            (
+                tab["label"],
+                tab.get("machine"),
+                tab.get("env"),
+                bool(tab.get("ready")),
+            )
+            for tab in self.source_tabs
+        ]
+        self.loader = loader
+        self._reconcile_bootstrap_source_ids(tabs, prepared.get("local"))
+        self._apply_loader_records()
+        self._source_local = prepared.get("local") or self._source_local
+        self._source_repo_branch = prepared.get("repo_branch") or ("", "")
+        self._roster_ready = True
+        self.machine_idx = next(
+            (
+                index
+                for index, tab in enumerate(self.source_tabs)
+                if index and tab.get("local")
+            ),
+            1 if len(self.source_tabs) > 1 else 0,
+        )
+        self.maint_sel = ListSelection()
+        self._last_poll = time.monotonic()
+        self._last_pivot_poll = time.monotonic()
+        self.host_cols = prepared.get("host_cols") or list(_DEFAULT_HOST_COLS)
+        target_env_list = prepared.get("target_envs") or _DEFAULT_TARGET_ENVS
+        self.targets = target_rows(target_env_list)
+        self.grid = {}
+        for ti, target in enumerate(self.targets):
+            for hi in range(len(self.host_cols)):
+                self.grid[(ti, hi)] = self.cell_locked(ti, hi)
+        self.applied = dict(self.grid)
+        self._prof_unavailable = set()
+        self._prof_load = getattr(self.src, "load_profile_column", None)
+        self._prof_apply = getattr(self.src, "apply_profile_column", None)
+        self._prof_loaded = False
+        if callable(self._prof_load):
+            self.profiles_view.start_load()
+        self._pr_reconciled = False
+        rec_fn = getattr(self.src, "reconcile_prs", None)
+        if callable(rec_fn):
+            self._start_pr_reconcile(rec_fn)
+        self._bound_live_reconciled = False
+        blr_fn = getattr(self.src, "reconcile_bound_live", None)
+        if callable(blr_fn):
+            self._start_bound_live_reconcile(blr_fn)
+        self._reconcile_wt_sel()
+
+    def _apply_loader_records(self):
+        """Merge incomplete stream prefixes over cached rows."""
+        if self.loader is None:
+            return
+        records = self.loader.records()
+        authoritative_fn = getattr(self.loader, "authoritative_source_ids", None)
+        if not callable(authoritative_fn):
+            _ready, loading, failed = self.loader.counts()
+            if records or (loading == 0 and failed == 0):
+                self.data = records
+            return
+
+        authoritative = set(authoritative_fn())
+        current_sources = {
+            rec.get("source_id") for rec in self.data if rec.get("source_id")
+        }
+        incoming_sources = {
+            rec.get("source_id") for rec in records if rec.get("source_id")
+        }
+        if current_sources | incoming_sources <= authoritative:
+            self.data = records
+            return
+
+        incoming = {
+            self._row_key(rec): rec
+            for rec in records
+            if self._row_key(rec) is not None
+        }
+        merged = []
+        seen = set()
+        for rec in self.data:
+            key = self._row_key(rec)
+            if key in incoming:
+                merged.append(incoming[key])
+                seen.add(key)
+            elif rec.get("source_id") not in authoritative:
+                merged.append(rec)
+        for rec in records:
+            key = self._row_key(rec)
+            if key is None or key not in seen:
+                merged.append(rec)
+                if key is not None:
+                    seen.add(key)
+        self.data = merged
+
+    def _reconcile_bootstrap_source_ids(self, tabs, local):
+        """Rewrite bootstrap rows onto the canonical local source identity.
+
+        The cache-only bootstrap rows can land before roster resolution, so they
+        are normalized with the hostname-based local source identity from
+        ``data_local``. Once the authoritative roster arrives we know the real
+        local tab identity (for example a machine key that differs from the
+        hostname). Re-key those temporary rows before merging loader records so
+        the authoritative local rows replace them instead of duplicating them.
+        """
+        if not self.data or not local:
+            return
+        local_tab = next((tab for tab in tabs if tab.get("local")), None)
+        canonical_source_id = (
+            local_tab.get("source_id")
+            if isinstance(local_tab, dict)
+            else None
+        )
+        if not canonical_source_id:
+            return
+        updated = []
+        changed = False
+        for rec in self.data:
+            if (
+                (rec.get("machine"), rec.get("env")) != local
+                or rec.get("source_id") == canonical_source_id
+            ):
+                updated.append(rec)
+                continue
+            patched = dict(rec)
+            patched["source_id"] = canonical_source_id
+            selection_id = patched.get("selection_id")
+            if isinstance(selection_id, str) and "\x1f" in selection_id:
+                _old_source, row_id = selection_id.split("\x1f", 1)
+                patched["selection_id"] = f"{canonical_source_id}\x1f{row_id}"
+            updated.append(patched)
+            changed = True
+        if changed:
+            self.data = updated
 
     def on_unmount(self):
-        # Picker is tearing down (a launch decision, cancel, or quit). Kill any
-        # in-flight SSH prefetch so it never orphans into a heavy git-classify
-        # churning on the machine we're about to hand off into -- the picker
-        # perf bug where Copilot "slows to a crawl" after launch.
+        # Picker is tearing down (a launch decision, cancel, or quit). Signal
+        # every in-flight ``_run_bg`` pivot-action worker first: each checks
+        # ``_bg_cancel`` right before it would otherwise race
+        # ``app.call_from_thread`` against an app that (by the time the worker's
+        # blocking work() call returns) may already be gone -- so a worker still
+        # running at this moment drops its outcome quietly instead of logging a
+        # "could not marshal" warning for what is really just this expected exit.
+        self._bg_cancel.set()
+        # Kill any in-flight SSH prefetch so it never orphans into a heavy
+        # git-classify churning on the machine we're about to hand off into --
+        # the picker perf bug where Copilot "slows to a crawl" after launch.
         loader = getattr(self, "loader", None)
         if loader is not None:
             try:
@@ -1653,7 +2024,7 @@ class PickerScreen(Widget):
             busy = True
         # In live mode, stream in worktrees as each machine's load resolves.
         if self.live and self.loader is not None:
-            self.data = self.loader.records()
+            self._apply_loader_records()
             _ready, loading, _failed = self.loader.counts()
             busy = busy or loading > 0
             self._maybe_repoll()
@@ -1784,6 +2155,27 @@ class PickerScreen(Widget):
             )
             for tab in self.source_tabs
         ]
+        local = next(
+            (
+                (tab.get("machine"), tab.get("env"))
+                for tab in self.source_tabs
+                if tab.get("local")
+            ),
+            None,
+        )
+        if local is None:
+            try:
+                local = self.src.LOCAL
+            except Exception:
+                local = self._source_local
+        self._source_local = local or self._source_local
+        try:
+            self._source_repo_branch = (
+                getattr(self.src, "REPO", "") or "",
+                getattr(self.src, "BRANCH", "") or "",
+            )
+        except Exception:
+            self._source_repo_branch = ("", "")
         self.machine_idx = self.local_index()
         self.maint_sel = ListSelection()  # drop any stale Maintenance selection
         # Worktrees selection persists across reload (#2258 P3-7): it is NOT
@@ -1814,7 +2206,7 @@ class PickerScreen(Widget):
             self.load_delay = {}
             d = 1.4
             for i, (label, m, e, ok) in enumerate(self.machines):
-                if label == "All" or (m, e) == self.src.LOCAL or not ok:
+                if label == "All" or (m, e) == self._src_local() or not ok:
                     self.load_delay[i] = 0.0
                 else:
                     self.load_delay[i] = d
@@ -1861,6 +2253,7 @@ class PickerScreen(Widget):
         # Reconcile the persisted Worktrees selection against the freshly loaded
         # records (#2258 P3-7): keep survivors, drop rows that vanished, re-seat
         # a now-invalid range anchor. A no-op while records are still streaming.
+        self._roster_ready = True
         self._reconcile_wt_sel()
 
     def _start_pr_reconcile(self, rec_fn):
@@ -1915,7 +2308,7 @@ class PickerScreen(Widget):
         Mirrors the post-maintenance reload (#1421): in live mode the local
         source re-threads and the render tick picks up the fresh records; in the
         non-live path the data is reloaded in-place."""
-        m, e = self.src.LOCAL
+        m, e = self._src_local()
         if self.live and self.loader is not None:
             self.loader.reload(m, e)
         elif not self.live:
@@ -1966,11 +2359,14 @@ class PickerScreen(Widget):
         if not ok:
             return "disabled"
         if self.live:
+            loader = self.loader
+            if loader is None:
+                return "loading"
             source_id = self.source_tabs[i].get("source_id")
-            if source_id and hasattr(self.loader, "state_for_source"):
-                return self.loader.state_for_source(source_id)
-            return self.loader.state(m, e)
-        if (m, e) == self.src.LOCAL:
+            if source_id and hasattr(loader, "state_for_source"):
+                return loader.state_for_source(source_id)
+            return loader.state(m, e)
+        if (m, e) == self._src_local():
             return "ready"
         return "ready" if (time.monotonic() - self.t0) >= self.load_delay[i] else "loading"
 
@@ -1996,9 +2392,21 @@ class PickerScreen(Widget):
     def spin(self):
         return SPINNER[self.frame % len(SPINNER)]
 
+    def _src_local(self):
+        """Cached local identity; rendering never resolves source/config I/O."""
+        if self._source_local is not None:
+            return self._source_local
+        return (None, None)
+
+    def _src_repo_branch(self):
+        """Cached repo/branch labels; rendering never resolves source/config I/O."""
+        return self._source_repo_branch
+
     def local_index(self):
+        if not getattr(self, "_roster_ready", True) or not self.machines:
+            return 1 if len(self.machines) > 1 else 0
         for i, (label, m, e, ok) in enumerate(self.machines):
-            if (m, e) == self.src.LOCAL:
+            if (m, e) == self._src_local():
                 return i
         return 1 if len(self.machines) > 1 else 0
 
@@ -2197,7 +2605,7 @@ class PickerScreen(Widget):
         """Where '+ New Worktree' lands: the active machine, or LOCAL when on
         'All'."""
         if self.is_all():
-            return self.src.LOCAL
+            return self._src_local()
         m, e, _ = self.cur_machine()
         return (m, e)
 
@@ -2724,8 +3132,12 @@ class PickerScreen(Widget):
             ctx.append(" bridge / system worktree(s)", style=C_DIM)
         else:                                   # New worktree (default)
             ctx.append("    creates on ", style=C_DIM)
-            ctx.append(f"{tm} ", style=C_META)
-            ctx.append(te, style=C_ENV.get(te, C_META))
+            if tm is None:
+                ctx.append("…", style=C_DIM)
+            else:
+                ctx.append(f"{tm} ", style=C_META)
+                if te:
+                    ctx.append(te, style=C_ENV.get(te, C_META))
             if host_tag:
                 ctx.append(host_tag, style=C_DIM)
         return ctx
@@ -2738,7 +3150,7 @@ class PickerScreen(Widget):
         so adding a button never needs a hardcoded index."""
         bset = self.button_set()
         tm, te = self.create_target()
-        host_tag = "  (this host)" if (tm, te) == self.src.LOCAL else ""
+        host_tag = "  (this host)" if (tm, te) == self._src_local() else ""
         labels = {"N": " + New worktree… ", "K": " ✕ Clean ", "SY": " ⟳ Sync "}
 
         t = Text("  ")
@@ -3325,13 +3737,11 @@ class PickerScreen(Widget):
         yield _PickerSegment(self, "chrome", id="nf-chrome")
         yield _PickerMachine(self, id="nf-machine")
         yield _PickerButtons(self, id="nf-buttons")
-        if _native_list_enabled():
-            # NF5-5 (#88): swappable native OptionList data body (opt-in), with a
-            # pinned section header above it (hidden until scrolled).
-            yield _PickerStickyHeader(id="nf-body-sticky")
-            yield _PickerNativeData(self, id="nf-body-data")
-        else:
-            yield _PickerBodyData(self, id="nf-body-data")
+        # NF5-5 (#88): the native OptionList data body is the only remaining
+        # body path, with a pinned section header above it (hidden until
+        # scrolled).
+        yield _PickerStickyHeader(id="nf-body-sticky")
+        yield _PickerNativeData(self, id="nf-body-data")
         yield _PickerSegment(self, "footer", id="nf-footer")
 
     def _refresh_nf_segments(self) -> None:
@@ -3407,19 +3817,16 @@ class PickerScreen(Widget):
         return t
 
     def _update_seg(self, focused: bool):
-        """Version-indicator glyph for the launcher's update stage (#1430).
-
-        checking -> animated spinner; current -> ✓; available -> ↻ (focusable,
-        Enter applies + restarts). Returns a Text segment, or None when idle.
-        """
+        """Render the launcher's idle/paused/checking/current/available state."""
         st = getattr(self, "update_state", "idle")
         if st == "idle":
             return None
         t = Text()
         if st == "checking":
             t.append(" " + self.spin(), style=C_SPIN)
-        elif st == "current":
-            t.append(" ✓", style=C_READY)
+        elif st in ("current", "paused"):
+            t.append(" ✓" if st == "current" else " ‖",
+                     style=C_READY if st == "current" else C_DIM)
         elif st == "available":
             t.append(" ↻", style=(C_BTN_SEL if focused else C_HINT_ON))
         return t
@@ -3428,17 +3835,16 @@ class PickerScreen(Widget):
         # Right-side segments, dropped in this order as width shrinks:
         # version, branch, env, repo. Always kept: "Worktree Manager" + machine.
         ver = f" · v{VERSION}"
-        m, e = self.src.LOCAL
-        host = f"{m.lower()}"
+        m, e = self._src_local()
+        host = m.lower() if m else "…"
         # Repo name + default branch are project config, surfaced by the data
         # source (data_local/data_ssh expose REPO/BRANCH from the resolved
         # config); never hardcoded. Empty when a source omits them (e.g. a
         # fixture source) so the segment is dropped rather than showing a
         # fabricated name.
-        repo = getattr(self.src, "REPO", "") or ""
-        branch = getattr(self.src, "BRANCH", "") or ""
+        repo, branch = self._src_repo_branch()
         present = {"update_text": True, "version": True, "repo": bool(repo),
-                   "env": True, "branch": bool(branch)}
+                   "env": bool(e), "branch": bool(branch)}
         upd_focused = self.sel[0] == "UPD"
 
         def build():
@@ -3450,9 +3856,11 @@ class PickerScreen(Widget):
             seg = self._update_seg(upd_focused)
             if seg is not None:
                 left.append_text(seg)
-                if present["update_text"] and self.update_state == "available":
-                    left.append(" Update available…",
-                                style=(C_BTN_SEL if upd_focused else C_HINT_ON))
+                if present["update_text"] and self.update_state in ("available", "paused"):
+                    left.append(" Update available…" if self.update_state == "available"
+                                else " Updates paused",
+                                style=(C_BTN_SEL if upd_focused else C_HINT_ON)
+                                if self.update_state == "available" else C_DIM)
             right = Text("host ", style=C_DIM)
             right.append(host, style=C_META)
             if present["env"]:
@@ -4924,6 +5332,7 @@ class PickerScreen(Widget):
         try:
             if (m, e) == getattr(self.src, "LOCAL", None):
                 from worktree_manager import engine_client
+
                 from .. import context
 
                 return engine_client.list_worktree_sessions(
@@ -4960,6 +5369,7 @@ class PickerScreen(Widget):
                 payload = {"error": "no worktree id"}
             elif (m, e) == getattr(self.src, "LOCAL", None):
                 from worktree_manager import engine_client
+
                 from .. import context
 
                 payload = engine_client.recent_worktree_messages(
@@ -5287,19 +5697,43 @@ class PickerScreen(Widget):
         when a *different* surface already shows the load state (e.g. the Actions
         menu's own footer spinner while it refines in place) -- then the main
         footer is left alone and ``done`` is still invoked (with ``None`` on
-        error) so the caller can always finalize (drop its spinner)."""
+        error) so the caller can always finalize (drop its spinner).
+
+        The worker is tracked on ``self._bg_threads`` and honors
+        ``self._bg_cancel``, an ``Event`` set by ``on_unmount`` when the picker
+        itself is torn down (a launch decision, cancel, or quit). A worker
+        still running at that point drops its outcome quietly once
+        ``work()`` returns, instead of racing ``app.call_from_thread`` against
+        an app that may already be gone."""
         if not quiet:
             self._busy_label = label
 
         # Resolve the App while this screen is still attached. The worker may
         # outlive picker exit, when MessagePump.app can no longer walk to it.
         app = self.app
+        cancel = self._bg_cancel
 
         def _worker():
             try:
                 result, err = work(), None
             except Exception as exc:  # a worker thread must never die silently
                 result, err = None, exc
+
+            if cancel.is_set():
+                # The picker tore down (a launch decision, cancel, or quit)
+                # while this worker's blocking work() was still in flight --
+                # ``on_unmount`` already set ``_bg_cancel`` for exactly this
+                # case. There is no UI left to marshal onto and this is an
+                # expected, intentional exit rather than an unforeseen
+                # failure, so drop the outcome quietly (debug only, no
+                # traceback) instead of racing ``app.call_from_thread`` and
+                # logging it as a warning.
+                log.debug(
+                    "pivot action %r: picker exited while this worker was "
+                    "still running; dropping its outcome (err=%r)",
+                    label, err,
+                )
+                return
 
             def _apply():
                 if not quiet:
@@ -5324,11 +5758,35 @@ class PickerScreen(Widget):
             try:
                 app.call_from_thread(_apply)
             except Exception:
-                pass
+                # marshalling back onto the event loop itself failed for a
+                # reason OTHER than the expected/cancelled exit handled above
+                # (e.g. the screen itself is gone but the app is still up) --
+                # that outcome is otherwise lost with **no** operator-visible
+                # signal at all: a steer submission (or any other action) can
+                # genuinely succeed or fail off-thread while the operator sees
+                # nothing change and reasonably assumes it worked. Log it so
+                # this class of silent drop is at least diagnosable after the
+                # fact, even though the status line itself is unreachable at
+                # this point.
+                log.warning(
+                    "pivot action %r: could not marshal its outcome back to "
+                    "the UI (app.call_from_thread failed); the action itself "
+                    "may have already run to completion with err=%r",
+                    label, err, exc_info=True,
+                )
 
-        threading.Thread(
-            target=_worker, name=f"pivot-action:{label}", daemon=True
-        ).start()
+        def _tracked_worker():
+            thread = threading.current_thread()
+            try:
+                _worker()
+            finally:
+                self._bg_threads.discard(thread)
+
+        thread = threading.Thread(
+            target=_tracked_worker, name=f"pivot-action:{label}", daemon=True
+        )
+        self._bg_threads.add(thread)
+        thread.start()
 
     def _run_task_action(self, reg, action, rec):
         """Execute one task action, then invalidate the cached list so the row
@@ -5463,8 +5921,11 @@ class PickerScreen(Widget):
         prose (title/status/link/body) from the standard ``card.*`` paths (the
         action's ``title_from`` overrides the header). On Confirm it substitutes
         ``{field.<name>}`` / ``{fields}`` (+ entry tokens like ``{task_id}``)
-        into ``run`` and executes it via the pivot runtime. Save/Cancel/Escape
-        submit nothing (Save/Esc persist a resumable draft)."""
+        into ``run`` and executes it via the pivot runtime (the steer
+        transport). Save persists the answer as the task's durable
+        ``card_draft`` on the coordinator instead of submitting a steer -- the
+        task stays blocked; Reset (wired inside the modal itself) clears that
+        same coordinator draft. Escape behaves exactly like Save."""
         from . import pivots as _pivots
 
         spec = action.form or {}
@@ -5479,14 +5940,26 @@ class PickerScreen(Widget):
         }
         task_id = ctx.get("task_id") or rec.get(reg.id_field) or ""
 
-        def _after(values):
-            if values is None:
-                self.debug = f"{action.label} · saved/cancelled (no submit)"
+        def _after(result):
+            if result is None:
+                self.debug = f"{action.label} · cancelled (no submit)"
                 return
-            self._run_pivot_form_submit(reg, action, ctx, title, values)
+            kind = result.get("action")
+            values = result.get("values") or {}
+            if kind == "confirm":
+                self._run_pivot_form_submit(reg, action, ctx, title, values)
+            elif kind == "save":
+                self._run_pivot_form_draft_save(reg, ctx, title, values)
+
+        def _on_clear_draft():
+            self._run_pivot_form_draft_clear(reg, ctx, title)
 
         self.app.push_screen(
-            PivotFormScreen(card, fields, action.label, task_id=str(task_id)), _after
+            PivotFormScreen(
+                card, fields, action.label, task_id=str(task_id),
+                on_clear_draft=_on_clear_draft,
+            ),
+            _after,
         )
 
     def _run_pivot_form_submit(self, reg, action, ctx, title, values):
@@ -5500,10 +5973,18 @@ class PickerScreen(Widget):
 
         rt = self._pivot_runtime(reg)
         argv = _pivots.format_form_template(action.run, ctx, values)
+        task_id = ctx.get("task_id")
 
         def _work():
-            ok, msg = rt.run_resolved(argv)
-            rt.invalidate()
+            try:
+                ok, msg = rt.run_resolved(argv)
+            except Exception as exc:  # never let a delivery attempt vanish silently
+                ok, msg = False, f"{type(exc).__name__}: {exc}"
+            else:
+                try:
+                    rt.invalidate()
+                except Exception:
+                    pass
             return ok, msg
 
         def _done(result):
@@ -5512,6 +5993,20 @@ class PickerScreen(Widget):
                 self.sel = self.default_sel()
             short = (msg or "").splitlines()[0][:80] if msg else ""
             if ok:
+                # The steer form's Confirm always saves a draft before this
+                # subprocess even runs (so a failed submission never loses the
+                # operator's answer). Once the submission has genuinely
+                # succeeded, that draft has served its purpose -- clear it so a
+                # future card for this task doesn't restore stale content
+                # (the coordinator clears its own ``card_draft`` server-side on
+                # a successful steer; this is just the local copy).
+                if task_id:
+                    path = _steer_draft_path(str(task_id))
+                    try:
+                        if path and path.exists():
+                            path.unlink()
+                    except OSError:
+                        pass
                 # ``_work`` already invalidated the cached list; kick an immediate
                 # re-fetch of the current scope and repaint so the row reflects
                 # the new state at once, instead of waiting on the idle ~2fps tick
@@ -5525,9 +6020,84 @@ class PickerScreen(Widget):
                 self.refresh()
                 self.debug = f"{action.label} · {title}" + (f" — {short}" if short else "")
             else:
+                # Fail-fast (#2453): a delivery failure must never be reducible
+                # to this easily-missed footer line alone -- a blocking modal
+                # names exactly where the answer is still safely recoverable
+                # from (the local draft this method deliberately did NOT
+                # delete above).
                 self.debug = f"{action.label} failed · {short or 'see command output'}"
+                draft_path = _steer_draft_path(str(task_id)) if task_id else None
+                self.app.push_screen(
+                    SubmitErrorScreen(action.label, msg or short, draft_path)
+                )
 
         self._run_bg(action.label, _work, _done)
+
+    def _run_pivot_form_draft_save(self, reg, ctx, title, values):
+        """Persist an operator's not-yet-submitted draft answer as the task's
+        durable ``card_draft`` on the coordinator (``agent-dispatch card draft
+        save``) -- the Steer form's **Save**. Never touches ``awaiting_steer``
+        or the task's status; the task stays blocked exactly as before. Runs
+        off the render flow via :meth:`_run_bg`, mirroring
+        :meth:`_run_pivot_form_submit`."""
+        from . import pivots as _pivots
+
+        rt = self._pivot_runtime(reg)
+        task_id = ctx.get("task_id")
+        argv = _pivots.format_form_template(
+            ["agent-dispatch", "card", "draft", "save", "{task_id}", "{fields}"],
+            ctx, values,
+        )
+
+        def _work():
+            try:
+                return rt.run_resolved(argv)
+            except Exception as exc:
+                return False, f"{type(exc).__name__}: {exc}"
+
+        def _done(result):
+            ok, msg = result
+            short = (msg or "").splitlines()[0][:80] if msg else ""
+            if ok:
+                self.debug = f"Save · {title}" + (f" — {short}" if short else "")
+            else:
+                self.debug = f"Save failed · {short or 'see command output'}"
+                draft_path = _steer_draft_path(str(task_id)) if task_id else None
+                self.app.push_screen(
+                    SubmitErrorScreen("Save", msg or short, draft_path)
+                )
+
+        self._run_bg("Save", _work, _done, quiet=True)
+
+    def _run_pivot_form_draft_clear(self, reg, ctx, title):
+        """Clear a task's durable ``card_draft`` on the coordinator
+        (``agent-dispatch card draft clear``) -- the Steer form's **Reset**.
+        Never touches ``awaiting_steer``/status. Best-effort: Reset already
+        cleared the local draft and every on-screen field synchronously, so a
+        failure here only means the coordinator keeps a now-superseded draft
+        around -- worth surfacing, but not worth blocking on."""
+        from . import pivots as _pivots
+
+        rt = self._pivot_runtime(reg)
+        argv = _pivots.format_form_template(
+            ["agent-dispatch", "card", "draft", "clear", "{task_id}"], ctx, {}
+        )
+
+        def _work():
+            try:
+                return rt.run_resolved(argv)
+            except Exception as exc:
+                return False, f"{type(exc).__name__}: {exc}"
+
+        def _done(result):
+            ok, msg = result
+            short = (msg or "").splitlines()[0][:80] if msg else ""
+            self.debug = (
+                f"Reset · {title}" if ok
+                else f"Reset: coordinator draft not cleared · {short or 'see command output'}"
+            )
+
+        self._run_bg("Reset", _work, _done, quiet=True)
 
     def _scope_label(self):
         return "All sources" if self.is_all() else self._current_tab()["label"]
@@ -5734,7 +6304,7 @@ class QuitConfirmScreen(ModalScreen[bool]):
         self.call_after_refresh(
             lambda: self.query_one("#quit-buttons", FocusGroup).focus())
 
-    def on_focus_group_activated(self, event: "FocusGroup.Activated") -> None:
+    def on_focus_group_activated(self, event: FocusGroup.Activated) -> None:
         self.dismiss(event.value == "quit")
 
     def action_quit(self) -> None:
@@ -5848,7 +6418,7 @@ class ProfConfirmScreen(ModalScreen[bool]):
         self.call_after_refresh(
             lambda: self.query_one("#prof-buttons", FocusGroup).focus())
 
-    def on_focus_group_activated(self, event: "FocusGroup.Activated") -> None:
+    def on_focus_group_activated(self, event: FocusGroup.Activated) -> None:
         self.dismiss(event.value == "apply")
 
     def action_cancel(self) -> None:
@@ -5931,11 +6501,11 @@ class TaskMenuScreen(ModalScreen[int]):
                 self._actions[i].description or "")
 
     def on_option_list_option_highlighted(
-            self, event: "OptionList.OptionHighlighted") -> None:
+            self, event: OptionList.OptionHighlighted) -> None:
         self._set_desc(event.option_index)
 
     def on_option_list_option_selected(
-            self, event: "OptionList.OptionSelected") -> None:
+            self, event: OptionList.OptionSelected) -> None:
         self.dismiss(event.option_index)
 
     def action_cancel(self) -> None:
@@ -6196,11 +6766,11 @@ class SubMenuScreen(ModalScreen[tuple]):
         self._set_desc(self._ahp_index)
 
     def on_option_list_option_highlighted(
-            self, event: "OptionList.OptionHighlighted") -> None:
+            self, event: OptionList.OptionHighlighted) -> None:
         self._set_desc(event.option_index)
 
     def on_option_list_option_selected(
-            self, event: "OptionList.OptionSelected") -> None:
+            self, event: OptionList.OptionSelected) -> None:
         # Enter on the No-mux row toggles it and stays open; Enter on a verb
         # dismisses with the chosen action + the current No-mux state.
         if event.option_index == self._nomux_index:
@@ -6252,7 +6822,7 @@ class FocusGroup(Widget):
     class Activated(Message):
         """Posted when a choice is activated (Enter/Space on the highlight)."""
 
-        def __init__(self, group: "FocusGroup", index: int, value: str) -> None:
+        def __init__(self, group: FocusGroup, index: int, value: str) -> None:
             super().__init__()
             self.group = group
             self.index = index
@@ -6463,10 +7033,10 @@ class ScopeDlgScreen(ModalScreen[bool]):
         self.query_one("#scope-impact", Static).update(body)
 
     def on_selection_list_selected_changed(
-            self, event: "SelectionList.SelectedChanged") -> None:
+            self, event: SelectionList.SelectedChanged) -> None:
         self._sync_from_selection()
 
-    def on_focus_group_activated(self, event: "FocusGroup.Activated") -> None:
+    def on_focus_group_activated(self, event: FocusGroup.Activated) -> None:
         self.dismiss(event.value == "confirm")
 
     def action_cancel(self) -> None:
@@ -6530,7 +7100,7 @@ class CfgMenuScreen(ModalScreen[int]):
         ol.focus()
 
     def on_option_list_option_selected(
-            self, event: "OptionList.OptionSelected") -> None:
+            self, event: OptionList.OptionSelected) -> None:
         self.dismiss(event.option_index)
 
     def action_cancel(self) -> None:
@@ -6597,11 +7167,11 @@ class MaintMenuScreen(ModalScreen[int]):
                 MAINT_ACTION_DESC.get(self._actions[i], ""))
 
     def on_option_list_option_highlighted(
-            self, event: "OptionList.OptionHighlighted") -> None:
+            self, event: OptionList.OptionHighlighted) -> None:
         self._set_desc(event.option_index)
 
     def on_option_list_option_selected(
-            self, event: "OptionList.OptionSelected") -> None:
+            self, event: OptionList.OptionSelected) -> None:
         self.dismiss(event.option_index)
 
     def action_cancel(self) -> None:
@@ -6948,819 +7518,17 @@ class MsgViewScreen(ModalScreen[None]):
             self._refresh()
 
 
-def _normalize_form_fields(raw: object) -> list[dict]:
-    """Normalize a request-input spec into a clean field list for the form.
-
-    Accepts the ``[{name, type, options?, allow_other?}]`` shape
-    ``steering.parse_request_input`` produces (surfaced on a task's
-    ``card.request_input``). Drops non-dict / un-named entries, defaults an
-    unknown/absent type to ``text``, keeps only a non-empty ``options`` list for
-    a choice/multichoice (an empty one degrades to a free-text field), and
-    carries ``allow_other`` (the "Other…" affordance) and a valid
-    ``show_when={"field", "equals"}`` choice predicate. Never raises -- a
-    malformed spec degrades to a shorter (or empty) form, so the modal always
-    renders."""
-    if not isinstance(raw, list):
-        return []
-    valid_types = {"text", "textarea", "choice", "multichoice"}
-    choice_types = {"choice", "multichoice"}
-    out: list[dict] = []
-    for item in raw:
-        if not isinstance(item, dict):
-            continue
-        name = item.get("name")
-        if not isinstance(name, str) or not name.strip():
-            continue
-        ftype = item.get("type")
-        ftype = ftype if isinstance(ftype, str) and ftype in valid_types else "text"
-        field: dict = {"name": name.strip(), "type": ftype}
-        if ftype in choice_types:
-            opts = item.get("options")
-            options = [str(o) for o in opts if str(o).strip()] if isinstance(opts, list) else []
-            if not options:
-                # A choice with no options can't be answered -- treat as text.
-                field["type"] = "text"
-            else:
-                field["options"] = options
-                if item.get("allow_other"):
-                    field["allow_other"] = True
-        condition = item.get("show_when")
-        if isinstance(condition, dict):
-            source = condition.get("field")
-            expected = condition.get("equals")
-            if (
-                isinstance(source, str)
-                and source.strip()
-                and isinstance(expected, str)
-                and expected.strip()
-            ):
-                field["show_when"] = {
-                    "field": source.strip(),
-                    "equals": expected.strip(),
-                }
-        out.append(field)
-    by_name = {field["name"]: field for field in out}
-    for field in out:
-        condition = field.get("show_when")
-        if not condition:
-            continue
-        controller = by_name.get(condition["field"])
-        if (
-            controller is None
-            or controller is field
-            or controller.get("type") != "choice"
-            or controller.get("show_when")
-            or condition["equals"] not in (controller.get("options") or [])
-        ):
-            field.pop("show_when", None)
-    return out
-
-
-def _escape_markdown_inline(value: object) -> str:
-    """Escape card metadata before embedding it in the Markdown wrapper."""
-    return re.sub(r"([\\`*_{}\[\]()#+.!|>-])", r"\\\1", str(value))
-
-
-def _card_markdown(card: dict, fallback_title: str = "") -> str:
-    """Compose card metadata and its Markdown body into one document."""
-    parts: list[str] = []
-    title = card.get("title") or fallback_title
-    if title:
-        parts.append(f"# {_escape_markdown_inline(title)}")
-    status = card.get("status")
-    if status:
-        parts.append(f"*Status:* **{status}**")
-    link = card.get("link")
-    if link:
-        parts.append(f"*Link:* <{str(link).strip()}>")
-    body = card.get("body")
-    if body:
-        if parts:
-            parts.append("---")
-        parts.append(str(body))
-    if not parts:
-        parts.append("*(empty card)*")
-    return "\n\n".join(parts)
-
-
-class PivotCardScreen(ModalScreen[None]):
-    """Read-only scrollable card-detail modal (A5 -- the DISPATCH pivot 'card').
-
-    Renders the card a blocked worker posted -- its title, one-line status, an
-    optional link to the rich artifact, and a scrollable body -- so the operator
-    can read the full brief before steering. Purely informational: no field
-    entry, no subprocess. Esc/q/Enter close; ↑/↓/PgUp/PgDn scroll the body (the
-    native ``VerticalScroll`` owns scrolling once focused)."""
-
-    CSS = """
-    PivotCardScreen { align: center middle; background: $background 55%; }
-    PivotCardScreen > #card-frame {
-        width: 92; height: auto; max-height: 90%;
-        border: round #ffaf00; background: $surface; padding: 0 1;
-    }
-    PivotCardScreen #card-scroll { height: auto; max-height: 24; }
-    PivotCardScreen Markdown { background: $surface; padding: 0 1; }
-    PivotCardScreen MarkdownH1 {
-        content-align: left middle; color: #ffaf00; background: $surface;
-    }
-    PivotCardScreen MarkdownH2, PivotCardScreen MarkdownH3 { color: #4aa3ff; }
-    PivotCardScreen MarkdownBlock > .strong { color: #ffaf00; text-style: bold; }
-    PivotCardScreen MarkdownBlock > .em { color: #a3a3a3; text-style: italic; }
-    PivotCardScreen MarkdownBlockQuote {
-        background: #17212b; border-left: outer #4aa3ff;
-    }
-    PivotCardScreen #card-foot { color: grey; height: auto; padding: 1 0 0 0; }
-    """
-    BINDINGS = [
-        Binding("escape", "close", show=False),
-        Binding("q", "close", show=False),
-        Binding("enter", "close", show=False),
-    ]
-
-    def __init__(self, row_title: str, card: dict) -> None:
-        super().__init__()
-        self._row_title = row_title
-        self._card = card or {}
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="card-frame"):
-            with VerticalScroll(id="card-scroll"):
-                yield Markdown(
-                    _card_markdown(self._card, self._row_title),
-                    id="card-body",
-                )
-            yield Static("↑/↓ scroll · Esc close", id="card-foot")
-
-    def on_mount(self) -> None:
-        self.query_one("#card-frame", Vertical).border_title = "Card"
-        self.query_one("#card-scroll", VerticalScroll).focus()
-
-    def action_close(self) -> None:
-        self.dismiss(None)
-
-
-#: Env override for the steer-draft directory (tests / operator escape hatch).
-_STEER_DRAFTS_ENV = "AGENT_WORKTREES_STEER_DRAFTS"
-#: Internal sentinels for the "Other…" affordance (never a real option value).
-_OTHER_SENTINEL = "\x00other"
-_OTHER_LABEL = "Other…"
-
-
-def _steer_drafts_dir() -> Path:
-    """Directory holding saved steer drafts (partial answers). Overridable via
-    ``AGENT_WORKTREES_STEER_DRAFTS``; defaults to ``~/.agent-worktrees/steer-drafts``."""
-    override = os.environ.get(_STEER_DRAFTS_ENV)
-    return Path(override) if override else Path.home() / ".agent-worktrees" / "steer-drafts"
-
-
-def _steer_draft_path(task_id: str) -> Path | None:
-    """Per-task draft file path (``<drafts>/<sanitized-task-id>.json``), or
-    ``None`` when the task id has no filesystem-safe characters."""
-    tid = "".join(c for c in str(task_id) if c.isalnum() or c in "-_")
-    return _steer_drafts_dir() / f"{tid}.json" if tid else None
-
-
-class _AutoExpandTextArea(TextArea):
-    """A docked steer input that grows with its content and follows the
-    Copilot-CLI editing mechanic.
-
-    * Height is CSS ``auto`` (bounded by ``min_height``/``max_height``), so the
-      box grows one row per line of content and caps out (then scrolls) -- no
-      manual line math, no off-by-one.
-    * **Enter accepts + advances** focus to the next field (or the button row on
-      the last one); **Shift+Enter inserts a newline** (grow the box) -- matching
-      the operator's Copilot-CLI muscle memory. Windows Terminal emits ``ESC``+
-      ``CR`` for Shift+Enter (not the Kitty ``\\x1b[13;2u`` form), which Textual
-      would otherwise collapse to a plain ``enter``; ``_register_shift_enter_key``
-      (module scope) restores the distinct ``shift+enter`` key. **Alt+Enter** and
-      **Ctrl+J** remain wired as newline fallbacks for terminals that report those
-      distinctly instead.
-    * **Ctrl+Left / Ctrl+Right switch tabs** even while the box has focus: a
-      ``TextArea`` natively binds these to cursor word-movement, which would
-      otherwise swallow them before the screen's tab bindings fire, so we forward
-      them to the screen's ``next_tab`` / ``prev_tab`` actions here."""
-
-    def __init__(self, *args, min_height: int = 3, max_height: int = 12, **kw) -> None:
-        super().__init__(*args, **kw)
-        self._min_height = min_height
-        self._max_height = max_height
-
-    def on_mount(self) -> None:
-        self.styles.height = "auto"
-        self.styles.min_height = self._min_height
-        self.styles.max_height = self._max_height
-
-    def autosize(self) -> None:
-        # Back-compat no-op: CSS ``height: auto`` now does the growing.
-        return
-
-    def on_key(self, event) -> None:
-        key = event.key
-        if key in ("ctrl+left", "ctrl+right"):
-            # Tab-switching wins over the TextArea's native word-movement while a
-            # box is focused (operator request): the TextArea would otherwise
-            # consume these as cursor_word_left/right and the screen's ctrl+←/→
-            # tab bindings would never fire. Forward to the screen's tab actions.
-            event.prevent_default()
-            event.stop()
-            action = "action_next_tab" if key == "ctrl+right" else "action_prev_tab"
-            fn = getattr(self.screen, action, None)
-            if callable(fn):
-                fn()
-        elif key in ("shift+enter", "alt+enter", "ctrl+j"):
-            # Insert a newline (grow the box). ``shift+enter`` is the primary
-            # mechanic, but a mux (psmux) or a terminal without the enhanced
-            # keyboard protocol collapses it to a bare ``enter`` -- so ``alt+enter``
-            # and ``ctrl+j`` (LF, distinct from CR/enter in Textual) are wired as
-            # always-distinguishable, mux-safe fallbacks.
-            event.prevent_default()
-            event.stop()
-            self.insert("\n")
-        elif key == "enter":
-            # Accept + advance (Copilot-CLI mechanic) -- do NOT insert a newline.
-            # Using the public on_key handler (not the private _on_key) keeps this
-            # robust across Textual upgrades.
-            event.prevent_default()
-            event.stop()
-            adv = getattr(self.screen, "_advance_focus", None)
-            if callable(adv):
-                adv(self)
-
-
-class _SteerRadioSet(RadioSet):
-    """A single-select that keeps ``Space`` = toggle-and-stay but makes ``Enter``
-    = toggle-**and-advance** (the steer form's keyboard flow). Enter that lands on
-    "Other…" focuses the revealed free-text box instead of advancing."""
-
-    BINDINGS = [
-        Binding("enter", "toggle_and_advance", show=False),
-        Binding("space", "toggle_button", show=False),
-    ]
-
-    def action_toggle_and_advance(self) -> None:
-        self.action_toggle_button()
-        # The selection settles asynchronously (pressed_index updates after the
-        # button's Changed message), so defer the advance until after refresh.
-        self.call_after_refresh(self._notify_advance)
-
-    def _notify_advance(self) -> None:
-        adv = getattr(self.screen, "_advance_after_choice", None)
-        if callable(adv):
-            adv(self)
-
-
-class _SteerSelectionList(SelectionList):
-    """A multi-select where ``Space`` toggles-and-stays (pick several) and
-    ``Enter`` toggles the highlighted option **and advances**. Enter that toggles
-    "Other…" on focuses the revealed free-text box."""
-
-    BINDINGS = [
-        Binding("enter", "toggle_and_advance", show=False),
-    ]
-
-    def action_toggle_and_advance(self) -> None:
-        self.action_select()
-        self.call_after_refresh(self._notify_advance)
-
-    def _notify_advance(self) -> None:
-        adv = getattr(self.screen, "_advance_after_choice", None)
-        if callable(adv):
-            adv(self)
-
-
-class SteerButtonRow(Widget):
-    """A single-line row of Picker-style buttons (Confirm/Save/Cancel), focusable
-    as one region: ←/→ move the cursor, Enter/Space press. Matches the picker's
-    ``C_BTN``/``C_BTN_SEL`` button aesthetic rather than the heavier Textual
-    ``Button`` widget. Calls ``on_press(key)`` when a button is pressed."""
-
-    can_focus = True
-
-    def __init__(self, buttons: list[tuple[str, str]], on_press, **kw) -> None:
-        super().__init__(**kw)
-        self._buttons = list(buttons)  # [(key, label), ...]
-        self._on_press = on_press
-        self._idx = 0
-
-    def render(self):
-        t = Text()
-        for i, (_key, label) in enumerate(self._buttons):
-            if i:
-                t.append("  ")
-            focused = self.has_focus and i == self._idx
-            t.append(f" {label} ", style=C_BTN_SEL if focused else C_BTN)
-        return t
-
-    def on_key(self, event) -> None:
-        if event.key == "left":
-            self._idx = (self._idx - 1) % len(self._buttons)
-            self.refresh()
-            event.stop()
-        elif event.key == "right":
-            self._idx = (self._idx + 1) % len(self._buttons)
-            self.refresh()
-            event.stop()
-        elif event.key in ("enter", "space"):
-            self._on_press(self._buttons[self._idx][0])
-            event.stop()
-
-    def press(self, key: str) -> None:
-        """Programmatic press (used by tests / click)."""
-        self._on_press(key)
-
-    def on_focus(self) -> None:
-        self.refresh()
-
-    def on_blur(self) -> None:
-        self.refresh()
-
-    def on_click(self, event) -> None:
-        event.stop()
-        self.focus()
-        # Hit-test the click against each button's rendered span so a mouse
-        # press acts on the button under the cursor (not merely the focused one).
-        x = int(getattr(event, "x", 0))
-        pos = 0
-        for i, (_key, label) in enumerate(self._buttons):
-            if i:
-                pos += 2  # the "  " separator between buttons
-            width = len(label) + 2  # the " label " span
-            if pos <= x < pos + width:
-                self._idx = i
-                self.refresh()
-                self._on_press(self._buttons[i][0])
-                return
-            pos += width
-
-
-class PivotFormScreen(ModalScreen[dict]):
-    """Docked card + tabbed elicitation modal (the DISPATCH-pivot 'Steer' surface).
-
-    A Copilot-CLI-style layout: the card's prose fills the top (a scrollable
-    ``#steer-card`` that takes all the height the docked input doesn't need), and
-    a **docked** elicitation section sits at the bottom -- one **tab per question**
-    (``TabbedContent``; a single question skips the tab bar), each a single-select
-    (``RadioSet``), multi-select (``SelectionList``), or free-form
-    auto-expanding text box (up to 10 lines). A choice/multichoice that declares
-    ``allow_other`` gains an **"Other…"** entry that reveals a free-text box.
-    Beneath sits a single-line Picker-style button row: **Confirm** (submit),
-    **Save** (persist a draft and close -- resume later, survives a kill/Escape),
-    **Cancel** (discard).
-
-    On **Confirm** the collected ``{name: value}`` answer is returned via
-    ``dismiss(dict)`` (a multichoice value is a list); ``dismiss(None)`` on
-    Save/Cancel/Escape. The caller substitutes those values into the action's
-    ``run`` template (the steer transport) -- this screen never runs a command
-    and never carries a verdict; it only gathers the operator's answer.
-
-    Esc saves a draft and closes (nothing is lost); Ctrl+S saves explicitly."""
-
-    CSS = """
-    PivotFormScreen { align: center middle; background: $background 55%; }
-    PivotFormScreen > #steer-frame {
-        width: 90%; height: 90%;
-        border: round #ffaf00; background: $surface; padding: 0 1;
-    }
-    PivotFormScreen #steer-card { height: 1fr; }
-    PivotFormScreen Markdown { background: $surface; padding: 0 1; }
-    PivotFormScreen MarkdownH1 {
-        content-align: left middle; color: #ffaf00; background: $surface;
-    }
-    PivotFormScreen MarkdownH2, PivotFormScreen MarkdownH3 { color: #4aa3ff; }
-    PivotFormScreen MarkdownBlock > .strong { color: #ffaf00; text-style: bold; }
-    PivotFormScreen MarkdownBlock > .em { color: #a3a3a3; text-style: italic; }
-    PivotFormScreen MarkdownBlockQuote {
-        background: #17212b; border-left: outer #4aa3ff;
-    }
-    PivotFormScreen #steer-dock { height: auto; max-height: 65%; padding: 0; }
-    PivotFormScreen .steer-qlabel { color: #ffaf00; height: auto; padding: 1 0 0 0; }
-    PivotFormScreen .steer-note { color: grey; height: auto; padding: 1 0 0 0; }
-    PivotFormScreen TextArea { border: round grey; background: $surface; }
-    PivotFormScreen Input { border: round grey; background: $surface; }
-    PivotFormScreen RadioSet, PivotFormScreen SelectionList {
-        border: none; background: $surface; height: auto;
-    }
-    PivotFormScreen #steer-foot { color: grey; height: auto; padding: 1 0 0 0; }
-    PivotFormScreen #steer-buttons { height: 1; padding: 0; }
-    """
-    BINDINGS = [
-        Binding("escape", "escape_close", show=False),
-        Binding("ctrl+s", "save", show=False),
-        Binding("ctrl+right", "next_tab", show=False),
-        Binding("ctrl+left", "prev_tab", show=False),
-    ]
-
-    def __init__(self, card: dict, fields: list[dict], submit_label: str,
-                 task_id: str = "") -> None:
-        super().__init__()
-        self._card = card or {}
-        self._fields = fields or []
-        self._submit_label = submit_label or "Steer"
-        self._task_id = str(task_id or "")
-        # Per-question runtime refs, filled during compose:
-        #   {name, type, options, allow_other, primary, other}
-        self._q: list[dict] = []
-
-    # ---- compose ------------------------------------------------------------
-    def compose(self) -> ComposeResult:
-        with Vertical(id="steer-frame"):
-            with VerticalScroll(id="steer-card"):
-                yield Markdown(_card_markdown(self._card), id="steer-card-body")
-            with Vertical(id="steer-dock"):
-                yield from self._compose_questions()
-                yield Static(self._foot(), id="steer-foot")
-                yield SteerButtonRow(
-                    [("confirm", "Confirm"), ("save", "Save"), ("cancel", "Cancel")],
-                    self._on_button, id="steer-buttons",
-                )
-
-    def _compose_questions(self):
-        if not self._fields:
-            yield Static("(this card requests no input — Confirm to acknowledge)",
-                         classes="steer-note")
-            return
-        if len(self._fields) == 1:
-            yield from self._compose_one(self._fields[0], 0)
-            return
-        with TabbedContent(id="steer-tabs"):
-            for i, f in enumerate(self._fields):
-                with TabPane(self._field_label(f), id=f"tab-{i}"):
-                    yield from self._compose_one(f, i)
-
-    def _compose_one(self, f: dict, i: int):
-        name, ftype = f["name"], f["type"]
-        options = list(f.get("options", []))
-        allow_other = bool(f.get("allow_other"))
-        rec = {
-            "name": name,
-            "type": ftype,
-            "options": options,
-            "allow_other": allow_other,
-            "show_when": f.get("show_when"),
-            "visible": True,
-            "primary": None,
-            "other": None,
-        }
-        yield Static(self._q_label(f), classes="steer-qlabel")
-        if ftype == "choice":
-            btns = [RadioButton(o, value=(j == 0)) for j, o in enumerate(options)]
-            if allow_other:
-                btns.append(RadioButton(_OTHER_LABEL))
-            rs = _SteerRadioSet(*btns, id=f"q-{i}")
-            rec["primary"] = rs
-            yield rs
-            if allow_other:
-                other = _AutoExpandTextArea(id=f"other-{i}")
-                other.display = False
-                rec["other"] = other
-                yield other
-        elif ftype == "multichoice":
-            sels = [(o, o) for o in options]
-            if allow_other:
-                sels.append((_OTHER_LABEL, _OTHER_SENTINEL))
-            sl = _SteerSelectionList(*sels, id=f"q-{i}")
-            rec["primary"] = sl
-            yield sl
-            if allow_other:
-                other = _AutoExpandTextArea(id=f"other-{i}")
-                other.display = False
-                rec["other"] = other
-                yield other
-        else:  # text -> single-line Input; textarea -> free-form auto-expand box
-            if ftype == "text":
-                w: Widget = Input(id=f"q-{i}")
-            else:
-                w = _AutoExpandTextArea(id=f"q-{i}")
-            rec["primary"] = w
-            yield w
-        self._q.append(rec)
-
-    # ---- rendering helpers --------------------------------------------------
-    @staticmethod
-    def _field_label(f: dict) -> str:
-        return str(f["name"]).replace("_", " ").capitalize()
-
-    @staticmethod
-    def _q_label(f: dict) -> str:
-        hints = {"textarea": "free text", "text": "free text",
-                 "choice": "choose one", "multichoice": "choose any"}
-        hint = hints.get(f["type"], "")
-        if f.get("allow_other"):
-            hint += " · Other… for free text"
-        label = PivotFormScreen._field_label(f)
-        return label + (f"  ({hint})" if hint else "") + ":"
-
-    def _foot(self) -> str:
-        return ("Enter accept+next · Shift+Enter newline · Space toggle · "
-                "Ctrl+←/→ tabs · Ctrl+S save · Esc save+close  ·  "
-                "Confirm sends this response to the agent")
-
-    # ---- lifecycle ----------------------------------------------------------
-    def on_mount(self) -> None:
-        self.query_one("#steer-frame", Vertical).border_title = f"Steer — {self._submit_label}"
-        # Choice defaults: pre-select the first real option (RadioSet index 0).
-        restored = self._load_draft()
-        if restored:
-            self._restore(restored)
-        self._sync_conditional_fields()
-        # Focus the first question's input (or the card scroll when there is none).
-        visible = self._visible_question_indexes()
-        target = (
-            self._q[visible[0]]["primary"]
-            if visible
-            else self.query_one("#steer-card", VerticalScroll)
-        )
-        try:
-            target.focus()
-        except Exception:
-            pass
-
-    # ---- dynamic "Other…" reveal --------------------------------------------
-    def _rec_for(self, widget) -> dict | None:
-        for rec in self._q:
-            if rec["primary"] is widget:
-                return rec
-        return None
-
-    def _question_index(self, widget) -> int:
-        """Index of the question a widget belongs to (its primary OR its Other
-        box), or -1."""
-        for i, rec in enumerate(self._q):
-            if rec["primary"] is widget or rec.get("other") is widget:
-                return i
-        return -1
-
-    def on_radio_set_changed(self, event) -> None:
-        # Reveal/hide the "Other…" free-text box for this question (display only;
-        # focus is handled on Enter by _advance_after_choice so Space stays put).
-        rec = self._rec_for(event.radio_set)
-        if rec and rec.get("other"):
-            other_idx = len(rec["options"])  # "Other…" follows the real options
-            rec["other"].display = getattr(event, "index", -1) == other_idx
-        self._sync_conditional_fields()
-
-    def on_selection_list_selected_changed(self, event) -> None:
-        rec = self._rec_for(event.selection_list)
-        if not rec or not rec.get("other"):
-            return
-        selected = list(getattr(event.selection_list, "selected", []) or [])
-        rec["other"].display = _OTHER_SENTINEL in selected
-
-    def _condition_value(self, rec: dict) -> str:
-        """Current scalar answer used by a dependent field predicate."""
-        primary = rec.get("primary")
-        if rec.get("type") == "choice":
-            idx = getattr(primary, "pressed_index", -1)
-            options = rec.get("options") or []
-            if 0 <= idx < len(options):
-                return str(options[idx])
-        return ""
-
-    def _condition_matches(self, rec: dict) -> bool:
-        condition = rec.get("show_when")
-        if not isinstance(condition, dict):
-            return True
-        controller = next(
-            (item for item in self._q if item["name"] == condition.get("field")),
-            None,
-        )
-        if controller is None:
-            return True
-        if not controller.get("visible", True):
-            return False
-        return self._condition_value(controller) == str(condition.get("equals", ""))
-
-    def _visible_question_indexes(self) -> list[int]:
-        return [i for i, rec in enumerate(self._q) if rec.get("visible", True)]
-
-    def _sync_conditional_fields(self) -> None:
-        """Show/hide dependent tabs after their controlling choice changes."""
-        tabs = next(iter(self.query(TabbedContent)), None)
-        for i, rec in enumerate(self._q):
-            visible = self._condition_matches(rec)
-            rec["visible"] = visible
-            if tabs is not None:
-                try:
-                    (tabs.show_tab if visible else tabs.hide_tab)(f"tab-{i}")
-                except Exception:
-                    pass
-        if tabs is not None:
-            visible = self._visible_question_indexes()
-            active = str(getattr(tabs, "active", ""))
-            if visible and active not in {f"tab-{i}" for i in visible}:
-                tabs.active = f"tab-{visible[0]}"
-
-    # ---- keyboard flow: advance + tab cycling -------------------------------
-    def _activate_tab(self, i: int) -> None:
-        try:
-            self.query_one("#steer-tabs", TabbedContent).active = f"tab-{i}"
-        except Exception:
-            pass
-
-    def _advance_to_next_question(self, i: int) -> None:
-        """Focus the next question's input (switching tabs), or the button row
-        (Confirm) when there is none left."""
-        following = [j for j in self._visible_question_indexes() if j > i]
-        if following:
-            next_i = following[0]
-            self._activate_tab(next_i)
-            try:
-                self._q[next_i]["primary"].focus()
-            except Exception:
-                pass
-        else:
-            try:
-                br = self.query_one(SteerButtonRow)
-                br._idx = 0  # highlight Confirm
-                br.focus()
-            except Exception:
-                pass
-
-    def _advance_focus(self, widget) -> None:
-        """Enter from a free-form / Other box: advance to the next question."""
-        self._advance_to_next_question(self._question_index(widget))
-
-    def _advance_after_choice(self, widget) -> None:
-        """Enter from a choice/multichoice: if the toggle activated the "Other…"
-        box, focus it (keep typing); otherwise advance to the next question."""
-        rec = self._rec_for(widget)
-        if rec and rec.get("other") is not None:
-            if rec["type"] == "choice":
-                other_active = getattr(widget, "pressed_index", -1) == len(rec["options"])
-            else:
-                other_active = _OTHER_SENTINEL in (getattr(widget, "selected", []) or [])
-            if other_active:
-                rec["other"].display = True
-                try:
-                    rec["other"].focus()
-                except Exception:
-                    pass
-                return
-        self._advance_to_next_question(self._question_index(widget))
-
-    def _cycle_tab(self, direction: int) -> None:
-        visible = self._visible_question_indexes()
-        if len(visible) <= 1:
-            return
-        try:
-            tabs = self.query_one("#steer-tabs", TabbedContent)
-        except Exception:
-            return
-        try:
-            cur = visible.index(int(str(tabs.active).split("-")[1]))
-        except Exception:
-            cur = 0
-        i = visible[(cur + direction) % len(visible)]
-        tabs.active = f"tab-{i}"
-        try:
-            self._q[i]["primary"].focus()
-        except Exception:
-            pass
-
-    def action_next_tab(self) -> None:
-        self._cycle_tab(1)
-
-    def action_prev_tab(self) -> None:
-        self._cycle_tab(-1)
-
-    # ---- collect / draft ----------------------------------------------------
-    def _collect(self, *, include_hidden: bool = False) -> dict:
-        values: dict = {}
-        for rec in self._q:
-            if not include_hidden and not rec.get("visible", True):
-                continue
-            name, ftype = rec["name"], rec["type"]
-            options, allow_other = rec["options"], rec["allow_other"]
-            prim, other = rec["primary"], rec["other"]
-            if ftype == "text":
-                values[name] = prim.value
-            elif ftype == "textarea":
-                values[name] = prim.text
-            elif ftype == "choice":
-                idx = getattr(prim, "pressed_index", -1)
-                if allow_other and idx == len(options):
-                    values[name] = other.text if other else ""
-                elif 0 <= idx < len(options):
-                    values[name] = options[idx]
-                else:
-                    values[name] = ""
-            elif ftype == "multichoice":
-                selected = list(getattr(prim, "selected", []) or [])
-                members = [s for s in selected if s != _OTHER_SENTINEL]
-                if (allow_other and _OTHER_SENTINEL in selected
-                        and other and other.text.strip()):
-                    members.append(other.text.strip())
-                values[name] = members
-        return values
-
-    def _restore(self, values: dict) -> None:
-        for rec in self._q:
-            name, ftype = rec["name"], rec["type"]
-            options, allow_other = rec["options"], rec["allow_other"]
-            prim, other = rec["primary"], rec["other"]
-            if name not in values:
-                continue
-            v = values[name]
-            if ftype == "text":
-                prim.value = str(v)
-            elif ftype == "textarea":
-                prim.text = str(v)
-                prim.autosize()
-            elif ftype == "choice":
-                btns = list(prim.query(RadioButton))
-                if str(v) in options:
-                    target = options.index(str(v))
-                elif allow_other and other is not None:
-                    target = len(options)  # "Other…"
-                    other.text = str(v)
-                    other.display = True
-                    other.autosize()
-                else:
-                    target = -1
-                for j, b in enumerate(btns):
-                    b.value = (j == target)
-            elif ftype == "multichoice":
-                members = v if isinstance(v, list) else [v]
-                extras = []
-                for m in members:
-                    if str(m) in options:
-                        try:
-                            prim.select(prim.get_option_at_index(options.index(str(m))))
-                        except Exception:
-                            pass
-                    else:
-                        extras.append(str(m))
-                if allow_other and other is not None and extras:
-                    other.text = ", ".join(extras)
-                    other.display = True
-                    other.autosize()
-                    try:
-                        prim.select(prim.get_option_at_index(len(options)))
-                    except Exception:
-                        pass
-
-    def _write_draft(self) -> None:
-        path = _steer_draft_path(self._task_id)
-        if not path:
-            return
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(
-                json.dumps({
-                    "task_id": self._task_id,
-                    "values": self._collect(include_hidden=True),
-                }),
-                encoding="utf-8",
-            )
-        except OSError:
-            pass
-
-    def _load_draft(self) -> dict:
-        path = _steer_draft_path(self._task_id)
-        try:
-            if path and path.exists():
-                data = json.loads(path.read_text(encoding="utf-8"))
-                if isinstance(data, dict) and isinstance(data.get("values"), dict):
-                    return data["values"]
-        except (OSError, ValueError):
-            pass
-        return {}
-
-    def _delete_draft(self) -> None:
-        path = _steer_draft_path(self._task_id)
-        try:
-            if path and path.exists():
-                path.unlink()
-        except OSError:
-            pass
-
-    # ---- actions ------------------------------------------------------------
-    def _on_button(self, key: str) -> None:
-        if key == "confirm":
-            self._confirm()
-        elif key == "save":
-            self.action_save()
-        else:
-            self._cancel()
-
-    def _confirm(self) -> None:
-        values = self._collect()
-        self._delete_draft()
-        self.dismiss(values)
-
-    def _cancel(self) -> None:
-        self._delete_draft()
-        self.dismiss(None)
-
-    def action_save(self) -> None:
-        self._write_draft()
-        self.dismiss(None)
-
-    def action_escape_close(self) -> None:
-        # Preserve work: Esc saves a draft (so nothing is lost if you step away)
-        # then closes without submitting.
-        self._write_draft()
-        self.dismiss(None)
+from .steering import (
+    PivotCardScreen,
+    PivotFormScreen,
+    ResetConfirmScreen,  # noqa: F401 -- re-export for tests
+    SteerButtonRow,  # noqa: F401 -- re-export for tests
+    SubmitErrorScreen,
+    _AutoExpandTextArea,  # noqa: F401 -- re-export for tests
+    _normalize_form_fields,
+    _steer_draft_path,
+    _STEER_DRAFTS_ENV,  # noqa: F401 -- re-export for tests
+)
 
 
 class MaintenanceView:
@@ -8031,27 +7799,48 @@ class WorktreesView:
                 add(self._row_text(rec, li, sel, width, lcols,
                                    preview, preview_ids),
                     stop=("L", li), data=rec)
-                # worktree-status-core live pulse (#2917): a dim, expiring
-                # sub-line carrying the agent's current intent, derived from
-                # the assistant.intent stream. Decorative (no stop) so it is
-                # never focusable and never affects selection. copilot-extensions
-                # #228: the line no longer expires -- ``live_pulse`` grades its
-                # colour/glyph: 'awaiting' renders an amber ⏳ ("this needs me"),
-                # 'fresh' a dim ⟳, 'stale' a dimmer ⟳; the last intent lingers
-                # (greyed) so a dormant worktree still shows what it was doing.
+                # Second (detail) row, always rendered -- one worktree, two
+                # lines. Decorative (no stop) so it is never focusable and
+                # never affects selection. Carries whatever the first row's
+                # narrower columns had no room for:
+                # 1. `status_markers` -- the closure descriptor's per-fact
+                #    freshness markers (worktree-finality-and-obligations
+                #    Phase 9: C<N>/F<N> held-claim/follow-up counts, dim;
+                #    U*/OC* unconfirmed-fact markers, warn-styled so a stale
+                #    fact stays scannable).
+                # 2. The live-pulse agent-intent sub-line (#2917/copilot-
+                #    extensions#228) -- unchanged glyph/colour rules, just no
+                #    longer gated on its own line's existence.
+                # A row with neither renders a single dim placeholder glyph
+                # rather than an empty line, so the two-line rhythm reads as
+                # deliberate spacing everywhere, not a blank gap on some rows.
                 _pulse = rec.get("live_pulse")
                 _intent = (rec.get("live_intent") or "").strip()
+                _markers = (rec.get("status_markers") or "").strip()
+                pline = Text("      ")
+                has_content = False
+                if _markers:
+                    for j, tok in enumerate(_markers.split()):
+                        if j:
+                            pline.append(" ")
+                        tok_style = C_WARN if tok.endswith("*") else C_DIM
+                        pline.append(tok, style=tok_style)
+                    has_content = True
                 if _pulse and _intent:
+                    if has_content:
+                        pline.append("  ")
                     if _pulse == "awaiting":
                         _pstyle, _pglyph = C_PULSE_AWAIT, "⏳ "
                     else:
                         _pstyle = C_DIM if _pulse == "fresh" else "grey30"
                         _pglyph = "⟳ "
-                    pline = Text("      ", style=_pstyle)
                     pline.append(_pglyph, style=_pstyle)
-                    pline.append(_clip(_intent, max(1, width - 9), "l"),
-                                 style=_pstyle)
-                    add(pline)
+                    avail = max(1, width - pline.cell_len - 1)
+                    pline.append(_clip(_intent, avail, "l"), style=_pstyle)
+                    has_content = True
+                if not has_content:
+                    pline.append("·", style="grey30")
+                add(pline)
                 li += 1
 
     def _row_text(self, rec, li, sel, width, lcols, preview, preview_ids):
@@ -8853,8 +8642,7 @@ class PickerApp(App):
     PickerScreen > #nf-buttons { width: 100%; height: auto; }
     PickerScreen > #nf-body-data   { width: 100%; height: 1fr; }
     PickerScreen > #nf-footer { width: 100%; height: 2; }
-    /* NF5-5 native OptionList data body (opt-in via
-       AGENT_WORKTREES_PICKER_NATIVE_LIST): picker palette + the amber cursor
+    /* NF5-5 native OptionList data body: picker palette + the amber cursor
        used by the native modals; matches the base type so it targets the
        _PickerNativeData subclass. */
     PickerScreen > OptionList#nf-body-data {

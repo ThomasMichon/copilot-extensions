@@ -37,7 +37,8 @@ from pydantic import (
 from pydantic_core import PydanticCustomError
 
 from . import __version__, telemetry
-from .config import DEFAULT_ORPHAN_GRACE
+from .config import DEFAULT_HANDOFF_FALLBACK_GRACE, DEFAULT_ORPHAN_GRACE
+from .coordinator_registries import register_registry_routes
 from .events import EventBus, sse_format
 from .loop_governance import LoopGovernance
 from .queue import (
@@ -48,11 +49,13 @@ from .queue import (
     ResultValidationError,
     RoutingAssignment,
     SpawnReservation,
+    Status,
     StructuredResult,
     Task,
     TaskError,
     TaskQueue,
     encode_result,
+    machine_matches,
     worker_id_for,
 )
 from .satellites import (
@@ -576,6 +579,144 @@ async def _orphan_reap_loop(
             bus.publish({"type": "task.reaped", "reaped": reaped})
 
 
+def _find_stale_handoff_tasks(
+    queue: TaskQueue, grace: float, machine: str, *, now: float | None = None
+) -> list[Task]:
+    """Unclaimed ``handoff``-labeled tasks past the bounded reconciliation
+    window, scoped to this machine (an unset ``target_machine`` matches any
+    machine, per :func:`machine_matches` -- same convention as claim
+    eligibility, unlike the orphan reaper's stricter machine-exact SQL).
+    """
+    ts = queue._now(now)
+    cutoff = ts - max(0.0, grace)
+    tasks = queue.list(status=[Status.PROPOSED, Status.QUEUED], label="handoff")
+    return [
+        task
+        for task in tasks
+        if machine_matches(task.target_machine, machine) and task.created_at < cutoff
+    ]
+
+
+def _attempt_handoff_fallback(
+    queue: TaskQueue,
+    task: Task,
+    *,
+    spawn_fn: Callable[..., Any] | None = None,
+) -> str:
+    """Attempt exactly one fallback launch for ``task``.
+
+    :meth:`TaskQueue.claim_handoff_fallback` is the fence: only the caller that
+    wins the atomic claim proceeds to spawn anything, so a racing reconciliation
+    cycle or a just-in-time human/tool pickup can never double-launch. Returns
+    ``skipped`` (lost the claim) / ``launched`` / ``failed`` (agent-bridge
+    non-zero) / ``unavailable`` (no agent-bridge CLI) / ``error`` (seed build or
+    unexpected exception).
+    """
+    if not queue.claim_handoff_fallback(task.id):
+        return "skipped"
+    from . import bridge
+    from .handoff_fallback_seed import build_fallback_seed
+
+    if spawn_fn is None:
+        spawn_fn = bridge.spawn_worker
+    try:
+        seed = build_fallback_seed(task.id, task.title)
+    except ValueError as exc:
+        queue.record_handoff_fallback_outcome(task.id, outcome="error", detail=str(exc))
+        return "error"
+    try:
+        result = spawn_fn(
+            task.id,
+            worker_id=f"handoff-fallback:{task.id}",
+            prompt=seed,
+            worktree_id=task.target_worktree,
+            reclaim=True,
+            wait=False,
+        )
+    except bridge.BridgeUnavailable as exc:
+        queue.record_handoff_fallback_outcome(task.id, outcome="unavailable", detail=str(exc))
+        return "unavailable"
+    except Exception as exc:
+        queue.record_handoff_fallback_outcome(task.id, outcome="error", detail=str(exc))
+        log.warning("handoff-fallback launch raised for task %s", task.id, exc_info=True)
+        return "error"
+    if result.returncode == 0:
+        queue.record_handoff_fallback_outcome(task.id, outcome="launched")
+        return "launched"
+    detail = (result.stderr or result.stdout or "").strip()[:500] or None
+    queue.record_handoff_fallback_outcome(task.id, outcome="failed", detail=detail)
+    return "failed"
+
+
+def _reconcile_handoff_fallback(queue: TaskQueue, grace: float) -> dict[str, int]:
+    """One reconciliation pass: find + attempt-launch every stale unclaimed
+    ``handoff`` task on this machine. Degrade-safe like :func:`_reap_orphans`:
+    an unresolved machine identity reconciles nothing. Returns counts:
+    ``checked``/``launched``/``skipped``/``unavailable``/``failed``/``error``.
+    """
+    from .identity import resolve_machine
+
+    counts = {
+        "checked": 0, "launched": 0, "skipped": 0,
+        "unavailable": 0, "failed": 0, "error": 0,
+    }
+    machine = resolve_machine()
+    if not machine:
+        return counts
+    for task in _find_stale_handoff_tasks(queue, grace, machine):
+        counts["checked"] += 1
+        outcome = _attempt_handoff_fallback(queue, task)
+        counts[outcome] = counts.get(outcome, 0) + 1
+    return counts
+
+
+async def _handoff_fallback_loop(
+    queue: TaskQueue,
+    interval: float,
+    bus: EventBus,
+    *,
+    grace: float,
+    health: LoopHealth,
+    cycle_timeout: float | None = None,
+    governance: LoopGovernance | None = None,
+) -> None:
+    """Periodically reconcile a stale unclaimed ``handoff`` task into a
+    fallback successor launch (opt-in -- ``AGENT_DISPATCH_HANDOFF_FALLBACK``).
+    agent-dispatch judges *staleness*; agent-bridge (``create --reclaim``)
+    performs the actual in-place replacement. Shares the supervised-cycle
+    contract with :func:`_gc_loop`/:func:`_orphan_reap_loop`.
+    """
+    while True:
+        await asyncio.sleep(health.current_interval)
+        if await _governance_backoff(
+            governance,
+            "iteration-boundary:handoff-fallback",
+            loop_name="handoff fallback",
+        ):
+            continue
+        if await _governance_backoff(
+            governance,
+            "pre-mutation:handoff-fallback",
+            loop_name="handoff fallback",
+        ):
+            continue
+        counts = await _run_supervised_cycle(
+            health,
+            lambda: _reconcile_handoff_fallback(queue, grace),
+            cycle_timeout=cycle_timeout or min(interval, 60.0),
+        )
+        counts = counts or {}
+        launched = counts.get("launched", 0)
+        if launched or counts.get("checked", 0):
+            log.info(
+                "handoff fallback: checked %d stale unclaimed handoff task(s), "
+                "launched %d, %s",
+                counts.get("checked", 0), launched, counts,
+            )
+        if launched:
+            bus.publish({"type": "task.handoff_fallback", "launched": launched, **counts})
+
+
 
 class ProducerScopeBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -723,6 +864,19 @@ class SteerBody(BaseModel):
     message: str | None = None
 
 
+class CardDraftBody(BaseModel):
+    """An operator's **not-yet-submitted** draft answer to a task's card.
+
+    Distinct from :class:`SteerBody`: saving a draft never resolves
+    ``awaiting_steer`` or moves the task's status -- it is a durable,
+    coordinator-visible scratchpad for a partial or complete answer the
+    operator hasn't submitted yet, readable from any surface/machine via
+    ``GET /tasks/{task_id}/card`` (not a local sidecar file). Not worker-owned,
+    mirroring :class:`SteerBody`."""
+
+    fields: dict = Field(default_factory=dict)
+
+
 class SteerTakeBody(BaseModel):
     """A worker consuming the next pending steer for a task it owns."""
 
@@ -798,6 +952,8 @@ class ReservationDetailBody(BaseModel):
 class RequestSpawnReleaseBody(BaseModel):
     detail: str | None = None
     disposition: str = "failed"
+    session_handle: str | None = None
+    worktree: str | None = None
 
 
 class RetireSpawnBody(ReservationDetailBody):
@@ -812,49 +968,6 @@ class RearmSpawnBody(BaseModel):
     permitted: bool = False
     reason: str | None = None
     min_failures: int = 3
-
-
-class ScheduleLeaseBody(BaseModel):
-    holder: str
-    holder_session: str | None = None
-    ttl: float | None = None
-
-
-class ReleaseLeaseBody(BaseModel):
-    holder: str
-    force: bool = False
-
-
-class AcquireResourceReservationBody(BaseModel):
-    key: str
-    owner: str
-    ttl: float
-    token: str | None = None
-
-
-class BindResourceReservationBody(BaseModel):
-    key: str
-    owner: str
-    token: str
-    task_id: str
-
-
-class ReleaseResourceReservationBody(BaseModel):
-    key: str
-    owner: str
-    token: str
-
-
-class RegistrationBody(BaseModel):
-    kind: str
-    spec: dict
-    id: str | None = None
-    machine: str | None = None
-    env: str = "default"
-
-
-class RegistrationStatusBody(BaseModel):
-    status: str
 
 
 class SatelliteRegisterBody(BaseModel):
@@ -989,6 +1102,8 @@ def create_app(
     control_token: str | None = None,
     sweep_interval: float = 0.0,
     orphan_grace: float = DEFAULT_ORPHAN_GRACE,
+    handoff_fallback_enabled: bool = False,
+    handoff_fallback_grace: float = DEFAULT_HANDOFF_FALLBACK_GRACE,
     enable_mcp: bool = True,
     wake_interval: float = 0.0,
     wake_deliver: Callable[[str, str, str, str | None, str], bool] | None = None,
@@ -1001,6 +1116,11 @@ def create_app(
     When ``sweep_interval > 0`` the coordinator runs a background lease-recovery
     sweep every ``sweep_interval`` seconds so a crashed worker's held task
     automatically returns to ``queued`` without a manual ``recover`` call.
+
+    ``handoff_fallback_enabled`` (opt-in; see ``AGENT_DISPATCH_HANDOFF_FALLBACK``)
+    arms the handoff-fallback reconciliation loop on the same cadence -- off by
+    default, as this is the coordinator autonomously spawning a real Copilot
+    process on a time heuristic.
 
     When ``enable_mcp`` is set and the ``mcp`` extra is installed, a
     coordinator-hosted MCP endpoint is mounted at ``/mcp`` (identity via
@@ -1077,9 +1197,13 @@ def create_app(
         )
         sweeper_health = LoopHealth(name="liveness_gc", base_interval=sweep_interval or 0.0)
         orphan_health = LoopHealth(name="orphan_reap", base_interval=sweep_interval or 0.0)
+        handoff_fallback_health = LoopHealth(
+            name="handoff_fallback", base_interval=sweep_interval or 0.0
+        )
         _app.state.loop_health = {
             sweeper_health.name: sweeper_health,
             orphan_health.name: orphan_health,
+            handoff_fallback_health.name: handoff_fallback_health,
         }
         sweeper = (
             asyncio.create_task(
@@ -1106,6 +1230,20 @@ def create_app(
                 )
             )
             if sweep_interval and sweep_interval > 0
+            else None
+        )
+        handoff_fallback_reconciler = (
+            asyncio.create_task(
+                _handoff_fallback_loop(
+                    queue,
+                    sweep_interval,
+                    bus,
+                    grace=handoff_fallback_grace,
+                    health=handoff_fallback_health,
+                    governance=governance,
+                )
+            )
+            if handoff_fallback_enabled and sweep_interval and sweep_interval > 0
             else None
         )
         # Self-retire on supersession (owner-liveness tether). A coordinator that
@@ -1361,6 +1499,12 @@ def create_app(
                     orphan_reaper.cancel()
                     try:
                         await orphan_reaper
+                    except asyncio.CancelledError:
+                        pass
+                if handoff_fallback_reconciler is not None:
+                    handoff_fallback_reconciler.cancel()
+                    try:
+                        await handoff_fallback_reconciler
                     except asyncio.CancelledError:
                         pass
 
@@ -2003,6 +2147,24 @@ def create_app(
             ),
         }
 
+    @app.post("/tasks/{task_id}/card-draft")
+    def save_card_draft(task_id: str, body: CardDraftBody) -> dict:
+        """Persist an operator's not-yet-submitted draft answer. Never touches
+        ``awaiting_steer``/status -- the task stays blocked exactly as before."""
+        return _guard(
+            lambda: queue.save_card_draft(task_id, fields=body.fields),
+            "task.card_draft",
+        )
+
+    @app.delete("/tasks/{task_id}/card-draft")
+    def clear_card_draft(task_id: str) -> dict:
+        """Clear a task's saved draft (the Steer form's Reset). Never touches
+        ``awaiting_steer``/status -- the task stays blocked exactly as before."""
+        return _guard(
+            lambda: queue.clear_card_draft(task_id),
+            "task.card_draft_cleared",
+        )
+
     @app.post("/tasks/{task_id}/steer/take")
     def steer_take(task_id: str, body: SteerTakeBody) -> dict:
         """Consume the next pending steer for a task the worker owns (or null)."""
@@ -2180,11 +2342,7 @@ def create_app(
     @app.post("/spawn-reservations/{key}/release")
     def request_spawn_release(key: str, body: RequestSpawnReleaseBody) -> dict:
         result = _reservation_guard(
-            lambda: queue.request_spawn_release(
-                key,
-                detail=body.detail,
-                disposition=body.disposition,
-            )
+            lambda: queue.request_spawn_release(key, **body.model_dump())
         )
         bus.publish({"type": "spawn.release_requested", "reservation": result})
         return result
@@ -2342,178 +2500,7 @@ def create_app(
             raise HTTPException(status_code=404, detail="no such reservation")
         return _reservation_dict(reservation)
 
-    # -- schedule registry ---------------------------------------------------
-
-    @app.post("/schedules")
-    def register_schedule(entry: dict) -> dict:
-        """Register (or upsert) a recurring schedule. 400 on a malformed entry."""
-        try:
-            return asdict(queue.register_schedule(entry))
-        except TaskError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    @app.get("/schedules")
-    def list_schedules(include_paused: bool = True) -> list[dict]:
-        return [asdict(r) for r in queue.list_schedules(include_paused=include_paused)]
-
-    @app.get("/schedules/{sid}")
-    def get_schedule(sid: str) -> dict:
-        rec = queue.get_schedule(sid)
-        if rec is None:
-            raise HTTPException(status_code=404, detail="no such schedule")
-        return asdict(rec)
-
-    @app.delete("/schedules/{sid}")
-    def remove_schedule(sid: str) -> dict:
-        if not queue.remove_schedule(sid):
-            raise HTTPException(status_code=404, detail="no such schedule")
-        return {"removed": True, "id": sid}
-
-    @app.post("/schedules/{sid}/pause")
-    def pause_schedule(sid: str) -> dict:
-        try:
-            return asdict(queue.set_schedule_paused(sid, True))
-        except TaskError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    @app.post("/schedules/{sid}/resume")
-    def resume_schedule(sid: str) -> dict:
-        try:
-            return asdict(queue.set_schedule_paused(sid, False))
-        except TaskError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    # -- supervisor registrations --------------------------------------------
-
-    @app.post("/registrations")
-    def register_registration(body: RegistrationBody) -> dict:
-        """Register (or upsert) a supervision unit; return its handle. 400 on a
-        malformed kind/spec."""
-        try:
-            return asdict(
-                queue.register_registration(
-                    body.kind,
-                    body.spec,
-                    reg_id=body.id,
-                    machine=body.machine,
-                    env=body.env,
-                )
-            )
-        except TaskError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    @app.get("/registrations")
-    def list_registrations(
-        kind: str | None = None,
-        machine: str | None = None,
-        env: str | None = None,
-        include_paused: bool = True,
-    ) -> list[dict]:
-        return [
-            asdict(r)
-            for r in queue.list_registrations(
-                kind=kind, machine=machine, env=env, include_paused=include_paused
-            )
-        ]
-
-    @app.get("/registrations/{rid}")
-    def get_registration(rid: str) -> dict:
-        rec = queue.get_registration(rid)
-        if rec is None:
-            raise HTTPException(status_code=404, detail="no such registration")
-        return asdict(rec)
-
-    @app.delete("/registrations/{rid}")
-    def remove_registration(rid: str) -> dict:
-        if not queue.remove_registration(rid):
-            raise HTTPException(status_code=404, detail="no such registration")
-        return {"removed": True, "id": rid}
-
-    @app.post("/registrations/{rid}/status")
-    def set_registration_status(rid: str, body: RegistrationStatusBody) -> dict:
-        try:
-            return asdict(queue.set_registration_status(rid, body.status))
-        except TaskError as exc:
-            code = 404 if str(exc).startswith("no such registration") else 400
-            raise HTTPException(status_code=code, detail=str(exc)) from exc
-
-    # -- schedule job-leases -------------------------------------------------
-
-    @app.post("/schedule-leases/{scope}/acquire")
-    def acquire_lease(scope: str, body: ScheduleLeaseBody) -> dict:
-        lease, granted = queue.acquire_schedule_lease(
-            scope, body.holder, holder_session=body.holder_session, ttl=body.ttl
-        )
-        return {"granted": granted, "lease": asdict(lease)}
-
-    @app.post("/schedule-leases/{scope}/release")
-    def release_lease(scope: str, body: ReleaseLeaseBody) -> dict:
-        try:
-            released = queue.release_schedule_lease(scope, body.holder, force=body.force)
-        except TaskError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return {"released": released, "scope": scope}
-
-    @app.get("/schedule-leases")
-    def list_leases() -> list[dict]:
-        return [asdict(lease) for lease in queue.list_schedule_leases()]
-
-    @app.get("/schedule-leases/{scope}")
-    def get_lease(scope: str) -> dict | None:
-        lease = queue.get_schedule_lease(scope)
-        return asdict(lease) if lease else None
-
-    # -- external producer resource reservations ----------------------------
-
-    @app.post("/resource-reservations/acquire")
-    def acquire_resource_reservation(
-        body: AcquireResourceReservationBody,
-    ) -> dict:
-        try:
-            reservation, granted = queue.acquire_resource_reservation(
-                body.key, body.owner, ttl=body.ttl, token=body.token
-            )
-        except TaskError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        payload = asdict(reservation)
-        if not granted:
-            payload.pop("token", None)
-        return {"granted": granted, "reservation": payload}
-
-    @app.post("/resource-reservations/bind")
-    def bind_resource_reservation(body: BindResourceReservationBody) -> dict:
-        try:
-            return asdict(
-                queue.bind_resource_reservation(
-                    body.key, body.owner, body.token, body.task_id
-                )
-            )
-        except TaskError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-    @app.post("/resource-reservations/release")
-    def release_resource_reservation(
-        body: ReleaseResourceReservationBody,
-    ) -> dict:
-        try:
-            released = queue.release_resource_reservation(
-                body.key, body.owner, body.token
-            )
-        except TaskError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return {"released": released, "key": body.key}
-
-    @app.get("/resource-reservations")
-    def list_resource_reservations(
-        owner_prefix: str | None = None,
-        task_id: str | None = None,
-    ) -> list[dict]:
-        return [
-            asdict(reservation)
-            for reservation in queue.list_resource_reservations(
-                owner_prefix=owner_prefix, task_id=task_id
-            )
-        ]
+    register_registry_routes(app, queue)
 
     if mcp_app is not None:
         # Mounted last so the coordinator's own routes take precedence.

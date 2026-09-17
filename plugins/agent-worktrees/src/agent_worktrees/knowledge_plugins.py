@@ -24,6 +24,8 @@ from plugin_resolve.conventions import (
 )
 
 from . import config as cfg
+from . import knowledge_composition_policy as policy
+from . import knowledge_plugin_committed as committed_settings
 from . import repos as repos_mod
 from . import state_root, tracking
 
@@ -499,10 +501,17 @@ def _compose_locked(
 
     Local marketplaces are re-pointed at ``knowledge_path``.  Remote
     marketplaces and enabled plugins are carried when the committed harness
-    base does not already provide them.  Existing unmanaged local settings are
+    base does not already provide them, or when the base's own value is an
+    explicit opt-in ``false`` (the operator's knowledge-bound ``true`` wins --
+    that is exactly what an opt-in flag is for).  Existing unmanaged local settings are
     preserved.  A private ownership marker records exact managed values, so a
     later re-point/removal can retire stale entries without deleting operator
     edits.
+
+    The knowledge repo's own local self-referential ``*-harness`` plugin is
+    never composed in -- see
+    :func:`knowledge_composition_policy.is_self_referential_harness_plugin`.
+    It is reported separately under ``excluded_enabled_plugins``.
     """
     harness = Path(harness_path).resolve()
     knowledge = Path(knowledge_path).resolve()
@@ -588,6 +597,10 @@ def _compose_locked(
 
     candidates: dict[str, dict] = {}
     conflicting_marketplaces: list[str] = []
+    harness_owned_marketplaces: set[str] = set()
+    harness_committed_marketplaces = (
+        committed_settings.read_harness_committed_marketplaces(harness)
+    )
     for name, definition in sorted(desired_marketplaces.items()):
         if name in local_names and name in marketplaces:
             if not markerless_legacy or name not in proven_legacy_names:
@@ -597,8 +610,20 @@ def _compose_locked(
         if base_definition is None:
             candidates[name] = definition
         elif base_definition != definition:
-            # The generic harness base remains authoritative on name collision.
-            conflicting_marketplaces.append(name)
+            committed_definition = harness_committed_marketplaces.get(name)
+            if committed_definition is not None and committed_definition == base_definition:
+                # The collision is purely with the harness's own *committed*
+                # marketplace declaration -- e.g. the harness's own local
+                # in-repo marketplace, incidentally redeclared elsewhere
+                # (differently) by the knowledge repo. No operator/native
+                # override participated, so resolution is well-defined (the
+                # harness's committed value always wins): don't cascade this
+                # into blocking `name@...` enabledPlugins overrides below,
+                # unlike a genuine ambiguous collision.
+                harness_owned_marketplaces.add(name)
+            else:
+                # The generic harness base remains authoritative on name collision.
+                conflicting_marketplaces.append(name)
 
     managed_marketplaces: dict[str, dict] = {}
     for name, definition in candidates.items():
@@ -617,7 +642,11 @@ def _compose_locked(
 
     managed_enabled: dict[str, bool] = {}
     conflicting_enabled: list[str] = []
+    excluded_enabled: list[str] = []
     conflicting_names = set(conflicting_marketplaces)
+    harness_committed_enabled = committed_settings.read_harness_committed_enabled(
+        harness
+    )
     if markerless_legacy:
         for source, on in enabled.items():
             _, marketplace = split_source(source)
@@ -632,6 +661,15 @@ def _compose_locked(
     for source, on in sorted(knowledge_settings.enabled.items()):
         if not on:
             continue
+        if policy.is_self_referential_harness_plugin(source, local_names):
+            # Never graft it in; also force-remove any stale entry a
+            # pre-fix (markerless-legacy or marker-owned) composition
+            # already wrote -- retirement above only clears entries with a
+            # recorded marker, so a markerless-legacy overlay would
+            # otherwise keep carrying it forever.
+            enabled.pop(source, None)
+            excluded_enabled.append(source)
+            continue
         _, marketplace = split_source(source)
         if marketplace in conflicting_names:
             conflicting_enabled.append(source)
@@ -641,6 +679,17 @@ def _compose_locked(
             continue
         if source in harness_settings.enabled:
             if harness_settings.enabled[source] is True:
+                continue
+            if (
+                harness_committed_enabled.get(source) is False
+                and source not in enabled
+            ):
+                # An explicit harness-*committed* `false` marks an opt-in
+                # plugin. A local/operator `false` still wins as a deliberate
+                # override and remains a conflict instead of being silently
+                # re-enabled by the knowledge repo.
+                enabled[source] = True
+                managed_enabled[source] = True
                 continue
             conflicting_enabled.append(source)
             continue
@@ -682,6 +731,8 @@ def _compose_locked(
             "marketplaces": sorted(set(conflicting_marketplaces)),
             "enabled_plugins": sorted(set(conflicting_enabled)),
         },
+        "harness_owned_marketplaces": sorted(harness_owned_marketplaces),
+        "excluded_enabled_plugins": sorted(set(excluded_enabled)),
     }
 
 
@@ -817,15 +868,53 @@ def _is_tracked_harness(
         return False
     if current.role == "harness":
         return True
-    if loaded_config is None:
-        return False
-    repo_config = getattr(loaded_config, "repos", {}).get(current.repo)
+    repo_config = policy.repo_config_for(loaded_config, current.repo)
     if repo_config is None:
-        try:
-            repo_config = loaded_config.default_repo
-        except KeyError:
-            return False
+        return False
     return bool(repo_config.stateless)
+
+
+def _retire_disabled_overlay(harness_path: str | Path) -> dict[str, Any]:
+    """Retire a marker-owned overlay when composition is config-disabled
+    (pair stays valid -- only composition is off; see `_retire_invalid_pair_overlay`)."""
+    harness = Path(harness_path).resolve()
+    output_path = harness / ".github" / "copilot" / "settings.local.json"
+    with _overlay_transaction(output_path):
+        existing = _load_json_object(output_path)
+        marker = _managed_marker(existing, output_path)
+        if marker is None or not marker.get("pairId"):
+            return {
+                "action": "disabled",
+                "paired": True,
+                "changed": False,
+                "settings_local": str(output_path),
+                "harness_path": str(harness),
+            }
+        marketplaces = _dict_setting(existing, "extraKnownMarketplaces", output_path)
+        enabled = _dict_setting(existing, "enabledPlugins", output_path)
+        previous_marketplaces = dict(marker["marketplaces"])
+        previous_enabled = dict(marker["enabledPlugins"])
+        _retire_previous(marketplaces, previous_marketplaces)
+        _retire_previous(enabled, previous_enabled)
+
+        result = dict(existing)
+        result.pop(_OVERLAY_KEY, None)
+        if marketplaces:
+            result["extraKnownMarketplaces"] = marketplaces
+        else:
+            result.pop("extraKnownMarketplaces", None)
+        if enabled:
+            result["enabledPlugins"] = enabled
+        else:
+            result.pop("enabledPlugins", None)
+        changed = _write_overlay(output_path, result)
+        return {
+            "action": "disabled",
+            "paired": True,
+            "changed": changed,
+            "settings_local": str(output_path),
+            "harness_path": str(harness),
+        }
 
 
 def compose_from_pair(
@@ -859,6 +948,15 @@ def compose_from_pair(
             "changed": False,
             "pair_error": pair_error,
         }
+
+    assert resolution.current is not None
+    repo_config = policy.repo_config_for(loaded_config, resolution.current.repo)
+    if repo_config is not None and not repo_config.compose_knowledge_plugins:
+        # Opted out via `RepoConfig.compose_knowledge_plugins`: state-root
+        # pairing stays valid; only the plugin overlay is retired/withheld.
+        summary = _retire_disabled_overlay(pair.harness_path)
+        summary["knowledge_repo"] = pair.knowledge_repo
+        return summary
 
     legacy_anchor: str | None = None
     if pair.pair_kind == "worktree":

@@ -12,16 +12,23 @@ resolved package union, including authority metadata.
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import hashlib
 import json
-import copy
+import os
+import shutil
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from agent_procutil import no_window_kwargs
+
 from . import modules as _modules
 from . import resources as _resources
+from . import self_update as _self_update
+from . import self_update_state as _self_update_state
 from . import validator as _validator
 from .authority import (
     AUTHORITY_MODE_OPAQUE_ADDITIVE,
@@ -60,6 +67,15 @@ class Plan:
     authority_decisions: list[dict[str, Any]] = field(default_factory=list)
 
 
+_RUNTIME_CHECK_TIMEOUT = 60
+_RUNTIME_INSTALLER_ENV_UNSET = (
+    "COPILOT_EXTENSIONS_CONTEXT",
+    "COPILOT_PLUGIN_INSTALL_STAGED",
+    "COPILOT_PLUGIN_ROOT",
+    "COPILOT_PLUGIN_STAGED_FROM",
+)
+
+
 def _repo_paths(resolved: list[RequirementPackage]) -> dict[str, Path]:
     """Map each repo name to its canonical location-class anchor."""
     paths: dict[str, Path] = {}
@@ -68,6 +84,220 @@ def _repo_paths(resolved: list[RequirementPackage]) -> dict[str, Path]:
         if root is not None:
             paths.setdefault(pkg.source_repo, root)
     return paths
+
+
+def _runtime_payload_root(home: Path) -> Path:
+    return home / ".copilot" / "installed-plugins" / "copilot-extensions"
+
+
+def _read_json_file(path: Path) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _clean_runtime_environment() -> dict[str, str]:
+    env = dict(os.environ)
+    for key in _RUNTIME_INSTALLER_ENV_UNSET:
+        env.pop(key, None)
+    return env
+
+
+def _runtime_command_runner(argv: list[str], *, timeout: int) -> _resources.RunOutcome:
+    # Same PATHEXT-resolution fix as self_update.default_command_runner: a
+    # bare plugin binstub name (e.g. "agent-machines") is really a `.cmd`
+    # shim on Windows, and CreateProcess (shell=False) does not search
+    # PATHEXT the way cmd.exe does.
+    resolved = argv
+    if argv:
+        binary = shutil.which(argv[0])
+        if binary:
+            resolved = [binary, *argv[1:]]
+    proc = subprocess.run(  # noqa: S603 - argv list rooted in the installed payload/binstub
+        resolved,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+        env=_clean_runtime_environment(),
+        **no_window_kwargs(),
+    )
+    return _resources.RunOutcome(proc.returncode, proc.stdout or "", proc.stderr or "")
+
+
+def _repair_runtime_command(payload_root: Path, plat: str) -> list[str] | None:
+    scripts = payload_root / "scripts"
+    if plat == "windows":
+        shell = shutil.which("pwsh") or shutil.which("powershell")
+        if not shell:
+            return None
+        for name, has_update in (("install.ps1", True), ("init.ps1", False)):
+            script = scripts / name
+            if script.is_file():
+                return [shell, "-File", str(script)] + (["update"] if has_update else [])
+        return None
+    for name, has_update in (("install.sh", True), ("init.sh", False)):
+        script = scripts / name
+        if script.is_file():
+            return ["bash", str(script)] + (["update"] if has_update else [])
+    return None
+
+
+def _runtime_check_command(name: str, payload: dict[str, Any]) -> list[str]:
+    return [name, "installer-readiness"] if payload.get("installerReadiness") else [name, "version"]
+
+
+def _runtime_detail(outcome: _resources.RunOutcome | None, error: Exception | None = None) -> str:
+    if error is not None:
+        return str(error)
+    if outcome is None:
+        return ""
+    return (outcome.stderr or outcome.stdout).strip()[:200]
+
+
+def runtime_spot_check_results(
+    *,
+    home: Path,
+    plat: str,
+    dry_run: bool,
+    runner=_runtime_command_runner,
+) -> list[_resources.ResourceResult]:
+    """Spot-check installed runtime plugins during maintenance-safe restores.
+
+    This intentionally uses the installed core-marketplace payload registry plus each
+    runtime plugin's own `installer-readiness` CLI (falling back to `version` only when
+    the manifest exposes no readiness contract) instead of importing the broader
+    installation-cell planner here. The maintenance-safe restore path stays self-contained,
+    while still deferring every repair to the owning plugin's existing install/init script.
+    """
+    payload_root = _runtime_payload_root(home)
+    if not payload_root.is_dir():
+        return []
+    results: list[_resources.ResourceResult] = []
+    for plugin_dir in sorted(path for path in payload_root.iterdir() if path.is_dir()):
+        payload = _read_json_file(plugin_dir / "plugin.json")
+        if not payload:
+            continue
+        name = payload.get("name")
+        scope = payload.get("runtimeScope")
+        if (
+            not isinstance(name, str)
+            or not name.strip()
+            or not isinstance(scope, str)
+            or scope == "none"
+        ):
+            continue
+        check_cmd = _runtime_check_command(name, payload)
+        repair_cmd = _repair_runtime_command(plugin_dir, plat)
+        try:
+            check = runner(check_cmd, timeout=_RUNTIME_CHECK_TIMEOUT)
+            healthy = check.returncode == 0
+            check_error: Exception | None = None
+        except (OSError, subprocess.SubprocessError) as exc:
+            check = None
+            healthy = False
+            check_error = exc
+        if healthy:
+            results.append(
+                _resources.ResourceResult(
+                    "runtime-spot-check",
+                    name,
+                    False,
+                    dry_run,
+                    "none",
+                    detail=f"`{' '.join(check_cmd)}` succeeded",
+                    commands=[check_cmd],
+                )
+            )
+            continue
+        if repair_cmd is None:
+            detail = _runtime_detail(check, check_error)
+            results.append(
+                _resources.ResourceResult(
+                    "runtime-spot-check",
+                    name,
+                    False,
+                    dry_run,
+                    "error",
+                    detail=(
+                        "runtime readiness failed and no install/init script was found"
+                        + (f": {detail}" if detail else "")
+                    ),
+                    commands=[check_cmd],
+                )
+            )
+            continue
+        if dry_run:
+            detail = _runtime_detail(check, check_error)
+            results.append(
+                _resources.ResourceResult(
+                    "runtime-spot-check",
+                    name,
+                    True,
+                    True,
+                    "repair",
+                    detail=(
+                        f"would run {' '.join(repair_cmd)} after failed `{' '.join(check_cmd)}`"
+                        + (f": {detail}" if detail else "")
+                    ),
+                    commands=[check_cmd, repair_cmd],
+                )
+            )
+            continue
+        repair = runner(repair_cmd, timeout=_resources.DEFAULT_TIMEOUT)
+        if repair.returncode != 0:
+            results.append(
+                _resources.ResourceResult(
+                    "runtime-spot-check",
+                    name,
+                    True,
+                    False,
+                    "error",
+                    detail=(
+                        f"`{' '.join(repair_cmd)}` exited {repair.returncode}: "
+                        f"{_runtime_detail(repair)}"
+                    ),
+                    commands=[check_cmd, repair_cmd],
+                )
+            )
+            continue
+        try:
+            post = runner(check_cmd, timeout=_RUNTIME_CHECK_TIMEOUT)
+            post_error: Exception | None = None
+        except (OSError, subprocess.SubprocessError) as exc:
+            post = None
+            post_error = exc
+        if post is None or post.returncode != 0:
+            detail = _runtime_detail(post, post_error)
+            results.append(
+                _resources.ResourceResult(
+                    "runtime-spot-check",
+                    name,
+                    True,
+                    False,
+                    "error",
+                    detail=(
+                        f"runtime readiness still failed after {' '.join(repair_cmd)}"
+                        + (f": {detail}" if detail else "")
+                    ),
+                    commands=[check_cmd, repair_cmd],
+                )
+            )
+            continue
+        results.append(
+            _resources.ResourceResult(
+                "runtime-spot-check",
+                name,
+                True,
+                False,
+                "repair",
+                detail=f"repaired runtime after failed `{' '.join(check_cmd)}`",
+                commands=[check_cmd, repair_cmd],
+            )
+        )
+    return results
 
 
 def resolve_union(
@@ -160,19 +390,23 @@ def effective_state_hash(
         for key, spec in sorted(pkg.manage.items()):
             if key == "copilot.settings" or key.startswith("copilot.settings."):
                 continue
-            non_settings_manage.append({
+            non_settings_manage.append(
+                {
+                    "package": pkg.name,
+                    "source_repo": pkg.source_repo,
+                    "key": key,
+                    "spec": _without_declaration_authority(spec),
+                }
+            )
+        package_metadata.append(
+            {
                 "package": pkg.name,
                 "source_repo": pkg.source_repo,
-                "key": key,
-                "spec": _without_declaration_authority(spec),
-            })
-        package_metadata.append({
-            "package": pkg.name,
-            "source_repo": pkg.source_repo,
-            "exclude": pkg.exclude,
-            "aliases": pkg.aliases,
-            "bootstrap_floor": pkg.bootstrap_floor,
-        })
+                "exclude": pkg.exclude,
+                "aliases": pkg.aliases,
+                "bootstrap_floor": pkg.bootstrap_floor,
+            }
+        )
     payload = {
         "settings": _settings_operations(resolved),
         "manage": non_settings_manage,
@@ -229,8 +463,9 @@ def plan(
         for pkg, mod in _modules.resolve_modules(resolved, machine, plat)
     ]
     resolved_resources, _ = _resources.resolve_resources(resolved, machine, plat)
-    resource_list = [
-        {
+    resource_list = []
+    for res in resolved_resources:
+        entry = {
             "type": res.type,
             "id": res.id,
             "summary": res.summary(),
@@ -238,8 +473,14 @@ def plan(
             "contributor_details": res.contributor_details,
             "authority_decisions": res.authority_decisions,
         }
-        for res in resolved_resources
-    ]
+        if res.type == "self-update":
+            observed = _self_update_state.observed_plan_fields(res.id)
+            entry["observed"] = observed
+            entry["summary"] = _self_update.format_plan_summary(
+                entry["summary"],
+                observed,
+            )
+        resource_list.append(entry)
     authority_decisions = sort_decisions(
         _validator.settings_authority_decisions(resolved)
         + [
@@ -319,9 +560,7 @@ class RestoreResult:
 
     @property
     def ok(self) -> bool:
-        return all(r.ok for r in self.resource_results) and all(
-            r.ok for r in self.module_results
-        )
+        return all(r.ok for r in self.resource_results) and all(r.ok for r in self.module_results)
 
 
 class RestoreValidationError(RuntimeError):
@@ -344,6 +583,7 @@ def restore(
     plat: str | None = None,
     home: Any = None,
     only: list[str] | None = None,
+    maintenance_safe: bool = False,
     accepted_machines: tuple[str, ...] | None = None,
 ) -> RestoreResult:
     """Converge ``machine`` to the package union.
@@ -352,7 +592,13 @@ def restore(
     declarative **resources** (packages/files), then runs the repo-local
     **modules**, all honoring the dry-run safety rules. ``only`` restricts the
     run to named surfaces/resources/modules -- the "review a section, then apply
-    just that section" flow.
+    just that section" flow. ``maintenance_safe`` keeps surface reconciliation
+    fully enabled, scopes resources to unattended-safe entries, adds runtime
+    spot checks for installed runtime plugins, and -- unless ``only`` names a
+    module explicitly -- reports every module as skipped rather than running
+    it: modules execute arbitrary repo-local commands with no per-module
+    safety opt-in yet, so the whole category stays out of a blanket
+    unattended sweep.
     """
     plat = plat or current_platform()
     resolved = resolve_union(packages, machine, accepted_machines)
@@ -369,13 +615,36 @@ def restore(
         ctx = _resources.ResourceContext(
             home=home_path, repo_paths=_repo_paths(resolved), platform=plat
         )
-        resource_results = _resources.apply_resources(
-            resolved, machine, plat, ctx, dry_run=dry_run, only=only
+        if maintenance_safe:
+            resource_results.extend(
+                runtime_spot_check_results(home=home_path, plat=plat, dry_run=dry_run)
+            )
+        resource_results.extend(
+            _resources.apply_resources(
+            resolved,
+            machine,
+            plat,
+            ctx,
+            dry_run=dry_run,
+            only=only,
+            maintenance_safe=maintenance_safe,
+            )
         )
 
     all_modules: list[_modules.ModuleResult] = []
     if _want_modules(only, resource_names):
-        all_modules = _modules.run_modules(resolved, machine, plat, dry_run=dry_run)
+        if maintenance_safe and not only:
+            # Modules run arbitrary repo-local commands with no per-module
+            # opt-in equivalent to a resource's `maintenance_safe: true` yet,
+            # so the whole category stays out of a blanket unattended sweep.
+            # An operator-directed `--only <module>` request is explicit
+            # intent and still executes normally even under
+            # `--maintenance-safe`.
+            all_modules = _modules.maintenance_safe_skip_results(
+                resolved, machine, plat, dry_run=dry_run
+            )
+        else:
+            all_modules = _modules.run_modules(resolved, machine, plat, dry_run=dry_run)
     results = [r for r in all_modules if not only or r.name in only]
     return RestoreResult(
         plan=p,
@@ -386,8 +655,12 @@ def restore(
 
 
 _SURFACE_ONLY_NAMES = {
-    "copilot.settings", "copilot.permissions", "copilot.trustedFolders",
-    "settings", "permissions", "trustedFolders",
+    "copilot.settings",
+    "copilot.permissions",
+    "copilot.trustedFolders",
+    "settings",
+    "permissions",
+    "trustedFolders",
 }
 
 

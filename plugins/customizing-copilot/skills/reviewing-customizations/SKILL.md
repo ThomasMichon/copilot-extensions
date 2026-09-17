@@ -173,12 +173,36 @@ instructions, nested/conditional `AGENTS.md`, standard personal Copilot
 instructions, `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` payloads, enabled skill/agent
 frontmatter metadata upper bounds, `additionalContext`-capable command-hook
 registrations, prompt-hook registrations, and other hook registrations. Dynamic
-payload size remains unknown; prompt-hook payloads are reported separately and
-are not counted as `additionalContext`.
+payload size remains unknown by default; prompt-hook payloads are reported
+separately and are not counted as `additionalContext`.
 JSON output includes a stable `context_budget` object.
 
+Add `--capture-dynamic` to also measure the real session-scoped
+`instructions/**/*.instructions.md` files each plugin's `sessionStart` command
+hook writes (see `docs/patterns/session-scoped-dynamic-guidance.md`), turning
+the "unknown" additionalContext row into real byte/token counts:
+
+```bash
+python3 <skill-dir>/scripts/scan-customizations.py <repo-root> \
+  --from-settings --context-budget --capture-dynamic
+```
+
+This runs only **plugin-owned** `sessionStart` command hooks (never
+repository- or user-level hook files), once each, with a synthetic session
+payload and a disposable sandbox `HOME`/`USERPROFILE` -- every facility
+session-guidance writer resolves its session-state root via `Path.home()`,
+so the override fully redirects the write; the real
+`~/.copilot/session-state` tree is never touched, and the sandbox is removed
+afterward. A hook that fails or times out is named in a per-plugin `errors`
+list rather than silently reported as zero. Because it executes already-
+installed, already-trusted plugin code (the same hooks a normal session runs
+on every launch), this is a materially different -- and lower-risk --
+operation than running arbitrary untrusted marketplace hooks; it is still
+opt-in given it executes code at all.
+
 The report prints paths and counts only. It never dumps instruction contents or
-hook commands, and it **never executes hooks merely to measure them**. The token
+hook commands, and it **never executes hooks merely to measure them unless
+`--capture-dynamic` is given**. The token
 estimate is a comparison heuristic, not a tokenizer result; metadata is an upper
 bound, and dynamic context remains unknown until runtime. The budget excludes
 runtime MCP tool schemas unless an authoritative runtime measurement is

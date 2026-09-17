@@ -538,6 +538,13 @@ class GiteaProvider:
             return len(commits) == 0
         return None
 
+    def ensure_fork(
+        self, repo: str, *, token: str | None = None,
+    ) -> tuple[str, str] | None:
+        """Not implemented: fork-mode publishing is GitHub-only today."""
+        _ = (repo, token)
+        return None
+
     def get_snapshot(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
     ) -> PRSnapshot:

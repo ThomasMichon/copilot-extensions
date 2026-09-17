@@ -380,6 +380,247 @@ class TestCreatePR:
 
 
 # ---------------------------------------------------------------------------
+# create_pr -- role-aware fork-PR flow (efforts/active/role-aware-fork-pr-flow)
+# ---------------------------------------------------------------------------
+
+class TestCreatePRForkFlow:
+    def _fork_config(self, config, tmp_path: Path, **fork_overrides):
+        import dataclasses
+        repo = config.repos["ext"]
+        fork = cfg.ForkConfig(enabled=True, remote="fork", **fork_overrides)
+        pr = dataclasses.replace(repo.pr, provider="github", fork=fork)
+        return dataclasses.replace(
+            config, repos={"ext": dataclasses.replace(repo, pr=pr)},
+        )
+
+    def _fake_provider(self, fork_owner: str, fork_clone_url: str):
+        class _FakeProvider:
+            name = "github"
+
+            def ensure_fork(self, repo, *, token=None):
+                return (fork_owner, fork_clone_url)
+
+        return _FakeProvider()
+
+    def test_fork_mode_needs_confirmation_and_does_nothing(self, pr_repo, tmp_path):
+        config, wid, wt_path, _remote_dir = pr_repo
+        config = self._fork_config(config, tmp_path)
+
+        res = pr_ops.create_pr(wid, config)
+
+        assert res["success"] is False
+        assert res["needs_confirmation"] == "fork_setup"
+        assert "fork" in res["message"].lower()
+        assert res["fork_remote"] == "fork"
+        # Nothing was mutated: no fork remote configured, no branch pushed.
+        assert not git_ops.has_remote("fork", cwd=str(wt_path))
+        assert not git_ops.local_branch_exists(
+            "feature/work-2-aaaa", cwd=str(wt_path)
+        )
+
+    def test_fork_mode_confirmed_pushes_to_fork_not_origin(
+        self, pr_repo, tmp_path, monkeypatch,
+    ):
+        config, wid, wt_path, _remote_dir = pr_repo
+        config = self._fork_config(config, tmp_path)
+
+        fork_dir = tmp_path / "fork.git"
+        git_ops.git("init", "--bare", "-b", "master", str(fork_dir))
+        fake = self._fake_provider("theirfork", str(fork_dir))
+        monkeypatch.setattr(
+            "agent_worktrees.providers.get_provider", lambda name: fake,
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.providers.account_token_for_slug",
+            lambda *a, **k: None,
+        )
+
+        res = pr_ops.create_pr(wid, config, confirm_fork=True)
+
+        assert res["success"] is True, res
+        assert res["remote"] == "fork"
+        assert res["pr_head"] == "theirfork:feature/work-2-aaaa"
+        # The local 'fork' remote now points at the fake fork's clone URL.
+        assert git_ops.remote_url("fork", cwd=str(wt_path)) == str(fork_dir)
+        # The branch landed on the FORK, never on origin.
+        assert git_ops.remote_branch_exists(
+            "fork", "feature/work-2-aaaa", cwd=str(wt_path)
+        )
+        origin_refs = git_ops.git(
+            "ls-remote", "origin", cwd=str(wt_path)
+        ).stdout
+        assert "feature/work-2-aaaa" not in origin_refs
+
+    def test_fork_owner_override_wins_over_provider_login(
+        self, pr_repo, tmp_path, monkeypatch,
+    ):
+        config, wid, _wt_path, _remote_dir = pr_repo
+        config = self._fork_config(config, tmp_path, owner="explicit-owner")
+
+        fork_dir = tmp_path / "fork2.git"
+        git_ops.git("init", "--bare", "-b", "master", str(fork_dir))
+        fake = self._fake_provider("provider-login", str(fork_dir))
+        monkeypatch.setattr(
+            "agent_worktrees.providers.get_provider", lambda name: fake,
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.providers.account_token_for_slug",
+            lambda *a, **k: None,
+        )
+
+        res = pr_ops.create_pr(wid, config, confirm_fork=True)
+
+        assert res["success"] is True, res
+        assert res["pr_head"] == "explicit-owner:feature/work-2-aaaa"
+
+    def test_fork_mode_off_by_default(self, pr_repo):
+        """A repo that never sets pr.fork/pr.roles is fully unaffected."""
+        config, wid, _wt_path, _remote_dir = pr_repo
+        res = pr_ops.create_pr(wid, config)
+        assert res["success"] is True, res
+        assert "needs_confirmation" not in res
+        assert "pr_head" not in res
+        assert res["remote"] == "origin"
+
+
+# ---------------------------------------------------------------------------
+# create_pr -- role resolution drives pr.roles (not a forced pr.fork.enabled)
+#
+# The tests above force ``pr.fork.enabled`` directly on the base PRConfig.
+# These instead exercise the actual integration seam create_pr relies on in
+# practice: a repo that only sets ``pr.roles`` (fork disabled at the base),
+# with the caller's role resolved from a *live* (here, faked) GitHub viewer
+# permission via ``_resolve_caller_role`` -> ``providers.actor_viewer_permission``
+# -> ``cfg.resolve_role_pr_config``. Closes the one seam
+# efforts/active/role-aware-fork-pr-flow's Phase 3 left unit-untested.
+# ---------------------------------------------------------------------------
+
+class TestCreatePRRoleResolution:
+    def _roles_config(self, config, **role_overrides):
+        import dataclasses
+        repo = config.repos["ext"]
+        pr = dataclasses.replace(
+            repo.pr, provider="github", roles=dict(role_overrides),
+        )
+        return dataclasses.replace(
+            config, repos={"ext": dataclasses.replace(repo, pr=pr)},
+        )
+
+    def _fake_permission_provider(self, viewer_permission: str, *, supported=True):
+        from types import SimpleNamespace
+
+        class _FakeProvider:
+            name = "github"
+
+            def get_repo_policy(self, repo, *, api_base="", token=None):
+                return SimpleNamespace(
+                    supported=supported, viewer_permission=viewer_permission,
+                )
+
+        return _FakeProvider()
+
+    def _patch_live_permission(self, monkeypatch, viewer_permission: str, **kw):
+        fake = self._fake_permission_provider(viewer_permission, **kw)
+        monkeypatch.setattr(
+            "agent_worktrees.providers.get_provider", lambda name: fake,
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.providers.account_token_for_slug",
+            lambda *a, **k: None,
+        )
+        return fake
+
+    def test_live_write_permission_resolves_to_roles_write_fork(
+        self, pr_repo, monkeypatch,
+    ):
+        """A caller whose live GitHub permission reads 'write' gets the
+        `pr.roles.write` override applied -- including its `fork.enabled` --
+        purely from the live permission read, with no `pr.fork.enabled` set
+        anywhere on the base config."""
+        config, wid, wt_path, _remote_dir = pr_repo
+        config = self._roles_config(
+            config,
+            write=cfg.PRRoleOverride(
+                merge_actor="", fork=cfg.ForkConfig(enabled=True),
+            ),
+        )
+        self._patch_live_permission(monkeypatch, "write")
+
+        res = pr_ops.create_pr(wid, config, target_repo="acme/ext")
+
+        assert res["success"] is False
+        assert res["needs_confirmation"] == "fork_setup"
+        assert res["repo"] == "acme/ext"
+        # Nothing mutated: the base config never set pr.fork.enabled itself.
+        assert not git_ops.has_remote("fork", cwd=str(wt_path))
+
+    def test_live_maintain_permission_keeps_direct_push(
+        self, pr_repo, monkeypatch,
+    ):
+        """A caller whose live permission reads 'maintain' resolves to the
+        `pr.roles.maintain` override (fork disabled, direct push unchanged) --
+        proceeds without any fork confirmation."""
+        config, wid, _wt_path, _remote_dir = pr_repo
+        config = self._roles_config(
+            config,
+            write=cfg.PRRoleOverride(
+                merge_actor="", fork=cfg.ForkConfig(enabled=True),
+            ),
+            maintain=cfg.PRRoleOverride(
+                merge_actor="submitter-direct",
+                fork=cfg.ForkConfig(enabled=False),
+            ),
+        )
+        self._patch_live_permission(monkeypatch, "maintain")
+
+        res = pr_ops.create_pr(wid, config, target_repo="acme/ext")
+
+        assert res["success"] is True, res
+        assert "needs_confirmation" not in res
+        assert res["remote"] == "origin"
+
+    def test_live_permission_with_no_matching_role_is_unaffected(
+        self, pr_repo, monkeypatch,
+    ):
+        """A live permission that resolves to a role absent from `pr.roles`
+        (e.g. 'read') leaves the base PRConfig untouched -- no fork, no
+        confirmation gate -- exactly like an unconfigured repo."""
+        config, wid, _wt_path, _remote_dir = pr_repo
+        config = self._roles_config(
+            config,
+            write=cfg.PRRoleOverride(
+                merge_actor="", fork=cfg.ForkConfig(enabled=True),
+            ),
+        )
+        self._patch_live_permission(monkeypatch, "read")
+
+        res = pr_ops.create_pr(wid, config, target_repo="acme/ext")
+
+        assert res["success"] is True, res
+        assert "needs_confirmation" not in res
+
+    def test_unresolvable_live_permission_falls_back_to_base_config(
+        self, pr_repo, monkeypatch,
+    ):
+        """A provider read that can't determine `viewer_permission`
+        (`supported=False`) must fail OPEN to the base, non-role-scoped
+        config -- never treated as a denial or as any particular role."""
+        config, wid, _wt_path, _remote_dir = pr_repo
+        config = self._roles_config(
+            config,
+            write=cfg.PRRoleOverride(
+                merge_actor="", fork=cfg.ForkConfig(enabled=True),
+            ),
+        )
+        self._patch_live_permission(monkeypatch, "", supported=False)
+
+        res = pr_ops.create_pr(wid, config, target_repo="acme/ext")
+
+        assert res["success"] is True, res
+        assert "needs_confirmation" not in res
+
+
+# ---------------------------------------------------------------------------
 # create_pr -- refspec head scheme (#1815)
 # ---------------------------------------------------------------------------
 
@@ -1515,7 +1756,7 @@ class TestMultiPR:
 # ---------------------------------------------------------------------------
 
 class TestPRStatusLive:
-    def _config_with_binding(self, base_config):
+    def _config_with_binding(self, base_config, **pr_kwargs):
         """Clone the fixture config with a merge-consent binding on its repo."""
         repo = base_config.default_repo
         pr = cfg.PRConfig(
@@ -1526,6 +1767,7 @@ class TestPRStatusLive:
             allow_stale_approval=True,
             hold_labels=("do-not-merge", "needs-rebase", "wip"),
             wip_title_prefixes=("wip:",),
+            **pr_kwargs,
         )
         new_repo = cfg.RepoConfig(
             anchor=repo.anchor, worktree_root=repo.worktree_root,
@@ -1569,6 +1811,25 @@ class TestPRStatusLive:
         assert res["live"]["merge_state"] == "clean"
         assert res["live"]["eligible"] is True
         assert res["live"]["reviews"] == 1
+
+    def test_live_verdict_reports_comment_when_review_blocking_false(
+        self, pr_repo, monkeypatch
+    ):
+        """A repo config'd review_blocking=False (e.g. Copilot code review on
+        a pr-self-merge repo, which can only COMMENT) reports that comment as
+        the "COMMENTED" verdict instead of no verdict at all."""
+        from agent_worktrees import pr_contract as pc
+        config, wid, _wt, _ = pr_repo
+        config = self._config_with_binding(config, review_blocking=False)
+        pr_ops.set_pr(wid, number=7, state="open", provider="gitea")
+        snap = pc.PRSnapshot(
+            pr_state="open", merged=False, head_sha="h", base_ref="master",
+            author="alice", mergeable=True, title="Feature",
+            reviews=(pc.Review(1, "COMMENT", "bob"),),
+        )
+        self._mock_provider(monkeypatch, snap)
+        res = pr_ops.pr_status(wid, config=config)
+        assert res["live"]["verdict"] == "COMMENTED"
 
     def test_cli_evidence_lookup_uses_configured_provider_for_manual_pr(
         self, pr_repo, monkeypatch

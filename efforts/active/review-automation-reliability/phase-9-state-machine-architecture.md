@@ -498,11 +498,12 @@ inside this checklist item.
   conflict policy unless a repository explicitly overrides it.
 - [x] Declare the bridge/session state machine
   (`../../../plugins/agent-dispatch/src/agent_dispatch/bridge_state_machine.py`),
-  deferring to the agent-bridge vision's verb work for the authoritative
-  verb vocabulary once it lands (as of this slice
-  `visions/plugins/agent-bridge/README.md` declares a task-shaped verb set
-  but not yet the hot/warm/cold liveness tiers or the cache-is-never-
-  authority rule, so this module does not duplicate or compete with it).
+  reconciled with the agent-bridge vision's verb work: as of this slice
+  `visions/plugins/agent-bridge/README.md` now declares the hot/warm/cold
+  liveness tiers and the cache-is-never-authority rule
+  (`cache-is-a-hint-never-authority`), alongside its task-shaped verb set,
+  so this module realizes that vision item rather than duplicating or
+  competing with it.
   Declares the lifecycle (absent/hydrating/running/suspended/ended), the
   corrected three-tier liveness model (hot/warm/cold, always a live
   observation, never cache-gated), and couples the one-universal-resume

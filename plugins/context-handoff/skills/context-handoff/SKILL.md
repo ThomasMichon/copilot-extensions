@@ -45,6 +45,23 @@ cutover choreography. If a worktree manager, agent-bridge, or another control
 system wants to act on the pending handoff, it can. Otherwise a human can use
 the short seed manually.
 
+For a worktree-level cutover mismatch between the head-session ledger and a
+control plane's current sweep target, use the dedicated
+`diagnosing-handoff-cutover` skill.
+
+## Every session knows this exists
+
+This is not a mechanism a session opts into only once it feels context
+pressure or the user says a trigger phrase. Every session receives the
+static, hookless session-start guidance
+(`instructions/context-handoff/session-guidance.instructions.md`, written by
+this plugin's `sessionStart` hook -- see `scripts/emit-guidance.*`), which
+states plainly -- whether or not it began
+from a handoff -- that the mechanism exists and that context pressure is
+never a reason to rush, truncate diligence, or leave work unfinished. Treat
+that awareness as standing permission to work as thoroughly as a task
+deserves: you can always hand off instead of cutting corners.
+
 ## Continuity contract
 
 A handoff transfers **active responsibility for the original objective**. It is
@@ -193,6 +210,32 @@ already consumed, or is currently being consumed, by another session
    control system spawning more than one successor for the same handoff) --
    ask the user first, then file it if they say yes.
 
+### Diagnosing a stuck cutover (predecessor not confirmed retired)
+
+`trigger_handoff` is one stage (6 of 13) in a wider cutover lifecycle traced
+across this plugin and `agent-worktrees`' resident status monitor -- see
+[context-handoff's README § Handoff-lifecycle observability](../../README.md#handoff-lifecycle-observability)
+for the full stage model and stores. For a predecessor whose retirement was
+never confirmed after its successor was spawned, first run the safe retry when
+you are still inside the superseded predecessor session:
+
+```bash
+node "$CH" retry-cutover --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
+```
+
+That path refocuses an already-live successor instead of spawning a duplicate.
+If no live successor exists, it falls back to a fresh spawn attempt. If the
+problem is specifically an unretired predecessor after a spawn is recorded (a
+successor associated as a candidate *or* already linked, plus a recorded spawn
+event -- not only a fully confirmed cutover), then run
+`agent-worktrees handoffs-check --worktree-id <id>` <!-- marketplace-isolation: allow diagnostic-tooling --> (or `--all`, `--execute`
+to actually retire what it finds) before assuming manual intervention is
+needed -- the read-only report does not itself confirm the pane is still
+alive, only `--execute`'s live check does -- and do not manually kill a
+predecessor pane yourself. It does **not** diagnose "acknowledged but
+nothing appeared" (no successor was ever
+recorded) -- that case has no dedicated diagnostic yet.
+
 ## CLI fallback
 
 When the extension is absent, invoke the payload-local CLI by exact verified
@@ -210,6 +253,8 @@ CH="$CH_ROOT/extensions/context-handoff/handoff-cli.mjs"
 [ -f "$CH" ] || { echo "context-handoff payload-local CLI not found" >&2; exit 1; }
 
 node "$CH" facts --json --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
+node "$CH" check-heads --json --cwd "$PWD"
+node "$CH" retry-cutover --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 node "$CH" save --title "<topic>" --prompt-file "<handoff.md>" \
   --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 node "$CH" trigger --title "<topic>" --prompt-file "<handoff.md>" \
@@ -237,6 +282,8 @@ if (-not (Test-Path -LiteralPath "$chRoot\plugin.json")) {
 $ch = Join-Path $chRoot 'extensions\context-handoff\handoff-cli.mjs'
 if (-not (Test-Path -LiteralPath $ch -PathType Leaf)) { throw 'context-handoff payload-local CLI not found' }
 node $ch facts --json --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
+node $ch check-heads --json --cwd $PWD
+node $ch retry-cutover --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch save --title '<topic>' --prompt-file '<handoff.md>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch trigger --title '<topic>' --prompt-file '<handoff.md>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch trigger --handoff-token '<HANDOFF_TOKEN>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
@@ -254,6 +301,7 @@ Compose the appropriate shape and pass it to `save_handoff_prompt` as
 ### Active Effort
 ### Next Slice
 ### Immediate Session Delta
+### Outstanding Background Flows & External State
 ### Completion Gates
 ### Re-Handoff Instructions
 
@@ -263,6 +311,7 @@ Compose the appropriate shape and pass it to `save_handoff_prompt` as
 ### Direction & Motivation
 ### Progress
 ### Successor Work Roster
+### Outstanding Background Flows & External State
 ### Completion Gates
 ### Re-Handoff Instructions
 ### Gotchas
@@ -270,6 +319,11 @@ Compose the appropriate shape and pass it to `save_handoff_prompt` as
 
 ## Rules
 
+- Every session has this mechanism available from turn one, whether or not it
+  began from a handoff -- the extension delivers a one-time awareness message
+  on the first turn so this is never gated behind a pressure threshold or an
+  explicit trigger phrase. Context pressure is never a reason to truncate
+  diligence; it is only a reason to hand off.
 - The seed is a **locator**, not the handoff. Never inline the full markdown in
   it.
 - The stored brief may be long. Preserve fidelity there; optimize the seed and
@@ -283,3 +337,9 @@ Compose the appropriate shape and pass it to `save_handoff_prompt` as
   genuine crossroads, an error, a design contradiction, or a confirmation-gated
   destructive step does -- and even those close with a handoff naming the
   blocker, not a silent stop.
+- Never silently drop outstanding background flows (watches, polls,
+  `manage_schedule` entries, long-running commands) or external state this
+  session owns (open PRs, held claims/leases, peer-agent coordination). Always
+  carry each forward in the handoff's **Outstanding Background Flows &
+  External State** section as either resumable (state how) or an explicit
+  open item -- write "none" only when genuinely none exist.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -1185,6 +1186,43 @@ class TestWorktreeRoutes:
         assert d["summary"] is None
         assert d["live_intent"] is None
 
+    def test_parse_worktree_list_reads_closure_descriptor(self) -> None:
+        """worktree-finality-and-obligations (Phase 5): _parse_worktree_list
+        threads the raw ``closure`` descriptor from ``list --json --classify``
+        opaquely (this route does not interpret version/final-ness -- that's
+        the cockpit consumer's job via ``prune.interpret_descriptor_payload``,
+        since a cross-machine crawl may reach a different agent-worktrees
+        version)."""
+        from agent_bridge.routes import worktrees as wt_routes
+
+        closure = {
+            "version": 1,
+            "label": "FINAL",
+            "closure": {"final": True},
+            "action": {"disposition": "safe", "bucket": "clean"},
+        }
+        raw = json.dumps({
+            "version": 1,
+            "worktrees": [{
+                "id": "w1", "path": "/w1", "branch": "b", "status": "active",
+                "closure": closure,
+            }],
+        })
+        e = wt_routes._parse_worktree_list(raw, "test-agent")[0]
+        assert e.closure == closure
+        assert e.to_dict()["closure"] == closure
+
+    def test_parse_worktree_list_closure_absent_when_not_classified(self) -> None:
+        """Absent when the crawl didn't run --classify (or hit an older
+        runtime) -- the cockpit falls back to legacy fields, never guesses."""
+        from agent_bridge.routes import worktrees as wt_routes
+
+        raw = ('{"version": 1, "worktrees": [{"id": "w1", "path": "/w1",'
+               ' "branch": "b", "status": "active"}]}')
+        e = wt_routes._parse_worktree_list(raw, "test-agent")[0]
+        assert e.closure is None
+        assert e.to_dict()["closure"] is None
+
     def test_resume_worktree_with_no_session_404s(self, client) -> None:
         self._seed_worktree("test-agent", "anomalous-potato-wsl-20250101-160000-empty")
         resp = client.post(
@@ -1843,7 +1881,7 @@ def test_worktree_discovery_crawl_is_single_flight() -> None:
 
     calls = {"n": 0}
 
-    async def _slow_crawl_agent(name, config, res):
+    async def _slow_crawl_agent(name, config, res, *, classify=True):
         calls["n"] += 1
         await asyncio.sleep(0.2)  # simulate a slow / stuck `list`
         return []
@@ -1880,7 +1918,7 @@ def test_worktree_discovery_crawl_if_empty_no_reentrant_deadlock() -> None:
     resolver.agents = {"local": agent_cfg}
     cache._resolver = resolver
 
-    async def _crawl_agent(name, config, res):
+    async def _crawl_agent(name, config, res, *, classify=True):
         return []
 
     async def _run() -> None:
@@ -1889,3 +1927,239 @@ def test_worktree_discovery_crawl_if_empty_no_reentrant_deadlock() -> None:
 
     asyncio.run(_run())
     assert cache.get_all() == {"local": []}
+
+
+def test_crawl_if_empty_never_blocks_on_classify_budget() -> None:
+    """worktree-finality-and-obligations (Phase 5): the FIRST, blocking crawl
+    (``crawl_if_empty``) must never expose a synchronous caller to the longer
+    classify timeout budget -- it always calls ``_crawl_agent`` with
+    ``classify=False`` and backfills the descriptor via a separate
+    fire-and-forget task, so a slow/old target can only stall the first
+    response by the base (legacy) timeout, never classify's extended one."""
+    import asyncio
+
+    from agent_bridge.routes.worktrees import WorktreeDiscoveryCache
+
+    cache = WorktreeDiscoveryCache(interval=0)
+    agent_cfg = MagicMock()
+    agent_cfg.project = "aw"
+    agent_cfg.worktree_discovery = True
+    agent_cfg.host = None
+    resolver = MagicMock()
+    resolver.agents = {"local": agent_cfg}
+    cache._resolver = resolver
+
+    seen_classify: list[bool] = []
+
+    async def _fake_crawl_agent(name, config, res, *, classify=True):
+        seen_classify.append(classify)
+        return []
+
+    async def _run() -> None:
+        with patch.object(cache, "_crawl_agent", side_effect=_fake_crawl_agent):
+            await asyncio.wait_for(cache.crawl_if_empty(), timeout=5)
+            # Let the fire-and-forget backfill task get scheduled/run too.
+            await asyncio.sleep(0.05)
+
+    asyncio.run(_run())
+    assert seen_classify[0] is False, "first-paint crawl must skip --classify"
+    assert True in seen_classify, "backfill task must still request --classify"
+
+
+def test_stop_cancels_pending_classify_backfill() -> None:
+    """worktree-finality-and-obligations (Phase 5): ``stop()`` must cancel and
+    await any in-flight classify-backfill task (not just the periodic
+    ``_task``) -- otherwise a backfill scheduled by an on-demand request can
+    keep running (and mutating the cache) past application shutdown
+    (#discussion_r4004943069)."""
+    import asyncio
+
+    from agent_bridge.routes.worktrees import WorktreeDiscoveryCache
+
+    cache = WorktreeDiscoveryCache(interval=0)
+    agent_cfg = MagicMock()
+    agent_cfg.project = "aw"
+    agent_cfg.worktree_discovery = True
+    agent_cfg.host = None
+    resolver = MagicMock()
+    resolver.agents = {"local": agent_cfg}
+    cache._resolver = resolver
+
+    started = asyncio.Event()
+
+    async def _hanging_crawl_agent(name, config, res, *, classify=True):
+        if classify:
+            started.set()
+            await asyncio.sleep(10)  # would outlive the test if not cancelled
+        return []
+
+    async def _run() -> None:
+        with patch.object(cache, "_crawl_agent", side_effect=_hanging_crawl_agent):
+            await asyncio.wait_for(cache.crawl_if_empty(), timeout=5)
+            assert len(cache._backfill_tasks) == 1
+            await asyncio.wait_for(started.wait(), timeout=5)
+            await asyncio.wait_for(cache.stop(), timeout=5)
+            assert len(cache._backfill_tasks) == 0
+
+    asyncio.run(_run())
+
+
+def test_crawl_agent_falls_back_when_classify_unsupported() -> None:
+    """worktree-finality-and-obligations (Phase 5): an older agent-worktrees
+    runtime that rejects ``--classify`` must not lose discovery entirely --
+    ``_crawl_agent`` detects the specific "unrecognized arguments" stderr and
+    retries with the legacy (unclassified) args instead of returning []."""
+    import asyncio
+
+    from agent_bridge.routes.worktrees import WorktreeDiscoveryCache
+
+    cache = WorktreeDiscoveryCache(interval=0)
+    agent_cfg = MagicMock()
+    agent_cfg.project = "aw"
+    agent_cfg.host = None
+    resolver = MagicMock()
+
+    calls: list[list[str]] = []
+
+    async def _fake_run_local_ex(project, args=None, *, timeout=None):
+        calls.append(args)
+        if args and "--classify" in args:
+            return None, "aw: error: unrecognized arguments: --classify"
+        return (
+            '{"version": 1, "worktrees": [{"id": "w1", "path": "/w1",'
+            ' "branch": "b", "status": "active"}]}',
+            "",
+        )
+
+    async def _run() -> None:
+        with patch(
+            "agent_bridge.routes.worktrees._run_local_ex",
+            side_effect=_fake_run_local_ex,
+        ):
+            return await cache._crawl_agent("local", agent_cfg, resolver)
+
+    entries = asyncio.run(_run())
+    assert len(calls) == 2  # classify attempt, then the legacy fallback
+    assert "--classify" in calls[0]
+    assert "--classify" not in calls[1]
+    assert len(entries) == 1
+    assert entries[0].id == "w1"
+    assert entries[0].closure is None  # legacy list never carried one
+    assert "local" in cache._classify_unsupported
+
+
+def test_crawl_agent_skips_classify_probe_once_cached_unsupported() -> None:
+    """Follow-up (review): once an agent is known to reject --classify, a
+    later classify=True crawl (periodic sweep) must not repeat the failed
+    probe -- it goes straight to the legacy args, so a long-lived bridge
+    daemon doesn't double its discovery work for a permanently old
+    runtime."""
+    import asyncio
+
+    from agent_bridge.routes.worktrees import WorktreeDiscoveryCache
+
+    cache = WorktreeDiscoveryCache(interval=0)
+    cache._classify_unsupported.add("local")
+    agent_cfg = MagicMock()
+    agent_cfg.project = "aw"
+    agent_cfg.host = None
+    resolver = MagicMock()
+
+    calls: list[list[str]] = []
+
+    async def _fake_run_local_ex(project, args=None, *, timeout=None):
+        calls.append(args)
+        return (
+            '{"version": 1, "worktrees": [{"id": "w1", "path": "/w1",'
+            ' "branch": "b", "status": "active"}]}',
+            "",
+        )
+
+    async def _run() -> None:
+        with patch(
+            "agent_bridge.routes.worktrees._run_local_ex",
+            side_effect=_fake_run_local_ex,
+        ):
+            return await cache._crawl_agent("local", agent_cfg, resolver, classify=True)
+
+    entries = asyncio.run(_run())
+    assert len(calls) == 1, "must not attempt --classify for a cached-unsupported agent"
+    assert "--classify" not in calls[0]
+    assert len(entries) == 1
+
+
+def test_crawl_agent_falls_back_when_classify_times_out() -> None:
+    """A classify pass that fails/times out for any OTHER reason (not the
+    specific unsupported-flag stderr) also falls back to the legacy args
+    rather than losing the agent's rows -- e.g. a large/slow target
+    genuinely exceeding the classify budget."""
+    import asyncio
+
+    from agent_bridge.routes.worktrees import WorktreeDiscoveryCache
+
+    cache = WorktreeDiscoveryCache(interval=0)
+    agent_cfg = MagicMock()
+    agent_cfg.project = "aw"
+    agent_cfg.host = None
+    resolver = MagicMock()
+
+    calls: list[list[str]] = []
+
+    async def _fake_run_local_ex(project, args=None, *, timeout=None):
+        calls.append(args)
+        if args and "--classify" in args:
+            return None, ""  # timeout: no stderr, just None
+        return (
+            '{"version": 1, "worktrees": [{"id": "w1", "path": "/w1",'
+            ' "branch": "b", "status": "active"}]}',
+            "",
+        )
+
+    async def _run() -> None:
+        with patch(
+            "agent_bridge.routes.worktrees._run_local_ex",
+            side_effect=_fake_run_local_ex,
+        ):
+            return await cache._crawl_agent("local", agent_cfg, resolver)
+
+    entries = asyncio.run(_run())
+    assert len(calls) == 2
+    assert len(entries) == 1
+    assert entries[0].id == "w1"
+
+
+def test_crawl_agent_uses_classify_budget_and_keeps_closure() -> None:
+    """The happy path: --classify succeeds on the first try (using the longer
+    _CLASSIFY_CMD_TIMEOUT budget) and its closure descriptor survives."""
+    import asyncio
+
+    from agent_bridge.routes import worktrees as wt_routes
+    from agent_bridge.routes.worktrees import WorktreeDiscoveryCache
+
+    cache = WorktreeDiscoveryCache(interval=0)
+    agent_cfg = MagicMock()
+    agent_cfg.project = "aw"
+    agent_cfg.host = None
+    resolver = MagicMock()
+
+    seen_timeouts: list[float | None] = []
+
+    async def _fake_run_local_ex(project, args=None, *, timeout=None):
+        seen_timeouts.append(timeout)
+        return (
+            '{"version": 1, "worktrees": [{"id": "w1", "path": "/w1",'
+            ' "branch": "b", "status": "active",'
+            ' "closure": {"version": 1, "label": "FINAL"}}]}',
+            "",
+        )
+
+    async def _run() -> None:
+        with patch(
+            "agent_bridge.routes.worktrees._run_local_ex",
+            side_effect=_fake_run_local_ex,
+        ):
+            return await cache._crawl_agent("local", agent_cfg, resolver)
+
+    entries = asyncio.run(_run())
+    assert seen_timeouts == [wt_routes._CLASSIFY_CMD_TIMEOUT]
+    assert entries[0].closure == {"version": 1, "label": "FINAL"}

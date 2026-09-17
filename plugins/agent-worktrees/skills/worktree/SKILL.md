@@ -263,6 +263,32 @@ ready yet."
 | **Previous push-changes failed** (network, rebase conflict) | Fix the issue, then retry `<agent-worktrees catalog argv[0]> push-changes` |
 | **Unsure what state the worktree is in** | `<agent-worktrees catalog argv[0]> status` first, then decide |
 
+### Make a successful `finalize` the last thing you do
+
+When the user asks you to finalize/wrap up/sign off, or you judge your
+assigned goal/effort/task complete, drive `finalize` to a **successful
+result** as the last action before ending your turn -- don't stop at
+`push-changes`, and don't end the turn on a failed or skipped `finalize`
+without saying so.
+
+`finalize` is a **fail-fast assertion**, not a gate you route around: it
+re-validates non-mutating checks (branch content, dirtiness, claim state) and
+names the *specific* blocker on failure. Read the blocker and clean it up
+directly -- resolve the cited obligation, retry `push-changes`, settle the
+named claim -- then call `finalize` again. Repeat this diagnose-and-clean
+cycle until you get a clean pass or hit a genuine blocker only the operator
+can resolve (see the obligation gate below). **Never force-release a claim
+and never improvise a hand-off** to make `finalize` pass -- a claim only
+moves to a successor when the user explicitly names one (an
+`agent-dispatch` handoff task, an async bridge agent, etc.); absent that
+direction, the fix is to close out the obligation yourself.
+
+A `finalize` that reports content already on the default branch **is** the
+successful result, even when it also reports the branch/folder were left in
+place because the session is still live (see `finalize does not delete the
+worktree out from under a running session` above) -- that is normal, not a
+failure to loop on.
+
 ### Finalize is gated on outbound resource obligations
 
 `finalize` holds a worktree **accountable** for what it allocated. If this
@@ -271,6 +297,17 @@ borrowed CodeSpace/container, or a bridge session it brought into being -- the
 **obligation gate blocks finalize by default** (`AGENT_WORKTREES_OBLIGATION_GATE`
 is `block`), refusing *before* any destructive step so the worktree stays intact.
 The error lists each unsettled obligation. Resolve it -- don't bypass:
+
+> **Itemize what you're leaving open -- don't just flip a flag.** Paused
+> mid-effort, mid-bug, or mid-task series? Name it explicitly:
+> `<agent-worktrees catalog argv[0]> follow-ups add "<summary>" --ref
+> effort:<slug>` (or `--ref issue:<repo>#<n>` for a bug you filed that's
+> related to the current task -- claim it proactively rather than letting it
+> drift unattached). An open follow-up item blocks `cleanup`/`gc` the same way
+> a held claim does, and only resolves when you `follow-ups resolve <id>` or
+> `dismiss <id> --reason <text>` -- the operator, not an idle timer, decides
+> when it's really done. `status --follow-up --summary "..."` remains a
+> shorthand for the boolean-only legacy case.
 
 - **A cross-repo worktree you created** -- finalize *it* first; its finalize
   flips this worktree's claim to `at-rest` automatically (no manual step).
@@ -409,7 +446,13 @@ In **PR mode**, sign-off becomes `create-pr` -> review -> merge ->
 the default branch.
 **An opened PR is final by default** -- land everything before `create-pr` (or
 open it as a draft with `--draft`, then `pr-ready` when ready for review), since
-a late push races the merge.
+a late push races the merge. **Driving the PR through to actual merge -- not
+just opening it -- is the default conduct for every profile**, using whichever
+waiting policy fits (self-merge: brief CI/review wait then `pr-merge --now`;
+human-merge: poll and address feedback; agent-merge: signal consent once
+approved). The only sanctioned deviations are an explicit operator instruction
+or a specific alternate charter that governs differently -- see
+references/pr-workflow.md's *Default conduct* section.
 
 The full PR-mode reference -- profiles + verb applicability, config resolution
 (machine-local vs in-repo), `create-pr` auto-open + attribution + labels, the
@@ -555,6 +598,100 @@ Never auto-purge unused worktrees without asking — a worktree may appear
 "unused" if the session involved only questions, planning, or conversation
 with no commits yet.
 
+### Fresh safety revalidation before removal
+
+The three **non-forced** cleanup reapers all re-check safety from fresh state
+at the action moment, not just at scan time: batch
+`cleanup --clean`, single-item `cleanup --worktree-id <id>`, and the automatic
+finished-session sweep each reacquire `FinalizeLock`, reload the tracking
+record, rebuild worktree-local liveness, re-classify git state, re-derive
+conversation turns, and re-run the complete cleanup disposition immediately
+before the reap. For a missing worktree directory, the branch-merged proof is
+also re-run under that same lock. Non-forced cleanup then keeps the
+per-record `_RecordLock(require_sidecar=True)` held through `_reap_worktree`,
+so the tool's own record writers (claim/follow-up/session-registration
+mutations) cannot slip a conflicting change into the final read→delete window.
+
+This is a **fail-closed, in-tool writer fence**, not a universal filesystem
+lock: arbitrary external edits or raw git commands outside agent-worktrees can
+still race the local delete. `cleanup --worktree-id <id> --force` remains the
+documented, narrower exception: it still refreshes liveness under `FinalizeLock`
+and refuses an active/hosted session, but it deliberately bypasses the full
+dirty/WIP/claim/follow-up/branch-merge disposition.
+
+**Known limitation (#2649):** a record whose tracking `status` is already
+`finalized` can still mask genuinely new WIP or conversation-only content added
+*after* finalize, because `_apply_tracking_override` currently collapses that
+fresh state to `COMPLETED` before `cleanup_disposition` sees it. The tests pin
+that behavior so it cannot silently drift, but the limitation itself remains
+tracked and unfixed here.
+
+### Dirty worktrees: resolve per-worktree, never blanket `--force`
+
+`cleanup` (and `remove-system`) refuse a worktree with uncommitted changes
+**on purpose** — that refusal is the tool protecting real, unlanded work.
+`cleanup --worktree-id <id> --force` (and `remove-system ... --force`) exist
+for a genuine, individually-verified exception, not as a bulk shortcut for a
+backlog of `dirty` worktrees. Treating "dirty" as a synonym for "safe to
+force" throws away the one signal that distinguishes real work from noise —
+and a mode-only or superseded diff in worktree #1 doesn't guarantee the
+same is true of worktree #2 through #23.
+
+For **every** worktree `cleanup` reports as `dirty`, go in individually:
+
+1. **Read the actual diff, including staged and untracked paths.** `DIRTY`
+   covers modified, staged, *and* untracked content (see the Worktree States
+   table below) — `git diff` alone only shows unstaged tracked changes. Run
+   `git status --porcelain` first to see every path, then `git diff HEAD`
+   for the full tracked diff (staged + unstaged), and open each untracked
+   file directly. Distinguish a real change (content not already on the
+   default branch, an unlanded fix) from noise (a stray mode-only flip, a
+   scratch file, a local edit later superseded upstream) — don't rely on
+   `--stat`, which renders a mode-only/rename-only change as `0
+   insertions/deletions`, indistinguishable at a glance from real content.
+2. **Land real work through the repo's own contribution flow — branch on
+   `pr-profile`.** Check `<agent-worktrees catalog argv[0]> get pr-profile`
+   first: a `pr-*` profile means commit, open its PR, get it
+   reviewed/merged (see § PR Workflow above); a **`direct`** profile has no
+   PR flow at all — commit and let `finalize` land the work directly (see
+   § Two-Phase Sign-Off above). Sending a direct-profile repo through PR
+   steps just produces inapplicable instructions. If the diff looks like it
+   duplicates something already on the default branch, confirm with
+   `git diff <default-branch> -- <path>` before writing it off as noise —
+   don't assume.
+3. **Discard confirmed noise explicitly, file by file, matching how it's
+   dirty.** `git checkout -- <path>` only restores the working tree from
+   the index — a **staged** noise change stays staged and the path stays
+   dirty. For a tracked path, discard both index and working tree with
+   `git restore --staged --worktree -- <path>` (or `git checkout HEAD --
+   <path>`, equivalent for this purpose). For **untracked** noise, remove
+   only the reviewed path(s) — `git clean -fd -- <path>` (or plain `rm`) —
+   never a bare `git clean -fd`, which deletes every untracked file and
+   directory in the worktree, including unrelated unreviewed work.
+4. **Re-check state before assuming plain `cleanup --clean` will prune it.**
+   A clean tree does not by itself make a worktree `completed` — it
+   reclassifies to whatever the underlying content actually is: `wip` if it
+   still carries unmerged commits ahead of the default branch (not pruned
+   by plain `cleanup --clean`; that content needs to land first, per step
+   2); `unused` if it now has no commits *and* the session held no
+   conversation turns (needs `--include-unused`); or `conversation-only` if
+   it has no commits but the session *did* hold turns (needs the separate
+   `--include-conversations` flag — `--include-unused` alone does **not**
+   cover this bucket). Confirm with the user per the existing "ask before
+   purging unused" rule above in either case — clearing noise doesn't
+   retroactively make a worktree's conversation/planning history
+   disposable. Only a worktree that reclassifies to `completed`/`gone` is
+   pruned by plain `cleanup --clean` with no extra flag. If `cleanup` still
+   skips a worktree you expected to be clear, that reclassification — not
+   `--force` — is the next thing to check.
+
+If a whole batch of worktrees turns out `dirty` for the **same root
+cause** (e.g. a shared tool stamping every worktree with an identical
+mode-only bit or a stale generated file), that is itself a defect worth
+tracking or fixing at the source — reaping the symptom once, by hand, after
+verifying it's genuinely inert, is reasonable; silently normalizing
+`--force` as the standing remedy for that pattern is not.
+
 ## Worktree States
 
 | Status | Meaning |
@@ -627,6 +764,23 @@ union of signals: tracked session locks under `~/.copilot/session-state/`, live
 `wt-<id>` tmux/psmux sessions, cached `mux_live` / `bound_live` hints, and
 bridge-owned session locks. Dead PIDs are filtered automatically, and stale
 locks can be reclaimed with the `reclaim` flow above.
+
+### Diagnosing an unretired handoff predecessor pane
+
+A worktree that accumulates extra mux panes after a series of handoffs (a
+predecessor whose successor was spawned but whose own retirement was never
+confirmed -- whether the handoff is only candidate-associated or already
+fully linked) is a handoff-lifecycle bug, not something to fix by hand. Run
+`agent-worktrees handoffs-check --worktree-id <id>` <!-- marketplace-isolation: allow diagnostic-tooling --> (read-only) or add
+`--execute` to retire what it finds. The read-only report does not itself
+confirm the pane is still alive -- it lists every unretired candidate it
+finds; `--execute` runs the same live-check choreography the resident
+status monitor uses for its own automatic sweep, and is what actually
+resolves whether a listed candidate was real. `--all` checks
+every tracked worktree in the current project. See
+[architecture.md § Handoff cutover lifecycle](../../docs/architecture.md#handoff-cutover-lifecycle-the-13-stage-trace)
+for the full 13-stage model this diagnoses against. **Never manually kill a
+pane/process** to work around a suspected stuck handoff -- use this tool.
 
 ## Resource Leases (atomic, cross-machine, same-harness)
 

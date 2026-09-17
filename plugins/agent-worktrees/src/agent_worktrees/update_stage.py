@@ -191,7 +191,20 @@ def discover_plugin_dir(home: Path | None = None) -> tuple[Path | None, str]:
 
 
 def fingerprint(plugin_dir: Path) -> str:
-    """Hash the version/launcher/installer files to detect a real change."""
+    """Hash the version/launcher/installer files plus the actual application
+    source (#2609) to detect a real change.
+
+    The curated ``_FINGERPRINT_FILES`` list alone misses a plugin bug fix that
+    lands purely in ``.py`` source under ``src/`` (or a vendored path-
+    dependency's ``libs/*/src/``) without touching a version string or any of
+    those specific meta-files -- exactly the gap that let a merged fix sit
+    undetected on this machine: the marketplace payload had genuinely changed,
+    but every staleness check available (this fingerprint, and the deployed-
+    vs-payload version-drift check that reads ``pyproject.toml``'s version
+    string) agreed nothing needed reinstalling. Hashing the source tree too
+    closes that gap the same way :func:`install.ps1's Get-PayloadHash /
+    install.sh's _payload_hash <#2609>` already were.
+    """
     import hashlib
 
     h = hashlib.sha256()
@@ -203,6 +216,26 @@ def fingerprint(plugin_dir: Path) -> str:
             except Exception:
                 h.update(b"<unreadable>")
         h.update(b"\x00")
+
+    source_roots = [plugin_dir / "src"]
+    libs_dir = plugin_dir / "libs"
+    if libs_dir.is_dir():
+        for lib in sorted(p for p in libs_dir.iterdir() if p.is_dir()):
+            candidate = lib / "src"
+            if candidate.is_dir():
+                source_roots.append(candidate)
+    for root in source_roots:
+        if not root.is_dir():
+            continue
+        for fp in sorted(root.rglob("*")):
+            if not fp.is_file() or fp.suffix in (".pyc", ".pyo") or "__pycache__" in fp.parts:
+                continue
+            h.update(str(fp.relative_to(plugin_dir)).replace("\\", "/").encode("utf-8"))
+            try:
+                h.update(fp.read_bytes())
+            except Exception:
+                h.update(b"<unreadable>")
+            h.update(b"\x00")
     return h.hexdigest()
 
 
@@ -364,6 +397,7 @@ def indicator_state(
     """Picker-facing update state for the version indicator (#1430).
 
     Returns one of:
+      "paused"    -- this launch explicitly disabled updates;
       "checking"  -- a background stage is in flight (live, fresh lock, or the
                      last stage recorded ``skipped: locked`` because a peer
                      stage owns the lock);
@@ -374,6 +408,9 @@ def indicator_state(
 
     Read-only and cheap (two small files); safe to poll on the render tick.
     """
+    if os.environ.get("WORKTREE_NO_UPDATE") == "1":
+        return "paused"
+
     lk = lock or lock_path()
     try:
         if lk.exists():

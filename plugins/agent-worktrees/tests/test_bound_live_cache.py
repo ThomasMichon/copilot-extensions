@@ -20,7 +20,7 @@ from unittest.mock import patch
 
 from agent_worktrees import __main__ as cli
 from agent_worktrees import tracking
-from agent_worktrees.picker_tui import data_local
+from agent_worktrees.picker_support import data_local
 
 
 def _rec(wt_id="aaaa", *, path="/tmp/wt", bound_live=None, bound_live_at=None):

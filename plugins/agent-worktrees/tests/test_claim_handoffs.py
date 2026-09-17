@@ -136,6 +136,31 @@ def test_offer_rejects_missing_inactive_and_cross_machine(handoff_state):
         )
 
 
+def test_finalized_source_and_consumer_may_still_offer(handoff_state):
+    """``finalized`` is not terminal -- a resumed source/consumer worktree may
+    still participate in a claim handoff (docs/worktree-lifecycle.md)."""
+    source_path = (
+        claim_handoffs.cfg.project_dir("source-project")
+        / "worktrees"
+        / "wt-source.yaml"
+    )
+    source = tracking.load_record(source_path)
+    source.status = "finalized"
+    tracking.save_record(source, source_path)
+    consumer_path = (
+        claim_handoffs.cfg.project_dir("consumer-project")
+        / "worktrees"
+        / "wt-consumer.yaml"
+    )
+    consumer = tracking.load_record(consumer_path)
+    consumer.status = "finalized"
+    tracking.save_record(consumer, consumer_path)
+    refs = [handoff_state[0].ref]
+    bundle, created = _offer(refs)
+    assert created is True
+    assert bundle.source == SOURCE and bundle.consumer == CONSUMER
+
+
 def test_decline_and_cancel_are_actor_checked_and_idempotent(handoff_state):
     ref = handoff_state[0].ref
     declined = _offer([ref])[0]

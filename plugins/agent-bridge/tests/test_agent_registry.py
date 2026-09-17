@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ from agent_bridge.agent_registry import (
     AgentConfig,
     AgentRegistryLoadError,
     AgentResolver,
+    CliNamespaceResolver,
     NamespaceAgentInfo,
     build_resolver,
     discover_local_agents,
@@ -815,6 +817,79 @@ class TestNamespaceResolvers:
         assert "slow-b:slow-b-agent" in names
         # Sequential would take >= 0.4s; concurrent stays well under it.
         assert elapsed < 0.35
+
+    @pytest.mark.asyncio
+    async def test_list_agents_async_bounds_one_straggling_resolver(self, monkeypatch):
+        # Reliability: a single resolver that hangs far longer than the
+        # others (a slow CodeSpaces API call, an unreachable SSH host, etc.)
+        # must not make the whole listing wait for it -- observed in
+        # production causing agent_dispatch's registered_agents() (20s
+        # timeout) to intermittently fail with "could not read the local
+        # agent registry" for agents having nothing to do with the slow
+        # resolver, which then dead-lettered unrelated spawn reservations.
+        import asyncio
+
+        monkeypatch.setenv("AGENT_BRIDGE_NAMESPACE_LIST_RESOLVER_TIMEOUT", "0.05")
+
+        class _SlowResolver:
+            @property
+            def prefix(self) -> str:
+                return "hangs"
+
+            async def list(self):
+                await asyncio.sleep(5.0)
+                return [NamespaceAgentInfo(name="hangs-agent")]  # pragma: no cover
+
+            async def resolve(self, name):  # pragma: no cover - unused here
+                raise NotImplementedError
+
+            async def ensure_ready(self, name):  # pragma: no cover - unused
+                raise NotImplementedError
+
+        resolver = AgentResolver({}, {})
+        resolver.register_namespace_resolver(_SlowResolver())
+        resolver.register_namespace_resolver(_MockResolver("fast"))
+
+        start = asyncio.get_event_loop().time()
+        agents = await resolver.list_agents_async()
+        elapsed = asyncio.get_event_loop().time() - start
+
+        names = {a["name"] for a in agents}
+        assert "fast:test-agent" in names
+        assert not any(n.startswith("hangs:") for n in names)
+        # Bounded by the 0.05s per-resolver timeout, not the 5s sleep.
+        assert elapsed < 1.0
+
+    @pytest.mark.asyncio
+    async def test_list_agents_async_forwards_timeout_into_cli_resolver_subprocess(
+        self, monkeypatch
+    ):
+        # Integration coverage: AgentResolver.list_agents_async() must not
+        # just bound a wedged CliNamespaceResolver by cancellation (which
+        # cannot stop a subprocess.run already running in a worker thread --
+        # see test_list_threads_timeout_into_subprocess_run in
+        # test_cli_namespace_resolver.py for the unit-level proof). It must
+        # actually detect that this resolver's list() accepts a ``timeout``
+        # keyword and pass the configured bound through, so the underlying
+        # subprocess.run(..., timeout=...) is what kills the child process.
+        import shutil
+        from unittest.mock import patch
+
+        monkeypatch.setenv("AGENT_BRIDGE_NAMESPACE_LIST_RESOLVER_TIMEOUT", "3.5")
+
+        resolver = AgentResolver({}, {})
+        resolver.register_namespace_resolver(
+            CliNamespaceResolver("codespace", "agent-codespaces")
+        )
+
+        with patch.object(shutil, "which", return_value="/usr/bin/agent-codespaces"), \
+             patch(
+                 "subprocess.run",
+                 return_value=subprocess.CompletedProcess([], 0, "[]", ""),
+             ) as mock_run:
+            await resolver.list_agents_async()
+
+        assert mock_run.call_args.kwargs["timeout"] == 3.5
 
     @pytest.mark.asyncio
     async def test_list_agents_async_one_namespace_failure_does_not_block_others(self):
@@ -2192,7 +2267,7 @@ class TestWorktreeDiscoveryEligibility:
         cache = WorktreeDiscoveryCache()
         crawled: list[str] = []
 
-        async def fake_crawl_agent(agent_name, config, resolver):
+        async def fake_crawl_agent(agent_name, config, resolver, *, classify=True):
             crawled.append(agent_name)
             return []
 

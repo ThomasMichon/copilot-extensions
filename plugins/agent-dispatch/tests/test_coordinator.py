@@ -964,6 +964,45 @@ def test_health_loops_report_liveness_gc_and_orphan_reap(tmp_path, monkeypatch):
         assert loops["liveness_gc"]["consecutive_failures"] == 0
         assert loops["orphan_reap"]["total_runs"] >= 1
         assert loops["orphan_reap"]["in_progress"] is False
+        # The handoff-fallback loop is disabled by default (see
+        # AGENT_DISPATCH_HANDOFF_FALLBACK) -- its health entry is still
+        # present (never a KeyError) but never records a run.
+        assert loops["handoff_fallback"]["total_runs"] == 0
+        c.close()
+    finally:
+        stop()
+
+
+def test_health_loops_report_handoff_fallback_when_enabled(tmp_path, monkeypatch):
+    """Opting in (``handoff_fallback_enabled=True``) arms the coordinator's
+    reconciliation loop alongside liveness GC / orphan reap, on the same
+    ``sweep_interval`` cadence, and it is independently visible at ``GET
+    /health`` -- the same 'where a stuck poller got stuck' diagnosis surface
+    the other two loops already have."""
+    from agent_dispatch.coordinator import create_app
+
+    monkeypatch.setattr("agent_dispatch.tracking.liveness_verdict", lambda *a, **k: "unknown")
+    monkeypatch.setattr("agent_dispatch.identity.resolve_machine", lambda: None)
+    q = TaskQueue(tmp_path / "tasks.db")
+    url, stop = _boot(
+        create_app(
+            q, sweep_interval=0.2, enable_mcp=False,
+            handoff_fallback_enabled=True, handoff_fallback_grace=0.0,
+        )
+    )
+    try:
+        c = DispatchClient(url)
+        deadline = time.time() + 5
+        loops = {}
+        while time.time() < deadline:
+            loops = httpx.get(f"{url}/health", timeout=5).json()["loops"]
+            if loops.get("handoff_fallback", {}).get("total_runs", 0) >= 1:
+                break
+            time.sleep(0.1)
+        assert loops["handoff_fallback"]["total_runs"] >= 1
+        assert loops["handoff_fallback"]["in_progress"] is False
+        assert loops["handoff_fallback"]["last_error"] is None
+        assert loops["handoff_fallback"]["consecutive_failures"] == 0
         c.close()
     finally:
         stop()

@@ -141,11 +141,6 @@ class TestDataModels:
         assert profile.name == "test"
         assert profile.label == "Test"
 
-    def test_session_backend_defaults_to_direct(self):
-        backend = cfg.SessionBackendConfig()
-        assert backend.kind == "direct"
-        assert backend.is_ahp is False
-
     def test_repo_config(self):
         repo = cfg.RepoConfig(
             anchor="/tmp/repo",
@@ -179,48 +174,7 @@ class TestDataModels:
         assert pr.branch_update_strategy == "rebase"
         assert pr.merge_strategy == "squash"
         assert pr.prefer_auto_merge is True
-
-
-class TestSessionBackendConfig:
-    def test_parses_explicit_ahp_backend(self):
-        backend = cfg._parse_session_backend({
-            "kind": "ahp",
-            "endpoint_url": "ws://127.0.0.1:8765",
-            "github_account": "octocat",
-            "protocol_versions": ["0.7.0"],
-        })
-        assert backend.is_ahp
-        assert backend.endpoint_url == "ws://127.0.0.1:8765"
-        assert backend.github_account == "octocat"
-        assert backend.protocol_versions == ("0.7.0",)
-
-    @pytest.mark.parametrize(
-        "raw, message",
-        [
-            ({"kind": "ahp"}, "endpoint_url"),
-            ({"kind": "other"}, "kind"),
-            (
-                {
-                    "kind": "ahp",
-                    "endpoint_url": "ws://127.0.0.1:8765",
-                    "protocol_versions": [],
-                },
-                "protocol_versions",
-            ),
-            (
-                {
-                    "kind": "ahp",
-                    "endpoint_url": "ws://127.0.0.1:8765",
-                    "connect_timeout_seconds": True,
-                },
-                "connect_timeout_seconds",
-            ),
-        ],
-    )
-    def test_rejects_invalid_backend(self, raw, message):
-        with pytest.raises(ValueError, match=message):
-            cfg._parse_session_backend(raw)
-
+        assert pr.notes == ""
 
 # ---------------------------------------------------------------------------
 # pr-workflow config parsing
@@ -247,6 +201,29 @@ class TestPRConfigParsing:
         self._write(cfgfile)
         conf = cfg.load_config(cfgfile)
         assert conf.repos["ext"].pr.enabled is False
+
+    def test_pr_notes_parsed(self, tmp_path: Path):
+        cfgfile = tmp_path / "config.yaml"
+        self._write(
+            cfgfile,
+            "    pr:\n"
+            "      enabled: true\n"
+            "      merge_actor: submitter-direct\n"
+            "      notes: >-\n"
+            "        Maintainers bypass required review in pull_request mode,\n"
+            "        not always/exempt, to keep an audit trail.\n",
+        )
+        conf = cfg.load_config(cfgfile)
+        assert conf.repos["ext"].pr.notes == (
+            "Maintainers bypass required review in pull_request mode, "
+            "not always/exempt, to keep an audit trail."
+        )
+
+    def test_pr_notes_defaults_empty(self, tmp_path: Path):
+        cfgfile = tmp_path / "config.yaml"
+        self._write(cfgfile, "    pr:\n      enabled: true\n")
+        conf = cfg.load_config(cfgfile)
+        assert conf.repos["ext"].pr.notes == ""
 
     def test_pr_block_parsed(self, tmp_path: Path):
         cfgfile = tmp_path / "config.yaml"
@@ -297,6 +274,91 @@ class TestPRConfigParsing:
         assert pr.bypass_reason == "self-serve"
         assert pr.squash is True
         assert pr.delete_source_branch is False
+
+    def test_pr_roles_and_fork_absent_defaults_empty(self, tmp_path: Path):
+        cfgfile = tmp_path / "config.yaml"
+        self._write(cfgfile, "    pr:\n      enabled: true\n")
+        pr = cfg.load_config(cfgfile).repos["ext"].pr
+        assert pr.roles == {}
+        assert pr.fork == cfg.ForkConfig()
+        assert pr.fork.enabled is False
+
+    def test_pr_fork_block_parsed(self, tmp_path: Path):
+        cfgfile = tmp_path / "config.yaml"
+        self._write(
+            cfgfile,
+            "    pr:\n"
+            "      enabled: true\n"
+            "      fork:\n"
+            "        enabled: true\n"
+            "        remote: myfork\n"
+            "        owner: someone\n",
+        )
+        pr = cfg.load_config(cfgfile).repos["ext"].pr
+        assert pr.fork == cfg.ForkConfig(enabled=True, remote="myfork", owner="someone")
+
+    def test_pr_roles_block_parsed(self, tmp_path: Path):
+        cfgfile = tmp_path / "config.yaml"
+        self._write(
+            cfgfile,
+            "    pr:\n"
+            "      enabled: true\n"
+            "      merge_actor: submitter-direct\n"
+            "      roles:\n"
+            "        maintain:\n"
+            "          merge_actor: submitter-direct\n"
+            "        write:\n"
+            "          merge_actor: \"\"\n"
+            "          fork:\n"
+            "            enabled: true\n"
+            "        bogus-role:\n"
+            "          merge_actor: submitter-direct\n",
+        )
+        pr = cfg.load_config(cfgfile).repos["ext"].pr
+        # An unrecognized role key is dropped, not raised.
+        assert set(pr.roles) == {"maintain", "write"}
+        assert pr.roles["maintain"].merge_actor == "submitter-direct"
+        assert pr.roles["maintain"].fork is None
+        assert pr.roles["write"].merge_actor == ""
+        assert pr.roles["write"].fork == cfg.ForkConfig(enabled=True)
+
+    def test_resolve_role_pr_config_no_role_returns_base(self, tmp_path: Path):
+        cfgfile = tmp_path / "config.yaml"
+        self._write(
+            cfgfile,
+            "    pr:\n"
+            "      enabled: true\n"
+            "      merge_actor: submitter-direct\n"
+            "      roles:\n"
+            "        write:\n"
+            "          merge_actor: \"\"\n",
+        )
+        pr = cfg.load_config(cfgfile).repos["ext"].pr
+        assert cfg.resolve_role_pr_config(pr, None) is pr
+        assert cfg.resolve_role_pr_config(pr, "unconfigured-role") is pr
+
+    def test_resolve_role_pr_config_layers_matching_role(self, tmp_path: Path):
+        cfgfile = tmp_path / "config.yaml"
+        self._write(
+            cfgfile,
+            "    pr:\n"
+            "      enabled: true\n"
+            "      merge_actor: submitter-direct\n"
+            "      reviewer: copilot\n"
+            "      roles:\n"
+            "        write:\n"
+            "          merge_actor: \"\"\n"
+            "          fork:\n"
+            "            enabled: true\n"
+            "            remote: myfork\n",
+        )
+        pr = cfg.load_config(cfgfile).repos["ext"].pr
+        resolved = cfg.resolve_role_pr_config(pr, "Write")  # case-insensitive
+        assert resolved.merge_actor == ""
+        assert resolved.fork == cfg.ForkConfig(enabled=True, remote="myfork")
+        # Everything not overridden by the role is inherited unchanged.
+        assert resolved.reviewer == "copilot"
+        assert resolved.enabled is True
 
     def test_pr_required_parsed(self, tmp_path: Path):
         cfgfile = tmp_path / "config.yaml"
@@ -971,7 +1033,8 @@ class TestLayeredConfig:
         anchor = tmp_path / "owner"
         anchor.mkdir()
         (anchor / cfg.INREPO_CONFIG_FILENAME).write_text(
-            "stateless: true\nrequires_external_state_root: true\n",
+            "stateless: true\nrequires_external_state_root: true\n"
+            "knowledge_only: false\n",
             encoding="utf-8",
         )
         from agent_worktrees import repos as repos_mod
@@ -1009,7 +1072,36 @@ class TestLayeredConfig:
 
         assert conf.repo_name == "owner"
         assert conf.default_repo.stateless is True
+        assert conf.default_repo.knowledge_only is False
         assert cfg.active_project() == "provider"
+
+    def test_knowledge_only_defaults_false_and_parses_true(
+        self, tmp_path: Path, monkeypatch
+    ):
+        anchor = tmp_path / "companion"
+        anchor.mkdir()
+        from agent_worktrees import repos as repos_mod
+
+        registry = repos_mod.ReposRegistry(
+            repos={
+                "companion": repos_mod.RepoEntry(
+                    name="companion",
+                    repo_class="knowledge",
+                    paths={"windows": str(anchor), "wsl": str(anchor),
+                           "linux": str(anchor)},
+                )
+            }
+        )
+        monkeypatch.setattr(repos_mod, "read_registry", lambda: registry)
+        cfg.set_active_project("companion")
+
+        missing = tmp_path / "no-machine-config.yaml"
+        assert cfg.load_config(missing).default_repo.knowledge_only is False
+
+        (anchor / cfg.INREPO_CONFIG_FILENAME).write_text(
+            "knowledge_only: true\n", encoding="utf-8",
+        )
+        assert cfg.load_config(missing).default_repo.knowledge_only is True
 
     def test_foreign_repo_machine_local_only(self, tmp_path: Path):
         # A foreign repo with no in-repo config loads purely from machine-local.

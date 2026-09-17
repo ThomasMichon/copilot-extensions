@@ -10,7 +10,12 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Handoff Cutover Lifecycle Journal](active/handoff-cutover-lifecycle-journal/README.md) | Draft | #2457 |
+| [Handoff Live Cutover](active/handoff-live-cutover/README.md) | Active | #2249† |
+| [Handoff Cutover Reload Robustness](active/handoff-cutover-reload-robustness/README.md) | Active | #5250† |
+| [Context-Handoff Overhaul](active/context-handoff-overhaul/README.md) | Draft | #2594 |
 | [Custom Context Aggregator Retirement](active/custom-context-aggregator-retirement/README.md) | Draft | #2173 |
+| [Role-Aware Fork PR Flow](active/role-aware-fork-pr-flow/README.md) | Active | See effort |
 | [SessionStart Static/Dynamic Content Conformance](active/sessionstart-static-dynamic-conformance/README.md) | Active | #2256 |
 | [agent-logger Aggregate Configuration](active/agent-logger-aggregate-configuration/README.md) | Active | #1817 |
 | [Balanced Profile Assignment](active/balanced-profile-assignment/README.md) | Active | #1564 |
@@ -21,6 +26,7 @@ that pattern to this repository.
 | [agent-bridge AHP Convergence](active/agent-bridge-ahp-convergence/README.md) | Draft | #1266, #1308 |
 | [agent-bridge Delegation Convergence](active/agent-bridge-delegation-convergence/README.md) | Active | #1448 |
 | [agent-bridge Attention Waits](active/agent-bridge-attention-waits/README.md) | Draft | #1450 |
+| [agent-bridge Session Discovery](active/agent-bridge-session-discovery/README.md) | Draft | #2530 |
 | [agent-bridge Delegation Contract](active/agent-bridge-delegation-contract/README.md) | Done; pending archive | #1449 |
 | [Migration Intake](active/migration-intake/README.md) | Draft | See effort |
 | [Account-Aware Operations](active/account-aware-operations/README.md) | Draft | See effort |
@@ -40,6 +46,9 @@ that pattern to this repository.
 | [Worktree Manager Control Plane](active/worktree-manager-control-plane/README.md) | Active | #352 |
 | [agent-index Engine Daemon](active/agent-index-engine-daemon/README.md) | Done; pending archive | See effort |
 | [Uniform Runtime Resolution](active/uniform-runtime-resolution/README.md) | Done; pending archive | #765 |
+| [Vendored Installer Engine](active/vendored-installer-engine/README.md) | Draft | See effort |
+| [Pull-Request Capability](active/pull-request-capability/README.md) | Draft | #2691, #2699, #2700 |
+| [Module Componentization Discipline](active/module-componentization-discipline/README.md) | Active | #2805 |
 
 ## Local conventions
 

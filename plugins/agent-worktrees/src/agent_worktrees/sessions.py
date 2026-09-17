@@ -21,6 +21,17 @@ from pathlib import Path
 
 import yaml
 
+from . import activity
+from .sessions_pane_retire import (
+    _mux_bin,
+    _mux_last_window_guard,  # noqa: F401 -- re-export for tests
+    _mux_pane_alive,
+    _mux_pane_process_tree,
+    _mux_pane_session_name,
+    _retire_failed_successor,
+    mux_retire_pane,  # noqa: F401 -- re-export for callers (e.g. pane_reaper, __main__)
+)
+
 try:  # libyaml (C) is dramatically faster; the one sanctioned sweep uses it.
     from yaml import CSafeLoader as _YamlSafeLoader
 except ImportError:  # pragma: no cover - pure-Python fallback
@@ -964,15 +975,11 @@ def _session_meta(session_dir: Path, session_id: str) -> dict | None:
             title = name.strip()
 
     return {
-        "id": session_id,
-        "name": title,
-        "cwd": str(ws_data.get("cwd", "")),
-        "branch": str(ws_data.get("branch", "")),
+        "id": session_id, "name": title,
+        "cwd": str(ws_data.get("cwd", "")), "branch": str(ws_data.get("branch", "")),
         "created_at": str(ws_data.get("created_at", "")),
         "updated_at": str(ws_data.get("updated_at", "")),
-        "event_count": event_count,
-        "turn_count": turn_count,
-        "live": _has_live_session(entry),
+        "event_count": event_count, "turn_count": turn_count, "live": _has_live_session(entry),
     }
 
 
@@ -1212,7 +1219,7 @@ class LiveVerdict:
     """Where liveness came from: ``mux`` | ``lock`` | ``both`` | ``none``."""
 
 
-def verify_worktree_active(record) -> "LiveVerdict":
+def verify_worktree_active(record) -> LiveVerdict:
     """Authoritatively verify whether ONE worktree has a live session right now.
 
     Unlike the batched populate scan, this pays for a precise single-worktree
@@ -1647,13 +1654,6 @@ def _initial_prompt_receipt_path(token: str) -> Path:
     return Path.home() / ".agent-worktrees" / "handoff-prompt-receipts" / token
 
 
-def _mux_bin(mux: str | None = None) -> str:
-    """Resolve the multiplexer binary name (psmux on Windows, tmux elsewhere)."""
-    if mux:
-        return mux
-    return "psmux" if platform.system() == "Windows" else "tmux"
-
-
 def _mux_session_target(worktree_id: str, mux_bin: str) -> str:
     """Session target string. tmux uses the ``=`` exact-match prefix; psmux
     does not support it (rejected as an unknown session)."""
@@ -1912,9 +1912,7 @@ def mux_new_session(
 
     sess = mux_session_name(worktree_id)
     try:
-        argv = build_mux_new_session_argv(
-            worktree_id, work_dir, cmd, env, mux=mux,
-        )
+        argv = build_mux_new_session_argv(worktree_id, work_dir, cmd, env, mux=mux)
         r = subprocess.run(argv, capture_output=True, text=True, timeout=15)
     except (OSError, RuntimeError, subprocess.TimeoutExpired) as e:
         return {"ok": False, "session": sess, "new_pane": None, "error": str(e)}
@@ -1923,10 +1921,94 @@ def mux_new_session(
             "ok": False, "session": sess, "new_pane": None,
             "error": r.stderr.strip() or f"exit {r.returncode}",
         }
+    # Stage 2 (mux_session_assigned): the programmatic cutover path's own
+    # emitter -- the ordinary-launch path already emits mux_attached (mapped
+    # to the same stage) from bin/launch-session.{sh,ps1}.
+    activity.log_event(
+        "mux_session_assigned", worktree_id=worktree_id, mux_session=sess,
+        method="mux_new_session",
+    )
     return {
         "ok": True, "session": sess,
         "new_pane": r.stdout.strip() or None, "error": None,
     }
+
+
+def mux_available(mux: str | None = None) -> bool:
+    """Whether the platform multiplexer binary (psmux/tmux) is even on PATH.
+
+    Distinct from :func:`has_mux_session`, which asks about a *specific*
+    worktree's already-running session -- this asks whether the mux tooling
+    exists at all. Both ``handoff-cutover`` (an existing live session) and
+    ``embody`` (creates one on demand) require this; a host with genuinely no
+    mux backend (e.g. a headless coordinator box) needs
+    :func:`headless_new_session` instead.
+    """
+    import shutil
+
+    return shutil.which(_mux_bin(mux)) is not None
+
+
+def headless_new_session(
+    worktree_id: str,
+    work_dir: str,
+    cmd: list[str],
+    env: dict[str, str] | None = None,
+    *,
+    seed: str | None = None,
+) -> dict:
+    """Launch ``cmd`` as a fully detached background process with **no mux at
+    all** (context-handoff-overhaul Phase 3 §4.3's non-mux launch primitive).
+
+    ``handoff-cutover`` requires an already-live mux session for the target
+    worktree and ``embody`` requires the mux binary to create one -- neither
+    works on a host with no multiplexer present, which is exactly the case an
+    ``agent-dispatch`` coordinator-driven fallback launch needs to cover (no
+    human is attaching to a pane; the successor just needs to exist and start
+    reading its handoff). This spawns the launch command directly via
+    ``subprocess.Popen``, detached from this process's controlling terminal
+    (``DETACHED_PROCESS`` + a new process group on Windows; a new session on
+    POSIX -- the same shape ``agent_dispatch``'s own coordinator autostart
+    uses for its detached ``serve`` process), with no pane, no session
+    registry entry, and no seed-typing choreography: the seed, when given, is
+    passed as a **native** ``-i <seed>`` argument directly, since headless has
+    no pane-wrapper argv-mangling to route around (unlike the mux path, which
+    must inject the seed as post-launch keystrokes -- see
+    :func:`build_mux_new_window_argv`'s ``initial_prompt`` handling).
+
+    Returns ``{ok, pid, error}``. The caller is responsible for verifying the
+    launch actually registers with the local bridge -- this only confirms the
+    process was *started*, not that Copilot itself came up successfully.
+    """
+    import subprocess
+
+    from agent_procutil import detached_kwargs
+
+    argv = list(cmd)
+    if seed:
+        argv += ["-i", seed]
+
+    full_env = {**os.environ, **(env or {})}
+    kwargs: dict[str, object] = {
+        "cwd": work_dir,
+        "env": full_env,
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "close_fds": True,
+        **detached_kwargs(),
+    }
+
+    try:
+        proc = subprocess.Popen(argv, **kwargs)  # noqa: S603 -- fixed argv, caller-built
+    except OSError as e:
+        return {"ok": False, "pid": None, "error": str(e)}
+
+    activity.log_event(
+        "headless_session_assigned", worktree_id=worktree_id,
+        method="headless_new_session", pid=proc.pid,
+    )
+    return {"ok": True, "pid": proc.pid, "error": None}
 
 
 def mux_seed_pane(
@@ -2157,6 +2239,70 @@ def mux_session_for_pane(
 ) -> str | None:
     """Return the exact mux session currently containing ``pane_id``."""
     return current_mux_session(pane_id, mux=mux)
+
+
+def _mux_target_window_id(target: str, mux_bin: str) -> str | None:
+    """Return the window id for one mux target, or ``None`` when unavailable."""
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            [mux_bin, "display-message", "-p", "-t", target, "#{window_id}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return None
+        window_id = result.stdout.strip()
+        return window_id or None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def mux_focus_pane(
+    session_name_or_worktree_id: str,
+    pane_id: str,
+    *,
+    mux: str | None = None,
+) -> bool:
+    """Make ``pane_id``'s window the current window for one mux session.
+
+    ``session_name_or_worktree_id`` may be the exact mux session name (for an
+    adopted anchor or other caller-owned session) or a bare worktree id, in
+    which case this resolves ``wt-<id>`` first. Returns ``False`` on any mux
+    error or if the pane/session identity cannot be positively confirmed.
+    """
+    import subprocess
+
+    if not session_name_or_worktree_id or not pane_id:
+        return False
+    mux_bin = _mux_bin(mux)
+    session_name = str(session_name_or_worktree_id).strip()
+    if not session_name:
+        return False
+    pane_session = _mux_pane_session_name(pane_id, mux_bin)
+    if pane_session != session_name and not session_name.startswith("wt-"):
+        session_name = mux_session_name(session_name)
+    if pane_session != session_name:
+        return False
+    target_window = _mux_target_window_id(pane_id, mux_bin)
+    if not target_window:
+        return False
+    session_target = _mux_named_session_target(session_name, mux_bin)
+    if _mux_target_window_id(session_target, mux_bin) == target_window:
+        return True
+    try:
+        result = subprocess.run(
+            [mux_bin, "select-window", "-t", target_window],
+            capture_output=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return False
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return _mux_target_window_id(session_target, mux_bin) == target_window
 
 
 def mux_binding_for_session(
@@ -2394,6 +2540,14 @@ def mux_new_window(
             "error": r.stderr.strip() or f"exit {r.returncode}",
         }
     new_pane = r.stdout.strip() or None
+    # Stage 2 (mux_session_assigned): fired here, right after the mux
+    # subprocess call succeeds -- not after the seed/prompt-receipt wait
+    # below, which is a distinct concern (Copilot readiness, not pane
+    # creation). The ordinary-launch path emits mux_attached separately.
+    activity.log_event(
+        "mux_session_assigned", worktree_id=worktree_id, new_pane=new_pane,
+        method="mux_new_window",
+    )
     prompt_received = initial_prompt is None
     prompt_status = None
     if receipt_path:
@@ -2435,11 +2589,7 @@ def mux_new_window(
             # the wrapper starts Copilot after writing its provisional receipt,
             # so only the late tree is guaranteed to include the real child.
             process_tree = _mux_pane_process_tree(new_pane, mux=mux)
-            cleanup = _retire_failed_successor(
-                new_pane,
-                process_tree,
-                mux=mux,
-            )
+            cleanup = _retire_failed_successor(new_pane, process_tree, mux=mux)
             return {
                 "ok": False,
                 "new_pane": new_pane,
@@ -2452,280 +2602,7 @@ def mux_new_window(
                 ),
             }
     return {
-        "ok": True,
-        "new_pane": new_pane,
-        "prompt_received": prompt_received,
-        "prompt_status": prompt_status,
-        "error": None,
+        "ok": True, "new_pane": new_pane, "prompt_received": prompt_received,
+        "prompt_status": prompt_status, "error": None,
     }
 
-
-def _mux_pane_pid(pane_id: str | None, *, mux: str | None = None) -> int | None:
-    """Return the root pid of one mux pane, or ``None`` when unavailable."""
-    if not pane_id:
-        return None
-    import subprocess
-
-    mux_bin = _mux_bin(mux)
-    try:
-        r = subprocess.run(
-            [
-                mux_bin, "display-message", "-p", "-t", pane_id,
-                "#{pane_pid}",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if r.returncode != 0:
-            return None
-        pid = int(r.stdout.strip())
-        return pid if pid > 0 else None
-    except (OSError, ValueError, subprocess.TimeoutExpired):
-        return None
-
-
-def _mux_pane_process_tree(
-    pane_id: str | None, *, mux: str | None = None,
-) -> set[int]:
-    """Snapshot the exact process tree rooted at ``pane_id`` before teardown."""
-    pane_pid = _mux_pane_pid(pane_id, mux=mux)
-    if not pane_pid:
-        return set()
-    try:
-        from . import reclaim
-
-        table = reclaim.build_process_table()
-        return {pane_pid, *reclaim.descendants_of(pane_pid, table)}
-    except OSError:
-        return {pane_pid}
-
-
-def _retire_failed_successor(
-    pane_id: str | None,
-    process_tree: set[int],
-    *,
-    mux: str | None = None,
-) -> dict:
-    """Retire a failed successor pane and terminate its exact surviving tree."""
-    import platform
-    import signal
-    import time
-
-    retire = (
-        mux_retire_pane(pane_id, mux=mux)
-        if pane_id else {"ok": True, "gone": True, "method": "no-pane"}
-    )
-    terminated: list[int] = []
-    survivors: list[int] = []
-    try:
-        from . import locks, procs
-
-        # Children first, pane root last. The snapshot is pane-specific, so this
-        # cannot splash onto the predecessor or another pane in the same worktree.
-        for pid in sorted(process_tree, reverse=True):
-            if not locks.pid_alive(pid):
-                continue
-            if procs.terminate_pid(pid):
-                terminated.append(pid)
-        deadline = time.monotonic() + 1.0
-        while time.monotonic() < deadline:
-            survivors = [
-                pid for pid in sorted(process_tree) if locks.pid_alive(pid)
-            ]
-            if not survivors:
-                break
-            time.sleep(0.05)
-        # procs.terminate_pid is SIGTERM on POSIX. Escalate the exact pane tree
-        # after the bounded grace period; Windows already uses TerminateProcess.
-        if survivors and platform.system() != "Windows":
-            for pid in survivors:
-                try:
-                    os.kill(pid, signal.SIGKILL)
-                except OSError:
-                    pass
-            deadline = time.monotonic() + 1.0
-            while time.monotonic() < deadline:
-                survivors = [
-                    pid for pid in survivors if locks.pid_alive(pid)
-                ]
-                if not survivors:
-                    break
-                time.sleep(0.05)
-    except OSError:
-        survivors = sorted(process_tree)
-    return {
-        "retire": retire,
-        "process_tree": sorted(process_tree),
-        "terminated": terminated,
-        "survivors": survivors,
-        "ok": bool(retire.get("gone")) and not survivors,
-    }
-
-
-def _mux_pane_alive(pane_id: str, mux_bin: str) -> bool:
-    """Whether ``pane_id`` still exists in any session/window."""
-    import subprocess
-
-    try:
-        r = subprocess.run(
-            [mux_bin, "list-panes", "-a", "-F", "#{pane_id}"],
-            capture_output=True, text=True, timeout=5,
-        )
-        if r.returncode != 0:
-            return False
-        return pane_id in r.stdout.split()
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-
-
-def _mux_pane_session_name(pane_id: str, mux_bin: str) -> str | None:
-    """Return the mux session name containing ``pane_id``."""
-    import subprocess
-
-    try:
-        r = subprocess.run(
-            [mux_bin, "display-message", "-p", "-t", pane_id, "#{session_name}"],
-            capture_output=True, text=True, timeout=5,
-        )
-        if r.returncode != 0:
-            return None
-        return getattr(r, "stdout", "").strip() or None
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-
-
-def _mux_session_window_count(session_name: str, mux_bin: str) -> int | None:
-    """Return the number of windows in ``session_name`` when the mux reports it."""
-    import subprocess
-
-    target = session_name if mux_bin == "psmux" else f"={session_name}"
-    try:
-        r = subprocess.run(
-            [mux_bin, "list-windows", "-t", target, "-F", "#{window_id}"],
-            capture_output=True, text=True, timeout=5,
-        )
-        if r.returncode != 0:
-            return None
-        return len([line for line in getattr(r, "stdout", "").splitlines() if line.strip()])
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-
-
-def _mux_last_window_guard(pane_id: str, mux_bin: str) -> dict | None:
-    """Return guard context when retiring ``pane_id`` would close a wt session."""
-    session_name = _mux_pane_session_name(pane_id, mux_bin)
-    if not session_name or not session_name.startswith("wt-"):
-        return None
-    window_count = _mux_session_window_count(session_name, mux_bin)
-    if window_count == 1:
-        return {"session": session_name, "window_count": window_count}
-    return None
-
-
-def mux_retire_pane(
-    pane_id: str,
-    *,
-    mux: str | None = None,
-    settle_timeout: float = 6.0,
-    poll_interval: float = 0.3,
-    ctrl_c_gap: float = 0.6,
-    escalate_after: float = 1.5,
-    hard_kill_settle: float = 1.5,
-) -> dict:
-    """Retire a specific pane by asking its Copilot to quit cleanly.
-
-    Copilot CLI exits on a **double Ctrl-C** ~600 ms apart (a single one does
-    little) -- its native clean-quit path (cf. :func:`graceful_quit_mux_session`).
-    Unlike that session-scoped helper, this targets one ``pane_id`` so it retires
-    the OLD Copilot after a cutover without touching the successor (the session's
-    new active pane). Falls back to ``kill-pane`` if it does not exit in time.
-
-    **Escalation ladder (up to three Ctrl-C).** Two interrupts is the common
-    case, but some Copilot states swallow the second (mid-render, a modal, a busy
-    turn flushing state) -- so after the double-interrupt we wait a brief
-    ``escalate_after`` window and, only if the pane is still alive, deliver a
-    conditional **third** Ctrl-C before the hard ``kill-pane`` fallback. This
-    mirrors :func:`graceful_quit_mux_session` (a76ab47 / #2614) so a stubborn old
-    pane is retired cleanly (persisting session state) instead of being severed,
-    which is the failure mode behind a lingering un-retired pane (#3946).
-
-    Returns ``{ok, pane, gone, method}`` where ``method`` is ``already-gone``,
-    ``graceful``, ``hard``, or ``failed``.
-    """
-    import subprocess
-    import time
-
-    mux_bin = _mux_bin(mux)
-
-    def _send(keys: str) -> bool:
-        try:
-            r = subprocess.run(
-                [mux_bin, "send-keys", "-t", pane_id, keys],
-                capture_output=True, timeout=5,
-            )
-            return r.returncode == 0
-        except (OSError, subprocess.TimeoutExpired):
-            return False
-
-    def _gone_within(window: float) -> bool:
-        deadline = time.monotonic() + window
-        while time.monotonic() < deadline:
-            if not _mux_pane_alive(pane_id, mux_bin):
-                return True
-            time.sleep(poll_interval)
-        return not _mux_pane_alive(pane_id, mux_bin)
-
-    if not _mux_pane_alive(pane_id, mux_bin):
-        return {"ok": True, "pane": pane_id, "gone": True, "method": "already-gone"}
-
-    guard = _mux_last_window_guard(pane_id, mux_bin)
-    if guard:
-        try:
-            from . import activity
-
-            activity.log_event(
-                "handoff_retire_guard",
-                source="python",
-                old_pane=pane_id,
-                reason="last-window-skip",
-                method="guard",
-                outcome="left-running",
-                mux_session=guard.get("session"),
-                window_count=guard.get("window_count"),
-            )
-        except Exception:
-            pass
-        return {
-            "ok": True, "pane": pane_id, "gone": False,
-            "method": "last-window-skip",
-            "session": guard.get("session"),
-        }
-
-    _send("C-c")
-    time.sleep(ctrl_c_gap)
-    _send("C-c")
-
-    # Brief window for the double-interrupt to land before escalating.
-    escalate_at = min(max(escalate_after, 0.0), settle_timeout)
-    if _gone_within(escalate_at):
-        return {"ok": True, "pane": pane_id, "gone": True, "method": "graceful"}
-
-    # Still alive after two -- conditional third, then wait out the budget.
-    _send("C-c")
-    if _gone_within(settle_timeout - escalate_at):
-        return {"ok": True, "pane": pane_id, "gone": True, "method": "graceful"}
-
-    # Graceful quit did not land -- hard-kill the pane.
-    try:
-        subprocess.run(
-            [mux_bin, "kill-pane", "-t", pane_id],
-            capture_output=True, timeout=5,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        pass
-    gone = _gone_within(max(hard_kill_settle, 0.0))
-    return {
-        "ok": gone, "pane": pane_id, "gone": gone,
-        "method": "hard" if gone else "failed",
-    }

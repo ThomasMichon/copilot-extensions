@@ -34,6 +34,7 @@
           "0.4.0-dev461",
           "0.4.0-dev468",
           "0.4.0-dev470",
+          "0.4.0-dev473",
           "0.4.0-dev474",
           "0.4.0-dev475",
           "0.4.0-dev476",
@@ -78,7 +79,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
-          "sha256": "8624e9c9577a277ba1e66157a2d755c28fd2abf1d6f8178e28f2cf63aef33b1c",
+          "sha256": "93186d0a6f5b81a3b4d3d8817ad68ad152604377916b4df8975b391462571e35",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -164,9 +165,9 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/representative-error.json",
-          "sha256": "44cb199bf6ca53897dc00ba2bd4f9dd26c7326e6ab6d006e3e48b7b96fba8656",
+          "sha256": "38d49a8762f4732216fbda79ad150438d6a7e101249d5d496fae07325111d92a",
           "role": "current representative FastAPI error",
-          "generation": 15
+          "generation": 14
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-11/health.json",
@@ -447,6 +448,14 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
           "source_git_blob": "8f0a0f10ce17e7bdd5e4a567cd856ed3f2891278",
           "capture_method": "Invoke the pre-resolution initialization refusal and preserve its FastAPI error response."
+        },
+        {
+          "commit": "e02fbee7594e07e2a6b074efee643926679a3b4a",
+          "plugin_version": "0.4.0-dev473",
+          "generation": 14,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "26bf21eb2b6503279f1f0cc47414d10a6e03551f",
+          "capture_method": "Invoke the pre-resolution initialization refusal and preserve its FastAPI error response; re-attested after adding the unrelated worktree-head-guard bridge-store cross-check (#2452), which does not touch this code path."
         },
         {
           "commit": "bd4ee1277365c1966cd830601a82043a1d6e49df",

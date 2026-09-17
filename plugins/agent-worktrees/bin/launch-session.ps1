@@ -621,7 +621,7 @@ function Invoke-UpdateApply {
 $DirectCommands = @(
     'services', 'repos', 'knowledge', 'agent-worktrees',
     'resolve', 'post-exit', 'finalize', 'push-changes', 'mark-complete',
-    'session-backend',
+    'execution-leg',
     'status', 'list', 'create', 'cleanup', 'validate', 'install',
     'register', 'unregister', 'uninstall', 'update', 'install-status',
     'deploy-instructions', 'get', 'pre-launch', 'stage-update', 'reconcile-plugins', 'dev', 'handoff-cutover',
@@ -692,7 +692,7 @@ if ($plan.PSObject.Properties.Name -contains 'launch') {
 # actually targets -- it can legitimately differ from this script's own
 # ambient/starting project (e.g. an initial `--project` inherited from how
 # this launcher was invoked). Always prefer it over a stale ambient value so
-# every downstream direct call (session-backend status, etc.) is scoped to
+# every downstream direct call (execution-leg get, etc.) is scoped to
 # the project that really owns the resolved worktree, not wherever this
 # script happened to start (#2338).
 if ($plan.PSObject.Properties.Name -contains 'project' -and $plan.project) {
@@ -880,25 +880,6 @@ if ($knowledgeExit -eq 0) {
     exit $knowledgeExit
 }
 
-$marketplaceArgs = @('-m', 'agent_worktrees', 'reconcile-marketplaces',
-    '--cwd', $knowledgeCwd, '--ensure-ignored', '--json')
-$savedErrorAction = $ErrorActionPreference
-try {
-    $ErrorActionPreference = 'Continue'
-    $marketplaceOutput = & $VenvPython @marketplaceArgs 2>&1
-    $marketplaceExit = $LASTEXITCODE
-} finally {
-    $ErrorActionPreference = $savedErrorAction
-}
-$marketplaceText = (($marketplaceOutput | ForEach-Object { "$_" }) -join '').Trim()
-if ($marketplaceExit -eq 0) {
-    Write-SetupLog "Marketplace override preflight completed: $marketplaceText"
-} else {
-    Write-SetupLog "Marketplace override preflight failed (exit ${marketplaceExit}): $marketplaceText" 'ERROR'
-    [Console]::Error.WriteLine("ERROR: Marketplace override preflight failed: $marketplaceText")
-    exit $marketplaceExit
-}
-
 # Apply environment variables from the launch plan
 if ($plan.env) {
     foreach ($prop in $plan.env.PSObject.Properties) {
@@ -914,7 +895,7 @@ Remove-Item Env:WORKTREE_PROJECT -ErrorAction SilentlyContinue
 
 $cmd = @($plan.cmd)
 
-$sessionBackend = $null
+$executionLeg = $null
 $ahpArgs = @()
 if (
     -not $joiningLiveSession -and
@@ -924,15 +905,15 @@ if (
     if ($script:LaunchProject) {
         $backendBaseArgs += @('--project', $script:LaunchProject)
     }
-    $backendStatusArgs = $backendBaseArgs + @(
-        'session-backend', 'status',
+    $executionLegArgs = $backendBaseArgs + @(
+        'execution-leg', 'get',
         '--worktree-id', [string]$plan.worktree_id,
         '--json'
     )
     $savedErrorAction = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
-        $backendStatusOutput = & $VenvPython @backendStatusArgs 2>&1
+        $backendStatusOutput = & $VenvPython @executionLegArgs 2>&1
         $backendStatusExit = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $savedErrorAction
@@ -942,71 +923,51 @@ if (
     ).Trim()
     if ($backendStatusExit -ne 0) {
         Write-SetupLog (
-            "Session backend status failed (exit ${backendStatusExit}): " +
+            "Execution-leg get failed (exit ${backendStatusExit}): " +
             $backendStatusText
         ) 'ERROR'
         [Console]::Error.WriteLine(
-            "ERROR: Session backend status failed: $backendStatusText"
+            "ERROR: Execution-leg get failed: $backendStatusText"
         )
         exit $backendStatusExit
     }
     try {
-        $sessionBackend = $backendStatusText |
+        $executionLeg = $backendStatusText |
             ConvertFrom-Json -ErrorAction Stop
     } catch {
         Write-SetupLog (
-            "Session backend returned invalid JSON: $backendStatusText"
+            "Execution-leg get returned invalid JSON: $backendStatusText"
         ) 'ERROR'
-        [Console]::Error.WriteLine('ERROR: Session backend returned invalid JSON.')
+        [Console]::Error.WriteLine('ERROR: Execution-leg get returned invalid JSON.')
         exit 3
     }
-    if ($sessionBackend.enabled -and $sessionBackend.kind -eq 'ahp') {
-        $token = & gh auth token --user ([string]$sessionBackend.auth_account) 2>$null
-        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($token)) {
-            $message = "Could not mint the AHP client token for account $($sessionBackend.auth_account)."
+    if (
+        $executionLeg.execution_leg -and
+        $executionLeg.execution_leg.provider -eq 'ahp' -and
+        $executionLeg.execution_leg.state -in @('active', 'unknown')
+    ) {
+        $blob = $executionLeg.execution_leg.blob
+        $authAccount = [string]$blob.auth_account
+        $endpointUrl = [string]$blob.endpoint_url
+        $sessionId = [string]$blob.session_id
+        if (
+            [string]::IsNullOrWhiteSpace($authAccount) -or
+            [string]::IsNullOrWhiteSpace($endpointUrl) -or
+            [string]::IsNullOrWhiteSpace($sessionId)
+        ) {
+            $message = (
+                "Persisted AHP execution leg for $($plan.worktree_id) is " +
+                "missing auth_account, endpoint_url, or session_id."
+            )
             Write-SetupLog $message 'ERROR'
             [Console]::Error.WriteLine("ERROR: $message")
             exit 3
         }
-        $backendEnsureArgs = $backendBaseArgs + @(
-            'session-backend', 'ensure',
-            '--worktree-id', [string]$plan.worktree_id,
-            '--json'
-        )
-        $savedErrorAction = $ErrorActionPreference
-        try {
-            $ErrorActionPreference = 'Continue'
-            $env:AGENT_WORKTREES_AHP_AUTH_TOKEN = $token.Trim()
-            $backendOutput = & $VenvPython @backendEnsureArgs 2>&1
-            $backendExit = $LASTEXITCODE
-        } finally {
-            Remove-Item Env:AGENT_WORKTREES_AHP_AUTH_TOKEN `
-                -ErrorAction SilentlyContinue
-            $ErrorActionPreference = $savedErrorAction
-        }
-        $backendText = (
-            ($backendOutput | ForEach-Object { "$_" }) -join ''
-        ).Trim()
-        if ($backendExit -ne 0) {
-            Write-SetupLog (
-                "Session backend ensure failed (exit ${backendExit}): " +
-                $backendText
-            ) 'ERROR'
-            [Console]::Error.WriteLine(
-                "ERROR: Session backend ensure failed: $backendText"
-            )
-            exit $backendExit
-        }
-        try {
-            $sessionBackend = $backendText |
-                ConvertFrom-Json -ErrorAction Stop
-        } catch {
-            Write-SetupLog (
-                "Session backend returned invalid JSON: $backendText"
-            ) 'ERROR'
-            [Console]::Error.WriteLine(
-                'ERROR: Session backend returned invalid JSON.'
-            )
+        $token = & gh auth token --user $authAccount 2>$null
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($token)) {
+            $message = "Could not mint the AHP client token for account ${authAccount}."
+            Write-SetupLog $message 'ERROR'
+            [Console]::Error.WriteLine("ERROR: $message")
             exit 3
         }
         $features = @(
@@ -1019,14 +980,25 @@ if (
         }
         $env:COPILOT_CLI_ENABLED_FEATURE_FLAGS = $features -join ','
         $ahpArgs = @(
-            '--ahp', [string]$sessionBackend.endpoint_url,
-            "--resume=$($sessionBackend.session_id)"
+            '--ahp', $endpointUrl,
+            "--resume=$sessionId"
         )
         $plan.post_exit = $false
         Write-SetupLog (
-            "AHP client bound to session $($sessionBackend.session_id) " +
-            "at $($sessionBackend.endpoint_url)"
+            "AHP client bound to session ${sessionId} at ${endpointUrl}"
         )
+    } elseif (
+        $executionLeg.execution_leg -and
+        $executionLeg.execution_leg.provider -eq 'ahp' -and
+        $executionLeg.execution_leg.state -eq 'disposed'
+    ) {
+        $message = (
+            "Persisted AHP execution leg for $($plan.worktree_id) is disposed; " +
+            "launching direct. Establishing a new AHP session now requires " +
+            "launching via the Worktree Manager Picker."
+        )
+        Write-SetupLog $message 'WARN'
+        [Console]::Error.WriteLine("WARNING: $message")
     }
 }
 

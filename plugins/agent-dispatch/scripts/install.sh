@@ -399,6 +399,22 @@ _source_kind() {
 # === end install-contract:v4 source-kind ===
 
 # -- Version helpers + downgrade guard (parity with agent-bridge #1790) ------
+_resolve_runtime_python() {
+    # The canonical, junction-free versioned-runtime resolver (uniform-runtime-
+    # resolution, #765) -- the same one the binstub uses: current-version ->
+    # last-known-good -> newest complete slot. Prints the resolved interpreter
+    # path and returns 0, or returns 1 with nothing printed when no slot is
+    # installed. Deployed to $INSTALL_DIR/bin at install time; absent only on a
+    # never-installed host.
+    local resolver="$INSTALL_DIR/bin/resolve-runtime.sh"
+    [[ -f "$resolver" ]] || return 1
+    local AGENT_RT_PY="" AGENT_RT_ROOT="$INSTALL_DIR"
+    # shellcheck disable=SC1090
+    . "$resolver"
+    [[ -n "$AGENT_RT_PY" ]] || return 1
+    printf '%s' "$AGENT_RT_PY"
+}
+
 _installed_version() {
     # The version currently ACTIVE (via the current-version marker), for the
     # downgrade guard. Marker-only -- the `.venv` link is retired (#765).
@@ -424,14 +440,43 @@ _source_version() {
 }
 
 # True (0) if version $1 is strictly older than $2. Normalizes the PEP 440 dev
-# separator (plugin.json `0.1.0-dev19` vs importlib `0.1.0.dev19`) so `sort -V`
-# orders the devN build stream correctly.
+# separator (plugin.json `0.1.0-dev19` vs importlib `0.1.0.dev19`), then
+# compares MAJOR.MINOR.PATCH[.devN] component-by-component as integers.
+#
+# This deliberately avoids `sort -V`: GNU coreutils orders a trailing `devN`
+# stream numerically, but Apple's `sort -V` (macOS) orders it lexically, so
+# e.g. "0.1.2.dev102" sorts *before* "0.1.2.dev74" on macOS -- a false
+# "source is older" positive that permanently blocks legitimate upgrades
+# (#377). A component-wise integer compare gives the same, correct answer on
+# every platform.
 _version_lt() {
     local a="${1//-/.}" b="${2//-/.}"
     [[ "$a" == "$b" ]] && return 1
-    local lower
-    lower="$(printf '%s\n%s\n' "$a" "$b" | sort -V | head -n1)"
-    [[ "$lower" == "$a" ]]
+    local -a pa pb
+    IFS='.' read -r -a pa <<< "$a"
+    IFS='.' read -r -a pb <<< "$b"
+    local len=${#pa[@]}
+    (( ${#pb[@]} > len )) && len=${#pb[@]}
+    local i ca cb na nb
+    for (( i = 0; i < len; i++ )); do
+        ca="${pa[i]:-}"
+        cb="${pb[i]:-}"
+        [[ -z "$ca" && -z "$cb" ]] && continue
+        # A version that ran out of components here (e.g. "0.1.2" vs
+        # "0.1.2.dev5") is the finished release; a release outranks any
+        # devN pre-release build of the same prefix.
+        [[ -z "$ca" ]] && return 1
+        [[ -z "$cb" ]] && return 0
+        na="${ca//[!0-9]/}"
+        nb="${cb//[!0-9]/}"
+        na="${na:-0}"
+        nb="${nb:-0}"
+        na=$((10#$na))
+        nb=$((10#$nb))
+        (( na < nb )) && return 0
+        (( na > nb )) && return 1
+    done
+    return 1
 }
 
 _downgrade_guard() {
@@ -1435,25 +1480,56 @@ do_update() {
 }
 
 do_start() {
-    command -v systemctl >/dev/null 2>&1 || { _fail 'systemd not available'; exit 1; }
-    if [[ ! -f "$UNIT_DIR/$SYSTEMD_UNIT" ]]; then
-        _fail "No service unit installed -- run: $0 install"
+    if command -v systemctl >/dev/null 2>&1 && [[ -f "$UNIT_DIR/$SYSTEMD_UNIT" ]]; then
+        systemctl --user start "$SYSTEMD_UNIT"
+        if systemctl --user is-active "$SYSTEMD_UNIT" &>/dev/null; then
+            _ok "Coordinator started"
+            _for_each_present_supervisor_unit _start_supervisor_callback
+            return 0
+        fi
+        _warn "systemd start did not activate the unit -- falling back to a direct start"
+    elif command -v systemctl >/dev/null 2>&1; then
+        _warn "No service unit installed -- falling back to a direct start"
+    else
+        _warn "systemd not available -- falling back to a direct start"
+    fi
+
+    # Direct-start fallback (systemd unavailable, unit missing, or activation
+    # failed): user-mode ensure must be sufficient to start the daemon on its
+    # own -- scheduled activation (the systemd unit above) is only a login-time
+    # convenience layered on top, never a prerequisite (service-lifecycle-
+    # supervision's rule 7; #2524). Reuses the CLI's own tier-1 lazy-autostart
+    # path via the internal `_ensure-coordinator` entrypoint -- the exact same
+    # code path every ordinary client command already triggers -- rather than
+    # re-implementing a detached spawn here (parity with agent-bridge's
+    # `do_start`, which has the equivalent direct-launch fallback).
+    local rt_py
+    rt_py="$(_resolve_runtime_python)" || { _fail "agent-dispatch not installed. Run: $0 install"; exit 1; }
+    if "$rt_py" -m agent_dispatch _ensure-coordinator >/dev/null 2>&1; then
+        _ok "Coordinator started (direct)"
+    else
+        _fail "Failed to start coordinator directly"
         exit 1
     fi
-    systemctl --user start "$SYSTEMD_UNIT"
-    systemctl --user is-active "$SYSTEMD_UNIT" &>/dev/null \
-        && _ok "Coordinator started" || { _fail "Failed to start coordinator"; exit 1; }
-    # Start every supervisor that is enabled (label-gated). Inert/disabled
-    # primary/profile supervisors are left alone.
     _for_each_present_supervisor_unit _start_supervisor_callback
 }
 
+
 do_stop() {
-    command -v systemctl >/dev/null 2>&1 || { _fail 'systemd not available'; exit 1; }
     _for_each_present_supervisor_unit _stop_supervisor_callback
-    if systemctl --user is-active "$SYSTEMD_UNIT" &>/dev/null; then
+    if command -v systemctl >/dev/null 2>&1 && systemctl --user is-active "$SYSTEMD_UNIT" &>/dev/null; then
         systemctl --user stop "$SYSTEMD_UNIT" 2>/dev/null || true
         _ok "Coordinator stopped"
+        return 0
+    fi
+    # Not managed by (or not currently active under) systemd: it may still be a
+    # directly-spawned coordinator (the tier-1 do_start fallback above, #2524,
+    # or plain CLI lazy-autostart) that systemctl was never going to reach.
+    # Stop it gracefully over its own HTTP /shutdown route instead of leaving
+    # it running unmanaged.
+    local rt_py
+    if rt_py="$(_resolve_runtime_python)" && "$rt_py" -m agent_dispatch _stop-coordinator >/dev/null 2>&1; then
+        _ok "Coordinator stopped (direct, or already down)"
     else
         _skip "Coordinator not running"
     fi

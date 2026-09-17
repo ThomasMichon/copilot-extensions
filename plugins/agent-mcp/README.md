@@ -758,6 +758,66 @@ tool itself — something a static `filter`/`transform` can't see.
 > result. `gate` never prunes `tools/list`; a gated tool stays advertised and
 > returns the deny action for calls that fail the predicate.
 
+### `input_gate` — deny a call whose OWN arguments match a predicate
+
+`gate` judges a call by an out-of-band **preflight** fact (a different tool's
+response). Some authorization invariants instead need to judge the call by its
+**own request arguments** — e.g. "never let a metadata-write call itself
+introduce a specific marker value into a `tags`/`title` argument", so a marker
+meant to be human-set can't be self-granted by the same session that also
+benefits from it being present. Neither `filter` (static per-tool allow/deny,
+no argument inspection) nor `transform` (reshapes a tool's OUTPUT only) can
+express that. `input_gate` closes that specific gap: it evaluates a boolean
+`deny_when` predicate over the call's **own arguments**, using the same
+path/op mini-language as `gate`'s `allow_when`, and denies the call before it
+ever reaches the upstream if the predicate matches.
+
+```yaml
+- type: input_gate
+  match_tools: [update_incident]                # globs; which tools/call to gate
+  deny_when:                                     # boolean predicate over the call's OWN args
+    any:
+      - { path: "tags[*]", matches: "(?i)^ai-safe$" }
+      - { path: "title", matches: "(?i)(^|[^A-Za-z0-9_-])ai-safe([^A-Za-z0-9_-]|$)" }
+  on_deny: error                                  # error | stub | drop (default: error)
+  reason: "the ai-safe tag/keyword is human-only; an agent must never self-grant it"
+```
+
+- **`match_tools`** — globs; only a matching `tools/call` is evaluated
+  (everything else passes straight through; `input_gate` never prunes
+  `tools/list`).
+- **`deny_when`** — the same predicate tree/leaf-op language as `gate`'s
+  `allow_when` (§ above), evaluated against the call's **arguments object**
+  directly (no preflight round-trip — there is nothing out-of-band to fetch).
+- **`on_deny`** — `error` (JSON-RPC error, **default** — this decorator
+  protects a WRITE, so the default is the opposite of `gate`'s READ-oriented
+  `stub` default), `stub` (return the `stub`/`reason` payload as the result),
+  or `drop` (empty result).
+- **`reason`** — a short human-readable string used as the JSON-RPC error
+  message (`on_deny: error`) or the default `stub` payload's `reason` field.
+
+Complementary to `gate`, not a replacement: `gate` decides "is this record's
+own state safe to read"; `input_gate` decides "does this write attempt
+introduce a value it must never introduce", independent of any preflight
+lookup or the record's current state.
+
+> **Placement — enforced, not just documented.** Put `input_gate` **last** in
+> the `decorators:` list (innermost, closest to upstream) — after
+> `code-mode`/`defer` (whose synthesized
+> `tools/call` sub-requests only reach decorators BELOW their own position, so
+> an `input_gate` placed above them never sees those calls), after `storage`
+> (which may rehydrate a `$stream` argument handle into its real value on the
+> way to upstream — an `input_gate` placed above `storage` would evaluate
+> `deny_when` against the un-rehydrated handle instead), and after `rename`
+> (which rewrites the client-visible tool name back to the real upstream name
+> — an `input_gate` placed above `rename` would see the RENAMED name instead
+> of the real one its `match_tools` glob names, so the gate could silently
+> never trigger). Last position guarantees `input_gate` always sees the
+> fully-resolved arguments AND the real tool name the upstream is actually
+> about to receive. **Config validation enforces this** — a stack with
+> `input_gate` positioned before any of `code-mode`/`defer`/`storage`/`rename`
+> is rejected at load time, not just discouraged in docs.
+
 
 
 ## Use from a Copilot agent
@@ -995,6 +1055,10 @@ cold path with `--no-serve` or `AGENT_MCP_NO_SERVE=1`.
   wrapped in a synthetic envelope.
 - **Errors** are a non-zero exit + a stderr message. The wait is bounded by the
   config `timeout`, so a dead or silent upstream fails fast instead of hanging.
+- **Honors the full `decorators:` stack**, including `gate`/`input_gate`'s
+  authorization decisions and `transform`'s reshaping — the cold path is not a
+  bypass. (When routed to a live `agent-mcp serve` daemon it goes through that
+  daemon's own pipeline instead, to the same effect.)
 
 ```sh
 agent-mcp call gitea list_issues '{"owner":"me","repo":"x"}'
@@ -1099,7 +1163,7 @@ stdin/stdout        Bridge        Decorator pipeline           UpstreamClient   
                                  ^                                                   or cli responder
                           filter/rename/defer/                                      Auth injector -> credential_relay.sources
                           code-mode/storage/
-                          transform/gate
+                          transform/gate/input_gate
 ```
 
 - `config.py` — load + validate the per-bridge config file (incl. `decorators:`).
@@ -1109,8 +1173,9 @@ stdin/stdout        Bridge        Decorator pipeline           UpstreamClient   
 - `pipeline.py` — `UpstreamClient` (JSON-RPC id correlation over a transport) +
   `Pipeline` (compose decorators around the upstream core call).
 - `decorators/` — `base` (Decorator + BridgeContext), `_catalog` (catalog
-  pagination + JSON-Schema→TS), and the `filter`/`rename`/`defer`/`code-mode`/
-  `storage`/`transform`/`gate` decorators.
+  pagination + JSON-Schema→TS), `_predicate` (the shared path/op predicate
+  engine used by `gate` and `input_gate`), and the `filter`/`rename`/`defer`/
+  `code-mode`/`storage`/`transform`/`gate`/`input_gate` decorators.
 - `bridge.py` — stdio framing, per-request dispatch through the pipeline,
   unsolicited-message passthrough.
 - `protocol.py` — the dual-era version model: modern (`2026-07-28`, per-request
@@ -1120,5 +1185,10 @@ stdin/stdout        Bridge        Decorator pipeline           UpstreamClient   
 - `client.py` — `OneShotSession`: connect + **negotiate era** (`server/discover`
   probe / forced) + one `tools/list` / `tools/call` against an upstream, then exit
   (the engine under `call` and the introspection step of `materialize`).
+  **Only `call_tool`** runs through the same `Pipeline`/`decorators:` stack the
+  long-lived bridge does, so `gate`/`input_gate`/etc. apply on the cold `call`
+  path too; `list_tools` (materialize's introspection, and `call`'s own catalog
+  fetch) still calls the upstream directly and does not go through
+  `rename`/`defer`/`transform` — only the legacy top-level `tools:` filter.
 - `materialize.py` — project a `tools/list` catalog into the on-disk stub fleet
   (symlink farm on POSIX, `.ps1`/`.cmd` shim farm on Windows) + plated sidecars.

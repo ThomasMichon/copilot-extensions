@@ -319,6 +319,85 @@ function Write-Step    { param([string]$m) Write-Host "  ...    $m" }
 function Write-Warn    { param([string]$m) Write-Host "  [WARN] $m" -ForegroundColor Yellow }
 function Write-Fail    { param([string]$m) Write-Host "  [FAIL] $m" -ForegroundColor Red }
 
+function Test-IsSreModuleMismatch {
+    <# Detects `AssertionError: SRE module mismatch` -- a transient race on a
+       shared uv-managed Python interpreter (cpython-3.11-windows-x86_64-none)
+       that surfaces when several installers hit it in quick succession during
+       one big `agent-worktrees update --force` sweep (#6785, mirrored from
+       agent-bridge's install.ps1/install.sh). The interpreter reliably heals
+       within seconds once the sweep's other uv invocations finish touching
+       it, so a short-delay retry recovers cleanly. #>
+    param([string]$Output)
+    return $Output -match 'SRE module mismatch'
+}
+
+function Test-IsVenvCorruption {
+    <# Detects the `pyvenv.cfg` variant of the shared uv-managed-interpreter
+       race first seen in #6785 (see Test-IsSreModuleMismatch): a concurrent
+       `uv venv` from another installer landing on the same slot can leave
+       python.exe present but pyvenv.cfg missing/incomplete, so `uv venv
+       --allow-existing` (or any later uv Python-interpreter probe against
+       that slot) fails immediately with uv exit code 106 / "failed to locate
+       pyvenv.cfg" (#6852, mirrored from agent-bridge). The slot self-heals
+       once the other install finishes writing it, so a short-delay retry
+       recovers cleanly. #>
+    param([string]$Output)
+    return ($Output -match 'failed to locate pyvenv\.cfg') -or ($Output -match 'exit code:\s*106')
+}
+
+function Invoke-UvPipInstallResilient {
+    <# Runs `uv pip install` with the given arguments, capturing combined
+       output and exit code. On the transient SRE-module-mismatch signature
+       (see Test-IsSreModuleMismatch), retries with backoff (up to 3 extra
+       attempts: 3s/6s/10s); any other failure, or a mismatch persisting after
+       all retries, is returned as-is for the caller to handle/fail on as
+       before. #>
+    param([Parameter(Mandatory)][string[]]$Arguments)
+    $delays = @(3, 6, 10)
+    $out = & uv pip install @Arguments 2>&1
+    $exit = $LASTEXITCODE
+    foreach ($delay in $delays) {
+        if ($exit -eq 0 -or -not (Test-IsSreModuleMismatch ($out | Out-String))) { break }
+        Write-Warn "uv build hit a transient SRE module mismatch (shared Python cache race, #6785) -- retrying in ${delay}s"
+        Start-Sleep -Seconds $delay
+        $out = & uv pip install @Arguments 2>&1
+        $exit = $LASTEXITCODE
+    }
+    return [pscustomobject]@{ Output = $out; ExitCode = $exit }
+}
+
+function Invoke-UvVenvResilient {
+    <# Runs `uv venv $VenvDir @Arguments`, capturing combined output and exit
+       code. Retries with backoff (3s/6s/10s) on the transient
+       SRE-module-mismatch (#6785) or pyvenv.cfg-corruption (#6852)
+       signatures. Also treats a zero-exit run that didn't actually leave a
+       pyvenv.cfg behind at $VenvDir\pyvenv.cfg as a failure worth retrying --
+       uv can exit 0 while still racing another concurrent writer touching
+       the same slot. #>
+    param([Parameter(Mandatory)][string]$VenvDir, [Parameter(Mandatory)][string[]]$Arguments)
+    $cfgPath = Join-Path $VenvDir 'pyvenv.cfg'
+    $delays = @(3, 6, 10)
+    $out = & uv venv $VenvDir @Arguments 2>&1
+    $exit = $LASTEXITCODE
+    foreach ($delay in $delays) {
+        if ($exit -eq 0 -and (Test-Path $cfgPath)) { break }
+        $text = ($out | Out-String)
+        if ($exit -eq 0) {
+            Write-Warn "uv venv reported success but pyvenv.cfg is missing at $cfgPath (shared interpreter race, #6852) -- retrying in ${delay}s"
+        } elseif (Test-IsSreModuleMismatch $text) {
+            Write-Warn "uv venv hit a transient SRE module mismatch (shared Python cache race, #6785) -- retrying in ${delay}s"
+        } elseif (Test-IsVenvCorruption $text) {
+            Write-Warn "uv venv hit a transient pyvenv.cfg corruption (shared Python cache race, #6852) -- retrying in ${delay}s"
+        } else {
+            break
+        }
+        Start-Sleep -Seconds $delay
+        $out = & uv venv $VenvDir @Arguments 2>&1
+        $exit = $LASTEXITCODE
+    }
+    return [pscustomobject]@{ Output = $out; ExitCode = $exit }
+}
+
 function Test-UvConfiguredIndex {
     $configPaths = if ($env:UV_CONFIG_FILE) {
         @($env:UV_CONFIG_FILE)
@@ -355,18 +434,27 @@ function Test-UvConfiguredIndex {
 function Ensure-UvIndex {
     if ($env:UV_DEFAULT_INDEX -or $env:UV_INDEX_URL -or (Test-UvConfiguredIndex)) { return }
     $idx = ''
-    if (Get-Command pip -CommandType Application -ErrorAction SilentlyContinue) {
-        $out = & pip config get global.index-url 2>$null
-        if ($LASTEXITCODE -eq 0) { $idx = ($out | Out-String).Trim() }
-    }
-    if (-not $idx) {
-        if (Get-Command py -CommandType Application -ErrorAction SilentlyContinue) {
-            $out = & py -3 -m pip config get global.index-url 2>$null
-            if ($LASTEXITCODE -eq 0) { $idx = ($out | Out-String).Trim() }
-        } elseif (Get-Command python -CommandType Application -ErrorAction SilentlyContinue) {
-            $out = & python -m pip config get global.index-url 2>$null
+    # pip writes routine "no such key" notices to stderr when unconfigured; under
+    # $ErrorActionPreference='Stop' that becomes a terminating error even with a
+    # 2>$null redirect, so relax it for the duration of these probes.
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        if (Get-Command pip -CommandType Application -ErrorAction SilentlyContinue) {
+            $out = & pip config get global.index-url 2>$null
             if ($LASTEXITCODE -eq 0) { $idx = ($out | Out-String).Trim() }
         }
+        if (-not $idx) {
+            if (Get-Command py -CommandType Application -ErrorAction SilentlyContinue) {
+                $out = & py -3 -m pip config get global.index-url 2>$null
+                if ($LASTEXITCODE -eq 0) { $idx = ($out | Out-String).Trim() }
+            } elseif (Get-Command python -CommandType Application -ErrorAction SilentlyContinue) {
+                $out = & python -m pip config get global.index-url 2>$null
+                if ($LASTEXITCODE -eq 0) { $idx = ($out | Out-String).Trim() }
+            }
+        }
+    } finally {
+        $ErrorActionPreference = $prevEAP
     }
     if (-not $idx) {
         $configPaths = @($env:PIP_CONFIG_FILE)
@@ -584,23 +672,31 @@ function New-SignedVenv {
     <# Create or rebuild $VenvDir so its python.exe is SAC-trusted. Prefers a
        signed base Python via `--copies`; rebuilds an existing unsigned venv;
        falls back to uv (unsigned) when no signed Python exists. Returns $true
-       if $VenvPython is present afterward. #>
+       if $VenvPython AND $VenvDir\pyvenv.cfg are both present afterward --
+       checking python.exe alone would treat a #6852-corrupted slot
+       (python.exe present, pyvenv.cfg missing) as already healthy and never
+       rebuild it. #>
     # #935: toss an INCOMPLETE prior slot first so we never build over a corpse.
     Invoke-VersionedSlotClean
-    if ((Test-Path $VenvPython) -and ($env:OS -eq 'Windows_NT')) {
-        $sig = try { (Get-AuthenticodeSignature $VenvPython).Status } catch { 'Unknown' }
+    $cfgPath = Join-Path $VenvDir 'pyvenv.cfg'
+    if (Test-Path $VenvPython) {
+        $sig = if ($env:OS -eq 'Windows_NT') { try { (Get-AuthenticodeSignature $VenvPython).Status } catch { 'Unknown' } } else { 'Valid' }
         if ($sig -ne 'Valid' -and (Get-SignedBasePython)) {
             Write-Step 'Existing venv python is unsigned (Smart App Control-incompatible) -- rebuilding from signed Python'
             try { Remove-Item -Recurse -Force $VenvDir -ErrorAction Stop }
             catch { Write-Warn "Could not remove existing venv (in use?): $_" }
+        } elseif (-not (Test-Path $cfgPath)) {
+            Write-Warn "Existing venv python.exe present but pyvenv.cfg is missing at $cfgPath (shared interpreter race, #6852) -- rebuilding"
+            try { Remove-Item -Recurse -Force $VenvDir -ErrorAction Stop }
+            catch { Write-Warn "Could not remove corrupted venv (in use?): $_" }
         }
     }
-    if (Test-Path $VenvPython) { return $true }
+    if ((Test-Path $VenvPython) -and (Test-Path $cfgPath)) { return $true }
 
     $signedBase = Get-SignedBasePython
     if ($signedBase) {
         & $signedBase -m venv --copies $VenvDir 2>&1 | Out-Null
-        if (Test-Path $VenvPython) {
+        if ((Test-Path $VenvPython) -and (Test-Path $cfgPath)) {
             Write-Ok "Venv created from signed Python ($signedBase)"
             return $true
         }
@@ -608,12 +704,11 @@ function New-SignedVenv {
     } elseif ($env:OS -eq 'Windows_NT') {
         Write-Warn 'No signed system Python found -- using uv (unsigned). On Smart App Control machines, install python.org Python 3.10+ and re-run.'
     }
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    & uv venv $VenvDir --python 3.10 --allow-existing 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) { & uv venv $VenvDir --allow-existing 2>&1 | Out-Null }
-    $ErrorActionPreference = $prevEAP
-    return (Test-Path $VenvPython)
+    $result = Invoke-UvVenvResilient -VenvDir $VenvDir -Arguments @('--python', '3.10', '--allow-existing')
+    if ($result.ExitCode -ne 0 -or -not (Test-Path $cfgPath)) {
+        $result = Invoke-UvVenvResilient -VenvDir $VenvDir -Arguments @('--allow-existing')
+    }
+    return ((Test-Path $VenvPython) -and (Test-Path $cfgPath))
 }
 
 function Get-GitInfo {
@@ -900,9 +995,9 @@ function Install-Package {
 
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    $setuptoolsOut = & uv pip install --python $VenvPython "setuptools>=83.0.0" --quiet 2>&1
-    $setuptoolsResult = $LASTEXITCODE
-    if ($setuptoolsResult -ne 0) {
+    $setuptoolsResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, 'setuptools>=83.0.0', '--quiet')
+    $setuptoolsOut = $setuptoolsResult.Output
+    if ($setuptoolsResult.ExitCode -ne 0) {
         $ErrorActionPreference = $prevEAP
         Write-Fail "setuptools install failed"
         if ($setuptoolsOut) { Write-Host ($setuptoolsOut | Out-String) }
@@ -925,17 +1020,18 @@ function Install-Package {
         }
     )) {
         if (-not (Test-Path (Join-Path $lib.Path 'pyproject.toml'))) { continue }
-        $libOut = & uv pip install --python $VenvPython --no-build-isolation --reinstall-package $lib.Package $lib.Path --quiet 2>&1
-        $libResult = $LASTEXITCODE
-        if ($libResult -ne 0) {
+        $libResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--no-build-isolation', '--reinstall-package', $lib.Package, $lib.Path, '--quiet')
+        $libOut = $libResult.Output
+        if ($libResult.ExitCode -ne 0) {
             $ErrorActionPreference = $prevEAP
             Write-Fail "$($lib.Name) library install failed"
             if ($libOut) { Write-Host ($libOut | Out-String) }
             exit 1
         }
     }
-    $out = & uv pip install --python $VenvPython --no-build-isolation --no-deps "$PluginDir" --quiet 2>&1
-    $result = $LASTEXITCODE
+    $installResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--no-build-isolation', '--no-deps', "$PluginDir", '--quiet')
+    $out = $installResult.Output
+    $result = $installResult.ExitCode
     $ErrorActionPreference = $prevEAP
     if ($result -ne 0) {
         Write-Fail "Package install failed (exit $result)"

@@ -31,6 +31,12 @@
   `cmd_launch` repoint + direct non-mux fallback is now implemented; the
   old in-plugin scripts are intentionally still deployed as a temporary
   rollback until the relocated path is proven live on real hardware.
+  Sub-slice 2b's design was revised twice (2026-09-12, see below): first
+  after discovering the `sessions.py` coupling depth, then again (before any
+  code was written) after discovering `_perform_remux` also backs the
+  bundled Picker's standalone "Restore" action via `--restore` -- Sub-slice
+  2b is now purely additive (a new query verb + WM's own executor), with no
+  deletion in agent-worktrees. Implementation has not started.
 
 ## Why this is a different shape of problem than AHP
 
@@ -186,27 +192,131 @@ about leaving Mux itself half-migrated.
 
 ### Sub-slice 2b — Relocate the remux action; keep liveness detection
 
-1. Split `cmd_remux`/`_perform_remux` into: **detection** (is the owner
-   process unreachable/ambiguous? — stays in agent-worktrees as an
-   observation query, reusing `reclaim.py` unchanged) and **action** (adopt
-   into tmux via `reptyr`, or the Windows reclaim-then-relaunch-through-the-
-   normal-launcher step — moves to Worktree Manager, which now owns "the
-   normal mux launcher" per Sub-slice 2a).
-2. agent-worktrees exposes the detection half as a `--json` query (e.g.
-   `agent-worktrees mux-owner-status --worktree-id <id>`) that Worktree
-   Manager calls before deciding to reclaim; the actual reclaim/relaunch
-   sequence is driven by Worktree Manager against the relocated launcher.
-3. `reclaim_one` (used by both Picker "Reclaim" and remux) **stays in
-   agent-worktrees unchanged** — it is a generic process-termination
-   operation over `reclaim.py`'s process-table observation, not a launch
-   mechanic, and the Picker's plain "Reclaim" action (no relaunch) has
-   nothing to do with the Mux launcher.
-4. Preserve every existing safety invariant from #1478/#1491 verbatim: refuse
+**Design revised 2026-09-12** after discovering the coupling runs deeper than
+originally scoped below: `remux.py`'s POSIX reptyr-adoption action calls
+`sessions.mux_session_name` / `build_mux_new_window_argv` /
+`build_mux_new_session_argv` -- and those helpers are **not** remux-specific.
+They are pervasive, load-bearing utilities used throughout `__main__.py` (list
+rendering, session-catalog liveness, the bundled Picker's own native mux
+launch when Worktree Manager is absent). Duplicating them into Worktree
+Manager would be exactly the "parallel reimplementation" the operator's clean-
+cutover directive forbids, and reads on `sessions.py` are exactly the vision's
+*provider-observation-ingestion* feature this document already says stays put.
+So the split is **not** "detection stays, both actions move as self-contained
+logic" as originally written -- it mirrors the **resolve/execute pattern
+Sub-slice 2a already established** for the main launch path: agent-worktrees
+keeps sole ownership of *planning* (still owns every tmux-naming/argv-building
+call), Worktree Manager owns only *executing* what agent-worktrees tells it to.
+
+1. **New agent-worktrees query verb (planning only, no side effects, never
+   terminates a process):**
+   `agent-worktrees mux-remux-plan --worktree-id <id> [--session-id <id>]
+   [--force-sudo | --no-force-sudo] --json`.
+   - Refactors `_perform_remux`'s and `remux_bare_copilot`'s **guard/target-
+     resolution** logic (already-has-live-mux refusal, ambiguous-owner
+     rejection via `reclaim.py` unchanged, none-found) into this query,
+     unchanged in substance -- reuses `reclaim.py` and `sessions.py` exactly
+     as today.
+   - **POSIX (Linux/WSL) result:** the *precise* reptyr pane-adoption `argv`
+     the query would have run (built via the SAME
+     `sessions.build_mux_new_window_argv`/`build_mux_new_session_argv`/
+     `mux_session_name`, unchanged, still living here), the resolved
+     `pid`/`session_id`/`session_name`, and whether `sudo` is required
+     (`_needs_sudo()`, unchanged) -- but does **not** invoke it.
+   - **Windows result:** the exact same preview shape `_perform_remux`
+     already computes today (target `pid`/`session_id`, `reason`,
+     `requires_resume`) -- but does **not** call `reclaim_one` itself; that
+     becomes a separate, explicit step (below).
+   - Every existing safety invariant (refuse live mux, refuse ambiguous
+     owner, never resolve the calling process's own subtree) lives entirely
+     in this query, verbatim.
+2. **The action moves to Worktree Manager as a thin executor, not a
+   reimplementation:**
+   - **POSIX:** calls `mux-remux-plan --json`, runs the returned `argv`
+     directly via `subprocess` (mechanical -- no tmux-naming knowledge of its
+     own), then polls agent-worktrees' *existing, unchanged* liveness query
+     (`has_mux_session` / the homing-observation path) to confirm the
+     hand-over, mirroring `remux_bare_copilot`'s current verify-poll loop.
+   - **Windows:** calls `mux-remux-plan --json` for the preview, then (on
+     apply) calls the **already-existing, unchanged**
+     `agent-worktrees reclaim --worktree-id <id> --bare-only --yes --json`
+     verb (the same primitive Picker's plain "Reclaim" action already uses)
+     to terminate the confirmed-unreachable owner, then relaunches through
+     its **own relocated** `<bin>/launch-session.*` script from Sub-slice 2a
+     in ordinary resume mode -- the identical path any normal Picker resume
+     takes, not a new relaunch mechanic.
+   - This means **no new Windows relaunch code** is needed in Worktree
+     Manager at all: "reclaim-then-relaunch" is just "call the reclaim verb,
+     then do a normal resume" -- both already-existing primitives.
+3. **Correction (2026-09-12, before implementation started):** point 3 as
+   originally written here ("delete `cmd_remux`/`_perform_remux`/
+   `remux_bare_copilot`'s execution from agent-worktrees") is **unsafe as
+   literally stated**. `_perform_remux` is not solely the standalone `remux`
+   CLI verb's backend -- it is also called internally by
+   `_restore_before_resume`, which backs `resolve --restore` and, through it,
+   the bundled Picker's own **"Restore"** action (`picker_tui/engine.py`).
+   That capability must keep working with **zero** session-host providers
+   present (the vision's own invariant: the bundled Picker still ships and is
+   still mux-capable until Phase 6c retires it, and `--restore`/"Restore" is
+   exactly how it self-heals an unreachable bound session **without**
+   Worktree Manager). Deleting the underlying action would regress that --
+   exactly the class of live regression this whole effort exists to prevent.
+
+   **Revised, purely additive plan:** agent-worktrees's existing
+   `cmd_remux`/`_perform_remux`/`remux_bare_copilot` action machinery is
+   **unchanged and stays** -- it is agent-worktrees' own zero-provider-mode
+   remux capability (both the standalone `remux` verb and the internal
+   `--restore` path keep using it exactly as today). The new
+   `mux-remux-plan` query is an **additional** surface, refactoring the
+   SAME guard/target-resolution logic into a shared, reusable pure function
+   that both the existing action code and the new query call -- not a
+   replacement for the existing action, and not something that removes any
+   existing capability. Worktree Manager becomes a **second, independent**
+   executor of that same plan (useful once WM wants its own "Restore"
+   Picker-parity action without importing agent-worktrees' Python or
+   duplicating tmux-naming logic) -- it does not replace or disable
+   agent-worktrees' own standalone remux/`--restore` path, which remains the
+   fallback when Worktree Manager is absent.
+4. `reclaim_one` (used by both Picker "Reclaim" and the Windows remux action)
+   **stays in agent-worktrees unchanged** -- already true today, reconfirmed:
+   it is a generic process-termination operation over `reclaim.py`'s
+   process-table observation, invoked identically by both callers.
+5. Preserve every existing safety invariant from #1478/#1491 verbatim: refuse
    an existing live mux, refuse an ambiguous owner, never reap the calling
-   process's own subtree.
-5. Same clean-cutover rule: `cmd_remux`'s relaunch action moves to Worktree
-   Manager and is deleted from agent-worktrees in the same PR that adds the
-   detection-query verb's consumer — no parallel remux implementations.
+   process's own subtree. These live entirely inside the shared plan
+   function now, called by both the existing action and the new query --
+   "preserved" means the guard logic is shared, not duplicated or rewritten.
+6. **No cutover/deletion in agent-worktrees for this sub-slice.** Unlike
+   Sub-slice 2a (where exactly one launch implementation must exist), remux
+   is not being relocated away from agent-worktrees -- agent-worktrees keeps
+   its own standalone remux/`--restore` capability permanently (the
+   zero-provider fallback), and Worktree Manager gains an *independent*
+   second consumer of the same plan for its own eventual Picker-parity
+   "Restore" action. "No parallel reimplementation" here means: don't
+   duplicate the plan-computation logic (tmux-naming, guard checks) in both
+   places -- it means share one plan function, not "only one place may
+   execute a remux."
+
+### Sub-slice 3 — Split the resident status-monitor's push/observe legs into Worktree Manager
+
+Detailed ordered plan: [`phase-3b-substatus-monitor-relocation.md`](phase-3b-substatus-monitor-relocation.md).
+
+This parent doc now keeps only the boundary statement:
+
+- `agent-worktrees` retains the existing resident `status-monitor` daemon as
+  the **sole accumulator/authority** for worktree status data.
+- `worktree-manager` gains a new **companion mux daemon** that owns
+  Worktree-Manager-managed worktree ⇄ mux-session/pane mapping and writes mux
+  status-bar options.
+- The two daemons communicate **bidirectionally**:
+  1. Worktree Manager notifies `agent-worktrees` when a managed worktree gains,
+     changes, or loses a live mux pane.
+  2. `agent-worktrees` sends already-rendered status payloads back to Worktree
+     Manager, which applies them to the mapped mux session(s).
+
+The dedicated doc above defines the transport, message shapes, status-updater
+retirement/reconciliation, implementation ordering, and validation contract.
+
 
 ## What stays in agent-worktrees (not relocated, ever)
 
@@ -214,6 +324,14 @@ about leaving Mux itself half-migrated.
   `verify_worktree_active` — live liveness **observation**, feeding the
   aggregate-status reducer. This is the vision's *provider-observation-
   ingestion* feature, not launch mechanics.
+- `sessions.py`'s `mux_session_name`, `build_mux_new_window_argv`,
+  `build_mux_new_session_argv` — **discovered during Sub-slice 2b design
+  (2026-09-12)** to be pervasive planning/naming utilities used throughout
+  `__main__.py` well beyond remux (list rendering, session-catalog liveness,
+  the bundled Picker's own native mux launch). These stay so agent-worktrees
+  remains the single owner of "how to name/build a mux session for worktree
+  X"; Worktree Manager only ever *executes* an argv agent-worktrees already
+  computed (`mux-remux-plan`), never rebuilds one itself.
 - `reclaim.py` in full — process-table introspection and bound-process
   resolution, reused by Reclaim (a non-relaunching action) independent of
   which launcher a worktree uses.
@@ -227,21 +345,33 @@ about leaving Mux itself half-migrated.
 
 1. **(Done)** Copy launcher/wrapper scripts into `worktree-manager/bin/`,
    unchanged; prove the deployment mechanism with a self-install test.
-2. Add the health-probed new-location resolution **and** the direct non-mux
-   fallback to `cmd_launch`; **defer deleting** the old in-plugin scripts until
-   a follow-up live-proof cleanup PR removes the temporary rollback. The
-   repoint/fallback portion is validated against the full Picker
-   golden/screenshot suite, both plugins' test suites, and the
-   `agent-worktrees-solo` / `worktree-manager-bootstrap` clean-room scenarios.
+2. **(Done)** Add the health-probed new-location resolution **and** the
+   direct non-mux fallback to `cmd_launch`; **defer deleting** the old
+   in-plugin scripts until a follow-up live-proof cleanup PR removes the
+   temporary rollback. Also closed the concurrent live regression where
+   Worktree Manager's own `_run_launch` bypassed the relocated launcher
+   entirely (see `README.md` journal, 2026-09-10).
 3. Author (or extend) a combined clean-room scenario proving an actual
-   interactive mux launch end-to-end across both installed plugins, if not
-   already done as part of step 2.
-4. Split `cmd_remux` per Sub-slice 2b; land the detection-query verb in
-   agent-worktrees, then cut the relaunch action over to Worktree Manager and
-   delete it from agent-worktrees in the same PR (same clean-cutover rule).
-5. Update `test_remux.py`, `test_ahp_launcher_contract.py`, and any launcher-
-   path-asserting test to the new location; add Worktree Manager tests for
-   the relocated scripts and the new remux action.
+   interactive mux launch end-to-end across both installed plugins.
+4. Implement Sub-slice 2b per the revised (2026-09-12, twice-corrected)
+   design above:
+   a. Extract `_perform_remux`'s/`remux_bare_copilot`'s guard and
+      target-resolution logic into a shared, reusable plan function
+      (unchanged in substance) called by BOTH the existing action code
+      (`cmd_remux`, `_restore_before_resume` -- unaffected, still fully
+      functional standalone) and a new
+      `agent-worktrees mux-remux-plan --json` query verb.
+   b. Add Worktree Manager's OWN, independent executor consuming that
+      query: POSIX runs the returned `argv` + polls existing liveness;
+      Windows calls the existing `agent-worktrees reclaim --bare-only --yes
+      --json` then relaunches via its own relocated launcher in ordinary
+      resume mode.
+   c. **No deletion in agent-worktrees.** `cmd_remux`, `_perform_remux`, and
+      `remux_bare_copilot`'s execution stay exactly as they are today --
+      this sub-slice is purely additive (see the correction above).
+5. Update/add tests for the new shared plan function and query verb; add
+   Worktree Manager tests for its new executor. No existing test should need
+   to change in spirit (the existing action's behavior is unchanged).
 
 ## Validation
 

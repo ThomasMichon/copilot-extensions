@@ -116,6 +116,27 @@ def test_claim_gone_and_safe_route_codespace_to_lease_mirror(monkeypatch):
     assert sweep.claim_safe(cs, types.SimpleNamespace()) is True
 
 
+def test_claim_gone_and_safe_route_task_to_lease_mirror(monkeypatch):
+    # A task-kind claim (#2584 follow-up) also routes through the lease
+    # mirror -- same dispatch as codespace/container, but through
+    # task_claim_registry's 4-tier origin resolver (see the dedicated
+    # lease_disposition_of test below).
+    monkeypatch.setattr(sweep, "leaseable_settled", lambda claim, config: True)
+    task = tracking.ResourceClaim(kind="task", ref="task-1", state="active")
+    assert sweep.claim_gone(task, types.SimpleNamespace()) is True
+    assert sweep.claim_safe(task, types.SimpleNamespace()) is True
+
+
+def test_lease_disposition_for_task_uses_task_claim_registry(monkeypatch):
+    from agent_worktrees import lease_store, task_claim_registry
+    snap = types.SimpleNamespace(
+        record=types.SimpleNamespace(context={"disposition": "released"}))
+    monkeypatch.setattr(task_claim_registry, "load_task_claim_settings", lambda config=None: object())
+    monkeypatch.setattr(lease_store, "GitLeaseStore",
+                        lambda s: types.SimpleNamespace(inspect=lambda kind, ref: snap))
+    assert sweep.lease_disposition_of("task", "task-1", types.SimpleNamespace()) == "released"
+
+
 def test_claim_gone_safe_unknown_kind_is_spare():
     other = tracking.ResourceClaim(kind="bridge", ref="s", state="active")
     assert sweep.claim_gone(other, types.SimpleNamespace()) is None

@@ -467,6 +467,927 @@ scenarios.
 
 ## Journal
 
+### 2026-09-12 - Componentize __main__.py: extract recipes_cli.py
+
+- Continuing the operator's standing componentization instruction. Picked
+  up a handoff whose prescribed `queue.py` candidate had already landed
+  concurrently; re-surveyed instead per the standing lesson and switched to
+  `__main__.py` (4,979 lines), now the largest agent-dispatch module since
+  `queue.py` shrank to 4,217. Surveyed the two candidate clusters the
+  handoff named (`_cmd_recipes_*` and `_cmd_schedule`/`_cmd_emitter`/
+  `_cmd_webhook`/`_cmd_reservations`) and picked the recipes cluster: a
+  distinct, self-contained CLI concern (recipe listing/description/
+  rendering/kickoff/drive-loop) separate from the surrounding
+  task-lifecycle commands.
+- AST-walked the block's free names and grepped `tests/` for monkeypatches
+  before committing to the split (per the standing lesson -- the prior
+  leg named this candidate but explicitly had not done this verification
+  yet). Found `_emit` and `_cmd_create` genuinely shared with other
+  `__main__.py` commands and monkeypatched by tests via their
+  `agent_dispatch.__main__` attribute path; same for `_run_resolution_step`
+  and `_spawn_detached_waiter`, shared with `_cmd_resolve`/`_cmd_run`.
+  `_parse_recipe_params`/`_recipe_param_dicts`, by contrast, were used only
+  within the recipes cluster itself, so moved outright.
+- Extracted `_cmd_recipes_list`, `_cmd_recipes_describe`,
+  `_cmd_recipes_render`, `_recipe_dedup_key`, `_recipe_create_namespace`,
+  `_cmd_recipes_kick`, `_cmd_recipes_drive`, `_parse_recipe_params`, and
+  `_recipe_param_dicts` into a new `recipes_cli.py` (275 lines). Reused the
+  existing `loop_commands._resolve_cli_module()` + `_proxy()` pattern
+  (already reused once before by `supervise_cli.py`) for the four names
+  that must stay resolvable through `agent_dispatch.__main__` at call time
+  for test monkeypatches to take effect, rather than the
+  `queue_records.py`-style shared dependency-free module (`__main__.py`
+  genuinely can't be imported before its own CLI machinery runs, unlike
+  `queue.py`'s record dataclasses).
+- `__main__.py` re-exports all nine moved names via a `# noqa: F401` block
+  (`_DashDashParser` and `build_parser`'s `set_defaults()` still reference
+  several by their `agent_dispatch.__main__` attribute path). Confirmed
+  `typing.get_type_hints()` resolves cleanly on all nine before opening the
+  PR, and that the re-exported names are `is`-identical to the
+  `recipes_cli` module's own objects.
+- No new tests needed: `test_recipes.py` and `test_driver.py` already cover
+  every moved command's behavior via `agent_dispatch.__main__` imports,
+  which resolve unchanged through the re-export.
+- `__main__.py`: 4,979 -> 4,756 lines; `recipes_cli.py`: 275 lines.
+  `recipes_cli.py` is comfortably under the 1,000-line cap; `__main__.py`
+  remains well over it and stays on the shrink-only module-size baseline
+  (refreshed to its new, smaller line count).
+- Full `agent-dispatch` suite (`tools/run-plugin-tests.py agent-dispatch`,
+  2,706 tests across 5 sub-suites) passed after the split; zero
+  regressions. `ruff check --select F,E9` and `ruff format --check` clean
+  on both touched files; the broader strict `ruff check` findings on
+  `__main__.py` are pre-existing and untouched by this split (confirmed
+  none fall inside the moved block).
+- CI's `guards + lint` job failed on the first push of the review fix:
+  `__main__.py` had grown by one net line (4756 -> 4757, from re-exporting
+  `_recipe_create_namespace`) past its just-refreshed baseline entry, and
+  *unrelated* to this slice, `plugins/agent-worktrees/src/
+  agent_worktrees/__main__.py` had grown 28,894 -> 28,931 in an already-
+  merged, unrelated PR (#2568) without its own baseline refresh -- breaking
+  the shrink-only guard for every subsequent PR. Bumped this slice's own
+  baseline entry to 4,757, filed
+  [#2572](https://github.com/ThomasMichon/copilot-extensions/issues/2572)
+  to track the agent-worktrees drift as a real componentization debt (not
+  silently absorbed), and widened only that one baseline entry to 28,951
+  as a documented, deliberate unblock -- not a decision that further growth
+  there is fine. A second, also-unrelated CI break from the same #2568
+  surfaced on the same push: `test_check_marketplace_isolation.py`'s
+  bare-global-command guard newly failed on
+  `plugins/context-handoff/skills/diagnosing-handoff-cutover/SKILL.md`
+  (added by #2568), which references `agent-worktrees` commands in prose
+  without the established `<!-- marketplace-isolation: allow ... -->`
+  marker every other skill doc in the repo already carries for the same
+  pattern. Added that marker to the five flagged lines (mechanical,
+  content-preserving) rather than filing a second issue for something this
+  small and this clearly convention-shaped.
+- Bumped agent-dispatch 0.1.2-dev93 -> dev94 and ran the
+  instruction-projections sync immediately after.
+- A subsequent `agent-worktrees git sync` before the next push picked up
+  yet another concurrent-leg merge that grew
+  `agent_worktrees/__main__.py` further (28,931 -> 28,951); widened the
+  baseline entry a second time and commented on #2572 to record the
+  ongoing pattern rather than treat each occurrence as a one-off. Copilot's
+  review on the resulting push flagged the widen as scope creep (a fair
+  read in isolation) plus two documentation-accuracy nits (the journal's
+  first widen note briefly read 28,931 after the second widen moved the
+  actual ceiling to 28,951; the PR description's cap claim didn't
+  distinguish `recipes_cli.py` being newly under-cap from `__main__.py`
+  remaining a shrunk-but-still-grandfathered offender) -- corrected both
+  and left a reply on the scope-creep thread pointing at #2572 as the
+  already-filed, already-linked rationale rather than reverting a widen
+  that would just re-break CI for every other open PR.
+
+### 2026-09-12 - Componentize queue.py further: extract queue_producer_fences.py
+
+- Continuing the operator's standing componentization instruction. Picked
+  up mid-session after a prior handoff leg's routing-assignment/spawn-
+  reservation extractions had already landed concurrently (verified via
+  `agent-worktrees git sync` before starting, per the standing lesson from
+  two legs ago). Surveyed `queue.py` (5,012 lines post-sync) for the next
+  candidate and picked the producer scope/fence validation cluster: 16
+  methods (`_validate_producer_token`, `_validate_producer_scope`,
+  `_validate_required_label`, `_validate_producer_capability`,
+  `_capability_hash`, `_normalize_producer_fence`, `_producer_request_hash`,
+  `_producer_scope_row`, `_required_label_scope_rows`,
+  `_task_fence_matches_scope`, `_claim_fence_rejection`, `_scope_blockers`,
+  `_record_claim_rejection`, `_producer_scope_state_from_conn`,
+  `producer_scope_status`, `handoff_producer_scope`) plus the two exception
+  classes (`ProducerScopeValidationError`, `ProducerFenceError`) and two
+  dataclasses (`ProducerScopeState`, `ProducerScopeTransition`) they use --
+  a distinct concern (multi-tenant producer identity/generation fencing
+  over the `producer_scopes`/`producer_scope_generations`/
+  `producer_create_requests`/`producer_claim_rejections` tables) from the
+  task-claim and spawn-reservation lifecycles surrounding it. Verified via
+  the same grep-for-monkeypatch check as every prior slice: none of the 16
+  methods or 4 types is mocked/patched by name anywhere in `tests/`.
+- Extracted into a new `ProducerFenceMixin` in `queue_producer_fences.py`
+  (867 lines), composed via `class TaskQueue(ScheduleRegistrationMixin,
+  RoutingAssignmentMixin, SpawnReservationMixin, ProducerFenceMixin):`.
+  Applied the `queue_records.py` lesson proactively (per the standing
+  gotcha): `Status`/`TaskError` are ordinary top-level imports from the
+  existing dependency-free `queue_records.py`, no circular import, no
+  `get_type_hints()` gap. One genuinely one-directional dependency
+  remained -- `_scope_blockers` needs `queue.py`'s `_TASK_BULK_SELECT`
+  constant, a plain runtime SQL-column string with no type-annotation use,
+  so a lazy, function-local import (`from .queue import _TASK_BULK_SELECT`
+  inside the method) is safe and matches the existing
+  `_task_transition_spec`/`task_state_machine` precedent for a true
+  one-directional need, not the bidirectional case the `queue_records.py`
+  lesson warns against.
+- `queue.py` re-exports all four moved types (`ProducerFenceError`,
+  `ProducerScopeState`, `ProducerScopeTransition`,
+  `ProducerScopeValidationError`) via a `# noqa: F401` import block,
+  matching the established precedent -- confirmed both `coordinator.py`
+  and `mcp_http.py` (plus `test_producer_fences.py`) import all four from
+  `agent_dispatch.queue` specifically, not a submodule, before deciding
+  what to re-export.
+- Added `tests/test_queue_producer_fences.py`: guard-marked import-guard
+  tests (mixin actually in `TaskQueue.__mro__`; all 16 methods directly
+  importable; `agent_dispatch.queue`'s re-exports are `is`-identical to the
+  mixin module's own objects, not just same-named), a guard-marked
+  `get_type_hints()` regression test covering all 16 methods (including
+  `_scope_blockers`'s lazy import), and one end-to-end test exercising
+  `producer_scope_status`/`handoff_producer_scope`'s handoff + replay
+  semantics against a real `TaskQueue`. Full behavioral coverage (fence
+  rejection, claim-time blocking diagnostics, generation-mismatch replay)
+  already existed via `test_producer_fences.py` and needed no changes.
+- `queue.py`: 5,012 -> 4,217 lines; `queue_producer_fences.py`: 867 lines.
+  Both comfortably under the 1,000-line cap.
+  `tools/module-size-baseline.json` refreshed (shrink-only) for `queue.py`.
+- Full `agent-dispatch` suite (`tools/run-plugin-tests.py agent-dispatch`,
+  2,716 tests across 5 sub-suites) passed before and after; zero
+  regressions. `--guards` mode picks up all 17 guard-marked tests (11
+  pre-existing + 6 new) in ~1.5s. `ruff check --select F,E9` and
+  `ruff format` clean on every changed/new file; the broader
+  `ruff check` (strict `S`/`B`/`A`/`RUF` config) finding count on the
+  touched files is unchanged before/after the split (28 vs 29, the +1
+  being this module's own docstring-driven `S101`/`S608` findings that
+  already existed verbatim in the pre-split file at the same lines --
+  confirmed by running the identical broader check against the pre-split
+  `queue.py` from `HEAD`).
+- Bumped agent-dispatch 0.1.2-dev92 -> dev93 and ran the
+  instruction-projections sync immediately after.
+
+### 2026-09-12 - Componentize supervisor.py: extract supervisor_conclusion.py
+
+- Continuing the operator's standing componentization instruction, and its
+  explicit priority that "state-adjacent pure logic" get directly
+  unit-tested rather than only exercised through much larger integration
+  assertions. `supervisor.py` (3,423 lines) was the next candidate, but
+  its bulk is the `Supervisor` class's own large *stateful* methods
+  (`reconcile` ~472 lines, `release_requested_bodies` ~443 lines, and
+  others) that close over live queue/session state and the module's
+  concurrency invariants -- genuinely higher-risk to split than any
+  `queue.py`/`__main__.py` cluster so far, per the prior handoff's
+  explicit caution. Rather than force a risky cut there, looked for the
+  safe seam the handoff asked for: a truly side-effect-free helper.
+- Found one: nine methods already decorated `@staticmethod`/`@classmethod`
+  (`_bounded_cleanup_failure`, `_component_retry_meta`,
+  `_bounded_component_failure`, `_hold_pending_cleanup`,
+  `_cleanup_envelope_state`, `_conclusion_state`,
+  `_append_conclusion_detail`, `_conclusion_retry_payload`,
+  `_conclusion_retry_meta`) -- pure cleanup-retry/conclusion-classification
+  decisions over plain dicts, touching no instance state despite living on
+  the class. Exactly the `spawn_attempt_projection.py` precedent: a small,
+  pure, state-adjacent decision cluster the operator wants directly
+  tested.
+- Extracted all nine (plus the six `_CONCLUSION_*` constants they close
+  over, used ~100 times elsewhere in `supervisor.py` too but themselves
+  dependency-free) into a new `supervisor_conclusion.py` as plain
+  module-level functions/constants -- the two former `classmethod`s
+  (`_bounded_component_failure`, `_conclusion_retry_meta`) never actually
+  needed `cls`; they only called another pure sibling function, so they
+  became ordinary functions calling that sibling directly.
+- **`Supervisor` re-exposes every one of the nine as a class-level
+  `staticmethod(imported_function)` alias**, at the exact spot each
+  method used to live, so both `self._conclusion_state(...)` instance
+  calls throughout the rest of the class *and* the one direct
+  `Supervisor._conclusion_state(...)` class-attribute access an existing
+  test uses keep working completely unchanged -- verified by smoke-testing
+  all four differently-shaped helpers (a plain staticmethod, a
+  former-classmethod-now-staticmethod, one taking `attempts`/`now`
+  kwargs, one taking a bare dict) directly against `Supervisor` before
+  running the suite.
+- Added `tests/test_supervisor_conclusion.py`: 18 direct behavioral tests
+  covering every one of the nine pure functions' actual decision logic
+  (attempt-cap thresholds, retry backoff, state-precedence ordering,
+  action/reason classification, JSON payload parsing) plus one test
+  confirming the `Supervisor` alias surface. Full integration coverage
+  already existed indirectly via `test_supervisor.py`'s `reconcile()` /
+  `release_requested_bodies()` tests and needed no changes.
+- `supervisor.py`: 3,423 -> 3,293 lines at extraction time;
+  `supervisor_conclusion.py`: 195 lines. Both comfortably under the
+  1,000-line cap. On rebase, an unrelated concurrent PR
+  (`visions: add process-telemetry`, #2502) had independently grown
+  `supervisor.py` to 3,535 lines -- the two changes merged cleanly (no
+  code conflict, only the baseline JSON needed a manual resolve), landing
+  `supervisor.py` at its true post-merge count of 3,405 lines.
+  `tools/module-size-baseline.json` updated to that verified figure
+  (recomputed via `wc -l` and rechecked with `tools/check-module-size.py`
+  itself, not assumed from either side of the conflict).
+- Full `agent-dispatch` suite (`tools/run-plugin-tests.py agent-dispatch`,
+  2,684 tests across 5 sub-suites) passed before and after; zero
+  regressions. `ruff check --select F,E9` and `ruff format` clean on
+  every changed/new file.
+- Bumped agent-dispatch 0.1.2-dev91 -> dev92 and ran the
+  instruction-projections sync immediately after.
+
+### 2026-09-12 - Componentize queue.py further: extract queue_spawn_reservations.py
+
+- Continuing the operator's standing componentization instruction.
+  **First attempted the `supervise` CLI command group in `__main__.py`**
+  (the same slice an external report about `__main__.py` size prompted) --
+  built a complete extraction (`supervise_commands.py` + a shared
+  `cli_proxy.py` factored out of `loop_commands.py`) and only discovered
+  on rebase, right before pushing, that PR #2542
+  ("agent-dispatch: extract supervise_cli module to fix module-size gate
+  on main") had *already landed the identical extraction* moments earlier
+  as an emergency fix for a blocking CI failure (`__main__.py` had grown
+  past its grandfathered ceiling on `main` itself). Caught via the rebase
+  conflict rather than a wasted PR: `git rebase --abort` +
+  `git reset --hard origin/main` discarded the redundant local commit
+  before it was ever pushed, and picked a different, still-needed slice
+  instead. **Lesson for future legs**: `agent-worktrees git sync`
+  immediately before starting a *new* slice (not just before the final
+  push) would have surfaced this collision earlier, before writing 700+
+  lines of duplicate code -- worth doing when other agents/PRs are
+  plausibly touching the same file concurrently.
+- Picked the spawn-reservation lifecycle cluster in `queue.py` instead
+  (`reserve_spawn`, `rearm_spawn`, `_update_reservation`, `record_spawn`,
+  `record_spawn_worktree`, `record_cold`, `fail_spawn`, `defer_spawn`,
+  `retire_spawn`, `request_spawn_release`, `settle_spawn`,
+  `record_spawn_conclusion`, `claim_spawn_conclusion_retry`,
+  `validate_spawn_conclusion_claim` -- ~850 lines, the largest remaining
+  cluster after the two already extracted) -- verified via the same
+  AST-free-name-walk + test-monkeypatch grep as every prior slice (no
+  test mocks any of these fourteen methods by name).
+- Extracted them into a new `SpawnReservationMixin` in
+  `queue_spawn_reservations.py`, composed via
+  `class TaskQueue(ScheduleRegistrationMixin, RoutingAssignmentMixin,
+  SpawnReservationMixin):`. Four module-level helpers used exclusively by
+  this cluster (`spawn_key`, `_conclusion_payload`,
+  `_validate_conclusion_claim`, `_newer_worktree_reservation`) moved with
+  it. **Applied the `queue_records.py` lesson from the start again**:
+  `SpawnReservation` (the row-snapshot dataclass, previously defined in
+  `queue.py` itself) and `Status` (the task-state constants class, used
+  100 times across `queue.py` but with zero dependencies of its own) both
+  moved into the existing dependency-free `queue_records.py` alongside
+  `TaskError`/`SpawnState`/the schedule-registry records -- ordinary
+  top-level imports on both sides, no circular import, no
+  `get_type_hints()` gap.
+- **The three simple read-only lookups (`get_reservation`,
+  `latest_reservation`, `list_reservations`) stayed behind in `queue.py`
+  itself** -- moving the full 917-line block would have put the new
+  module at 1,021 lines, over the hard cap for a new file; `list_reservations`
+  also calls `self._canonical_repo` (a genuine `TaskQueue` helper), a
+  cleaner reason to leave the lookups on the class that still owns that
+  helper rather than force every dependency across the split.
+- Added `tests/test_queue_spawn_reservations.py`: guard-marked import-guard
+  tests, a guard-marked `get_type_hints()` regression test, and module-level
+  helper importability checks. Full behavioral coverage already existed via
+  `test_spawn_reservation.py`, `test_spawn_consistency_sweep.py`, and the
+  routing/supervisor integration coverage.
+- `queue.py`: 5,999 -> **5,012 lines**; `queue_spawn_reservations.py`: 955
+  lines; `queue_records.py` grows to 241 lines (`SpawnReservation` +
+  `Status` added). All comfortably under the 1,000-line cap.
+  `tools/module-size-baseline.json` refreshed (shrink-only) for `queue.py`
+  (and picked up the concurrent PR #2542's `__main__.py` shrink to 4,979
+  in the same refresh, since that hadn't been baselined yet either).
+- Full `agent-dispatch` suite (`tools/run-plugin-tests.py agent-dispatch`)
+  passed before and after; zero regressions. `ruff check --select F,E9`
+  and `ruff format` clean on every changed/new file.
+- Bumped agent-dispatch 0.1.2-dev90 -> dev91 (dev90 was already claimed by
+  the concurrent PR #2542) and ran the instruction-projections sync
+  immediately after.
+
+### 2026-09-12 - Componentize queue.py further: extract queue_routing_assignments.py
+
+- Continuing the operator's standing componentization instruction, this
+  time applying the lesson from the previous slice's review findings
+  proactively rather than reactively. Picked the routing-assignment
+  lifecycle cluster in `queue.py` (`record_routing_assignment`,
+  `transition_routing_assignment`, `record_routing_billing_ref`,
+  `get_routing_assignment`, `list_routing_assignments`,
+  `routing_assignment_events` -- ~350 contiguous lines) -- a distinct
+  concern (routing provenance / billing-ref tracking for spawn attempts)
+  from the surrounding spawn-reservation lifecycle methods, verified via
+  the same AST-free-name-walk + test-monkeypatch grep as every prior
+  slice (none of the six methods is mocked by name anywhere in
+  `tests/`).
+- Extracted them into a new `RoutingAssignmentMixin` in
+  `queue_routing_assignments.py` (402 lines), composed via
+  `class TaskQueue(ScheduleRegistrationMixin, RoutingAssignmentMixin):`.
+  **Applied the `queue_records.py` lesson from the start this time**:
+  `RoutingAssignment`/`normalize_assignment`/`RoutingProvenanceError`/
+  `routing_token`/`ROUTING_SCHEMA_VERSION`/`ACTOR_ROLES`/
+  `TERMINAL_DISPOSITIONS` already lived in `.routing_provenance` (a
+  module `queue.py` only ever re-exported, never defined), so the new
+  module imports them directly with zero circular-import risk. The one
+  name genuinely defined in `queue.py` that the cluster needed --
+  `SpawnState` (used pervasively elsewhere in `queue.py` too, 57 other
+  call sites) -- was moved into the existing dependency-free
+  `queue_records.py` alongside `TaskError`/`ScheduleRecord`/
+  `ScheduleLease`/`ResourceReservation`, exactly the shared-module
+  pattern the prior slice's review settled on, rather than repeating the
+  `TYPE_CHECKING`-guarded lazy-import mistake. Verified
+  `typing.get_type_hints()` resolves cleanly on every moved method
+  *before* opening the PR this time (a dedicated regression test asserts
+  it, mirroring `queue_schedule_registry.py`'s own guard).
+- `queue.py` re-exports the `.routing_provenance` names it used to import
+  (now via `# noqa: F401`, matching the established precedent) so nothing
+  outside this split notices a change -- learned from the accidental
+  `.registrations` re-export drop the prior slice's review caught.
+- Added `tests/test_queue_routing_assignments.py`: two `pytest.mark.guard`
+  import-guard tests, a guard-marked `get_type_hints()` regression test,
+  and one end-to-end test exercising the full assignment lifecycle
+  (record -> transition -> billing-ref -> events) against a real
+  `TaskQueue`. Full behavioral coverage for every moved method already
+  existed through the composed `TaskQueue` (`test_routing_provenance.py`,
+  429 lines) and needed no changes.
+- `queue.py` dropped from 6,394 to **5,999 lines** (under 6,000 for the
+  first time this effort); `queue_routing_assignments.py`: 402 lines;
+  `queue_records.py` grew to 161 lines (added `SpawnState`). All three
+  comfortably under the 1,000-line cap. `tools/module-size-baseline.json`
+  refreshed (shrink-only) for `queue.py`.
+- Full `agent-dispatch` suite (`tools/run-plugin-tests.py agent-dispatch`,
+  2,665 tests across 5 sub-suites) passed before and after; zero
+  regressions. `--guards` picks up the two new guard-marked tests
+  (8 total agent-dispatch guard tests now).
+- `ruff check --select F,E9` (CI's gate) and `ruff format` clean on every
+  changed/new file.
+- Bumped agent-dispatch 0.1.2-dev88 -> dev89 (rebased onto `origin/main`
+  after an unrelated PR had already claimed dev88; re-bumped to the next
+  free version) and ran the
+  instruction-projections sync immediately after.
+
+### 2026-09-12 - Componentize queue.py: extract queue_schedule_registry.py
+
+- Continuing the operator's standing componentization instruction. Picked
+  `queue.py` (7,217 lines, the largest agent-dispatch module and the
+  central SQLite coordinator store) since the prior legs already picked
+  the safer cuts from `__main__.py` and `supervisor.py`. Rather than
+  attempt a risky cut into the single 6,000+-line `TaskQueue` class's
+  concurrency-sensitive task/spawn/routing machinery, found a genuinely
+  self-contained tail cluster: the module's own trailing "schedule
+  registry" / "supervisor registrations" / "schedule job-leases" /
+  "external producer resource reservations" section (the last ~496
+  contiguous lines of the file) -- four concerns that only touch
+  `self._connect()` / `self._now()` and their own dedicated SQLite tables,
+  never the task/spawn/routing state the rest of the class manages.
+- Extracted that whole cluster (`register_schedule`, `list_schedules`,
+  `get_schedule`, `remove_schedule`, `set_schedule_paused`,
+  `_registration_from_row`, `register_registration`, `list_registrations`,
+  `get_registration`, `remove_registration`, `set_registration_status`,
+  `acquire_schedule_lease`, `release_schedule_lease`, `get_schedule_lease`,
+  `list_schedule_leases`, `acquire_resource_reservation`,
+  `bind_resource_reservation`, `release_resource_reservation`,
+  `list_resource_reservations`) into a new `ScheduleRegistrationMixin` in
+  `queue_schedule_registry.py`, composed into `TaskQueue` via
+  `class TaskQueue(ScheduleRegistrationMixin):` -- a plain mixin, not a
+  proxy-forwarding split like `loop_commands.py`'s CLI helpers, since
+  nothing in the test suite monkeypatches any of these eighteen methods
+  by name (verified by grep across `tests/` before moving).
+- The remaining circularity risk was the four small record dataclasses
+  (`ScheduleRecord`, `ScheduleLease`, `ResourceReservation`) and
+  `TaskError`, all defined earlier in `queue.py` itself and needed by the
+  moved methods at *call* time. Rather than a static top-level import (which
+  would create a real load-time cycle, since `queue.py` must import the new
+  module's mixin class before `TaskQueue` can inherit from it), each moved
+  method does a lazy, function-local `from .queue import ...` -- safe
+  because by the time any of these methods actually runs, both modules have
+  finished importing (the same pattern `_task_transition_spec`'s own
+  docstring in `queue.py` already documents for its `task_state_machine`
+  import). A `TYPE_CHECKING`-guarded import at the new module's top
+  satisfies `ruff`'s static analysis without re-introducing a real runtime
+  cycle. The five still-needed `.registrations` imports (`RegistrationError`,
+  `RegistrationKind`, `RegistrationRecord`, `RegistrationStatus`,
+  `derive_registration_id`, `validate_registration`) moved as plain
+  top-level imports since `registrations.py` has no dependency on
+  `queue.py` -- no cycle there.
+- Added `tests/test_queue_schedule_registry.py`: import-guard tests
+  confirming `ScheduleRegistrationMixin` is actually in `TaskQueue.__mro__`
+  and that all eighteen methods are directly importable, plus one
+  end-to-end test exercising one method from each of the four
+  sub-clusters against a real `TaskQueue` instance -- proving the lazy
+  `from .queue import ...` calls actually resolve their record
+  dataclasses at runtime, not just that the names exist. Full behavioral
+  coverage for every method already exists through the composed
+  `TaskQueue` (`test_schedule_registry.py`, `test_registrations.py`,
+  resource-reservation coverage in `test_producers_emitter.py` /
+  `test_coordinator.py`) and needed no changes.
+- `queue.py` dropped from 7,217 to 6,481 lines (more than the raw
+  496-line block removed, since `ruff format` also reformatted the now
+  five-line-shorter `.registrations` import block and collapsed several
+  long lines elsewhere in the file); `queue_schedule_registry.py` landed
+  at 541 lines, comfortably under the 1,000-line cap.
+  `tools/module-size-baseline.json` refreshed (shrink-only) for `queue.py`.
+- Full `agent-dispatch` suite (`tools/run-plugin-tests.py agent-dispatch`,
+  2,655 tests across 5 sub-suites) passed before and after; zero
+  regressions.
+- Ran `ruff check --select F,E9` (CI's actual repo-wide gate) clean on both
+  changed files plus the new test file, and `ruff format`. A broader
+  `ruff check` (the stricter local `pyproject.toml` config, `S`/`B`/`A`/
+  `RUF` included) still reports the same ~30 pre-existing `S608`/`S101`/
+  `B007` findings the *original* monolithic `queue.py` already had
+  (confirmed by running the same check against the pre-split file) --
+  none of them introduced by this split, so left untouched rather than
+  drive-by "fixed" outside this slice's scope.
+- Bumped agent-dispatch 0.1.2-dev85 -> dev86, then immediately ran
+  `manage-instruction-projections.py sync .` per the gotcha the prior leg
+  recorded (skipping this cost a review round-trip last time).
+- **PR #2517's review caught two real findings, one of them substantive
+  (both fixed before merge)**:
+  1. **Moderate: the new import-guard tests weren't guard-marked.** The
+     repo has an existing `pytest.mark.guard` convention (registered per
+     plugin, e.g. `agent-bridge`, `agent-worktrees`) for fast structural/
+     contract checks a pre-push sweep runs via `--guards` -- agent-dispatch
+     had never adopted it. Registered the marker in agent-dispatch's own
+     `pyproject.toml` and tagged the five purely-structural tests in
+     `test_queue_schedule_registry.py`.
+  2. **Moderate: the `TYPE_CHECKING`-guarded `from .queue import ...`
+     satisfied `ruff` but broke runtime introspection.** Verified directly:
+     `typing.get_type_hints()` on every moved method that referenced
+     `ScheduleRecord`/`ScheduleLease`/`ResourceReservation` raised
+     `NameError`, since those names were never actually bound in
+     `queue_schedule_registry`'s real module globals (only inside
+     `TYPE_CHECKING`, which is `False` at runtime, and inside each method's
+     own local scope). Fixed properly rather than patching around it:
+     extracted `TaskError` and the three record dataclasses into a new,
+     dependency-free `queue_records.py` that both `queue.py` and
+     `queue_schedule_registry.py` import as ordinary top-level names --
+     eliminating the lazy-import workaround (and the underlying circular-
+     import risk) entirely, not just papering over the symptom. `queue.py`
+     re-exports all four (`# noqa: F401` for the three now only used via
+     re-export, matching the `loop_commands.py` precedent) for existing
+     call sites. Added a regression test
+     (`test_mixin_method_annotations_resolve_via_get_type_hints`, itself
+     guard-marked) asserting `get_type_hints()` succeeds on every affected
+     method, so this exact failure mode can't silently return.
+  3. **Nit (also fixed): the Phase 10 tracking-issue reference was wrong.**
+     `queue_schedule_registry.py`'s module docstring and the PR body both
+     cited #2357 (Phase 9, now complete) instead of #2423 (this effort's
+     actual Phase 10 coordination token); corrected both.
+  - This further shrank `queue.py` to 6,386 lines (baseline refreshed
+    again) and added `queue_records.py` at 115 lines. Full suite (2,656
+    tests with the new regression test) still passes; `--guards` picks up
+    all six guard-marked tests in ~2s.
+- **A third review round on PR #2517 caught two more real findings, both
+  fixed**: (1) medium: extracting `queue_records.py` had incidentally
+  dropped `queue.py`'s pass-through re-export of the six `.registrations`
+  names (`RegistrationError`, `RegistrationKind`, `RegistrationRecord`,
+  `RegistrationStatus`, `derive_registration_id`, `validate_registration`)
+  it used to bind at module scope before this split -- an unintended API
+  break for any external `from agent_dispatch.queue import ...` consumer,
+  despite the PR's own "no API surface change" claim. Restored them as a
+  `# noqa: F401` re-export block, same precedent as the other four; this
+  restored block is itself 8 lines, pushing `queue.py` to 6,394 lines --
+  a deliberate, reviewed widen of the module-size baseline (6,386 ->
+  6,394), not uncontrolled drift, and still a net reduction from the
+  file's original 7,217 lines before this PR. (2) low: the PR
+  description's own final-size summary had gone stale after the
+  `queue_records.py` follow-up commit (still quoting the pre-fix
+  6,481/541 numbers instead of 6,386/529/115); corrected via `gh api ...
+  -X PATCH`.
+- **A fourth review round caught one more low finding (fixed)**: the fix
+  for the third round's re-export finding itself left this very journal
+  entry's `queue.py` line count one commit stale (6,386, not the
+  post-re-export 6,394) -- corrected here.
+- **Standing note carried from the prior leg's handoff**: that leg's PR
+  #2506 review included one declined false-positive finding (Copilot
+  claimed `tools/module-size-baseline.json`'s prior `__main__.py` entry,
+  5,568, was one line below the file's "actual" 5,569-line count). Verified
+  directly at the time (recomputed the line count with the exact method
+  `tools/check-module-size.py` itself uses, and cross-checked the PR's own
+  passing "guards + lint" CI job) that the file was genuinely 5,568 lines
+  and the claim was wrong; correctly declined the edit. Recorded here since
+  the handoff flagged it as not yet captured in a journal entry.
+
+### 2026-09-12 - Componentize __main__.py: extract loop_commands.py + spawn_attempt_projection.py
+
+- Continuing the operator's standing componentization instruction (split
+  oversized modules; keep state-machine-adjacent code well unit-tested).
+  Picked `__main__.py` (6,506 lines, the largest non-baselined-forever CLI
+  entry point) since `supervisor.py`'s remaining bulk is now its own
+  stateful `Supervisor` methods -- genuinely higher risk than the CLI's
+  mostly-independent `_cmd_*` argparse handlers.
+- Extracted the entire reviewer-loop and repository-issue-loop command
+  cluster (`_reviewer_loop_declarations/_registrations/_setup/_status`,
+  `_cmd_reviewer_loop`, the equivalent `_repository_issue_loop_*` set, and
+  `_cmd_repository_issue_loop` -- ~1,020 contiguous lines) into a new
+  `loop_commands.py`. Verified first, by AST-walking the block's free
+  names, that it was self-contained except for five genuinely CLI-wide
+  helpers (`_client`, `_emit`, `_registration_scope`,
+  `_reject_worktree_checkout_as_repo_root`,
+  `_read_supervisor_runtime_status`) that dozens of *other* `__main__.py`
+  commands also use and that `tests/test_cli.py` /
+  `tests/test_repository_issue_loop_cli.py` monkeypatch by their
+  `agent_dispatch.__main__.<name>` attribute path. A static import of
+  those five into `loop_commands.py` would have silently stopped picking
+  up a monkeypatched replacement (the new module would bind its own
+  private copy of the pre-patch function at import time), so instead each
+  is a thin `_proxy("<name>")` wrapper that looks the real one up on the
+  live `agent_dispatch.__main__` module object at call time -- the same
+  live-module-reference trick the test suite itself already uses
+  (`from agent_dispatch import __main__ as cli;
+  monkeypatch.setattr(cli, "_client", ...)`).
+- `loop_commands.py` also imports `__main__`-defined names to build
+  itself, but only lazily inside those five proxy functions' bodies, never
+  at module load time -- so `__main__.py` can import `loop_commands.py` at
+  its own top level (for `build_parser()`'s `set_defaults(func=...)`
+  wiring) with no circular-import hazard: `loop_commands.py` never touches
+  `agent_dispatch.__main__` until a proxy is actually called, by which
+  point both modules are fully initialized.
+- The block's own `_spawn_attempt_projection` (a small pure dead-letter/
+  rearm-eligibility projection shared by both loop kinds' `status`
+  commands) was further extracted into its own `spawn_attempt_projection.py`
+  module -- both because it has zero `__main__` dependency and because a
+  small, pure, state-adjacent decision function is exactly the kind of
+  code the operator wants directly unit-tested rather than only exercised
+  indirectly through a much larger CLI-output assertion. `loop_commands.py`
+  keeps `_spawn_attempt_projection` as an alias for backward compatibility.
+  This extraction also brought `loop_commands.py` itself back under the
+  1,000-line hard cap (it landed at 1,023 lines with just the CLI-command
+  cluster; 981 after the projection function moved out).
+- Added `tests/test_spawn_attempt_projection.py` (6 direct behavioral
+  tests: default-cap threshold, the atomic-rearm 3-failure floor, the
+  manual-recovery fallback below that floor, label-cap precedence over the
+  default, a zero-cap never-dead-letters guard, and the owned/non-queued
+  exclusion) and `tests/test_loop_commands.py` (import-guard tests mirroring
+  `test_spawn_factories.py`'s pattern, plus two tests proving the `_client`/
+  `_emit` proxies actually pick up a live `agent_dispatch.__main__`
+  monkeypatch).
+- `__main__.py` re-exports every moved name (`# noqa: F401 -- re-exported
+  for existing call sites/tests`, matching the `spawn_factories.py`
+  precedent) so `build_parser()`'s `set_defaults(func=_cmd_reviewer_loop)`
+  / `set_defaults(func=_cmd_repository_issue_loop)` call sites are
+  unaffected.
+- **Copilot's PR review caught one real, valid finding** (fixed before
+  merge): `python -m agent_dispatch` -- the real production invocation
+  (`scripts/install.sh`'s stub, the `serve` systemd unit) -- loads
+  `__main__.py` as `sys.modules["__main__"]`, never as
+  `sys.modules["agent_dispatch.__main__"]`. The initial proxy
+  implementation's `from . import __main__ as _cli` would therefore import
+  and execute a second, independent copy of the entire module under `-m`,
+  silently diverging from whatever state the actually-running copy held.
+  Fixed with a `_resolve_cli_module()` helper: `runpy` still sets the
+  running module's `__spec__.name` to its real dotted name even though its
+  `sys.modules` key is `"__main__"`, so checking
+  `sys.modules["__main__"].__spec__.name == "agent_dispatch.__main__"`
+  recognizes the live `-m` copy; falling back to
+  `sys.modules.get("agent_dispatch.__main__")` covers the normal-import
+  case (tests, any other importer), and a fresh dotted import is the last
+  resort. Added two regression tests
+  (`test_resolve_cli_module_prefers_the_live_python_dash_m_module`,
+  `..._falls_back_to_dotted_import_for_a_normal_importer`) that fabricate
+  both `sys.modules["__main__"]` shapes directly, since this environment
+  doesn't have a clean way to assert on an actual subprocess's internal
+  module identity.
+- Full `agent-dispatch` suite (`tools/run-plugin-tests.py agent-dispatch`)
+  passed before and after; `__main__.py` dropped from 6,506 to 5,568 lines;
+  `tools/module-size-baseline.json` refreshed (shrink-only) accordingly.
+- Bumped agent-dispatch 0.1.2-dev84 -> dev85.
+
+### 2026-09-12 - Componentize supervisor.py: extract spawn_factories.py
+
+- Split `plugins/agent-dispatch/src/agent_dispatch/supervisor.py` (4,169
+  lines, the largest non-generated offender on
+  `tools/module-size-baseline.json` after `queue.py`) by extracting the
+  entire pre-`class Supervisor` block of default liveness/verdict/nudge/
+  redrive/conclusion callables and the three embody-backend factories
+  (`make_embody_spawn`, `make_headless_spawn`, `make_label_routed_spawn`,
+  `make_redrive_sender`) into a new `spawn_factories.py`. Chosen as the
+  safe first cut per the operator's standing componentization
+  instruction: every function in that block is either a pure default
+  closing only over its own arguments, or a factory returning a closure
+  -- none of it touches `Supervisor` instance state (`self`), so nothing
+  needed to change about *how* the class consumes these names.
+  `supervisor.py` re-exports every moved name (types, constants,
+  functions), so all existing call sites (`__main__.py`'s lazy
+  `from .supervisor import make_embody_spawn, ...`) and every existing
+  test that monkeypatches `agent_dispatch.supervisor.<name>` (e.g.
+  `test_cli.py`'s `monkeypatch.setattr(sup_mod, "make_embody_spawn", ...)`)
+  are unaffected -- Python resolves a bare name against the *current*
+  module globals at call time, and monkeypatching a module attribute
+  works identically whether the underlying implementation lives in that
+  module or was imported into it.
+- Two things this split's tests caught that the embody.py split's
+  simpler case didn't have: (1) `test_supervisor.py` patches
+  `supervisor_module.Path.stat` directly on the `pathlib.Path` **class**
+  (not a module attribute) to simulate a stat failure inside
+  `_target_directory_missing` (which moved to `spawn_factories.py` and
+  imports its own `Path`) -- patching the class object affects every
+  importer of `pathlib.Path` identically, so this worked unmodified once
+  `Path` was re-imported into `supervisor.py` too (kept as a deliberate
+  re-export, `# noqa: F401`, since tests reference it by name); (2) two
+  type aliases (`LocalColdFn`, `FleetColdFn`) were miscounted during the
+  initial line-range extraction and briefly missing from
+  `spawn_factories.py` -- caught immediately by `ImportError` on the next
+  full-suite run, fixed by adding them.
+- `supervisor.py` is now 3,422 lines (still baselined -- nowhere near the
+  1,000-line cap yet, `queue.py` and the rest of `supervisor.py` itself
+  remain the next targets) but the baseline entry was refreshed downward
+  (4,169 -> 3,422) so it never silently re-widens.
+  `spawn_factories.py` is 605 lines, itself under the cap with no
+  baseline entry.
+- Added `plugins/agent-dispatch/tests/test_spawn_factories.py` (9 tests):
+  a lightweight import-guard suite mirroring `test_embody_prompts.py`'s
+  pattern -- confirms the new module's own public API (parse helpers,
+  the three spawn factories, `make_redrive_sender`,
+  `SpawnPreparationRetained`) is directly importable and behaves
+  correctly independent of the `supervisor` facade, since the underlying
+  behavior is already exhaustively covered through that facade in
+  `test_supervisor.py`/`test_cli.py`/`test_fleet.py`.
+- Full `agent-dispatch` suite (2,738 tests across the runner's 5
+  sub-suites) passes via `tools/run-plugin-tests.py agent-dispatch`;
+  zero regressions. Bumped agent-dispatch 0.1.2-dev83 -> dev84 across
+  `plugin.json`, `pyproject.toml`, and `marketplace.json`.
+- Phase 10 item 4's liveness-probe wiring (thread 2 of the last handoff)
+  is **not** done this leg -- `supervisor.py` still has substantial
+  further splitting ahead of it before its `local_body_verdict_fn`
+  call sites are a low-risk place to wire in
+  `bridge_liveness_probe.local_body_liveness_probe`. This leg's gate was
+  satisfied by the module-split thread alone, per the prior handoff's
+  explicit "either is a legitimate stopping point" allowance.
+
+### 2026-09-11 - Phase 10 item 4: componentize embody.py to unblock call-site wiring
+
+- Split `plugins/agent-dispatch/src/agent_dispatch/embody.py` (1,205 lines,
+  over the repo's module-size cap) by extracting the two large, pure
+  autopilot seed-prompt builders (`autopilot_worker_prompt`,
+  `fleet_autopilot_worker_prompt`, ~250 lines together) into a new
+  `embody_prompts.py`. Chosen as the safest possible first cut: both
+  functions are pure string builders with no shared state, no subprocess/
+  network I/O, and nothing any test mocks -- verified directly (existing
+  tests monkeypatch `embody.autopilot_worker_prompt` itself, which still
+  works after the move since the re-exported name is a normal binding in
+  `embody.py`'s own module globals, and `embody.py`'s own callers resolve
+  it via bare-name lookup against those same globals at call time).
+  `embody.py` re-exports both names, so all 9 existing call sites and
+  every existing test are unaffected -- zero test changes required.
+- `embody.py` is now 989 lines (**below the cap without a baseline
+  entry at all** -- graduated via `--refresh-baseline`, not merely
+  grandfathered). `embody_prompts.py` is 263 lines.
+- Added `plugins/agent-dispatch/tests/test_embody_prompts.py` (2 tests):
+  a lightweight import guard confirming the new module's own public API
+  is directly importable, independent of the facade (the functions'
+  actual behavior is already thoroughly covered through
+  `embody.autopilot_worker_prompt`/`fleet_autopilot_worker_prompt` in
+  `test_embody.py`/`test_fleet.py`).
+- Full `agent-dispatch` suite (769 tests) passes via
+  `tools/run-plugin-tests.py agent-dispatch`; zero regressions. Bumped
+  agent-dispatch's version to 0.1.2-dev83.
+- This unblocks item 4's next slice: `embody.py` has headroom again for
+  the call-site wiring (`bridge_liveness_probe.local_body_liveness_probe`
+  into a real resume/reconciliation path) that a prior slice deferred
+  specifically because `embody.py` had none. `supervisor.py` (4,169 lines)
+  is a separate, much larger componentization target -- not attempted in
+  this slice.
+
+### 2026-09-11 - Phase 10 item 4: corrected the AHP misconception + first slice (liveness probe)
+
+- **Correction:** item 4's earlier text said it was "coordinated with"
+  agent-bridge's own verb-vocabulary convergence -- conflating it with the
+  `agent-bridge-ahp-convergence` effort (Status: Draft), which is actually
+  about exposing an *external* Agent Host Protocol surface, an unrelated
+  concern. Verified directly: `embody.local_body_verdict`/
+  `fleet_body_verdict` (`agent-bridge --json status <session>`) are
+  already a real, in-production liveness read -- the exact same read item
+  5's spawn-consistency sweep already calls. Item 4 was never actually
+  blocked; the doc's framing was simply wrong. Corrected in
+  `phase-10-live-wiring.md`.
+- Added `plugins/agent-dispatch/src/agent_dispatch/bridge_liveness_probe.py`:
+  `local_body_liveness_probe(session_id)`, a real HOT/WARM/COLD read via
+  `agent-bridge --json status <session_id>` (this machine's own daemon).
+  Maps agent-bridge's own `SessionStatus` values
+  (`plugins/agent-bridge/src/agent_bridge/models.py`) directly, since that
+  distinction already exists in agent-bridge's real session model and is
+  finer than the tri-state `local_body_verdict`/`fleet_body_verdict`
+  collapse to: `running` -> HOT (a turn is actively executing --
+  attaching a second controller now would race it), `idle`/`created`/
+  `starting` -> WARM (alive, no turn in flight, safe to reattach),
+  `stopping`/`stopped`/`failed`/`ended` -> COLD. Every ambiguous case
+  (not-found, transport failure, unparseable output, an unrecognized
+  status value) resolves to HOT rather than being guessed as WARM or COLD
+  -- refusing an unnecessary resume is always safe; wrongly resolving WARM
+  or COLD risks a double-attached controller or an orphaned duplicate
+  spawn. Never raises.
+- Deliberately does **not** wire this probe into a real resume/
+  reconciliation call site: every plausible call site (`supervisor.py`,
+  `embody.py`) is already at its grandfathered module-size ceiling. Adding
+  a call there means splitting one of those modules first or a deliberate,
+  reviewed widening -- left as a named follow-up, not smuggled into this
+  slice.
+- Added `plugins/agent-dispatch/tests/test_bridge_liveness_probe.py` (21
+  tests): every declared status value's mapping, every failure/ambiguity
+  path (not-found exit, other non-zero exit, empty/unparseable/non-dict
+  output, timeout, `OSError`, no resolvable launch prefix, empty session
+  id) resolving to HOT, and a case-insensitivity/whitespace check on the
+  status string.
+- Full `agent-dispatch` suite passes via `tools/run-plugin-tests.py
+  agent-dispatch`. `tools/check-module-size.py` passes.
+- Item 4 remains open (call-site wiring + the fleet/SSH variant are
+  follow-up slices), but is now unblocked and has a real, tested
+  component, same shape as item 3's slices.
+
+### 2026-09-11 - Phase 10 item 3 complete: poll loop + webhook receiver (fifth slice)
+
+- Added `PRObservationStore.tracked_keys()`: every `(repo, number)` the
+  store currently holds, the poll-fallback loop's iteration set. A PR
+  starts being tracked the moment anything records its first observation;
+  there is no separate watch-list to seed.
+- Added `plugins/agent-dispatch/src/agent_dispatch/pr_review_poll_loop.py`:
+  `run_poll_cycle(store, observe, repository_tiers, now)` -- iterates
+  every tracked PR, refreshes whichever are due per
+  `pr_polling_policy.poll_due`, and persists via `record_observation`.
+  Never discovers new PRs on its own.
+- Added `plugins/agent-dispatch/src/agent_dispatch/producers/
+  github_pr_review_webhook.py`: a GitHub-specific FastAPI receiver
+  (deliberately separate from the existing forge-neutral
+  `producers/webhook.py`, which only handles PR-merge). Recognizes
+  `pull_request`/`pull_request_review`/`pull_request_review_thread`/
+  `check_suite`/`check_run` events via `extract_pr_ref`, verifies GitHub's
+  own `X-Hub-Signature-256` HMAC (distinct from the bearer-token
+  `inbound_token` the other webhook uses -- GitHub itself never sends a
+  bearer token), and on any recognized event re-fetches full state through
+  an injected `observe` callable rather than trying to reconstruct
+  `reviewDecision`/etc. from the webhook body -- those are GraphQL-only
+  aggregates the REST webhook payload does not carry. This also makes a
+  late/duplicate/out-of-order delivery harmless: every delivery just
+  triggers a fresh, idempotent re-observation.
+  - Hit and fixed a real FastAPI/annotations gotcha while wiring this:
+    with `from __future__ import annotations` in effect, a route handler's
+    `request: Request` parameter failed to resolve (FastAPI misclassified
+    it as an unknown query parameter, 422 on every request) because
+    `Request` was imported *locally* inside `build_app` -- `get_type_hints`
+    only sees the *module's* globals, not an enclosing function's locals.
+    Fixed by moving the `fastapi` import to module level (documented
+    in-line so the next slice doesn't reintroduce the same nested-import
+    pattern for a `Request`-typed handler).
+- Added `plugins/agent-dispatch/tests/test_pr_review_poll_loop.py` (5
+  tests) and `test_github_pr_review_webhook.py` (20 tests, incl. valid/
+  invalid/missing-signature and every recognized/unrecognized event shape).
+- Full `agent-dispatch` suite passes via `tools/run-plugin-tests.py
+  agent-dispatch`. `tools/check-module-size.py` passes (every new module
+  is small). Bumped agent-dispatch's version to 0.1.2-dev81.
+- **Item 3 is now complete end-to-end**: observe -> evaluate (staleness) ->
+  persist, triggered by webhook and backstopped by cadence-scoped polling.
+  What's left is deployment, not code: registering/running this webhook
+  receiver with a real secret and scheduling the poll-cycle tick against a
+  real repository -- both deployment-specific decisions left to whoever
+  operates a concrete instance. Item 4 (bridge liveness) remains blocked on
+  `agent-bridge-ahp-convergence` (status: Draft).
+
+### 2026-09-11 - Phase 10 item 3: fourth slice, persistent observation store
+
+- Added `plugins/agent-dispatch/src/agent_dispatch/pr_observation_store.py`:
+  `PRObservationStore`, a small self-contained SQLite-backed store keyed by
+  `(repo, number)` with `get`/`put`/`last_observed_at`, plus
+  `record_observation()` -- the glue that reads the stored previous
+  observation, evaluates the new one via `pr_revision_evaluator`, persists
+  the result, and returns it.
+- Deliberately **its own database file, not a new `queue.py` table**: this
+  repo now enforces a 1,000-line module-size cap
+  (`tools/check-module-size.py`, landed this session), and `queue.py` is
+  already grandfathered at its current size. A PR-observation cache has no
+  owner/generation/claim semantics in common with `queue.py`'s existing
+  task/spawn-reservation/routing-assignment rows, so folding it in would
+  be exactly the unbounded single-module growth the guard now exists to
+  catch -- a small standalone module is the componentized alternative.
+- Concurrency is intentionally minimal (a plain SQLite upsert, no CAS/
+  generation fencing): unlike `queue.py`'s multi-worker task rows, exactly
+  one process writes a given PR's observation in every deployment this
+  targets today (a single coordinator's polling/webhook loop). Documented
+  as a scope choice, not an oversight -- add real fencing only if a future
+  slice introduces a genuinely concurrent writer.
+- Added `plugins/agent-dispatch/tests/test_pr_observation_store.py` (9
+  tests): round-trip of every field, overwrite-on-put, independence across
+  repos and PR numbers, persistence across store instances against the
+  same db path, and `record_observation`'s first-observation and
+  staleness-detection behavior (reusing the evaluator's own logic through
+  the store).
+- Full `agent-dispatch` suite passes via `tools/run-plugin-tests.py
+  agent-dispatch`. Bumped agent-dispatch's version to 0.1.2-dev80.
+- Item 3 remaining: the real webhook receiver for review/check-status
+  events (today's `producers/webhook.py` only handles PR-merge) and the
+  loop that actually invokes this machinery on a schedule (poll on
+  `pr_polling_policy.poll_due`, call `record_observation` on each
+  observation). Item 4 (bridge liveness) is still blocked on
+  `agent-bridge-ahp-convergence` (status: Draft).
+
+### 2026-09-11 - Phase 10 item 3: third slice, revision-history evaluator (STALE)
+
+- Added `plugins/agent-dispatch/src/agent_dispatch/pr_revision_evaluator.py`:
+  `evaluate_observation(previous, current)` decides whether an
+  `APPROVED` status should be corrected to `STALE`, by reusing the
+  already-declared `APPROVAL_TRANSITIONS` table directly -- looks up the
+  `revision_invalidates_approval` transition by name and checks
+  `current.approval_status` against its `from_states` -- rather than
+  re-deciding the staleness rule inline. Same "the declared table is the
+  actual governing data" discipline Phase 10 items 1/2 already
+  established for the task machine.
+- A first-ever observation (`previous is None`) is returned unchanged:
+  staleness is a property of *two* observations
+  (`classify_revision_change`), not something a lone snapshot can
+  classify.
+- Never applies `revalidate_stale` itself: that recovery is simply
+  whatever the provider's own `reviewDecision` already reports on the next
+  observation (e.g. `REVIEW_REQUIRED` once someone re-requests review) --
+  this evaluator always recomputes from the provider's current raw status,
+  never from a locally cached "STALE" flag, so there is nothing to
+  explicitly un-stick.
+- Added `plugins/agent-dispatch/tests/test_pr_revision_evaluator.py` (9
+  tests): first-observation pass-through, unchanged/base-only revision
+  leaves `APPROVED` untouched, a substantive change invalidates `APPROVED`
+  to `STALE`, a substantive change with an already-non-`APPROVED` current
+  status is a no-op (parametrized over `NONE`/`PENDING`/`STALE`), and every
+  other observation field is preserved through evaluation.
+- Full `agent-dispatch` suite passes via `tools/run-plugin-tests.py
+  agent-dispatch`. Bumped agent-dispatch's version to 0.1.2-dev78.
+- Item 3 remains open: still needed are the persistent per-(repo, PR)
+  state store (a new `queue.py` table, following the plugin's existing
+  one-table-per-declared-machine convention) both this evaluator and the
+  polling-cadence policy's fallback timer need to actually hold `previous`
+  observations across calls, and a real webhook receiver for review/
+  check-status events (today's `producers/webhook.py` only handles
+  PR-merge).
+
+### 2026-09-11 - Phase 10 item 3: second slice, polling-fallback cadence policy
+
+- Added `plugins/agent-dispatch/src/agent_dispatch/pr_polling_policy.py`,
+  resolving the trigger-mechanism design fork the first slice left open.
+  Operator direction: webhooks are the primary, low-latency trigger for
+  new PR observations; polling only fires as a fallback once a PR's last
+  observed state (from any source) is older than a declared interval.
+  That interval is scoped by a declared `RepoTier` (not one global
+  number), matching the operator's own risk framing: `OWNED_PRIVATE` (5
+  min -- a private, single-tenant repo with no shared rate-limit risk),
+  `QUICK_COLLAB` (30 min), `PUBLIC_UNOWNED` (60 min, and the default for
+  any repository with no explicit tier -- the conservative assumption for
+  a repo this identity does not control).
+- The repository -> tier mapping is intentionally **not** committed to
+  this module: `copilot-extensions` is a public, organization-neutral
+  repo, so no specific repository name belongs in its source. The
+  mapping is caller-supplied config instead, the same shape
+  `provider_state_machine.REPOSITORY_OVERRIDES` already uses (declared
+  empty here, populated by whoever deploys it).
+- `poll_due(repo, last_observed_at, now, repository_tiers)` is the pure
+  decision function: a fresh observation from *any* source (webhook or
+  poll) pushes the next poll out, so the fallback timer never fires while
+  webhooks keep the state fresh.
+- Added `plugins/agent-dispatch/tests/test_pr_polling_policy.py` (16
+  tests): tier resolution (declared mapping, undeclared-repo fallback,
+  explicit default override), the declared per-tier intervals, interval
+  overrides, and `poll_due`'s not-yet-due / due / reset-by-fresh-
+  observation / undeclared-repo / invalid-clock-order behavior.
+- Full `agent-dispatch` suite (690 tests) passes via
+  `tools/run-plugin-tests.py agent-dispatch`. Bumped agent-dispatch's
+  version to 0.1.2-dev77.
+- Item 3 remains open: still needed are the `Revision`-history evaluator
+  (incl. `STALE`), a real webhook receiver for review/check-status events
+  (today's `producers/webhook.py` only handles PR-merge), and the
+  persistent per-(repo, PR) state store both the evaluator and this
+  policy's poll-fallback timer depend on.
+
+### 2026-09-11 - Phase 10 item 3: first slice of the GitHub provider adapter (read-only observer)
+
+- Added `plugins/agent-dispatch/src/agent_dispatch/github_provider_adapter.py`:
+  the first slice of item 3 (no prior provider-adapter code existed for
+  `provider_state_machine.py` to wire against). `observe_pr_state` is a
+  pure function classifying a raw GitHub GraphQL `pullRequest` node into
+  the declared `ApprovalStatus` (via `reviewDecision`), `Mergeability`
+  (via `mergeable` + the last commit's `statusCheckRollup.state`), and
+  `HoldReason` set (`isDraft`, a WIP title/label marker, any unresolved
+  review thread) -- plus the raw `Revision` fingerprints (`headRefOid`/
+  `baseRefOid`). `GitHubPRAdapter` is the thin `gh`-CLI fetch wrapper,
+  mirroring `repository_issue_loops.GitHubProvider`'s injectable-runner +
+  identity-verification pattern (a fresh, narrow adapter rather than a
+  shared base class -- issue polling and PR review state are different
+  read shapes).
+- Deliberately scoped as a **read model only**, following Phase 9's own
+  "declare/observe first, wire later" sequencing: it does not decide
+  `ApprovalStatus.STALE` (that needs a previously-recorded `Revision` an
+  evaluator holds across two observations, not a single snapshot -- see
+  `classify_revision_change`), does not call any declared transition,
+  write anything back to GitHub, or feed a task/coordinator loop. An
+  unrecognized `reviewDecision`/`mergeable`/`statusCheckRollup.state`
+  value raises (`GitHubPRObservationError`) rather than guessing a state,
+  per Phase 9's "never assume the safer state without evidence" rule.
+- Added `plugins/agent-dispatch/tests/test_github_provider_adapter.py`
+  (39 tests): pure-classification fixtures for every declared enum value
+  plus unrecognized-value rejections, hold-combination tests (multiple
+  holds co-occurring independently), and `gh`-CLI wrapper tests against a
+  fake runner (identity/repo verification order and caching, GraphQL
+  error surfacing, non-zero `gh` exit handling) -- no network in any test.
+- Full `agent-dispatch` suite (674 tests) passes via
+  `tools/run-plugin-tests.py agent-dispatch`. Bumped agent-dispatch's
+  version to 0.1.2-dev76.
+- Item 3 remains open (`phase-10-live-wiring.md`'s Plan checkbox): this
+  slice is the read-only observer only. Remaining slices: an evaluator
+  that holds prior `Revision` state and actually drives
+  `APPROVAL_TRANSITIONS` (including `STALE`), and wiring the observer into
+  a real polling- or webhook-driven loop. Item 4 (bridge liveness) is
+  still blocked on `agent-bridge-ahp-convergence` (status: Draft).
+
 ### 2026-09-11 - Phase 10 item 5: wire the spawn-reservation consistency sweep into the supervisor
 
 - Added `Supervisor.sweep_spawn_consistency()`
@@ -947,13 +1868,12 @@ slice's deferral reasons and produced a new declared design:
   than declared as an independent set: REATTACH and SPAWN_FRESH_BOUND
   each name a real transition in the lifecycle table, checked by test.
 - The companion agent-bridge vision (`visions/plugins/agent-bridge/README.md`)
-  does not yet declare the hot/warm/cold tiers or the cache-is-never-
-  authority rule as of this slice -- it has a task-shaped verb set
-  (create/identify/read/steer/wait/interrupt/stop/resume/end) and a
-  "takeover" pattern, but nothing more specific. This module does not
-  duplicate or compete with those verbs; it declares only what this
-  effort's Phase 9 needs and should be reconciled with the vision once it
-  declares its own liveness model.
+  now declares the hot/warm/cold tiers and the cache-is-never-authority rule
+  (`cache-is-a-hint-never-authority`), reconciled from this effort's slice.
+  This module does not duplicate or compete with the vision's verb set; it
+  declares only the lifecycle states and liveness-to-transition coupling this
+  effort needs, realizing the vision's liveness model rather than waiting to
+  reconcile with it.
 - Added structural tests
   (`plugins/agent-dispatch/tests/test_bridge_state_machine.py`, 24
   passing): reachability/exit-checking of the lifecycle table, the live

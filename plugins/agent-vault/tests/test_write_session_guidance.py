@@ -130,5 +130,5 @@ def test_hook_and_projection_contracts():
     pointer = (PLUGIN / "instructions" / "session-guidance.instructions.md").read_text(
         encoding="utf-8"
     )
-    assert "COPILOT_AGENT_SESSION_ID" in pointer
+    assert "already-disclosed session folder" in pointer
     assert "instructions/agent-vault/session-guidance.instructions.md" in pointer

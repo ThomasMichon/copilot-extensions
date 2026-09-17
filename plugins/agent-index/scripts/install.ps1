@@ -1963,9 +1963,20 @@ function Get-ActiveSlotPython {
         $p = Join-Path $InstallDir "versions\$ver\Scripts\python.exe"
         if (Test-Path -LiteralPath $p) { return $p }
     }
-    # Marker missing/stale: match the binstub's resolution -- fall back to the
-    # LATEST built slot under versions\* (a real installed runtime) before the
-    # build's $LinkPython, so a present-but-unmarked runtime is still found.
+    # #742: marker missing/stale -> prefer last-known-good (the last version
+    # `activate()` published) over a raw newest-slot guess, which could bind a
+    # still-installing/never-activated slot mid-swap.
+    try {
+        $lkg = ([IO.File]::ReadAllText((Join-Path $InstallDir 'last-known-good'))).Trim()
+    } catch { $lkg = '' }
+    if ($lkg) {
+        $lp = Join-Path $InstallDir "versions\$lkg\Scripts\python.exe"
+        if (Test-Path -LiteralPath $lp) { return $lp }
+    }
+    # Marker and last-known-good missing/stale: match the binstub's resolution --
+    # fall back to the LATEST built slot under versions\* (a real installed
+    # runtime) before the build's $LinkPython, so a present-but-unmarked runtime
+    # is still found.
     $latest = Get-ChildItem (Join-Path $InstallDir 'versions') -Directory -ErrorAction SilentlyContinue |
         Sort-Object Name | ForEach-Object { Join-Path $_.FullName 'Scripts\python.exe' } |
         Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Last 1

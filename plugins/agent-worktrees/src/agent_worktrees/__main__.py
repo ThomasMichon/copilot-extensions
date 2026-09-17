@@ -31,7 +31,6 @@ Usage (direct):
     agent-worktrees repos srcroot [--set PATH] [--platform P]
     agent-worktrees config-root [--destination PATH] [--json]
     agent-worktrees knowledge compose-plugins [--json] [--cwd PATH]
-    agent-worktrees reconcile-marketplaces [--json] [--cwd PATH]
     agent-worktrees pre-launch
     agent-worktrees reconcile-plugins [--machine M]
 
@@ -53,21 +52,40 @@ import argparse
 import contextlib
 import dataclasses
 import enum
+import hashlib
 import json
 import os
 import platform
 import re
 import secrets
-import signal
 import shutil
+import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
+
+# `-m agent_worktrees` (the binstub's own invocation, and this module's
+# normal entry point) executes this file under the name ``"__main__"``, a
+# SEPARATE sys.modules entry from its real qualified name
+# ``agent_worktrees.__main__``. Late in this file, `pr_cli.py` does
+# `from . import __main__ as core` -- an ordinary submodule import that,
+# absent this alias, finds no `agent_worktrees.__main__` entry yet and
+# re-executes this entire module FROM THE TOP under that qualified name.
+# That second execution reaches its own `from . import pr_cli, ...` line
+# while the FIRST pr_cli import is still mid-load (frozen at its own
+# `from . import __main__ as core` line), so it gets back the same
+# partially-initialized `pr_cli` module and crashes attribute-binding a name
+# `pr_cli` hasn't defined yet ("partially initialized module ... has no
+# attribute"). Aliasing the qualified name to the module already executing
+# -- BEFORE any submodule import can trigger the problem -- makes `pr_cli`'s
+# import a no-op cache hit instead of a second full execution. Fixes #2650.
+sys.modules.setdefault(f"{__package__}.__main__", sys.modules[__name__])
 
 import yaml
 from agent_procutil import (
@@ -83,20 +101,21 @@ from . import (
     disposition_history,
     effort_focus,
     git_ops,
+    handoff_trace,
     list_cache,
     locks,
     obligations,
     output,
     permissions,
-    profile_assignment,
+    pr_config,
     pr_ops,
     procs,
-    providers,
+    profile_assignment,
     prune,
-    reclaim,
     reciprocal_presentation,
+    reclaim,
     sessions,
-    terminal_conclusion,
+    sessions_pane_retire,
     tracking,
 )
 from . import claimant as claimant_mod
@@ -104,8 +123,11 @@ from . import config as cfg
 from . import finalize as fin
 from . import installer as inst
 from . import loop_governance as loop_governance_mod
-from . import session_context as session_context_mod
+from . import (
+    managed_worktree_guard as remove_guard,
+)
 from . import services as svc
+from . import session_context as session_context_mod
 from . import state_root as state_root_mod
 from . import validate as val
 from .picker import ItemKind, MenuItem, pick
@@ -138,6 +160,41 @@ def _env_set(new_name: str, value: str) -> None:
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+def _fire_launch_resolution_watchdog() -> None:
+    """Self-terminate a hung bare-launch invocation (copilot-extensions #<TBD>).
+
+    The pre-handoff resolution in ``cmd_launch`` (project/config resolution,
+    filesystem probes, an optional git call for the recovery anchor) has been
+    observed to survive its hosting console being closed mid-call and hang
+    indefinitely at near-zero CPU rather than exit -- a known CPython-on-
+    Windows interaction where the installed console-control handler reports
+    the close "handled" and returns immediately even though the blocked
+    native call (e.g. a git subprocess wait) is never actually interrupted, so
+    the process never gets a chance to notice and exit on its own. Whatever
+    the trigger, nothing downstream can be trusted to notice a stall here, so
+    this watchdog guarantees a hard ceiling: ``os._exit`` bypasses the stuck
+    call entirely rather than trying to unwind through it.
+    """
+    try:
+        sys.stderr.write(
+            "[agent-worktrees] bare-launch resolution exceeded "
+            f"{_LAUNCH_RESOLUTION_TIMEOUT_SECS}s -- self-terminating a likely "
+            "hang instead of blocking forever.\n"
+        )
+        sys.stderr.flush()
+    except Exception:
+        pass
+    os._exit(1)
+
+
+# How long cmd_launch's pre-handoff resolution (before it hands the console off
+# to launch-session / the direct fallback, where a long or indefinite wait is
+# expected and healthy) may run before the watchdog above assumes it is stuck.
+# Generous for a cold git call on a slow disk/network, nowhere close to a
+# human-perceptible delay for the normal case.
+_LAUNCH_RESOLUTION_TIMEOUT_SECS = 60.0
+
+
 def cmd_launch(argv: list[str]) -> int:
     """Default action: exec into launch-session.sh with passthrough args.
 
@@ -155,101 +212,120 @@ def cmd_launch(argv: list[str]) -> int:
         else:
             passthrough.append(arg)
 
-    launch_project = cfg.active_project()
-    launcher_args = ["--project", launch_project, *passthrough] if launch_project else passthrough
-
-    # Resolve launch support from the same validated runtime root that entered
-    # this Python process. An explicit cell must never fall back to legacy.
-    from . import registry_paths
-
-    context = registry_paths.installation_context()
-    inst_dir = (
-        Path(context["pluginRoot"])
-        if context is not None
-        else cfg.install_dir()
+    # Bounds the resolution below (never the handoff itself, which cancels
+    # this before blocking on the child/session -- see the docstring above).
+    # The `finally` is the safety net: cancel unconditionally on EVERY exit
+    # path (normal return, sys.exit, or an unexpected exception raised
+    # anywhere below) -- an explicit .cancel() at a specific handoff point is
+    # a documentation aid, never the only thing standing between a failure
+    # here and a real, unmocked timer left armed in the background.
+    _watchdog = threading.Timer(
+        _LAUNCH_RESOLUTION_TIMEOUT_SECS, _fire_launch_resolution_watchdog
     )
-    if context is not None:
-        _env_set("AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT", str(inst_dir))
-        try:
-            _env_set(
-                "AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR",
-                cfg.load_config(project=launch_project).default_repo.anchor,
-            )
-        except (OSError, RuntimeError, ValueError):
-            os.environ.pop("AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR", None)
-    plat = cfg.detect_platform()
-    legacy_name = "launch-session.cmd" if plat == "windows" else "launch-session.sh"
-    # Temporary deviation from efforts/active/worktree-manager-control-plane/
-    # phase-3b-mux-relocation.md Sub-slice 2a Step 2: the in-plugin
-    # launch-session/pane-wrapper files are deliberately NOT deleted yet, and
-    # are an ACTIVE fallback tier here (not just inert rollback files) until
-    # the relocated Worktree Manager path is proven live on real hardware.
-    # Try each candidate bin dir in order (relocated Worktree Manager, then
-    # the in-plugin scripts) and use the FIRST one whose script actually
-    # exists -- a "usable" relocated install (its Python module runs and
-    # reports a compatible version) does not by itself guarantee its bin/
-    # payload copy completed, so a partial deploy there must still fall
-    # through to the in-plugin tier rather than jumping straight to the new
-    # direct, non-mux path.
-    launch_bin = None
-    for candidate in (_usable_worktree_manager_launcher_dir(), inst_dir / "bin"):
-        if candidate is not None and (candidate / legacy_name).exists():
-            launch_bin = candidate
-            break
-    if launch_bin is None:
-        output.warn(
-            "No launch-session script found (neither the relocated "
-            "Worktree Manager launcher nor the in-plugin fallback); "
-            "launching Copilot directly without mux."
+    _watchdog.daemon = True
+    _watchdog.start()
+    try:
+        launch_project = cfg.active_project()
+        launcher_args = (
+            ["--project", launch_project, *passthrough] if launch_project else passthrough
         )
-        return _run_direct_launch_fallback(launch_project, passthrough)
 
-    if plat == "windows":
-        launch_script = launch_bin / "launch-session.cmd"
-    else:
-        launch_script = launch_bin / "launch-session.sh"
+        # Resolve launch support from the same validated runtime root that
+        # entered this Python process. An explicit cell must never fall back
+        # to legacy.
+        from . import registry_paths
 
-    if plat == "windows":
-        # Two launch shapes on Windows (copilot-extensions #102 -- launcher
-        # depth):
-        #   * ACP / --stdio: keep the cmd.exe -> .cmd shim. The .cmd forwards
-        #     stdin verbatim, which a stdio MCP server requires
-        #     (docs/patterns/cross-platform-parity.md); dropping it risks
-        #     corrupting the JSON-RPC channel.
-        #   * Interactive: hand off straight to `pwsh -File launch-session.ps1`,
-        #     dropping the cmd.exe shim entirely -- one fewer resident process
-        #     per worktree session. The .cmd's only extra job (native recovery
-        #     when the venv is broken) is unreachable here anyway: reaching
-        #     cmd_launch means Python already ran, so the venv is healthy.
-        is_stdio = "--stdio" in passthrough or "--acp" in passthrough
-        ps1 = launch_script.with_name("launch-session.ps1")
-        if is_stdio or not ps1.exists():
-            argv = ["cmd.exe", "/c", str(launch_script), *launcher_args]
-        else:
-            argv = ["pwsh.exe", "-NoProfile", "-NoLogo", "-File", str(ps1), *launcher_args]
-        # Popen + wait (never os.exec on Windows, which has no true exec and
-        # would detach the child from the console): hold the console and catch
-        # KeyboardInterrupt (Ctrl+C) so the child (launch-session.ps1) can finish
-        # its try/finally handoff check + post-exit finalization instead of being
-        # killed mid-cleanup.
-        proc = subprocess.Popen(argv)
-        try:
-            rc = proc.wait()
-        except KeyboardInterrupt:
-            # Ctrl+C was sent to the entire console process group.
-            # The child (pwsh -> copilot, or cmd.exe -> pwsh -> copilot in
-            # stdio mode) received it too. Wait for the child to finish its
-            # cleanup (handoff check, post-exit finalization) rather than
-            # killing it.
+        context = registry_paths.installation_context()
+        inst_dir = (
+            Path(context["pluginRoot"])
+            if context is not None
+            else cfg.install_dir()
+        )
+        if context is not None:
+            _env_set("AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT", str(inst_dir))
             try:
-                rc = proc.wait(timeout=30)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                rc = 130  # 128 + SIGINT(2)
-        sys.exit(rc)
-    else:
-        os.execvp("bash", ["bash", str(launch_script), *launcher_args])
-    return 1  # unreachable -- os.execvp replaces process
+                _env_set(
+                    "AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR",
+                    cfg.load_config(project=launch_project).default_repo.anchor,
+                )
+            except (OSError, RuntimeError, ValueError):
+                os.environ.pop("AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR", None)
+        plat = cfg.detect_platform()
+        legacy_name = "launch-session.cmd" if plat == "windows" else "launch-session.sh"
+        # Temporary deviation from efforts/active/worktree-manager-control-plane/
+        # phase-3b-mux-relocation.md Sub-slice 2a Step 2: the in-plugin
+        # launch-session/pane-wrapper files are deliberately NOT deleted yet,
+        # and are an ACTIVE fallback tier here (not just inert rollback
+        # files) until the relocated Worktree Manager path is proven live on
+        # real hardware. Try each candidate bin dir in order (relocated
+        # Worktree Manager, then the in-plugin scripts) and use the FIRST one
+        # whose script actually exists -- a "usable" relocated install (its
+        # Python module runs and reports a compatible version) does not by
+        # itself guarantee its bin/payload copy completed, so a partial
+        # deploy there must still fall through to the in-plugin tier rather
+        # than jumping straight to the new direct, non-mux path.
+        launch_bin = None
+        for candidate in (_usable_worktree_manager_launcher_dir(), inst_dir / "bin"):
+            if candidate is not None and (candidate / legacy_name).exists():
+                launch_bin = candidate
+                break
+        if launch_bin is None:
+            output.warn(
+                "No launch-session script found (neither the relocated "
+                "Worktree Manager launcher nor the in-plugin fallback); "
+                "launching Copilot directly without mux."
+            )
+            return _run_direct_launch_fallback(launch_project, passthrough)
+
+        if plat == "windows":
+            launch_script = launch_bin / "launch-session.cmd"
+        else:
+            launch_script = launch_bin / "launch-session.sh"
+
+        if plat == "windows":
+            # Two launch shapes on Windows (copilot-extensions #102 -- launcher
+            # depth):
+            #   * ACP / --stdio: keep the cmd.exe -> .cmd shim. The .cmd forwards
+            #     stdin verbatim, which a stdio MCP server requires
+            #     (docs/patterns/cross-platform-parity.md); dropping it risks
+            #     corrupting the JSON-RPC channel.
+            #   * Interactive: hand off straight to `pwsh -File launch-session.ps1`,
+            #     dropping the cmd.exe shim entirely -- one fewer resident process
+            #     per worktree session. The .cmd's only extra job (native recovery
+            #     when the venv is broken) is unreachable here anyway: reaching
+            #     cmd_launch means Python already ran, so the venv is healthy.
+            is_stdio = "--stdio" in passthrough or "--acp" in passthrough
+            ps1 = launch_script.with_name("launch-session.ps1")
+            if is_stdio or not ps1.exists():
+                argv = ["cmd.exe", "/c", str(launch_script), *launcher_args]
+            else:
+                argv = ["pwsh.exe", "-NoProfile", "-NoLogo", "-File", str(ps1), *launcher_args]
+            # Popen + wait (never os.exec on Windows, which has no true exec and
+            # would detach the child from the console): hold the console and catch
+            # KeyboardInterrupt (Ctrl+C) so the child (launch-session.ps1) can finish
+            # its try/finally handoff check + post-exit finalization instead of being
+            # killed mid-cleanup.
+            proc = subprocess.Popen(argv)
+            _watchdog.cancel()  # resolution is done -- the wait below is expected
+            try:
+                rc = proc.wait()
+            except KeyboardInterrupt:
+                # Ctrl+C was sent to the entire console process group.
+                # The child (pwsh -> copilot, or cmd.exe -> pwsh -> copilot in
+                # stdio mode) received it too. Wait for the child to finish its
+                # cleanup (handoff check, post-exit finalization) rather than
+                # killing it.
+                try:
+                    rc = proc.wait(timeout=30)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    rc = 130  # 128 + SIGINT(2)
+            sys.exit(rc)
+        else:
+            os.execvp("bash", ["bash", str(launch_script), *launcher_args])
+        return 1  # unreachable -- os.execvp replaces process
+    finally:
+        _watchdog.cancel()
 
 
 def _age_str(started_at: str) -> str:
@@ -356,17 +432,20 @@ def _build_active_paths(
     else:
         # Batch list unavailable (mux missing or blocked): prefer the #4057
         # cached liveness hint on the record (a free read, stamped by the
-        # authoritative verify at the action moments) when it is FRESH, and only
-        # fall back to the slow per-worktree has-session probe when there is no
-        # usable hint. This keeps the populate cheap even when the live batch
-        # can't run, without trusting a stale stamp.
+        # authoritative verify at the action moments) when it is a FRESH
+        # ``True`` -- that short-circuits the slow per-worktree probe. A
+        # missing hint OR a fresh cached ``False`` both still fall through to
+        # the authoritative ``has_mux_session`` probe (cleanup-toctou-
+        # revalidation effort): a cached negative is not proof a session
+        # hasn't attached since the stamp, so it must never be trusted on its
+        # own to skip the fallback check.
         for rec in records:
             if not rec.worktree_path:
                 continue
             hint = _fresh_mux_live_hint(rec)
             if hint is True:
                 active.add(_normalize_path(rec.worktree_path))
-            elif hint is None and sessions.has_mux_session(rec.worktree_id):
+            elif sessions.has_mux_session(rec.worktree_id):
                 active.add(_normalize_path(rec.worktree_path))
     # #4057/#1416 bare-resume blind spot: a bare-resumed Copilot (cwd=home) is
     # invisible to BOTH the lock scan above (its session isn't registered under
@@ -481,11 +560,37 @@ def _apply_tracking_override(
     live, and hiding it behind COMPLETED strands the row with no lifecycle verb
     (the bb68/ca29 status-tracking bug -- a muxed/lock-held session rendered
     FINAL). Liveness wins over the durable finalize status.
+
+    A worktree with **any uncommitted content** is never masked either --
+    checked two ways so neither a missing count nor a stale state label can
+    slip through:
+
+    - ``info.state == DIRTY`` (the direct classifier's own read), kept as an
+      explicit fallback because some callers reconstruct a
+      ``WorktreeStateInfo`` from a **cached** ``git_state`` string (e.g.
+      ``_classify_from_cache``) without repopulating ``dirty`` -- that path
+      can hand this function ``state == DIRTY, dirty == 0``, and checking
+      only the count would miss it.
+    - ``info.dirty > 0`` (the count directly), needed because
+      ``_classify_git_state`` can also return ``ORPHAN`` (no merge base)
+      while still reporting a nonzero ``dirty`` count -- state-matching
+      alone would miss *that* case.
+
+    Uncommitted working-tree changes made *after* finalization are new, real,
+    unlanded content that the stale ``finalized``/``complete``/``completed``
+    tracking status knows nothing about -- unlike the two corrected cases
+    above, this isn't a classifier misreading already-landed work, it's
+    genuinely unlanded work. Masking it to COMPLETED would let plain
+    ``cleanup --clean`` delete it with no ``--force`` at all.
     """
     if rec.status in ("finalized", "complete", "completed"):
-        if info.state not in (
-            git_ops.WorktreeState.GONE,
-            git_ops.WorktreeState.ACTIVE,
+        if (
+            info.state != git_ops.WorktreeState.DIRTY
+            and info.dirty == 0
+            and info.state not in (
+                git_ops.WorktreeState.GONE,
+                git_ops.WorktreeState.ACTIVE,
+            )
         ):
             return dataclasses.replace(info, state=git_ops.WorktreeState.COMPLETED)
     return info
@@ -494,6 +599,8 @@ def _apply_tracking_override(
 def _classify_records(
     records: list[tracking.WorktreeRecord],
     session_ctx: sessions.SessionContext | None = None,
+    *,
+    daemon_filters: dict | None = None,
 ) -> dict[str, git_ops.WorktreeStateInfo]:
     """Classify each worktree's git state, keyed by worktree id.
 
@@ -506,6 +613,25 @@ def _classify_records(
     carries its own worktree states in ``list --json`` over SSH (the local
     picker cannot git-classify a remote worktree). No fetch (``behind`` reflects
     the last fetch); ~5 git calls per existing worktree, hence opt-in.
+
+    Resident-daemon fast path (Phase 4d, #2323): when ``daemon_filters`` names
+    the exact ``status_filter``/``platform_filter``/``all`` values the caller
+    used to resolve ``records`` (only ``list --json --classify`` opts in), this
+    first tries the resident status-monitor's classify daemon (see
+    :mod:`classify_daemon`) via the full boot-wait sequence
+    (:func:`classify_daemon.classify_with_boot`) -- booting one via
+    :func:`_ensure_status_monitor` when none is currently publishing a
+    classify endpoint, waiting up to ``classify_daemon.BOOT_WAIT_S`` -- so
+    concurrent classify passes for the same project + filter set coalesce
+    onto one resident execution instead of each independently racing the
+    lease below. ``daemon_filters=None`` (every other caller) skips the
+    daemon entirely -- unchanged behavior. Any miss (no resident monitor,
+    boot-wait timeout, unreachable, past its deadline, an error resolving the
+    project, or -- critically -- a successful-but-malformed/incomplete
+    response whose worktree-id set doesn't match ``records`` exactly) falls
+    through to the lease-guarded path exactly as if no daemon existed; a
+    partial or garbled daemon answer is never trusted over rendering nothing
+    for an affected row.
 
     Guarded by a per-project :class:`single_instance_lease.SingleInstance`
     (plugin-process-hygiene Phase 4c, #2315): this is the shared entry point
@@ -522,6 +648,117 @@ def _classify_records(
     advisory only: any lease-layer failure (not contention) degrades to
     classifying live, exactly as before this guard existed.
     """
+    if daemon_filters is not None:
+        try:
+            project = cfg.project_name()
+        except Exception:
+            project = ""
+        if project:
+            from . import classify_daemon
+            from . import locks as _locks
+
+            key = "|".join(
+                (
+                    project,
+                    str(daemon_filters.get("status_filter")),
+                    str(daemon_filters.get("platform_filter")),
+                    str(bool(daemon_filters.get("all"))),
+                )
+            )
+            payload = {"project": project, **daemon_filters}
+            expected_ids = {rec.worktree_id for rec in records}
+
+            def _fallback() -> dict:
+                return _serialize_classify_map(
+                    _classify_records_lease_guarded(records, session_ctx)
+                )
+
+            raw = classify_daemon.classify_with_boot(
+                read_lock_data=lambda: _locks.read_lock(_monitor_lock_path()),
+                # Honor the resident-monitor opt-out (AGENT_WORKTREES_STATUS_
+                # MONITOR=0): booting one just to serve this classify request
+                # would defeat a caller's explicit choice to stay per-session
+                # inline-only. A dial-only attempt (no boot) still runs, so an
+                # already-live monitor from before the opt-out was set is
+                # still used if reachable.
+                ensure_monitor=_ensure_status_monitor if _status_monitor_enabled() else None,
+                key=key,
+                payload=payload,
+                fallback=_fallback,
+            )
+            try:
+                decoded = _deserialize_classify_map(raw, strict=True)
+            except Exception:
+                decoded = None
+            if decoded is not None and set(decoded) == expected_ids:
+                return decoded
+            # The daemon answered, but with a shape/id-set mismatch (a
+            # different-version daemon, a partial compute, or corruption in
+            # transit) -- never render a partial/garbled state_map. Re-run
+            # the unchanged lease-guarded path directly, exactly as if the
+            # daemon had never answered at all.
+            return _classify_records_lease_guarded(records, session_ctx)
+    return _classify_records_lease_guarded(records, session_ctx)
+
+
+def _serialize_classify_map(
+    state_map: dict[str, git_ops.WorktreeStateInfo],
+) -> dict[str, dict]:
+    """Wire-serialize a classify result for the coalescing daemon's protocol."""
+    return {wt_id: dataclasses.asdict(info) for wt_id, info in state_map.items()}
+
+
+def _deserialize_classify_map(
+    raw: dict, *, strict: bool = False
+) -> dict[str, git_ops.WorktreeStateInfo]:
+    """Inverse of :func:`_serialize_classify_map`.
+
+    ``strict=False`` (the default) is tolerant of a malformed entry (skipped
+    rather than raised). ``strict=True`` raises on the first malformed entry
+    instead -- used by :func:`_classify_records`'s daemon fast path, which
+    must treat *any* shape problem as a daemon miss (triggering its own
+    lease-guarded re-run) rather than silently rendering a partial result.
+    """
+    out: dict[str, git_ops.WorktreeStateInfo] = {}
+    if not isinstance(raw, dict):
+        if strict:
+            raise ValueError("classify daemon result is not a dict")
+        return out
+    for wt_id, info_dict in raw.items():
+        if not isinstance(info_dict, dict):
+            if strict:
+                raise ValueError(f"classify daemon result for {wt_id!r} is not a dict")
+            continue
+        try:
+            state = git_ops.WorktreeState(info_dict.get("state"))
+        except ValueError:
+            if strict:
+                raise
+            state = git_ops.WorktreeState.UNKNOWN
+        try:
+            out[wt_id] = git_ops.WorktreeStateInfo(
+                state=state,
+                ahead=int(info_dict.get("ahead") or 0),
+                behind=int(info_dict.get("behind") or 0),
+                dirty=int(info_dict.get("dirty") or 0),
+                title=str(info_dict.get("title") or ""),
+                current_branch=info_dict.get("current_branch"),
+                branch_drift=bool(info_dict.get("branch_drift", False)),
+            )
+        except (TypeError, ValueError):
+            if strict:
+                raise
+            continue
+    return out
+
+
+def _classify_records_lease_guarded(
+    records: list[tracking.WorktreeRecord],
+    session_ctx: sessions.SessionContext | None = None,
+) -> dict[str, git_ops.WorktreeStateInfo]:
+    """The pre-#2323 lease-guarded classify path, factored out so
+    :func:`_classify_records`'s daemon fast path can fall back to it
+    directly."""
     try:
         lock_dir = cfg.project_dir()
     except Exception:
@@ -546,6 +783,54 @@ def _classify_records(
         lease.release()
 
 
+def _classify_daemon_compute(kind: str, payload: dict) -> dict:
+    """Resident classify daemon's ``compute`` callback (Phase 4d, #2323).
+
+    Runs inside the resident status-monitor process. Resolves + classifies
+    the named project's own records entirely here from ``payload``'s
+    identity + filters -- never trusts records serialized by a caller (see
+    :mod:`classify_daemon`'s own module docstring for the contract). Mirrors
+    ``_list_records_for_args``'s exact filter semantics (including the
+    existing-worktree-with-a-``.git``-dir check unless ``all`` is set) so a
+    caller gets an identical result whether or not the daemon answered it.
+    Any exception here propagates to the coalescing server, which surfaces
+    it to every joined caller -- each caller's own
+    :func:`classify_daemon.classify_via_daemon` treats that identically to
+    "no daemon" and runs its own fallback, so a daemon-side bug degrades to
+    correctness, never a wrong answer.
+    """
+    project = str(payload.get("project") or "")
+    if not project:
+        raise ValueError("classify request missing project")
+    status_filter = payload.get("status_filter")
+    platform_filter = payload.get("platform_filter")
+    tracking_path = cfg.project_dir(project) / "worktrees"
+    records = tracking.list_records(
+        tracking_path,
+        status_filter=status_filter,
+        platform_filter=platform_filter,
+    )
+    if not payload.get("all"):
+        records = [
+            r
+            for r in records
+            if r.worktree_path
+            and Path(r.worktree_path).exists()
+            and (Path(r.worktree_path) / ".git").exists()
+        ]
+    session_ctx = sessions.scan_sessions_fast(records)
+    config = cfg.load_config(path=cfg.project_dir(project) / "config.yaml", project=project)
+    repo = config.default_repo
+    active_paths = _build_active_paths(records, session_ctx)
+    state_map = {
+        rec.worktree_id: _classify_one_record(
+            rec, repo=repo, active_paths=active_paths, session_ctx=session_ctx
+        )
+        for rec in records
+    }
+    return _serialize_classify_map(state_map)
+
+
 def _classify_records_live(
     records: list[tracking.WorktreeRecord],
     session_ctx: sessions.SessionContext | None = None,
@@ -561,8 +846,7 @@ def _classify_records_live(
     return {
         rec.worktree_id: _classify_one_record(
             rec, repo=repo, active_paths=active_paths, session_ctx=session_ctx
-        )
-        for rec in records
+        ) for rec in records
     }
 
 
@@ -614,9 +898,7 @@ def _classify_from_cache(
     out: dict[str, git_ops.WorktreeStateInfo] = {}
     for rec in records:
         try:
-            fresh = tracking.load_record(
-                cfg.tracking_dir() / f"{rec.worktree_id}.yaml"
-            )
+            fresh = tracking.load_record(cfg.tracking_dir() / f"{rec.worktree_id}.yaml")
         except Exception:
             fresh = rec
         cached = fresh.git_state
@@ -630,9 +912,7 @@ def _classify_from_cache(
         else:
             state = git_ops.WorktreeState.UNKNOWN
         if session_ctx is not None:
-            state = git_ops.refine_state_with_session(
-                state, fresh.session_turns or 0
-            )
+            state = git_ops.refine_state_with_session(state, fresh.session_turns or 0)
         out[rec.worktree_id] = git_ops.WorktreeStateInfo(state=state)
     return out
 
@@ -667,10 +947,7 @@ def _classify_one_record(
     # Layer the session-derived CONVO refinement so this data contract
     # reports the same display state the tmux status bar does.
     if session_ctx is not None:
-        turns = session_ctx.turn_count.get(
-            _normalize_path(rec.worktree_path),
-            0,
-        )
+        turns = session_ctx.turn_count.get(_normalize_path(rec.worktree_path), 0,)
         if turns:
             info = dataclasses.replace(
                 info,
@@ -728,24 +1005,11 @@ def _emit_plan(plan: dict) -> None:
 # JSON output helpers -- shared by all --json modes
 # ═══════════════════════════════════════════════════════════════════════════
 
-_JSON_SCHEMA_VERSION = 1
-
-
-def _json_output(data: dict) -> None:
-    """Write a versioned JSON envelope to the real stdout.
-
-    Always writes to ``sys.__stdout__`` so it works inside
-    ``output.stdout_to_stderr()`` blocks.
-    """
-    envelope = {"version": _JSON_SCHEMA_VERSION, **data}
-    sys.__stdout__.write(json.dumps(envelope, indent=2) + "\n")
-    sys.__stdout__.flush()
-
-
-def _json_error(message: str, exit_code: int = 1) -> int:
-    """Emit a JSON error envelope and return the exit code."""
-    _json_output({"error": message})
-    return exit_code
+# Moved to output.py (module-size split); re-exported here since nothing about
+# these needs to be defined in the entry-point module itself.
+_JSON_SCHEMA_VERSION = output._JSON_SCHEMA_VERSION
+_json_output = output._json_output
+_json_error = output._json_error
 
 
 def _sync_status_tag(info: git_ops.WorktreeStateInfo) -> str:
@@ -771,23 +1035,10 @@ def _sync_status_tag(info: git_ops.WorktreeStateInfo) -> str:
     return ""
 
 
-def _controller_metadata(
-    rec: tracking.WorktreeRecord,
-) -> list[dict[str, object]]:
-    """Normalized controller relations shared by machine-readable surfaces."""
-    return [tracking.controller_relation_to_dict(relation) for relation in rec.controllers]
-
-
-def _controller_findings(
-    rec: tracking.WorktreeRecord,
-) -> list[dict[str, object]]:
-    """Derived terminal-controller findings shared by JSON surfaces."""
-    from . import controller_lineage
-
-    try:
-        return controller_lineage.controller_findings(rec)
-    except Exception:
-        return []
+# Moved to tracking.py (module-size split); re-exported here for existing
+# unqualified call sites in this module and for back-compat test access.
+_controller_metadata = tracking._controller_metadata
+_controller_findings = tracking._controller_findings
 
 
 def _worktree_to_dict(
@@ -839,28 +1090,20 @@ def _worktree_to_dict(
     head_session = getattr(rec, "resolved_head_session", None)
     if head_session:
         d["last_session_id"] = head_session
-    if rec.session_backend is not None:
-        d["session_backend"] = rec.session_backend.to_dict()
-        d["session_ahp_live"] = rec.session_backend.state in {
-            "active",
-            "unknown",
-        }
-        if not head_session and rec.session_backend.state != "disposed":
-            d["last_session_id"] = rec.session_backend.session_id
-    elif rec.session_backend_opaque:
-        d["session_backend"] = {"opaque": True, "state": "unknown"}
-        d["session_ahp_live"] = True
-    if rec.execution_leg_opaque:
+    if rec.execution_leg_opaque or rec.session_backend_opaque:
+        # Legacy ``session_backend:`` opaque records still surface through the
+        # generic execution-leg envelope so callers never branch on the old key.
         d["execution_leg"] = {"opaque": True, "state": "unknown"}
         d["execution_leg_live"] = True
     else:
         execution_leg = tracking.derive_execution_leg(rec)
         if execution_leg is not None:
             d["execution_leg"] = execution_leg.to_dict()
-            d["execution_leg_live"] = execution_leg.state in {
-            "active",
-            "unknown",
-            }
+            d["execution_leg_live"] = execution_leg.state in {"active", "unknown"}
+            if not head_session and execution_leg.state != "disposed":
+                session_id = execution_leg.blob.get("session_id")
+                if isinstance(session_id, str) and session_id:
+                    d["last_session_id"] = session_id
     if rec.completed_at:
         d["completed_at"] = rec.completed_at
     if rec.kind in tracking.MANAGED_KINDS:
@@ -903,10 +1146,7 @@ def _worktree_to_dict(
         d["controllers"] = _controller_metadata(rec)
         controller_findings = _controller_findings(rec)
         d["controller_findings"] = controller_findings
-    d["reciprocal_relation"] = reciprocal_presentation.derive(
-        rec,
-        controller_findings,
-    )
+    d["reciprocal_relation"] = reciprocal_presentation.derive(rec, controller_findings,)
     # resource-claims: expose the backward owner link + forward outbound claim
     # list so the ledger view (and consumers like `run`) can read a worktree's
     # full claim set. Emitted only when present, keeping the envelope lean.
@@ -965,13 +1205,41 @@ def _worktree_to_dict(
             if session_ctx is not None
             else 0
         )
-        d["cleanup_bucket"] = prune.cleanup_disposition(
+        _disposition = prune.cleanup_disposition(
             rec,
             state_info,
             turn_count=_turns,
             claimant_alive=_local_claimant_alive,
             paired_sibling_final=prune.default_paired_sibling_final,
-        ).bucket
+        )
+        d["cleanup_bucket"] = _disposition.bucket
+        # worktree-finality-and-obligations Phase 4: the canonical closure
+        # descriptor, additive alongside the legacy `cleanup_bucket`/`state`
+        # fields above (not yet a replacement -- see the effort's Phase 5).
+        # "refreshed" requires a fetch to have both been requested AND
+        # succeeded (`state_info.fetch_requested and not
+        # state_info.fetch_failed`, Phase 5 follow-up) -- `fetch_failed`
+        # alone is insufficient, since it stays False when no fetch was ever
+        # attempted (every current caller here classifies with
+        # `fetch=False`), which would otherwise let an ordinary fetch-free
+        # `list --json --classify` masquerade as refreshed evidence.
+        _fetch_fresh = state_info.fetch_requested and not state_info.fetch_failed
+        if _fetch_fresh:
+            # Phase 9: this call's own fresh fetch also counts as current
+            # evidence for every OTHER worktree of this repo -- record it in
+            # the repo-scoped ledger rather than letting only this call
+            # benefit from it.
+            tracking.record_repo_fetch_confirmed(rec.repo)
+        d["closure"] = prune.assemble_closure_descriptor(
+            rec,
+            state_info,
+            _disposition,
+            held_claims=sum(1 for c in rec.resources if c.is_live),
+            open_follow_ups=tracking.effective_open_follow_up_count(rec),
+            evidence_mode="refreshed" if _fetch_fresh else "cached",
+            turn_count=_turns,
+            repo_fetch_fresh=tracking.is_repo_fetch_fresh(rec.repo),
+        ).to_dict()
         d["ff_eligible"] = (
             git_ops.can_fast_forward(state_info)
             and state_info.state != git_ops.WorktreeState.ACTIVE
@@ -1070,140 +1338,6 @@ def _worktree_to_dict(
     return d
 
 
-def cmd_session_backend(args) -> int:
-    """Create, verify, inspect, or dispose a worktree session backend."""
-    from . import ahp_backend
-
-    config = cfg.load_config()
-    worktree_id = _resolve_worktree_id(args.worktree_id)
-    yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
-    if not yaml_path.exists():
-        return _json_error(f"Worktree not found: {worktree_id}")
-
-    try:
-        with tracking._RecordLock(yaml_path):
-            initial_record = tracking.load_record(yaml_path)
-        if not config.session_backend.is_ahp:
-            if initial_record.session_backend_opaque or (
-                initial_record.session_backend is not None
-                and initial_record.session_backend.state in {"active", "unknown"}
-            ):
-                raise ahp_backend.AhpBackendError(
-                    "worktree has a live or unknown hosted-session binding while "
-                    "session_backend.kind is 'direct'; restore the AHP "
-                    "configuration and dispose the binding before launching "
-                    "directly"
-                )
-            _json_output({"enabled": False, "kind": "direct"})
-            return 0
-        configured_account = ahp_backend.account_for_backend(config)
-        if args.action == "status":
-            record = initial_record
-            if record.session_backend_opaque:
-                raise ahp_backend.AhpBackendError(
-                    "worktree uses a newer unsupported session_backend schema"
-                )
-            binding = record.session_backend
-            if binding is not None:
-                if binding.endpoint_url != config.session_backend.endpoint_url:
-                    raise ahp_backend.AhpBackendError(
-                        "persisted AHP endpoint does not match current configuration"
-                    )
-                if binding.auth_account != configured_account:
-                    raise ahp_backend.AhpBackendError(
-                        "persisted AHP account does not match current configuration"
-                    )
-        else:
-            backend_lock_path = yaml_path.with_suffix(".session-backend.yaml")
-            backend_lock_timeout = (
-                (ahp_backend.SESSION_LIFECYCLE_TIMEOUT_SECONDS * 2)
-                + (config.session_backend.connect_timeout_seconds * 2)
-                + 5
-            )
-            with tracking._RecordLock(
-                backend_lock_path,
-                timeout=backend_lock_timeout,
-                require_sidecar=True,
-            ):
-                record = tracking.load_record(yaml_path)
-                repo = _repo_for_record(config, record) or config.default_repo
-                lifecycle_lock = fin.FinalizeLock(Path(repo.worktree_root) / ".finalize.lock")
-                lifecycle_lock.acquire()
-                try:
-                    if not yaml_path.exists():
-                        raise ahp_backend.AhpBackendError(
-                            f"worktree record disappeared: {worktree_id}"
-                        )
-                    record = tracking.load_record(yaml_path)
-                    if record.session_backend_opaque:
-                        raise ahp_backend.AhpBackendError(
-                            "worktree uses a newer unsupported session_backend schema"
-                        )
-                    if args.action == "ensure" and record.status in {"finalizing", "finalized"}:
-                        raise ahp_backend.AhpBackendError(
-                            "cannot activate a hosted session for a finalizing "
-                            "or finalized worktree"
-                        )
-                    if args.action == "ensure":
-                        binding = ahp_backend.ensure_worktree_session(
-                            config,
-                            record,
-                        )
-                        event_name = "ahp_session_bound"
-                    else:
-                        changed = ahp_backend.dispose_worktree_session(
-                            config,
-                            record,
-                        )
-                        binding = record.session_backend
-                        event_name = "ahp_session_disposed" if changed else ""
-
-                    if binding is not None and (args.action == "ensure" or changed):
-                        with tracking._RecordLock(yaml_path):
-                            latest = tracking.load_record(yaml_path)
-                            latest.session_backend = binding
-                            latest.session_backend_opaque = False
-                            latest.session_backend_raw = None
-                            tracking._save_record_unlocked(latest, yaml_path)
-                            record = latest
-                        activity.log_event(
-                            event_name,
-                            worktree_id=record.worktree_id,
-                            session_id=binding.session_id,
-                            backend="ahp",
-                        )
-                finally:
-                    lifecycle_lock.release()
-    except (ahp_backend.AhpBackendError, OSError, ValueError) as exc:
-        return _json_error(str(exc), exit_code=3)
-
-    if binding is None:
-        _json_output(
-            {
-                "enabled": True,
-                "kind": "ahp",
-                "bound": False,
-                "endpoint_url": config.session_backend.endpoint_url,
-                "auth_account": configured_account,
-            }
-        )
-        return 0
-    _json_output(
-        {
-            "enabled": True,
-            "kind": "ahp",
-            "bound": binding.state == "active",
-            "endpoint_url": binding.endpoint_url,
-            "session_id": binding.session_id,
-            "protocol_version": binding.protocol_version,
-            "auth_account": binding.auth_account,
-            "state": binding.state,
-            "binding_revision": binding.binding_revision,
-        }
-    )
-    return 0
-
-
 def _execution_leg_payload(
     worktree_id: str,
     binding: tracking.ExecutionLegBinding | None,
@@ -1212,8 +1346,7 @@ def _execution_leg_payload(
 ) -> dict[str, object]:
     return {
         "worktree_id": worktree_id,
-        "execution_leg": binding.to_dict() if binding is not None else None,
-        "legacy": legacy,
+        "execution_leg": binding.to_dict() if binding is not None else None, "legacy": legacy,
     }
 
 
@@ -1286,10 +1419,7 @@ def _write_execution_leg_reservation(
 ) -> None:
     temp_path = path.with_name(f"{path.name}.{secrets.token_hex(8)}.tmp")
     try:
-        temp_path.write_text(
-            json.dumps(value, separators=(",", ":")),
-            encoding="utf-8",
-        )
+        temp_path.write_text(json.dumps(value, separators=(",", ":")), encoding="utf-8",)
         os.replace(temp_path, path)
     finally:
         try:
@@ -1331,9 +1461,7 @@ def cmd_execution_leg(args) -> int:
             with tracking._RecordLock(yaml_path):
                 record = tracking.load_record(yaml_path)
             if record.execution_leg_opaque or record.session_backend_opaque:
-                raise ValueError(
-                    "worktree uses an unsupported hosted-session schema"
-                )
+                raise ValueError("worktree uses an unsupported hosted-session schema")
             binding = tracking.derive_execution_leg(record)
             _json_output(
                 _execution_leg_payload(
@@ -1350,9 +1478,7 @@ def cmd_execution_leg(args) -> int:
             if not args.provider:
                 raise ValueError("execution-leg set requires --provider")
             if args.binding_revision is None or args.binding_revision <= 0:
-                raise ValueError(
-                    "execution-leg set requires a positive --binding-revision"
-                )
+                raise ValueError("execution-leg set requires a positive --binding-revision")
             if not args.blob_file:
                 raise ValueError("execution-leg set requires --blob-file")
         if args.action in {"reserve", "renew"}:
@@ -1370,19 +1496,13 @@ def cmd_execution_leg(args) -> int:
             if not args.provider:
                 raise ValueError("execution-leg reserve requires --provider")
             if getattr(args, "operation", None) not in {"ensure", "dispose"}:
-                raise ValueError(
-                    "execution-leg reserve requires --operation ensure|dispose"
-                )
+                raise ValueError("execution-leg reserve requires --operation ensure|dispose")
             if not getattr(args, "reservation_owner", None):
-                raise ValueError(
-                    "execution-leg reserve requires --reservation-owner"
-                )
+                raise ValueError("execution-leg reserve requires --reservation-owner")
         if args.action in {"renew", "release"} and not getattr(
             args, "reservation_token", None
         ):
-            raise ValueError(
-                f"execution-leg {args.action} requires --reservation-token"
-            )
+            raise ValueError(f"execution-leg {args.action} requires --reservation-token")
 
         mutation_lock = yaml_path.with_suffix(".execution-leg.yaml")
         reservation_path = _execution_leg_reservation_path(yaml_path)
@@ -1393,9 +1513,7 @@ def cmd_execution_leg(args) -> int:
         ):
             record = tracking.load_record(yaml_path)
             repo = _repo_for_record(config, record) or config.default_repo
-            lifecycle_lock = fin.FinalizeLock(
-                Path(repo.worktree_root) / ".finalize.lock"
-            )
+            lifecycle_lock = fin.FinalizeLock(Path(repo.worktree_root) / ".finalize.lock")
             lifecycle_lock.acquire()
             try:
                 if not yaml_path.exists():
@@ -1403,17 +1521,13 @@ def cmd_execution_leg(args) -> int:
                 with tracking._RecordLock(yaml_path):
                     latest = tracking.load_record(yaml_path)
                     if latest.execution_leg_opaque:
-                        raise ValueError(
-                            "worktree uses a newer unsupported execution_leg schema"
-                        )
+                        raise ValueError("worktree uses a newer unsupported execution_leg schema")
                     if latest.session_backend_opaque:
                         raise ValueError(
                             "worktree uses a newer unsupported session_backend schema"
                         )
                     current = tracking.derive_execution_leg(latest)
-                    current_revision = (
-                        current.binding_revision if current is not None else 0
-                    )
+                    current_revision = (current.binding_revision if current is not None else 0)
                     reservation = (
                         _read_execution_leg_reservation(reservation_path)
                         if reservation_path.exists()
@@ -1423,37 +1537,22 @@ def cmd_execution_leg(args) -> int:
                         "committing",
                         "releasing",
                     }:
-                        result = _binding_from_payload(
-                            reservation.get("result_execution_leg")
-                        )
-                        current_payload = (
-                            current.to_dict() if current is not None else None
-                        )
-                        result_payload = (
-                            result.to_dict() if result is not None else None
-                        )
+                        result = _binding_from_payload(reservation.get("result_execution_leg"))
+                        current_payload = (current.to_dict() if current is not None else None)
+                        result_payload = (result.to_dict() if result is not None else None)
                         if current_payload == result_payload:
-                            supplied_token = getattr(
-                                args, "reservation_token", None
-                            )
+                            supplied_token = getattr(args, "reservation_token", None)
                             if (
                                 args.action in {"set", "clear", "release"}
                                 and reservation.get("token") != supplied_token
                             ):
-                                raise ValueError(
-                                    "execution-leg reservation token mismatch"
-                                )
+                                raise ValueError("execution-leg reservation token mismatch")
                             reservation_path.unlink()
                             reservation = None
                             if args.action in {"set", "clear", "release"}:
-                                _json_output(
-                                    _execution_leg_payload(worktree_id, current)
-                                )
+                                _json_output(_execution_leg_payload(worktree_id, current))
                                 return 0
-                        elif (
-                            int(reservation.get("reserved_revision") or -1)
-                            != current_revision
-                        ):
+                        elif (int(reservation.get("reserved_revision") or -1) != current_revision):
                             raise ValueError(
                                 "execution-leg reservation transition cannot be "
                                 "reconciled"
@@ -1467,12 +1566,8 @@ def cmd_execution_leg(args) -> int:
                                 owner_live is None
                                 and not _reservation_expired(reservation, now=now)
                             ):
-                                owner = str(
-                                    reservation.get("owner") or "<unknown>"
-                                )
-                                expires_at = str(
-                                    reservation.get("expires_at") or "<unknown>"
-                                )
+                                owner = str(reservation.get("owner") or "<unknown>")
+                                expires_at = str(reservation.get("expires_at") or "<unknown>")
                                 raise ValueError(
                                     "execution-leg lifecycle operation is already "
                                     f"reserved by {owner} until {expires_at}"
@@ -1480,9 +1575,7 @@ def cmd_execution_leg(args) -> int:
                             previous = _binding_from_payload(
                                 reservation.get("previous_execution_leg")
                             )
-                            current_payload = (
-                                current.to_dict() if current is not None else None
-                            )
+                            current_payload = (current.to_dict() if current is not None else None)
                             previous_payload = (
                                 previous.to_dict() if previous is not None else None
                             )
@@ -1563,10 +1656,7 @@ def cmd_execution_leg(args) -> int:
                             "reserved_revision": binding.binding_revision,
                             "previous_execution_leg": previous,
                         }
-                        _write_execution_leg_reservation(
-                            reservation_path,
-                            reservation_value,
-                        )
+                        _write_execution_leg_reservation(reservation_path, reservation_value,)
                         latest.execution_leg = binding
                         latest.execution_leg_opaque = False
                         latest.execution_leg_raw = None
@@ -1579,10 +1669,7 @@ def cmd_execution_leg(args) -> int:
                             preserve_handoff_reservations=False,
                         )
                         reservation_value["phase"] = "reserved"
-                        _write_execution_leg_reservation(
-                            reservation_path,
-                            reservation_value,
-                        )
+                        _write_execution_leg_reservation(reservation_path, reservation_value,)
                         _json_output({
                             **_execution_leg_payload(worktree_id, binding),
                             "reservation_token": token,
@@ -1596,26 +1683,16 @@ def cmd_execution_leg(args) -> int:
 
                     if args.action == "renew":
                         if reservation is None:
-                            raise ValueError(
-                                "execution-leg lifecycle operation is not reserved"
-                            )
+                            raise ValueError("execution-leg lifecycle operation is not reserved")
                         if reservation.get("token") != args.reservation_token:
                             raise ValueError("execution-leg reservation token mismatch")
-                        if (
-                            int(reservation.get("reserved_revision") or -1)
-                            != current_revision
-                        ):
-                            raise ValueError(
-                                "execution-leg reservation revision changed"
-                            )
+                        if (int(reservation.get("reserved_revision") or -1) != current_revision):
+                            raise ValueError("execution-leg reservation revision changed")
                         now = datetime.now(timezone.utc)
                         reservation["expires_at"] = (
                             now + timedelta(seconds=args.lease_seconds)
                         ).isoformat(timespec="seconds")
-                        _write_execution_leg_reservation(
-                            reservation_path,
-                            reservation,
-                        )
+                        _write_execution_leg_reservation(reservation_path, reservation,)
                         _json_output({
                             **_execution_leg_payload(worktree_id, current),
                             "reservation_token": args.reservation_token,
@@ -1625,23 +1702,14 @@ def cmd_execution_leg(args) -> int:
 
                     if args.action == "release":
                         if reservation is None:
-                            raise ValueError(
-                                "execution-leg lifecycle operation is not reserved"
-                            )
+                            raise ValueError("execution-leg lifecycle operation is not reserved")
                         if reservation.get("token") != getattr(
                             args, "reservation_token", None
                         ):
                             raise ValueError("execution-leg reservation token mismatch")
-                        if (
-                            int(reservation.get("reserved_revision") or -1)
-                            != current_revision
-                        ):
-                            raise ValueError(
-                                "execution-leg reservation revision changed"
-                            )
-                        binding = _binding_from_payload(
-                            reservation.get("previous_execution_leg")
-                        )
+                        if (int(reservation.get("reserved_revision") or -1) != current_revision):
+                            raise ValueError("execution-leg reservation revision changed")
+                        binding = _binding_from_payload(reservation.get("previous_execution_leg"))
                         if binding is not None:
                             binding.binding_revision = current_revision + 1
                         latest.execution_leg = binding
@@ -1654,10 +1722,7 @@ def cmd_execution_leg(args) -> int:
                         reservation["result_execution_leg"] = (
                             binding.to_dict() if binding is not None else None
                         )
-                        _write_execution_leg_reservation(
-                            reservation_path,
-                            reservation,
-                        )
+                        _write_execution_leg_reservation(reservation_path, reservation,)
                         tracking._save_record_unlocked(
                             latest,
                             yaml_path,
@@ -1668,28 +1733,15 @@ def cmd_execution_leg(args) -> int:
                         return 0
 
                     if reservation is not None:
-                        supplied_token = getattr(
-                            args, "reservation_token", None
-                        )
+                        supplied_token = getattr(args, "reservation_token", None)
                         if reservation.get("token") != supplied_token:
                             if supplied_token:
-                                raise ValueError(
-                                    "execution-leg reservation token mismatch"
-                                )
-                            raise ValueError(
-                                "execution-leg lifecycle operation is reserved"
-                            )
-                        if (
-                            int(reservation.get("reserved_revision") or -1)
-                            != current_revision
-                        ):
-                            raise ValueError(
-                                "execution-leg reservation revision changed"
-                            )
+                                raise ValueError("execution-leg reservation token mismatch")
+                            raise ValueError("execution-leg lifecycle operation is reserved")
+                        if (int(reservation.get("reserved_revision") or -1) != current_revision):
+                            raise ValueError("execution-leg reservation revision changed")
                     elif getattr(args, "reservation_token", None):
-                        raise ValueError(
-                            "execution-leg lifecycle operation is not reserved"
-                        )
+                        raise ValueError("execution-leg lifecycle operation is not reserved")
                     expected = args.if_match_revision
                     if expected is not None and expected != current_revision:
                         raise ValueError(
@@ -1758,10 +1810,7 @@ def cmd_execution_leg(args) -> int:
                         reservation["result_execution_leg"] = (
                             binding.to_dict() if binding is not None else None
                         )
-                        _write_execution_leg_reservation(
-                            reservation_path,
-                            reservation,
-                        )
+                        _write_execution_leg_reservation(reservation_path, reservation,)
                     tracking._save_record_unlocked(
                         latest,
                         yaml_path,
@@ -1779,16 +1828,10 @@ def cmd_execution_leg(args) -> int:
 
 
 def _unsupported_hosted_launch(
-    config: cfg.Config,
     record: tracking.WorktreeRecord | None,
     operation: str,
 ) -> str:
-    """Fail-closed message for launch paths not yet wired to AHP."""
-    if config.session_backend.is_ahp:
-        return (
-            f"{operation} does not yet support the AHP session backend; "
-            "use the normal Worktree Manager launcher"
-        )
+    """Fail-closed message for launch paths that do not own hosted sessions."""
     if record is not None and _hosted_session_blocks_cleanup(record):
         return (
             f"{operation} cannot launch directly while the worktree has a "
@@ -1843,7 +1886,9 @@ def _carve_paired_knowledge(
     pair_id = f"{timestamp}-{suffix}"
     harness_ref = tracking.format_claim_ref(config.machine, config.repo_name or "?", harness_id)
     entry = repos_mod.find_repo(knowledge_name)
-    is_worktree_class = bool(entry) and repos_mod.normalize_class(entry.repo_class) == "worktree"
+    is_worktree_class = bool(entry) and repos_mod.normalize_class(entry.repo_class) in (
+        "worktree", "knowledge",
+    )
     remote = git_ops.resolve_remote_name(
         (entry.remote or "origin") if entry else "origin",
         cwd=knowledge_anchor,
@@ -1870,9 +1915,7 @@ def _carve_paired_knowledge(
             file=sys.stderr,
         )
         return {
-            "pair_id": pair_id,
-            "pair_role": "harness",
-            "pair_ref": anchor_ref,
+            "pair_id": pair_id, "pair_role": "harness", "pair_ref": anchor_ref,
             "pair_kind": "anchor",
         }
 
@@ -1883,10 +1926,7 @@ def _carve_paired_knowledge(
     knowledge_wt_path = str(Path(knowledge_wt_root) / knowledge_id)
 
     Path(knowledge_wt_root).mkdir(parents=True, exist_ok=True)
-    print(
-        f"Creating paired knowledge worktree on branch {knowledge_branch}...",
-        file=sys.stderr,
-    )
+    print(f"Creating paired knowledge worktree on branch {knowledge_branch}...", file=sys.stderr,)
     git_ops.create_worktree(
         knowledge_anchor,
         knowledge_wt_path,
@@ -1920,9 +1960,7 @@ def _carve_paired_knowledge(
         branch=knowledge_branch,
     )
     return {
-        "pair_id": pair_id,
-        "pair_role": "harness",
-        "pair_ref": knowledge_ref,
+        "pair_id": pair_id, "pair_role": "harness", "pair_ref": knowledge_ref,
         "pair_kind": "worktree",
     }
 
@@ -1984,10 +2022,7 @@ def _journal_owner_reciprocal_claim(
     if not owner_ref:
         return False
     try:
-        owner_path, _owner_wt, _err = _resolve_owner_ref_record_path(
-            owner_ref,
-            config,
-        )
+        owner_path, _owner_wt, _err = _resolve_owner_ref_record_path(owner_ref, config,)
         if owner_path is None or not owner_path.exists():
             return False
         child_ref = tracking.format_claim_ref(
@@ -2015,10 +2050,7 @@ def _journal_owner_reciprocal_claim(
         else:
             with tracking._RecordLock(owner_path, require_sidecar=True):
                 _write_claim()
-        print(
-            f"Journaled this worktree as an obligation on {owner_ref}.",
-            file=sys.stderr,
-        )
+        print(f"Journaled this worktree as an obligation on {owner_ref}.", file=sys.stderr,)
         return True
     except Exception as exc:  # never let journaling break the carve
         print(f"owner-claim journaling failed (non-fatal): {exc}", file=sys.stderr)
@@ -2117,6 +2149,14 @@ def _create_worktree_core(
     Raises ``RuntimeError`` on failure.
     """
     repo = config.default_repo
+    if kind != "system" and getattr(repo, "knowledge_only", False):
+        raise RuntimeError(
+            f"'{config.repo_name}' is a knowledge-only companion repo "
+            "(knowledge_only: true) -- it cannot be driven directly. "
+            "It is carved automatically as a paired '-k' worktree when the "
+            "stateless harness bound to it (see its knowledge_repo config) "
+            "creates its own worktree; work there instead."
+        )
     plat = cfg.detect_platform()
     plat_short = "win" if plat == "windows" else plat
 
@@ -2281,15 +2321,10 @@ def _create_worktree_core(
             pair_stamp = None
         _stamp_and_compose_paired_knowledge(config, record, worktree_path, pair_stamp)
 
-    # Copilot discovers repository settings before sessionStart. Seed the
-    # worktree-local source overlay now so programmatic create callers and
-    # direct launch commands see registered local marketplaces immediately.
-    _reconcile_marketplaces_for_checkout(
-        worktree_path,
-        ensure_ignored=True,
-        refresh_repositories=True,
-        fast_forward_repositories=config.auto_fast_forward,
-    )
+    # Copilot discovers repository settings before sessionStart. A committed
+    # relative-path directory marketplace source (this repo's own) resolves
+    # live against whichever checkout is active, so no local override seeding
+    # is needed here (#marketplace-override-retirement).
 
     result = {"worktree": _worktree_to_dict(record)}
     if not launches_copilot:
@@ -2333,7 +2368,7 @@ def _create_worktree_core(
         "post_exit": True,
         "no_mux": no_mux,
         # Authoritative for downstream out-of-process calls (e.g. the
-        # launcher's `session-backend status`), which must scope to the
+        # launcher's `execution-leg get`), which must scope to the
         # project that actually owns this worktree -- not whatever ambient
         # project the launcher itself started with, nor the mutable
         # process-global `cfg.active_project()` (#2338).
@@ -2619,12 +2654,7 @@ def _build_launch_cmd(
                     resolved_hook,
                 ]
                 if config_root_path:
-                    cmd += [
-                        "-ConfigRoot",
-                        config_root_path,
-                        "-RuntimePython",
-                        sys.executable,
-                    ]
+                    cmd += ["-ConfigRoot", config_root_path, "-RuntimePython", sys.executable]
                 if session_path_arg:
                     cmd += ["-SessionPath", session_path_arg]
                 if resolved_env_script:
@@ -2644,12 +2674,7 @@ def _build_launch_cmd(
                     resolved_hook,
                 ]
                 if config_root_path:
-                    cmd += [
-                        "--config-root",
-                        config_root_path,
-                        "--runtime-python",
-                        sys.executable,
-                    ]
+                    cmd += ["--config-root", config_root_path, "--runtime-python", sys.executable]
                 if session_path_arg:
                     cmd += ["--session-path", session_path_arg]
                 if resolved_env_script:
@@ -2774,40 +2799,25 @@ def _wait_for_handoff_candidate(
     pane_id: str | None,
     *,
     timeout: float = 30.0,
+    mux_session: str | None = None,
+    predecessor_session_id: str | None = None,
 ) -> tuple[str | None, str]:
-    """Wait until sessionStart associates the exact handoff token."""
-    deadline = time.monotonic() + timeout
-    mux_bin = sessions._mux_bin()
-    while time.monotonic() < deadline:
-        try:
-            candidate_record = tracking.load_record(record_path)
-            handoff = next(
-                (item for item in candidate_record.handoffs if item.token == token),
-                None,
-            )
-        except (OSError, ValueError):
-            handoff = None
-        if handoff is not None and handoff.candidate:
-            return handoff.candidate, "session-associated"
-        if pane_id and not sessions._mux_pane_alive(pane_id, mux_bin):
-            return None, "pane-exited-before-session"
-        time.sleep(0.05)
-    return None, "session-association-timeout"
+    """Wait until a successor is confirmed for the exact handoff token.
+
+    See ``sessions_pane_retire.wait_for_handoff_candidate`` (moved there to
+    keep this grandfathered module's shrink-only size baseline).
+    """
+    return sessions_pane_retire.wait_for_handoff_candidate(
+        record_path, token, pane_id, timeout=timeout, mux_session=mux_session,
+        predecessor_session_id=predecessor_session_id,
+    )
 
 
-def _handoff_cutover_spawn_result(
-    args: argparse.Namespace,
+def _resolve_handoff_cutover_target(
+    raw_id: str | None,
+    session_id: str | None,
 ) -> tuple[int, dict[str, object]]:
-    """Return the spawn-mode ``handoff-cutover`` result without printing JSON."""
-    seed = getattr(args, "seed", None)
-    if not seed:
-        return 1, {
-            "ok": False,
-            "error": "handoff-cutover requires --seed (or --retire-pane)",
-        }
-
-    raw_id = getattr(args, "worktree_id", None)
-    session_id = getattr(args, "session_id", None)
+    """Resolve the target worktree (or adopted anchor) for handoff cutover."""
     config = None
     if raw_id:
         wt_id = _resolve_worktree_id(raw_id)
@@ -2853,10 +2863,42 @@ def _handoff_cutover_spawn_result(
                         "bare-resumed worktree session"
                     ),
                 }
+    return 0, {
+        "ok": True,
+        "worktree_id": wt_id,
+        "anchor_mode": wt_id == tracking.ANCHOR_ID,
+        "config": config,
+    }
+
+
+def _handoff_cutover_spawn_result(
+    args: argparse.Namespace,
+) -> tuple[int, dict[str, object]]:
+    """Return the spawn-mode ``handoff-cutover`` result without printing JSON."""
+    seed = getattr(args, "seed", None)
+    if not seed:
+        return 1, {
+            "ok": False, "error": "handoff-cutover requires --seed (or --retire-pane)",
+        }
+    raw_id = getattr(args, "worktree_id", None)
+    session_id = getattr(args, "session_id", None)
+    headless = bool(getattr(args, "headless", False))
+    rc, resolved = _resolve_handoff_cutover_target(raw_id, session_id)
+    if rc != 0:
+        return rc, resolved
+    wt_id = str(resolved.get("worktree_id") or "")
+    config = resolved.get("config")
 
     # A live cutover needs a mux session to cut into. Without one, the caller
-    # (extension) must fall back to the store-task-and-reply flow.
-    anchor_mode = wt_id == tracking.ANCHOR_ID
+    # (extension) must fall back to the store-task-and-reply flow -- unless
+    # --headless was requested, which explicitly opts out of mux entirely
+    # (context-handoff-overhaul Phase 3 §4.3's non-mux launch primitive).
+    anchor_mode = bool(resolved.get("anchor_mode"))
+    if headless and anchor_mode:
+        return 2, {
+            "ok": False,
+            "error": "handoff-cutover --headless does not support anchor-mode cutover",
+        }
 
     mux_session = None
     record = None
@@ -2878,7 +2920,7 @@ def _handoff_cutover_spawn_result(
             }
         work_dir = config.default_repo.anchor
     else:
-        if not sessions.has_mux_session(wt_id):
+        if not headless and not sessions.has_mux_session(wt_id):
             return 3, {
                 "ok": False,
                 "error": f"no mux session wt-{wt_id}; not under mux",
@@ -2895,7 +2937,6 @@ def _handoff_cutover_spawn_result(
         work_dir = record.worktree_path
 
     backend_error = _unsupported_hosted_launch(
-        config,
         record,
         "handoff-cutover",
     )
@@ -2922,10 +2963,7 @@ def _handoff_cutover_spawn_result(
     predecessor_binding = None
     if session_id:
         predecessor_binding = (
-            sessions.mux_binding_for_session(
-                session_id,
-                expected_session_name=mux_session,
-            )
+            sessions.mux_binding_for_session(session_id, expected_session_name=mux_session,)
             if anchor_mode and mux_session
             else sessions.mux_binding_for_session(session_id)
         )
@@ -2985,6 +3023,79 @@ def _handoff_cutover_spawn_result(
     handoff_token = getattr(args, "handoff_token", None)
     if handoff_token:
         env[_SESSION_HANDOFF_TOKEN] = handoff_token
+
+    if headless:
+        # No pane, no mux session, no seed-typing choreography: the seed is
+        # passed as a native ``-i <seed>`` argument directly by
+        # headless_new_session itself (headless has no pane-wrapper argv
+        # mangling to route around).
+        if getattr(args, "dry_run", False):
+            dry_result: dict[str, object] = {
+                "ok": True,
+                "dry_run": True,
+                "headless": True,
+                "work_dir": work_dir,
+                "cmd": [*launch_cmd, "-i", "<seed>"],
+                "seed_len": len(seed),
+            }
+            if selection.assignment is not None:
+                dry_result["profile_assignment"] = profile_assignment.metadata(
+                    selection.assignment)
+            return 0, dry_result
+
+        spawn_event_ctx = {
+            "worktree_id": wt_id, "session_id": session_id, "source": "python",
+            "handoff_token": handoff_token, "old_pane": None,
+            "method": "headless_new_session",
+        }
+        activity.log_event("handoff_successor_spawn_started", **spawn_event_ctx)
+        result = sessions.headless_new_session(wt_id, work_dir, launch_cmd, env, seed=seed)
+        if not result.get("ok"):
+            failure = dict(result, ok=False)
+            failure["error"] = f"failed to spawn headless successor: {result.get('error')}"
+            activity.log_event(
+                "handoff_successor_spawn_failed", error=result.get("error"), **spawn_event_ctx)
+            return 4, failure
+        pid = result.get("pid")
+        activity.log_event(
+            "handoff_cutover_spawn", new_pane=None, pid=pid,
+            seeded=True, seed_ready=True,
+            candidate_session=None, candidate_status="awaiting-session-association",
+            predecessor_copilot_pid=predecessor_pid,
+            predecessor_copilot_start_time=predecessor_start,
+            **spawn_event_ctx,
+        )
+        candidate_session = None
+        if handoff_token and record_path is not None:
+            candidate_session, candidate_status = _wait_for_handoff_candidate(
+                record_path, handoff_token, None,
+            )
+            if not candidate_session:
+                return 4, {
+                    "ok": False,
+                    "headless": True,
+                    "pid": pid,
+                    "candidate_status": candidate_status,
+                    "error": (
+                        "successor did not create a token-associated Copilot "
+                        f"session (status: {candidate_status})"
+                    ),
+                }
+        response: dict[str, object] = {
+            "ok": True,
+            "headless": True,
+            "pid": pid,
+            "seed_len": len(seed),
+            "seeded": True,
+            "seed_ready": True,
+            "seed_method": "interactive-argv",
+        }
+        if candidate_session:
+            response["candidate_session"] = candidate_session
+        if selection.assignment is not None:
+            response["profile_assignment"] = profile_assignment.metadata(selection.assignment)
+        return 0, response
+
     # Keep the multi-word seed OUT of the pane command argv: psmux space-joins
     # that argv before CreateProcess and irreversibly splits it. mux_new_window
     # sends base64 control tokens to the platform wrapper instead; the wrapper
@@ -3024,37 +3135,39 @@ def _handoff_cutover_spawn_result(
             dry_result["profile_assignment"] = profile_assignment.metadata(selection.assignment)
         return 0, dry_result
 
-    result = sessions.mux_new_window(
-        wt_id,
-        work_dir,
-        launch_cmd,
-        env,
-        initial_prompt=seed,
-        session_name=mux_session,
-    )
+    spawn_event_ctx = {
+        "worktree_id": wt_id, "session_id": session_id, "source": "python",
+        "handoff_token": handoff_token, "old_pane": old_pane,
+        "expected_mux_session": expected_mux_session,
+        "method": "mux_new_window_interactive_argv",
+    }
+    def _spawn_failed(error: object) -> None:
+        activity.log_event(
+            "handoff_successor_spawn_failed", error=error, **spawn_event_ctx)
+    activity.log_event("handoff_successor_spawn_started", **spawn_event_ctx)
+    try:
+        result = sessions.mux_new_window(
+            wt_id, work_dir, launch_cmd, env,
+            initial_prompt=seed, session_name=mux_session)
+    except Exception as exc:
+        # mux_new_window guards only a known subset; an uncaught exception
+        # must not leave the spawn stuck at "started".
+        _spawn_failed(str(exc))
+        raise
     if not result.get("ok"):
-        failure = dict(result)
-        failure["ok"] = False
+        failure = dict(result, ok=False)
         failure["error"] = f"failed to open successor window: {result.get('error')}"
+        _spawn_failed(result.get("error"))
         return 4, failure
-
     new_pane = result.get("new_pane")
     activity.log_event(
-        "handoff_cutover_spawn",
-        worktree_id=wt_id,
-        session_id=session_id,
-        source="python",
-        handoff_token=handoff_token,
-        old_pane=old_pane,
-        new_pane=new_pane,
+        "handoff_cutover_spawn", new_pane=new_pane,
         seeded=bool(result.get("prompt_received")),
         seed_ready=bool(result.get("prompt_received")),
-        candidate_session=None,
-        candidate_status="awaiting-session-association",
+        candidate_session=None, candidate_status="awaiting-session-association",
         predecessor_copilot_pid=predecessor_pid,
         predecessor_copilot_start_time=predecessor_start,
-        expected_mux_session=expected_mux_session,
-        method="mux_new_window_interactive_argv",
+        **spawn_event_ctx,
     )
     candidate_session = None
     if handoff_token and record_path is not None:
@@ -3062,6 +3175,8 @@ def _handoff_cutover_spawn_result(
             record_path,
             handoff_token,
             new_pane,
+            mux_session=expected_mux_session,
+            predecessor_session_id=session_id,
         )
         if not candidate_session:
             failure = dict(result)
@@ -3092,6 +3207,233 @@ def _handoff_cutover_spawn_result(
     if selection.assignment is not None:
         response["profile_assignment"] = profile_assignment.metadata(selection.assignment)
     return 0, response
+
+
+def _latest_handoff_cutover_retry_handoff(
+    record: tracking.WorktreeRecord,
+) -> tracking.SessionHandoff | None:
+    """Return the most recent non-cancelled handoff on ``record``."""
+    handoffs = [
+        handoff
+        for handoff in getattr(record, "handoffs", []) or []
+        if getattr(handoff, "state", None) != "cancelled"
+    ]
+    if not handoffs:
+        return None
+    return max(handoffs, key=lambda handoff: getattr(handoff, "ordinal", 0))
+
+
+def _handoff_cutover_retry_result(
+    args: argparse.Namespace,
+) -> tuple[int, dict[str, object]]:
+    """Retry a stuck cutover without duplicating a live successor."""
+    session_id = getattr(args, "session_id", None)
+    rc, resolved = _resolve_handoff_cutover_target(
+        getattr(args, "worktree_id", None),
+        session_id,
+    )
+    if rc != 0:
+        return rc, resolved
+    wt_id = str(resolved.get("worktree_id") or "")
+    if wt_id == tracking.ANCHOR_ID:
+        return 3, {
+            "ok": False,
+            "error": "handoff-cutover --retry only supports tracked worktrees",
+        }
+    record_path = cfg.tracking_dir() / f"{wt_id}.yaml"
+    if not record_path.exists():
+        return 1, {"ok": False, "error": f"Worktree not found: {wt_id}"}
+    record = tracking.load_record(record_path)
+    handoff = _latest_handoff_cutover_retry_handoff(record)
+    if handoff is None:
+        return 1, {
+            "ok": False,
+            "error": f"worktree {wt_id} has no recorded handoff to retry",
+        }
+    predecessor_session = str(getattr(handoff, "predecessor", "") or "").strip() or None
+    if session_id and predecessor_session and session_id != predecessor_session:
+        return 2, {
+            "ok": False,
+            "error": (
+                "handoff-cutover --retry must be invoked from the most recent "
+                f"handoff predecessor ({predecessor_session}), not {session_id}"
+            ),
+        }
+    handoff_token = str(getattr(handoff, "token", "") or "").strip() or None
+    explicit_token = str(getattr(args, "handoff_token", "") or "").strip() or None
+    if explicit_token and explicit_token != handoff_token:
+        return 2, {
+            "ok": False,
+            "error": (
+                f"handoff-cutover --retry targets the most recent handoff "
+                f"token {handoff_token}, not {explicit_token}"
+            ),
+        }
+    head_session = record.resolved_head_session
+    recorded_successor = str(getattr(handoff, "successor", "") or "").strip() or None
+    if recorded_successor and head_session not in {None, recorded_successor}:
+        return 2, {
+            "ok": False,
+            "error": (
+                "the most recent handoff's recorded successor disagrees with "
+                f"the resolved worktree head ({head_session}); retry refused"
+            ),
+        }
+    live_session = recorded_successor or (
+        str(getattr(handoff, "candidate", "") or "").strip() or None
+    )
+    expected_mux_session = sessions.mux_session_name(wt_id)
+    mux_bin = sessions._mux_bin()
+    if live_session:
+        try:
+            binding = sessions.mux_binding_for_session(
+                live_session,
+                expected_session_name=expected_mux_session,
+            )
+        except Exception:
+            binding = None
+        pane_id = str((binding or {}).get("pane_id") or "").strip() or None
+        if (
+            binding
+            and str(binding.get("session_name") or "").strip() == expected_mux_session
+            and pane_id
+            and sessions._mux_pane_alive(pane_id, mux_bin)
+        ):
+            response = {
+                "ok": True,
+                "outcome": "refocused",
+                "worktree_id": wt_id,
+                "handoff_token": handoff_token,
+                "handoff_state": (
+                    "linked" if recorded_successor else getattr(handoff, "state", None)
+                ),
+                "session": expected_mux_session,
+                "successor_session": live_session,
+                "successor_pane": pane_id,
+            }
+            if getattr(args, "dry_run", False):
+                response["dry_run"] = True
+                return 0, response
+            if sessions.mux_focus_pane(expected_mux_session, pane_id):
+                return 0, response
+            response.update(
+                {
+                    "ok": False,
+                    "error": (
+                        "a live successor pane already exists, but its mux "
+                        "window could not be focused"
+                    ),
+                }
+            )
+            return 5, response
+    request = _monitor_read_session_state_handoff(
+        _monitor_session_state_handoff_path(predecessor_session)
+    )
+    seed = str(getattr(args, "seed", "") or "").strip() or None
+    request_token = str((request or {}).get("handoffId") or "").strip() or None
+    if request_token in {None, handoff_token}:
+        if recorded_successor:
+            prompt_text = str((request or {}).get("promptText") or "").strip()
+            if prompt_text:
+                seed = prompt_text
+        if not seed:
+            request_seed = str((request or {}).get("seed") or "").strip()
+            if request_seed:
+                seed = request_seed
+    spawn_args = argparse.Namespace(**vars(args))
+    spawn_args.worktree_id = wt_id
+    spawn_args.session_id = predecessor_session or session_id
+    spawn_args.handoff_token = None if recorded_successor else handoff_token
+    spawn_args.seed = seed
+    rc, response = _handoff_cutover_spawn_result(spawn_args)
+    response.setdefault("worktree_id", wt_id)
+    response.setdefault("handoff_token", handoff_token)
+    if rc == 0 and response.get("ok"):
+        response["outcome"] = "spawned"
+    return rc, response
+
+
+# A losing Stage-13 claimant's brief retry window (see _maybe_emit_stage_13):
+# short enough to add negligible latency to a hook/monitor call, long enough
+# for the winner's own log_event() + failure-detection + rollback to settle.
+_STAGE13_CLAIM_RETRIES = 3
+_STAGE13_CLAIM_RETRY_DELAY_S = 0.05
+
+
+def _maybe_emit_stage_13(
+    wt_id: str | None, handoff_token: str | None, *, launch_id: str | None = None,
+) -> None:
+    """Emit Stage 13 (handoff_complete) once the predecessor pane is gone AND
+    the successor is head (linked, not just candidate) -- called from both
+    the retire and claim sides since either can complete first. Dedup is an
+    atomic exclusive-create claim file keyed by a collision-resistant digest
+    of the exact (worktree, token) pair (NOT the lossy character-sanitized
+    ``_monitor_handoff_claim_segment()``, which can map distinct tokens like
+    "task:1" and "task_1" onto the same on-disk name): the successor's
+    sessionStart process and the resident monitor's retire process run
+    concurrently, so a plain read_events() check-then-act could let both
+    sides pass before either logs, double-recording Stage 13. If the log
+    write is detected to have failed (via
+    ``activity.log_event_failure_count()``), the winner rolls its claim back
+    so the failure stays retryable -- but that rollback can race a losing
+    caller's own FileExistsError check, so a loser doesn't just give up: it
+    waits briefly, and if the claim vanished (a rollback), retries the claim
+    itself instead of silently losing Stage 13 forever. A hard process crash
+    between the claim and the log write is a narrower residual gap left to
+    Phase 3's durable trace store.
+    """
+    if not wt_id or not handoff_token:
+        return
+    retired = {
+        str(e.get("handoff_token") or "").strip()
+        for e in activity.read_events(worktree_id=wt_id, event="handoff_predecessor_retire")
+        if e.get("outcome") == "gone"
+    }
+    if handoff_token not in retired:
+        return
+    try:
+        record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")
+    except Exception:
+        return
+    handoff = next((h for h in record.handoffs if h.token == handoff_token), None)
+    if handoff is None or handoff.state != "linked":
+        return
+    digest = hashlib.sha256(f"{wt_id}\x00{handoff_token}".encode()).hexdigest()
+    claim_path = _monitor_handoff_claim_root() / "stage13" / f"{digest}.json"
+    try:
+        claim_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return  # unwritable/malformed claim root -- fail open like the claim itself
+    claimed = False
+    for _attempt in range(_STAGE13_CLAIM_RETRIES):
+        try:
+            with open(claim_path, "x", encoding="utf-8"):
+                pass
+        except FileExistsError:
+            # A losing caller must not just give up: if the current holder's
+            # log write fails and rolls back the claim (below), that rollback
+            # can happen between our check and its own return, and no other
+            # caller may ever retry -- silently losing Stage 13 forever. Give
+            # the holder a brief window to either finish or roll back, then
+            # retry the claim ourselves if it did.
+            time.sleep(_STAGE13_CLAIM_RETRY_DELAY_S)
+            if claim_path.exists():
+                return  # still held -- its owner is genuinely in flight
+            continue
+        except OSError:
+            return  # unwritable claim dir -- no-op
+        claimed = True
+        break
+    if not claimed:
+        return
+    failures_before = activity.log_event_failure_count()
+    activity.log_event(
+        "handoff_complete", worktree_id=wt_id, session_id=handoff.predecessor,
+        successor_session_id=handoff.successor, handoff_token=handoff_token,
+        launch_id=launch_id)
+    if activity.log_event_failure_count() > failures_before:
+        with contextlib.suppress(OSError):
+            claim_path.unlink()
 
 
 def _handoff_cutover_retire_result(
@@ -3162,8 +3504,7 @@ def _handoff_cutover_retire_result(
         result = sessions.mux_retire_pane(retire_pane)
     reap = {"checked": False}
     identity_skip = result.get("method") in {
-        "process-identity-unavailable",
-        "process-identity-mismatch",
+        "process-identity-unavailable", "process-identity-mismatch",
     }
     if session_id and result.get("method") != "last-window-skip" and not identity_skip:
         if strict_process_identity:
@@ -3202,11 +3543,14 @@ def _handoff_cutover_retire_result(
         copilot_reaped=reap.get("reaped", 0),
         copilot_survivors=reap.get("survivors", 0),
     )
+    _maybe_emit_stage_13(
+        wt_id, getattr(args, "handoff_token", None),
+        launch_id=getattr(args, "launch_id", None) or os.environ.get("WORKTREE_LAUNCH_ID"))
     return (0 if overall_ok else 1), result
 
 
 def cmd_handoff_cutover(args: argparse.Namespace) -> int:
-    """Live-cutover handoff: spawn a seeded successor Copilot or retire a pane.
+    """Live-cutover handoff: spawn/refocus a successor Copilot or retire a pane.
 
     Two modes (JSON out on stdout either way):
 
@@ -3229,6 +3573,10 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
       leaves a lingering parallel session that the mux later restores as a
       reappearing pane. Success requires **both** the pane retired and the old
       Copilot process gone.
+    * **retry** (``--retry``): inspect the most recent handoff on this worktree
+      and positively confirm whether its recorded successor session already has
+      a live pane in this mux. If so, do **not** spawn again -- just refocus
+      that existing window. If not, fall back to the ordinary spawn path.
 
     The mux choreography lives here (agent-worktrees owns launch + mux); the
     context-handoff extension is a thin trigger that shells out to this command.
@@ -3238,6 +3586,11 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
     if retire_pane:
         rc, result = _handoff_cutover_retire_result(args)
         _json_output(result)
+        return rc
+
+    if getattr(args, "retry", False):
+        rc, response = _handoff_cutover_retry_result(args)
+        _json_output(response)
         return rc
 
     # ── Spawn / cutover mode ─────────────────────────────────────────────
@@ -3285,13 +3638,6 @@ def cmd_embody(args: argparse.Namespace) -> int:
         config = cfg.load_config()
     except Exception as e:
         return _json_error(str(e))
-    if make_new and config.session_backend.is_ahp:
-        return _json_error(
-            "embody --new does not yet support the AHP session backend; "
-            "create and open the worktree through Worktree Manager",
-            exit_code=3,
-        )
-
     # Resolve target worktree id + path (creating a fresh worktree for --new).
     if make_new:
         try:
@@ -3335,7 +3681,6 @@ def cmd_embody(args: argparse.Namespace) -> int:
                 return _json_error(f"Worktree record not found: {wt_id}")
         if record is not None:
             backend_error = _unsupported_hosted_launch(
-                config,
                 record,
                 "embody",
             )
@@ -3427,20 +3772,14 @@ def cmd_embody(args: argparse.Namespace) -> int:
     try:
         lifecycle_lock.acquire()
     except TimeoutError:
-        return _json_error(
-            "worktree lifecycle remained busy for five minutes",
-            exit_code=3,
-        )
+        return _json_error("worktree lifecycle remained busy for five minutes", exit_code=3,)
     try:
         # A managed-GC pass may have completed while launch preflight ran.
         # Re-check under the shared lifecycle fence before creating a process.
         try:
             launch_record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")
         except FileNotFoundError:
-            return _json_error(
-                f"Worktree record disappeared before launch: {wt_id}",
-                exit_code=3,
-            )
+            return _json_error(f"Worktree record disappeared before launch: {wt_id}", exit_code=3,)
         if getattr(launch_record, "kind", None) in tracking.MANAGED_KINDS and getattr(
             launch_record, "status", None
         ) in {"complete", "completed", "finalized"}:
@@ -3460,10 +3799,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
                 and getattr(launch_record, "repo", None) != getattr(record, "repo", None)
             )
         ):
-            return _json_error(
-                f"Worktree record changed before launch: {wt_id}",
-                exit_code=3,
-            )
+            return _json_error(f"Worktree record changed before launch: {wt_id}", exit_code=3,)
         if sessions.has_mux_session(wt_id):
             _json_output(
                 {
@@ -3552,10 +3888,7 @@ def _restore_before_resume(record: tracking.WorktreeRecord) -> bool:
         if result.get("verified"):
             return True
         output.err(
-            result.get(
-                "reason",
-                "the live process was not confirmed inside the mux pane",
-            )
+            result.get("reason", "the live process was not confirmed inside the mux pane",)
         )
         return False
     if result.get("ok"):
@@ -3592,7 +3925,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     id + path WITHOUT launching Copilot or a mux session -- then resume later
     with ``--json --worktree-id <id>``.
     """
-    from .picker_tui.frame_health import append_launch_event
+    from .launch_trace import append_launch_event
 
     append_launch_event("resolve_handler_start")
     use_json = getattr(args, "json", False)
@@ -4122,10 +4455,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             # Build picker menu
             menu_items: list[MenuItem] = []
             reciprocal_relations = {
-                rec.worktree_id: reciprocal_presentation.derive(
-                    rec,
-                    _controller_findings(rec),
-                )
+                rec.worktree_id: reciprocal_presentation.derive(rec, _controller_findings(rec),)
                 for rec, _info in classified
             }
 
@@ -5410,7 +5740,7 @@ def _machine_key_for_display(config: cfg.Config, name: str) -> str:
 
 def _run_picker_housekeeping() -> None:
     """Run each post-refresh sweep independently; one failure never stops peers."""
-    from .picker_tui.frame_health import append_launch_event
+    from .launch_trace import append_launch_event
 
     append_launch_event("housekeeping_start")
     for action in (
@@ -5431,147 +5761,21 @@ def _run_picker_housekeeping() -> None:
 
 
 def _run_new_picker(config: cfg.Config | None, args: argparse.Namespace) -> int:
-    """Run the Textual worktree picker and resolve its launch decision.
+    """Compatibility shim after the bundled picker retired.
 
-    Maps the picker's decision dict onto the existing resume/create/remote
-    code paths. Cleanup/Sync/Stop/profiles actions run **for real** in-TUI
-    (they mutate worktrees / terminal profiles) and never emit a launch
-    decision, so they never reach here. (Their simulated no-op counterparts run
-    only in the explicit ``picker mock`` dev sandbox.)
+    Bare invocations now hand off to the standalone Worktree Manager before
+    this function is ever considered; keep the helper fail-closed if some older
+    path reaches it directly.
     """
-    from . import picker_tui
-
-    # Reap orphaned mux sessions (finalized / gone / untracked) so a dead
-    # worktree is never presented as a live, resumable session (issue #713).
-    # Run it on a background thread so the mux enumeration never delays the
-    # picker appearing -- interaction must not wait on startup housekeeping
-    # (#1432). Best-effort: a reap hiccup never touches the picker.
-    # Avoid a confusing double hop: when this picker is itself running over SSH,
-    # don't fan out to other machines -- show only the local source (no remote
-    # tabs / handoffs). See issue: "a process should know it's accessed via SSH."
-    live = not _in_ssh_session()
-    decision = picker_tui.run_tui_picker(
-        live=live,
-        after_first_refresh=_run_picker_housekeeping,
-    )
-    if not decision:
-        print("Cancelled.")
-        _emit_plan({"action": "none", "exit_code": 0})
-        return 0
-
-    if config is None:
-        config = cfg.load_config()
-    action = decision.get("action")
-    profile = _resolve_profile(config, args)
-
-    if action == "refresh":
-        # The picker's refresh icon (#1430): apply the staged update and
-        # relaunch. The picker runs from the runtime venv the update replaces,
-        # so it can't apply in place -- hand back to the launcher, which applies
-        # then re-execs resolve on the new version.
-        _emit_plan({"action": "refresh"})
-        return 0
-
-    # A selection on another machine hands off over SSH. The picker's target
-    # carries machine *and* env, so resolve the env-specific SSH alias (not the
-    # machine's primary -- see ``_emit_remote_plan_for_env``). The selected
-    # action is forwarded as binstub args so the remote launches **straight
-    # through** into that worktree's interactive session instead of re-opening
-    # its own picker (resume -> ``--worktree-id <id>``; new -> ``--new``).
-    if not decision.get("is_local", True):
-        machine = decision.get("machine") or ""
-        env_label = decision.get("env") or ""
-        opts = decision.get("options") or {}
-        remote_args: list[str] = []
-        if action in ("resume", "restore"):
-            wt_id = decision.get("worktree_id")
-            if wt_id:
-                remote_args = ["--worktree-id", str(wt_id)]
-                if action == "restore":
-                    remote_args.append("--restore")
-                if opts.get("no_mux"):
-                    remote_args.append("--no-mux")
-                if opts.get("bare_resume"):
-                    remote_args.append("--bare-resume")
-        elif action == "new":
-            remote_args = ["--new"]
-            if opts.get("no_mux"):
-                remote_args.append("--no-mux")
-        # Other actions (or a resume with no id) fall back to opening the
-        # remote picker (empty remote_args).
-        rc = _emit_remote_plan_for_env(config, machine, env_label, remote_args)
-        if rc is not None:
-            return rc
-        output.err(f"Unknown or unreachable remote machine: {machine} {env_label}".strip())
-        return 1
-
-    if action in ("resume", "restore"):
-        wt_id = decision.get("worktree_id")
-        if not wt_id:
-            output.err(f"Picker returned a {action} decision with no worktree id.")
-            return 1
-        # The Open sub-menu's No-mux toggle (picker #1343) launches without the
-        # PSMux/TMux wrapper.
-        opts = decision.get("options") or {}
-        if opts.get("no_mux"):
-            args.no_mux = True
-        # Deprecated advanced "Bare resume": create the worktree's mux, but
-        # launch Copilot in HOME with no --resume. The operator finishes with a
-        # manual ``/resume <id>`` (the sub-menu shows the id).
-        if opts.get("bare_resume"):
-            args.bare_resume = True
-        wt_id = _resolve_worktree_id(wt_id)
-        if _relocate_active_project_for_worktree(wt_id):
-            try:
-                config = cfg.load_config()
-            except Exception as e:
-                output.err(str(e))
-                return 1
-        yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
-        if not yaml_path.exists():
-            output.err(f"Worktree not found: {wt_id}")
-            return 1
-        record = tracking.load_record(yaml_path)
-        try:
-            _validate_profile_assignment_config(config)
-        except profile_assignment.ProfileAssignmentError as exc:
-            output.err(str(exc))
-            _emit_plan(
-                {
-                    "action": "error",
-                    "error": str(exc),
-                    "exit_code": 3,
-                }
-            )
-            return 3
-        plan_work_dir = (
-            os.path.expanduser("~")
-            if getattr(args, "bare_resume", False)
-            else record.worktree_path
-        )
-        launch_preflight = _preflight_launch(config, args, plan_work_dir)
-        if launch_preflight.error:
-            return _launch_preflight_error(launch_preflight)
-        if action == "restore" and not _restore_before_resume(record):
-            return 1
-        return _resolve_resume(
-            record,
-            config,
-            args,
-            profile=profile,
-            launch_preflight=launch_preflight,
-        )
-    if action == "new":
-        opts = decision.get("options") or {}
-        if opts.get("no_mux"):
-            args.no_mux = True
-        if opts.get("anchor"):
-            return _resolve_base_repo(config, args, profile=profile)
-        # 'bare' and 'local_model' have no backend yet -- ignored for now.
-        return _resolve_new(config, args, profile=profile)
-
-    output.err(f"Picker returned an unsupported decision: {action!r}")
-    return 1
+    mgr = _usable_worktree_manager()
+    project = None
+    try:
+        project = cfg.active_project()
+    except Exception:
+        project = None
+    if mgr:
+        return _exec_worktree_manager(mgr, project)
+    return cmd_manager_install_trigger(project)
 
 
 def _start_picker_monitor_root():
@@ -5580,6 +5784,7 @@ def _start_picker_monitor_root():
         return None
     try:
         import atexit
+
         from . import monitor_roots
 
         root = monitor_roots.PickerHeartbeat(
@@ -5838,7 +6043,7 @@ def _resolve_resume(
         "post_exit": True,
         "no_mux": getattr(args, "no_mux", False),
         # Authoritative for downstream out-of-process calls (e.g. the
-        # launcher's `session-backend status`), which must scope to the
+        # launcher's `execution-leg get`), which must scope to the
         # project that actually owns this worktree -- not whatever ambient
         # project the launcher itself started with (#2338).
         "project": config.repo_name,
@@ -5980,254 +6185,18 @@ def _infer_worktree_id(
     return _infer_worktree_id_from_cwd(config)
 
 
-def _worktree_id_from_git(cwd: Path) -> str | None:
-    """Return the git-internal worktree name if CWD is inside a *linked*
-    worktree, else None.
-
-    Git has no notion of a shared "worktree root": ``git worktree add <path>``
-    places a worktree at an arbitrary folder and records its admin data at
-    ``<main-repo>/.git/worktrees/<name>/``. From anywhere inside a linked
-    worktree, ``git rev-parse --git-dir`` therefore resolves to
-    ``<main-repo>/.git/worktrees/<name>`` -- and ``<name>`` is exactly the
-    agent-worktrees ID (we name the git worktree after the ID). The *main*
-    worktree's git-dir is plain ``.git`` (no ``worktrees/`` parent), which
-    yields no id. This is layout-independent, so it survives a ``worktree_root``
-    change (copilot-extensions#59).
-    """
-    try:
-        result = git_ops.git("rev-parse", "--git-dir", cwd=str(cwd), check=False, timeout=10)
-    except Exception:
-        return None
-    if result.returncode != 0:
-        return None
-    git_dir = (result.stdout or "").strip()
-    if not git_dir:
-        return None
-    p = Path(git_dir)
-    if not p.is_absolute():
-        p = (cwd / p).resolve()
-    # A linked worktree's git-dir is ``.../.git/worktrees/<name>``.
-    if p.parent.name == "worktrees" and p.name and p.name != "worktrees":
-        return p.name
-    return None
-
-
-def _linked_worktree_root(cwd: str | Path) -> Path | None:
-    """Return git's actual linked-worktree root, never a configured projection."""
-    candidate = Path(cwd).resolve()
-    if not _worktree_id_from_git(candidate):
-        return None
-    try:
-        result = git_ops.git(
-            "rev-parse",
-            "--show-toplevel",
-            cwd=str(candidate),
-            check=False,
-            timeout=10,
-        )
-    except Exception:
-        return None
-    if result.returncode != 0 or not (result.stdout or "").strip():
-        return None
-    return Path(result.stdout.strip()).resolve()
-
-
-def _worktree_path_for_id(
-    config: cfg.Config,
-    worktree_id: str | None,
-    *,
-    cwd: str | Path,
-) -> str:
-    """Resolve a worktree ID to its authoritative path."""
-    if not worktree_id:
-        return ""
-    linked_root = _linked_worktree_root(cwd)
-    if linked_root is not None and _worktree_id_from_git(linked_root) == worktree_id:
-        return str(linked_root)
-    record = tracking.load_record_by_id(worktree_id)
-    if record is not None and record.worktree_path:
-        return record.worktree_path
-    return str(Path(config.default_repo.worktree_root) / worktree_id)
-
-
-def _adopt_linked_worktree(cwd: str | Path) -> str | None:
-    """Track a linked worktree created by an external session host."""
-    root = _linked_worktree_root(cwd)
-    worktree_id = _worktree_id_from_git(root) if root is not None else None
-    if root is None or not worktree_id or not cfg.active_project():
-        return None
-    try:
-        config = cfg.load_config()
-        anchor = Path(config.default_repo.anchor).resolve()
-        linked_anchor = git_ops.resolve_to_anchor(root).resolve()
-        if linked_anchor != anchor or git_ops._normalize_wt_path(
-            str(root)
-        ) == git_ops._normalize_wt_path(str(anchor)):
-            return None
-        branch = git_ops.current_branch(root)
-        if not branch:
-            return None
-        record, _created = tracking.create_new_record_if_absent(
-            worktree_id=worktree_id,
-            branch=branch,
-            worktree_path=str(root),
-            repo=config.repo_name,
-            machine=config.machine,
-            platform_name=config.platform,
-            tracking_path=cfg.tracking_dir(),
-            interface="cli",
-            origin="user",
-            checkout_managed=False,
-        )
-    except Exception:
-        return None
-    if record.repo != config.repo_name or git_ops._normalize_wt_path(
-        record.worktree_path
-    ) != git_ops._normalize_wt_path(str(root)):
-        return None
-    return worktree_id
-
-
-def _infer_worktree_id_from_worktree_root(config: cfg.Config | None, cwd: Path) -> str | None:
-    """Legacy fallback: derive the ID from the first path component under the
-    configured ``worktree_root``.
-
-    Superseded by git-based + tracked-path resolution in
-    :func:`_infer_worktree_id_from_cwd`; retained only as a last resort. This
-    single-root assumption is exactly what copilot-extensions#59 fixed (it
-    silently failed for worktrees created under a *previous* ``worktree_root``
-    layout), so do not rely on it as the primary path.
-    """
-    try:
-        if config is None:
-            config = cfg.load_config()
-        wt_root = Path(config.default_repo.worktree_root).resolve()
-    except Exception:
-        return None
-
-    try:
-        rel = cwd.relative_to(wt_root)
-    except ValueError:
-        return None
-
-    if not rel.parts:
-        return None  # CWD is exactly worktree_root
-
-    candidate = rel.parts[0]
-
-    # Validate: a tracking YAML should exist for this candidate
-    yaml_path = cfg.tracking_dir() / f"{candidate}.yaml"
-    if yaml_path.exists():
-        return candidate
-
-    # Even without a tracking file, if the directory exists under
-    # worktree_root and has a .git entry it's a valid worktree
-    wt_dir = wt_root / candidate
-    if wt_dir.is_dir() and (wt_dir / ".git").exists():
-        return candidate
-
-    return None
-
-
-def _infer_worktree_id_from_cwd(
-    config: cfg.Config | None = None,
-) -> str | None:
-    """Derive the worktree ID from the current working directory.
-
-    Identity is resolved the way git itself resolves a linked worktree --
-    **independent of any configured ``worktree_root``**. Because git records a
-    worktree at an arbitrary path (there is no shared "root" in git's model),
-    the current worktree is identifiable from anywhere inside it, regardless of
-    where it lives on disk. This keeps inference correct across a
-    ``worktree_root`` layout change: worktrees created under an older root are
-    still resolved (copilot-extensions#59).
-
-    Resolution order (each root-independent; the legacy single-root scan is
-    only a last resort):
-      1. **git's own identity** -- ``git rev-parse --git-dir`` under a linked
-         worktree is ``.../.git/worktrees/<name>``; ``<name>`` is the tracking
-         ID. Authoritative even when the tracking YAML is briefly absent. When
-         no tracking YAML exists at all (a worktree `git worktree add`-ed by an
-         external host -- a GitHub-App/coding-agent session, a hand-run git
-         command, or any environment where agent-worktrees' own sessionStart
-         hook never ran), auto-adopts it on the spot (:func:`_adopt_linked_worktree`)
-         so every caller -- not just the hook -- can bind ownership on first
-         use. A worktree is never "unadoptable" merely because a prior session
-         in a different environment created it without our tooling's help.
-      2. **tracked-path match** -- match CWD against each record's recorded
-         ``worktree_path`` (:func:`tracking.find_worktree_id_by_cwd`,
-         deepest-match wins).
-      3. **legacy ``worktree_root`` prefix scan** -- the pre-fix single-root
-         assumption, kept only for safety.
-    """
-    cwd = Path.cwd().resolve()
-    tdir = cfg.tracking_dir()
-
-    # 1. Ask git. A linked worktree's git-dir names the worktree directly.
-    git_id = _worktree_id_from_git(cwd)
-    if git_id:
-        if (tdir / f"{git_id}.yaml").exists():
-            return git_id
-        # Tracking YAML missing: this may be a linked worktree that was never
-        # created through `agent-worktrees create` -- e.g. a GitHub-App/coding
-        # -agent session, or any external host that ran `git worktree add`
-        # directly. Auto-adopt it now (best-effort) so every caller of this
-        # shared inference (create-pr, pr-status, finalize, push-changes, ...)
-        # can bind ownership on first use, rather than depending on the
-        # sessionStart hook having already run in that environment -- which it
-        # never will when agent-worktrees isn't even installed there. Falls
-        # through to the pre-existing path-match-or-git_id behavior when
-        # adoption isn't possible (no active project, foreign anchor, etc.).
-        adopted_id = _adopt_linked_worktree(cwd)
-        if adopted_id:
-            return adopted_id
-        # Tracking YAML briefly missing: prefer a path match if one exists,
-        # else trust git's authoritative identity.
-        return tracking.find_worktree_id_by_cwd(str(cwd)) or git_id
-
-    # 2. Match CWD against recorded worktree paths (root-independent).
-    path_id = tracking.find_worktree_id_by_cwd(str(cwd))
-    if path_id:
-        return path_id
-
-    # 3. Legacy single-root scan (last resort; the #59 failure mode).
-    return _infer_worktree_id_from_worktree_root(config, cwd)
-
-
-def _resolve_worktree_id(raw_id: str) -> str:
-    """Canonicalize a worktree ID, resolving short suffixes.
-
-    If ``raw_id`` matches a tracking file directly, return as-is.
-    Otherwise, search for tracking files whose stem ends with the
-    given suffix.  Raises ``SystemExit`` on ambiguous or invalid IDs.
-    """
-    import re
-
-    # Reject IDs with path-traversal or glob metacharacters
-    if re.search(r"[/\\]|\.\.", raw_id):
-        output.err(f"Invalid worktree ID: {raw_id}")
-        raise SystemExit(1)
-
-    tdir = cfg.tracking_dir()
-
-    # Exact match -- fast path
-    if (tdir / f"{raw_id}.yaml").exists():
-        return raw_id
-
-    # Suffix match: iterate tracking files whose stems end with raw_id
-    matches = [p.stem for p in tdir.glob("*.yaml") if p.stem.endswith(raw_id)]
-
-    if len(matches) == 1:
-        return matches[0]
-
-    if len(matches) > 1:
-        short_list = ", ".join(sorted(m[-12:] for m in matches))
-        output.err(f"Ambiguous short ID '{raw_id}' matches {len(matches)} worktrees: {short_list}")
-        raise SystemExit(1)
-
-    # No tracking match -- return as-is (caller will fail on missing YAML)
-    return raw_id
-
+# Worktree-identity resolution (git-dir-based ID inference, short-suffix
+# resolution, external-worktree adoption) moved to worktree_identity.py --
+# no dependency on this entry-point module, so sibling CLI modules (pr_cli.py
+# etc.) can import it directly instead of reverse-importing __main__.
+from .worktree_identity import (  # noqa: E402 -- re-export position matches original definition site
+    _adopt_linked_worktree,
+    _infer_worktree_id_from_cwd,
+    _infer_worktree_id_from_worktree_root,  # noqa: F401 -- re-exported for unit tests
+    _resolve_worktree_id,
+    _worktree_id_from_git,
+    _worktree_path_for_id,
+)
 
 # ═══════════════════════════════════════════════════════════════════════════
 # post-exit -- finalization after Copilot exits
@@ -6673,6 +6642,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             draft=getattr(args, "draft", False),
             attribution=(False if getattr(args, "no_attribution", False) else None),
             dry_run=args.dry_run,
+            confirm_fork=getattr(args, "confirm_fork", False),
         )
 
         _reminder = _pr_reminder_for(
@@ -6735,6 +6705,12 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                     f"then record it with:\n"
                     f"  agent-worktrees set-pr {worktree_id} --url <URL> --number <N>"
                 )
+        elif result.get("needs_confirmation"):
+            # Not an error -- the repo's resolved flow needs a personal fork,
+            # and create-pr never forks/pushes anywhere without --confirm-fork.
+            # Relay this to the human verbatim; re-run with --confirm-fork once
+            # they say yes.
+            output.warn(result.get("message", "Confirmation needed before continuing."))
         else:
             output.err(result.get("error", "create-pr failed."))
 
@@ -7168,9 +7144,7 @@ def _cmd_status_write(
     with tracking._RecordLock(yaml_path):
         record = tracking.load_record(yaml_path)
         if record.kind in tracking.MANAGED_KINDS and record.status in {
-            "complete",
-            "completed",
-            "finalized",
+            "complete", "completed", "finalized",
         }:
             output.err(
                 f"Worktree {worktree_id} is terminal and managed; refusing disposition changes."
@@ -7184,15 +7158,27 @@ def _cmd_status_write(
             return 1
         if follow_up is True and record.status == "finalized":
             tracking.update_status(record, "active", save=False)
+        session_id = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
         tracking.set_disposition(
             record,
             summary=summary,
             title=title,
             follow_up=follow_up,
-            session_id=(os.environ.get("COPILOT_AGENT_SESSION_ID") or None),
+            session_id=session_id,
             save=False,
         )
         tracking.save_record(record)
+        # Stage 5 (status_reported): once per session_id (held under the
+        # same RecordLock as the write above so two concurrent writers can't
+        # both observe "no prior event" and double-emit). No `limit` here --
+        # the log is already retention-pruned, and a `limit` would silently
+        # drop an older matching event once a worktree accumulates enough
+        # newer ones, defeating the once-per-session guarantee.
+        if session_id and not any(
+            e.get("session_id") == session_id
+            for e in activity.read_events(worktree_id=worktree_id, event="status_reported")
+        ):
+            activity.log_event("status_reported", worktree_id=worktree_id, session_id=session_id)
     flag = "follow-ups pending" if record.follow_up else "resolved"
     msg = f"[OK] Worktree {worktree_id[-4:]} disposition: {flag}"
     if title is not None and record.title:
@@ -7300,10 +7286,7 @@ def _session_role(record, session_id):
     else:
         role = "head-elect"
     return {
-        "role": role,
-        "head_session": head,
-        "head_state": head_state,
-        "is_head": is_head,
+        "role": role, "head_session": head, "head_state": head_state, "is_head": is_head,
         "registered": registered,
         "pending_handoff_predecessor": (pending.session_id if pending else None),
     }
@@ -7464,14 +7447,49 @@ def _effort_focus_output(
     record: tracking.WorktreeRecord,
     inspection: effort_focus.EffortInspection | None,
 ) -> dict[str, object]:
+    active = inspection is not None and inspection.active
     return {
         "worktree_id": record.worktree_id,
         "active_effort": inspection.to_dict() if inspection is not None else None,
         "follow_up": record.follow_up or bool(inspection and inspection.active),
-        "summary": (
-            inspection.summary if inspection is not None and inspection.active else record.summary
-        ),
+        "summary": inspection.summary if active else record.summary,
     }
+
+
+def _effort_storage_root(config: cfg.Config, worktree_root: Path) -> Path:
+    """Resolve the root an effort README path should be read against.
+
+    For an ordinary (self-hosted) repo, that is the worktree's own verified
+    Git root. For a stateless harness (``stateless: true`` /
+    ``requires_external_state_root: true``) the effort README instead lives in
+    the paired knowledge worktree/anchor -- exactly what
+    ``agent-worktrees state-root --pair`` already resolves -- so
+    ``effort-focus bind``/``show`` must resolve against that sibling instead of
+    the harness worktree's own checkout (#300). Falls back to
+    ``worktree_root`` unchanged when the repo isn't stateless, or when no
+    sibling can be resolved (surfaced as the usual "effort path does not
+    exist" once the (now-correct-for-this-repo) root is probed).
+    """
+    try:
+        repo_cfg = getattr(config, "default_repo", None)
+    except Exception:
+        repo_cfg = None
+    requires_external = bool(
+        getattr(repo_cfg, "stateless", False)
+        or getattr(repo_cfg, "requires_external_state_root", False)
+    )
+    if not requires_external:
+        return worktree_root
+    try:
+        pair = state_root_mod.resolve_pair(config, cwd=str(worktree_root))
+    except Exception:
+        return worktree_root
+    if pair.paired and pair.sibling and not pair.error:
+        try:
+            return Path(pair.sibling.path).resolve(strict=True)
+        except OSError:
+            pass
+    return worktree_root
 
 
 def cmd_effort_focus(args: argparse.Namespace) -> int:
@@ -7500,6 +7518,7 @@ def cmd_effort_focus(args: argparse.Namespace) -> int:
     if action in {"bind", "show"} or (action == "release" and args.completed):
         try:
             repo_root = effort_focus.repository_root(record.worktree_path)
+            repo_root = _effort_storage_root(config, repo_root)
         except effort_focus.EffortFocusError as exc:
             repo_error = str(exc)
             if action != "show":
@@ -7838,6 +7857,30 @@ _SEGMENT_STYLE: dict[git_ops.WorktreeState, tuple[str, str]] = {
     git_ops.WorktreeState.UNKNOWN: ("colour238", "?"),  # dark grey
 }
 
+# worktree-finality-and-obligations (Phase 5): background color per
+# `prune.ClosureDescriptor.style` -- the canonical style token every
+# descriptor-driven surface (list JSON, mux, Picker) shares. Reuses
+# `_SEGMENT_STYLE`'s existing palette for the base states it mirrors 1:1
+# (dirty/wip/unused/convo/orphan/gone/unknown/active), and adds two tokens
+# `_SEGMENT_STYLE` never needed because it never distinguished them:
+# `final` (a *refreshed*, claim-free, follow-up-free COMPLETED -- the exact
+# green FINAL block) vs `merged-blocked` (COMPLETED but not yet safe to prune
+# -- held claims, open follow-ups, cached/fetch-free evidence, or any other
+# live blocker -- rendered amber/orange, distinct from WIP's amber so "work
+# landed but not closed out" never reads as "still being written").
+_DESCRIPTOR_STYLE_BG: dict[str, str] = {
+    "final": "colour034",  # green -- same as legacy FINAL
+    "merged-blocked": "colour208",  # orange -- landed but blocked
+    "active": "colour039",
+    "dirty": "colour160",
+    "wip": "colour178",
+    "unused": "colour244",
+    "convo": "colour037",
+    "orphan": "colour129",
+    "gone": "colour238",
+    "unknown": "colour238",
+}
+
 _SEGMENT_TITLE_MAX = 48
 
 
@@ -8034,20 +8077,33 @@ def _render_status_segment(
     Classifies the worktree's git disposition relative to its upstream
     default branch -- independent of any live session -- and prints::
 
-        <title> #[bg=<color>] <STATE><sync> #[default]
+        <title> #[bg=<color>] <STATE><markers><sync> #[default]
 
     States: ``DIRTY`` (uncommitted changes or commits ahead of upstream),
-    ``FINAL`` (clean, work landed / fast-forwardable to upstream),
-    ``UNUSED`` (clean, no work and no conversation since the fork point),
-    ``CONVO`` (clean, no commits but the session held conversation turns --
-    annotated with the turn count), ``WIP`` (clean, commits ahead whose
-    content is not yet upstream), ``ORPHAN`` (no merge base with upstream).
-    ``<sync>`` is the picker's ``↑ahead``/``↓behind`` tag.
+    ``FINAL`` (COMPLETED, and -- when a tracking record exists --
+    genuinely claim-free/follow-up-free evidence refreshed via a successful
+    ``--fetch``), ``MERGED`` (COMPLETED but not (yet) provably FINAL: no
+    tracking record, a fetch-free/cached poll, a requested ``--fetch`` that
+    itself failed, held claims, or open follow-ups -- see
+    ``prune.assemble_closure_descriptor``), ``UNUSED`` (clean, no work and
+    no conversation since the fork point), ``CONVO`` (clean, no commits but
+    the session held conversation turns -- annotated with the turn count),
+    ``WIP`` (clean, commits ahead whose content is not yet upstream),
+    ``ORPHAN`` (no merge base with upstream). ``<markers>`` is the
+    descriptor's compact `` C<N>``/`` F<N>`` suffix -- held-claim / open-
+    follow-up counts, present on ANY state (not just MERGED) when a
+    tracking record has them. ``<sync>`` is the picker's ``↑ahead``/
+    ``↓behind`` tag.
 
     Fetch-free by default so it is cheap enough to poll on a short
     ``status-interval``; pass ``--fetch`` to refresh behind-counts from the
-    remote.  Prints nothing (exit 0) outside a git worktree so a
-    misconfigured status line never spams errors into the bar.
+    remote AND to make a genuine ``FINAL`` reachable at all (a fetch-free
+    poll can only ever report ``MERGED`` for a completed worktree, per
+    design.md's cached-evidence-never-authorizes-FINAL rule -- and a
+    requested ``--fetch`` that itself fails degrades the same way, never
+    silently upgrading stale local refs to FINAL). Prints nothing (exit 0)
+    outside a git worktree so a misconfigured status line never spams
+    errors into the bar.
     """
     target = str(Path(path).resolve()) if path else os.getcwd()
 
@@ -8099,19 +8155,74 @@ def _render_status_segment(
             ctx, turns = None, 0
 
     sync = _sync_status_tag(info)
-    state = git_ops.refine_state_with_session(info.state, turns)
+    refined_state = git_ops.refine_state_with_session(info.state, turns)
+    refined_info = (
+        dataclasses.replace(info, state=refined_state)
+        if refined_state != info.state else info
+    )
 
-    if state == git_ops.WorktreeState.CONVO:
-        bg, label = _SEGMENT_STYLE[state]
-        tag = f" {turns}\U0001f4ac"  # turn count + speech-balloon glyph
+    if rec is not None:
+        # worktree-finality-and-obligations (Phase 5): the mux/PSMux status
+        # bar now consumes the same canonical closure descriptor list JSON
+        # already publishes (Phase 4), instead of re-deriving its own
+        # label/color from the raw git state -- so a worktree with a held
+        # claim or an open follow-up renders that fact here too (`C<N>`/
+        # `F<N>` markers), and a COMPLETED worktree is `FINAL` only when
+        # genuinely claim-free/follow-up-free evidence says so, `MERGED`
+        # otherwise. Fetch-free polling (the default) never reports FINAL --
+        # matches design.md's "cached evidence never authorizes FINAL/safe".
+        # "refreshed" requires the fetch to have both been REQUESTED and
+        # actually attempted (`info.fetch_requested`) and succeeded (not
+        # `info.fetch_failed`) -- a requested fetch that failed (network
+        # down, remote unreachable) or a classification that short-circuited
+        # before ever reaching the fetch step must not be treated as
+        # authoritative current-state evidence either.
+        held_claims = sum(1 for c in rec.resources if c.is_live)
+        open_follow_ups = tracking.effective_open_follow_up_count(rec)
+        disposition = prune.cleanup_disposition(
+            rec, refined_info, turn_count=turns,
+            claimant_alive=_local_claimant_alive,
+            paired_sibling_final=prune.default_paired_sibling_final,
+        )
+        _fetch_fresh = info.fetch_requested and not info.fetch_failed
+        if _fetch_fresh:
+            # Phase 9: share this fetch's freshness with every other
+            # worktree of this repo via the repo-scoped ledger.
+            tracking.record_repo_fetch_confirmed(rec.repo)
+        descriptor = prune.assemble_closure_descriptor(
+            rec, refined_info, disposition,
+            held_claims=held_claims, open_follow_ups=open_follow_ups,
+            evidence_mode="refreshed" if _fetch_fresh else "cached",
+            turn_count=turns,
+            repo_fetch_fresh=tracking.is_repo_fetch_fresh(rec.repo),
+        )
+        bg = _DESCRIPTOR_STYLE_BG.get(descriptor.style, "colour238")
+        block_label = descriptor.compact
+        tag = f" {turns}\U0001f4ac" if refined_state == git_ops.WorktreeState.CONVO else sync
     else:
-        bg, label = _SEGMENT_STYLE.get(state, ("colour238", state.value.upper()))
-        tag = sync
+        # No tracking record -- held claims/follow-ups/disposition are
+        # unknowable, so this falls back to the legacy raw-state label. A
+        # COMPLETED worktree renders MERGED here, never FINAL: FINAL is a
+        # claim-free/follow-up-free *proof*, and without a record there is no
+        # evidence to prove it with (#discussion_r4008048471's sibling finding
+        # -- an untracked completed worktree must not read as more settled
+        # than a tracked one ever could without --fetch).
+        if refined_state == git_ops.WorktreeState.CONVO:
+            bg, block_label = _SEGMENT_STYLE[refined_state]
+            tag = f" {turns}\U0001f4ac"
+        elif refined_state == git_ops.WorktreeState.COMPLETED:
+            bg, block_label = _DESCRIPTOR_STYLE_BG["merged-blocked"], "MERGED"
+            tag = sync
+        else:
+            bg, block_label = _SEGMENT_STYLE.get(
+                refined_state, ("colour238", refined_state.value.upper())
+            )
+            tag = sync
 
     if plain:
-        block = f"[{label}{tag}]"
+        block = f"[{block_label}{tag}]"
     else:
-        block = f"#[bg={bg},fg=colour015,bold] {label}{tag} #[default]"
+        block = f"#[bg={bg},fg=colour015,bold] {block_label}{tag} #[default]"
 
     parts: list[str] = []
     if not no_title:
@@ -8124,8 +8235,117 @@ def _render_status_segment(
     return " ".join(parts)
 
 
+def _status_segment_json(path: str | None = None, fetch: bool = False) -> dict | None:
+    """Cheap, single-worktree JSON snapshot of the status-segment's own facts.
+
+    Mirrors :func:`_render_status_segment`'s classify pass -- the same
+    non-daemon, fetch-free-by-default :func:`git_ops.classify_worktree` call
+    -- but returns structured data instead of a rendered bar string. Built
+    for a caller (the Mux Companion) that wants the current worktree's id,
+    state, sync counts, and closure descriptor WITHOUT paying the resident
+    classify daemon's whole-fleet negotiation cost that ``list --json
+    --classify --worktree-id`` incurs even when scoped to one id (the daemon
+    protocol has no per-id request shape, only project-wide filters, so a
+    single-id caller still waits on/falls through a full-fleet round trip).
+
+    Kept as a deliberate sibling of ``_render_status_segment`` rather than a
+    shared refactor of it -- that function renders the live,
+    every-``status-interval`` mux bar, so duplicating its (already carefully
+    reviewed) classify prefix here is safer than reshaping it. Returns
+    ``None`` outside a git worktree, exactly like the rendered segment
+    returns an empty string.
+    """
+    target = str(Path(path).resolve()) if path else os.getcwd()
+
+    remote, config_default = "origin", None
+    try:
+        repo_cfg = cfg.load_config(include_control_plane_related_pr=False).default_repo
+        remote, config_default = repo_cfg.remote, repo_cfg.default_branch
+    except Exception:
+        pass
+    default_branch = (
+        _detect_upstream_branch(target, remote, config_default) or config_default or "master"
+    )
+
+    rec = _find_record_for_path(target)
+    branch = rec.branch if rec else (git_ops._get_current_branch_safe(target) or "HEAD")
+
+    try:
+        info = git_ops.classify_worktree(
+            target,
+            branch,
+            fetch=bool(fetch),
+            remote=remote,
+            default_branch=default_branch,
+            active_paths=None,
+        )
+    except Exception:
+        return None
+
+    if info.state == git_ops.WorktreeState.GONE:
+        return None
+
+    if rec is not None:
+        info = _apply_tracking_override(rec, info)
+
+    turns = 0
+    if rec is not None:
+        try:
+            ctx = sessions.scan_sessions_fast([rec])
+            turns = ctx.turn_count.get(_normalize_path(target), 0)
+        except Exception:
+            turns = 0
+
+    refined_state = git_ops.refine_state_with_session(info.state, turns)
+    refined_info = (
+        dataclasses.replace(info, state=refined_state)
+        if refined_state != info.state else info
+    )
+
+    closure = None
+    if rec is not None:
+        held_claims = sum(1 for c in rec.resources if c.is_live)
+        open_follow_ups = tracking.effective_open_follow_up_count(rec)
+        disposition = prune.cleanup_disposition(
+            rec, refined_info, turn_count=turns,
+            claimant_alive=_local_claimant_alive,
+            paired_sibling_final=prune.default_paired_sibling_final,
+        )
+        _fetch_fresh = info.fetch_requested and not info.fetch_failed
+        if _fetch_fresh:
+            # Phase 9: share this fetch's freshness with every other
+            # worktree of this repo via the repo-scoped ledger.
+            tracking.record_repo_fetch_confirmed(rec.repo)
+        descriptor = prune.assemble_closure_descriptor(
+            rec, refined_info, disposition,
+            held_claims=held_claims, open_follow_ups=open_follow_ups,
+            evidence_mode="refreshed" if _fetch_fresh else "cached",
+            turn_count=turns,
+            repo_fetch_fresh=tracking.is_repo_fetch_fresh(rec.repo),
+        )
+        closure = descriptor.to_dict()
+
+    return {
+        "id": rec.worktree_id if rec is not None else None,
+        "path": target,
+        "repo": rec.repo if rec is not None else None,
+        "branch": branch,
+        "state": refined_state.value,
+        "ahead": refined_info.ahead,
+        "behind": refined_info.behind,
+        "dirty": refined_info.dirty,
+        "turn_count": turns,
+        "status": rec.status if rec is not None else None,
+        "closure": closure,
+    }
+
+
 def cmd_status_segment(args: argparse.Namespace) -> int:
     """Print the worktree status-bar segment (thin wrapper over the renderer)."""
+    if getattr(args, "json", False):
+        data = _status_segment_json(args.path, fetch=bool(args.fetch))
+        _json_output(data if data is not None else {"error": "not a tracked git worktree"})
+        return 0
     line = _render_status_segment(
         args.path,
         fetch=bool(args.fetch),
@@ -8157,6 +8377,39 @@ _ENV_BG: dict[str, str] = {
 }
 
 
+def _resolve_machine_alias(machine: str, repo: str | None) -> str:
+    """Normalize a raw/tracked machine value through machines.yaml's alias
+    resolution, mirroring ``cmd_machine_context``'s own resolution.
+
+    A worktree's tracking record freezes ``machine`` at registration time (an
+    older raw hostname/COMPUTERNAME), and ``cfg.detect_machine()`` returns the
+    raw hostname when called with no ``repo_dir``. Neither path re-resolves
+    through ``machines.yaml``'s ``hostname:``/``alias:`` mapping the way
+    ``machine-context`` does, so a box whose COMPUTERNAME differs from its
+    canonical mesh key/alias (dotfiles machines.yaml's decoupled-hostname
+    convention) never gets its friendly name rendered here even though live
+    detection resolves it correctly elsewhere. Fails open to the raw value on
+    any error -- this must never break the status segment.
+    """
+    if not machine:
+        return machine
+    try:
+        from . import repos as repos_mod
+
+        repo_dir = repos_mod.resolve_path(repo) if repo else None
+        if not repo_dir:
+            repo_dir = _find_repo_dir()
+        if not repo_dir:
+            return machine
+        entries = cfg.load_machines_yaml(repo_dir)
+        entry = cfg.find_machine_entry(entries, machine)
+        if entry is None:
+            return machine
+        return cfg.machine_name(entry)
+    except Exception:
+        return machine
+
+
 def _render_status_context(path: str | None = None, plain: bool = False) -> str:
     """Render the left status-bar segment: machine, environment, repo:id.
 
@@ -8173,12 +8426,17 @@ def _render_status_context(path: str | None = None, plain: bool = False) -> str:
     worktree id) rendered as a colored badge keyed on OS type, and
     ``<id4>`` is the worktree id's 4-char suffix (its "last 4 digits").
     Values come from the worktree's tracking record when the path is
-    inside a tracked worktree, falling back to live host detection.
+    inside a tracked worktree, falling back to live host detection. Either
+    source is normalized through machines.yaml's alias resolution (see
+    ``_resolve_machine_alias``) so a decoupled hostname/alias mapping (a
+    shared-pool box whose COMPUTERNAME differs from its mesh key) renders
+    its friendly name here too, matching ``machine-context``.
     """
     target = str(Path(path).resolve()) if path else os.getcwd()
     rec = _find_record_for_path(target)
 
     machine = (rec.machine if rec and rec.machine else "") or cfg.detect_machine()
+    machine = _resolve_machine_alias(machine, rec.repo if rec else None)
     platform = (rec.platform if rec and rec.platform else "") or cfg.detect_platform()
     env = _platform_short(platform)
 
@@ -8372,8 +8630,7 @@ _BACKGROUND_AUTH_ENV_KEYS = {
 def _background_environment() -> dict[str, str]:
     """Environment for resident helpers, excluding session credentials."""
     return {
-        key: value
-        for key, value in os.environ.items()
+        key: value for key, value in os.environ.items()
         if key.upper() not in _BACKGROUND_AUTH_ENV_KEYS
     }
 
@@ -8661,6 +8918,10 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
 # lock; a superseded runtime self-retires (mirrors the updater's #911 behaviour).
 
 _STATUS_MONITOR_ENV = "AGENT_WORKTREES_STATUS_MONITOR"
+_STATUS_MONITOR_HANDOFF_CLAIM_STALE_SECONDS_ENV = (
+    "AGENT_WORKTREES_STATUS_MONITOR_HANDOFF_CLAIM_STALE_SECONDS"
+)
+_STATUS_MONITOR_HANDOFF_CLAIM_STALE_SECONDS_DEFAULT = 180.0
 
 
 def _status_monitor_enabled() -> bool:
@@ -8696,6 +8957,18 @@ def _monitor_handoff_claim_root() -> Path:
     return _aw_runtime_home() / "status-monitor-handoffs.d"
 
 
+def _monitor_handoff_claim_stale_seconds() -> float:
+    raw = os.environ.get(_STATUS_MONITOR_HANDOFF_CLAIM_STALE_SECONDS_ENV, "").strip()
+    if raw:
+        try:
+            value = float(raw)
+            if value > 0:
+                return value
+        except ValueError:
+            pass
+    return _STATUS_MONITOR_HANDOFF_CLAIM_STALE_SECONDS_DEFAULT
+
+
 def _monitor_handoff_claim_segment(value: str | None, fallback: str) -> str:
     safe = re.sub(r"[^A-Za-z0-9._-]", "_", str(value or "")).strip("._-")
     return safe[:160] or fallback
@@ -8709,6 +8982,125 @@ def _monitor_handoff_claim_path(worktree_id: str | None, token: str | None) -> P
     )
 
 
+def _monitor_handoff_claim_created_at(
+    path: Path,
+    claim: dict[str, object] | None,
+) -> datetime | None:
+    value = claim.get("created_at") if isinstance(claim, dict) else None
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            parsed = None
+        if parsed is not None:
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    except OSError:
+        return None
+
+
+def _monitor_handoff_claim_staleness(
+    path: Path,
+    claim: dict[str, object] | None = None,
+) -> dict[str, object]:
+    claim = claim if isinstance(claim, dict) else locks.read_lock(path)
+    created_at = _monitor_handoff_claim_created_at(path, claim)
+    age_seconds = (
+        max(
+            0.0,
+            (datetime.now(timezone.utc) - created_at).total_seconds(),
+        )
+        if created_at is not None
+        else None
+    )
+    if isinstance(claim, dict):
+        pid = claim.get("pid")
+        if isinstance(pid, int) and pid > 0:
+            if not locks.pid_alive(pid):
+                return {
+                    "stale": True,
+                    "reason": "pid-gone",
+                    "age_seconds": age_seconds,
+                    "claim": claim,
+                }
+            recorded = claim.get("start_time")
+            if recorded:
+                current = locks.process_start_time(pid)
+                if current is not None and str(current) != str(recorded):
+                    return {
+                        "stale": True,
+                        "reason": "pid-reused",
+                        "age_seconds": age_seconds,
+                        "claim": claim,
+                    }
+    if age_seconds is not None and age_seconds >= _monitor_handoff_claim_stale_seconds():
+        return {
+            "stale": True,
+            "reason": "age-expired",
+            "age_seconds": age_seconds,
+            "claim": claim,
+        }
+    return {
+        "stale": False,
+        "reason": None,
+        "age_seconds": age_seconds,
+        "claim": claim,
+    }
+
+
+def _monitor_publish_handoff_cutover_claim(
+    path: Path,
+    payload: dict[str, object],
+) -> tuple[bool, str | None]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(
+        dir=str(path.parent),
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            json.dump(payload, handle, ensure_ascii=True)
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            os.link(tmp, path)
+        except FileExistsError:
+            return False, None
+        return True, None
+    except OSError as exc:
+        return False, str(exc)
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
+def _monitor_reclaim_stale_handoff_cutover_claim(
+    path: Path,
+    payload: dict[str, object],
+) -> tuple[bool, bool, str | None]:
+    displaced = path.with_name(
+        f".{path.name}.{os.getpid()}.{secrets.token_hex(8)}.stale"
+    )
+    try:
+        os.replace(path, displaced)
+    except FileNotFoundError:
+        return True, False, None
+    except OSError as exc:
+        return False, False, str(exc)
+    try:
+        claimed, error = _monitor_publish_handoff_cutover_claim(path, payload)
+        return error is None, claimed, error
+    finally:
+        with contextlib.suppress(OSError):
+            displaced.unlink()
+
+
 def _monitor_claim_handoff_cutover(
     request: dict[str, object],
 ) -> dict[str, object]:
@@ -8716,20 +9108,103 @@ def _monitor_claim_handoff_cutover(
     token = str(request.get("token") or "").strip()
     worktree_id = str(request.get("worktree_id") or "").strip()
     path = _monitor_handoff_claim_path(worktree_id, token)
+    owner_pid = os.getpid()
     payload = {
         "schema": 1,
         "kind": "handoff-cutover-claim",
         "token": token,
         "worktree_id": worktree_id or None,
         "session_id": str(request.get("predecessor_session_id") or "").strip() or None,
-        "pid": os.getpid(),
+        "pid": owner_pid,
+        "start_time": locks.process_start_time(owner_pid),
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "x", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=True)
-    except FileExistsError:
+
+    def _acquired_response() -> dict[str, object]:
+        log_data = {
+            "worktree_id": worktree_id or None,
+            "session_id": payload["session_id"],
+            "source": "python",
+            "handoff_token": token or None,
+            "reason": "monitor-cutover",
+            "outcome": "acquired",
+        }
+        if reclaim_reason is not None:
+            log_data["claim_reclaimed"] = True
+            log_data["stale_reason"] = reclaim_reason
+            log_data["stale_age_seconds"] = (
+                round(reclaim_age_seconds, 3)
+                if reclaim_age_seconds is not None
+                else None
+            )
+            if isinstance(prior_claim, dict):
+                prior_pid = prior_claim.get("pid")
+                if isinstance(prior_pid, int) and prior_pid > 0:
+                    log_data["prior_pid"] = prior_pid
+                prior_session = str(prior_claim.get("session_id") or "").strip()
+                if prior_session:
+                    log_data["prior_session_id"] = prior_session
+        activity.log_event("handoff_cutover_claim", **log_data)
+        return {"ok": True, "claimed": True, "path": str(path)}
+
+    reclaim_reason = None
+    reclaim_age_seconds = None
+    prior_claim: dict[str, object] | None = None
+    for _attempt in range(3):
+        claimed, error = _monitor_publish_handoff_cutover_claim(path, payload)
+        if error is not None:
+            activity.log_event(
+                "handoff_cutover_claim",
+                worktree_id=worktree_id or None,
+                session_id=payload["session_id"],
+                source="python",
+                handoff_token=token or None,
+                reason="monitor-cutover",
+                outcome="error",
+                error=error,
+            )
+            return {
+                "ok": False, "claimed": False, "path": str(path), "error": error,
+            }
+        if claimed:
+            return _acquired_response()
+        if not path.exists():
+            continue
+        staleness = _monitor_handoff_claim_staleness(path)
+        if not staleness.get("stale"):
+            break
+        prior_claim = staleness.get("claim") if isinstance(staleness.get("claim"), dict) else None
+        reclaim_reason = str(staleness.get("reason") or "").strip() or "unknown"
+        reclaim_age_raw = staleness.get("age_seconds")
+        reclaim_age_seconds = (
+            float(reclaim_age_raw) if isinstance(reclaim_age_raw, (int, float)) else None
+        )
+        ok, reclaimed, reclaim_error = _monitor_reclaim_stale_handoff_cutover_claim(path, payload)
+        if reclaim_error is not None:
+            activity.log_event(
+                "handoff_cutover_claim",
+                worktree_id=worktree_id or None,
+                session_id=payload["session_id"],
+                source="python",
+                handoff_token=token or None,
+                reason="monitor-cutover",
+                outcome="error",
+                error=reclaim_error,
+            )
+            return {
+                "ok": False,
+                "claimed": False,
+                "path": str(path),
+                "error": reclaim_error,
+            }
+        if ok and reclaimed:
+            return _acquired_response()
+        reclaim_reason = None
+        reclaim_age_seconds = None
+        prior_claim = None
+        break
+
+    if path.exists():
         activity.log_event(
             "handoff_cutover_claim",
             worktree_id=worktree_id or None,
@@ -8740,7 +9215,8 @@ def _monitor_claim_handoff_cutover(
             outcome="already-claimed",
         )
         return {"ok": True, "claimed": False, "path": str(path)}
-    except OSError as exc:
+    claimed, error = _monitor_publish_handoff_cutover_claim(path, payload)
+    if error is not None:
         activity.log_event(
             "handoff_cutover_claim",
             worktree_id=worktree_id or None,
@@ -8749,14 +9225,11 @@ def _monitor_claim_handoff_cutover(
             handoff_token=token or None,
             reason="monitor-cutover",
             outcome="error",
-            error=str(exc),
+            error=error,
         )
-        return {
-            "ok": False,
-            "claimed": False,
-            "path": str(path),
-            "error": str(exc),
-        }
+        return {"ok": False, "claimed": False, "path": str(path), "error": error}
+    if claimed:
+        return _acquired_response()
     activity.log_event(
         "handoff_cutover_claim",
         worktree_id=worktree_id or None,
@@ -8764,9 +9237,9 @@ def _monitor_claim_handoff_cutover(
         source="python",
         handoff_token=token or None,
         reason="monitor-cutover",
-        outcome="acquired",
+        outcome="already-claimed",
     )
-    return {"ok": True, "claimed": True, "path": str(path)}
+    return {"ok": True, "claimed": False, "path": str(path)}
 
 
 def _valid_monitor_session(sess: str) -> bool:
@@ -8987,6 +9460,7 @@ def cmd_status_monitor_restart(args: argparse.Namespace) -> int:
 def cmd_reconcile_sessions(args: argparse.Namespace) -> int:
     """Run one bounded record/session/projection reconciliation pass."""
     import shutil
+
     from . import session_catalog
 
     reconciler = session_catalog.ResidentSessionReconciler(
@@ -9168,34 +9642,161 @@ def _monitor_pending_handoff_request(
     return None
 
 
-def _monitor_pending_handoff_predecessor_retire(
+#: Retire-attempt outcomes that can never self-resolve merely by waiting --
+#: the predecessor's own process either is confirmed gone or a different,
+#: unrelated live session/pane now holds the identity a fresh check would
+#: match against. Distinct from an outcome not in this set (e.g. a race
+#: right after spawn, or "left-running" from a bad process-identity check
+#: input) which may legitimately succeed on a later sweep. See
+#: `_pending_handoff_retire_requests`'s abandonment logic below.
+_RETIRE_TERMINAL_FAILURE_METHODS = frozenset({
+    "process-identity-unavailable",
+    "identity-mismatch-skip",
+    "identity-unresolved-skip",
+    "last-window-skip",
+})
+#: Minimum span (seconds) between a token's oldest and current terminal-
+#: failure-method retry attempt before it is concluded "abandoned" rather
+#: than retried again. Generous -- long enough that a legitimately slow
+#: successor cold-start or a transient lock-file race is never mistaken for
+#: an unrecoverable predecessor.
+_RETIRE_ABANDON_GRACE_S = 600  # 10 minutes
+
+
+def _pending_handoff_retire_requests(
     record: tracking.WorktreeRecord,
-) -> dict[str, object] | None:
-    """Return one consumed/associated handoff whose predecessor still needs retirement."""
-    if not _status_monitor_enabled():
-        return None
+) -> list[dict[str, object]]:
+    """Every consumed/associated handoff whose predecessor still needs
+    retirement, oldest first -- the shared core both
+    :func:`_monitor_pending_handoff_predecessor_retire` (the daemon's
+    one-at-a-time sweep) and ``handoffs-check`` (which retires every stale
+    predecessor on a worktree in one pass, not just the first) build on.
+
+    Considers every non-``cancelled`` handoff on the record (``pending`` --
+    a candidate is associated but not yet linked -- and ``linked``, i.e.
+    fully confirmed), not just ``record.pending_handoffs``. A handoff
+    reaches ``linked`` well before its predecessor is actually retired (that
+    is a separate, later step), so restricting this to the still-``pending``
+    subset made a predecessor whose retire failed hours ago -- the daemon's
+    own sweep had already long since moved past that handoff to newer ones
+    -- permanently invisible to both the automatic sweep and this on-demand
+    check, even though the mux pane was still sitting there alive.
+
+    A token whose retire attempts are ALL unrecoverable-class failures
+    (`_RETIRE_TERMINAL_FAILURE_METHODS`) for at least
+    `_RETIRE_ABANDON_GRACE_S` is concluded ("abandoned") rather than
+    surfaced again -- see the abandonment pass below. Before this fix, no
+    terminal condition existed at all: a predecessor whose own process had
+    already exited (so identity could never be proven again) was retried
+    every sweep forever, confirmed in production as thousands of no-op
+    retries spanning days across several worktrees.
+    """
     worktree_id = getattr(record, "worktree_id", None)
     if not worktree_id:
-        return None
+        return []
+    # The rolling activity.jsonl log is bounded (age + a 64-event read cap);
+    # a worktree with more than 64 later cutovers -- or one revisited well
+    # past the log's retention window -- can silently drop an older
+    # handoff's spawn/retire evidence right out of view. Both
+    # "handoff_cutover_spawn" and "handoff_predecessor_retire" are
+    # stage-mapped (HANDOFF_STAGE_MAP stages 8 and 11), so they also land in
+    # the durable, unrotated per-project trace store (handoff_trace.py,
+    # Phase 3) -- merge it in as the completeness backstop the bounded log
+    # can't be.
+    trace_events: list[dict[str, object]] = []
+    project = cfg.active_project()
+    if project:
+        try:
+            trace_events = handoff_trace.read_trace(project, worktree_id)
+        except Exception:
+            trace_events = []
+    spawn_events = [e for e in trace_events if e.get("event") == "handoff_cutover_spawn"]
+    spawn_events += activity.read_events(
+        worktree_id=worktree_id, event="handoff_cutover_spawn", limit=64,
+    )
     spawned = {
         str(event.get("handoff_token") or "").strip(): event
-        for event in activity.read_events(
-            worktree_id=worktree_id,
-            event="handoff_cutover_spawn",
-            limit=64,
-        )
+        for event in spawn_events
         if str(event.get("handoff_token") or "").strip()
     }
+    retire_events = [e for e in trace_events if e.get("event") == "handoff_predecessor_retire"]
+    retire_events += activity.read_events(
+        worktree_id=worktree_id, event="handoff_predecessor_retire", limit=64,
+    )
     retired = {
         str(event.get("handoff_token") or "").strip()
-        for event in activity.read_events(
-            worktree_id=worktree_id,
-            event="handoff_predecessor_retire",
-            limit=64,
-        )
-        if str(event.get("handoff_token") or "").strip()
+        for event in retire_events
+        # A genuinely successful retirement ("gone") or a confirmed-
+        # unrecoverable one ("abandoned", see below) both count as
+        # "handled" -- matching Stage 13's own success gate (see
+        # _maybe_emit_stage_13). A merely-failed attempt (e.g.
+        # "left-running" on a stale/incorrect identity hint) must stay
+        # retryable, not be permanently abandoned on its own.
+        if event.get("outcome") in ("gone", "abandoned")
+        and str(event.get("handoff_token") or "").strip()
     }
-    for handoff in reversed(record.pending_handoffs):
+    # A predecessor whose retire attempts have ALL failed the same
+    # unrecoverable way for a sustained period is never coming back --
+    # most commonly because the predecessor's own Copilot process already
+    # exited on its own days ago, so mux_binding_for_session can never find
+    # a live lock to prove identity against again. Retrying that forever
+    # (previously: no terminal condition existed at all) wastes every sweep
+    # indefinitely and leaves a stale request permanently contesting a pane
+    # a much later, unrelated session has since legitimately reused --
+    # confirmed in production as thousands of no-op retries across several
+    # worktrees, one running 3+ days straight. `_RETIRE_TERMINAL_FAILURE_
+    # METHODS` are the outcomes that can never self-resolve by "the
+    # predecessor eventually starts responding" (unlike a fresh
+    # process-identity check racing a just-spawned successor); a token
+    # failing only with those, for at least `_RETIRE_ABANDON_GRACE_S`,
+    # is concluded rather than retried again. The conclusion is logged
+    # exactly once (that log event is itself what the `retired` set above
+    # picks up on the next sweep, self-limiting without extra state).
+    by_token: dict[str, list[dict[str, object]]] = {}
+    for event in retire_events:
+        token = str(event.get("handoff_token") or "").strip()
+        if token:
+            by_token.setdefault(token, []).append(event)
+    now_ts = time.time()
+    for token, events in by_token.items():
+        if token in retired:
+            continue
+        if not events or not all(
+            e.get("method") in _RETIRE_TERMINAL_FAILURE_METHODS for e in events
+        ):
+            continue
+        failure_times = []
+        for event in events:
+            try:
+                failure_times.append(
+                    datetime.fromisoformat(
+                        str(event.get("ts")).replace("Z", "+00:00")
+                    ).timestamp()
+                )
+            except (TypeError, ValueError):
+                continue
+        if not failure_times or (now_ts - min(failure_times)) < _RETIRE_ABANDON_GRACE_S:
+            continue
+        last = events[-1]
+        activity.log_event(
+            "handoff_predecessor_retire",
+            worktree_id=worktree_id,
+            session_id=last.get("session_id"),
+            source="python",
+            handoff_token=token,
+            old_pane=last.get("old_pane"),
+            successor_verified=True,
+            reason="monitor-abandoned",
+            method=last.get("method"),
+            outcome="abandoned",
+            copilot_found=0,
+            copilot_reaped=0,
+            copilot_survivors=0,
+        )
+        retired.add(token)
+    requests: list[dict[str, object]] = []
+    candidates = [h for h in record.handoffs if getattr(h, "state", None) != "cancelled"]
+    for handoff in reversed(sorted(candidates, key=lambda h: getattr(h, "ordinal", 0))):
         token = str(getattr(handoff, "token", "") or "").strip()
         if not token or token in retired:
             continue
@@ -9221,8 +9822,28 @@ def _monitor_pending_handoff_predecessor_retire(
         except (TypeError, ValueError):
             predecessor_pid = None
         predecessor_start = str(spawn.get("predecessor_copilot_start_time") or "").strip() or None
+        # The recorded predecessor_copilot_pid/start_time can itself be
+        # permanently wrong for a handoff whose spawn event predates the
+        # process-identity fix (context-handoff previously logged its own
+        # Node extension-host pid, not the actual copilot process) -- no
+        # future fix corrects data already written. A fresh, session-scoped
+        # mux_binding_for_session() lookup is the same stronger identity
+        # proof the spawn-time fix now trusts; prefer it here too so a
+        # historically-poisoned old_pane/pid pairing can still be resolved
+        # and retired instead of permanently failing its identity check.
+        try:
+            live_binding = sessions.mux_binding_for_session(
+                predecessor_session,
+                expected_session_name=sessions.mux_session_name(worktree_id),
+            )
+        except Exception:
+            live_binding = None
+        if live_binding:
+            old_pane = live_binding.get("pane_id") or old_pane
+            predecessor_pid = live_binding.get("copilot_pid")
+            predecessor_start = str(live_binding.get("copilot_start_time") or "").strip() or None
         yield_reason = "linked" if getattr(handoff, "successor", None) else "candidate"
-        return {
+        requests.append({
             "handoff_token": token,
             "worktree_id": worktree_id,
             "predecessor_session_id": predecessor_session,
@@ -9232,8 +9853,28 @@ def _monitor_pending_handoff_predecessor_retire(
             "mux_session": str(spawn.get("expected_mux_session") or "").strip() or None,
             "successor_session_id": successor_session,
             "retire_reason": f"monitor-successor-{yield_reason}",
-        }
-    return None
+        })
+    return requests
+
+
+def _monitor_pending_handoff_predecessor_retire(
+    record: tracking.WorktreeRecord,
+    *,
+    require_monitor_enabled: bool = True,
+) -> dict[str, object] | None:
+    """Return one consumed/associated handoff whose predecessor still needs retirement.
+
+    ``require_monitor_enabled`` gates this to the resident daemon's own
+    automatic sweep (default). An explicit, on-demand caller (``handoffs-check``)
+    passes ``False`` -- a manual diagnostic must work even when the background
+    monitor is disabled (``AGENT_WORKTREES_STATUS_MONITOR=0``); that toggle
+    only opts a machine out of *automatic* sweeps, not out of an agent's
+    ability to explicitly ask "is this worktree's cutover actually finished?".
+    """
+    if require_monitor_enabled and not _status_monitor_enabled():
+        return None
+    requests = _pending_handoff_retire_requests(record)
+    return requests[0] if requests else None
 
 
 def _monitor_retire_handoff_predecessor(
@@ -9259,6 +9900,106 @@ def _monitor_retire_handoff_predecessor(
     )
 
 
+def cmd_handoffs_check(args: argparse.Namespace) -> int:
+    """Diagnose (and optionally finish) a stalled handoff-cutover retirement.
+
+    A confirmed handoff cutover (the successor is recorded) can still leave
+    its predecessor's mux pane alive and un-retired -- the failure mode
+    behind a worktree accumulating stale panes across serial handoffs
+    (efforts/active/handoff-cutover-lifecycle-journal). This is the
+    on-demand counterpart to the resident status-monitor's own automatic
+    sweep: any agent can invoke it directly instead of waiting for (or
+    debugging) the background daemon.
+
+    ``--worktree-id`` checks one worktree; ``--all`` checks every tracked
+    worktree in the current project. Without ``--execute`` this only
+    reports what it finds (read-only). With ``--execute`` it retires each
+    found predecessor now, via the identical choreography
+    (:func:`_monitor_retire_handoff_predecessor`) the daemon uses --
+    including its process-identity guard (never retires a pid-reused
+    impostor process), just run synchronously instead of on the daemon's
+    own schedule.
+    """
+    worktree_id = getattr(args, "worktree_id", None)
+    check_all = bool(getattr(args, "all", False))
+    if not worktree_id and not check_all:
+        return _json_error("handoffs-check requires --worktree-id or --all")
+    if worktree_id and check_all:
+        return _json_error("handoffs-check: pass --worktree-id or --all, not both")
+
+    if check_all:
+        records = tracking.list_records(cfg.tracking_dir())
+    else:
+        resolved = _resolve_worktree_id(worktree_id)
+        record_path = cfg.tracking_dir() / f"{resolved}.yaml"
+        if not record_path.exists():
+            return _json_error(f"Worktree not found: {resolved}")
+        records = [tracking.load_record(record_path)]
+
+    execute = bool(getattr(args, "execute", False))
+    findings: list[dict[str, object]] = []
+    for record in records:
+        # ALL stale predecessors on this worktree, not just the first -- a
+        # worktree can accumulate several in a row (the exact failure mode
+        # this tool exists to clean up), and a single check/--execute pass
+        # must not require re-invoking once per predecessor.
+        for request in _pending_handoff_retire_requests(record):
+            finding: dict[str, object] = {
+                "worktree_id": request.get("worktree_id"),
+                "handoff_token": request.get("handoff_token"),
+                "predecessor_session_id": request.get("predecessor_session_id"),
+                "successor_session_id": request.get("successor_session_id"),
+                "retire_pane": request.get("retire_pane"),
+                "executed": False,
+            }
+            if execute:
+                rc, response = _monitor_retire_handoff_predecessor(request)
+                finding["executed"] = True
+                # `_handoff_cutover_retire_result`'s returned dict has no
+                # "outcome" key (that string is only computed for the
+                # activity-log event, never merged back) -- its actual
+                # success signal is `rc == 0` (== `response["ok"]`, set from
+                # `gone and proc_ok`). Checking a nonexistent "outcome" key
+                # made every real successful retire report retired=False.
+                finding["retired"] = rc == 0 and bool(response.get("ok"))
+                finding["result"] = response
+            findings.append(finding)
+
+    payload = {
+        "checked": len(records),
+        "found": len(findings),
+        "executed": execute,
+        "findings": findings,
+    }
+    if getattr(args, "json", False):
+        _json_output(payload)
+    else:
+        if not findings:
+            output.ok("handoffs-check: no stalled predecessor retirements found.")
+        for finding in findings:
+            if not execute:
+                print(
+                    f"  {finding['worktree_id']}: predecessor "
+                    f"{finding['predecessor_session_id']} still alive "
+                    f"(pane {finding['retire_pane']}) -- token "
+                    f"{finding['handoff_token']}"
+                )
+            elif finding.get("retired"):
+                output.ok(
+                    f"{finding['worktree_id']}: retired predecessor "
+                    f"{finding['predecessor_session_id']} (pane {finding['retire_pane']})"
+                )
+            else:
+                output.err(
+                    f"{finding['worktree_id']}: could not retire predecessor "
+                    f"{finding['predecessor_session_id']}: "
+                    f"{(finding.get('result') or {}).get('method', 'unknown')}"
+                )
+    if execute and any(not f.get("retired") for f in findings):
+        return 1
+    return 0
+
+
 def _monitor_trigger_handoff_cutover(
     request: dict[str, object],
 ) -> tuple[int, dict[str, object]]:
@@ -9269,22 +10010,30 @@ def _monitor_trigger_handoff_cutover(
     old_pane = None
     mux_session = None
     if predecessor_session:
+        worktree_id = str(request.get("worktree_id") or "").strip() or None
+        expected_session_name = sessions.mux_session_name(worktree_id) if worktree_id else None
         try:
-            binding = sessions.mux_binding_for_session(predecessor_session)
+            binding = sessions.mux_binding_for_session(
+                predecessor_session, expected_session_name=expected_session_name,
+            )
         except Exception:
             binding = None
         if binding:
-            binding_start = str(binding.get("copilot_start_time") or "").strip() or None
-            if (
-                predecessor_pid in (None, binding.get("copilot_pid"))
-                and (
-                    predecessor_start is None or binding_start == str(predecessor_start)
-                )
-            ):
-                old_pane = binding.get("pane_id")
-                mux_session = binding.get("session_name")
-                predecessor_pid = binding.get("copilot_pid")
-                predecessor_start = binding_start
+            # Trust a freshly resolved, session-scoped binding unconditionally --
+            # it is keyed off the predecessor's own registered ``inuse.<pid>.lock``
+            # (a strong per-session identity proof), whereas ``predecessor_pid``
+            # here is only ever a caller-supplied *hint* (e.g. context-handoff's
+            # own `handoff_requested` activity field, which historically recorded
+            # its own Node extension-host pid rather than the actual `copilot`
+            # process -- #handoff-cutover-lifecycle-journal). Requiring agreement
+            # with an untrustworthy hint before accepting a good binding is what
+            # let every subsequent handoff on a worktree silently fail to retire
+            # its predecessor (permanently, since a failed attempt was still
+            # recorded as "handled") -- the hint is no longer load-bearing here.
+            old_pane = binding.get("pane_id")
+            mux_session = binding.get("session_name")
+            predecessor_pid = binding.get("copilot_pid")
+            predecessor_start = str(binding.get("copilot_start_time") or "").strip() or None
     rc, response = _handoff_cutover_spawn_result(
         argparse.Namespace(
             seed=request.get("seed"),
@@ -9326,6 +10075,15 @@ def _monitor_maybe_trigger_handoff_cutover(path: str, *, governance=None) -> Non
     record = _find_record_for_path(path)
     if record is None:
         return
+    _monitor_maybe_process_handoff_record(record, governance=governance)
+
+
+def _monitor_maybe_process_handoff_record(
+    record: tracking.WorktreeRecord,
+    *,
+    governance=None,
+) -> None:
+    """Run the monitor's handoff retire/spawn checks for one tracking record."""
     retire_request = _monitor_pending_handoff_predecessor_retire(record)
     if retire_request is not None:
         _status_monitor_recheck(governance, "pre-mutation:handoff-predecessor-retire")
@@ -9413,6 +10171,7 @@ def _monitor_sweep(
     warm_projects: dict[str, str | None] = {
         project: None for project in (picker_projects or set())
     }
+    served_path_keys: set[str] = set()
     for sess, path in served:
         if pane_observer is not None:
             pane_observer(sess, path)
@@ -9430,6 +10189,7 @@ def _monitor_sweep(
                     project = cfg.project_name()
                     if session_projects is not None:
                         session_projects[path_key] = project
+                served_path_keys.add(path_key)
                 warm_projects.setdefault(project, path)
             except Exception:
                 pass
@@ -9476,6 +10236,52 @@ def _monitor_sweep(
         if context_value is not None and _publish("@aw_ctx", context_value):
             ctx_done.add(sess)
         _publish("@aw_seg", segment_value)
+    # A pending-handoff worktree that this tick's served-pane pass never
+    # observed (dormant since the last sweep, or missed by a stale project
+    # scope) can still need its cutover check run -- that is the whole point
+    # of this pass (#handoff-cutover-head-misalignment). But it must never
+    # attempt live cutover choreography (subprocess mux queries, a spawn, a
+    # retire) against a worktree that is not *actually* sitting in a live mux
+    # session right now: mirror the served-pane pass's own ``if mux_bin:``
+    # gate, then positively confirm liveness with ``has_mux_session`` per
+    # worktree rather than only inferring dormancy from "not in the served
+    # set" (served can miss a genuinely live session for reasons unrelated to
+    # whether it is safe to act -- e.g. a stale project scope on this tick).
+    if mux_bin:
+        scan_projects = list(warm_projects)
+        active_project = cfg.active_project()
+        if active_project and active_project not in scan_projects:
+            scan_projects.append(active_project)
+        for project in scan_projects:
+            _wait_for_lifecycle_priority(lifecycle_priority)
+            with project_lock if project_lock is not None else contextlib.nullcontext():
+                try:
+                    cfg.set_active_project(project)
+                    for record in tracking.list_records(cfg.tracking_dir()):
+                        worktree_path = getattr(record, "worktree_path", None)
+                        if worktree_path:
+                            try:
+                                if (
+                                    os.path.normcase(os.path.realpath(worktree_path))
+                                    in served_path_keys
+                                ):
+                                    continue
+                            except (OSError, ValueError):
+                                pass
+                        if not record.pending_handoffs:
+                            retire_request = _monitor_pending_handoff_predecessor_retire(record)
+                            if retire_request is None:
+                                continue
+                        try:
+                            if not sessions.has_mux_session(record.worktree_id):
+                                continue
+                        except Exception:
+                            continue
+                        _monitor_maybe_process_handoff_record(record, governance=governance)
+                except _StatusMonitorGovernanceDeferred:
+                    raise
+                except Exception:
+                    pass
     for project in warm_projects:
         _wait_for_lifecycle_priority(lifecycle_priority)
         with project_lock if project_lock is not None else contextlib.nullcontext():
@@ -9857,32 +10663,86 @@ def _anchor_hygiene_diagnostic(cwd: str) -> str:
     return "".join(f"{message}\n" for message in messages)
 
 
-def _reconcile_marketplace_snapshot(payload: dict, cwd: str) -> None:
+def _migrate_legacy_marketplace_overrides(payload: dict, cwd: str) -> None:
+    """One-time cleanup of a marker left by the retired marketplace_overrides
+    mechanism.
+
+    A repo's ``.github/copilot/settings.local.json`` may still carry the
+    now-defunct ``_agentWorktreesMarketplaceOverrides`` marker and its
+    absolute ``directory``-source entries from a prior version of this
+    plugin. Left in place, those entries would keep shadowing the repo's own
+    committed marketplace declaration with a stale, anchor-pinned path
+    forever, since nothing produces or refreshes that marker anymore. This
+    retires exactly the marker-owned values that are still unmodified and
+    removes the marker; any operator edit to a managed key is preserved
+    untouched, matching ``_retire_invalid_pair_overlay_locked``'s own
+    retirement contract. Idempotent and a silent no-op once migrated.
+    """
     output_text = "{}"
     try:
-        from . import marketplace_overrides
+        from . import knowledge_plugins as kp
 
-        repo = _checkout_root(cwd)
-        if repo is not None:
-            summary = marketplace_overrides.reconcile(
-                repo,
-                refresh_repositories=False,
-                fast_forward_repositories=False,
-            )
-            if summary.get("changed"):
-                path = summary.get("settings_local", "settings.local.json")
-                output_text = json.dumps(
-                    {
-                        "additionalContext": (
-                            "Agent Worktrees updated local plugin marketplace "
-                            f"source overrides in {path}. Restart Copilot CLI for "
-                            "the new plugin sources to take effect."
+        output_path = Path(cwd).resolve() / ".github" / "copilot" / "settings.local.json"
+        if output_path.is_file():
+            with kp._overlay_transaction(output_path):
+                existing = kp._load_json_object(output_path)
+                marker = existing.get("_agentWorktreesMarketplaceOverrides")
+                previous = marker.get("marketplaces") if isinstance(marker, dict) else None
+                if isinstance(marker, dict) and marker.get("version") == 1 and isinstance(previous, dict):
+                    marketplaces = kp._dict_setting(existing, "extraKnownMarketplaces", output_path)
+                    kp._retire_previous(marketplaces, previous)
+                    result = dict(existing)
+                    result.pop("_agentWorktreesMarketplaceOverrides", None)
+                    if marketplaces:
+                        result["extraKnownMarketplaces"] = marketplaces
+                    else:
+                        result.pop("extraKnownMarketplaces", None)
+                    if kp._write_overlay(output_path, result):
+                        output_text = json.dumps(
+                            {
+                                "additionalContext": (
+                                    "Agent Worktrees retired a legacy local "
+                                    f"marketplace source override in {output_path}. "
+                                    "Restart Copilot CLI for the committed "
+                                    "marketplace source to take effect."
+                                )
+                            }
                         )
-                    }
-                )
     except Exception:
         pass
-    _write_session_lifecycle_snapshot("marketplace-overrides", payload, output_text)
+    _write_session_lifecycle_snapshot("marketplace-overrides-migration", payload, output_text)
+
+
+def _reconcile_knowledge_plugin_overlay(payload: dict, cwd: str) -> None:
+    """Best-effort sessionStart refresh of the knowledge-repo plugin overlay.
+
+    ``compose_from_pair`` otherwise only runs at worktree create time (or via
+    the manual ``knowledge compose-plugins`` CLI subcommand), so a plugin
+    enabled in the knowledge repo's own settings *after* the harness worktree
+    was created would never propagate into ``settings.local.json`` -- not
+    even across a restart. Re-running it here, silently no-op'ing when the
+    checkout isn't a valid/paired knowledge pair, closes that gap.
+    """
+    output_text = "{}"
+    try:
+        from . import knowledge_plugins
+
+        _activate_project_for_path(cwd)
+        summary = knowledge_plugins.compose_from_pair(cwd=cwd)
+        if summary.get("changed"):
+            path = summary.get("settings_local", "settings.local.json")
+            output_text = json.dumps(
+                {
+                    "additionalContext": (
+                        "Agent Worktrees updated the knowledge-repo plugin "
+                        f"enable overlay in {path}. Restart Copilot CLI for "
+                        "the newly enabled plugin(s) to take effect."
+                    )
+                }
+            )
+    except Exception:
+        pass
+    _write_session_lifecycle_snapshot("knowledge-plugin-overlay", payload, output_text)
 
 
 def _provisioning_status_diagnostic(cwd: str) -> str:
@@ -10071,7 +10931,8 @@ def _run_session_lifecycle(
             json.dumps({"additionalContext": nudge}) if nudge else "{}",
         )
 
-        _reconcile_marketplace_snapshot(payload, cwd)
+        _migrate_legacy_marketplace_overrides(payload, cwd)
+        _reconcile_knowledge_plugin_overlay(payload, cwd)
 
         registration_args = argparse.Namespace(
             worktree_id=None,
@@ -10434,11 +11295,9 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     """
     import shutil
     import time
+
+    from . import classify_daemon, monitor_roots, pane_reaper, registry_paths, session_catalog
     from . import locks as _locks
-    from . import monitor_roots
-    from . import pane_reaper
-    from . import registry_paths
-    from . import session_catalog
     from .hook_ipc import HookIpcServer, HookUnavailable
 
     mux = "psmux" if shutil.which("psmux") else ("tmux" if shutil.which("tmux") else None)
@@ -10561,6 +11420,18 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         except Exception:
             hook_server = None
 
+    # Phase 4d (#2323): resident classify/list accelerator. Independent of the
+    # hook-decision server above -- its own single-instance lease guard
+    # (`_classify_records_lease_guarded`) remains the always-correct fallback
+    # whenever this daemon is absent, unreachable, or errors, so a failure to
+    # start it here is never fatal to the monitor.
+    classify_server = None
+    try:
+        classify_server = classify_daemon.start_server(_classify_daemon_compute)
+        classify_server.start()
+    except Exception:
+        classify_server = None
+
     def _lock_extra() -> dict:
         extra = {"prefix": my_prefix, "mux": bool(mux_bin)}
         if isinstance(installation_context, dict):
@@ -10573,6 +11444,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             )
         if hook_server is not None:
             extra.update(hook_server.rendezvous())
+        if classify_server is not None:
+            extra.update(classify_daemon.rendezvous_fields(classify_server))
         return extra
 
     _locks.write_lock(lock, extra=_lock_extra())
@@ -10663,6 +11536,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     finally:
         if hook_server is not None:
             hook_server.close()
+        if classify_server is not None:
+            classify_server.close()
         # Release the lock only if it is still ours (never clobber a successor).
         d = _locks.read_lock(lock)
         if isinstance(d, dict) and d.get("pid") == os.getpid():
@@ -10741,7 +11616,7 @@ def _cmd_list_stream(args: argparse.Namespace, records) -> int:
         config = cfg.load_config()
         repo = config.default_repo
         active_paths = _build_active_paths(records, session_ctx)
-        from .picker_tui.data_local import _stamp_from_raw
+        from .picker_support.data_local import _stamp_from_raw
 
         for rec in records:
             info = _classify_one_record(
@@ -10901,7 +11776,19 @@ def _build_list_json_payload(
     session_ctx = sessions.scan_sessions_fast(records)
     state_map: dict[str, git_ops.WorktreeStateInfo] = {}
     if getattr(args, "classify", False):
-        state_map = _classify_records(records, session_ctx)
+        # Same status/platform/all filters _list_records_for_args used to
+        # resolve `records` -- so the resident classify daemon's independent
+        # re-resolution (#2323) is guaranteed to match this caller's own set.
+        daemon_filters = {
+            "status_filter": (
+                None if args.tracking_status == "all" else args.tracking_status
+            ),
+            "platform_filter": (
+                None if getattr(args, "include_other_platforms", False) else cfg.detect_platform()
+            ),
+            "all": bool(getattr(args, "all", False)),
+        }
+        state_map = _classify_records(records, session_ctx, daemon_filters=daemon_filters)
     # #93: same enriched pass as the streaming path -- mark worktrees hosting
     # a bare (un-muxed) bound Copilot so the Picker (local or over SSH) can
     # annotate the row. Gated on --mux-details (the Picker's flag) so a plain
@@ -10940,7 +11827,7 @@ def _build_list_json_payload(
     # authoritative classify pass, stamp each worktree's session-render cache
     # so a FUTURE --cache-only fast phase on THIS machine reads it directly.
     if getattr(args, "classify", False) and stamp_session_state:
-        from .picker_tui.data_local import _stamp_from_raw
+        from .picker_support.data_local import _stamp_from_raw
 
         for wt_dict, rec in zip(worktrees, records, strict=True):
             _stamp_from_raw(rec, wt_dict, session_ctx)
@@ -11015,7 +11902,7 @@ def cmd_list(args: argparse.Namespace) -> int:
         # so a remote SSH fast phase paints instantly and never re-reads
         # events.jsonl or scans processes. Never-populated -> Unknown.
         if getattr(args, "cache_only", False):
-            from .picker_tui.data_local import _overlay_cached_state
+            from .picker_support.data_local import _overlay_cached_state
 
             worktrees = []
             for rec in records:
@@ -11173,12 +12060,228 @@ def cmd_claims(args: argparse.Namespace) -> int:
         return _claims_settle(args, target[1])
     if target and target[0] == "sweep":
         return _claims_sweep(args)
+    if target and target[0] == "mirror-status":
+        if len(target) < 3:
+            msg = (
+                "claims mirror-status: usage 'mirror-status <kind> <ref> "
+                "--status <disposition>'"
+            )
+            if args.json:
+                return _json_error(msg, 2)
+            output.err(msg)
+            return 2
+        return _claims_mirror_status(args, target[1], target[2])
     if target and target[0] == "cleanup":
         return _claims_cleanup(args)
     if target and target[0] == "orphans":
         return _claims_orphans(args)
     worktree_id = target[0] if target else None
     return _claims_show(args, worktree_id)
+
+
+def _parse_follow_up_refs(raw: list[str] | None) -> list[tracking.FollowUpRef]:
+    """Parse repeatable ``--ref kind:value`` CLI args into ``FollowUpRef``s.
+
+    An unrecognized ``kind`` degrades to ``other`` rather than erroring, so a
+    typo doesn't block journaling the follow-up itself.
+    """
+    valid_kinds = {"resource-claim", "dispatch-task", "issue", "pull-request",
+                   "file", "effort", "other"}
+    refs: list[tracking.FollowUpRef] = []
+    for item in raw or []:
+        kind, sep, value = item.partition(":")
+        if not sep:
+            refs.append(tracking.FollowUpRef(kind="other", ref=item))
+            continue
+        kind = kind.strip() if kind.strip() in valid_kinds else "other"
+        refs.append(tracking.FollowUpRef(kind=kind, ref=value.strip()))
+    return refs
+
+
+def _follow_up_to_json(fu: tracking.FollowUpRecord) -> dict:
+    return {
+        "id": fu.id,
+        "summary": fu.summary,
+        "state": fu.state,
+        "revision": fu.revision,
+        "created_at": fu.created_at,
+        "updated_at": fu.updated_at,
+        "refs": [{"kind": r.kind, "ref": r.ref} for r in fu.refs],
+        **({"result_ref": fu.result_ref} if fu.result_ref else {}),
+        **({"reason": fu.reason} if fu.reason else {}),
+    }
+
+
+def cmd_follow_ups(args: argparse.Namespace) -> int:
+    """Dispatch the follow-ups verb (worktree-finality-and-obligations Ph3):
+    ``follow-ups [worktree_id]`` lists; ``add``/``resolve``/``dismiss`` mutate.
+
+    Transfer (``offer``/``accept``/``decline``) is intentionally NOT
+    implemented yet -- it needs the same cross-worktree registry machinery as
+    ``claims handoff``, which itself only supports offer/decline/cancel (no
+    accept) so far.
+    """
+    target = list(getattr(args, "target", None) or [])
+    if target and target[0] == "add":
+        if len(target) < 2:
+            msg = "follow-ups add: usage 'add <summary>'"
+            if args.json:
+                return _json_error(msg, 2)
+            output.err(msg)
+            return 2
+        return _follow_ups_add(args, " ".join(target[1:]))
+    if target and target[0] == "resolve":
+        if len(target) < 2:
+            msg = "follow-ups resolve: missing <id>"
+            if args.json:
+                return _json_error(msg, 2)
+            output.err(msg)
+            return 2
+        return _follow_ups_resolve(args, target[1])
+    if target and target[0] == "dismiss":
+        if len(target) < 2:
+            msg = "follow-ups dismiss: missing <id>"
+            if args.json:
+                return _json_error(msg, 2)
+            output.err(msg)
+            return 2
+        return _follow_ups_dismiss(args, target[1])
+    worktree_id = target[0] if target else None
+    return _follow_ups_show(args, worktree_id)
+
+
+def _follow_ups_record_path(args: argparse.Namespace, config: cfg.Config) -> tuple[str, Path]:
+    wt_id = _infer_worktree_id(getattr(args, "follow_up_worktree", None), config)
+    return wt_id, cfg.tracking_dir() / f"{wt_id}.yaml"
+
+
+def _follow_ups_show(args: argparse.Namespace, worktree_id: str | None) -> int:
+    config = cfg.load_config()
+    wt_id = _infer_worktree_id(worktree_id, config)
+    rec_path = cfg.tracking_dir() / f"{wt_id}.yaml"
+    if not rec_path.exists():
+        if args.json:
+            return _json_error(f"worktree not found: {wt_id}")
+        output.err(f"worktree not found: {wt_id}")
+        return 1
+    rec = tracking.load_record(rec_path)
+    items = [_follow_up_to_json(fu) for fu in rec.follow_ups]
+    open_count = tracking.effective_open_follow_up_count(rec)
+    if args.json:
+        _json_output({
+            "worktree_id": wt_id,
+            "follow_ups": items,
+            "open_count": open_count,
+            "legacy_follow_up": rec.follow_up,
+        })
+        return 0
+    print(f"Follow-ups for {wt_id} -- {open_count} open")
+    if not items:
+        if rec.follow_up:
+            print("  (legacy boolean follow_up=true, no itemized entries)")
+        else:
+            print("  (none)")
+        return 0
+    for fu in items:
+        refs = ", ".join(f"{r['kind']}:{r['ref']}" for r in fu["refs"])
+        line = f"  [{fu['state']}] {fu['id']}: {fu['summary']}"
+        if refs:
+            line += f"  ({refs})"
+        print(line)
+    return 0
+
+
+def _follow_ups_add(args: argparse.Namespace, summary: str) -> int:
+    config = cfg.load_config()
+    blocked = _require_coordination_readiness(config, json_out=args.json)
+    if blocked is not None:
+        return blocked
+    wt_id, rec_path = _follow_ups_record_path(args, config)
+    if not rec_path.exists():
+        if args.json:
+            return _json_error(f"worktree not found: {wt_id}")
+        output.err(f"worktree not found: {wt_id}")
+        return 1
+    refs = _parse_follow_up_refs(getattr(args, "follow_up_refs", None))
+    with tracking._RecordLock(rec_path, require_sidecar=True):
+        rec = tracking.load_record(rec_path)
+        was_finalized = rec.status == "finalized"
+        try:
+            item = tracking.add_follow_up(rec, summary, refs=refs, save=False)
+        except ValueError as exc:
+            if args.json:
+                return _json_error(str(exc))
+            output.err(str(exc))
+            return 1
+        reopened = was_finalized and rec.status == "active"
+        tracking.save_record(rec, rec_path)
+    if args.json:
+        _json_output({"worktree_id": wt_id, **_follow_up_to_json(item),
+                      "reopened": reopened})
+        return 0
+    print(f"added follow-up {item.id} on {wt_id}: {item.summary}")
+    if reopened:
+        print(f"  reopened {wt_id}: finalized -> active (new open follow-up)")
+    return 0
+
+
+def _follow_ups_resolve(args: argparse.Namespace, follow_up_id: str) -> int:
+    config = cfg.load_config()
+    wt_id, rec_path = _follow_ups_record_path(args, config)
+    if not rec_path.exists():
+        if args.json:
+            return _json_error(f"worktree not found: {wt_id}")
+        output.err(f"worktree not found: {wt_id}")
+        return 1
+    with tracking._RecordLock(rec_path, require_sidecar=True):
+        rec = tracking.load_record(rec_path)
+        item = tracking.resolve_follow_up(
+            rec, follow_up_id,
+            result_ref=getattr(args, "follow_up_result_ref", None), save=False)
+        if item is None:
+            msg = f"follow-ups resolve: no such follow-up {follow_up_id!r} on {wt_id}"
+            if args.json:
+                return _json_error(msg)
+            output.err(msg)
+            return 1
+        tracking.save_record(rec, rec_path)
+    if args.json:
+        _json_output({"worktree_id": wt_id, **_follow_up_to_json(item)})
+        return 0
+    print(f"resolved follow-up {item.id} on {wt_id}")
+    return 0
+
+
+def _follow_ups_dismiss(args: argparse.Namespace, follow_up_id: str) -> int:
+    config = cfg.load_config()
+    reason = (getattr(args, "follow_up_reason", "") or "").strip()
+    if not reason:
+        msg = "follow-ups dismiss: requires --reason"
+        if args.json:
+            return _json_error(msg, 2)
+        output.err(msg)
+        return 2
+    wt_id, rec_path = _follow_ups_record_path(args, config)
+    if not rec_path.exists():
+        if args.json:
+            return _json_error(f"worktree not found: {wt_id}")
+        output.err(f"worktree not found: {wt_id}")
+        return 1
+    with tracking._RecordLock(rec_path, require_sidecar=True):
+        rec = tracking.load_record(rec_path)
+        item = tracking.dismiss_follow_up(rec, follow_up_id, reason=reason, save=False)
+        if item is None:
+            msg = f"follow-ups dismiss: no such follow-up {follow_up_id!r} on {wt_id}"
+            if args.json:
+                return _json_error(msg)
+            output.err(msg)
+            return 1
+        tracking.save_record(rec, rec_path)
+    if args.json:
+        _json_output({"worktree_id": wt_id, **_follow_up_to_json(item)})
+        return 0
+    print(f"dismissed follow-up {item.id} on {wt_id}: {reason}")
+    return 0
 
 
 def _claim_handoff_actor(config: cfg.Config, explicit_worktree: str | None) -> str:
@@ -11394,7 +12497,7 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
     owner-ref path is for a call-site whose cwd is not the borrowing worktree
     (e.g. agent-codespaces journaling a CodeSpace claim from the daemon's cwd).
     """
-    valid_kinds = {"worktree", "codespace", "container", "ssh", "workdir", "pr"}
+    valid_kinds = {"worktree", "codespace", "container", "ssh", "workdir", "pr", "task"}
     if kind not in valid_kinds:
         msg = (
             f"claims add: unknown kind {kind!r} (expected one of {', '.join(sorted(valid_kinds))})"
@@ -11451,7 +12554,12 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
     # blocking record lock (no I/O in the window).
     with tracking._RecordLock(rec_path, require_sidecar=True):
         rec = tracking.load_record(rec_path)
-        if rec.status in {"finalizing", "finalized", "orphaned"}:
+        # ``finalized`` is deliberately not blocked here: finalize is a
+        # non-terminal safe-to-prune assertion, not a frozen end state, and a
+        # finalized worktree may legitimately resume and take on new work.
+        # Only the in-flight ``finalizing`` RMW window and a genuinely broken
+        # ``orphaned`` record freeze creator ownership.
+        if rec.status in {"finalizing", "orphaned"}:
             msg = (
                 f"claims add: owner worktree {wt_id} is {rec.status}; "
                 "creator ownership is frozen and cannot accept new resources"
@@ -11460,6 +12568,7 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
                 return _json_error(msg)
             output.err(msg)
             return 1
+        was_finalized = rec.status == "finalized"
         claim = tracking.ResourceClaim(
             kind=kind,
             ref=ref,
@@ -11468,12 +12577,58 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
             note=getattr(args, "note", "") or "",
         )
         tracking.add_resource_claim(rec, claim, save=False)
+        reopened = was_finalized and rec.status == "active"
         tracking.save_record(rec, rec_path)
     if args.json:
-        _json_output({"worktree_id": wt_id, "kind": kind, "ref": ref, "state": obligations.ACTIVE})
+        _json_output({
+            "worktree_id": wt_id, "kind": kind, "ref": ref,
+            "state": obligations.ACTIVE, "reopened": reopened,
+        })
         return 0
     print(f"added outbound claim {kind}:{ref} on {wt_id}")
+    if reopened:
+        print(f"  reopened {wt_id}: finalized -> active (new held claim)")
     return 0
+
+
+def _claims_mirror_status(args: argparse.Namespace, kind: str, ref: str) -> int:
+    """Mirror a claim's disposition onto its cross-machine discovery store.
+
+    Only ``task`` is currently backed by a mirror
+    (:mod:`task_claim_registry`'s 4-tier origin chain,
+    ThomasMichon/copilot-extensions#2584) -- ``codespace``/``container`` are
+    mirrored directly by their owning plugins via ``agent-worktrees lease
+    renew --disposition`` instead, since they hold a real fencing token from
+    their own ``lease acquire``. Best-effort: the caller (e.g.
+    ``agent_dispatch.hibernation_claims``) treats a failure as non-fatal.
+    """
+    status = getattr(args, "status", None)
+    if not status:
+        msg = "claims mirror-status: --status is required"
+        if args.json:
+            return _json_error(msg, 2)
+        output.err(msg)
+        return 2
+    if kind != "task":
+        msg = (
+            f"claims mirror-status: unsupported kind {kind!r} "
+            "(only 'task' is externally mirrored today)"
+        )
+        if args.json:
+            return _json_error(msg, 2)
+        output.err(msg)
+        return 2
+    from . import task_claim_registry
+    holder = getattr(args, "claim_holder", None) or "agent-dispatch"
+    ok = task_claim_registry.set_task_claim_status(ref, status, holder=holder)
+    if args.json:
+        _json_output({"kind": kind, "ref": ref, "status": status, "mirrored": ok})
+        return 0 if ok else 1
+    if ok:
+        print(f"mirrored {kind}:{ref} disposition -> {status}")
+        return 0
+    output.err(f"claims mirror-status: failed to mirror {kind}:{ref} -> {status}")
+    return 1
 
 
 def _claims_release(args: argparse.Namespace, ref: str) -> int:
@@ -11895,13 +13050,13 @@ def _slugify(text: str) -> str:
 def cmd_remove_system(args: argparse.Namespace) -> int:
     """Remove a system worktree by id (git worktree + tracking record).
 
-    Refuses non-system worktrees. Used by daemons at end-of-run and by the
-    System-menu browse view to reap leaked worktrees.
+    Refuses non-system worktrees. Guarded like ``cleanup`` (see
+    ``managed_worktree_guard``); an unadvertised ``--force`` bypasses it.
     """
     config = cfg.load_config()
-    repo = config.default_repo
     tracking_path = cfg.tracking_dir()
     wt_id = getattr(args, "worktree_id", None)
+    force = getattr(args, "force", False)
     if not wt_id:
         output.err("remove-system requires a worktree id")
         return 2
@@ -11917,23 +13072,20 @@ def cmd_remove_system(args: argparse.Namespace) -> int:
         )
         return 1
 
-    removed, warnings = _remove_managed_worktree(
-        rec,
-        repo,
-        tracking_path,
-        force=True,
-    )
-    if not removed:
-        location = f"; worktree path: {rec.worktree_path}" if rec.worktree_path else ""
-        message = (
+    def _fail(message: str) -> int:
+        return _json_error(message) if getattr(args, "json", False) else (output.err(message) or 1)
+
+    outcome = remove_guard.perform(wt_id, yaml_path, config, force=force, remove_fn=_remove_managed_worktree, tracking_path=tracking_path)
+    if not outcome.ok:
+        return _fail(outcome.message)
+    if not outcome.removed:
+        rec = outcome.rec
+        loc = f"; worktree path: {rec.worktree_path}" if rec.worktree_path else ""
+        return _fail(
             f"failed to fully remove system worktree {wt_id}: "
-            f"{'; '.join(warnings) or 'removal failed'}{location}; "
+            f"{'; '.join(outcome.warnings) or 'removal failed'}{loc}; "
             "tracking record retained for retry"
         )
-        if getattr(args, "json", False):
-            return _json_error(message)
-        output.err(message)
-        return 1
     activity.log_event("system_worktree_removed", worktree_id=wt_id)
     if getattr(args, "json", False):
         _json_output({"removed": wt_id})
@@ -12057,31 +13209,6 @@ def cmd_create(args: argparse.Namespace) -> int:
     print(f"   Path:   {wt['path']}")
     print(f"   Branch: {wt['branch']}")
     return 0
-
-
-def _reconcile_marketplaces_for_checkout(
-    checkout: str | Path,
-    *,
-    ensure_ignored: bool = False,
-    warn_only: bool = True,
-    refresh_repositories: bool = False,
-    fast_forward_repositories: bool = False,
-) -> dict | None:
-    """Pre-seed local marketplace overrides without orphaning lifecycle work."""
-    from . import marketplace_overrides
-
-    try:
-        return marketplace_overrides.reconcile(
-            checkout,
-            ensure_ignored=ensure_ignored,
-            refresh_repositories=refresh_repositories,
-            fast_forward_repositories=fast_forward_repositories,
-        )
-    except marketplace_overrides.MarketplaceOverrideError as exc:
-        if warn_only:
-            output.warn(f"Could not reconcile local marketplace overrides: {exc}")
-            return None
-        raise
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -12476,6 +13603,7 @@ def _reap_worktree(
     if not rec.checkout_managed:
         tracking.retire_record(rec, tracking_path)
         disposition_history.remove(rec.worktree_id)
+        handoff_trace.remove_trace(cfg.active_project(), rec.worktree_id)
         activity.log_event(
             "external_worktree_tracking_retired",
             worktree_id=rec.worktree_id,
@@ -12532,6 +13660,7 @@ def _reap_worktree(
     # Remove tracking YAML (or tombstone it, when paired -- #957/#220)
     tracking.retire_record(rec, tracking_path)
     disposition_history.remove(rec.worktree_id)
+    handoff_trace.remove_trace(cfg.active_project(), rec.worktree_id)
 
     activity.log_event(
         "worktree_reaped",
@@ -12680,18 +13809,29 @@ def reap_one(
             }
         )
     try:
-        latest = tracking.load_record(yaml_path)
-        if _hosted_session_blocks_cleanup(latest):
+        result = _revalidate_cleanup_safety(
+            wt_id,
+            repo=repo,
+            tracking_path=tracking_path,
+            force=force,
+            include_unused=include_unused,
+            include_conversations=include_conversations,
+            reap=lambda latest, fresh_info: _reap_worktree(
+                latest, fresh_info, repo, tracking_path),
+        )
+        if not result.cleanable:
             return _result(
                 {
                     "ok": False,
                     "removed": False,
                     "skipped": True,
-                    "reason": "active hosted Copilot session in use",
-                    "bucket": "active",
+                    "reason": result.reason,
+                    "bucket": result.bucket,
                 }
             )
-        failures, warnings = _reap_worktree(rec, info, repo, tracking_path)
+        failures = result.failures
+        warnings = result.warnings
+        info = result.info
         git_ops.prune_worktrees(cwd=repo.anchor)
     finally:
         lock.release()
@@ -12931,6 +14071,49 @@ _LIVE_DESCENDANT_IMAGES = frozenset(
 )
 
 
+def _ancestor_chain_intact(
+    ppid: int,
+    by_pid: dict[int, dict],
+    pid_alive: Callable[[int], bool] | None,
+) -> bool:
+    """Whether ``ppid`` and every ancestor above it, as far as verifiable, is
+    still alive -- i.e. whether the process whose parent is ``ppid`` is
+    genuinely parented rather than an orphan whose immediate parent happens to
+    still be a live (but itself orphaned/stuck) intermediate node.
+
+    Walking past the immediate parent matters for exactly the launcher-shell
+    chains this reaper targets: ``agent-worktrees.ps1 -> python -> python ->
+    pwsh launch-session.ps1`` stacks several of *this reaper's own* process
+    names on top of each other, so an intermediate hop's parent can be dead
+    even while the immediate parent (one level down) is still alive.
+
+    Without a real ``pid_alive`` probe (pure/test mode), this degrades to the
+    original single-hop snapshot-membership check: a filtered snapshot cannot
+    distinguish "not enumerated" from "dead" for anything beyond one hop, so
+    walking further would misclassify a live-but-unenumerated terminal as
+    dead. With a real probe, walking continues past the immediate parent as
+    long as each hop it can still see in ``by_pid`` is confirmed alive,
+    stopping (and assuming intact) the moment it runs off the edge of what
+    was enumerated -- never the moment it merely can't verify further.
+    """
+    if pid_alive is None:
+        return ppid in by_pid
+    cur = ppid
+    guard = 0
+    while cur > 0 and guard < 128:
+        if not bool(pid_alive(cur)):
+            return False
+        node = by_pid.get(cur)
+        if node is None:
+            return True  # edge of the snapshot; alive so far, can't see further
+        next_ppid = int(node.get("ppid", -1) or -1)
+        if next_ppid <= 0 or next_ppid == cur:
+            return True  # reached the top of a fully-verified chain
+        cur = next_ppid
+        guard += 1
+    return True
+
+
 def select_orphan_launcher_shells(
     procs: list[dict],
     *,
@@ -13014,9 +14197,7 @@ def select_orphan_launcher_shells(
             skipped.append({"pid": pid, "reason": "live-descendant"})  # (3)
             continue
         ppid = int(p.get("ppid", -1) or -1)
-        parent_alive = (
-            ppid in by_pid if pid_alive is None else (ppid > 0 and bool(pid_alive(ppid)))
-        )
+        parent_alive = _ancestor_chain_intact(ppid, by_pid, pid_alive)
         if ppid > 0 and parent_alive:
             skipped.append({"pid": pid, "reason": "parent-alive"})  # (5)
             continue
@@ -13046,13 +14227,15 @@ def _enumerate_launcher_shells() -> list[dict] | None:
 
 
 def _enumerate_launcher_shells_windows() -> list[dict] | None:
-    names = sorted(
-        n for n in (_LAUNCHER_SHELL_NAMES | _LIVE_DESCENDANT_IMAGES) if n.endswith(".exe")
-    )
-    where = " OR ".join(f"Name='{n}'" for n in names)
+    # No -Filter: candidate selection (name + positive command-line signature)
+    # happens in select_orphan_launcher_shells, but the parent-alive check
+    # needs to walk the FULL ancestor chain up to the real console host
+    # (Windows Terminal/conhost/explorer/etc.) -- a filtered snapshot that
+    # only ever contains launcher/witness images can't see past them, so a
+    # stacked chain's true root (a dead terminal) would look unverifiable
+    # rather than confirmed-dead. See _ancestor_chain_intact.
     ps = (
-        "Get-CimInstance Win32_Process -Filter "
-        f'"{where}" | '
+        "Get-CimInstance Win32_Process | "
         "Select-Object ProcessId,ParentProcessId,Name,CommandLine,SessionId,"
         "@{n='Create';e={try{([DateTimeOffset]$_.CreationDate)"
         ".ToUnixTimeSeconds()}catch{$null}}} | ConvertTo-Json -Compress -Depth 3"
@@ -13111,8 +14294,11 @@ def _enumerate_launcher_shells_posix() -> list[dict] | None:
             comm = (entry / "comm").read_text(errors="ignore").strip().lower()
         except OSError:
             continue
-        if comm not in _LAUNCHER_SHELL_NAMES and comm not in _LIVE_DESCENDANT_IMAGES:
-            continue
+        # No name filter here: candidate selection (name + positive command-
+        # line signature) happens in select_orphan_launcher_shells, but the
+        # parent-alive check needs to walk the full ancestor chain up to the
+        # real controlling terminal/session leader, not just launcher/witness
+        # images. See _ancestor_chain_intact.
         try:
             cmdline = (
                 (entry / "cmdline")
@@ -13217,10 +14403,7 @@ def reap_orphan_launcher_shells(
             errors.append({"pid": pid, "reason": "kill failed"})
     candidates = [{"pid": int(p["pid"]), "cmdline": p.get("cmdline") or ""} for p in reap]
     return {
-        "available": True,
-        "reaped": reaped,
-        "candidates": candidates,
-        "skipped": skipped,
+        "available": True, "reaped": reaped, "candidates": candidates, "skipped": skipped,
         "errors": errors,
     }
 
@@ -13254,17 +14437,9 @@ def cmd_reap_shells(args: argparse.Namespace) -> int:
     return 0
 
 
-def _repo_for_record(config, record):
-    """Resolve a record's repository with the legacy/default fallback."""
-    repos = getattr(config, "repos", {})
-    record_repo = getattr(record, "repo", "")
-    repo = repos.get(record_repo) if hasattr(repos, "get") else None
-    if repo is None and (not record_repo or record_repo == getattr(config, "repo_name", None)):
-        try:
-            repo = config.default_repo
-        except (AttributeError, KeyError, ValueError):
-            repo = None
-    return repo
+# Moved to tracking.py (module-size split); re-exported here for existing
+# unqualified call sites and back-compat test access.
+_repo_for_record = tracking._repo_for_record
 
 
 def _remove_managed_worktree(
@@ -13418,6 +14593,7 @@ def _remove_managed_worktree(
     except OSError as exc:
         return False, [f"tracking record remove failed: {exc}"]
     disposition_history.remove(rec.worktree_id)
+    handoff_trace.remove_trace(cfg.active_project(), rec.worktree_id)
     return True, warns
 
 
@@ -13495,7 +14671,7 @@ def sweep_managed_worktrees(
         verdict = gc_mod.classify_managed_worktree(
             worktree_id=rec.worktree_id,
             kind=rec.kind,
-            follow_up=rec.follow_up,
+            follow_up=bool(tracking.effective_open_follow_up_count(rec)),
             status=rec.status,
             git_state=git_state,
             has_live_mux=has_live_mux,
@@ -13503,6 +14679,7 @@ def sweep_managed_worktrees(
             has_live_session=has_live_session,
             idle_secs=idle_secs,
             min_idle_secs=min_idle_secs,
+            held_claims=sum(1 for c in rec.resources if c.is_live),
         )
         if verdict.action == "skip":
             result["skipped"].append({"id": rec.worktree_id, "reason": verdict.reason})
@@ -13575,7 +14752,7 @@ def sweep_managed_worktrees(
             fresh_verdict = gc_mod.classify_managed_worktree(
                 worktree_id=current.worktree_id,
                 kind=current.kind,
-                follow_up=current.follow_up,
+                follow_up=bool(tracking.effective_open_follow_up_count(current)),
                 status=current.status,
                 git_state=fresh_git_state,
                 has_live_mux=fresh_name in fresh_mux,
@@ -13583,6 +14760,7 @@ def sweep_managed_worktrees(
                 has_live_session=fresh_norm in fresh_ctx.active_sessions,
                 idle_secs=fresh_idle,
                 min_idle_secs=min_idle_secs,
+                held_claims=sum(1 for c in current.resources if c.is_live),
             )
             if fresh_verdict.action == "skip":
                 result["skipped"].append(
@@ -13816,14 +14994,48 @@ def sweep_finished_session_worktrees(
         return result
     try:
         for rec, info, reason in candidates:
-            f, warns = _reap_worktree(rec, info, repo, tracking_path)
+            # Idle-grace revalidation (cleanup-toctou-revalidation, Phase 3):
+            # re-derive activity at action time so a resume between candidate
+            # selection (Pass 1) and this reap (Pass 2) postpones removal even
+            # when no session remains live at this final check.
+            name = sessions.mux_session_name(rec.worktree_id)
+            fresh_activity = sessions._mux_session_activity()
+            fresh_last_active = fresh_activity.get(name)
+            if fresh_last_active is None:
+                fresh_yaml = tracking_path / f"{rec.worktree_id}.yaml"
+                fresh_rec = tracking.load_record(fresh_yaml) if fresh_yaml.exists() else rec
+                fresh_last_active = (
+                    _iso_epoch(fresh_rec.last_resumed_at)
+                    or _iso_epoch(fresh_rec.completed_at)
+                    or _iso_epoch(fresh_rec.started_at)
+                )
+            if fresh_last_active is not None and (time.time() - fresh_last_active) < grace:
+                result["skipped"].append(
+                    {"id": rec.worktree_id,
+                     "reason": "idle grace not elapsed (activity since selection)"}
+                )
+                continue
+
+            rr = _revalidate_cleanup_safety(
+                rec.worktree_id,
+                repo=repo,
+                tracking_path=tracking_path,
+                include_unused=False,
+                include_conversations=False,
+                reap=lambda latest, fresh_info: _reap_worktree(
+                    latest, fresh_info, repo, tracking_path),
+            )
+            if not rr.cleanable:
+                result["skipped"].append({"id": rec.worktree_id, "reason": rr.reason})
+                continue
             try:
                 activity.log_event(
-                    "session_worktree_autoclean", worktree_id=rec.worktree_id, reason=reason
+                    "session_worktree_autoclean", worktree_id=rec.worktree_id,
+                    reason=rr.reason,
                 )
             except Exception:
                 pass
-            full = reason + (f"; {'; '.join(warns)}" if warns else "")
+            full = rr.reason + (f"; {'; '.join(rr.warnings)}" if rr.warnings else "")
             result["removed"].append({"id": rec.worktree_id, "reason": full})
         git_ops.prune_worktrees(cwd=repo.anchor)
     finally:
@@ -14047,13 +15259,8 @@ def _perform_remux(
 
     def _fail(reason: str, **extra) -> dict:
         return {
-            "ok": False,
-            "reason": reason,
-            "worktree_id": worktree_id,
-            "session_id": session_id,
-            "action": "failed",
-            "requires_resume": False,
-            **extra,
+            "ok": False, "reason": reason, "worktree_id": worktree_id, "session_id": session_id,
+            "action": "failed", "requires_resume": False, **extra,
         }
 
     if not worktree_id:
@@ -14314,12 +15521,8 @@ def reclaim_one(
     except Exception:
         pass
     return {
-        "ok": ok,
-        "worktree_id": worktree_id,
-        "targets": len(targets),
-        "reaped": reaped,
-        "locks_cleared": cleared,
-        "bridge_locks_cleared": bridge_cleared,
+        "ok": ok, "worktree_id": worktree_id, "targets": len(targets), "reaped": reaped,
+        "locks_cleared": cleared, "bridge_locks_cleared": bridge_cleared,
         "mux_servers_torn_down": mux_torn_down,
     }
 
@@ -14375,6 +15578,204 @@ def _cleanup_one(args: argparse.Namespace) -> int:
             line += f" -- {payload['reason']}"
         print(line)
     return 0 if payload.get("ok") else 1
+
+
+#: `cleanup_disposition` buckets that get their OWN per-item skip line (a
+#: specific, actionable reason worth calling out individually) rather than
+#: folding into the aggregate unused/conversation/dirty/wip summary counters.
+#: worktree-finality-and-obligations Phase 5: `held-claims`/`follow-up` were
+#: previously missing here, so a worktree blocked by either silently vanished
+#: from `cleanup`'s report entirely -- neither listed as skipped nor counted.
+_CLEANUP_PER_ITEM_BUCKETS = frozenset({
+    "claimed", "open-pr", "closed-unmerged", "paired-pending",
+    "held-claims", "follow-up",
+})
+
+
+def _cleanup_per_item_skip_reason(disp: prune.CleanupDisposition) -> str:
+    """The exact per-worktree skip line for `cleanup`'s report, or "" when the
+    bucket instead folds into an aggregate summary counter."""
+    if disp.bucket == "active":
+        return "active Copilot session in use"
+    if disp.bucket in _CLEANUP_PER_ITEM_BUCKETS:
+        return disp.reason
+    return ""
+
+
+@dataclasses.dataclass
+class RevalidationResult:
+    """The canonical outcome of :func:`_revalidate_cleanup_safety`."""
+
+    cleanable: bool
+    reason: str
+    bucket: str
+    #: Populated only when ``cleanable`` -- the fresh record/classification the
+    #: reap must act on, never the caller's pre-lock objects.
+    record: tracking.WorktreeRecord | None = None
+    info: git_ops.WorktreeStateInfo | None = None
+    #: Populated only when a ``reap`` callback was supplied and actually ran.
+    failures: int = 0
+    warnings: list[str] = dataclasses.field(default_factory=list)
+    reaped: bool = False
+
+
+def _revalidate_cleanup_safety(
+    wt_id: str,
+    *,
+    repo,
+    tracking_path: Path,
+    force: bool = False,
+    include_unused: bool = False,
+    include_conversations: bool = False,
+    reap: Callable[
+        [tracking.WorktreeRecord, git_ops.WorktreeStateInfo], tuple[int, list[str]]
+    ]
+    | None = None,
+) -> RevalidationResult:
+    """The one canonical, under-``FinalizeLock`` safety recheck every reaper
+    shares (cleanup-toctou-revalidation effort, replacing the narrower
+    ``_revalidate_before_reap``).
+
+    Reloads the tracking record fresh, rebuilds a single-worktree
+    ``active_paths``, re-classifies git state fresh (no network fetch),
+    re-derives ``turn_count``, and runs the complete (ordering-fixed)
+    :func:`prune.cleanup_disposition` -- never a narrowed dirty/active-only
+    check. Returns a :class:`RevalidationResult` carrying the fresh
+    ``record``/``info`` the caller must reap, not the caller's stale pre-lock
+    objects.
+
+    **Two named contracts** (Phase 2):
+
+    - **Non-forced** (default): re-checks the complete disposition --
+      dirty/WIP/conversation/held-claims/follow-up/paired-pending/branch-merge
+      (for a missing directory) -- via the *ordering-fixed*
+      ``cleanup_disposition``, in addition to liveness. When ``reap`` is
+      given and the fresh decision is cleanable, this acquires
+      ``tracking._RecordLock(yaml_path, require_sidecar=True)`` and invokes
+      ``reap`` **while continuing to hold it**, so the fresh read and the
+      delete happen as one uninterrupted, lock-held sequence (Option 1(b)):
+      a racing write from this codebase's OTHER record mutators (resource
+      claims, follow-ups, session registration -- all of which already take
+      the same sidecar lock for their own RMW) is fenced out for the whole
+      window, not just the read. ``require_sidecar=True`` means lock
+      contention **fails closed** (raises ``TimeoutError``, reported as the
+      ``"locked"`` bucket) rather than degrading to the in-process-only
+      lock. Callers must already hold ``FinalizeLock`` before calling this
+      (lock order: ``FinalizeLock`` then ``_RecordLock`` -- never reversed).
+    - **Forced** (`force=True`): mirrors ``reap_one --force``'s documented,
+      narrower escape hatch -- skips ``cleanup_disposition`` entirely (dirty/
+      WIP/claims/follow-ups/branch-merge are NOT re-checked), but still
+      refreshes liveness fresh, under the lock, via the *same* liveness-read
+      code path as the non-forced contract (closing the gap where ``--force``
+      used to trust a stale pre-lock ``active_paths`` snapshot). The one
+      check ``--force`` never bypasses is an active/hosted session. Forced
+      mode does not take ``_RecordLock`` -- its narrower contract isn't
+      gated on the fields other writers mutate.
+
+    A worktree with no on-disk path (``GONE``) re-proves the branch-merged
+    gate itself (``cleanup_disposition`` deliberately excludes ``GONE`` --
+    that proof is caller-owned), so a branch that became unmerged after an
+    earlier, caller-side pre-lock proof is still caught here.
+
+    This function never performs a network PR reconciliation -- ``rec.prs``
+    is read as already reconciled at scan time (or not reconciled at all, in
+    which case a stale ``open`` fails safe toward "don't reap").
+    """
+    yaml_path = tracking_path / f"{wt_id}.yaml"
+    if not yaml_path.exists():
+        return RevalidationResult(False, f"worktree not found: {wt_id}", "gone")
+
+    def _fresh_liveness(latest: tracking.WorktreeRecord) -> tuple[
+        git_ops.WorktreeStateInfo, set[str], sessions.SessionContext
+    ]:
+        session_ctx = sessions.scan_sessions_fast([latest])
+        active_paths = _build_active_paths([latest], session_ctx)
+        if latest.worktree_path and Path(latest.worktree_path).exists():
+            fresh_info = git_ops.classify_worktree(
+                latest.worktree_path,
+                latest.branch,
+                fetch=False,
+                remote=repo.remote,
+                default_branch=repo.default_branch,
+                active_paths=active_paths,
+            )
+            fresh_info = _apply_tracking_override(latest, fresh_info)
+        elif latest.status == "finalized":
+            fresh_info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
+        else:
+            fresh_info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.GONE)
+        return fresh_info, active_paths, session_ctx
+
+    def _do_reap(
+        latest: tracking.WorktreeRecord, fresh_info: git_ops.WorktreeStateInfo
+    ) -> tuple[int, list[str]]:
+        if reap is not None:
+            return reap(latest, fresh_info)
+        return 0, []
+
+    if force:
+        latest = tracking.load_record(yaml_path)
+        if _hosted_session_blocks_cleanup(latest):
+            return RevalidationResult(
+                False, "active hosted Copilot session in use", "active")
+        fresh_info, _active_paths, _ctx = _fresh_liveness(latest)
+        if fresh_info.state == git_ops.WorktreeState.ACTIVE:
+            return RevalidationResult(
+                False, "worktree became active since the initial scan", "active")
+        failures, warnings = _do_reap(latest, fresh_info)
+        return RevalidationResult(
+            True, "forced", "forced", latest, fresh_info,
+            failures=failures, warnings=warnings, reaped=reap is not None,
+        )
+
+    try:
+        with tracking._RecordLock(yaml_path, require_sidecar=True):
+            latest = tracking.load_record(yaml_path)
+            if _hosted_session_blocks_cleanup(latest):
+                return RevalidationResult(
+                    False, "active hosted Copilot session in use", "active")
+            fresh_info, active_paths, session_ctx = _fresh_liveness(latest)
+            if fresh_info.state == git_ops.WorktreeState.ACTIVE:
+                return RevalidationResult(
+                    False, "worktree became active since the initial scan",
+                    "active")
+
+            if fresh_info.state == git_ops.WorktreeState.GONE:
+                upstream = f"{repo.remote}/{repo.default_branch}"
+                if latest.branch and not git_ops.is_branch_merged(
+                    latest.branch, upstream, cwd=repo.anchor,
+                ):
+                    return RevalidationResult(
+                        False,
+                        "branch has unmerged commits (worktree dir missing)",
+                        "unmerged")
+                failures, warnings = _do_reap(latest, fresh_info)
+                return RevalidationResult(
+                    True, "gone; branch merged", "clean", latest, fresh_info,
+                    failures=failures, warnings=warnings, reaped=reap is not None,
+                )
+
+            norm = _normalize_path(latest.worktree_path) if latest.worktree_path else ""
+            turns = session_ctx.turn_count.get(norm, 0)
+            disp = prune.cleanup_disposition(
+                latest,
+                fresh_info,
+                turn_count=turns,
+                include_unused=include_unused,
+                include_conversations=include_conversations,
+                claimant_alive=claimant_mod.resolve_claimant_alive,
+                paired_sibling_final=prune.default_paired_sibling_final,
+            )
+            if not disp.cleanable:
+                return RevalidationResult(False, disp.reason, disp.bucket)
+            failures, warnings = _do_reap(latest, fresh_info)
+            return RevalidationResult(
+                True, disp.reason, disp.bucket, latest, fresh_info,
+                failures=failures, warnings=warnings, reaped=reap is not None,
+            )
+    except TimeoutError:
+        return RevalidationResult(
+            False, "revalidation lock contended", "locked")
 
 
 def cmd_cleanup(args: argparse.Namespace) -> int:
@@ -14497,23 +15898,14 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
                 paired_sibling_final=prune.default_paired_sibling_final,
             )
             cleanable = disp.cleanable
-            if disp.bucket == "active":
-                skip_reason = "active Copilot session in use"
-            elif disp.bucket == "claimed":
-                skip_reason = disp.reason
-            elif disp.bucket == "open-pr":
-                skip_reason = disp.reason
-            elif disp.bucket == "closed-unmerged":
-                skip_reason = disp.reason
-            elif disp.bucket == "paired-pending":
-                skip_reason = disp.reason
-            elif disp.bucket == "unused" and not cleanable:
+            skip_reason = _cleanup_per_item_skip_reason(disp)
+            if not skip_reason and disp.bucket == "unused" and not cleanable:
                 unused_count += 1
-            elif disp.bucket == "conversation" and not cleanable:
+            elif not skip_reason and disp.bucket == "conversation" and not cleanable:
                 conversation_count += 1
-            elif disp.bucket == "dirty":
+            elif not skip_reason and disp.bucket == "dirty":
                 dirty_count += 1
-            elif disp.bucket == "wip":
+            elif not skip_reason and disp.bucket == "wip":
                 wip_count += 1
 
         if cleanable:
@@ -14581,19 +15973,25 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     cleaned_count = 0
     try:
         for rec, info in to_clean:
-            yaml_path = tracking_path / f"{rec.worktree_id}.yaml"
-            if yaml_path.exists():
-                latest = tracking.load_record(yaml_path)
-                if _hosted_session_blocks_cleanup(latest):
-                    output.warn(
-                        f"Skipping {rec.worktree_id}: active hosted Copilot session in use"
-                    )
-                    continue
-            print(f"Cleaning {rec.worktree_id} ({info.state.value})...")
-            f, warns = _reap_worktree(rec, info, repo, tracking_path)
-            for w in warns:
+
+            def _reap_cb(latest_rec, latest_info):
+                return _reap_worktree(latest_rec, latest_info, repo, tracking_path)
+
+            result = _revalidate_cleanup_safety(
+                rec.worktree_id,
+                repo=repo,
+                tracking_path=tracking_path,
+                include_unused=args.include_unused,
+                include_conversations=include_conversations,
+                reap=_reap_cb,
+            )
+            if not result.cleanable:
+                output.warn(f"Skipping {rec.worktree_id}: {result.reason}")
+                continue
+            print(f"Cleaning {rec.worktree_id} ({result.info.state.value})...")
+            for w in result.warnings:
                 output.warn(w)
-            failures += f
+            failures += result.failures
             cleaned_count += 1
 
         # Prune stale worktree entries
@@ -14814,9 +16212,7 @@ def _sync_one_record(
     info = _apply_tracking_override(rec, info)
     if info.state == git_ops.WorktreeState.ACTIVE:
         return {
-            "worktree_id": rec.worktree_id,
-            "updated": False,
-            "reason": "active",
+            "worktree_id": rec.worktree_id, "updated": False, "reason": "active",
             "behind": info.behind,
         }
     ff = git_ops.fast_forward_worktree(
@@ -14826,9 +16222,7 @@ def _sync_one_record(
         do_fetch=False,
     )
     return {
-        "worktree_id": rec.worktree_id,
-        "updated": ff.updated,
-        "reason": ff.reason,
+        "worktree_id": rec.worktree_id, "updated": ff.updated, "reason": ff.reason,
         "behind": ff.behind,
     }
 
@@ -14877,9 +16271,7 @@ def finalize_one(wt_id: str) -> dict:
         config = cfg.load_config()
     except Exception as e:
         return {
-            "worktree_id": wt_id,
-            "success": False,
-            "ok": False,
+            "worktree_id": wt_id, "success": False, "ok": False,
             "reason": str(e) or "config load failed",
         }
     wt_id = _resolve_worktree_id(wt_id)
@@ -14889,9 +16281,7 @@ def finalize_one(wt_id: str) -> dict:
             success = fin.validate_and_finalize(wt_id, config)
     except Exception as e:
         return {
-            "worktree_id": wt_id,
-            "success": False,
-            "ok": False,
+            "worktree_id": wt_id, "success": False, "ok": False,
             "reason": (str(e) or type(e).__name__),
         }
     status = "finalized"
@@ -14951,6 +16341,16 @@ def cmd_sync(args: argparse.Namespace) -> int:
             git_ops.fetch(repo.remote, cwd=repo.anchor)
         except Exception:
             pass
+        else:
+            # worktree-finality-and-obligations Phase 9: this IS the
+            # "sync" operation-triggered freshness signal -- record it for
+            # every distinct repo represented among the records just synced
+            # (normally exactly one, since tracking_dir() is per-project),
+            # so the closure descriptor's upstream_containment fact reflects
+            # this fetch immediately rather than waiting for the next
+            # periodic sweep.
+            for _synced_repo in {r.repo for r in records if r.repo}:
+                tracking.record_repo_fetch_confirmed(_synced_repo)
 
     session_ctx = sessions.scan_sessions_fast(records)
     active_paths = _build_active_paths(records, session_ctx)
@@ -14975,7 +16375,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
 
 def _profiles_host() -> tuple[str, str]:
     """This machine's (display_name, env_label) in roster vocabulary."""
-    from .picker_tui import roster
+    from . import roster
 
     return roster.local_host()
 
@@ -15007,7 +16407,7 @@ def cmd_profiles(args: argparse.Namespace) -> int:
             # cross-machine), computed from the roster candidates. The Picker
             # keys off ``managed`` (False) and renders the default itself, so
             # these targets are for human/JSON legibility.
-            from .picker_tui import roster
+            from . import roster
 
             candidates = [
                 profiles_mod.TargetSel(m, e, kind)
@@ -15249,88 +16649,60 @@ def _terminal_fragment_doctor(machine: str, current: str | None) -> int:
 
 
 def cmd_picker(args: argparse.Namespace) -> int:
-    """Inspect the Textual picker for this machine.
-
-    The Textual picker is the **only supported picker, with no opt-out**.
-    ``status`` reports whether it's effectively in use here (it always is,
-    unless this session is blocked by the Windows-over-SSH ConPTY keyboard
-    limitation, in which case the legacy ANSI picker is used automatically).
-    ``mock`` launches the picker in the mock dev sandbox.
-    """
-    from . import picker_tui
-
+    """Inspect or hand off to the standalone Worktree Manager picker."""
     action = getattr(args, "picker_action", "status")
     as_json = getattr(args, "json", False)
+    mgr = _usable_worktree_manager()
 
     if action == "mock":
-        # Explicit dev sandbox: launch the picker in mock mode -- real data is
-        # shown but every mutating action (Cleanup / Sync / Stop / profiles
-        # Apply) is simulated with no side effects. This is the ONLY sanctioned
-        # way to run the picker's mock behaviors; a normal launch is always
-        # real. Prints the resulting launch decision instead of acting on it.
-        # ``--local`` forces the local-only source (data_local) instead of the
-        # multi-machine SSH source -- needed for an isolated sandbox preview,
-        # where no mesh repo/roster is resolvable (data_ssh would raise).
+        if not mgr:
+            return cmd_manager_install_trigger(cfg.active_project())
+        subcommand = ["picker", "mock"]
+        project = cfg.active_project()
+        if project:
+            subcommand.append(project)
         if getattr(args, "picker_local", False):
-            live = False
-        else:
-            live = not _in_ssh_session()
-        decision = picker_tui.run_tui_picker(live=live, mock_mode=True)
-        if as_json:
-            _json_output({"mock": True, "decision": decision})
-        else:
-            output.info(f"mock picker exited · decision: {decision!r}")
-        return 0
+            subcommand.append("--local")
+        return _exec_worktree_manager(mgr, None, subcommand=subcommand)
 
     if action == "screenshot":
-        # Deterministic headless capture of the picker for auditing: render the
-        # current worktree state to an SVG "screenshot" (or a character grid)
-        # with no live terminal and no human watching. Realizes visions/picker
-        # Features/auditable-testable-rendering.
-        import sys as _sys
-
-        from .picker_tui import capture as _capture
-
-        live = bool(getattr(args, "live", False))
-        fmt = getattr(args, "picker_format", "svg")
+        if not mgr:
+            return cmd_manager_install_trigger(cfg.active_project())
+        subcommand = [
+            "picker",
+            "screenshot",
+        ]
+        project = cfg.active_project()
+        if project:
+            subcommand.append(project)
+        subcommand += ["--format", getattr(args, "picker_format", "svg")]
         out = getattr(args, "out", None)
-        pivot = getattr(args, "picker_pivot", None)
-        wait_pivot = float(getattr(args, "picker_wait", 0.0) or 0.0)
-        if live:
-            from .picker_tui import data_ssh as _source
-        else:
-            from .picker_tui import data_local as _source
-        caps = _capture.capture(
-            _source,
-            live=live,
-            pivot=pivot,
-            wait_pivot=wait_pivot,
-        )
-        content = caps[fmt]
         if out:
-            Path(out).write_text(content, encoding="utf-8")
-            if as_json:
-                _json_output({"screenshot": out, "format": fmt, "bytes": len(content)})
-            else:
-                output.ok(f"picker {fmt} screenshot -> {out} ({len(content)} bytes)")
-        else:
-            _sys.stdout.write(content)
-            if not content.endswith("\n"):
-                _sys.stdout.write("\n")
-        return 0
+            subcommand += ["--out", out]
+        if getattr(args, "live", False):
+            subcommand.append("--live")
+        pivot = getattr(args, "picker_pivot", None)
+        if pivot:
+            subcommand += ["--pivot", pivot]
+        wait_pivot = float(getattr(args, "picker_wait", 0.0) or 0.0)
+        if wait_pivot > 0:
+            subcommand += ["--wait", str(wait_pivot)]
+        return _exec_worktree_manager(mgr, None, subcommand=subcommand)
 
     # status
-    ssh_blocked = _new_picker_blocked_by_ssh()
-    effective = not ssh_blocked
+    effective = mgr is not None
     if as_json:
-        _json_output({"effective": effective, "ssh_fallback": ssh_blocked})
+        _json_output(
+            {
+                "effective": effective,
+                "manager_available": effective,
+                "bundled": False,
+                "install_trigger": not effective,
+            }
+        )
     else:
         print(f"effective:    {str(effective).lower()}")
-        if ssh_blocked:
-            print(
-                "              (Windows-over-SSH auto-fallback to the legacy "
-                "ANSI picker; not user-configurable)"
-            )
+        print("owner:        Worktree Manager" if effective else "owner:        install trigger")
     return 0
 
 
@@ -15967,7 +17339,7 @@ def cmd_repair(args: argparse.Namespace) -> int:
         output.header("Repairing project binstubs")
         try:
             inst.reconcile_binstubs()
-        except Exception as e:  # noqa: BLE001 -- report, don't abort the other target
+        except Exception as e:
             output.err(f"Binstub repair failed: {e}")
             rc = 1
 
@@ -16270,19 +17642,10 @@ def cmd_register(args: argparse.Namespace) -> int:
     except Exception:
         pass
 
-    # Adoption owns repository-local machine wiring. Seed source overrides after
-    # the repo registry entry exists, so exact-name marketplace checkouts can be
-    # resolved without guessing from the source root.
-    try:
-        registration_fast_forward = cfg.load_config(config_path).auto_fast_forward
-    except Exception:
-        registration_fast_forward = False
-    _reconcile_marketplaces_for_checkout(
-        repo_dir,
-        ensure_ignored=True,
-        refresh_repositories=True,
-        fast_forward_repositories=registration_fast_forward,
-    )
+    # Adoption owns repository-local machine wiring. Committed relative-path
+    # directory marketplace sources resolve live against whatever checkout is
+    # active, so no local source-override seeding is needed here
+    # (#marketplace-override-retirement).
 
     # Refresh Windows Terminal profiles if installed via install.ps1
     if plat == "windows":
@@ -16580,7 +17943,7 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
     # each was re-registered. `update` owns fleet-wide binstub health.
     try:
         inst.reconcile_binstubs()
-    except Exception as e:  # noqa: BLE001 -- a stub refresh must never fail update
+    except Exception as e:
         output.warn(f"Binstub reconcile skipped: {e}")
 
     # Step 4 -- update registered sibling modules (agent-bridge, etc.)
@@ -17776,6 +19139,7 @@ def cmd_machine_context(args: argparse.Namespace) -> int:
 _GET_KEYS: dict[str, str] = {
     "repo-dir": "Anchor repo directory",
     "worktree-dir": "Current worktree root (the worktree you are in; empty if not inside one)",
+    "worktree-id": "Current worktree id (empty if not inside one)",
     "worktree-state-dir": "Per-worktree or adopted-anchor state directory outside the repo checkout",
     "worktrees-root": "Parent directory that holds all worktrees (formerly 'worktree-dir')",
     "src-dir": "Source root (parent of repos)",
@@ -17799,28 +19163,10 @@ _GET_KEYS: dict[str, str] = {
 }
 
 
-def _resolve_repo_remote(config: cfg.Config, repo: cfg.RepoConfig) -> str:
-    """Canonical remote URL for the active repo -- the device-independent key.
 
-    Prefers the **registry** remote for this project (curated and consistent
-    across machines, so a shared consumer keys every device the same way), and
-    falls back to the anchor's ``git remote get-url origin`` when the project is
-    not in the repos registry. Returns ``""`` when neither resolves.
-    """
-    from . import repos
-
-    try:
-        entry = repos.find_repo(config.repo_name)
-        if entry and entry.remote:
-            return entry.remote
-        result = git_ops.git("remote", "get-url", "origin", cwd=repo.anchor, check=False)
-        if result.returncode == 0:
-            return result.stdout.strip()
-    except OSError:
-        # anchor may not exist yet (e.g. a freshly-configured project); the
-        # remote is simply unknown rather than an error.
-        pass
-    return ""
+# Moved to pr_config.py (module-size split); re-exported here for existing
+# unqualified call sites and back-compat test access.
+_resolve_repo_remote = pr_config._resolve_repo_remote
 
 
 def _resolve_lease_origin() -> str:
@@ -17844,32 +19190,10 @@ def _resolve_lease_origin() -> str:
         return ""
 
 
-def _pr_flow_profile(repo: cfg.RepoConfig):
-    """Derive this repo's PR-flow profile from its config (pure, no network).
 
-    Wraps :func:`pr_contract.classify_pr_flow` with the repo's ``pr`` binding so
-    every surface (``get pr-profile``, ``pr-status``, ``pr-merge``) reports the
-    same profile: ``direct`` | ``pr-human-merge`` | ``pr-agent-merge`` |
-    ``pr-self-merge``.
-    """
-    from . import pr_contract as pc
-
-    prc = repo.pr
-    return pc.classify_pr_flow(
-        enabled=prc.enabled,
-        required=prc.required,
-        provider=prc.provider,
-        automerge_label=getattr(prc, "automerge_label", ""),
-        reviewer=getattr(prc, "reviewer", ""),
-        review_blocking=getattr(prc, "review_blocking", False),
-        review_latency_hint=getattr(prc, "review_latency_hint", ""),
-        self_approve=getattr(prc, "self_approve", False),
-        merge_actor=getattr(prc, "merge_actor", ""),
-        conflict_retriggers_review=getattr(prc, "conflict_retriggers_review", True),
-        branch_update_strategy=getattr(prc, "branch_update_strategy", "rebase"),
-        merge_strategy=getattr(prc, "merge_strategy", "squash"),
-        prefer_auto_merge=getattr(prc, "prefer_auto_merge", True),
-    )
+# Moved to pr_config.py (module-size split); re-exported here for existing
+# unqualified call sites and back-compat test access.
+_pr_flow_profile = pr_config._pr_flow_profile
 
 
 def _pr_reminder_for(
@@ -18008,6 +19332,7 @@ def cmd_get(args: argparse.Namespace) -> int:
     values = {
         "repo-dir": repo.anchor,
         "worktree-dir": current_worktree,
+        "worktree-id": wt_id or "",
         "worktree-state-dir": (str(state_dir) if state_dir is not None else ""),
         "worktrees-root": repo.worktree_root,
         "src-dir": config.srcroot,
@@ -18110,6 +19435,7 @@ _WORKTREE_VERBS = {
     "create": "create",
     "run": "run",
     "claims": "claims",
+    "follow-ups": "follow-ups",
     "claimant-liveness": "claimant-liveness",
     "remove-system": "remove-system",
     "conclude-disposable": "conclude-disposable",
@@ -18622,7 +19948,7 @@ def _repos_usage() -> None:
     print(f"Usage: {project} repos <command>")
     print()
     print("Commands:")
-    print("  list [--class reference|singleton|worktree]   List known repositories")
+    print("  list [--class reference|singleton|worktree|knowledge]   List known repositories")
     print("  find <name>                         Resolve a repo to its local path")
     print("  add <name> <path>                   Register a repo at a known path")
     print("     [--class C] [--remote URL] [--default-branch B]")
@@ -18650,6 +19976,9 @@ def _repos_usage() -> None:
     print("  reference   read-only; resolve/clone/index only; never edited")
     print("  singleton   single anchor checkout; no worktree isolation")
     print("  worktree    full agent-worktrees lifecycle; concurrent-flow safe")
+    print("  knowledge   worktree-capable, but only as another project's paired")
+    print("              '-k' companion -- never driven directly (see")
+    print("              RepoConfig.knowledge_only)")
     print()
     print("Examples:")
     print(f"  {project} repos list")
@@ -18814,7 +20143,7 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
         if len(rest) < 2:
             output.err(
                 "Usage: repos add <name> <path> "
-                "[--class reference|singleton|worktree] [--remote URL] "
+                "[--class reference|singleton|worktree|knowledge] [--remote URL] "
                 "[--default-branch B] [--account LOGIN] [--tags a,b] "
                 "[--contributing PATH] [--agent|--no-agent]"
             )
@@ -19880,93 +21209,36 @@ def cmd_knowledge_dispatch(argv: list[str]) -> int:
     return 0
 
 
-def _checkout_root(path: str | Path | None) -> Path | None:
-    """Return the actual checkout root, preserving linked-worktree identity."""
-    target = Path(path).resolve() if path else Path.cwd()
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(target), "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            timeout=5,
-        )
-    except Exception:
-        return None
-    raw_root = result.stdout.strip()
-    if result.returncode != 0 or not raw_root:
-        return None
-    try:
-        return Path(os.fsdecode(raw_root)).resolve()
-    except OSError:
-        return None
-
-
 def cmd_reconcile_marketplaces(args: argparse.Namespace) -> int:
-    """Reconcile trusted local marketplace sources for one repo checkout."""
-    cwd = args.cwd
+    """Deprecated no-op compatibility shim for the retired ``reconcile-marketplaces``
+    command (#2722).
+
+    Local-checkout marketplace source overrides were retired entirely --
+    nothing produces or consumes ``_agentWorktreesMarketplaceOverrides``
+    markers anymore (see ``_migrate_legacy_marketplace_overrides``). This
+    shim exists ONLY to bridge the upgrade window: a launch already in
+    flight when the runtime updates (its ``launch-session.ps1``/``.sh``
+    already read into the shell process before the update lands), or a
+    stale ``marketplace-overrides.ps1``/``.sh`` left behind under a
+    machine's ``~/.agent-worktrees/bin/`` by a pre-#2722 install that a
+    later install hasn't overwritten/pruned yet, can still invoke this
+    subcommand. Without it, either caller hits the catch-all "Unknown
+    subcommand" error and -- in the launch-session.ps1 case -- aborts the
+    entire session launch. Accepts the retired flags, does nothing, and
+    always succeeds. Safe to delete once enough versions have shipped that
+    no pre-#2722 caller can still be invoking it.
+    """
     if args.stdin:
         try:
-            payload = json.loads(sys.stdin.read() or "{}")
-        except (OSError, ValueError):
-            payload = {}
-        if isinstance(payload, dict) and isinstance(payload.get("cwd"), str):
-            cwd = payload["cwd"]
-
-    repo = _checkout_root(cwd)
-    if repo is None:
-        summary = {"action": "no-op", "changed": False, "reason": "no-repo"}
-    else:
-        from . import marketplace_overrides
-
-        try:
-            fast_forward_repositories = False
-            if not args.session_start:
-                try:
-                    project = _reverse_lookup_project(repo)
-                    config_path = cfg.project_dir(project) / "config.yaml" if project else None
-                    fast_forward_repositories = (
-                        cfg.load_config(config_path).auto_fast_forward if config_path else True
-                    )
-                except Exception:
-                    fast_forward_repositories = True
-            summary = marketplace_overrides.reconcile(
-                repo,
-                ensure_ignored=args.ensure_ignored,
-                refresh_repositories=not args.session_start,
-                fast_forward_repositories=fast_forward_repositories,
-            )
-        except marketplace_overrides.MarketplaceOverrideError as exc:
-            if args.session_start:
-                print("{}")
-                return 0
-            summary = {"action": "error", "changed": False, "error": str(exc)}
-            if args.json:
-                print(json.dumps(summary, indent=2))
-            else:
-                print(
-                    f"Marketplace override reconciliation failed: {exc}",
-                    file=sys.stderr,
-                )
-            return 3
-
+            sys.stdin.read()
+        except OSError:
+            pass
     if args.session_start:
-        if summary.get("changed"):
-            path = summary.get("settings_local", "settings.local.json")
-            message = (
-                "Agent Worktrees updated local plugin marketplace source "
-                f"overrides in {path}. Restart Copilot CLI for the new plugin "
-                "sources to take effect."
-            )
-            print(json.dumps({"additionalContext": message}))
-        else:
-            print("{}")
+        print("{}")
     elif args.json:
-        print(json.dumps(summary, indent=2))
+        print(json.dumps({"action": "no-op", "changed": False, "reason": "retired"}, indent=2))
     else:
-        if summary["action"] == "no-op":
-            print("No repository checkout was resolved.")
-        else:
-            action = "Updated" if summary["changed"] else "Verified"
-            print(f"{action} marketplace overrides: {summary['settings_local']}")
+        print("Marketplace source overrides were retired; nothing to reconcile.")
     return 0
 
 
@@ -20514,7 +21786,13 @@ def cmd_related_dispatch(argv: list[str]) -> int:
             adopted=adopted,
             base_repo=base_repo,
         )
+        # The registry key (``resn.name``) can be an arbitrary alias, not the
+        # ``owner/name`` slug `gh`/`repos gh` actually expect as a repo target
+        # -- derive the real slug from the remote so the reminder below never
+        # emits a command that would resolve the wrong account.
+        _gh_slug = repos.github_slug(reg.remote) if (reg and reg.remote) else None
         if json_out:
+            _acct_json = repos.resolve_account(reg)
             _json_output(
                 {
                     "name": resn.name,
@@ -20523,7 +21801,20 @@ def cmd_related_dispatch(argv: list[str]) -> int:
                     "available_here": resn.available_here,
                     "editing_model": resn.editing_model,
                     "base_repo": base_repo,
-                    "account": repos.resolve_account(reg),
+                    "account": _acct_json,
+                    "account_routing_reminder": (
+                        (
+                            f"Route every gh/API operation for {_gh_slug} through "
+                            f"`agent-worktrees repos gh {_gh_slug} -- <gh args>` "
+                            f"-- never a bare `gh <cmd>` or `gh auth switch`."
+                        ) if _acct_json and _gh_slug else (
+                            f"Route every gh/API operation for this repo through "
+                            f"`agent-worktrees repos gh <owner/name> -- <gh args>` "
+                            f"(resolve the exact owner/name slug first; the "
+                            f"registry name '{resn.name}' may not match it) -- "
+                            f"never a bare `gh <cmd>` or `gh auth switch`."
+                        ) if _acct_json else None
+                    ),
                     "ownership": related.effective_ownership(entry),
                     "owner": entry.owner,
                     "delegate_via": resn.delegate_via,
@@ -20555,6 +21846,29 @@ def cmd_related_dispatch(argv: list[str]) -> int:
         if _acct:
             _asrc = "explicit" if (reg and reg.account) else "derived"
             print(f"  account:  {_acct} ({_asrc})")
+            if _gh_slug:
+                output.warn(
+                    f"This repo resolves to account '{_acct}', which may "
+                    f"differ from the machine's ambient `gh auth` default. "
+                    f"Route every `gh`/API operation for it through "
+                    f"`agent-worktrees repos gh {_gh_slug} -- <gh args>` (or "
+                    f"`repos gh -- <gh args>` from inside its checkout) -- "
+                    f"never a bare `gh <cmd>` or `gh auth switch` (the active "
+                    f"account is machine-global and racy). Treat a wrapper "
+                    f"warning like `could not mint a gh token ... using "
+                    f"ambient auth` as a failure to repair before composing "
+                    f"or posting."
+                )
+            else:
+                output.warn(
+                    f"This repo resolves to account '{_acct}', which may "
+                    f"differ from the machine's ambient `gh auth` default. "
+                    f"Resolve its exact `owner/name` slug (the registry name "
+                    f"'{resn.name}' may not match it) and route every "
+                    f"`gh`/API operation through `agent-worktrees repos gh "
+                    f"<owner/name> -- <gh args>` -- never a bare `gh <cmd>` "
+                    f"or `gh auth switch`."
+                )
         if resn.delegate_via:
             print(f"  delegate: {resn.delegate_via}")
         print(f"  machine:  {current_machine or '(unknown)'}")
@@ -20753,9 +22067,7 @@ def plan_pre_launch() -> dict:
                 (_manifest_data or {}).get("source") or {}
             ).get("kind")
             if _source_kind == "marketplace" and aw_plugin_dir is not None:
-                staleness = svc.check_marketplace_staleness(
-                    wm_manifest, aw_plugin_dir
-                )
+                staleness = svc.check_marketplace_staleness(wm_manifest, aw_plugin_dir)
             else:
                 staleness = svc.check_staleness(wm_manifest, repo_dir)
         if staleness != "current":
@@ -21073,6 +22385,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
+    from . import pr_cli, session_tracking_cli
+
     # resolve (emit JSON launch plan, then exit -- shell handles execution)
     p = sub.add_parser("resolve", help="Resolve launch plan as JSON (for shell wrappers)")
     p.add_argument("--dry-run", action="store_true")
@@ -21170,14 +22484,6 @@ def build_parser() -> argparse.ArgumentParser:
         "bridge spawn, the dispatching (caller) worktree's ref.",
     )
     p.add_argument("copilot_args", nargs="*", default=[])
-
-    p = sub.add_parser(
-        "session-backend",
-        help="Manage the externally hosted session bound to a worktree",
-    )
-    p.add_argument("action", choices=["ensure", "status", "dispose"])
-    p.add_argument("--worktree-id", required=True)
-    p.add_argument("--json", action="store_true")
 
     p = sub.add_parser(
         "execution-leg",
@@ -21346,6 +22652,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         dest="no_attribution",
         help="Omit source-worktree attribution even when the repo enables pr.source_attribution",
+    )
+    p.add_argument(
+        "--confirm-fork",
+        action="store_true",
+        dest="confirm_fork",
+        help="Confirm setting up + publishing through a personal fork, when "
+        "this repo's resolved role requires it (pr.fork/pr.roles). Without "
+        "this flag, create-pr stops and asks for confirmation instead of "
+        "forking/pushing anywhere.",
     )
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
@@ -21564,6 +22879,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Omit the worktree title; show only the state block",
     )
+    p.add_argument(
+        "--json",
+        action="store_true",
+        help=(
+            "Emit structured JSON (id/path/repo/branch/state/ahead/behind/"
+            "dirty/closure) instead of the rendered bar string. Same cheap, "
+            "non-daemon single-worktree classify pass -- unlike `list --json "
+            "--classify --worktree-id`, which still pays the resident "
+            "classify daemon's whole-fleet negotiation cost."
+        ),
+    )
 
     # status-context (left status-bar segment: machine / env / repo:id)
     p = sub.add_parser(
@@ -21677,6 +23003,22 @@ def build_parser() -> argparse.ArgumentParser:
         "clean quit) and report whether it exited",
     )
     p.add_argument(
+        "--retry",
+        action="store_true",
+        help="Retry mode: refocus an already-live successor pane for this "
+        "worktree's latest handoff, otherwise fall back to the ordinary "
+        "spawn attempt",
+    )
+    p.add_argument(
+        "--headless",
+        action="store_true",
+        help="Spawn mode: launch the successor as a fully detached background "
+        "process with no mux at all (no pane, no attach target), instead of "
+        "requiring an already-live mux session for this worktree. For hosts "
+        "with no multiplexer present -- e.g. a coordinator-driven fallback "
+        "launch with no human attaching to watch it.",
+    )
+    p.add_argument(
         "--successor-verified",
         action="store_true",
         help="Retire mode: record that the successor invoked the "
@@ -21702,6 +23044,27 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--json", action="store_true", help="JSON output mode (stdout is JSON only; always on)"
     )
+    # handoffs-check (on-demand diagnostic: is a confirmed cutover's predecessor
+    # pane still alive and un-retired? optionally finish retiring it now)
+    p = sub.add_parser(
+        "handoffs-check",
+        help="Diagnose (and with --execute, finish) a stalled handoff-cutover "
+        "predecessor retirement -- the on-demand counterpart to the resident "
+        "status-monitor's automatic sweep",
+    )
+    g = p.add_mutually_exclusive_group(required=True)
+    g.add_argument(
+        "--worktree-id", dest="worktree_id", default=None, help="Check only this worktree"
+    )
+    g.add_argument(
+        "--all", action="store_true", help="Check every tracked worktree in this project"
+    )
+    p.add_argument(
+        "--execute",
+        action="store_true",
+        help="Retire each found stale predecessor now (default: read-only report)",
+    )
+    p.add_argument("--json", action="store_true", help="JSON output")
     # embody (D5: agent-initiated CLI embodiment -- detached mux+Copilot spawn)
     p = sub.add_parser(
         "embody",
@@ -21878,6 +23241,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--note", default="", help="with add: an optional human label for the claim")
     p.add_argument(
+        "--status",
+        default=None,
+        help="with mirror-status: the disposition to mirror onto the "
+        "claim's cross-machine discovery store (e.g. active|at-rest|released)",
+    )
+    p.add_argument(
+        "--holder",
+        default=None,
+        dest="claim_holder",
+        help="with mirror-status: an opaque holder identity for the mirrored "
+        "lease (default: 'agent-dispatch')",
+    )
+    p.add_argument(
         "--released",
         action="store_true",
         help="with settle: mark the claim released rather than at-rest",
@@ -21912,6 +23288,47 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--reason", default="", help="with handoff decline/cancel: required explanation"
+    )
+    p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
+
+    # follow-ups (itemized worktree-local obligation ledger, replacing the
+    # boolean-only `follow_up` flag -- worktree-finality-and-obligations Ph3)
+    p = sub.add_parser(
+        "follow-ups",
+        help="List/add/resolve/dismiss itemized follow-up obligations on a "
+        "worktree. Defaults to the current worktree; pass an id for "
+        "another. An open (or pending-transfer) item counts as an open "
+        "obligation the same way the legacy --follow-up flag did.",
+    )
+    p.add_argument(
+        "target",
+        nargs="*",
+        default=None,
+        help="[worktree_id] to list, OR 'add <summary>' to journal a new "
+        "open follow-up, OR 'resolve <id>' to mark one done, OR "
+        "'dismiss <id>' to mark one explicitly not requiring action",
+    )
+    p.add_argument(
+        "--ref",
+        action="append",
+        default=None,
+        dest="follow_up_refs",
+        metavar="KIND:VALUE",
+        help="with add: a typed objective reference (kind: resource-claim | "
+        "dispatch-task | issue | pull-request | file | effort | other), "
+        "repeatable",
+    )
+    p.add_argument(
+        "--result-ref", default=None, dest="follow_up_result_ref",
+        help="with resolve: an optional reference to the result",
+    )
+    p.add_argument(
+        "--reason", default="", dest="follow_up_reason",
+        help="with dismiss: required explanation for why no action is needed",
+    )
+    p.add_argument(
+        "--worktree", default=None, dest="follow_up_worktree",
+        help="the owner worktree (default: current)",
     )
     p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
 
@@ -22034,6 +23451,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p = sub.add_parser("remove-system", help="Remove a system worktree by id")
     p.add_argument("worktree_id", help="Worktree id to remove")
+    # --force is not advertised: resolve the refusal instead of reaching for it.
+    p.add_argument("--force", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
 
     # cleanup
@@ -22376,23 +23795,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Repair only project binstubs (default: both terminal and binstubs)",
     )
 
-    # picker (Textual picker is the only supported picker; no opt-out)
+    # picker (compatibility shim onto the standalone Worktree Manager)
     p = sub.add_parser(
         "picker",
-        help="Inspect the Textual worktree picker for this machine (no opt-out)",
+        help="Inspect or hand off to the standalone Worktree Manager picker",
     )
     p.add_argument(
         "picker_action",
         choices=["status", "mock", "screenshot"],
         nargs="?",
         default="status",
-        help="the Textual picker is the only supported picker, everywhere, "
-        "with no opt-out; status (default) reports whether it's effectively "
-        "in use here (always, unless this session hits the Windows-over-SSH "
-        "ConPTY keyboard limitation, which auto-falls-back to the legacy "
-        "picker); mock launches the picker in the mock dev sandbox (real "
-        "data, simulated actions, no side effects); screenshot renders the "
-        "picker headlessly and captures it for auditing",
+        help="status (default) reports whether the standalone Worktree Manager "
+        "owns the picker seam here; mock and screenshot hand off to that "
+        "manager when it is installed, otherwise the install trigger is shown",
     )
     p.add_argument("--json", action="store_true", help="Emit a JSON result")
     p.add_argument(
@@ -22645,42 +24060,10 @@ def build_parser() -> argparse.ArgumentParser:
     # git -- dispatched pre-argparse (see cmd_git_dispatch)
     sub.add_parser("git", help="Git collaboration primitives (run 'git' for usage)")
 
-    # pr-watch / pr -- dispatched pre-argparse (see cmd_pr_watch_dispatch /
-    # cmd_pr_dispatch). Registered here only so they surface in --help.
-    sub.add_parser("pr-watch", help="Block until a PR moves (run 'pr-watch' for usage)")
-    sub.add_parser(
-        "pr-merge", help="Signal merge consent on an approved PR (run 'pr-merge' for usage)"
-    )
-    sub.add_parser(
-        "pr-research", help="Inspect a repo's provider settings -> policy matrix (read-only)"
-    )
-    sub.add_parser("pr", help="Author-side PR command family (run 'pr' for usage)")
+    pr_cli.add_parsers(sub)
 
     # pre-launch (two-pass self-update protocol)
     sub.add_parser("pre-launch", help="Check bootstrap staleness (JSON output)")
-
-    # reconcile-marketplaces (registered local checkout source overrides)
-    sp = sub.add_parser(
-        "reconcile-marketplaces",
-        help="Prefer exact-name registered local plugin marketplace checkouts",
-    )
-    sp.add_argument(
-        "--cwd", default=None, help="Path inside the target checkout (defaults to cwd)"
-    )
-    sp.add_argument(
-        "--stdin", action="store_true", help="Read a sessionStart payload and use its cwd"
-    )
-    sp.add_argument(
-        "--session-start",
-        action="store_true",
-        help="Emit sessionStart JSON and request restart when changed",
-    )
-    sp.add_argument(
-        "--ensure-ignored",
-        action="store_true",
-        help="Add the local settings path to Git info/exclude if needed",
-    )
-    sp.add_argument("--json", action="store_true", help="Emit the reconciliation summary as JSON")
 
     # stage-update (background marketplace download; #1430 stage-then-join)
     sp = sub.add_parser(
@@ -22692,6 +24075,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Status file path (defaults to ~/.agent-worktrees/updater-status.json)",
     )
     sp.add_argument("--json", action="store_true", help="Echo the status dict to stdout")
+
+    # reconcile-marketplaces -- retired (#2722); kept as a no-op compatibility
+    # shim so a caller still running pre-upgrade script content (an in-flight
+    # launch, or a stale deployed marketplace-overrides.ps1/.sh) doesn't
+    # hard-fail with "Unknown subcommand" during the upgrade window.
+    sp = sub.add_parser(
+        "reconcile-marketplaces",
+        help="Deprecated no-op (local marketplace source overrides were retired)",
+    )
+    sp.add_argument("--cwd", default=None, help=argparse.SUPPRESS)
+    sp.add_argument("--stdin", action="store_true", help=argparse.SUPPRESS)
+    sp.add_argument("--session-start", action="store_true", help=argparse.SUPPRESS)
+    sp.add_argument("--ensure-ignored", action="store_true", help=argparse.SUPPRESS)
+    sp.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
 
     # reconcile-plugins (repo-configured plugin payload + runtime reconcile)
     sp = sub.add_parser(
@@ -23088,213 +24485,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum exact session projection relations to inspect (default: 256)",
     )
 
-    # list-sessions -- enumerate a worktree's Copilot sessions as JSON
-    sp = sub.add_parser(
-        "list-sessions",
-        help="List a worktree's Copilot sessions with metadata (JSON)",
-    )
-    sp.add_argument(
-        "--worktree",
-        "--worktree-id",
-        dest="worktree_id",
-        default=None,
-        help="Worktree ID to scope to (default: all worktrees)",
-    )
-    sp.add_argument(
-        "--all-projects",
-        action="store_true",
-        help="Enumerate sessions across every adopted project",
-    )
-    sp.add_argument(
-        "--json",
-        action="store_true",
-        help="Emit JSON (default; accepted for caller compatibility)",
-    )
-
-    # head-session -- a worktree's asserted head session + lifecycle state (JSON)
-    sp = sub.add_parser(
-        "head-session",
-        help="Show a worktree's asserted head (current) session + state (JSON)",
-    )
-    sp.add_argument(
-        "--worktree",
-        "--worktree-id",
-        dest="worktree_id",
-        required=True,
-        help="Worktree ID (full or 4-char suffix)",
-    )
-    sp.add_argument(
-        "--json",
-        action="store_true",
-        help="Emit JSON (default; accepted for caller compatibility)",
-    )
-
-    sp = sub.add_parser(
-        "worktree-lineage",
-        help="Show one worktree's authoritative bounded lineage graph (JSON)",
-    )
-    sp.add_argument(
-        "--worktree",
-        "--worktree-id",
-        dest="worktree_id",
-        required=True,
-        help="Worktree ID (full or unique suffix)",
-    )
-    sp.add_argument(
-        "--json", action="store_true", help="Emit JSON (the default; accepted for consistency)"
-    )
-
-    # conclude-session -- assert a session's conclusion (handed-off | concluded)
-    sp = sub.add_parser(
-        "conclude-session",
-        help="Assert a session concluded (handed-off|concluded); clears it as "
-        "head (JSON) without guessing a successor",
-    )
-    sp.add_argument(
-        "--worktree",
-        "--worktree-id",
-        dest="worktree_id",
-        required=True,
-        help="Worktree ID (full or 4-char suffix)",
-    )
-    sp.add_argument(
-        "--session",
-        "--session-id",
-        dest="session_id",
-        required=True,
-        help="Copilot session ID to conclude",
-    )
-    sp.add_argument(
-        "--state",
-        choices=["handed-off", "concluded"],
-        default="handed-off",
-        help="Conclusion kind (default: handed-off)",
-    )
-    sp.add_argument("--handoff-token", default=None, help="Stable token for the pending handoff")
-    sp.add_argument(
-        "--json",
-        action="store_true",
-        help="Emit JSON (default; accepted for caller compatibility)",
-    )
-
-    # conclude-disposable -- safely conclude an exact disposable CLI worker
-    sp = sub.add_parser(
-        "conclude-disposable",
-        help="Conclude an exact disposable CLI worker and optionally remove it",
-    )
-    sp.add_argument(
-        "--worktree",
-        "--worktree-id",
-        dest="worktree_id",
-        required=True,
-        help="Exact recorded worktree id (suffix inference is not allowed)",
-    )
-    sp.add_argument(
-        "--session",
-        "--session-id",
-        dest="session_id",
-        default=None,
-        help="Exact recorded Copilot session id, when available",
-    )
-    sp.add_argument(
-        "--policy",
-        choices=[
-            terminal_conclusion.DISPOSABLE_CLI_POLICY,
-            terminal_conclusion.DISPATCH_ATTEMPT_POLICY,
-        ],
-        required=True,
-        help="Explicit discard policy authorizing generated checkout reconciliation",
-    )
-    sp.add_argument(
-        "--reservation",
-        dest="reservation_key",
-        default=None,
-        help="Exact dispatch reservation required by dispatch-attempt policy",
-    )
-    sp.add_argument(
-        "--owner",
-        required=True,
-        help="Lifecycle owner recorded on the managed worktree",
-    )
-    sp.add_argument(
-        "--remove",
-        action="store_true",
-        help="After a successful safety verdict, immediately run exact-ID "
-        "managed teardown with fresh lifecycle and liveness checks",
-    )
-    sp.add_argument(
-        "--json",
-        action="store_true",
-        help="Emit JSON (the default; accepted for command-family consistency)",
-    )
-
-    # link-succession -- write the two-way predecessor<->successor handoff link
-    sp = sub.add_parser(
-        "link-succession",
-        help="Write the two-way predecessor<->successor link, conclude the "
-        "predecessor, and move the head to the successor (JSON)",
-    )
-    sp.add_argument(
-        "--worktree",
-        "--worktree-id",
-        dest="worktree_id",
-        required=True,
-        help="Worktree ID (full or 4-char suffix)",
-    )
-    sp.add_argument(
-        "--predecessor", required=True, help="The outgoing session ID (marked handed-off)"
-    )
-    sp.add_argument("--successor", required=True, help="The incoming session ID (the new head)")
-    sp.add_argument(
-        "--predecessor-state",
-        dest="predecessor_state",
-        choices=["handed-off", "concluded"],
-        default="handed-off",
-        help="Predecessor conclusion kind (default: handed-off)",
-    )
-    sp.add_argument("--handoff-token", default=None, help="Stable token for this succession link")
-    sp.add_argument(
-        "--json",
-        action="store_true",
-        help="Emit JSON (default; accepted for caller compatibility)",
-    )
-
-    # session-transcript -- emit a session's renderable events as JSON
-    sp = sub.add_parser(
-        "session-transcript",
-        help="Emit a Copilot session's renderable transcript events (JSON)",
-    )
-    sp.add_argument("session_id", help="Copilot session ID")
-    sp.add_argument(
-        "--json",
-        action="store_true",
-        help="Emit JSON (default; accepted for caller compatibility)",
-    )
-
-    # recent-messages -- a worktree's latest session's last N conversation turns
-    sp = sub.add_parser(
-        "recent-messages",
-        help="Show a worktree's latest session's last N conversation messages "
-        "(JSON) -- the read-side companion to the disposition summary",
-    )
-    sp.add_argument(
-        "--worktree",
-        "--worktree-id",
-        dest="worktree_id",
-        required=True,
-        help="Worktree ID (full or 4-char suffix)",
-    )
-    sp.add_argument(
-        "--limit",
-        type=int,
-        default=3,
-        help="How many of the most recent messages to return (default: 3)",
-    )
-    sp.add_argument(
-        "--json",
-        action="store_true",
-        help="Emit JSON (default; accepted for caller compatibility)",
-    )
+    session_tracking_cli.add_parsers(sub)
 
     # anchor-check (anchor repo hygiene)
     sp = sub.add_parser(
@@ -23375,6 +24566,18 @@ def build_parser() -> argparse.ArgumentParser:
         "rows (destructive; guarded by age/lock/current/"
         "registered).",
     )
+    sp.add_argument(
+        "--prune-pivots",
+        action="store_true",
+        dest="prune_pivots",
+        help="With --fix, also delete stale Picker pivot manifest "
+        "files (duplicate/identity-mismatch/missing-target/"
+        "invalid-entry) once a live, correct manifest for the "
+        "same plugin already exists elsewhere in the registry "
+        "(destructive; never touches an operator-authored or "
+        "indeterminate manifest -- explicit opt-in, off by "
+        "default even with --fix).",
+    )
     sp.add_argument("--json", action="store_true", help="Emit the health report as JSON.")
     sp.add_argument(
         "--projection-budget",
@@ -23383,7 +24586,58 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum exact session projection relations to inspect (default: 256)",
     )
 
+    # hygiene -- detect/clean stale global-Python editable installs (#2726)
+    sp = sub.add_parser(
+        "hygiene",
+        help="Detect (and with --fix, remove) stale global-Python editable "
+        "installs left by a manual 'pip install -e .' against a worktree "
+        "checkout (see #2726). Machine-wide; no project context needed.",
+    )
+    sp.add_argument(
+        "--fix",
+        action="store_true",
+        help="Remove each finding (pip uninstall, falling back to deleting "
+        "the .pth file). Default: report only.",
+    )
+    sp.add_argument("--json", action="store_true", help="Emit the report as JSON.")
+
     return parser
+
+
+def cmd_hygiene(args: argparse.Namespace) -> int:
+    """``hygiene`` -- report (and with ``--fix``, remove) stale global-Python
+    editable installs pointing at a worktree checkout (#2726).
+
+    A manual ``pip install -e .`` run inside a worktree (instead of this
+    plugin's own installer, which always builds an isolated versioned venv)
+    leaves a ``.pth`` file in the interpreter's global ``site-packages``
+    permanently pinned to that one worktree, silently shadowing whatever
+    worktree a later ``import``/console-script invocation actually intends --
+    with no error, even after the worktree is deleted.
+    """
+    from . import hygiene
+
+    fix = getattr(args, "fix", False)
+    json_mode = getattr(args, "json", False)
+    report = hygiene.scan_and_clean(fix=fix)
+
+    if json_mode:
+        print(json.dumps(report, indent=2))
+        return 0
+
+    findings = report["findings"]
+    if not findings:
+        print("No stale global-Python editable installs found.")
+        return 0
+    for item in findings:
+        print(
+            f"{item['distribution']} {item['version']} -> {item['target']} "
+            f"[{item['status']}]"
+        )
+        print(f"  {item['pth']}")
+    if not fix:
+        print(f"\n{len(findings)} stale editable install(s) found. Re-run with --fix to remove.")
+    return 0
 
 
 def cmd_dev(args: argparse.Namespace) -> int:
@@ -23475,6 +24729,40 @@ def _emit_register_session_result(args: argparse.Namespace, result: dict) -> Non
         holder.append(text)
     else:
         print(text)
+
+
+def _emit_handoff_claim_stages(
+    wt_id: str, session_id: str, linked_handoff, *, launch_id: str | None = None,
+) -> None:
+    """Emit Stage 10 (claimed) always; Stage 11 (predecessor closing) only if
+    the resident-monitor's own retire flow hasn't already recorded it.
+
+    ``linked_handoff`` is ``tracking.register_session()``'s return: the
+    ``SessionHandoff`` it *just* linked (head authoritatively transferred), or
+    ``None`` for no fresh transfer. The monitor's `handoff_predecessor_retire`
+    (outcome="gone") is ALSO mapped to Stage 11 (Phase 1) and can fire before
+    this call site (retirement is gated on candidate presence, not on this
+    link) -- checking for it first prevents a double Stage-11 record for the
+    same token while still covering the common case where that outcome never
+    fires (observed "left-running", not "gone" -- Phase 4's open question).
+    """
+    if linked_handoff is None:
+        return
+    activity.log_event(
+        "handoff_successor_claimed", worktree_id=wt_id, session_id=session_id,
+        handoff_token=linked_handoff.token,
+        predecessor_session_id=linked_handoff.predecessor, launch_id=launch_id)
+    already_retired = any(
+        str(e.get("handoff_token") or "").strip() == linked_handoff.token
+        and e.get("outcome") == "gone"
+        for e in activity.read_events(worktree_id=wt_id, event="handoff_predecessor_retire",)
+    )
+    if not already_retired:
+        activity.log_event(
+            "handoff_pickup_confirmed_predecessor_closing", worktree_id=wt_id,
+            session_id=linked_handoff.predecessor, successor_session_id=session_id,
+            handoff_token=linked_handoff.token, launch_id=launch_id)
+    _maybe_emit_stage_13(wt_id, linked_handoff.token, launch_id=launch_id)
 
 
 def cmd_register_session(args: argparse.Namespace) -> int:
@@ -23589,14 +24877,13 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         pane_id = pane_id or mux_binding.get("pane_id")
         pid = pid or mux_binding.get("copilot_pid")
 
-    candidate_token = (
-        getattr(args, "handoff_candidate_token", None)
-        or (None if resident_environment else os.environ.get(_SESSION_HANDOFF_TOKEN))
-        or None
-    )
+    candidate_token = getattr(args, "handoff_candidate_token", None) or (
+        None if resident_environment else os.environ.get(_SESSION_HANDOFF_TOKEN)
+    ) or None
     candidate_associated = False
+    linked_handoff = None
     try:
-        tracking.register_session(
+        linked_handoff = tracking.register_session(
             wt_id,
             session_id,
             pid=pid,
@@ -23611,11 +24898,8 @@ def cmd_register_session(args: argparse.Namespace) -> int:
             with tracking._RecordLock(yaml_path):
                 candidate_record = tracking.load_record(yaml_path)
                 tracking.associate_handoff_candidate(
-                    candidate_record,
-                    candidate_token,
-                    session_id,
-                    associated_at=event_at,
-                    save=False,
+                    candidate_record, candidate_token, session_id,
+                    associated_at=event_at, save=False,
                 )
                 tracking.save_record(candidate_record, yaml_path)
             candidate_associated = True
@@ -23633,15 +24917,21 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         wt_id,
     )
     profile_assignment.maintain()
-    activity.log_event(
-        "session_started",
-        worktree_id=wt_id,
-        session_id=session_id,
-        launch_id=(
-            getattr(args, "launch_id", None)
-            or (None if resident_environment else os.environ.get("WORKTREE_LAUNCH_ID"))
-        ),
+    launch_id = (
+        getattr(args, "launch_id", None)
+        or (None if resident_environment else os.environ.get("WORKTREE_LAUNCH_ID"))
     )
+    activity.log_event(
+        "session_started", worktree_id=wt_id, session_id=session_id,
+        launch_id=launch_id)
+    if candidate_associated:
+        # Emitted after stage-4's session_started so the trace never
+        # appears to move backwards.
+        activity.log_event(
+            "handoff_successor_session_start_bound", worktree_id=wt_id,
+            session_id=session_id, handoff_token=candidate_token,
+            launch_id=launch_id)
+    _emit_handoff_claim_stages(wt_id, session_id, linked_handoff, launch_id=launch_id)
     # Re-seed the status-bar updater for this session's mux (best-effort, no-op
     # off-mux).  The launcher spawns it at psmux create/join, but an attached
     # long-lived session is never re-run through the launcher -- so after a
@@ -23872,7 +25162,7 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
             candidate_before_ack = None
 
     try:
-        tracking.register_session(
+        linked_handoff = tracking.register_session(
             wt_id,
             session_id,
             pid=getattr(args, "pid", None),
@@ -23895,6 +25185,10 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
         session_id=session_id,
         source="bind-session",
         pane=pane_id,
+    )
+    _emit_handoff_claim_stages(
+        wt_id, session_id, linked_handoff,
+        launch_id=os.environ.get("WORKTREE_LAUNCH_ID"),
     )
 
     # Record the bind in the worktree's own memory: a session-tagged `bind`
@@ -24359,10 +25653,9 @@ def _run_reciprocal_backfill(
     )
     return {
         "legacy_controllers": {
-            "candidates": len(controller_items),
+            "candidates": len(controller_items), "items": controller_items,
             "repaired": sum(bool(item["repaired"]) for item in controller_items),
             "blocked": sum(item["status"] == "blocked" for item in controller_items),
-            "items": controller_items,
         },
         "projections": projections,
     }
@@ -24420,11 +25713,8 @@ def _run_backfill(
         projection_budget=projection_budget,
     )
     return {
-        "scanned": len(need_backfill),
-        "sessions": sum(len(v) for v in discovered.values()),
-        "worktrees": len(discovered),
-        "registry": sess_updated,
-        "titles": titled,
+        "scanned": len(need_backfill), "sessions": sum(len(v) for v in discovered.values()),
+        "worktrees": len(discovered), "registry": sess_updated, "titles": titled,
         "reciprocal_metadata": reciprocal,
     }
 
@@ -24483,12 +25773,15 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     worktree whose head was orphaned by a handoff whose successor never
     registered). ``--gc-sessions`` (with ``--fix``) additionally removes empty
     session-state shells and purges their orphaned ``session-store.db`` rows.
-    ``--json`` emits the report.
+    ``--prune-pivots`` (with ``--fix``) additionally deletes stale Picker pivot
+    manifest files that ``prunable_findings`` proved superseded (never an
+    operator-authored or indeterminate one). ``--json`` emits the report.
     """
     from . import health
 
     apply = getattr(args, "fix", False)
     do_gc = getattr(args, "gc_sessions", False)
+    do_prune_pivots = getattr(args, "prune_pivots", False)
     json_mode = getattr(args, "json", False)
     projection_budget = getattr(args, "projection_budget", 256)
 
@@ -24643,9 +25936,16 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         runtime_lag = []
 
     from . import config_dropins
-    from .picker_tui import pivots as pivot_registry
+    from .picker_support import pivots as pivot_registry
 
     pivot_report = pivot_registry.scan_pivot_registry(materialize=False)
+    pivot_pruned: list[dict[str, object]] = []
+    if apply and do_prune_pivots:
+        pivot_pruned = pivot_registry.prune_stale_entries(pivot_report, apply=True)
+        if any(item.get("removed") for item in pivot_pruned):
+            # Re-scan so the report reflects post-prune reality (findings for
+            # the files just removed must not still be listed as present).
+            pivot_report = pivot_registry.scan_pivot_registry(materialize=False)
     config_d_report = (
         config_dropins.scan_config_dropin_registry(
             cfg.default_config_path().parent / "config.d",
@@ -24708,7 +26008,14 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         },
         "bare_orphans": {"count": len(bare_orphans), "items": bare_orphans},
         "runtime_lag": runtime_lag,
-        "pivots": pivot_report.to_dict(),
+        "pivots": {
+            **pivot_report.to_dict(),
+            "pruned": {
+                "found": sum(1 for item in pivot_pruned),
+                "removed": sum(1 for item in pivot_pruned if item.get("removed")),
+                "items": pivot_pruned,
+            },
+        },
         "config_d": config_d_report.to_dict(),
     }
 
@@ -24716,11 +26023,18 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         _json_output(report)
         return 0
 
-    _render_doctor_report(report, applied=apply, gc_applied=(apply and do_gc))
+    _render_doctor_report(
+        report,
+        applied=apply,
+        gc_applied=(apply and do_gc),
+        prune_pivots_applied=(apply and do_prune_pivots),
+    )
     return 0
 
 
-def _render_doctor_report(report: dict, *, applied: bool, gc_applied: bool) -> None:
+def _render_doctor_report(
+    report: dict, *, applied: bool, gc_applied: bool, prune_pivots_applied: bool = False
+) -> None:
     chk = "\u2713"
     print(f"Worktree/session doctor ({'fix' if applied else 'report-only'})")
     if not report.get("project_health_available", True):
@@ -24888,6 +26202,20 @@ def _render_doctor_report(report: dict, *, applied: bool, gc_applied: bool) -> N
         print("  \u2713 Runtime services match installed payload")
 
     _render_dropin_registry_report("Picker pivots", report.get("pivots") or {})
+    pruned = (report.get("pivots") or {}).get("pruned") or {}
+    if pruned.get("found"):
+        removed = pruned.get("removed", 0)
+        found = pruned.get("found", 0)
+        if prune_pivots_applied:
+            print(f"      pruned {removed}/{found} stale pivot manifest(s)")
+            for item in pruned.get("items", []):
+                if not item.get("removed"):
+                    print(f"        - kept {item['entry']}: {item.get('error', 'not removed')}")
+        else:
+            print(
+                f"      {found} pivot finding(s) are prunable -- "
+                "run `doctor --fix --prune-pivots` to remove them"
+            )
     _render_dropin_registry_report("Project config.d", report.get("config_d") or {})
 
 
@@ -24910,580 +26238,6 @@ def _render_dropin_registry_report(label: str, report: dict) -> None:
             print(f"        -> {finding['remedy']}")
 
 
-def cmd_list_sessions(args: argparse.Namespace) -> int:
-    """List a worktree's Copilot sessions with metadata as JSON.
-
-    Scopes to a single worktree with ``--worktree ID``; without it,
-    enumerates sessions across tracked worktrees in the current project.
-    ``--all-projects`` instead reads every adopted project's tracking
-    directory. Each session entry carries its ``worktree_id`` plus the
-    worktree's resolved interface and origin. Always emits the versioned JSON
-    envelope (machine-facing -- consumed by agent-bridge).
-    """
-    wt_id = getattr(args, "worktree_id", None)
-    all_projects = bool(getattr(args, "all_projects", False))
-    if all_projects:
-        records = []
-        for tracking_path in _all_tracking_dirs():
-            try:
-                records.extend(tracking.list_records(tracking_path))
-            except Exception:
-                continue
-    else:
-        records = tracking.list_records(cfg.tracking_dir())
-    if wt_id:
-        records = [r for r in records if r.worktree_id == wt_id]
-        if not records:
-            return _json_error(f"No worktree found: {wt_id}")
-
-    by_session: dict[str, dict] = {}
-    head_session: str | None = None
-    head_revision = 0
-    handoffs: list[dict] = []
-    controller_revision = 0
-    controllers: list[dict[str, object]] = []
-    controller_findings: list[dict[str, object]] = []
-    for rec in records:
-        for s in sessions.list_worktree_sessions(rec):
-            row = dict(s)
-            row["worktree_id"] = rec.worktree_id
-            row["interface"] = rec.resolved_interface
-            row["origin"] = rec.resolved_origin
-            session_id = row.get("id")
-            if not isinstance(session_id, str) or not session_id:
-                continue
-            assignment = profile_assignment.assignment_for_session(rec, session_id)
-            if assignment is not None:
-                row["profile_assignment"] = profile_assignment.metadata(assignment)
-            existing = by_session.get(session_id)
-            if existing is None:
-                by_session[session_id] = row
-                continue
-            if (
-                existing.get("interface") != row["interface"]
-                or existing.get("origin") != row["origin"]
-            ):
-                existing["interface"] = "unknown"
-                existing["origin"] = "unknown"
-                existing["provenance_conflict"] = True
-            if row.get("is_head") and not existing.get("is_head"):
-                preserved = {
-                    key: existing[key]
-                    for key in ("interface", "origin", "provenance_conflict")
-                    if key in existing
-                }
-                existing.clear()
-                existing.update(row)
-                existing.update(preserved)
-    # session-lifecycle: when scoped to ONE worktree, surface its asserted head
-    # on the envelope so a consumer (agent-bridge -> Neuron Forge) can resolve
-    # the current session without re-deriving it. Per-session ``is_head`` (from
-    # list_worktree_sessions) covers the all-worktrees case. Derived from the
-    # ground-layer record; no rival pointer (agent-fabric derive-dont-duplicate).
-    if wt_id and records:
-        head_session = records[0].resolved_head_session
-        transition = records[0].replayed_head_transition
-        head_revision = transition.revision if transition is not None else 0
-        handoffs = [dataclasses.asdict(handoff) for handoff in records[0].handoffs]
-        controller_revision = records[0].controller_revision
-        controllers = _controller_metadata(records[0])
-        controller_findings = _controller_findings(records[0])
-
-    _json_output(
-        {
-            "sessions": list(by_session.values()),
-            "head_session": head_session,
-            "head_revision": head_revision,
-            "handoffs": handoffs,
-            "controller_revision": controller_revision,
-            "controllers": controllers,
-            "controller_findings": controller_findings,
-        }
-    )
-    return 0
-
-
-def _all_tracking_dirs() -> list[Path]:
-    """Every project's worktree-tracking dir on this machine (dedup, ordered).
-
-    The active project (resolved from CWD, when there is one) comes first, then
-    every project in the projects registry. This lets a **project-agnostic
-    caller** -- notably the agent-bridge daemon, whose CWD is unrelated to the
-    worktree it is guarding -- resolve a worktree by id without first knowing
-    which project owns it. Never raises: a project that cannot resolve a dir is
-    skipped.
-    """
-    dirs: list[Path] = []
-    seen: set[Path] = set()
-
-    def _add(d: Path | None) -> None:
-        if d is not None and d not in seen:
-            seen.add(d)
-            dirs.append(d)
-
-    try:
-        _add(cfg.tracking_dir())
-    except Exception:
-        pass
-    try:
-        projects = inst.read_projects_registry().get("projects", {})
-    except Exception:
-        projects = {}
-    for name in projects:
-        try:
-            _add(cfg.project_dir(name) / "worktrees")
-        except Exception:
-            continue
-    return dirs
-
-
-def _find_tracking_file(raw_id: str) -> Path | None:
-    """Locate a worktree's tracking YAML across **all** projects, or None.
-
-    Exact stem match wins globally; a unique 4-char (or longer) suffix match is
-    the fallback. An ambiguous suffix (or no match) returns None -- the caller
-    then treats the worktree as untracked (fail-open), never guessing.
-    """
-    import re
-
-    if re.search(r"[/\\]|\.\.", raw_id):
-        return None
-    tdirs = _all_tracking_dirs()
-    for tdir in tdirs:
-        exact = tdir / f"{raw_id}.yaml"
-        if exact.exists():
-            return exact
-    matches: list[Path] = []
-    for tdir in tdirs:
-        if not tdir.exists():
-            continue
-        matches += [p for p in tdir.glob("*.yaml") if p.stem.endswith(raw_id)]
-    return matches[0] if len(matches) == 1 else None
-
-
-def _find_tracking_file_by_session(session_id: str) -> Path | None:
-    """Locate the first exact registered association in deterministic order."""
-    for tracking_dir in _all_tracking_dirs():
-        if not tracking_dir.exists():
-            continue
-        for path in sorted(tracking_dir.glob("*.yaml"), key=lambda item: item.name):
-            try:
-                if session_id not in path.read_text(encoding="utf-8"):
-                    continue
-                if tracking.load_record(path).session_entry(session_id):
-                    return path
-            except Exception:
-                continue
-    return None
-
-
-def cmd_head_session(args: argparse.Namespace) -> int:
-    """Emit a worktree's **asserted head session** and its lifecycle state (JSON).
-
-    The ground-layer read that higher layers (agent-bridge's create guard,
-    context-handoff) **derive** the current session from -- the source of truth
-    for "which session is current in this worktree," so no other layer keeps a
-    rival pointer (agent-fabric ``derive-dont-duplicate``).
-
-    Output envelope::
-
-        {"version": 1, "worktree_id": "<id>", "tracked": bool,
-         "head_session": "<session-id>" | null, "active": bool,
-         "state": "active" | "handed-off" | "concluded" | null}
-
-    - ``head_session`` is ``WorktreeRecord.resolved_head_session`` -- the stored
-      head when it is still un-concluded, else the newest non-concluded session
-      (today's "latest is current" fallback), else null.
-    - ``active`` is ``head_session is not None`` -- i.e. the worktree has a
-      current, un-concluded session that a fresh create would collide with.
-    - ``tracked`` is False when no tracking record exists for the worktree (an
-      unknown / untracked worktree): a fail-open signal so a consumer treats it
-      as "no head to guard."
-
-    Resolves the worktree across **all** projects (see :func:`_find_tracking_file`)
-    so the agent-bridge daemon can call it from any CWD. An unknown worktree is
-    **not** an error (exit 0, ``tracked: false``): a guard that cannot find a
-    record must fail *open*, not refuse the create.
-    """
-    raw = args.worktree_id
-    yaml_path = _find_tracking_file(raw)
-    if yaml_path is None:
-        _json_output(
-            {
-                "worktree_id": raw,
-                "tracked": False,
-                "head_session": None,
-                "active": False,
-                "occupied": False,
-                "state": None,
-                "head_revision": 0,
-                "pending_handoffs": [],
-                "controller_revision": 0,
-                "controllers": [],
-                "controller_findings": [],
-            }
-        )
-        return 0
-    record = tracking.load_record(yaml_path)
-    head = record.resolved_head_session
-    entry = record.session_entry(head) if head else None
-    transition = record.replayed_head_transition
-    pending = [
-        {
-            "ordinal": handoff.ordinal,
-            "token": handoff.token,
-            "predecessor": handoff.predecessor,
-            "opened_at": handoff.opened_at,
-            "candidate": handoff.candidate,
-            "candidate_at": handoff.candidate_at,
-        }
-        for handoff in record.pending_handoffs
-    ]
-    _json_output(
-        {
-            "worktree_id": record.worktree_id or raw,
-            "tracked": True,
-            "head_session": head,
-            "active": head is not None,
-            "occupied": head is not None or bool(pending),
-            "state": (entry.state if entry is not None else None),
-            "head_revision": transition.revision if transition is not None else 0,
-            "pending_handoffs": pending,
-            "controller_revision": record.controller_revision,
-            "controllers": _controller_metadata(record),
-            "controller_findings": _controller_findings(record),
-        }
-    )
-    return 0
-
-
-def cmd_worktree_lineage(args: argparse.Namespace) -> int:
-    """Emit one authoritative worktree's bounded session/controller graph."""
-    from . import lineage_surfaces
-
-    yaml_path = _find_tracking_file(args.worktree_id)
-    if yaml_path is None:
-        return _json_error(f"No worktree found: {args.worktree_id}")
-    record = tracking.load_record(yaml_path)
-    _json_output(lineage_surfaces.worktree_lineage(record))
-    return 0
-
-
-def cmd_conclude_session(args: argparse.Namespace) -> int:
-    """Assert a session's conclusion (``handed-off`` | ``concluded``) -- JSON out.
-
-    The ground-layer WRITE that context-handoff's live cutover shells to so the
-    retired session leaves a durable, asserted lifecycle record -- not merely a
-    killed pane. Concluding the outgoing session clears it as head without
-    guessing a replacement from list order. An exact-token successor bind
-    performs the normal atomic link; this command remains the compatibility and
-    explicit-sunset primitive.
-
-    Resolves the worktree across all projects (a higher-layer caller's CWD is
-    unrelated to the worktree). Unlike the read-only ``head-session``, an unknown
-    worktree or session is a real error here -- a mutation must not silently
-    no-op.
-    """
-    raw = args.worktree_id
-    yaml_path = _find_tracking_file(raw)
-    if yaml_path is None:
-        return _json_error(f"Worktree not found: {raw}")
-    state = getattr(args, "state", "handed-off")
-    with tracking._RecordLock(yaml_path):
-        record = tracking.load_record(yaml_path)
-        try:
-            tracking.conclude_session(
-                record,
-                args.session_id,
-                state=state,
-                handoff_token=getattr(args, "handoff_token", None),
-                save=False,
-            )
-        except tracking.SessionLifecycleError as e:
-            return _json_error(str(e))
-        # Persist to the RESOLVED path, not ``record.yaml_path`` -- this verb is
-        # project-agnostic (``_find_tracking_file`` searches every project), and
-        # runs with no active project, so a bare ``save_record`` would recompute
-        # the wrong (or an unresolvable) path.
-        tracking.save_record(record, yaml_path)
-    record = tracking.load_record(yaml_path)
-    entry = record.session_entry(args.session_id)
-    _json_output(
-        {
-            "worktree_id": record.worktree_id or raw,
-            "session": args.session_id,
-            "state": (entry.state if entry is not None else None),
-            "head_session": record.resolved_head_session,
-            "head_revision": record.head_revision,
-            "pending_handoffs": [
-                dataclasses.asdict(handoff) for handoff in record.pending_handoffs
-            ],
-        }
-    )
-    return 0
-
-
-def _find_tracking_file_exact(raw_id: str) -> Path | None:
-    """Locate an exact worktree id across projects without suffix inference."""
-    if re.search(r"[/\\]|\.\.", raw_id):
-        return None
-    matches: list[Path] = []
-    for tracking_dir in _all_tracking_dirs():
-        path = tracking_dir / f"{raw_id}.yaml"
-        if path.is_file():
-            matches.append(path)
-    unique = list(dict.fromkeys(path.resolve() for path in matches))
-    if len(unique) > 1:
-        raise RuntimeError(f"Worktree id is ambiguous across projects: {raw_id}")
-    return unique[0] if unique else None
-
-
-def _project_for_tracking_file(path: Path) -> str | None:
-    """Resolve the project whose machine-local tracking dir contains ``path``."""
-    names: list[str] = []
-    active = cfg.active_project()
-    if active:
-        names.append(active)
-    try:
-        names.extend(inst.read_projects_registry().get("projects", {}))
-    except Exception:
-        pass
-    for name in dict.fromkeys(names):
-        try:
-            if (cfg.project_dir(name) / "worktrees").resolve() == path.parent.resolve():
-                return name
-        except OSError:
-            continue
-    return None
-
-
-def _relocate_active_project_for_worktree(wt_id: str) -> bool:
-    """Switch the ambient active project if ``wt_id`` lives in a different one.
-
-    A worktree id is globally unique, but a resume-by-id call only knows the
-    *ambient* project (CWD/``--project`` resolved once by ``main()``) -- which
-    is wrong whenever the Picker's cross-project daemon hands back an id for a
-    worktree that belongs to some other registered project (#2338 follow-up:
-    the launcher scoping fix covers plan construction, but a resume-by-id
-    lookup that runs before any plan exists still trusts the ambient project).
-    Rather than fail with a false "Worktree not found" for a worktree that
-    genuinely exists elsewhere, look it up by exact id across every
-    registered project's tracking dir and, if it is uniquely found under a
-    different project, switch the in-process active project to match before
-    the caller re-checks. Best-effort: any lookup error leaves the ambient
-    project untouched, so the caller's existing "not found" handling still
-    applies. Returns ``True`` iff the active project was switched.
-    """
-    if (cfg.tracking_dir() / f"{wt_id}.yaml").exists():
-        return False
-    try:
-        found = _find_tracking_file_exact(wt_id)
-    except RuntimeError:
-        return False
-    if found is None:
-        return False
-    project = _project_for_tracking_file(found)
-    if not project or project == cfg.active_project():
-        return False
-    cfg.set_active_project(project)
-    return True
-
-
-def cmd_conclude_disposable(args: argparse.Namespace) -> int:
-    """Conclude one exact disposable CLI worker and optionally remove it."""
-    raw = args.worktree_id
-    if not raw or re.search(r"[/\\]|\.\.", raw):
-        return _json_error(f"Invalid exact worktree id: {raw!r}")
-    try:
-        yaml_path = _find_tracking_file_exact(raw)
-    except RuntimeError as exc:
-        return _json_error(str(exc))
-    if yaml_path is None:
-        if getattr(args, "remove", False):
-            _json_output(
-                {
-                    "worktree_id": raw,
-                    "action": "already-removed",
-                    "managed_gc_eligible": False,
-                }
-            )
-            return 0
-        return _json_error(f"Worktree not found by exact id: {raw}")
-    project = _project_for_tracking_file(yaml_path)
-    if not project:
-        return _json_error(f"Could not resolve project for worktree: {raw}")
-    try:
-        config = cfg.load_project_config(project)
-        try:
-            record = tracking.load_record(yaml_path)
-        except FileNotFoundError:
-            if getattr(args, "remove", False):
-                _json_output(
-                    {
-                        "worktree_id": raw,
-                        "action": "already-removed",
-                        "managed_gc_eligible": False,
-                    }
-                )
-                return 0
-            raise
-        if record.worktree_id != raw or record.worktree_id != yaml_path.stem:
-            return _json_error(f"Tracking record identity mismatch for exact id: {raw}")
-        repo = _repo_for_record(config, record)
-        if repo is None:
-            _json_output(
-                {
-                    "worktree_id": record.worktree_id,
-                    "action": "skipped",
-                    "reason": "repo-unresolved",
-                    "managed_gc_eligible": False,
-                }
-            )
-            return 0
-        try:
-            result = terminal_conclusion.conclude_disposable_worktree(
-                yaml_path,
-                repo,
-                session_id=getattr(args, "session_id", None),
-                owner=args.owner,
-                policy=args.policy,
-                reservation_key=getattr(args, "reservation_key", None),
-            )
-        except FileNotFoundError:
-            if getattr(args, "remove", False) and not yaml_path.exists():
-                _json_output(
-                    {
-                        "worktree_id": raw,
-                        "action": "already-removed",
-                        "managed_gc_eligible": False,
-                    }
-                )
-                return 0
-            raise
-        if getattr(args, "remove", False) and result.get("managed_gc_eligible"):
-            report = sweep_managed_worktrees(
-                min_idle_secs=0,
-                config=config,
-                tracking_path=yaml_path.parent,
-                worktree_ids={record.worktree_id},
-            )
-            removed = next(
-                (entry for entry in report["removed"] if entry.get("id") == record.worktree_id),
-                None,
-            )
-            if removed is None:
-                if not yaml_path.exists():
-                    result.update(
-                        action="already-removed",
-                        reason="managed-gc-already-removed",
-                        managed_gc_eligible=False,
-                    )
-                    _json_output(result)
-                    return 0
-                skipped = next(
-                    (
-                        entry
-                        for entry in report["skipped"]
-                        if entry.get("id") == record.worktree_id
-                    ),
-                    None,
-                )
-                reason = (
-                    skipped.get("reason")
-                    if isinstance(skipped, dict)
-                    else "worktree was not selected"
-                )
-                raise RuntimeError(f"managed teardown skipped: {reason}")
-            result.update(
-                action="removed",
-                reason="managed-gc-removed",
-                managed_gc_eligible=False,
-                removal=removed,
-            )
-    except Exception as exc:
-        return _json_error(str(exc))
-    _json_output(result)
-    return 0
-
-
-def cmd_link_succession(args: argparse.Namespace) -> int:
-    """Write the durable two-way handoff link and move the head -- JSON out.
-
-    The explicit ground-layer form of ``tracking.link_succession``: chains
-    ``predecessor -> successor`` in both directions, concludes the predecessor
-    (default ``handed-off``), and moves the head to the successor. Both sessions
-    must already be tracked -- so this is for callers that know BOTH ids (e.g. an
-    explicit, non-cutover handoff or a manual repair). The live cutover instead
-    concludes the predecessor via ``conclude-session`` and lets
-    ``register_session`` stamp the successor half once its id exists.
-    """
-    raw = args.worktree_id
-    yaml_path = _find_tracking_file(raw)
-    if yaml_path is None:
-        return _json_error(f"Worktree not found: {raw}")
-    with tracking._RecordLock(yaml_path):
-        record = tracking.load_record(yaml_path)
-        try:
-            tracking.link_succession(
-                record,
-                args.predecessor,
-                args.successor,
-                predecessor_state=getattr(args, "predecessor_state", "handed-off"),
-                handoff_token=getattr(args, "handoff_token", None),
-                save=False,
-            )
-        except tracking.SessionLifecycleError as e:
-            return _json_error(str(e))
-        # Persist to the RESOLVED path (see cmd_conclude_session): this verb is
-        # project-agnostic and runs with no active project.
-        tracking.save_record(record, yaml_path)
-    record = tracking.load_record(yaml_path)
-    pred = record.session_entry(args.predecessor)
-    _json_output(
-        {
-            "worktree_id": record.worktree_id or raw,
-            "predecessor": args.predecessor,
-            "successor": args.successor,
-            "predecessor_state": (pred.state if pred is not None else None),
-            "head_session": record.resolved_head_session,
-            "head_revision": record.head_revision,
-        }
-    )
-    return 0
-
-
-def cmd_session_transcript(args: argparse.Namespace) -> int:
-    """Emit a single session's renderable transcript events as JSON.
-
-    Reads the session's ``events.jsonl`` from local session-state and
-    returns the renderable event subset.  An absent/empty session yields
-    an empty ``events`` list (not an error) so callers can treat "no
-    transcript" uniformly.
-    """
-    session_id = args.session_id
-    events = sessions.read_session_transcript(session_id)
-    _json_output({"session_id": session_id, "events": events})
-    return 0
-
-
-def cmd_recent_messages(args: argparse.Namespace) -> int:
-    """Emit a worktree's latest session's last N conversation messages as JSON.
-
-    The read-side companion to the disposition ``summary`` overlay: when the
-    agent-asserted summary never accumulated, this derives recent context
-    straight from the worktree's newest session ``events.jsonl``. Accepts a full
-    worktree id or its 4-char suffix. An unknown worktree is a JSON error; a
-    known worktree with no session yields an empty ``messages`` list.
-    """
-    wt_id = _resolve_worktree_id(args.worktree_id)
-    records = tracking.list_records(cfg.tracking_dir())
-    rec = next((r for r in records if r.worktree_id == wt_id), None)
-    if rec is None:
-        return _json_error(f"No worktree found: {args.worktree_id}")
-    payload = sessions.recent_worktree_messages(rec, limit=getattr(args, "limit", 3))
-    payload["worktree_id"] = rec.worktree_id
-    _json_output(payload)
-    return 0
 
 
 def cmd_reconcile_plugins(args: argparse.Namespace) -> int:
@@ -25813,9 +26567,41 @@ def cmd_session_lock(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+from . import pr_cli, session_tracking_cli
+
+_infer_active_repo_slug = pr_cli._infer_active_repo_slug
+_pr_watch_usage = pr_cli._pr_watch_usage
+_pr_parse_repo = pr_cli._pr_parse_repo
+_tracked_pr_head_evidence = pr_cli._tracked_pr_head_evidence
+_classify_pr_operands = pr_cli._classify_pr_operands
+_pr_watch_review_blocking = pr_cli._pr_watch_review_blocking
+cmd_pr_watch_dispatch = pr_cli.cmd_pr_watch_dispatch
+_PR_NAMESPACE = pr_cli._PR_NAMESPACE
+_pr_merge_usage = pr_cli._pr_merge_usage
+_pr_merge_print_human = pr_cli._pr_merge_print_human
+_pr_merge_now = pr_cli._pr_merge_now
+cmd_pr_merge_dispatch = pr_cli.cmd_pr_merge_dispatch
+_pr_usage = pr_cli._pr_usage
+cmd_pr_research_dispatch = pr_cli.cmd_pr_research_dispatch
+cmd_pr_dispatch = pr_cli.cmd_pr_dispatch
+_all_tracking_dirs = session_tracking_cli._all_tracking_dirs
+_find_tracking_file = session_tracking_cli._find_tracking_file
+_find_tracking_file_exact = session_tracking_cli._find_tracking_file_exact
+_find_tracking_file_by_session = session_tracking_cli._find_tracking_file_by_session
+_project_for_tracking_file = session_tracking_cli._project_for_tracking_file
+_relocate_active_project_for_worktree = session_tracking_cli._relocate_active_project_for_worktree
+cmd_list_sessions = session_tracking_cli.cmd_list_sessions
+cmd_head_session = session_tracking_cli.cmd_head_session
+cmd_worktree_lineage = session_tracking_cli.cmd_worktree_lineage
+cmd_conclude_session = session_tracking_cli.cmd_conclude_session
+cmd_conclude_disposable = session_tracking_cli.cmd_conclude_disposable
+cmd_link_succession = session_tracking_cli.cmd_link_succession
+cmd_session_transcript = session_tracking_cli.cmd_session_transcript
+cmd_recent_messages = session_tracking_cli.cmd_recent_messages
+terminal_conclusion = session_tracking_cli.terminal_conclusion
+
 COMMAND_MAP = {
     "resolve": cmd_resolve,
-    "session-backend": cmd_session_backend,
     "execution-leg": cmd_execution_leg,
     "post-exit": cmd_post_exit,
     "session-lock": cmd_session_lock,
@@ -25837,9 +26623,11 @@ COMMAND_MAP = {
     "reconcile-sessions": cmd_reconcile_sessions,
     "status-monitor-restart": cmd_status_monitor_restart,
     "handoff-cutover": cmd_handoff_cutover,
+    "handoffs-check": cmd_handoffs_check,
     "embody": cmd_embody,
     "list": cmd_list,
     "claims": cmd_claims,
+    "follow-ups": cmd_follow_ups,
     "claimant-liveness": cmd_claimant_liveness,
     "create": cmd_create,
     "run": cmd_run,
@@ -25869,8 +26657,8 @@ COMMAND_MAP = {
     "machine-context": cmd_machine_context,
     "get": cmd_get,
     "pre-launch": cmd_pre_launch,
-    "reconcile-marketplaces": cmd_reconcile_marketplaces,
     "stage-update": cmd_stage_update,
+    "reconcile-marketplaces": cmd_reconcile_marketplaces,
     "reconcile-plugins": cmd_reconcile_plugins,
     "uninstall-plugins": cmd_uninstall_plugins,
     "reconcile-binstubs": cmd_reconcile_binstubs,
@@ -25889,6 +26677,7 @@ COMMAND_MAP = {
     "session-role": cmd_session_role,
     "backfill-sessions": cmd_backfill_sessions,
     "doctor": cmd_doctor,
+    "hygiene": cmd_hygiene,
     "list-sessions": cmd_list_sessions,
     "head-session": cmd_head_session,
     "worktree-lineage": cmd_worktree_lineage,
@@ -26265,6 +27054,7 @@ _NO_PROJECT_COMMANDS = {
     "reconcile-marketplaces",
     "picker",
     "doctor",
+    "hygiene",
     "reap-shells",
     "status-updater",
     "status-monitor",
@@ -26840,9 +27630,7 @@ def _run_direct_launch_fallback(project: str | None, passthrough: list[str]) -> 
                 update_args.append("update")
                 result = subprocess.run(update_args, env=_launch_probe_env())
                 if result.returncode != 0:
-                    output.warn(
-                        "Full update returned non-zero -- continuing to relaunch"
-                    )
+                    output.warn("Full update returned non-zero -- continuing to relaunch")
             continue
         if action == "remote":
             ssh_alias = plan.get("ssh_alias")
@@ -26925,14 +27713,10 @@ def _bundled_picker_available() -> bool:
     front-end 6c removes) rather than a version flag, so the fallback flips
     automatically the moment the Picker is gone -- no dispatch change needed.
     """
-    import importlib.util
-
     try:
-        return importlib.util.find_spec("agent_worktrees.picker_tui") is not None
+        return (Path(__file__).resolve().parent / "picker_tui" / "__init__.py").exists()
     except Exception:
-        # A parent-package import error is not a clean "absent"; keep today's
-        # Picker behavior rather than surfacing the install trigger spuriously.
-        return True
+        return False
 
 
 def cmd_manager_install_trigger(project: str | None) -> int:
@@ -27201,1124 +27985,6 @@ def cmd_git_dispatch(argv: list[str]) -> int:
     return 1
 
 
-def _pr_watch_usage() -> None:
-    out = sys.stderr
-    print("Usage: <project> pr-watch <wait|cursor> <owner/name> <pr> [options]", file=out)
-    print(file=out)
-    print("Block until a pull request moves, then wake the caller. The review", file=out)
-    print("backend (host, token) is the repo's PR binding (.agent-worktrees/", file=out)
-    print("config.yaml: provider / api_base / token_command).", file=out)
-    print(file=out)
-    print("  wait <repo> <pr>    Block until a transition or timeout.", file=out)
-    print("    --until LIST      Comma-list of transitions or 'any'", file=out)
-    print("                      (default: changes_requested,approved,conflict,", file=out)
-    print("                       mergeable,checks_failed,approval_dismissed,", file=out)
-    print("                       merged,closed)", file=out)
-    print("    --since CURSOR     Baseline cursor (race-proof); omit to auto-baseline", file=out)
-    print("    --timeout SECS     Max seconds to block (0 = no limit; default 3600)", file=out)
-    print("    --interval SECS    Poll interval (> 0; default 20)", file=out)
-    print("    --json             Emit only the result JSON on stdout", file=out)
-    print("  cursor <repo> <pr>  Print the current baseline cursor for a PR.", file=out)
-    print(file=out)
-    print("  Overrides: --host URL (api base), --token TOKEN.", file=out)
-    print(file=out)
-    print("  One-shot read: `wait ... --timeout 1` returns the current-state", file=out)
-    print("  snapshot (verdict/merge/consent) even on timeout; or use the", file=out)
-    print("  worktree-scoped `pr-status` for the same live state without waiting.", file=out)
-    print(file=out)
-    print("  The result payload carries a 'merge' block describing what stands", file=out)
-    print("  between the PR and a merge -- act on it after a review lands:", file=out)
-    print("    needs_consent   true => approved+unblocked but the merge-consent", file=out)
-    print("                    label is not applied yet; YOU must add it (the PR", file=out)
-    print("                    will NOT merge on its own).", file=out)
-    print("    consent_action  apply | already | skip  (+ 'reason').", file=out)
-    print("    clear_to_merge  true when only consent stands in the way.", file=out)
-
-
-def _pr_parse_repo(value: str) -> str:
-    if value.count("/") != 1 or not all(value.split("/")):
-        raise ValueError("repo must be a 'owner/name' (or ADO 'project/repo') slug")
-    return value
-
-
-def _infer_active_repo_slug(config: cfg.Config) -> str | None:
-    """Provider-correct PR repo slug for the active project, or None.
-
-    Lets the pr-* / ``repos`` verbs omit the explicit ``owner/name`` positional:
-    resolves the active project's canonical remote (``_resolve_repo_remote`` --
-    the registry remote, else the anchor's git origin) and parses the hosting
-    slug from the URL. Provider-correct for **both** GitHub (``owner/name``) and
-    Azure DevOps (``project/repo`` -- e.g. ``ExampleProject/example-repo``).
-    Returns None when the remote is unresolvable (caller then requires the
-    positional).
-    """
-    try:
-        remote = _resolve_repo_remote(config, config.default_repo)
-    except Exception:
-        return None
-    return git_ops.slug_from_url(remote)
-
-
-def _tracked_pr_head_evidence(
-    config: cfg.Config,
-    repo: str,
-    number: int,
-    provider: str,
-    api_base: str,
-) -> tuple[str, str]:
-    """Return locally recorded publication evidence for one PR's current head."""
-    try:
-        authority_endpoint = providers.get_provider(provider).authority_endpoint(api_base)
-    except (providers.ProviderError, ValueError, AttributeError):
-        return "", ""
-    worktree_id = _infer_worktree_id_from_cwd(config)
-    if not worktree_id:
-        return "", ""
-    try:
-        record = tracking.load_record(
-            cfg.tracking_dir() / f"{_resolve_worktree_id(worktree_id)}.yaml"
-        )
-    except Exception:
-        return "", ""
-    for pr in record.prs:
-        target_repo = pr.repo or record.repo
-        if (
-            pr.number == number
-            and target_repo == repo
-            and (pr.provider or provider) == provider
-            and pr.head_observed_api_base == authority_endpoint
-        ):
-            return pr.head_sha, pr.head_observed_at
-    return "", ""
-
-
-def _classify_pr_operands(operands: list[str]) -> tuple[str | None, int | None]:
-    """Split free-form pr-merge operands into ``(repo_slug, pr_number)``.
-
-    A token containing ``/`` is the provider repo slug (``owner/name`` or ADO
-    ``project/repo``); an all-digit token is the PR number. This is what lets
-    the repo be **omitted** (inferred from the active project) while a bare PR
-    number is never mistaken for a slug -- e.g. ``pr-merge 2333486`` resolves to
-    ``(None, 2333486)``, not a bogus repo. Raises ``ValueError`` on a duplicate
-    or unrecognized token.
-    """
-    repo: str | None = None
-    pr: int | None = None
-    for tok in operands:
-        if "/" in tok:
-            if repo is not None:
-                raise ValueError(f"unexpected extra repo argument {tok!r}")
-            repo = _pr_parse_repo(tok)
-        elif tok.isdigit():
-            if pr is not None:
-                raise ValueError(f"unexpected extra PR number {tok!r}")
-            pr = int(tok)
-        else:
-            raise ValueError(
-                f"unrecognized argument {tok!r} (expected a repo slug "
-                "-- owner/name or ADO project/repo -- or a PR number)"
-            )
-    return repo, pr
-
-
-def cmd_pr_watch_dispatch(argv: list[str]) -> int:
-    """Route `pr-watch` verbs (wait / cursor) -- the provider-generic watcher.
-
-    The network+timing loop lives in :mod:`agent_worktrees.pr_watch`; the pure
-    transition logic in :mod:`agent_worktrees.pr_contract`; the provider read in
-    the provider plugins. This dispatcher wires the CLI onto the repo's PR
-    binding (host/token/provider from config).
-    """
-    import json as _json
-
-    from . import pr_contract as pc
-    from . import pr_watch as prw
-    from .providers import ProviderError
-
-    if not argv or argv[0] in ("--help", "-h", "help"):
-        _pr_watch_usage()
-        return 0 if argv and argv[0] in ("--help", "-h", "help") else 1
-
-    verb = argv[0]
-    if verb not in ("wait", "cursor"):
-        output.err(f"Unknown pr-watch subcommand: {verb}")
-        _pr_watch_usage()
-        return 1
-
-    p = argparse.ArgumentParser(prog=f"pr-watch {verb}", add_help=True)
-    p.add_argument(
-        "repo",
-        type=_pr_parse_repo,
-        nargs="?",
-        default=None,
-        help="repo slug -- owner/name or ADO project/repo (optional; "
-        "inferred from the active project)",
-    )
-    p.add_argument("pr", type=int, help="PR number")
-    p.add_argument(
-        "--host", default="", help="API base URL override (else the binding's api_base)"
-    )
-    p.add_argument("--token", default=None, help="Provider token override (else the binding)")
-    p.add_argument("--config", default=None)
-    if verb == "wait":
-        p.add_argument(
-            "--until",
-            default=",".join(pc.DEFAULT_UNTIL),
-            help="comma-list of transitions or 'any'",
-        )
-        p.add_argument("--since", default=None, help="baseline cursor (omit to auto-baseline)")
-        p.add_argument(
-            "--timeout", type=float, default=3600.0, help="max seconds to block (0 = no limit)"
-        )
-        p.add_argument("--interval", type=float, default=20.0, help="poll interval seconds")
-        p.add_argument("--json", action="store_true", help="emit only the result JSON")
-    try:
-        args = p.parse_args(argv[1:])
-    except SystemExit as exc:
-        return int(exc.code or 0)
-
-    # Parse/validate --until.
-    if verb == "wait":
-        raw = args.until.strip().lower()
-        if raw == "any":
-            until = ["any"]
-        else:
-            until = [v.strip() for v in args.until.split(",") if v.strip()]
-            bad = [v for v in until if v not in pc.ALL_TRANSITIONS]
-            if bad:
-                output.err(
-                    f"unknown transition(s) {bad}; choose from "
-                    f"{', '.join(pc.ALL_TRANSITIONS)} or 'any'"
-                )
-                return 2
-        if args.timeout < 0:
-            output.err("--timeout must be >= 0 (0 = no limit)")
-            return 2
-        if args.interval <= 0:
-            output.err("--interval must be > 0")
-            return 2
-
-    try:
-        config = cfg.load_config(Path(args.config) if args.config else None)
-        prcfg = config.default_repo.pr
-        if args.repo is None:
-            args.repo = _infer_active_repo_slug(config)
-            if not args.repo:
-                output.err(
-                    "pr-watch: could not infer the repo from the active "
-                    "project; pass an explicit repo slug"
-                )
-                return 2
-        fetch = prw.build_fetch(prcfg, args.repo, args.pr, api_base=args.host, token=args.token)
-        if verb == "cursor":
-            snap = fetch()
-            print(pc.Baseline.from_snapshot(snap).to_cursor())
-            return 0
-
-        baseline = pc.Baseline.from_cursor(args.since) if args.since else None
-        tracked_head_sha, head_observed_at = _tracked_pr_head_evidence(
-            config,
-            args.repo,
-            args.pr,
-            prcfg.provider,
-            args.host or prcfg.api_base,
-        )
-        if not args.json:
-            mode = f"since {args.since}" if args.since else "auto-baseline"
-            print(
-                f"pr-watch: watching {args.repo}#{args.pr} for [{', '.join(until)}] "
-                f"({mode}, every {args.interval:g}s, timeout {args.timeout:g}s)",
-                file=sys.stderr,
-            )
-        result = prw.run_wait(
-            repo=args.repo,
-            pr=args.pr,
-            until=until,
-            baseline=baseline,
-            fetch=fetch,
-            timeout=args.timeout,
-            interval=args.interval,
-            automerge_label=getattr(prcfg, "automerge_label", "") or "",
-            hold_labels=tuple(getattr(prcfg, "hold_labels", ()) or ()),
-            wip_title_prefixes=tuple(getattr(prcfg, "wip_title_prefixes", ()) or ()),
-            approval_required=bool(getattr(prcfg, "approval_required", True)),
-            allow_stale_approval=bool(getattr(prcfg, "allow_stale_approval", False)),
-            stale_approval_head_sha=tracked_head_sha,
-            stale_approval_head_observed_at=head_observed_at,
-            on_error=lambda e: print(f"pr-watch: poll error (will retry): {e}", file=sys.stderr),
-        )
-        if not result.matched:
-            # #3486: a timeout still carries the current-state snapshot (verdict
-            # / merge state / consent / labels) when a poll succeeded, so a
-            # short-timeout pr-watch doubles as a one-shot read. Preserve the
-            # legacy {repo, pr, timed_out} keys and enrich with the snapshot.
-            payload = dict(result.payload) if result.payload else {}
-            payload.setdefault("repo", args.repo)
-            payload.setdefault("pr", args.pr)
-            payload["timed_out"] = True
-            print(_json.dumps(payload))
-            if not args.json:
-                print(f"pr-watch: timed out after {args.timeout:g}s", file=sys.stderr)
-                merge = payload.get("merge") or {}
-                if merge:
-                    conflict = " (conflict)" if merge.get("conflict") else ""
-                    print(
-                        f"pr-watch: current state -> verdict "
-                        f"{merge.get('verdict', '?')}, merge "
-                        f"{merge.get('merge_state', '?')}, consent "
-                        f"{merge.get('consent_action', '?')}{conflict}",
-                        file=sys.stderr,
-                    )
-                    print(
-                        "pr-watch: (this is a one-shot read; `pr-status` gives "
-                        "the same live state without waiting)",
-                        file=sys.stderr,
-                    )
-            return 124
-        print(_json.dumps(result.payload))
-        if not args.json:
-            print(
-                f"pr-watch: {args.repo}#{args.pr} -> {', '.join(result.payload['transitions'])}",
-                file=sys.stderr,
-            )
-            # Surface the next action so a woken caller doesn't assume "approved
-            # == done": an approved+unblocked PR still needs merge consent.
-            merge = result.payload.get("merge") or {}
-            if merge.get("needs_consent"):
-                label = merge.get("consent_label") or "the merge-consent label"
-                print(
-                    f"pr-watch: NEXT -> grant merge consent (add label "
-                    f"'{label}') -- the PR will not merge until you do "
-                    f"({merge.get('reason', '')})",
-                    file=sys.stderr,
-                )
-            elif merge.get("consent_action") == "already":
-                print(
-                    "pr-watch: merge consent already granted; the merge gate will proceed",
-                    file=sys.stderr,
-                )
-        return 0
-    except ProviderError as exc:
-        output.err(f"pr-watch: {exc}")
-        return 3
-    except ValueError as exc:
-        output.err(f"pr-watch: {exc}")
-        return 2
-
-
-def _pr_merge_usage() -> None:
-    out = sys.stderr
-    print("Usage: <project> pr-merge <owner/name> <pr> [options]", file=out)
-    print("       <project> pr-merge <owner/name> --all [options]", file=out)
-    print(file=out)
-    print("Signal merge consent on an APPROVED PR by applying the repo's", file=out)
-    print("merge-consent label (the .copilot-extensions/agent-worktrees/config.yaml binding", file=out)
-    print(
-        "automerge_label; multi-machine system: auto-merge). Applies by default; it never",
-        file=out,
-    )
-    print("merges -- the review gate still decides. Only eligible PRs are", file=out)
-    print("touched (approved at head, mergeable, not draft/WIP, no hold label,", file=out)
-    print("targeting the default branch).", file=out)
-    print(file=out)
-    print("  <pr>            Consent to one PR (the author path).", file=out)
-    print("  --all           Sweep every open PR (transition-helper mode).", file=out)
-    print("  --now           (submitter-self-merge repos only) merge <pr>", file=out)
-    print("                  directly now (squash). Refused where the submitter", file=out)
-    print("                  does not self-merge -- use pr-watch/pr-status there.", file=out)
-    print("  --dry-run       Preview classification only; apply nothing.", file=out)
-    print("  --loop          (sweep) Repeat until no PR remains eligible.", file=out)
-    print("  --interval S    (sweep+loop) Seconds between passes (default 30).", file=out)
-    print("  --max-passes N  (sweep+loop) Cap passes (0 = unbounded).", file=out)
-    print("  --json          Emit the result JSON on stdout.", file=out)
-    print("  Overrides: --host URL (api base), --token TOKEN.", file=out)
-
-
-def _pr_merge_print_human(summary: dict) -> None:
-    mode = "APPLY" if summary["apply"] else "preview (dry-run)"
-    output_line = (
-        f"pr-merge [{mode}] {summary['repo']}: {summary['open']} open, "
-        f"{summary['eligible']} eligible for auto-merge"
-    )
-    print(output_line, file=sys.stderr)
-    for d in summary["decisions"]:
-        if d["action"] == "apply":
-            if not summary["apply"]:
-                mark = "+ auto-merge"
-            elif d.get("applied"):
-                mark = "APPLIED"
-            else:
-                mark = f"FAILED ({d.get('error', '')})"
-        elif d["action"] == "already":
-            mark = "already"
-        else:
-            mark = f"skip: {d.get('reason', '')}"
-        print(f"  #{d['pr']:<6} {mark:<14} {d.get('title', '')}", file=sys.stderr)
-
-
-def _pr_merge_now(args, prcfg, flow, *, apply: bool) -> int:
-    """Perform (or preview) a submitter-direct merge -- ``pr-merge --now``.
-
-    Only a **pr-self-merge** repo may use this submitter-direct merge verb.
-    Azure DevOps routes through its native ``request_auto_complete`` operation,
-    which either arms auto-complete or completes immediately with the configured
-    policy bypass. Other providers honor ``prefer_auto_merge`` (#225, default
-    on): first try ``enable_auto_merge``, then fall back to ``merge_pull`` where
-    auto-merge is unavailable or disabled. The fallback uses an admin bypass
-    only for a non-blocking review posture; a blocking review remains
-    provider-enforced.
-    Any other profile is refused-with-reminder, steering the agent to the
-    sanctioned wait/consent path.
-    Returns a shell exit code (0 success, 1 merge failure, 2 refusal/usage).
-    """
-    import json as _json
-
-    from . import pr_contract as pc
-    from .providers import (
-        ProviderError,
-        account_token_for_slug,
-        actor_viewer_permission,
-        get_provider,
-    )
-
-    if args.sweep:
-        output.err("pr-merge --now: name a single PR number (not --all).")
-        return 2
-
-    # Only submitter-self-merge repos self-merge. Refuse elsewhere with a
-    # reminder that names the sanctioned path (never a raw provider merge).
-    if flow.profile != pc.PROFILE_PR_SELF_MERGE:
-        reason = (
-            "--now performs a direct submitter self-merge; this repo's PR-flow "
-            f"profile is '{flow.profile}', which does not self-merge"
-        )
-        rem = pc.pr_reminder(flow, "pr-merge", ok=False, reason=reason)
-        if args.json:
-            print(
-                _json.dumps(
-                    {
-                        "repo": args.repo,
-                        "pr": args.pr,
-                        "error": "--now not applicable to this repo's flow",
-                        "flow_profile": flow.profile,
-                        "merge_mode": flow.merge_mode,
-                        "applied": False,
-                        "reminder": rem.as_dict(),
-                    }
-                )
-            )
-        else:
-            output.err(f"pr-merge --now: {reason}. Nothing merged.")
-            print(rem.text(), file=sys.stderr)
-        return 2
-
-    provider = get_provider(getattr(prcfg, "provider", "gitea") or "gitea")
-    base = (args.host or getattr(prcfg, "api_base", "") or "").strip()
-    prefer_auto = bool(getattr(prcfg, "prefer_auto_merge", True))
-
-    if not apply:  # --dry-run: preview only, merge nothing.
-        rem = pc.pr_reminder(flow, "pr-merge", ok=True)
-        would = (
-            "request CI-gated native auto-merge (fallback: direct squash-merge)"
-            if prefer_auto
-            else "squash-merge directly (submitter-direct)"
-        )
-        if args.json:
-            print(
-                _json.dumps(
-                    {
-                        "repo": args.repo,
-                        "pr": args.pr,
-                        "action": "dry-run",
-                        "would": would,
-                        "prefer_auto_merge": prefer_auto,
-                        "flow_profile": flow.profile,
-                        "applied": False,
-                        "reminder": rem.as_dict(),
-                    }
-                )
-            )
-        else:
-            output.ok(
-                f"pr-merge --now (dry-run): would {would} for PR #{args.pr} in "
-                f"{args.repo}. Nothing merged."
-            )
-            print(rem.text(), file=sys.stderr)
-        return 0
-
-    tok = args.token if args.token is not None else account_token_for_slug(args.repo, prcfg)
-
-    # General repo comprehension: this repo's *config* selects pr-self-merge
-    # (a maintainer's choice), but that never implies the identity running
-    # THIS command holds merge rights -- a repo with several maintainers and
-    # outside contributors needs the actor's live permission checked, not
-    # assumed. Fail-open on an unknown/failed read (None): only a confident
-    # read-only/no-access verdict (False) refuses. A maintainer is never
-    # blocked by a permission-read hiccup; a contributor is never told to
-    # self-merge a PR they cannot actually merge.
-    live_permission = actor_viewer_permission(
-        provider, args.repo, api_base=base, token=tok,
-    )
-    authority = pc.actor_merge_authority(live_permission)
-    if authority is False:
-        reason = (
-            "a live permission check found the acting identity does not have "
-            f"write access to {args.repo} (reports '{live_permission}'). This "
-            "repo's config selects pr-self-merge, but that authorizes "
-            "maintainers, not every submitter -- a contributor's PR must wait "
-            "for a maintainer to review and merge it"
-        )
-        rem = pc.pr_reminder_no_actor_authority(flow, reason=reason)
-        if args.json:
-            print(
-                _json.dumps(
-                    {
-                        "repo": args.repo,
-                        "pr": args.pr,
-                        "error": "actor lacks live merge authority",
-                        "viewer_permission": live_permission,
-                        "flow_profile": flow.profile,
-                        "applied": False,
-                        "reminder": rem.as_dict(),
-                    }
-                )
-            )
-        else:
-            output.err(f"pr-merge refused: {reason}. Nothing merged.")
-            print(rem.text(), file=sys.stderr)
-        return 2
-
-    # Azure DevOps exposes completion through request_auto_complete rather than
-    # the GitHub-oriented enable_auto_merge / merge_pull interfaces.
-    if provider.name == "azure-devops":
-        try:
-            err = provider.request_auto_complete(
-                args.repo,
-                args.pr,
-                api_base=base,
-                token=tok,
-                automerge_label=getattr(prcfg, "automerge_label", ""),
-                squash=getattr(prcfg, "squash", True),
-                delete_source_branch=getattr(prcfg, "delete_source_branch", True),
-                bypass_policy=getattr(prcfg, "bypass_policy", False),
-                bypass_reason=getattr(prcfg, "bypass_reason", ""),
-            )
-        except ProviderError as exc:
-            err = str(exc)
-        if err:
-            rem = pc.pr_reminder(
-                flow,
-                "pr-merge",
-                ok=False,
-                reason="the Azure DevOps completion request failed",
-            )
-            if args.json:
-                print(
-                    _json.dumps(
-                        {
-                            "repo": args.repo,
-                            "pr": args.pr,
-                            "action": "auto-complete",
-                            "applied": False,
-                            "error": err,
-                            "flow_profile": flow.profile,
-                            "reminder": rem.as_dict(),
-                        }
-                    )
-                )
-            else:
-                output.err(
-                    f"pr-merge --now: failed to complete PR #{args.pr} in {args.repo}: {err}"
-                )
-                print(rem.text(), file=sys.stderr)
-            return 1
-        rem = pc.pr_reminder(flow, "pr-watch", ok=True)
-        if args.json:
-            print(
-                _json.dumps(
-                    {
-                        "repo": args.repo,
-                        "pr": args.pr,
-                        "action": "auto-complete",
-                        "applied": True,
-                        "merged": False,
-                        "flow_profile": flow.profile,
-                        "reminder": rem.as_dict(),
-                    }
-                )
-            )
-        else:
-            output.ok(
-                f"pr-merge --now: requested Azure DevOps completion for PR "
-                f"#{args.pr} in {args.repo}."
-            )
-            print(rem.text(), file=sys.stderr)
-        return 0
-
-    # Other providers prefer native CI-gated auto-merge (so the merge waits on
-    # required checks) and fall back to an immediate self-merge only where the
-    # provider offers no auto-merge or it can't be armed (#225).
-    auto_armed = False
-    if prefer_auto:
-        try:
-            auto_err = provider.enable_auto_merge(
-                args.repo,
-                args.pr,
-                squash=True,
-                api_base=base,
-                token=tok,
-            )
-        except ProviderError as exc:
-            auto_err = str(exc)
-        auto_armed = not auto_err
-
-    if auto_armed:
-        # Auto-merge is armed -- the PR is NOT merged yet; it lands when checks
-        # pass. Steer the agent to watch for the merge, not to finalize.
-        rem = pc.pr_reminder(flow, "pr-watch", ok=True)
-        if args.json:
-            print(
-                _json.dumps(
-                    {
-                        "repo": args.repo,
-                        "pr": args.pr,
-                        "action": "auto-merge",
-                        "applied": True,
-                        "merged": False,
-                        "flow_profile": flow.profile,
-                        "reminder": rem.as_dict(),
-                    }
-                )
-            )
-        else:
-            output.ok(
-                f"pr-merge --now: armed CI-gated auto-merge on PR #{args.pr} in "
-                f"{args.repo} (squash). It merges when required checks pass -- "
-                f"`pr-watch` wakes you on merge or regression."
-            )
-            print(rem.text(), file=sys.stderr)
-        return 0
-
-    try:
-        err = provider.merge_pull(
-            args.repo,
-            args.pr,
-            squash=True,
-            admin=not flow.review_blocking,
-            api_base=base,
-            token=tok,
-        )
-    except ProviderError as exc:
-        err = str(exc)
-
-    if err:
-        rem = pc.pr_reminder(
-            flow, "pr-merge", ok=False, reason="the direct merge did not complete"
-        )
-        if args.json:
-            print(
-                _json.dumps(
-                    {
-                        "repo": args.repo,
-                        "pr": args.pr,
-                        "action": "merge",
-                        "applied": False,
-                        "error": err,
-                        "flow_profile": flow.profile,
-                        "reminder": rem.as_dict(),
-                    }
-                )
-            )
-        else:
-            output.err(f"pr-merge --now: failed to merge PR #{args.pr} in {args.repo}: {err}")
-            print(rem.text(), file=sys.stderr)
-        return 1
-
-    rem = pc.pr_reminder(flow, "pr-merge", state=pc.PR_STATE_MERGED, ok=True)
-    if args.json:
-        print(
-            _json.dumps(
-                {
-                    "repo": args.repo,
-                    "pr": args.pr,
-                    "action": "merge",
-                    "applied": True,
-                    "flow_profile": flow.profile,
-                    "reminder": rem.as_dict(),
-                }
-            )
-        )
-    else:
-        output.ok(
-            f"pr-merge --now: squash-merged PR #{args.pr} in {args.repo} "
-            f"(submitter-direct). Run `finalize` to clean up the worktree."
-        )
-        print(rem.text(), file=sys.stderr)
-    return 0
-
-
-def cmd_pr_merge_dispatch(argv: list[str]) -> int:
-    """Route `pr-merge` -- signal merge consent (apply the consent label).
-
-    The pure eligibility classifier lives in :mod:`agent_worktrees.pr_contract`
-    (``classify_state``); the apply/sweep orchestration in
-    :mod:`agent_worktrees.pr_merge`; the label-apply in the provider. The
-    consent-label vocabulary is the repo's PR binding (``automerge_label`` etc.).
-    """
-    import json as _json
-
-    from . import pr_merge as pm
-    from . import pr_contract as pc
-    from .providers import ProviderError
-
-    if argv and argv[0] in ("--help", "-h", "help"):
-        _pr_merge_usage()
-        return 0
-
-    p = argparse.ArgumentParser(prog="pr-merge", add_help=True)
-    p.add_argument(
-        "operands",
-        nargs="*",
-        metavar="[repo] [pr]",
-        help="repo slug -- owner/name or ADO project/repo (optional; "
-        "inferred from the active project) -- and/or PR number, "
-        "in any order",
-    )
-    p.add_argument(
-        "--all",
-        action="store_true",
-        dest="sweep",
-        help="sweep every open PR (transition-helper mode)",
-    )
-    p.add_argument(
-        "--dry-run", action="store_true", help="preview classification only; apply nothing"
-    )
-    p.add_argument(
-        "--loop", action="store_true", help="(sweep) repeat until no PR remains eligible"
-    )
-    p.add_argument("--interval", type=float, default=30.0)
-    p.add_argument("--max-passes", type=int, default=0, dest="max_passes")
-    p.add_argument("--host", default="", help="API base URL override")
-    p.add_argument("--token", default=None, help="Provider token override")
-    p.add_argument(
-        "--now",
-        action="store_true",
-        help="(submitter-self-merge repos) merge the PR directly now "
-        "(squash); refused where the submitter does not self-merge",
-    )
-    p.add_argument("--json", action="store_true", help="emit the result JSON")
-    p.add_argument("--config", default=None)
-    try:
-        args = p.parse_args(argv)
-    except SystemExit as exc:
-        return int(exc.code or 0)
-
-    # A repo slug (contains '/') and/or a PR number (all digits) may be given in
-    # any order; the slug is optional and inferred below when omitted, so a bare
-    # `pr-merge <#>` is never mistaken for a repo.
-    try:
-        args.repo, args.pr = _classify_pr_operands(args.operands)
-    except ValueError as exc:
-        output.err(f"pr-merge: {exc}")
-        return 2
-
-    if args.sweep and args.pr is not None:
-        output.err("pr-merge: pass either a <pr> or --all, not both")
-        return 2
-    if not args.sweep and args.pr is None:
-        output.err("pr-merge: provide a PR number, or --all to sweep")
-        return 2
-
-    apply = not args.dry_run
-    try:
-        config = cfg.load_config(Path(args.config) if args.config else None)
-        if args.repo is None:
-            args.repo = _infer_active_repo_slug(config)
-            if not args.repo:
-                output.err(
-                    "pr-merge: could not infer the repo from the active "
-                    "project; pass an explicit repo slug"
-                )
-                return 2
-        repo_cfg = config.default_repo
-        prcfg = repo_cfg.pr
-        default_branch = repo_cfg.default_branch
-        flow = _pr_flow_profile(repo_cfg)
-
-        # --now: perform the direct submitter self-merge (pr-self-merge repos).
-        if args.now:
-            return _pr_merge_now(args, prcfg, flow, apply=apply)
-
-        # A submitter-self-merge repo has no consent label: bare `pr-merge` is a
-        # no-op here. Refuse-with-reminder and point at the sanctioned `--now`
-        # verb (handled above), NOT the human-merge/stale-anchor path below.
-        if flow.profile == pc.PROFILE_PR_SELF_MERGE:
-            rem = pc.pr_reminder(
-                flow,
-                "pr-merge",
-                ok=False,
-                reason="this repo merges directly (self-merge); bare pr-merge does nothing",
-            )
-            if args.json:
-                print(
-                    _json.dumps(
-                        {
-                            "repo": args.repo,
-                            "error": "self-merge repo: use pr-merge --now",
-                            "flow_profile": flow.profile,
-                            "merge_mode": flow.merge_mode,
-                            "applies": False,
-                            "hint": "submitter-self-merge repo: merge directly with "
-                            "`pr-merge <#> --now`",
-                            "reminder": rem.as_dict(),
-                        }
-                    )
-                )
-            else:
-                output.err(
-                    "pr-merge: this repo's PR-flow profile is 'pr-self-merge' -- "
-                    "the submitter merges directly. Bare pr-merge applies no "
-                    "consent label here; merge now with `pr-merge <#> --now`. "
-                    "Nothing applied."
-                )
-                print(rem.text(), file=sys.stderr)
-            return 2
-
-        if not getattr(prcfg, "automerge_label", ""):
-            # No merge-consent label bound -> pr-merge cannot apply consent here.
-            # Two distinct causes wear the same face; name both and point at the
-            # right process for each (see the repo's PR-flow profile):
-            #   (a) HUMAN-MERGE repo -- PR-gated, but a human approves + merges.
-            #       pr-merge legitimately does not apply; open the PR, address
-            #       review (pr-watch), and let a human merge.
-            #   (b) STALE ANCHOR -- a repo that *should* have the binding, whose
-            #       checkout hasn't pulled it yet. Refresh the anchor and retry;
-            #       do NOT hand-merge or escalate.
-            # (pr-self-merge repos are handled above; this path is human-merge.)
-            msg = (
-                "pr-merge: no merge-consent label (pr.automerge_label) is bound "
-                f"in this repo's .copilot-extensions/agent-worktrees/config.yaml on this machine. "
-                f"This repo's PR-flow profile is '{flow.profile}'. Two cases:\n"
-                "  - Human-merge repo (expected): PR-gated but a HUMAN approves "
-                "and merges -- pr-merge does not apply. Open the PR (create-pr), "
-                "address review with pr-watch, then a human merges. Check the "
-                "repo's CONTRIBUTING / review process for who merges.\n"
-                "  - Stale anchor (if you EXPECTED an auto-merge label here): "
-                "this checkout is likely behind -- update the anchor "
-                "('test-chamber update' / 'git sync' on the anchor) so the "
-                "binding is present, then retry pr-merge. Do NOT hand-merge or "
-                "escalate to an admin. Nothing applied."
-            )
-            if args.json:
-                print(
-                    _json.dumps(
-                        {
-                            "repo": args.repo,
-                            "error": "no automerge_label binding",
-                            "flow_profile": flow.profile,
-                            "merge_mode": flow.merge_mode,
-                            "applies": False,
-                            "hint": (
-                                "human-merge repo: a human merges (pr-merge N/A); "
-                                "OR stale anchor if an auto-merge label was "
-                                "expected -- update the anchor and retry"
-                            ),
-                            "reminder": pc.pr_reminder(
-                                flow,
-                                "pr-merge",
-                                ok=False,
-                                reason="no merge-consent label bound",
-                            ).as_dict(),
-                        }
-                    )
-                )
-            else:
-                output.err(msg)
-                _rem = pc.pr_reminder(
-                    flow,
-                    "pr-merge",
-                    ok=False,
-                    reason="no merge-consent label bound",
-                )
-                print(_rem.text(), file=sys.stderr)
-            return 2
-
-        if args.sweep:
-            summary = pm.run_sweep(
-                prcfg,
-                args.repo,
-                api_base=args.host,
-                token=args.token,
-                apply=apply,
-                loop=args.loop,
-                interval=args.interval,
-                max_passes=args.max_passes,
-                default_branch=default_branch,
-            )
-        else:
-            tracked_head_sha, head_observed_at = _tracked_pr_head_evidence(
-                config,
-                args.repo,
-                args.pr,
-                prcfg.provider,
-                args.host or prcfg.api_base,
-            )
-            row = pm.merge_one(
-                prcfg,
-                args.repo,
-                args.pr,
-                api_base=args.host,
-                token=args.token,
-                apply=apply,
-                default_branch=default_branch,
-                tracked_head_sha=tracked_head_sha,
-                head_observed_at=head_observed_at,
-            )
-            eligible = 1 if row["action"] == "apply" else 0
-            applied = 1 if row.get("applied") else 0
-            failed = 1 if (row["action"] == "apply" and apply and not row.get("applied")) else 0
-            summary = {
-                "repo": args.repo,
-                "open": 1,
-                "eligible": eligible,
-                "applied": applied,
-                "failed": failed,
-                "apply": apply,
-                "decisions": [row],
-            }
-
-        if args.json:
-            print(_json.dumps(summary))
-        else:
-            _pr_merge_print_human(summary)
-
-        # Single-PR (author) mode: the operator named one PR and expects a
-        # concrete state transition. A "skip" here means the action does NOT
-        # apply to that PR (unapproved, not mergeable, draft/WIP, already merged,
-        # hold label, wrong base) -- that is an ERROR, not success. A no-op must
-        # never masquerade as success (issue #2779 / the defect that stranded
-        # PR #2774). --all sweep mode legitimately skips ineligible PRs.
-        if not args.sweep:
-            row = summary["decisions"][0]
-            action = row["action"]
-            n = row["pr"]
-            if action == "skip":
-                if not args.json:
-                    output.err(
-                        f"pr-merge: PR #{n} in {args.repo} is not eligible for "
-                        f"merge consent ({row.get('reason', 'ineligible')}); no "
-                        f"consent applied. pr-merge only applies to an APPROVED, "
-                        f"mergeable, non-draft PR -- nothing changed."
-                    )
-                return 1
-            if action == "apply" and apply and not row.get("applied"):
-                if not args.json:
-                    output.err(
-                        f"pr-merge: failed to apply merge consent to PR #{n} in "
-                        f"{args.repo}: {row.get('error', 'unknown error')}"
-                    )
-                return 1
-            if not args.json and apply:
-                if action == "already":
-                    output.ok(
-                        f"pr-merge: merge consent already granted on PR #{n} in "
-                        f"{args.repo}; the review gate will merge when satisfied."
-                    )
-                elif action == "apply" and row.get("applied"):
-                    output.ok(
-                        f"pr-merge: applied auto-merge consent to PR #{n} in "
-                        f"{args.repo}; the review gate will merge when satisfied."
-                    )
-            return 0
-
-        return 1 if summary["failed"] else 0
-    except ProviderError as exc:
-        output.err(f"pr-merge: {exc}")
-        return 3
-    except ValueError as exc:
-        output.err(f"pr-merge: {exc}")
-        return 2
-
-
-def _pr_usage() -> None:
-    out = sys.stderr
-    print("Usage: <project> pr <verb> [args...]", file=out)
-    print(file=out)
-    print("Author-side PR command family (verbs also available flat as pr-*):", file=out)
-    print("  create   Open a PR from the worktree (= create-pr)", file=out)
-    print("  watch    Block until the PR moves (= pr-watch)", file=out)
-    print("  merge    Signal merge consent on an approved PR (= pr-merge)", file=out)
-    print("  status   Read tracked PR metadata (= pr-status)", file=out)
-    print("  complete Reconcile the worktree after merge (= pr-complete)", file=out)
-    print("  ready    Move a PR out of draft, ready-for-review (= pr-ready)", file=out)
-    print(
-        "  research Inspect the repo's provider settings -> policy matrix (= pr-research)",
-        file=out,
-    )
-
-
-def cmd_pr_research_dispatch(argv: list[str]) -> int:
-    """Route ``pr-research`` -- read the repo's live provider settings and derive
-    the policy matrix to match (#225). Read-only: it PRINTS the suggested ``pr:``
-    policy keys (never writes config), so an operator/agent can align the config
-    with the repo's real settings instead of a guess.
-    """
-    import json as _json
-
-    from . import pr_contract as pc
-    from .providers import ProviderError, account_token_for_slug, get_provider
-
-    if argv and argv[0] in ("--help", "-h", "help"):
-        print(
-            "Usage: <project> pr-research [repo] [--default-branch B] "
-            "[--host URL] [--token T] [--json]",
-            file=sys.stderr,
-        )
-        print(file=sys.stderr)
-        print(
-            "Read the repo's live provider settings (allowed merge methods, native auto-merge,",
-            file=sys.stderr,
-        )
-        print(
-            "delete-branch-on-merge, required reviews/checks) and derive the repo-overridable",
-            file=sys.stderr,
-        )
-        print(
-            "`pr:` policy matrix to match. Read-only -- prints a suggestion; "
-            "writes nothing. The repo is inferred from the active project when "
-            "omitted.",
-            file=sys.stderr,
-        )
-        return 0
-
-    p = argparse.ArgumentParser(prog="pr-research", add_help=True)
-    p.add_argument(
-        "repo",
-        type=_pr_parse_repo,
-        nargs="?",
-        default=None,
-        help="repo slug -- owner/name or ADO project/repo (optional; "
-        "inferred from the active project)",
-    )
-    p.add_argument(
-        "--default-branch",
-        default="",
-        dest="default_branch",
-        help="branch to read protection from (defaults to repo config)",
-    )
-    p.add_argument("--host", default="", help="API base URL override")
-    p.add_argument("--token", default=None, help="Provider token override")
-    p.add_argument("--json", action="store_true", help="emit the result JSON")
-    p.add_argument("--config", default=None)
-    try:
-        args = p.parse_args(argv)
-    except SystemExit as exc:
-        return int(exc.code or 0)
-
-    try:
-        config = cfg.load_config(Path(args.config) if args.config else None)
-        if args.repo is None:
-            args.repo = _infer_active_repo_slug(config)
-            if not args.repo:
-                raise ValueError(
-                    "could not infer the repo from the active project; pass an explicit repo slug"
-                )
-        repo_cfg = config.default_repo
-        prcfg = repo_cfg.pr
-        provider = get_provider(getattr(prcfg, "provider", "gitea") or "gitea")
-        base = (args.host or getattr(prcfg, "api_base", "") or "").strip()
-        branch = args.default_branch or repo_cfg.default_branch or ""
-        tok = args.token if args.token is not None else account_token_for_slug(args.repo, prcfg)
-        policy = provider.get_repo_policy(
-            args.repo, default_branch=branch, api_base=base, token=tok
-        )
-    except ProviderError as exc:
-        output.err(f"pr-research: {exc}")
-        return 1
-    except Exception as exc:  # config / resolution failure
-        output.err(f"pr-research: {exc}")
-        return 1
-
-    matrix = pc.derive_policy_matrix(policy)
-    settings = {
-        "supported": policy.supported,
-        "allow_squash": policy.allow_squash,
-        "allow_merge_commit": policy.allow_merge_commit,
-        "allow_rebase": policy.allow_rebase,
-        "allow_auto_merge": policy.allow_auto_merge,
-        "delete_branch_on_merge": policy.delete_branch_on_merge,
-        "required_approving_reviews": policy.required_approving_reviews,
-        "has_required_status_checks": policy.has_required_status_checks,
-    }
-    if args.json:
-        print(
-            _json.dumps(
-                {
-                    "repo": args.repo,
-                    "provider": getattr(prcfg, "provider", ""),
-                    "supported": policy.supported,
-                    "error": policy.error,
-                    "settings": settings,
-                    "suggested_matrix": matrix,
-                }
-            )
-        )
-        return 0 if policy.supported else 1
-
-    if not policy.supported:
-        output.err(f"pr-research: {policy.error}")
-        return 1
-    output.header(f"PR-policy research: {args.repo}")
-    print("  Live settings:")
-    for k, v in settings.items():
-        if k == "supported":
-            continue
-        print(f"    {k}: {v}")
-    print("  Suggested pr: policy (drop into .copilot-extensions/agent-worktrees/config.yaml):")
-    if matrix:
-        for k, v in matrix.items():
-            print(f"    {k}: {str(v).lower() if isinstance(v, bool) else v}")
-    else:
-        print("    (no confident derivation -- keep the defaults)")
-    return 0
-
-
-# pr <verb> namespace -> canonical top-level verb (or manual dispatcher).
-_PR_NAMESPACE = {
-    "create": "create-pr",
-    "status": "pr-status",
-    "complete": "pr-complete",
-    "ready": "pr-ready",
-}
-
-
-def cmd_pr_dispatch(argv: list[str]) -> int:
-    """Route the `pr <verb>` namespace onto the flat pr-* command family."""
-    if not argv or argv[0] in ("--help", "-h", "help"):
-        _pr_usage()
-        return 0 if argv and argv[0] in ("--help", "-h", "help") else 1
-    verb = argv[0]
-    if verb == "watch":
-        return cmd_pr_watch_dispatch(argv[1:])
-    if verb == "merge":
-        return cmd_pr_merge_dispatch(argv[1:])
-    if verb == "research":
-        return cmd_pr_research_dispatch(argv[1:])
-    canonical = _PR_NAMESPACE.get(verb)
-    if not canonical:
-        output.err(f"Unknown pr subcommand: {verb}")
-        _pr_usage()
-        return 1
-    parser = build_parser()
-    try:
-        args = parser.parse_args([canonical, *argv[1:]])
-    except SystemExit as exc:
-        return int(exc.code or 0)
-    handler = COMMAND_MAP.get(args.command)
-    if not handler:
-        _pr_usage()
-        return 1
-    return handler(args)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -28552,8 +28218,10 @@ def main(argv: list[str] | None = None) -> int:
     # pr-watch -- provider-generic PR review-callback watcher (manual dispatch:
     # sub-subcommands wait/cursor + owner/name + pr).
     if args_list[0] == "pr-watch":
+        from . import pr_cli
+
         try:
-            return cmd_pr_watch_dispatch(args_list[1:])
+            return pr_cli.cmd_pr_watch_dispatch(args_list[1:])
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130
@@ -28561,8 +28229,10 @@ def main(argv: list[str] | None = None) -> int:
     # pr-merge -- signal merge consent (apply the consent label). Manual
     # dispatch (owner/name + pr | --all).
     if args_list[0] == "pr-merge":
+        from . import pr_cli
+
         try:
-            return cmd_pr_merge_dispatch(args_list[1:])
+            return pr_cli.cmd_pr_merge_dispatch(args_list[1:])
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130
@@ -28570,16 +28240,20 @@ def main(argv: list[str] | None = None) -> int:
     # pr-research -- read the repo's live provider settings -> policy matrix
     # (#225). Read-only manual dispatch (owner/name).
     if args_list[0] == "pr-research":
+        from . import pr_cli
+
         try:
-            return cmd_pr_research_dispatch(args_list[1:])
+            return pr_cli.cmd_pr_research_dispatch(args_list[1:])
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130
 
     # pr <verb> namespace -- sugar over the flat pr-* command family.
     if args_list[0] == "pr":
+        from . import pr_cli
+
         try:
-            return cmd_pr_dispatch(args_list[1:])
+            return pr_cli.cmd_pr_dispatch(args_list[1:])
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130

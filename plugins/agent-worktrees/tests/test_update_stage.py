@@ -104,6 +104,68 @@ def test_fingerprint_changes_with_content(tmp_path: Path):
     assert fp1 != fp2
 
 
+def test_fingerprint_detects_source_only_change(tmp_path: Path):
+    """#2609 regression: a plugin bug fix landing purely in ``src/`` .py
+    source, with no touch to plugin.json/pyproject.toml or any other curated
+    meta-file, must still change the fingerprint -- otherwise the staging
+    path's "did the payload actually change" check silently misses a real,
+    already-downloaded update and the venv is never reinstalled."""
+    home = tmp_path / "home"
+    d = _make_marketplace(
+        home,
+        {
+            "plugin.json": '{"version":"1"}',
+            "src/agent_worktrees/__main__.py": "def cmd_launch():\n    return 1\n",
+        },
+    )
+    fp1 = us.fingerprint(d)
+    (d / "src" / "agent_worktrees" / "__main__.py").write_text(
+        "def cmd_launch():\n    return 2  # a real bug fix, no version bump\n",
+        encoding="utf-8",
+    )
+    fp2 = us.fingerprint(d)
+    assert fp1 != fp2
+
+
+def test_fingerprint_detects_vendored_lib_source_change(tmp_path: Path):
+    """The same gap applied to a vendored path-dependency's own src/ tree
+    (e.g. libs/dropin-registry/src/...) -- a fix there is just as invisible
+    to the curated meta-file list."""
+    home = tmp_path / "home"
+    d = _make_marketplace(
+        home,
+        {
+            "plugin.json": '{"version":"1"}',
+            "libs/dropin-registry/src/dropin_registry/model.py": "X = 1\n",
+        },
+    )
+    fp1 = us.fingerprint(d)
+    (d / "libs" / "dropin-registry" / "src" / "dropin_registry" / "model.py").write_text(
+        "X = 2\n", encoding="utf-8"
+    )
+    fp2 = us.fingerprint(d)
+    assert fp1 != fp2
+
+
+def test_fingerprint_ignores_pycache(tmp_path: Path):
+    """A stale .pyc left behind by a previous interpreter run must not make
+    two otherwise-identical checkouts fingerprint differently."""
+    home = tmp_path / "home"
+    d = _make_marketplace(
+        home,
+        {
+            "plugin.json": '{"version":"1"}',
+            "src/agent_worktrees/__main__.py": "X = 1\n",
+        },
+    )
+    fp1 = us.fingerprint(d)
+    pycache = d / "src" / "agent_worktrees" / "__pycache__"
+    pycache.mkdir(parents=True)
+    (pycache / "__main__.cpython-312.pyc").write_bytes(b"\x00\x01\x02compiled-bytecode")
+    fp2 = us.fingerprint(d)
+    assert fp1 == fp2
+
+
 # ---------------------------------------------------------------------------
 # stage() end to end (copilot mocked)
 # ---------------------------------------------------------------------------
@@ -355,6 +417,20 @@ def test_indicator_current_and_available(tmp_path: Path):
     status.write_text(json.dumps({"stage_done": True, "plugin_changed": True}),
                       encoding="utf-8")
     assert us.indicator_state(status=status, lock=lock) == "available"
+
+
+def test_indicator_paused_ignores_stale_available_status(
+    tmp_path: Path, monkeypatch
+):
+    status = tmp_path / "status.json"
+    lock = tmp_path / "lock"
+    status.write_text(json.dumps({"stage_done": True, "plugin_changed": True}),
+                      encoding="utf-8")
+    lock.write_text(json.dumps({"pid": os.getpid(), "started": us.time.time()}),
+                    encoding="utf-8")
+    monkeypatch.setenv("WORKTREE_NO_UPDATE", "1")
+
+    assert us.indicator_state(status=status, lock=lock) == "paused"
 
 
 def test_indicator_locked_skip_reads_as_checking(tmp_path: Path):

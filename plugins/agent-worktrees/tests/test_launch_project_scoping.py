@@ -5,7 +5,7 @@ worktree that was just created/resumed), never the mutable process-global
 
 ``launch-session.ps1``/``.sh`` treat the resolved plan's ``project`` field as
 authoritative for every downstream out-of-process call (notably
-``session-backend status``). Before this fix, ``_create_worktree_core`` filled
+``execution-leg get``). Before this fix, ``_create_worktree_core`` filled
 that field from ``cfg.active_project()`` -- a single, process-wide value that
 can legitimately differ from the project actually being acted on (e.g. an
 automated flow whose launcher started against one project but resolves a
@@ -103,7 +103,6 @@ def _stub_create_worktree_core_internals(monkeypatch, m, tmp_path):
     monkeypatch.setattr(m.permissions, "add_trusted_folder", lambda *_a: False)
     monkeypatch.setattr(m.activity, "log_event", lambda *_a, **_k: None)
     monkeypatch.setattr(m, "_worktree_to_dict", lambda record: {"id": record.worktree_id})
-    monkeypatch.setattr(m, "_reconcile_marketplaces_for_checkout", lambda *_a, **_k: None)
     monkeypatch.setattr(
         m.state_root_mod,
         "resolve_state_root",

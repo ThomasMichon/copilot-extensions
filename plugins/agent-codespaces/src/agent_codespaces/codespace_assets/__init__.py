@@ -9,8 +9,8 @@ tunnel:
   tunnel to the host's credential relay (and on to Git Credential
   Manager). Installed to ``~/.local/bin/ado-auth-helper-relay``.
 
-- ``ado-auth-helper-wrapper`` -- a smart **Node** shim installed as both
-  ``~/ado-auth-helper`` and ``~/azure-auth-helper``. When
+- ``ado-auth-helper-wrapper`` -- a smart **Node** shim installed as
+  ``~/ado-auth-helper``. When
   ``LC_GIT_CREDENTIAL_RELAY`` is set (or the tunnel port is reachable) it
   delegates to ``ado-auth-helper-relay``; otherwise it ``require()``s the
   REAL VS Code extension ``auth-helper.js`` (discovered at runtime), mirroring
@@ -129,6 +129,72 @@ if changed:
     p.write_text("".join(kept), encoding="utf-8")
 """
 
+# #440: a headless odsp-web push runs its pre-push hook's Rush validation via
+# `node common/scripts/install-run-rush.js`, which bootstraps the PUBLIC
+# pinned Rush engine (e.g. ``@microsoft/rush``) through whatever registry the
+# workspace's ambient npm config points at -- normally the private Azure
+# Artifacts feed. If that feed's token is stale/unavailable (a token-only
+# problem, unrelated to the actual push), install-run-rush.js 401s and the
+# entire pre-push hook -- LFS, Rush change validation, Prettier, project
+# validation -- never runs, even though nothing about the push itself needed
+# the private feed.
+#
+# Fix, mirroring the reporter's own verified manual workaround: for every
+# Rush-monorepo workspace under /workspaces (detected by a top-level
+# ``rush.json`` + ``common/scripts/install-run-rush.js``), run the Rush
+# engine bootstrap once with a TRANSIENT project-local ``.npmrc`` override
+# that points the default registry (and the ``@microsoft`` scope
+# specifically) at the public npmjs registry, restoring/removing that
+# override immediately after. install-run-rush.js is itself idempotent (a
+# warm ``common/temp/install-run`` cache makes this a fast no-op), so running
+# it unconditionally on every connect is cheap and safe. No user-level or
+# persisted npm configuration is touched, and private dependency installs are
+# unaffected since they run later, through the workspace's normal (restored)
+# npm config.
+_RUSH_BOOTSTRAP_SEED = r"""
+import glob
+import os
+import subprocess
+
+PUBLIC_REGISTRY = "https://registry.npmjs.org/"
+_OVERRIDE = "registry=" + PUBLIC_REGISTRY + "\n@microsoft:registry=" + PUBLIC_REGISTRY + "\n"
+
+for ws in sorted(glob.glob("/workspaces/*")):
+    rush_json = os.path.join(ws, "rush.json")
+    installer = os.path.join(ws, "common", "scripts", "install-run-rush.js")
+    if not (os.path.isfile(rush_json) and os.path.isfile(installer)):
+        continue
+    npmrc = os.path.join(ws, ".npmrc")
+    backup = npmrc + ".agent-codespaces-bak"
+    had_npmrc = os.path.exists(npmrc)
+    try:
+        if had_npmrc:
+            os.replace(npmrc, backup)
+        with open(npmrc, "w", encoding="utf-8") as f:
+            f.write(_OVERRIDE)
+        # --version is a trivial, side-effect-free invocation that still
+        # forces install-run-rush.js's own engine bootstrap/cache path.
+        subprocess.run(
+            ["node", installer, "--version"],
+            cwd=ws,
+            timeout=120,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        pass
+    finally:
+        try:
+            os.remove(npmrc)
+        except OSError:
+            pass
+        if had_npmrc:
+            try:
+                os.replace(backup, npmrc)
+            except OSError:
+                pass
+"""
+
 
 def asset_text(name: str) -> str:
     """Return the text of a packaged CodeSpace asset."""
@@ -209,20 +275,47 @@ def build_auth_error_policy_command() -> str:
     )
 
 
-def build_provision_command() -> str:
+def _azure_auth_helper_repair_command() -> str:
+    return (
+        '_repaired_azure_helper=0; '
+        'if [ -f "$HOME/azure-auth-helper" ] && '
+        'grep -q ado-auth-helper-relay "$HOME/azure-auth-helper" 2>/dev/null; then '
+        '_repaired_azure_helper=1; '
+        'if [ -f "$HOME/.azure-auth-helper-vscode" ] && '
+        '! grep -q ado-auth-helper-relay "$HOME/.azure-auth-helper-vscode" 2>/dev/null; then '
+        'cp -f "$HOME/.azure-auth-helper-vscode" "$HOME/azure-auth-helper"; '
+        'chmod +x "$HOME/azure-auth-helper"; '
+        'else rm -f "$HOME/azure-auth-helper"; fi; '
+        'fi; '
+        'if [ "$_repaired_azure_helper" = 1 ] && '
+        '[ ! -f "$HOME/azure-auth-helper" ] && '
+        '[ -L "$HOME/.local/bin/azure-auth-helper" ] && '
+        '[ "$(readlink "$HOME/.local/bin/azure-auth-helper")" = "$HOME/azure-auth-helper" ]; then '
+        'rm -f "$HOME/.local/bin/azure-auth-helper"; fi'
+    )
+
+
+def build_provision_command(ado_host: str | None = None) -> str:
     """Build an idempotent bash command that installs the relay helpers.
 
     The returned command is safe to run on every SSH connect:
 
     - writes ``~/.local/bin/ado-auth-helper-relay`` (the relay client)
-    - installs the smart Node wrapper as BOTH ``~/ado-auth-helper`` and
-      ``~/azure-auth-helper``, backing up each native helper to
-      ``~/.<name>-vscode`` the first time (never backing up our own wrapper)
+    - installs the smart Node wrapper as ``~/ado-auth-helper``, backing up the
+      native helper to ``~/.ado-auth-helper-vscode`` (never backing up our own
+      wrapper)
+    - removes a legacy relay wrapper from ``~/azure-auth-helper``, restoring a
+      preserved native helper when available, so Azure CLI login keeps its
+      native authentication contract
     - writes the wrapper with the **extension's own node shebang** (taken from
       the backed-up native shim) so it runs under the same node the extension
       used; falls back to ``/usr/bin/env node``.
     - hardens headless boot against an interactive git prompt hang (#18, see
       :data:`_NONINTERACTIVE_GIT_PROFILE` below).
+    - backgrounds a best-effort Rush install-run engine cache seed for any
+      Rush-monorepo workspace (#440, see :data:`_RUSH_BOOTSTRAP_SEED` below),
+      so a headless ``git push``'s pre-push hook never 401s bootstrapping the
+      public Rush engine through a stale/unavailable private-feed token.
 
     The wrapper is relay-first and, when no relay is active, ``require()``s the
     REAL extension ``auth-helper.js`` discovered at runtime -- so VS Code auth
@@ -230,11 +323,28 @@ def build_provision_command() -> str:
 
     Assets are transported as gzip-compressed base64 chunks so arbitrary script
     content survives the SSH command line without one oversized argv token.
+
+    ``ado_host``, when given, is the repo's configured
+    ``credentials.ado_host`` (e.g. ``onedrive.visualstudio.com``); it is
+    registered alongside ``dev.azure.com``/``github.com`` in the pinned git
+    credential-helper loop below, instead of an un-substituted placeholder
+    (#383).
     """
     relay_b64 = _compressed_b64(asset_text(_RELAY_CLIENT))
     wrapper_b64 = _compressed_b64(asset_text(_WRAPPER))
     profile_b64 = _compressed_b64(_NONINTERACTIVE_GIT_PROFILE)
     npm_scrub_b64 = _compressed_b64(_STALE_NPM_TOKEN_SCRUB)
+    rush_seed_b64 = _compressed_b64(_RUSH_BOOTSTRAP_SEED)
+    # The configured ADO host (if any) always comes first; dev.azure.com and
+    # github.com are pinned unconditionally, skipping either if it duplicates
+    # the configured ado_host.
+    _credential_hosts = ([f"https://{ado_host}"] if ado_host else []) + [
+        h for h in ("https://dev.azure.com", "https://github.com")
+        if not ado_host or h != f"https://{ado_host}"
+    ]
+    _credential_hosts_literal = " ".join(
+        shlex.quote(h) for h in _credential_hosts
+    )
     parts = [
         "set -e",
         'mkdir -p "$HOME/.local/bin"',
@@ -254,14 +364,34 @@ def build_provision_command() -> str:
             "| python3 -",
         )
         + "\n) || true",
+        # #440: seed the Rush install-run engine cache for any Rush-monorepo
+        # workspace via a transient project-local .npmrc registry override,
+        # so the pre-push hook's own bootstrap never depends on private-feed
+        # auth for the public Rush engine. Backgrounded (nohup + disown) so a
+        # cold/slow bootstrap never delays connect; best-effort like the
+        # npm-scrub step above.
+        "(\n"
+        + _chunked_payload_pipeline(
+            rush_seed_b64,
+            ".agent-codespaces-rush-seed.b64",
+            '> "$HOME/.agent-codespaces-rush-seed.py"',
+        )
+        + ';\nnohup python3 "$HOME/.agent-codespaces-rush-seed.py" '
+        ">/dev/null 2>&1 </dev/null & disown"
+        "\n) || true",
         # Decode the smart wrapper once to a staging file
         _chunked_payload_pipeline(
             wrapper_b64,
             ".agent-codespaces-auth-wrapper.b64",
             '> "$HOME/.agent-codespaces-auth-wrapper"',
         ),
-        # Install for both ado-auth-helper and azure-auth-helper
-        'for _n in ado-auth-helper azure-auth-helper; do '
+        # Older releases also installed the relay wrapper as
+        # ~/azure-auth-helper. That shadows Azure CLI's native login helper,
+        # whose verbs the ADO relay does not implement. Repair that state
+        # before installing only the ADO-specific wrapper.
+        _azure_auth_helper_repair_command(),
+        # Install the relay wrapper only for ado-auth-helper.
+        'for _n in ado-auth-helper; do '
         # Back up the native helper once (skip if it is already our wrapper)
         'if [ -f "$HOME/$_n" ] && '
         '! grep -q ado-auth-helper-relay "$HOME/$_n" 2>/dev/null; then '
@@ -288,21 +418,26 @@ def build_provision_command() -> str:
         'done; '
         'rm -f "$HOME/.agent-codespaces-auth-wrapper"',
         # --- #133/#112/#159: pin the relay-first git credential helper --------
-        # The native git config points ADO (your-org.visualstudio.com /
-        # dev.azure.com) at the VS Code broker (`external-git ado-helper`), which
-        # returns EMPTY over headless SSH -> `git push` fails with "could not
-        # read Username"; and GitHub at the codespace-scoped
-        # `gitcredential_github.sh` -- a valid token, but scoped to the
-        # CodeSpaces repo, so pushing to another GitHub repo (e.g. the
-        # dotfiles/harness repo) 403s. Both fail headless even though the relay
-        # itself serves working creds. Point these hosts at the relay-first
-        # ~/ado-auth-helper wrapper (host identity over the relay): the leading
-        # empty value resets any lower-priority helper so ours is authoritative,
-        # and the wrapper falls back to the real VS Code helper when no relay is
-        # active, so interactive VS Code auth is unaffected. Best-effort.
+        # The native git config points ADO (dev.azure.com or an
+        # organization's own *.visualstudio.com host) at the VS Code broker
+        # (`external-git ado-helper`), which returns EMPTY over headless SSH ->
+        # `git push` fails with "could not read Username"; and GitHub at the
+        # codespace-scoped `gitcredential_github.sh` -- a valid token, but
+        # scoped to the CodeSpaces repo, so pushing to another GitHub repo
+        # (e.g. the dotfiles/harness repo) 403s. Both fail headless even
+        # though the relay itself serves working creds. Point these hosts at
+        # the relay-first ~/ado-auth-helper wrapper (host identity over the
+        # relay): the leading empty value resets any lower-priority helper so
+        # ours is authoritative, and the wrapper falls back to the real VS
+        # Code helper when no relay is active, so interactive VS Code auth is
+        # unaffected. Best-effort.
+        #
+        # The repo's configured `credentials.ado_host` (e.g.
+        # `onedrive.visualstudio.com`) is registered here too -- an
+        # un-substituted `your-org.visualstudio.com` placeholder previously
+        # stood in its place and never matched a real ADO remote (#383).
         "( "
-        'for _h in "https://your-org.visualstudio.com" '
-        '"https://dev.azure.com" "https://github.com"; do '
+        f"for _h in {_credential_hosts_literal}; do "
         'git config --global --unset-all "credential.${_h}.helper" 2>/dev/null || true; '
         'git config --global --add "credential.${_h}.helper" ""; '
         'git config --global --add "credential.${_h}.helper" "$HOME/ado-auth-helper"; '

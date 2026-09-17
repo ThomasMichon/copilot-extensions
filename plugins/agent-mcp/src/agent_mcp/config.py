@@ -26,6 +26,8 @@ from typing import Any
 
 import yaml
 
+from ._predicate import validate_predicate
+
 # Transport kinds (mirror MCP server-launch ``type`` values, plus ``cli`` --
 # the local CLI->MCP responder that has no upstream MCP at all).
 TRANSPORTS = ("http", "stdio", "cli")
@@ -66,7 +68,8 @@ PARSE_MODES = ("keyvalue", "raw")
 
 # Decorator types in the ``decorators:`` stack. Kept in sync with the registry in
 # ``agent_mcp.decorators`` (a test asserts they match) to avoid a circular import.
-DECORATOR_TYPES = ("filter", "rename", "defer", "code-mode", "storage", "transform", "gate")
+DECORATOR_TYPES = ("filter", "rename", "defer", "code-mode", "storage", "transform",
+                    "gate", "input_gate")
 
 BRIDGES_DIR = Path(os.environ.get("AGENT_MCP_HOME", Path.home() / ".agent-mcp")) / "bridges"
 
@@ -1027,6 +1030,50 @@ def _validate_decorators(decorators: list[DecoratorSpec]) -> list[str]:
             errors.extend(_validate_transform_rules(opts, label))
         if d.type == "gate":
             errors.extend(_validate_gate(opts, label))
+        if d.type == "input_gate":
+            errors.extend(_validate_input_gate(opts, label))
+    errors.extend(_validate_input_gate_position(decorators))
+    return errors
+
+
+# Decorator types whose synthesized/rewritten/rehydrated sub-requests can
+# bypass an `input_gate` positioned before (client-side / outer of) them --
+# see input_gate.py's module docstring for the full rationale.
+_UNSAFE_BEFORE_INPUT_GATE = ("code-mode", "defer", "storage", "rename")
+
+
+def _validate_input_gate_position(decorators: list[DecoratorSpec]) -> list[str]:
+    """Reject a decorator stack where an ``input_gate`` sits BEFORE
+    ``code-mode``/``defer`` (whose synthesized sub-requests only reach
+    decorators below their own position, never back through ``input_gate``
+    above them), ``storage`` (which may rehydrate a ``$stream`` argument
+    handle into its real value on the way to upstream -- an ``input_gate``
+    above it would evaluate ``deny_when`` against the handle, not the real
+    value), or ``rename`` (which rewrites the client-visible tool name back to
+    the real upstream name on the way down -- an ``input_gate`` above it would
+    see the RENAMED name in ``match_tools``, e.g. a caller-facing
+    `partner__update_incident` instead of the real `update_incident`, so a
+    `match_tools: [update_incident]` gate would silently never trigger). This
+    is a documented ordering requirement (README, module docstrings); this
+    function makes it a HARD, enforced requirement instead of a config author
+    simply having to remember it correctly."""
+    errors: list[str] = []
+    input_gate_indices = [i for i, d in enumerate(decorators) if d.type == "input_gate"]
+    if not input_gate_indices:
+        return errors
+    last_unsafe_index = max(
+        (i for i, d in enumerate(decorators) if d.type in _UNSAFE_BEFORE_INPUT_GATE),
+        default=-1,
+    )
+    for i in input_gate_indices:
+        if i < last_unsafe_index:
+            errors.append(
+                f"decorators[{i}] (input_gate) must be positioned AFTER every "
+                f"{'/'.join(_UNSAFE_BEFORE_INPUT_GATE)} decorator (found one at "
+                f"decorators[{last_unsafe_index}]) -- a synthesized sub-request "
+                "or a rehydrated $stream value would otherwise bypass its "
+                "deny_when check. Move input_gate to be the LAST decorator in "
+                "the stack.")
     return errors
 
 
@@ -1048,12 +1095,30 @@ def _validate_gate(opts: dict, label: str) -> list[str]:
             errors.append(f"{label}.preflight.cache '{cache}' must be per-key|none")
     if not isinstance(opts.get("allow_when"), dict):
         errors.append(f"{label}: gate requires an 'allow_when' predicate mapping")
+    else:
+        errors.extend(validate_predicate(opts["allow_when"], f"{label}.allow_when"))
     on_deny = opts.get("on_deny", "stub")
     if on_deny not in ("stub", "drop", "error"):
         errors.append(f"{label}.on_deny '{on_deny}' must be stub|drop|error")
     on_error = opts.get("on_error", "deny")
     if on_error not in ("deny", "allow"):
         errors.append(f"{label}.on_error '{on_error}' must be deny|allow")
+    return errors
+
+
+def _validate_input_gate(opts: dict, label: str) -> list[str]:
+    """Validate an input_gate decorator (match_tools + deny_when + on_deny)."""
+    errors: list[str] = []
+    match_tools = opts.get("match_tools")
+    if not match_tools or not isinstance(match_tools, list):
+        errors.append(f"{label}: input_gate requires a non-empty 'match_tools' list")
+    if not isinstance(opts.get("deny_when"), dict):
+        errors.append(f"{label}: input_gate requires a 'deny_when' predicate mapping")
+    else:
+        errors.extend(validate_predicate(opts["deny_when"], f"{label}.deny_when"))
+    on_deny = opts.get("on_deny", "error")
+    if on_deny not in ("stub", "drop", "error"):
+        errors.append(f"{label}.on_deny '{on_deny}' must be stub|drop|error")
     return errors
 
 

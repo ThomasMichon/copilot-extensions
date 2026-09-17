@@ -26,13 +26,14 @@ def _write_record(tracking_dir, wt_id):
 def test_relocate_switches_active_project_when_found_elsewhere(tmp_path, monkeypatch):
     from agent_worktrees import __main__ as m
     from agent_worktrees import config as cfg
+    from agent_worktrees import session_tracking_cli
 
     ambient_dir = tmp_path / "ambient" / "worktrees"
     other_dir = tmp_path / "other" / "worktrees"
     _write_record(other_dir, "wt-1")
+    record_path = other_dir / "wt-1.yaml"
 
     monkeypatch.setattr(cfg, "tracking_dir", lambda: ambient_dir)
-    monkeypatch.setattr(m, "_all_tracking_dirs", lambda: [ambient_dir, other_dir])
     monkeypatch.setattr(cfg, "project_dir", lambda name=None: (tmp_path / name))
     monkeypatch.setattr(cfg, "active_project", lambda: "ambient-project")
 
@@ -40,7 +41,12 @@ def test_relocate_switches_active_project_when_found_elsewhere(tmp_path, monkeyp
     monkeypatch.setattr(
         cfg, "set_active_project", lambda name: switched.append(name)
     )
-    monkeypatch.setattr(m, "_project_for_tracking_file", lambda path: "other-project")
+    monkeypatch.setattr(
+        session_tracking_cli, "_find_tracking_file_exact", lambda wt_id: record_path
+    )
+    monkeypatch.setattr(
+        session_tracking_cli, "_project_for_tracking_file", lambda path: "other-project"
+    )
 
     assert m._relocate_active_project_for_worktree("wt-1") is True
     assert switched == ["other-project"]

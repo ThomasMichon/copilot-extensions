@@ -413,6 +413,121 @@ def test_local_settings_can_disable_base_plugin(tmp_path: Path):
     ) == []
 
 
+def test_agent_worktrees_repo_marketplace_resolves_via_registry(
+    tmp_path: Path, monkeypatch,
+):
+    # A marketplace declared via {"source": "agent-worktrees-repo", "repo":
+    # "<name>"} resolves that repo's local checkout through the trusted
+    # agent-worktrees registry (mocked here), then treats it exactly like a
+    # directory marketplace rooted there -- portable across machines since
+    # the declaration carries only a stable repo name, never an absolute path.
+    other_repo = tmp_path / "other-repo-checkout"
+    (other_repo / ".ai" / "cap" / "skills").mkdir(parents=True)
+    _skill(other_repo / ".ai" / "cap" / "skills", "cap")
+    (other_repo / ".ai" / "cap" / "plugin.json").write_text(
+        json.dumps({"name": "cap", "version": "1.0.0"}), encoding="utf-8",
+    )
+    _marketplace(
+        other_repo / ".ai",
+        "other-marketplace",
+        entries=[{"name": "cap", "source": "cap"}],
+    )
+
+    def fake_which(name):
+        return "/usr/bin/agent-worktrees" if name == "agent-worktrees" else None
+
+    def fake_run(argv, **kwargs):
+        assert argv[1:3] == ["repos", "find"]
+        assert argv[3] == "other-repo-alias"
+        return scan.subprocess.CompletedProcess(
+            argv, 0, stdout=f"{other_repo}\n", stderr="",
+        )
+
+    monkeypatch.setattr(scan.shutil, "which", fake_which)
+    monkeypatch.setattr(scan.subprocess, "run", fake_run)
+
+    repo = tmp_path / "consuming-repo"
+    repo.mkdir()
+    _settings(
+        repo,
+        {"cap@other-marketplace": True},
+        {
+            "other-marketplace": {
+                "source": {
+                    "source": "agent-worktrees-repo",
+                    "repo": "other-repo-alias",
+                },
+            },
+        },
+    )
+
+    sources = scan.assemble_enabled_plugins(
+        repo,
+        installed_root=tmp_path / "none",
+        home=tmp_path / "home",
+    )
+    assert len(sources) == 1
+    assert sources[0].payload_root == (other_repo / ".ai" / "cap").resolve()
+    assert sources[0].origin == "other-marketplace/cap"
+    # Cross-repo (repo dir isn't a parent of the resolved payload) -> external,
+    # unlike an in-repo ./.ai directory marketplace which is "controlled".
+    assert sources[0].controlled is False
+
+
+@pytest.mark.parametrize(
+    "break_it",
+    ["no_cli", "cli_fails", "empty_output", "bad_repo_name", "not_a_directory"],
+)
+def test_agent_worktrees_repo_marketplace_unresolvable_cases(
+    tmp_path: Path, monkeypatch, break_it: str,
+):
+    repo_name = "not a valid name!" if break_it == "bad_repo_name" else "some-repo"
+
+    def fake_which(name):
+        if break_it == "no_cli":
+            return None
+        return "/usr/bin/agent-worktrees" if name == "agent-worktrees" else None
+
+    def fake_run(argv, **kwargs):
+        if break_it == "cli_fails":
+            return scan.subprocess.CompletedProcess(argv, 1, stdout="", stderr="not found")
+        if break_it == "empty_output":
+            return scan.subprocess.CompletedProcess(argv, 0, stdout="   \n", stderr="")
+        if break_it == "not_a_directory":
+            missing = tmp_path / "does-not-exist"
+            return scan.subprocess.CompletedProcess(argv, 0, stdout=f"{missing}\n", stderr="")
+        raise AssertionError("fake_run should not be reached for this case")
+
+    monkeypatch.setattr(scan.shutil, "which", fake_which)
+    monkeypatch.setattr(scan.subprocess, "run", fake_run)
+
+    repo = tmp_path / "consuming-repo"
+    repo.mkdir()
+    _settings(
+        repo,
+        {"cap@other-marketplace": True},
+        {
+            "other-marketplace": {
+                "source": {
+                    "source": "agent-worktrees-repo",
+                    "repo": repo_name,
+                },
+            },
+        },
+    )
+
+    sources = scan.assemble_enabled_plugins(
+        repo,
+        installed_root=tmp_path / "none",
+        home=tmp_path / "home",
+    )
+    # Unresolvable -> falls through to the generic installed-plugins
+    # footprint (matching an ordinary unresolvable external marketplace),
+    # never raises.
+    assert len(sources) == 1
+    assert sources[0].payload_root == tmp_path / "none" / "other-marketplace" / "cap"
+
+
 def test_assemble_github_marketplace_is_external_with_source(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -2248,6 +2363,139 @@ def test_context_budget_splits_hooks_without_executing(
     assert "payload size unknown (not additionalContext)" in output
 
 
+def _write_session_file_hook(marker_dir_name: str) -> dict:
+    """A sessionStart command hook that writes a session-scoped file.
+
+    Mirrors the real facility write_session_guidance.py contract: it derives
+    the session-state root from $HOME/$USERPROFILE (never a hardcoded path)
+    and writes under instructions/<marker_dir_name>/.
+    """
+    session_id = "scan-customizations-dynamic-capture"
+    bash = (
+        f'mkdir -p "$HOME/.copilot/session-state/{session_id}/instructions/'
+        f'{marker_dir_name}" && printf \'dynamic content\' > '
+        f'"$HOME/.copilot/session-state/{session_id}/instructions/'
+        f'{marker_dir_name}/topic.instructions.md"'
+    )
+    powershell = (
+        f"New-Item -ItemType Directory -Force -Path "
+        f"\"$env:USERPROFILE\\.copilot\\session-state\\{session_id}\\"
+        f"instructions\\{marker_dir_name}\" | Out-Null; Set-Content -Path "
+        f"\"$env:USERPROFILE\\.copilot\\session-state\\{session_id}\\"
+        f"instructions\\{marker_dir_name}\\topic.instructions.md\" "
+        f"-Value 'dynamic content' -NoNewline"
+    )
+    return {"type": "command", "bash": bash, "powershell": powershell}
+
+
+def test_capture_dynamic_disabled_by_default(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    plugin = tmp_path / "plugin"
+    (plugin / "skills").mkdir(parents=True)
+    (plugin / "hooks.json").write_text(json.dumps({
+        "version": 1,
+        "hooks": {"sessionStart": [_write_session_file_hook("plugin-x")]},
+    }), encoding="utf-8")
+    source = scan.PluginSource(
+        skills_root=plugin / "skills", origin="market/plugin",
+    )
+
+    budget = scan.build_context_budget(repo, [source], home=home)
+    dynamic = budget["dynamic_session_files"]
+    assert dynamic == {
+        "captured": False, "totals": {
+            "characters": 0, "bytes": 0, "words": 0, "estimated_tokens": 0,
+        }, "files": [], "errors": [],
+    }
+    assert not (home / ".copilot" / "session-state").exists()
+
+
+def test_capture_dynamic_sandboxes_and_measures_session_files(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    plugin = tmp_path / "plugin"
+    (plugin / "skills").mkdir(parents=True)
+    (plugin / "hooks.json").write_text(json.dumps({
+        "version": 1,
+        "hooks": {"sessionStart": [_write_session_file_hook("plugin-x")]},
+    }), encoding="utf-8")
+    source = scan.PluginSource(
+        skills_root=plugin / "skills", origin="market/plugin",
+    )
+
+    budget = scan.build_context_budget(
+        repo, [source], home=home, capture_dynamic=True,
+    )
+    dynamic = budget["dynamic_session_files"]
+    assert dynamic["captured"] is True
+    assert dynamic["errors"] == []
+    assert len(dynamic["files"]) == 1
+    entry = dynamic["files"][0]
+    assert entry["path"] == "<session-instructions>/plugin-x/topic.instructions.md"
+    assert entry["characters"] == len("dynamic content")
+    assert dynamic["totals"]["characters"] == len("dynamic content")
+
+    # The real home fixture is never touched -- only the disposable sandbox.
+    assert not (home / ".copilot" / "session-state").exists()
+
+
+def test_capture_dynamic_reports_hook_failures_without_raising(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    plugin = tmp_path / "plugin"
+    (plugin / "skills").mkdir(parents=True)
+    (plugin / "hooks.json").write_text(json.dumps({
+        "version": 1,
+        "hooks": {"sessionStart": [{
+            "type": "command",
+            "bash": "exit 3",
+            "powershell": "exit 3",
+        }]},
+    }), encoding="utf-8")
+    source = scan.PluginSource(
+        skills_root=plugin / "skills", origin="market/plugin",
+    )
+
+    budget = scan.build_context_budget(
+        repo, [source], home=home, capture_dynamic=True,
+    )
+    dynamic = budget["dynamic_session_files"]
+    assert dynamic["files"] == []
+    assert len(dynamic["errors"]) == 1
+    assert dynamic["errors"][0]["plugin"] == "plugin:market/plugin"
+    assert "exit code" in dynamic["errors"][0]["detail"]
+
+
+def test_capture_dynamic_skips_repo_and_user_hooks(tmp_path: Path):
+    """Only plugin-owned sessionStart hooks run; repo/user ones never do."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    home = tmp_path / "home"
+    user_hooks = home / ".copilot" / "hooks"
+    user_hooks.mkdir(parents=True)
+    (user_hooks / "personal.json").write_text(json.dumps({
+        "hooks": {"sessionStart": [_write_session_file_hook("user-plugin")]},
+    }), encoding="utf-8")
+    (repo / "hooks.json").write_text(json.dumps({
+        "version": 1,
+        "hooks": {"sessionStart": [_write_session_file_hook("repo-plugin")]},
+    }), encoding="utf-8")
+
+    budget = scan.build_context_budget(
+        repo, [], home=home, capture_dynamic=True,
+    )
+    dynamic = budget["dynamic_session_files"]
+    assert dynamic["files"] == []
+    assert dynamic["errors"] == []
+
+
 def test_json_context_budget_shape(tmp_path: Path, capsys, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -2262,6 +2510,7 @@ def test_json_context_budget_shape(tmp_path: Path, capsys, monkeypatch):
         "token_estimate",
         "static_instruction_payloads",
         "metadata_upper_bounds",
+        "dynamic_session_files",
         "hook_registrations",
         "known_totals",
     }

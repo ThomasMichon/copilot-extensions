@@ -29,7 +29,31 @@ resources:
     strategy: ensure-present    # enforce | ensure-present
     content: |
       set -g mouse on
+  - type: self-update
+    tier: watchdog              # watchdog | sweep
+    state: present              # present (default) | absent
 ```
+
+## Common resource fields
+
+Every resource type supports the same small set of cross-cutting fields:
+
+| Field | Meaning |
+| --- | --- |
+| `authority` | Optional schema-v4 authority override for deterministic field selection and reporting. |
+| `platforms` | Restrict to a subset of `windows` / `linux` / `wsl`. |
+| `gate` | Restrict to specific machines (defaults to the package gate). |
+| `owner` | Override the collision owner label (defaults to the package name). |
+| `maintenance_safe` | Optional boolean, default `false`. Includes the resource in `agent-machines restore --maintenance-safe` unattended restores. When omitted, the resource stays visible in maintenance-safe restores as a skipped result with an explicit reason. |
+
+`maintenance_safe` is an unattended-maintenance opt-in, not the default. The
+one built-in exception is a `type: package` resource that declares both
+`pin: true` and an explicit `version:`: when that package is **already
+installed** but at the wrong version, maintenance-safe restore treats
+realignment back to the declared pinned version as safe drift correction even
+without `maintenance_safe: true`. First install, removal, pin-only metadata
+changes, and package declarations without explicit `pin` + `version` still
+require `maintenance_safe: true` to participate in unattended runs.
 
 ## Resource types
 
@@ -190,6 +214,39 @@ sees drift and retries. A failed query or post-apply mismatch is an error rather
 than a success-shaped fallback. `state` is not supported: power settings are
 always declarations of desired AC/DC indexes.
 
+### `self-update`
+
+Declare machine-local opt-in for one unattended `agent-machines self-update`
+tier. Identity is `tier`, so `watchdog` and `sweep` are independent resources
+with independent authority and locking.
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `type` | yes | `self-update` |
+| `tier` | yes | `watchdog` or `sweep`. |
+| `state` | no | `present` (opted in; default) or `absent` (opted out). |
+| `platforms` | no | Restrict to a subset of `windows` / `linux` / `wsl`. |
+| `gate` | no | Restrict to specific machines (defaults to the package gate). |
+| `owner` | no | Override the collision owner label (defaults to the package name). |
+
+`watchdog` is the narrow hourly dtssh-launcher liveness tier; `sweep` is the
+broader daily pull + plugin-reconcile + **maintenance-safe** restore tier.
+Declaring the resource controls both `agent-machines self-update run` and the
+Windows Scheduled Task presence reconciled by `agent-machines self-update
+install` and `agent-machines restore --apply`:
+
+- `run` resolves the selected tier first and is a clean no-op when it is
+  opted out.
+- `install` resolves the same authority-selected state first and attempts
+  Scheduled Task registration only for tiers whose resolved state is `present`.
+- `restore --apply` treats Scheduled Task presence as ordinary machine drift:
+  a newly opted-in tier is registered (or returns the same explicit
+  elevate-and-retry instruction), and a newly opted-out tier is removed without
+  a separate install/uninstall step.
+
+The created Windows tasks run only when the user is logged on, matching the
+interactive credential/token needs of the dtssh watchdog and restore sweep.
+
 ## Path anchors
 
 | Anchor | Resolves to |
@@ -214,6 +271,7 @@ compatibility data from lower-authority declarations remain effective:
 | package two different `version` pins | highest authority wins; equal-highest disagreement errors |
 | package `pin` flags differ | OR'd to pinned (compatible) |
 | package `process_guard.names` differ | names are case-folded and unioned (conservative, compatible) |
+| resource `maintenance_safe` flags differ | OR'd to maintenance-safe (compatible opt-in) |
 | file two `enforce` with different `content` | highest enforce authority wins; equal-highest disagreement errors |
 | file conflicting `format` | highest authority wins; equal-highest disagreement errors |
 | file `enforce` + `ensure-present` | enforce wins (advisory) |
@@ -226,6 +284,7 @@ compatibility data from lower-authority declarations remain effective:
 | registry conflicting `value` or `value_type` | highest field authority wins; equal-highest disagreement errors |
 | feature `present` + `absent` | highest authority wins; equal-highest disagreement errors |
 | power setting conflicting `ac` or `dc` value | highest authority for that power source wins; equal-highest disagreement errors |
+| self-update `present` + `absent` | highest authority wins; equal-highest disagreement errors |
 
 File `format` and `content` are selected from declarations participating in the
 winning strategy (`enforce` when present, otherwise `ensure-present`), so
@@ -252,6 +311,18 @@ Resources appear in every verb:
   `--dry-run` (the default) previews the exact commands / writes, `--apply`
   performs them, and `--only <id|type|type:id>` restricts the run to a resource
   (and skips modules when nothing else is selected).
+- `agent-machines restore --maintenance-safe` still reconciles every `manage:`
+  Copilot settings/permissions entry, runs runtime spot checks for installed
+  runtime plugins, and applies only resources that explicitly declare
+  `maintenance_safe: true` plus the package pinned-version realignment exception
+  above. **Repo-local `modules:` are excluded entirely** (reported as `skipped`,
+  not run) unless `--only <module>` names one explicitly: a module executes an
+  arbitrary repo-local command with no per-module safety opt-in equivalent to a
+  resource's `maintenance_safe: true`, so the whole category stays out of a
+  blanket unattended run rather than risking an unreviewed side effect (package
+  installs, PATH/config edits, and similar). Excluded resources and modules
+  remain visible as `skipped` results with a reason; plain restore behavior is
+  otherwise unchanged.
 - `agent-machines restore --json` includes a `resources` list (each result has
   `status: ok|changed|deferred|skipped|error`), a `plan.resources` list, and
   stable `authority_decisions`. Any resource error makes the top-level `ok`

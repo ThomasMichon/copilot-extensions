@@ -106,6 +106,28 @@ that commits later without an observer.
 
 `seal`/`unseal` use named 32-byte KEKs stored beside the config (`AGENT_VAULT_KEK_DIR` overrides). They require `cryptography` for AES-256-GCM. KEKs are independent of KeePass master passwords, so these commands work while the vault is locked.
 
+## Lifecycle tier (declared, per `service-lifecycle-supervision`)
+
+- **Default tier: 2 — scheduled activation**, layered around the tier-1
+  user-mode ensure path. `install`/`update`/`start`/session-start readiness
+  all converge on the same non-elevated daemon-start path (#1836); the
+  scheduled trigger below only adds a login/startup kick around it and is
+  never a prerequisite for `start` or `stop`.
+- **Availability promise:** starts with the user's session; restarts on
+  logon; does **not** survive full logout (the daemon exits when the
+  session ends) and does **not** start before login. This matches the
+  vault's own security posture — the unlocked master secret is memory-
+  resident and deliberately does not persist across a real logout.
+- **Windows:** Scheduled Task `AgentVault`, `AtLogOn` trigger, 15-second
+  delay, non-elevated (`RunLevel Limited`), running the resolved
+  version-slot Python via `conhost.exe --headless`.
+- **POSIX:** systemd **user** unit `agent-vault.service` (no system-level
+  unit, no root requirement).
+- **No escalation:** no concrete requirement for pre-login startup, a
+  system identity, or container isolation has been identified, so this
+  stays at tier 2 — an escalation to tier 3 (system service) or tier 4
+  (container-managed) would be a deliberate, separately-justified change.
+
 ## Supervision and updates
 
 The POSIX installer writes a systemd user unit (`agent-vault.service`) when systemd is available. It runs:
@@ -118,15 +140,20 @@ The Windows installer registers a Scheduled Task named `AgentVault`, triggered a
 
 `--no-service` / `-NoService` installs a client-only runtime. Even without supervision, the CLI can cold-start the daemon on demand.
 
-Windows `update` includes `Stop-VaultDaemonGraceful` in `scripts/install.ps1`: after building/activating the new slot, it pings the old daemon, sends the cooperative `--stop` action, waits briefly for the endpoint to be released, then starts/registers the scheduled task. This is the plugin's light connection-owner cutover: short in-flight requests finish, but the in-memory master password is intentionally released; reconnect is via the opt-in persistent cache or a single re-unlock. POSIX `update` reinstalls and restarts the systemd user service.
+Windows `update` includes `Stop-VaultDaemonGraceful` in `scripts/install.ps1`: after building/activating the new slot, it pings the old daemon, sends the cooperative `--stop` action, waits briefly for the endpoint to be released, then starts/registers the scheduled task. This is the plugin's light connection-owner cutover: short in-flight requests finish, but the in-memory master password is intentionally released; reconnect is via the opt-in persistent cache or a single re-unlock.
 
-> **In progress (#743):** the restart-based update above is being replaced by the
-> shared drain-safe zero-downtime cutover (the `zdd` + `single-instance-lease`
-> primitives, now vendored), so a routine version bump stands up the new
-> generation, health-gates it, flips the routing record, and drains the old one —
-> with **no forced re-unlock**. This closes the `plugin-services`
-> §*zero-downtime-cutover* behavior for agent-vault. See the invariants below for
-> the binding security constraint on how the unlocked secret crosses generations.
+**POSIX/systemd `update` now uses the shared drain-safe zero-downtime cutover**
+(landed, #743): the `zdd` + `single-instance-lease` primitives (vendored) stand
+the new generation up, health-gate it, hand off the outgoing daemon's warmed
+vaults via a `systemctl --user set-environment` carrier, and drain the old one
+— **no forced re-unlock** on a routine POSIX version bump. This closes the
+`plugin-services` §*zero-downtime-cutover* behavior for agent-vault on that
+transport. **Windows is deliberately out of scope** for this cutover: the named
+pipe transport is not proven owner-gated, so the Windows update path still
+restarts (forcing a re-unlock) per invariant #3 below — hardening the pipe's
+DACL to make Windows eligible is separate, larger, security-sensitive follow-up
+work, not yet scheduled. See the invariants below for the binding security
+constraint on how the unlocked secret crosses generations.
 
 ## Invariants
 

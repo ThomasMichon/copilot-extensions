@@ -31,6 +31,15 @@ def test_claims_release_parser():
     assert args.remove is True
 
 
+def test_claims_mirror_status_parser():
+    args = m.build_parser().parse_args(
+        ["claims", "mirror-status", "task", "task-1", "--status", "released",
+         "--holder", "agent-dispatch"])
+    assert args.target == ["mirror-status", "task", "task-1"]
+    assert args.status == "released"
+    assert args.claim_holder == "agent-dispatch"
+
+
 def test_claims_registered():
     assert m.COMMAND_MAP["claims"] is m.cmd_claims
     assert m._WORKTREE_VERBS.get("claims") == "claims"
@@ -275,7 +284,7 @@ def _blocked_readiness():
 
 @pytest.mark.parametrize(
     "kind",
-    ["worktree", "codespace", "container", "ssh", "workdir", "pr"],
+    ["worktree", "codespace", "container", "ssh", "workdir", "pr", "task"],
 )
 def test_claims_add_rejects_unready_coordination_without_mutation(
     kind,
@@ -328,6 +337,51 @@ def test_claims_add_dedups_by_ref(monkeypatch, tmp_path, capfd):
     assert len(rec.resources) == 1  # refreshed, not duplicated
 
 
+# --- claims mirror-status (#2584 follow-up) ---------------------------------
+
+def _mirror_args(kind, ref, *, status="active", holder=None, json_=True):
+    return argparse.Namespace(
+        target=["mirror-status", kind, ref], status=status,
+        claim_holder=holder, json=json_)
+
+
+def test_claims_mirror_status_requires_status(monkeypatch, tmp_path):
+    rc = m.cmd_claims(_mirror_args("task", "task-1", status=None))
+    assert rc == 2
+
+
+def test_claims_mirror_status_rejects_non_task_kind(monkeypatch, tmp_path):
+    rc = m.cmd_claims(_mirror_args("codespace", "cs-1"))
+    assert rc == 2
+
+
+def test_claims_mirror_status_success(monkeypatch, tmp_path, capfd):
+    from agent_worktrees import task_claim_registry
+    seen = {}
+
+    def _fake_set(ref, status, *, holder="agent-dispatch", config=None, settings=None):
+        seen.update(ref=ref, status=status, holder=holder)
+        return True
+
+    monkeypatch.setattr(task_claim_registry, "set_task_claim_status", _fake_set)
+    rc = m.cmd_claims(_mirror_args("task", "task-1", status="released", holder="w"))
+    assert rc == 0
+    out = json.loads(capfd.readouterr().out)
+    assert out["kind"] == "task" and out["ref"] == "task-1"
+    assert out["status"] == "released" and out["mirrored"] is True
+    assert seen == {"ref": "task-1", "status": "released", "holder": "w"}
+
+
+def test_claims_mirror_status_failure_is_nonzero(monkeypatch, tmp_path, capfd):
+    from agent_worktrees import task_claim_registry
+    monkeypatch.setattr(task_claim_registry, "set_task_claim_status",
+                        lambda ref, status, **kw: False)
+    rc = m.cmd_claims(_mirror_args("task", "task-1"))
+    assert rc == 1
+    out = json.loads(capfd.readouterr().out)
+    assert out["mirrored"] is False
+
+
 def test_claims_add_rejects_finalizing_owner(monkeypatch, tmp_path, capfd):
     _seed(tmp_path, monkeypatch)
     path = tmp_path / "worktrees" / "wt-A.yaml"
@@ -339,6 +393,25 @@ def test_claims_add_rejects_finalizing_owner(monkeypatch, tmp_path, capfd):
     out = json.loads(capfd.readouterr().out)
     assert "ownership is frozen" in out["error"]
     assert tracking.load_record(path).resources == []
+
+
+def test_claims_add_allows_finalized_owner(monkeypatch, tmp_path, capfd):
+    """``finalized`` is not terminal (docs/worktree-lifecycle.md): a resumed,
+    already-finalized worktree may still accept a new outbound claim, which
+    reopens it to `active` (worktree-finality-and-obligations Phase 2)."""
+    _seed(tmp_path, monkeypatch)
+    path = tmp_path / "worktrees" / "wt-A.yaml"
+    rec = tracking.load_record(path)
+    rec.status = "finalized"
+    tracking.save_record(rec, path)
+    rc = m.cmd_claims(_add_args("codespace", "cs-resumed"))
+    assert rc == 0
+    out = json.loads(capfd.readouterr().out)
+    assert out["kind"] == "codespace" and out["ref"] == "cs-resumed"
+    assert out["reopened"] is True
+    reloaded = tracking.load_record(path)
+    assert [c.ref for c in reloaded.resources] == ["cs-resumed"]
+    assert reloaded.status == "active"
 
 
 def test_claims_add_missing_operands(monkeypatch, tmp_path):

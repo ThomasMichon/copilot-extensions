@@ -1977,6 +1977,62 @@ def _cmd_service(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _cmd_agent_show(args: argparse.Namespace) -> None:
+    """Show one registered agent by name -- a fast path that never enumerates
+    namespace/CodeSpace/container providers.
+
+    Backs ``agent_dispatch``'s single-agent existence/project checks (spawn
+    preflight, headless-lane resolution), which previously always called
+    ``agent-bridge agents`` (the full listing) even though they only ever
+    care about one name. That full listing awaits every registered namespace
+    resolver (CodeSpaces enumeration across accounts, container queries) --
+    genuinely useful for the interactive ``agents`` listing, but wasted,
+    latency-risking work for a caller checking a single, almost-always local
+    or SSH-topology agent name. This command instead calls the static/
+    topology-only lookup (``AgentResolver.get_agent_config``), which never
+    touches a namespace resolver. It intentionally does **not** resolve a
+    namespace-prefixed name (``codespace:foo``, ``container:bar``) -- that
+    would require enumerating (or targeting) that one provider, which is
+    exactly the latency this command exists to avoid; a caller that
+    specifically needs a namespace-resolved agent's metadata should still use
+    ``agents`` (or ``agents --json`` filtered client-side).
+    """
+    client = _get_client()
+    from .client import BridgeClientError
+
+    try:
+        agent = client.get_agent(args.name)
+    except BridgeClientError as exc:
+        if exc.status == 404:
+            agent = {}
+        else:
+            raise
+    if not agent:
+        if args.json:
+            _json_out(None)
+        else:
+            print(f"(no such agent: {args.name!r})")
+        raise SystemExit(1)
+    if args.json:
+        _json_out(agent)
+    else:
+        display = agent.get("display_name", "") or agent.get("name", "")
+        print(display)
+        if agent.get("name") and agent.get("name") != display:
+            print(f"  Name:     {agent['name']}")
+        aliases = agent.get("aliases") or []
+        if aliases:
+            print(f"  Aliases:  {', '.join(aliases)}")
+        target_type = agent.get("target_type", "")
+        if target_type:
+            print(f"  Type:     {target_type}")
+        host = agent.get("host", "")
+        if host:
+            print(f"  Host:     {host}")
+        if agent.get("managed"):
+            print(f"  Managed:  {agent['managed']}")
+
+
 def _cmd_agents(args: argparse.Namespace) -> None:
     """List registered agents."""
     client = _get_client()
@@ -3226,6 +3282,7 @@ def _resolve_target(
     effort: str | None = None,
     target_dir: str | None = None,
     worktree_id: str | None = None,
+    reclaim: bool = False,
 ) -> str:
     """Resolve a target string to a session ID.
 
@@ -3240,7 +3297,9 @@ def _resolve_target(
     ``force_new`` (``create``) skips caller-affinity reuse and always asks
     the server for a fresh session; ``refuse_on_conflict`` turns the
     one-session-per-CodeSpace guard into an ``_AgentSessionConflict`` raise
-    instead of reusing the existing session.
+    instead of reusing the existing session. ``reclaim`` is the head-guard
+    break-glass (mirrors ``resume --reclaim``): threaded through so a create
+    into an occupied ``worktree_id`` takes over instead of a 409.
     """
     from .client import BridgeClientError
 
@@ -3325,6 +3384,7 @@ def _resolve_target(
             effort=effort,
             target_dir=target_dir,
             worktree_id=worktree_id,
+            reclaim=reclaim,
         )
 
     # Not in the cached agent list -- hand the target to the server as-is so its
@@ -3340,6 +3400,7 @@ def _resolve_target(
             effort=effort,
             target_dir=target_dir,
             worktree_id=worktree_id,
+            reclaim=reclaim,
         )
     except BridgeClientError as exc:
         if exc.status != 404:
@@ -3426,6 +3487,7 @@ def _cmd_create(args: argparse.Namespace) -> None:
             effort=getattr(args, "effort", None),
             target_dir=getattr(args, "target_dir", None),
             worktree_id=getattr(args, "worktree_id", None),
+            reclaim=bool(getattr(args, "reclaim", False)),
         )
     except _AgentSessionConflict as conflict:
         sid = conflict.existing_session_id
@@ -3979,6 +4041,7 @@ def _start_agent_session(
     effort: str | None = None,
     target_dir: str | None = None,
     worktree_id: str | None = None,
+    reclaim: bool = False,
 ) -> str:
     """Start or reuse a session for a named agent.
 
@@ -3993,6 +4056,11 @@ def _start_agent_session(
     ``refuse_on_conflict=True`` this raises ``_AgentSessionConflict`` (so
     ``create`` can tell the user to end the existing session first) instead of
     silently reusing it.
+
+    ``reclaim`` is the session-lifecycle head-guard break-glass: passed
+    through to ``client.start_session`` so a create into an occupied
+    ``worktree_id`` takes over in place instead of being refused 409 (see
+    ``_render_head_guard_refusal``).
     """
     from .client import BridgeClientError
 
@@ -4042,6 +4110,7 @@ def _start_agent_session(
             sender_repo=_sender_repo(), force_new=force_new,
             caller_owner_ref=_worktrees_get("owner-ref"),
             worktree_id=worktree_id,
+            reclaim=reclaim,
             model=model, effort=effort,
             request_timeout=_startup_request_timeout(),
         )
@@ -5190,6 +5259,86 @@ def _cmd_handoff_request(args: argparse.Namespace) -> None:
     )
 
 
+def _cmd_handoff_check(args: argparse.Namespace) -> None:
+    """Diagnose (and optionally finish) a stalled handoff-cutover retirement.
+
+    Thin passthrough to ``agent-worktrees handoffs-check`` -- the ground-layer
+    owner of the mux/pane primitives a CLI-hosted worktree's cutover depends on
+    (mirroring how ``routes/worktrees.py`` already derives worktree/session
+    state from ``agent-worktrees list``). agent-bridge is the single surface an
+    agent reaches for either driver (ACP or mux/CLI); for a mux/CLI-hosted
+    worktree the actual check+retire logic still lives where the pane
+    primitives do. A future ACP-hosted equivalent belongs here too, once that
+    path needs the same on-demand diagnostic.
+    """
+    exe = shutil.which("agent-worktrees")
+    if not exe:
+        print("[FAIL] agent-worktrees is not on PATH; cannot check handoffs.", file=sys.stderr)
+        sys.exit(1)
+    argv = [exe, "handoffs-check", "--json"]
+    argv += ["--worktree-id", args.worktree_id] if args.worktree_id else ["--all"]
+    if args.execute:
+        argv.append("--execute")
+    # agent-bridge's own runtime-gate.sh exports AGENT_RT_ROOT (pointing at
+    # THIS plugin's runtime root) before dispatching into agent_bridge's
+    # python; that export otherwise leaks into this child process and
+    # hijacks agent-worktrees' own resolve-runtime.sh (it honors the same
+    # variable name), silently resolving to agent-bridge's python instead
+    # of agent-worktrees' -- causing a "No module named agent_worktrees"
+    # failure that looks identical to agent-worktrees itself being broken.
+    child_env = dict(os.environ)
+    child_env.pop("AGENT_RT_ROOT", None)
+    child_env.pop("AGENT_RT_PY", None)
+    try:
+        result = subprocess.run(
+            argv, capture_output=True, text=True, timeout=60, env=child_env
+        )
+    except Exception as exc:
+        print(f"[FAIL] could not run agent-worktrees handoffs-check: {exc}", file=sys.stderr)
+        sys.exit(1)
+    try:
+        payload = json.loads(result.stdout or "{}")
+    except Exception:
+        payload = {
+            "error": "unparseable agent-worktrees output",
+            "raw": result.stdout,
+            "stderr": result.stderr,
+        }
+    if result.returncode != 0 and "findings" not in payload and not payload.get("error"):
+        # agent-worktrees failed (nonzero exit) without a JSON error envelope
+        # -- e.g. empty stdout -- so json.loads("{}" fallback) looks
+        # identical to a legitimate empty result. Surface stderr rather than
+        # silently reporting "no findings" for what was actually a failure.
+        payload = {
+            "error": f"agent-worktrees handoffs-check exited {result.returncode}",
+            "stderr": result.stderr,
+        }
+    if payload.get("error"):
+        if args.json:
+            _json_out(payload)
+        else:
+            print(f"[FAIL] handoff-check: {payload['error']}", file=sys.stderr)
+            if payload.get("stderr"):
+                print(payload["stderr"], file=sys.stderr)
+        sys.exit(1)
+    if args.json:
+        _json_out(payload)
+    elif not payload.get("findings"):
+        print("[OK] handoff-check: no stalled predecessor retirements found.")
+    else:
+        for finding in payload["findings"]:
+            wt = finding.get("worktree_id")
+            pred = finding.get("predecessor_session_id")
+            pane = finding.get("retire_pane")
+            if not finding.get("executed"):
+                print(f"  {wt}: predecessor {pred} still alive (pane {pane})")
+            elif finding.get("retired"):
+                print(f"[OK] {wt}: retired predecessor {pred} (pane {pane})")
+            else:
+                print(f"[FAIL] {wt}: could not retire predecessor {pred}", file=sys.stderr)
+    sys.exit(result.returncode)
+
+
 def _cmd_session_usage(args: argparse.Namespace) -> None:
     """Show context window usage for a session."""
     client = _get_client()
@@ -5840,6 +5989,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     # -- Client commands --
 
+    agent_show_p = sub.add_parser(
+        "agent-show",
+        help="Show one registered agent by name (fast path -- static/topology "
+             "lookup only, never enumerates namespace/CodeSpace/container providers)",
+    )
+    agent_show_p.add_argument("name", help="Agent name to look up")
+    agent_show_p.set_defaults(func=_cmd_agent_show)
+
     agents_p = sub.add_parser("agents", help="List registered agents")
     agents_p.add_argument(
         "--all-projects", action="store_true",
@@ -6142,6 +6299,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--worktree-id", dest="worktree_id", default=None, metavar="ID",
         help="Bind the created session to an existing agent-worktrees worktree id.",
     )
+    create_p.add_argument(
+        "--reclaim", action="store_true",
+        help=(
+            "Break-glass take-over: create into --worktree-id even if occupied "
+            "(bypasses the 409 worktree-head guard). Mirrors 'resume --reclaim'."
+        ),
+    )
     _add_stream_args(create_p)
     create_p.set_defaults(func=_cmd_create)
 
@@ -6361,6 +6525,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="Emit JSON.",
     )
     handoff_request_p.set_defaults(func=_cmd_handoff_request)
+
+    handoff_check_p = sub.add_parser(
+        "handoff-check",
+        help="Diagnose (and with --execute, finish) a stalled handoff-cutover "
+        "predecessor retirement for a mux/CLI-hosted worktree",
+    )
+    handoff_check_g = handoff_check_p.add_mutually_exclusive_group(required=True)
+    handoff_check_g.add_argument(
+        "--worktree-id", default=None, help="Check only this worktree"
+    )
+    handoff_check_g.add_argument(
+        "--all", action="store_true", help="Check every tracked worktree"
+    )
+    handoff_check_p.add_argument(
+        "--execute",
+        action="store_true",
+        help="Retire each found stale predecessor now (default: read-only report)",
+    )
+    handoff_check_p.add_argument("--json", action="store_true", help="Emit JSON.")
+    handoff_check_p.set_defaults(func=_cmd_handoff_check)
 
     usage_p = sub.add_parser(
         "session-usage", help="Show context window usage for a session"

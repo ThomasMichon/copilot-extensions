@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import git_ops, sessions, tracking
-from agent_worktrees.picker_tui import derive
+from agent_worktrees.picker_support import derive
 
 
 def _record(**kw):
@@ -35,17 +37,28 @@ def _ns(target):
                               no_title=True)
 
 
-def _wire(monkeypatch, target, *, state, turns):
+def _wire(monkeypatch, target, *, state, turns, rec=None):
     info = git_ops.WorktreeStateInfo(state=state)
-    rec = _record(worktree_path=target)
+    if rec is None:
+        rec = _record(worktree_path=target)
     monkeypatch.setattr(m, "_detect_upstream_branch", lambda *a, **k: "master")
     monkeypatch.setattr(m, "_find_record_for_path", lambda _p: rec)
-    monkeypatch.setattr(m.git_ops, "classify_worktree", lambda *a, **k: info)
+    # Reflect the real classify_worktree contract: fetch_requested mirrors
+    # whether THIS call actually passed fetch=True, so a test's --fetch flag
+    # (ns.fetch) genuinely drives evidence_mode the same way it would for
+    # the real implementation, instead of always defaulting to False.
+    monkeypatch.setattr(
+        m.git_ops, "classify_worktree",
+        lambda *a, fetch=False, **k: dataclasses.replace(
+            info, fetch_requested=fetch,
+        ),
+    )
     monkeypatch.setattr(m, "_apply_tracking_override", lambda r, i: i)
     ctx = sessions.SessionContext()
     if turns:
         ctx.turn_count[m._normalize_path(target)] = turns
     monkeypatch.setattr(m.sessions, "scan_sessions_fast", lambda recs: ctx)
+    return rec
 
 
 def test_status_segment_skips_control_plane_pr_overlay(monkeypatch):
@@ -108,6 +121,226 @@ def test_turns_do_not_override_dirty(monkeypatch, capsys):
     out = capsys.readouterr().out.strip()
     assert "DIRTY" in out
     assert "CONVO" not in out
+
+
+# ---------------------------------------------------------------------------
+# worktree-finality-and-obligations (Phase 5): the status segment now
+# consumes prune.assemble_closure_descriptor instead of re-deriving its own
+# label/color from the raw git state -- so held claims / open follow-ups
+# surface as C<N>/F<N> markers here too, and COMPLETED only reads FINAL when
+# genuinely claim-free/follow-up-free AND freshly (fetched) evidenced.
+# ---------------------------------------------------------------------------
+
+def test_completed_and_fetched_and_clean_renders_final(monkeypatch, capsys):
+    target = str(Path("wt-final").resolve())
+    _wire(monkeypatch, target, state=git_ops.WorktreeState.COMPLETED, turns=0)
+    ns = argparse.Namespace(path=target, fetch=True, plain=True, no_title=True)
+    rc = m.cmd_status_segment(ns)
+    assert rc == 0
+    out = capsys.readouterr().out.strip()
+    assert "FINAL" in out
+    assert "MERGED" not in out
+
+
+def test_fetch_requested_but_failed_still_renders_merged_not_final(monkeypatch, capsys):
+    # A requested --fetch that itself failed (network down, remote
+    # unreachable) must NOT be treated as refreshed evidence -- classification
+    # ran on stale local refs, so this must render MERGED, not FINAL, even
+    # though the caller asked for --fetch (#discussion_r4008048471).
+    target = str(Path("wt-fetch-failed").resolve())
+    info = git_ops.WorktreeStateInfo(
+        state=git_ops.WorktreeState.COMPLETED,
+        fetch_requested=True, fetch_failed=True,
+    )
+    rec = _record(worktree_path=target)
+    monkeypatch.setattr(m, "_detect_upstream_branch", lambda *a, **k: "master")
+    monkeypatch.setattr(m, "_find_record_for_path", lambda _p: rec)
+    monkeypatch.setattr(m.git_ops, "classify_worktree", lambda *a, **k: info)
+    monkeypatch.setattr(m, "_apply_tracking_override", lambda r, i: i)
+    monkeypatch.setattr(m.sessions, "scan_sessions_fast", lambda recs: sessions.SessionContext())
+    ns = argparse.Namespace(path=target, fetch=True, plain=True, no_title=True)
+    rc = m.cmd_status_segment(ns)
+    assert rc == 0
+    out = capsys.readouterr().out.strip()
+    assert "MERGED" in out
+    assert "FINAL" not in out
+
+
+def test_completed_but_not_fetched_renders_merged_not_final(monkeypatch, capsys):
+    # Fetch-free (cached) evidence must never authorize FINAL, even when the
+    # record is otherwise claim-free/follow-up-free (design.md's destructive-
+    # freshness rule, mirrored here from prune.assemble_closure_descriptor).
+    target = str(Path("wt-cached").resolve())
+    _wire(monkeypatch, target, state=git_ops.WorktreeState.COMPLETED, turns=0)
+    rc = m.cmd_status_segment(_ns(target))  # _ns() defaults fetch=False
+    assert rc == 0
+    out = capsys.readouterr().out.strip()
+    assert "MERGED" in out
+    assert "FINAL" not in out
+
+
+def test_completed_with_held_claim_renders_merged_with_marker(monkeypatch, capsys):
+    rec = _record(
+        worktree_path=str(Path("wt-claimed").resolve()),
+        resources=[tracking.ResourceClaim(kind="codespace", ref="cs-1", state="active")],
+    )
+    target = rec.worktree_path
+    _wire(monkeypatch, target, state=git_ops.WorktreeState.COMPLETED, turns=0, rec=rec)
+    ns = argparse.Namespace(path=target, fetch=True, plain=True, no_title=True)
+    rc = m.cmd_status_segment(ns)
+    assert rc == 0
+    out = capsys.readouterr().out.strip()
+    assert "MERGED" in out
+    assert "C1" in out
+    assert "FINAL" not in out
+
+
+def test_dirty_with_open_follow_up_shows_marker_but_keeps_dirty_label(monkeypatch, capsys):
+    # design.md: blocker markers ride on ANY base state's compact text; only
+    # COMPLETED gets the MERGED/FINAL label swap.
+    rec = _record(worktree_path=str(Path("wt-followup").resolve()))
+    rec.follow_ups = [
+        tracking.FollowUpRecord(id="f1", summary="finish the thing", state="open")
+    ]
+    target = rec.worktree_path
+    _wire(monkeypatch, target, state=git_ops.WorktreeState.DIRTY, turns=0, rec=rec)
+    rc = m.cmd_status_segment(_ns(target))
+    assert rc == 0
+    out = capsys.readouterr().out.strip()
+    assert "DIRTY" in out
+    assert "F1" in out
+
+
+def test_completed_without_tracking_record_renders_merged_never_final(monkeypatch, capsys):
+    # #discussion_r4008048471's sibling finding: without a record, held
+    # claims/open follow-ups are unknowable, so a COMPLETED worktree must
+    # never render as more settled (FINAL) than a *tracked* worktree could
+    # without --fetch. The legacy _SEGMENT_STYLE mapped COMPLETED -> FINAL
+    # directly here; that was the bug.
+    target = str(Path("wt-untracked").resolve())
+    info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
+    monkeypatch.setattr(m, "_detect_upstream_branch", lambda *a, **k: "master")
+    monkeypatch.setattr(m, "_find_record_for_path", lambda _p: None)
+    monkeypatch.setattr(m.git_ops, "classify_worktree", lambda *a, **k: info)
+    monkeypatch.setattr(m.git_ops, "_get_current_branch_safe", lambda *a, **k: "HEAD")
+    ns = argparse.Namespace(path=target, fetch=True, plain=True, no_title=True)
+    rc = m.cmd_status_segment(ns)
+    assert rc == 0
+    out = capsys.readouterr().out.strip()
+    assert "MERGED" in out
+    assert "FINAL" not in out
+
+
+def test_completed_with_held_claim_uses_merged_blocked_color(monkeypatch, capsys):
+    # #discussion_r4008114780's sibling finding: every prior descriptor test
+    # used plain=True, so the actual styled (non-plain) branch that consumes
+    # descriptor.style / _DESCRIPTOR_STYLE_BG was never exercised -- a
+    # regression in the color mapping would have passed silently.
+    rec = _record(
+        worktree_path=str(Path("wt-claimed-styled").resolve()),
+        resources=[tracking.ResourceClaim(kind="codespace", ref="cs-1", state="active")],
+    )
+    target = rec.worktree_path
+    _wire(monkeypatch, target, state=git_ops.WorktreeState.COMPLETED, turns=0, rec=rec)
+    ns = argparse.Namespace(path=target, fetch=True, plain=False, no_title=True)
+    rc = m.cmd_status_segment(ns)
+    assert rc == 0
+    out = capsys.readouterr().out.strip()
+    assert f"bg={m._DESCRIPTOR_STYLE_BG['merged-blocked']}" in out
+    assert "MERGED C1" in out
+
+
+def test_completed_and_fetched_and_clean_uses_final_color(monkeypatch, capsys):
+    target = str(Path("wt-final-styled").resolve())
+    _wire(monkeypatch, target, state=git_ops.WorktreeState.COMPLETED, turns=0)
+    ns = argparse.Namespace(path=target, fetch=True, plain=False, no_title=True)
+    rc = m.cmd_status_segment(ns)
+    assert rc == 0
+    out = capsys.readouterr().out.strip()
+    assert f"bg={m._DESCRIPTOR_STYLE_BG['final']}" in out
+    assert "FINAL" in out
+
+
+# ---------------------------------------------------------------------------
+# status-segment --json: the cheap, non-daemon single-worktree JSON snapshot
+# (worktree-status-json-segment) used by the Mux Companion instead of `list
+# --json --classify --worktree-id`, which still pays the resident classify
+# daemon's whole-fleet negotiation cost even when scoped to one id.
+# ---------------------------------------------------------------------------
+
+def _json_ns(target, *, fetch=False):
+    return argparse.Namespace(path=target, fetch=fetch, plain=True,
+                              no_title=True, json=True)
+
+
+def test_status_segment_json_outside_worktree_reports_error(monkeypatch, capfd):
+    target = str(Path("wt-gone").resolve())
+    monkeypatch.setattr(m, "_detect_upstream_branch", lambda *a, **k: "master")
+    monkeypatch.setattr(m, "_find_record_for_path", lambda _p: None)
+    monkeypatch.setattr(m.git_ops, "_get_current_branch_safe", lambda p: "main")
+    monkeypatch.setattr(
+        m.git_ops, "classify_worktree",
+        lambda *a, **k: git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.GONE),
+    )
+    rc = m.cmd_status_segment(_json_ns(target))
+    assert rc == 0
+    out = json.loads(capfd.readouterr().out)
+    assert "error" in out
+
+
+def test_status_segment_json_untracked_worktree_has_no_closure(monkeypatch, capfd):
+    target = str(Path("wt-untracked").resolve())
+    monkeypatch.setattr(m, "_detect_upstream_branch", lambda *a, **k: "master")
+    monkeypatch.setattr(m, "_find_record_for_path", lambda _p: None)
+    monkeypatch.setattr(m.git_ops, "_get_current_branch_safe", lambda p: "main")
+    monkeypatch.setattr(
+        m.git_ops, "classify_worktree",
+        lambda *a, fetch=False, **k: git_ops.WorktreeStateInfo(
+            state=git_ops.WorktreeState.WIP, ahead=2, fetch_requested=fetch,
+        ),
+    )
+    rc = m.cmd_status_segment(_json_ns(target))
+    assert rc == 0
+    out = json.loads(capfd.readouterr().out)
+    assert out["id"] is None
+    assert out["state"] == "wip"
+    assert out["ahead"] == 2
+    assert out["closure"] is None
+
+
+def test_status_segment_json_tracked_completed_matches_rendered_label(monkeypatch, capfd):
+    target = str(Path("wt-json-completed").resolve())
+    _wire(monkeypatch, target, state=git_ops.WorktreeState.COMPLETED, turns=0)
+    rc = m.cmd_status_segment(_json_ns(target, fetch=True))
+    assert rc == 0
+    out = json.loads(capfd.readouterr().out)
+    assert out["id"] == "anomalous-potato-win-20260625-221940-8e45"
+    assert out["closure"]["label"] == "FINAL"
+
+
+def test_status_segment_json_held_claim_surfaces_blocker(monkeypatch, capfd):
+    rec = _record(
+        worktree_path=str(Path("wt-json-claimed").resolve()),
+        resources=[tracking.ResourceClaim(kind="codespace", ref="cs-1", state="active")],
+    )
+    target = rec.worktree_path
+    _wire(monkeypatch, target, state=git_ops.WorktreeState.COMPLETED, turns=0, rec=rec)
+    rc = m.cmd_status_segment(_json_ns(target, fetch=True))
+    assert rc == 0
+    out = json.loads(capfd.readouterr().out)
+    assert out["closure"]["label"] == "MERGED"
+    codes = {b["code"] for b in out["closure"]["blockers"]}
+    assert "held-claims" in codes
+
+
+def test_status_segment_json_reports_turn_count(monkeypatch, capfd):
+    target = str(Path("wt-json-turns").resolve())
+    _wire(monkeypatch, target, state=git_ops.WorktreeState.UNUSED, turns=7)
+    rc = m.cmd_status_segment(_json_ns(target))
+    assert rc == 0
+    out = json.loads(capfd.readouterr().out)
+    assert out["turn_count"] == 7
+    assert out["state"] == "convo"  # refined by session turn count
 
 
 # ---------------------------------------------------------------------------

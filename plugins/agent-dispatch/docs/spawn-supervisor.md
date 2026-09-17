@@ -192,7 +192,18 @@ boundary.
    or missing mechanism moves a reservation-created allocation to `releasing`;
    `create --spawn` immediately attempts the same exact-ID managed teardown as
    the supervisor. A later run cannot retry until the ground layer safely
-   removes the worktree or explicitly holds it for attention.
+   removes the worktree or explicitly holds it for attention. `make_embody_spawn`
+   treats a zero exit with no recognizable session id (`embody.parse_handle`
+   found nothing usable) as a **failure**, not a success: a `SPAWNED`
+   reservation with `session_handle=None` would otherwise be indistinguishable
+   from one that never reached spawning anything at all, letting
+   `release_requested_bodies`' absent-worktree shortcut (see below) wrongly
+   treat a genuinely-launched but unidentifiable body as confirmed absent.
+   The supervisor's own single spawn call site enforces the same rule
+   generically for **every** `spawn_fn`, not only the built-in factories: a
+   sessionless `ok=True` is downgraded to a failure before ever reaching
+   `record_spawn`, so a custom caller-supplied `spawn_fn` can't reintroduce
+   the ambiguity either.
 
 Fail-safe: if the reservation call itself errors, `create --spawn` **does not
 spawn** (better to leave the task queued than risk a second autonomous worker).
@@ -753,6 +764,62 @@ of being recovered. The remaining unsupported recovery path is **CLI/mux fleet**
 auto-recovery: without a headless bridge session handle, a synthetic-owner fleet
 body is still not auto-joined to the origin's live-session registry; use
 headless fleet for recoverable remote sweeps.
+
+**Retiring an unleased worktree-only reservation.** A `release_requested`
+reservation whose task never reached a captured `owner_session_id` (the normal
+shape of a RESERVING-stage spawn failure — the attempt failed before any
+session/claim ever existed) has no owner identity for `verdict_fn`/
+`tracking.liveness_verdict` to key a `gone` verdict on, so that shared,
+identity-keyed resolver stays `unknown` here exactly as it does for every
+other claimed/started task's liveness GC — it must not be loosened generally,
+since a generically claimed task's worktree may have no agent-worktrees
+record at all, and an uncaptured `owner_session_id` can legitimately mean
+"claim not yet registered" for a still-live worker.
+
+`release_requested_bodies`'s own worktree-only retirement branch layers one
+additional, narrowly-scoped check on top: when `verdict_fn` answers `unknown`
+for exactly this shape (`task.get("owner")` and `owner_session_id` both
+literally `None` -- not merely an owner string `_machine_from_owner` fails to
+parse, e.g. a claimer's arbitrary non-`<machine>/<worktree>` worker id --
+*and* the reservation's own `session_handle` is also empty, since a
+spawned-but-never-claimed body (or one that yielded after claiming) can have
+the same unset owner/owner_session_id while `session_handle` still names a
+real recorded body whose liveness must resolve through its own path, not this
+shortcut -- and the reservation's *own* recorded `worktree`,
+`worktree_ownership == "created"`, and a `creating_host` matching this
+supervisor's own `machine`, compared case-insensitively like every other
+machine/SSH-alias comparison in this plugin — created by agent-dispatch
+itself via `embody.prepare_reusable_worktree`, so the local agent-worktrees
+registry is authoritative for whether it still exists), it cross-checks that
+registry directly (`worktree_directory_present_fn`, default
+`tracking.worktree_directory_present`, scoped to the **same allocation
+project** `_prepare_spawn_task` would have used to actually create this
+worktree -- `self._spawn_attribute(task, "allocation_project",
+embody.project_for_task(task) or "")`, not a plain re-derivation, since a
+routed/headless `spawn_fn` can select a different project via an
+`allocation_project_for` selector; this daemon is CWD-neutral either way).
+That resolution call sits inside the same `try`/`except` as the probe itself
+-- `_spawn_attribute` can invoke an I/O-backed selector (the default headless
+one calls a strict registry lookup) that may raise when a backing registry is
+unavailable, and that must degrade only this one reservation to `unknown`
+for this cycle, never abort the whole `release_requested_bodies` polling
+pass over every other reservation. The probe also passes
+`--include-other-platforms`: the registry's default `list` filters to the
+host's *current* detected local platform, so a reservation created on this
+same host under a different local platform (e.g. Windows vs. WSL) would
+otherwise be silently omitted and its still-existing worktree misread as
+absent -- presence, not per-platform enumeration, is what this probe answers.
+It checks across every tracking status, not merely the ACTIVE-only set
+`live_worktrees()` uses for orphan reaping — a `finalized` worktree may still
+be fully present on disk. Only a confirmed absence retires the reservation;
+an unresolved probe, a claimed task under any owner string (well-formed or
+not), or a reservation whose `creating_host` differs from this host (a shared
+cross-machine queue's reservation created elsewhere) all leave it `unknown`.
+`worktree_directory_present`'s own docstring notes one residual, pre-existing
+platform limitation it shares with `live_worktrees()`: agent-worktrees'
+registry reader silently skips an unreadable tracking record rather than
+reporting it, so an empty result cannot be perfectly distinguished from a
+transient read failure for that exact record.
 
 ## Transport for a containerized producer
 

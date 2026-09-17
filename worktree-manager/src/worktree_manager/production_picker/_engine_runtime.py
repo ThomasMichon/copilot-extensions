@@ -9,6 +9,8 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
+from .. import agent_plugin_runtime
+
 ENGINE_SOURCE_ENV = "WORKTREE_MANAGER_AGENT_WORKTREES_SRC"
 
 
@@ -16,10 +18,18 @@ class EngineRuntimeError(RuntimeError):
     """The production Picker's temporary engine compatibility layer is absent."""
 
 
-def _context_runtime_root() -> Path | None:
+def _validate_explicit_context() -> None:
+    """Raise a clear diagnostic for a genuinely foreign/invalid explicit
+    context. This is a UX nicety only -- the actual root/slot selection
+    always comes from ``agent_plugin_runtime.resolve_installed_plugin_slot``,
+    which applies the identical validated, policy-gated, namespaced-then-
+    legacy fallback ``engine_client.installed_engine_command`` uses, so both
+    the subprocess and in-process paths can never disagree about which
+    install is available.
+    """
     context = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip()
     if not context:
-        return None
+        return
     pointer = Path(context).expanduser()
     if not pointer.is_absolute():
         raise EngineRuntimeError(
@@ -35,20 +45,18 @@ def _context_runtime_root() -> Path | None:
         raise EngineRuntimeError(
             "the selected installation context does not own agent-worktrees"
         )
-    return pointer.parent
 
 
 def _active_runtime_source() -> Path | None:
-    home = Path(os.environ.get("USERPROFILE") or Path.home())
-    root = _context_runtime_root() or (home / ".agent-worktrees")
-    marker = root / "current-version"
-    try:
-        version = marker.read_text(encoding="utf-8").strip()
-    except OSError:
+    _validate_explicit_context()
+    # Shares the exact namespaced-then-legacy slot selection
+    # engine_client.installed_engine_command() uses (marker/fallback walk,
+    # completion-marker requirement, validated receipts) so the Picker's
+    # in-process import path and the CLI subprocess path can never disagree
+    # about which install is available.
+    slot = agent_plugin_runtime.resolve_installed_plugin_slot("agent-worktrees")
+    if slot is None:
         return None
-    if not version:
-        return None
-    slot = root / "versions" / version
     for candidate in (
         slot / "Lib" / "site-packages",
         slot / "lib" / "python3.13" / "site-packages",

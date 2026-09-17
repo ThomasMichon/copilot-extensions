@@ -18,6 +18,8 @@ class FakeSocket:
         self.responses: list[str] = []
         self.sessions: list[dict[str, object]] = []
         self.sent: list[dict[str, object]] = []
+        self.create_timeouts = 0
+        self.page_size = 0
 
     def send(self, raw: str) -> None:
         request = json.loads(raw)
@@ -28,8 +30,27 @@ class FakeSocket:
         elif method == "authenticate":
             result = {}
         elif method == "listSessions":
-            result = {"items": list(self.sessions)}
+            cursor = int(request["params"].get("cursor", "0"))
+            if self.page_size:
+                items = self.sessions[cursor:cursor + self.page_size]
+                next_offset = cursor + len(items)
+                result = {"items": list(items)}
+                if next_offset < len(self.sessions):
+                    result["nextCursor"] = str(next_offset)
+            else:
+                result = {"items": list(self.sessions)}
         elif method == "createSession":
+            if self.create_timeouts:
+                self.create_timeouts -= 1
+                self.responses.append(json.dumps({
+                    "jsonrpc": "2.0",
+                    "id": request["id"],
+                    "error": {
+                        "code": -32603,
+                        "message": ahp_provider.SESSION_OWNER_TIMEOUT_MESSAGE,
+                    },
+                }))
+                return
             params = request["params"]
             self.sessions.append({
                 "resource": params["channel"],
@@ -102,6 +123,43 @@ def test_controller_initializes_authenticates_and_targets_exact_workspace(
     assert create["params"]["channel"] == f"ahp-session:/{session_id}"
 
 
+def test_controller_bypasses_proxies_for_loopback(monkeypatch):
+    socket = FakeSocket()
+    captured = {}
+    monkeypatch.setitem(
+        sys.modules,
+        "websocket",
+        SimpleNamespace(
+            create_connection=lambda *_args, **kwargs: captured.update(kwargs) or socket
+        ),
+    )
+
+    with ahp_provider.AhpController(_config(), "secret"):
+        pass
+
+    assert captured["http_proxy_host"] is None
+    assert captured["http_proxy_port"] is None
+    assert captured["http_no_proxy"] == ["localhost", "127.0.0.1", "::1"]
+
+
+def test_controller_retries_owner_startup_timeout(monkeypatch, tmp_path):
+    socket = FakeSocket()
+    socket.create_timeouts = 1
+    monkeypatch.setitem(
+        sys.modules,
+        "websocket",
+        SimpleNamespace(create_connection=lambda *_args, **_kwargs: socket),
+    )
+
+    with ahp_provider.AhpController(_config(), "secret") as controller:
+        session_id = controller.create_session(str(tmp_path))
+
+    creates = [request for request in socket.sent if request["method"] == "createSession"]
+    assert len(creates) == 2
+    assert creates[0]["params"]["channel"] != creates[1]["params"]["channel"]
+    assert creates[1]["params"]["channel"] == f"ahp-session:/{session_id}"
+
+
 def test_controller_rejects_session_bound_to_other_path(monkeypatch, tmp_path):
     socket = FakeSocket()
     socket.sessions.append({
@@ -117,6 +175,85 @@ def test_controller_rejects_session_bound_to_other_path(monkeypatch, tmp_path):
     with ahp_provider.AhpController(_config(), "secret") as controller:
         with pytest.raises(ahp_provider.AhpProviderError, match="different"):
             controller.require_session("session-1", str(tmp_path / "expected"))
+
+
+def test_summary_working_directory_accepts_legacy_scalar():
+    assert ahp_provider._summary_working_directory({
+        "workingDirectory": "file:///repo",
+    }) == "file:///repo"
+
+
+def test_list_sessions_follows_pagination(monkeypatch, tmp_path):
+    socket = FakeSocket()
+    socket.page_size = 1
+    expected = "33333333-3333-3333-3333-333333333333"
+    socket.sessions = [
+        {
+            "resource": f"ahp-session:/{index}{index}",
+            "workingDirectories": [(tmp_path / str(index)).resolve().as_uri()],
+        }
+        for index in ("11", "22")
+    ] + [{
+        "resource": f"ahp-session:/{expected}",
+        "workingDirectories": [tmp_path.resolve().as_uri()],
+    }]
+    monkeypatch.setitem(
+        sys.modules,
+        "websocket",
+        SimpleNamespace(create_connection=lambda *_args, **_kwargs: socket),
+    )
+
+    with ahp_provider.AhpController(_config(), "secret") as controller:
+        controller.require_session(expected, str(tmp_path))
+
+    list_requests = [request for request in socket.sent if request["method"] == "listSessions"]
+    assert [request["params"].get("cursor") for request in list_requests] == [
+        None,
+        "1",
+        "2",
+    ]
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "ws://example.com:8765",
+        "wss://127.0.0.1:8765",
+        "ws://127.0.0.1",
+        "ws://user@127.0.0.1:8765",
+    ],
+)
+def test_loopback_endpoint_rejects_unsafe_values(endpoint: str):
+    with pytest.raises(ahp_provider.AhpProviderError):
+        ahp_provider._loopback_endpoint(endpoint)
+
+
+def test_protocol_skew_fails_closed(monkeypatch):
+    socket = FakeSocket()
+    original_send = socket.send
+
+    def send(raw: str) -> None:
+        request = json.loads(raw)
+        if request["method"] == "initialize":
+            socket.sent.append(request)
+            socket.responses.append(json.dumps({
+                "jsonrpc": "2.0",
+                "id": request["id"],
+                "result": {"protocolVersion": "0.8.0"},
+            }))
+        else:
+            original_send(raw)
+
+    socket.send = send  # type: ignore[method-assign]
+    monkeypatch.setitem(
+        sys.modules,
+        "websocket",
+        SimpleNamespace(create_connection=lambda *_args, **_kwargs: socket),
+    )
+
+    with pytest.raises(ahp_provider.AhpProviderError, match="unsupported protocol"):
+        with ahp_provider.AhpController(_config(), "secret"):
+            pass
 
 
 def test_ensure_session_uses_only_public_engine_boundary(monkeypatch, tmp_path):
@@ -741,3 +878,217 @@ def test_reservation_heartbeat_renews_and_stops_deterministically(monkeypatch):
     assert calls[0][1]["lease_seconds"] == 3
     assert not heartbeat._thread.is_alive()
     assert not renewed.wait(0.03) or len(calls) == count
+
+
+# ---------------------------------------------------------------------------
+# Client-contributed plugins (AHP client-plugins protocol): repo-own-plugin
+# resolution + the resourceList/resourceRead reverse-request responder.
+# ---------------------------------------------------------------------------
+
+def _write_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def _make_repo_with_one_local_plugin(root: Path) -> None:
+    """A repo enabling one plugin resolvable to a local ``.ai``-style marketplace
+    directory, mirroring plugin_resolve's own ``_make_ai_marketplace`` fixture.
+    """
+    _write_json(root / ".github" / "copilot" / "settings.json", {
+        "extraKnownMarketplaces": {"mp": {"source": {"source": "directory", "path": "./.ai"}}},
+        "enabledPlugins": {"greeter@mp": True},
+    })
+    _write_json(root / ".ai" / ".claude-plugin" / "marketplace.json", {
+        "name": "mp",
+        "plugins": [{"name": "greeter", "source": "./greeter"}],
+    })
+    _write_json(root / ".ai" / "greeter" / ".claude-plugin" / "plugin.json", {"name": "greeter"})
+    (root / ".ai" / "greeter" / "SKILL.md").write_text(
+        "# Greeter\nSay hello.\n", encoding="utf-8"
+    )
+
+
+def test_plugin_container_customizations_resolves_local_plugin(tmp_path):
+    _make_repo_with_one_local_plugin(tmp_path)
+    customizations, roots = ahp_provider._plugin_container_customizations(str(tmp_path))
+    assert len(customizations) == 1
+    entry = customizations[0]
+    assert entry["id"] == "greeter@mp"
+    assert entry["name"] == "greeter@mp"
+    assert entry["enabled"] is True
+    assert entry["uri"] in roots
+    assert roots[entry["uri"]] == (tmp_path / ".ai" / "greeter").resolve()
+
+
+def test_plugin_container_customizations_empty_for_repo_without_settings(tmp_path):
+    customizations, roots = ahp_provider._plugin_container_customizations(str(tmp_path))
+    assert customizations == []
+    assert roots == {}
+
+
+def test_resolve_client_plugin_uri_serves_files_under_its_root(tmp_path):
+    _make_repo_with_one_local_plugin(tmp_path)
+    plugin_dir = (tmp_path / ".ai" / "greeter").resolve()
+    roots = {"ahp-client-plugin:/0": plugin_dir}
+
+    assert ahp_provider._resolve_client_plugin_uri(roots, "ahp-client-plugin:/0") == plugin_dir
+    assert (
+        ahp_provider._resolve_client_plugin_uri(roots, "ahp-client-plugin:/0/SKILL.md")
+        == plugin_dir / "SKILL.md"
+    )
+    # A URI naming a different root, or nothing registered, resolves to None.
+    assert ahp_provider._resolve_client_plugin_uri(roots, "ahp-client-plugin:/9") is None
+    assert ahp_provider._resolve_client_plugin_uri({}, "ahp-client-plugin:/0") is None
+
+
+def test_resolve_client_plugin_uri_refuses_path_escape(tmp_path):
+    plugin_dir = tmp_path / "plugin"
+    plugin_dir.mkdir()
+    roots = {"ahp-client-plugin:/0": plugin_dir}
+
+    # A literal ".." segment must never escape the registered root, whether
+    # written raw or percent-encoded ("%2e%2e").
+    assert ahp_provider._resolve_client_plugin_uri(roots, "ahp-client-plugin:/0/..") is None
+    assert (
+        ahp_provider._resolve_client_plugin_uri(roots, "ahp-client-plugin:/0/%2e%2e/secret")
+        is None
+    )
+    # A percent-encoded path separator inside one "segment" must not be
+    # treated as a real separator either.
+    assert (
+        ahp_provider._resolve_client_plugin_uri(roots, "ahp-client-plugin:/0/a%2Fb")
+        is None
+    )
+
+
+class FakeReversePluginSocket(FakeSocket):
+    """Extends FakeSocket to simulate the host's reverse resourceList/
+    resourceRead calls during createSession, exactly mirroring copilot-host's
+    own client_plugins_over_ahp.rs test harness: refuse nothing, walk the
+    declared customization's URI as a real directory tree, and only deliver
+    the final createSession result once every reverse read completes.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._reverse_next_id = 100_000
+        self._pending: dict[str, object] | None = None
+        self._create_request: dict[str, object] | None = None
+        self._walk_stack: list[str] = []
+        self.reverse_calls: list[tuple[str, str]] = []  # (method, uri)
+
+    def send(self, raw: str) -> None:
+        message = json.loads(raw)
+        if "method" not in message:
+            # A reply to one of our own reverse calls.
+            self._advance(message)
+            return
+        self.sent.append(message)
+        method = message["method"]
+        if method == "createSession":
+            params = message["params"]
+            active_client = params.get("activeClient") or {}
+            customizations = active_client.get("customizations") or []
+            self._create_request = message
+            if not customizations:
+                self._deliver_create_result(message)
+                return
+            # Kick off the walk at the first customization's root.
+            self._walk_stack = [c["uri"] for c in customizations]
+            self._issue_next_list()
+            return
+        if method in ("initialize", "authenticate"):
+            result = {"protocolVersion": "0.7.0"} if method == "initialize" else {}
+            self.responses.append(json.dumps({
+                "jsonrpc": "2.0", "id": message["id"], "result": result,
+            }))
+            return
+        if method == "listSessions":
+            self.responses.append(json.dumps({
+                "jsonrpc": "2.0",
+                "id": message["id"],
+                "result": {"items": list(self.sessions)},
+            }))
+            return
+        raise AssertionError(method)
+
+    def _issue_next_list(self) -> None:
+        if not self._walk_stack:
+            self._deliver_create_result(self._create_request)
+            return
+        uri = self._walk_stack.pop()
+        self._reverse_next_id += 1
+        self._pending = {"kind": "list", "uri": uri, "id": self._reverse_next_id}
+        self.reverse_calls.append(("resourceList", uri))
+        self.responses.append(json.dumps({
+            "jsonrpc": "2.0",
+            "id": self._reverse_next_id,
+            "method": "resourceList",
+            "params": {"channel": "ahp-root://", "uri": uri},
+        }))
+
+    def _advance(self, reply: dict[str, object]) -> None:
+        pending = self._pending
+        assert pending is not None and reply.get("id") == pending["id"]
+        if pending["kind"] == "list":
+            entries = (reply.get("result") or {}).get("entries", [])
+            for entry in entries:
+                child_uri = pending["uri"].rstrip("/") + "/" + entry["name"]
+                if entry["type"] == "directory":
+                    self._walk_stack.append(child_uri)
+                else:
+                    self._reverse_next_id += 1
+                    self._pending = {
+                        "kind": "read", "uri": child_uri, "id": self._reverse_next_id,
+                    }
+                    self.reverse_calls.append(("resourceRead", child_uri))
+                    self.responses.append(json.dumps({
+                        "jsonrpc": "2.0",
+                        "id": self._reverse_next_id,
+                        "method": "resourceRead",
+                        "params": {"channel": "ahp-root://", "uri": child_uri},
+                    }))
+                    return
+            self._issue_next_list()
+            return
+        if pending["kind"] == "read":
+            assert (reply.get("result") or {}).get("data") is not None
+            self._issue_next_list()
+            return
+
+    def _deliver_create_result(self, create_request: dict[str, object]) -> None:
+        params = create_request["params"]
+        self.sessions.append({
+            "resource": params["channel"],
+            "workingDirectories": params["workingDirectories"],
+        })
+        self.responses.append(json.dumps({
+            "jsonrpc": "2.0", "id": create_request["id"], "result": {},
+        }))
+
+
+def test_create_session_contributes_and_serves_repo_plugins(monkeypatch, tmp_path):
+    _make_repo_with_one_local_plugin(tmp_path)
+    socket = FakeReversePluginSocket()
+    monkeypatch.setitem(
+        sys.modules,
+        "websocket",
+        SimpleNamespace(create_connection=lambda *_args, **_kwargs: socket),
+    )
+
+    with ahp_provider.AhpController(_config(), "secret") as controller:
+        session_id = controller.create_session(str(tmp_path))
+
+    create = next(r for r in socket.sent if r["method"] == "createSession")
+    customizations = create["params"]["activeClient"]["customizations"]
+    assert [c["id"] for c in customizations] == ["greeter@mp"]
+
+    # The host actually walked the real on-disk plugin tree over the reverse
+    # protocol and read the real file content -- not a stub.
+    methods = [m for m, _uri in socket.reverse_calls]
+    assert "resourceList" in methods
+    assert "resourceRead" in methods
+    read_uris = [uri for m, uri in socket.reverse_calls if m == "resourceRead"]
+    assert any(uri.endswith("SKILL.md") for uri in read_uris)
+    assert any(uri.endswith("plugin.json") for uri in read_uris)
+    assert session_id

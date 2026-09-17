@@ -134,6 +134,54 @@ def binstub_present() -> Path | None:
     return None
 
 
+def _expected_binstub_contents() -> dict[str, str]:
+    """The exact binstub file contents this version would (re)deploy.
+
+    Factored out of :func:`_deploy_binstubs` so :func:`_binstubs_are_stale`
+    can compare against the same expectation without writing anything.
+    """
+    contents = {"worktree-manager": _sh_binstub()}
+    if os.name == "nt":
+        contents = {
+            "worktree-manager.cmd": _cmd_binstub(),
+            "worktree-manager.ps1": _ps1_binstub(),
+            "worktree-manager": _sh_binstub(),  # for git-bash on Windows
+        }
+    return contents
+
+
+def _binstubs_are_stale() -> bool:
+    """True when a deployed binstub is missing or its content doesn't match.
+
+    ``binstub_present()`` only proves *some* file with an expected name
+    exists -- it says nothing about what's actually in it. A machine can
+    carry a **legacy, pre-versioned, or otherwise incompatible**
+    ``worktree-manager`` (e.g. left over from an earlier install attempt or
+    prototype) that happens to occupy the exact binstub filename. Content-less
+    presence-checking then makes :func:`needs_install` report "already
+    installed" and skip re-deploying, silently leaving that stale/broken file
+    in place -- which then fails the consuming ``agent-worktrees`` seam's
+    ``--version`` health probe and falls back to the bundled picker instead of
+    handing off to this Manager. Comparing content closes that gap: any
+    mismatch (or absence) means the binstub needs (re)deploying.
+    """
+    lb = local_bin()
+    for name, expected in _expected_binstub_contents().items():
+        p = lb / name
+        try:
+            # newline="" preserves exact line endings on read (matches how
+            # _deploy_binstubs writes them) -- otherwise universal-newline
+            # translation would normalize a freshly-written \r\n binstub back
+            # to \n on read, making an up-to-date file look "stale".
+            with p.open(encoding="utf-8", newline="") as f:
+                actual = f.read()
+        except OSError:
+            return True
+        if actual != expected:
+            return True
+    return False
+
+
 @dataclass(frozen=True)
 class SelfInstallStatus:
     installed_version: str | None
@@ -161,6 +209,7 @@ def needs_install(version: str, root: Path | None = None) -> bool:
         current_version(r) == version
         and version_slot(version, r).is_dir()
         and binstub_present() is not None
+        and not _binstubs_are_stale()
     )
 
 
@@ -203,14 +252,7 @@ def _deploy_binstubs() -> list[Path]:
     lb = local_bin()
     lb.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
-    contents = {"worktree-manager": _sh_binstub()}
-    if os.name == "nt":
-        contents = {
-            "worktree-manager.cmd": _cmd_binstub(),
-            "worktree-manager.ps1": _ps1_binstub(),
-            "worktree-manager": _sh_binstub(),  # for git-bash on Windows
-        }
-    for name, body in contents.items():
+    for name, body in _expected_binstub_contents().items():
         p = lb / name
         p.write_text(body, encoding="utf-8", newline="")
         if os.name != "nt":
@@ -233,6 +275,156 @@ def _copy_payload(payload_dir: Path, slot: Path) -> None:
     shutil.copytree(payload_dir, slot, ignore=ignore)
 
 
+# ── legacy artifact recognition + cleanup ────────────────────────────────
+#
+# Before this out-of-plugin, versioned Manager existed, an EARLIER and
+# entirely unrelated "worktree-manager" plugin lived at
+# ``plugins/worktree-manager/`` (2026-05-26) and shipped its own
+# ``~/.local/bin/worktree-manager`` (+ ``.cmd``) binstub, plus a
+# non-versioned ``~/.worktree-manager/.venv`` + ``~/.worktree-manager/lib``
+# runtime layout. That plugin was renamed to ``agent-worktrees`` days later
+# (commit 6512114be) -- but a machine that installed it *before* the rename
+# can still carry those exact files, and the rename never cleaned them up.
+# They collide on both the binstub name and the root directory this Manager
+# now uses for its own versioned layout, and agent-worktrees' own
+# ``--version`` health probe against that ancient stub is exactly what
+# fails and falls back to the bundled picker.
+#
+# These are the byte-exact contents git history shows for that prototype
+# (unchanged from its initial scaffold through the rename commit). Matching
+# them exactly -- not just "the binstub looks wrong" -- lets cleanup
+# positively attribute what it removes to this one known, historical
+# artifact, rather than assuming any unrecognized content at that path is
+# safe to delete.
+_LEGACY_PRERENAME_SH = (
+    "#!/usr/bin/env bash\n"
+    "set -euo pipefail\n"
+    "\n"
+    'if [[ -z "${WORKTREE_PROJECT:-}" ]]; then\n'
+    '    echo "ERROR: WORKTREE_PROJECT is not set. Use the project-specific '
+    'binstub or export WORKTREE_PROJECT." >&2\n'
+    "    exit 1\n"
+    "fi\n"
+    "\n"
+    "# Dual-layout: prefer new runtime, fall back to legacy\n"
+    'if [[ -x "$HOME/.worktree-manager/.venv/bin/python" ]]; then\n'
+    '    PYTHON="$HOME/.worktree-manager/.venv/bin/python"\n'
+    '    export PYTHONPATH="$HOME/.worktree-manager/lib"\n'
+    "else\n"
+    '    echo "ERROR: Venv not found. Run the installer first." >&2\n'
+    "    exit 1\n"
+    "fi\n"
+    "\n"
+    "unset PYTHONHOME\n"
+    'exec "$PYTHON" -m worktree_manager "$@"\n'
+)
+
+_LEGACY_PRERENAME_CMD = (
+    "@echo off\n"
+    "setlocal\n"
+    "\n"
+    "if not defined WORKTREE_PROJECT (\n"
+    "    echo ERROR: WORKTREE_PROJECT is not set. Use the project-specific "
+    "binstub or set WORKTREE_PROJECT. >&2\n"
+    "    exit /b 1\n"
+    ")\n"
+    "\n"
+    "rem Resolve runtime\n"
+    'set "NEW_RUNTIME=%USERPROFILE%\\.worktree-manager"\n'
+    "\n"
+    'if exist "%NEW_RUNTIME%\\.venv\\Scripts\\python.exe" (\n'
+    '    set "PYTHON=%NEW_RUNTIME%\\.venv\\Scripts\\python.exe"\n'
+    '    set "PYTHONPATH=%NEW_RUNTIME%\\lib"\n'
+    ") else (\n"
+    "    echo ERROR: Venv not found. Run the installer first. >&2\n"
+    "    exit /b 1\n"
+    ")\n"
+    "\n"
+    '"%PYTHON%" -m worktree_manager %*\n'
+    "exit /b %ERRORLEVEL%\n"
+)
+
+_LEGACY_LABEL = (
+    "pre-rename 'worktree-manager' plugin prototype, May 2026 -- "
+    "before it became agent-worktrees"
+)
+
+_KNOWN_LEGACY_BINSTUB_SIGNATURES: dict[str, str] = {
+    "worktree-manager": _LEGACY_PRERENAME_SH,
+    "worktree-manager.cmd": _LEGACY_PRERENAME_CMD,
+}
+
+# The non-versioned runtime layout that same prototype kept directly under
+# the shared ``~/.worktree-manager`` root -- orphaned relative to this
+# Manager's own ``versions/`` + ``current-version`` layout, which never
+# creates either of these.
+_LEGACY_ROOT_DIRS = (".venv", "lib")
+
+
+def _read_exact(p: Path) -> str | None:
+    try:
+        with p.open(encoding="utf-8", newline="") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def _identify_legacy_binstub(name: str, text: str) -> str | None:
+    """A human label when ``text`` exactly matches ``name``'s known legacy
+    signature, else ``None`` -- never a fuzzy/generic "looks different" match."""
+    expected = _KNOWN_LEGACY_BINSTUB_SIGNATURES.get(name)
+    return _LEGACY_LABEL if expected is not None and text == expected else None
+
+
+def plan_legacy_cleanup(root: Path | None = None) -> list[str]:
+    """Report (never act on) recognized legacy artifacts a real run would remove."""
+    r = root or default_root()
+    lb = local_bin()
+    findings: list[str] = []
+    for name in _KNOWN_LEGACY_BINSTUB_SIGNATURES:
+        text = _read_exact(lb / name)
+        if text is not None and (label := _identify_legacy_binstub(name, text)):
+            findings.append(f"legacy binstub {lb / name} ({label})")
+    for name in _LEGACY_ROOT_DIRS:
+        d = r / name
+        if d.is_dir():
+            findings.append(f"legacy root artifact {d} ({_LEGACY_LABEL})")
+    return findings
+
+
+def clean_legacy_artifacts(root: Path | None = None) -> list[str]:
+    """Remove recognized legacy worktree-manager artifacts; return what was removed.
+
+    Only acts on content positively identified via
+    :data:`_KNOWN_LEGACY_BINSTUB_SIGNATURES` or the prototype's known root
+    layout (:data:`_LEGACY_ROOT_DIRS`) -- never a generic "this looks wrong"
+    guess, so an operator's own unrelated file at the same path is never
+    touched.
+    """
+    r = root or default_root()
+    lb = local_bin()
+    cleaned: list[str] = []
+    for name in _KNOWN_LEGACY_BINSTUB_SIGNATURES:
+        p = lb / name
+        text = _read_exact(p)
+        if text is None:
+            continue
+        label = _identify_legacy_binstub(name, text)
+        if not label:
+            continue
+        try:
+            p.unlink()
+        except OSError:
+            continue
+        cleaned.append(f"removed legacy binstub {p} ({label})")
+    for name in _LEGACY_ROOT_DIRS:
+        d = r / name
+        if d.is_dir():
+            shutil.rmtree(d, ignore_errors=True)
+            cleaned.append(f"removed legacy root artifact {d} ({_LEGACY_LABEL})")
+    return cleaned
+
+
 @dataclass(frozen=True)
 class SelfInstallResult:
     version: str | None
@@ -242,6 +434,7 @@ class SelfInstallResult:
     marker: str | None = None
     binstubs: tuple[str, ...] = ()
     reason: str | None = None
+    cleaned: tuple[str, ...] = ()
 
 
 def self_install(
@@ -262,18 +455,23 @@ def self_install(
         return SelfInstallResult(version=None, action="error", root=str(r),
                                  reason="could not read payload __version__")
     slot = version_slot(version, r)
+    if dry_run:
+        would_clean = tuple(plan_legacy_cleanup(r))
+        if not needs_install(version, r):
+            return SelfInstallResult(version=version, action="already-current", root=str(r),
+                                     slot=str(slot), marker=version, cleaned=would_clean)
+        return SelfInstallResult(version=version, action="planned", root=str(r),
+                                 slot=str(slot), reason="dry-run", cleaned=would_clean)
+    cleaned = tuple(clean_legacy_artifacts(r))
     if not needs_install(version, r):
         return SelfInstallResult(version=version, action="already-current", root=str(r),
-                                 slot=str(slot), marker=version)
-    if dry_run:
-        return SelfInstallResult(version=version, action="planned", root=str(r),
-                                 slot=str(slot), reason="dry-run")
+                                 slot=str(slot), marker=version, cleaned=cleaned)
     _copy_payload(pd, slot)
     stubs = _deploy_binstubs()
     _write_marker(r, version)  # publish last, so the marker only names a ready slot
     return SelfInstallResult(
         version=version, action="installed", root=str(r), slot=str(slot),
-        marker=version, binstubs=tuple(str(s) for s in stubs),
+        marker=version, binstubs=tuple(str(s) for s in stubs), cleaned=cleaned,
     )
 
 

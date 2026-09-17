@@ -15,7 +15,7 @@ test("payload-local CLI exposes the extension fallback flow", () => {
     encoding: "utf8",
   });
   assert.equal(result.status, 0, result.stderr);
-  for (const command of ["facts", "save", "trigger", "consume"]) {
+  for (const command of ["facts", "save", "trigger", "consume", "check-heads", "retry-cutover"]) {
     assert.match(result.stdout, new RegExp(`\\b${command}\\b`));
   }
   assert.match(result.stdout, /--locator/);
@@ -24,7 +24,7 @@ test("payload-local CLI exposes the extension fallback flow", () => {
   assert.match(result.stdout, /--task-id/);
   assert.match(result.stdout, /--handoff-token/);
   assert.doesNotMatch(result.stdout, /\bcontinue\b/);
-  assert.doesNotMatch(result.stdout, /\bretry\b/);
+  assert.match(result.stdout, /\bretry-cutover\b/);
 });
 
 test("trigger requires either markdown input or a stored handoff token", () => {
@@ -83,6 +83,8 @@ test("consume requires exactly one recovery target", () => {
 test("extension and CLI delegate storage, signaling, and consumption to the same core", () => {
   const source = readFileSync(cli, "utf8");
   for (const shared of [
+    "checkHeadAlignment",
+    "retryStoredHandoffCutover",
     "storeHandoff",
     "buildSeedForStored",
     "triggerHandoff",
@@ -92,7 +94,7 @@ test("extension and CLI delegate storage, signaling, and consumption to the same
   ]) {
     assert.match(source, new RegExp(`\\b${shared}\\b`));
   }
-  assert.doesNotMatch(source, /runHandoffCutover|retryStoredHandoffCutover/);
+  assert.doesNotMatch(source, /runHandoffCutover/);
 });
 
 test("fallback remains payload-only with no installed runtime", () => {

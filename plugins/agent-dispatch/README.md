@@ -173,6 +173,25 @@ opens a per-task action sub-menu. The seam is a filesystem manifest registry,
 not a Python import -- the plugins live in separate venvs -- so a stale or absent
 picker simply ignores it. Source: `pivots/agent-dispatch.json`.
 
+### Declared lifecycle tier (per `docs/patterns/service-lifecycle-supervision.md`)
+
+- **Default tier: 2 — scheduled activation**, layered around a tier-1
+  user-mode ensure path — **partially realized today, one gap found and
+  filed** (#2524, not yet fixed): the coordinator's Windows `Invoke-Start`
+  already falls back to a direct detached launch when no Scheduled Task is
+  registered (fixed for #3602), but the POSIX `do_start` still hard-fails
+  when the systemd unit isn't installed/available, with no direct-launch
+  fallback (unlike agent-bridge's own `do_start`). Until #2524 lands, POSIX
+  `start` is effectively tier-2-only, not tier-1-convergent.
+- **Availability promise:** starts with the user's session; restarts at
+  logon; does not survive full logout or start before login.
+- **Windows:** Scheduled Task `agent-dispatch`, `AtLogOn`, non-elevated;
+  the embody supervisor(s) register their own named tasks the same way.
+- **POSIX:** systemd **user** unit `agent-dispatch.service` (no system-level
+  unit); supervisor profiles register their own named units.
+- **No escalation:** no tier-3/tier-4 requirement has been identified for
+  the standalone per-host coordinator.
+
 ### Running the coordinator as a service
 
 On the host that *is* a coordinator, the service is installed by default
@@ -954,7 +973,7 @@ agent-dispatch run --resume <machine/worktree> --task <id> -- agent-worktrees pr
 
 # detached: the wait runs in a process that outlives this one, so the worker can
 # be torn down (costing nothing) while it waits -- true hibernation:
-agent-dispatch run --detach --resume <machine/worktree> -- agent-worktrees pr-watch 42
+agent-dispatch run --detach --resume <machine/worktree> --task <id> -- agent-worktrees pr-watch 42
 ```
 
 Everything after `--` is the blocking wait command (its own flags are never parsed
@@ -962,9 +981,47 @@ as `run` options). With `--detach` the wait is re-exec'd as a fully detached,
 cheap OS-level waiter (no agent, no tokens); the expensive worker session is spun
 down and re-woken with its context intact when the wait returns. The resume is a
 best-effort bridge nudge -- a genuinely-gone worker is handled by liveness
-recovery, not the nudge. See
+recovery, not the nudge.
+
+Always pass `--task` with `--detach`: it atomically suspends that task the
+moment the detached waiter is confirmed spawned (so `started` never outlives
+the session actually doing the work) and journals a `task`-kind
+agent-worktrees claim on the current worktree, blocking finalize/managed-GC
+from reclaiming it out from under the still-open task. Both are best-effort
+and non-fatal -- neither blocks the detach itself. See
 [`visions/plugins/agent-dispatch`](../../visions/plugins/agent-dispatch/README.md)
 (§Features/*hibernate-the-wait*).
+
+### Diagnosing a stuck hibernation (`agent-dispatch doctor`)
+
+A hibernating task's session is *supposed* to be gone -- that's the whole
+point -- so ordinary liveness classification can't tell "still legitimately
+waiting" from "the detached waiter died, or its worktree was reclaimed out
+from under it, and this will never self-resume". `doctor` checks the one
+signal strong enough to know for certain: whether the task's worktree is
+still a live, resumable checkout.
+
+```bash
+# report-only: never mutates anything
+agent-dispatch doctor --repo <lane>
+
+# unbind + re-queue every task whose worktree is confirmed gone
+# (fails its stale reservation, then releases/yields the task back to queued)
+agent-dispatch doctor --repo <lane> --repair
+```
+
+Each examined `claimed`/`started`/`suspended` task gets one of four verdicts:
+`orphaned_worktree_gone` (its worktree is `finalized`/`orphaned`/untracked --
+the only verdict `--repair` acts on), `stale_lease` (a `started` task's lease
+long expired with no reported activity, but the worktree itself couldn't be
+confirmed gone -- advisory only, never auto-repaired), `unknown` (no
+reservation/worktree on record to check), or `healthy`. `--repair` never
+re-creates a worker and never guesses from an indeterminate agent-worktrees
+lookup -- see [ThomasMichon/copilot-extensions#2577](https://github.com/ThomasMichon/copilot-extensions/issues/2577)
+for the full design rationale. Distinct from `agent-dispatch reviewer-loop
+doctor` (a single declared reviewer-loop's health across its emitter/
+evaluator/supervised-lane units, never mutating) -- this `doctor` is
+task-scoped and repo-wide, with an explicit opt-in mutation.
 
 ## Steer a blocked worker (`agent-dispatch card` / `steer`)
 

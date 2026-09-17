@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime as _dt
 
+from .. import prune
 from . import reciprocal
 from . import source_identity
 
@@ -159,16 +160,81 @@ def _state(w):
         # turns is not idle -- it's CONVO.
         if st == "unused" and w.get("turn_count", 0) > 0:
             return "CONVO"
+        if st == "completed":
+            # worktree-finality-and-obligations Phase 5: mirror the PSMux/TMux
+            # status segment's FINAL vs MERGED split via the same canonical
+            # closure descriptor (`list --json --classify`'s additive
+            # ``closure`` field), instead of always collapsing COMPLETED to
+            # FINAL. Routed through ``prune.interpret_descriptor_payload`` for
+            # mixed-version fleet safety (a remote on an older/newer
+            # ``agent-worktrees`` never gets its raw ``closure.label`` trusted
+            # directly) -- degrades to MERGED (never FINAL) when the
+            # descriptor is absent or unsupported.
+            interpreted = prune.interpret_descriptor_payload(w.get("closure"))
+            if interpreted["supported"] and interpreted["label"] in ("FINAL", "MERGED"):
+                return interpreted["label"]
+            return "MERGED"
         return _STATE_LABEL.get(st, st.upper()[:6])
     pr = w.get("pr") or {}
     status = w.get("status")
-    if pr.get("state") == "merged":
-        return "FINAL"
-    if status == "finalized":
-        return "FINAL"
+    if pr.get("state") == "merged" or status == "finalized":
+        # The unclassified-legacy-row fallback (no canonical ``state`` field --
+        # an older remote or a pre-``--classify`` row) must be gated through
+        # the same descriptor check as the classified ``completed`` path
+        # above; otherwise an absent/unsupported descriptor could still
+        # render FINAL through this back door.
+        interpreted = prune.interpret_descriptor_payload(w.get("closure"))
+        if interpreted["supported"] and interpreted["label"] in ("FINAL", "MERGED"):
+            return interpreted["label"]
+        return "MERGED"
     if status == "active":
         return "WIP" if w.get("turn_count", 0) > 0 else "UNUSED"
     return (status or "?").upper()[:6]
+
+
+def _state_style(w):
+    """The closure descriptor's validated ``style`` (e.g. ``merged-blocked``),
+    surfaced only when ``_state()`` itself actually resolved to FINAL/MERGED
+    through the descriptor. Reuses ``_state()``'s own resolution (rather than
+    re-deriving the same precedence) so a live mux/lock session -- which
+    ``_state()`` reports as ACTIVE regardless of a stale ``completed``/
+    ``finalized`` tracking field -- can never get a completed-descriptor style
+    here either. ``None`` for anything else (absent/unsupported descriptor, or
+    a state that never consults one), so a consumer that keys color purely off
+    ``rec["state"]`` remains correct with no ``state_style`` present.
+
+    Carried on the normalized record for a future renderer to key semantic
+    styling off of; the engine does not yet consume this field to recolor a
+    row -- it still colors by the plain ``state`` label alone.
+    """
+    if _state(w) not in ("FINAL", "MERGED"):
+        return None
+    interpreted = prune.interpret_descriptor_payload(w.get("closure"))
+    if interpreted["supported"] and interpreted["label"] in ("FINAL", "MERGED"):
+        return interpreted["style"]
+    return None
+
+
+def _status_markers(w):
+    """The closure descriptor's per-fact freshness markers (worktree-finality-
+    and-obligations Phase 9), e.g. ``"C1 U* OC*"`` -- held-claim/follow-up
+    counts plus an unconfirmed upstream-containment/open-claims marker.
+    Everything in ``compact`` AFTER the base label, which is already rendered
+    separately via ``_state()``/the ``state`` column -- never duplicate the
+    label itself. Empty string when there's nothing to show (no descriptor,
+    an unsupported/mixed-version one, or a clean/confirmed one) rather than
+    repeating the bare label. Routed through
+    ``prune.interpret_descriptor_payload`` for the same mixed-version fleet
+    safety as ``_state()`` -- never reads the raw ``closure`` dict directly.
+    """
+    interpreted = prune.interpret_descriptor_payload(w.get("closure"))
+    if not interpreted["supported"]:
+        return ""
+    compact = interpreted["compact"]
+    label = interpreted["label"]
+    if not compact or not label or not compact.startswith(label):
+        return ""
+    return compact[len(label):].strip()
 
 
 def _sess(w):
@@ -439,6 +505,8 @@ def norm(
         "kind": kind,
         "tracking": w.get("status", ""),
         "state": _state(w),
+        "state_style": _state_style(w),
+        "status_markers": _status_markers(w),
         "relation": reciprocal.short_label(reciprocal_relation),
         "reciprocal_relation": reciprocal_relation,
         "age": _age(
@@ -579,15 +647,16 @@ def bucket(wts):
 
     * **active**    -- in session (state ``ACTIVE``: a live Copilot/mux session
       owns the worktree). NOT merely "status active / not finalized".
-    * **completed** -- finalized / merged (state ``FINAL``), regardless of age.
+    * **completed** -- finalized or merged (state ``FINAL`` or ``MERGED`` --
+      see ``_state``'s Phase 5 closure-descriptor split), regardless of age.
     * **recent**    -- everything else (WIP / UNUSED / CONVO / DIRTY / ORPHAN /
       GONE): not in session and not final.
     """
     active = sorted((w for w in wts if w["state"] == "ACTIVE"),
                     key=lambda w: w["age_secs"])
-    completed = sorted((w for w in wts if w["state"] == "FINAL"),
+    completed = sorted((w for w in wts if w["state"] in ("FINAL", "MERGED")),
                        key=lambda w: w["age_secs"])
     recent = sorted(
-        (w for w in wts if w["state"] not in ("ACTIVE", "FINAL")),
+        (w for w in wts if w["state"] not in ("ACTIVE", "FINAL", "MERGED")),
         key=lambda w: w["age_secs"])
     return active, recent, completed

@@ -7,6 +7,7 @@ import argparse
 import base64
 import json
 import os
+import platform
 import shutil
 import stat
 import subprocess
@@ -539,13 +540,15 @@ def _load_repo_candidate(root: Path) -> tuple[str, Path | None, dict[str, Any] |
         return "invalid", layers[0], None
 
 
-def _git_root(start: Path) -> Path | None:
-    git = shutil.which("git")
-    if not git:
-        return None
+def _run_git(git: str, start: Path, *args: str) -> subprocess.CompletedProcess[str] | None:
     try:
-        result = subprocess.run(
-            [git, "-C", str(start), "rev-parse", "--show-toplevel"],
+        return subprocess.run(
+            # `-c safe.bareRepository=all` only widens what `-C start` itself
+            # is explicitly allowed to inspect (an already-known, registered
+            # repository path from this machine's own repository registry --
+            # never an ambient/inherited cwd), so it doesn't reopen the
+            # ambient-bare-repo attack surface that setting guards against.
+            [git, "-c", "safe.bareRepository=all", "-C", str(start), *args],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -555,10 +558,35 @@ def _git_root(start: Path) -> Path | None:
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    if result.returncode != 0 or not result.stdout.strip():
+
+
+def _git_root(start: Path) -> Path | None:
+    git = shutil.which("git")
+    if not git:
+        return None
+    result = _run_git(git, start, "rev-parse", "--show-toplevel")
+    if result is None:
+        return None
+    if result.returncode == 0 and result.stdout.strip():
+        try:
+            root = Path(result.stdout.strip()).resolve(strict=True)
+        except OSError:
+            return None
+        return root if root.is_dir() else None
+    # `--show-toplevel` only succeeds for a repository with an attached work
+    # tree. A bare repository (e.g. an agent-worktrees anchor checkout, which
+    # deliberately has no work tree of its own -- see the harness's worktree
+    # policy) is still a perfectly valid, resolvable git root: it simply has
+    # no work-tree files, so `_load_repo_candidate` below correctly finds no
+    # repo-local config there ("repository-config-absent") instead of this
+    # function reporting the root as unresolvable ("repository-unavailable",
+    # which is fatal to the whole multi-scope resolution -- see
+    # `_active_environment` in companion-provider.py).
+    bare = _run_git(git, start, "rev-parse", "--is-bare-repository")
+    if bare is None or bare.returncode != 0 or bare.stdout.strip() != "true":
         return None
     try:
-        root = Path(result.stdout.strip()).resolve(strict=True)
+        root = start.resolve(strict=True)
     except OSError:
         return None
     return root if root.is_dir() else None
@@ -603,6 +631,78 @@ def _worktrees_argv(command: str, *arguments: str) -> list[str]:
     return [command, *arguments]
 
 
+def _platform_key() -> str:
+    if platform.system() == "Windows":
+        return "windows"
+    if os.environ.get("WSL_DISTRO_NAME"):
+        return "wsl"
+    return "linux"
+
+
+def _project_name_for_root(root: Path) -> str | None:
+    """Reverse-lookup ``root``'s adopted project name from the repository
+    registry, for the ``--project`` fallback below.
+
+    ``agent-worktrees state-root`` normally discovers its project from the
+    current directory, like git -- but a *bare* anchor checkout (an
+    ``agent-worktrees``-managed repo's own anchor, which deliberately has no
+    work tree; see the harness's worktree policy) carries none of the
+    markers that walk-up discovery looks for, so cwd-based discovery always
+    fails there even though the repo is perfectly well-known by name.
+    """
+    state, registry = _load_yaml_mapping(Path.home() / ".agent-worktrees" / "repos.yaml")
+    if state != "ready" or registry is None:
+        return None
+    repos = registry.get("repos")
+    if not isinstance(repos, dict):
+        return None
+    key = _platform_key()
+    try:
+        target = root.resolve(strict=True)
+    except OSError:
+        target = root
+    for name, entry in repos.items():
+        if not isinstance(name, str) or not isinstance(entry, dict):
+            continue
+        candidate = entry.get(key)
+        if not isinstance(candidate, str) or not candidate.strip():
+            continue
+        try:
+            candidate_path = Path(candidate).expanduser().resolve(strict=True)
+        except OSError:
+            continue
+        if candidate_path == target:
+            return name
+    return None
+
+
+def _run_state_root(
+    command: str, environment: dict[str, str], *, cwd: Path | None, project: str | None
+) -> subprocess.CompletedProcess[str] | None:
+    arguments = ("state-root", "--json") if project is None else (
+        "--project", project, "state-root", "--json",
+    )
+    try:
+        return subprocess.run(
+            _worktrees_argv(command, *arguments),
+            cwd=str(cwd) if cwd is not None else None,
+            env=environment,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=20,
+            check=False,
+            # `command` can resolve to the PATH `.cmd` binstub (shutil.which
+            # prefers .cmd over .ps1 on Windows), which Windows must interpret
+            # through a fresh cmd.exe -- CREATE_NO_WINDOW keeps that console
+            # invisible instead of flashing on every companion-provider probe.
+            creationflags=(0x08000000 if os.name == "nt" else 0),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 def _external_state_root(root: Path) -> tuple[str, Path | None]:
     command = _worktrees_command()
     if not command:
@@ -620,27 +720,19 @@ def _external_state_root(root: Path) -> tuple[str, Path | None]:
             "PYTHONPATH",
         }
     }
-    try:
-        result = subprocess.run(
-            _worktrees_argv(command, "state-root", "--json"),
-            cwd=str(root),
-            env=environment,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=20,
-            check=False,
-            # `command` can resolve to the PATH `.cmd` binstub (shutil.which
-            # prefers .cmd over .ps1 on Windows), which Windows must interpret
-            # through a fresh cmd.exe -- CREATE_NO_WINDOW keeps that console
-            # invisible instead of flashing on every companion-provider probe.
-            creationflags=(0x08000000 if os.name == "nt" else 0),
-        )
-    except (OSError, subprocess.SubprocessError):
+    result = _run_state_root(command, environment, cwd=root, project=None)
+    if result is None:
         return "unavailable", None
     if result.returncode != 0:
-        return "unavailable", None
+        # cwd-based discovery fails outright for a bare anchor checkout (no
+        # work tree, so no walk-up markers) -- retry by explicit project name
+        # instead of giving up on the whole scope.
+        project = _project_name_for_root(root)
+        if project is None:
+            return "unavailable", None
+        result = _run_state_root(command, environment, cwd=None, project=project)
+        if result is None or result.returncode != 0:
+            return "unavailable", None
     try:
         payload = json.loads(result.stdout, object_pairs_hook=_strict_object)
     except (ConfigError, TypeError, ValueError):

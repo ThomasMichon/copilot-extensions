@@ -6,9 +6,11 @@ tracking its lifecycle state.
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import re
+import secrets
 import tempfile
 import threading
 from collections.abc import Callable, Iterable
@@ -111,9 +113,7 @@ def _bounded_nonnegative_int(value: object, *, field: str) -> int:
     ):
         raise ValueError(f"{field} must be a finite integer")
     if value < 0 or value > MAX_PERSISTED_COUNTER:
-        raise ValueError(
-            f"{field} must be between 0 and {MAX_PERSISTED_COUNTER}"
-        )
+        raise ValueError(f"{field} must be between 0 and {MAX_PERSISTED_COUNTER}")
     return int(value)
 
 
@@ -167,9 +167,7 @@ def _dispatch_attempt_from_mapping(value: object) -> DispatchAttempt | None:
             return None
         strings[key] = normalized
     try:
-        attempt = _bounded_nonnegative_int(
-            value.get("attempt"), field="dispatch_attempt.attempt"
-        )
+        attempt = _bounded_nonnegative_int(value.get("attempt"), field="dispatch_attempt.attempt")
     except (TypeError, ValueError, OverflowError):
         return None
     if attempt <= 0:
@@ -372,9 +370,21 @@ def _pr_is_terminal(pr: PRRecord) -> bool:
 # ---------------------------------------------------------------------------
 
 # The kinds of outbound resource a worktree can own and claim. ``worktree`` is
-# a cross-repo worktree it spun up; the others are placeholders the ledger view
-# already understands so later phases can journal them without a schema change.
-ResourceKind = Literal["worktree", "codespace", "container", "ssh", "workdir", "pr"]
+# a cross-repo worktree it spun up; ``task`` is an external, task-queue-owned
+# obligation (e.g. an agent-dispatch task suspended mid-flight, expecting to
+# resume in this exact worktree later) -- deliberately left unresolved by the
+# sweep (see sweep.py's per-kind handling: no branch = permanently ``spare``),
+# since only the owning task system can know when it is genuinely done;
+# ``session`` is a live Copilot session occupying this worktree (its ``ref``
+# is a qualified ``<machine>/<project>/<worktree_id>#<session_id>`` claim ref,
+# reusing the existing session-suffix grammar rather than a second
+# ``sessions:`` list) -- see Phase 8 of
+# ``efforts/active/worktree-finality-and-obligations/README.md``; the rest are
+# placeholders the ledger view already understands so later phases can
+# journal them without a schema change.
+ResourceKind = Literal[
+    "worktree", "codespace", "container", "ssh", "workdir", "pr", "task", "session"
+]
 
 # Claim disposition (resource-obligation-settlement): "active" while unsettled
 # work still rides on the resource, "at-rest" once that work is safe (merged /
@@ -422,9 +432,7 @@ class ClaimRef:
 
     def canonical(self) -> str:
         """Render back to the canonical string form."""
-        return format_claim_ref(
-            self.machine, self.project, self.worktree_id, self.session
-        )
+        return format_claim_ref(self.machine, self.project, self.worktree_id, self.session)
 
 
 #: Reserved ``worktree_id`` sentinel naming a repo's **anchor** checkout (its
@@ -543,6 +551,132 @@ class ResourceClaim:
         return obligations.is_abandoned(self.state)
 
 
+#: Recognized states for a `FollowUpRecord` (worktree-finality-and-obligations,
+#: Phase 3). ``open``/``pending-transfer`` count as effective open obligations
+#: (block finality); ``resolved``/``dismissed``/``transferred`` do not.
+FollowUpState = Literal[
+    "open", "resolved", "dismissed", "pending-transfer", "transferred",
+]
+
+FOLLOW_UP_OPEN: FollowUpState = "open"
+FOLLOW_UP_RESOLVED: FollowUpState = "resolved"
+FOLLOW_UP_DISMISSED: FollowUpState = "dismissed"
+FOLLOW_UP_PENDING_TRANSFER: FollowUpState = "pending-transfer"
+FOLLOW_UP_TRANSFERRED: FollowUpState = "transferred"
+
+#: States that still count as this worktree's obligation.
+_FOLLOW_UP_EFFECTIVE_OPEN: frozenset[str] = frozenset(
+    {FOLLOW_UP_OPEN, FOLLOW_UP_PENDING_TRANSFER})
+
+#: Recognized ``kind`` values for a follow-up's typed objective reference.
+FollowUpRefKind = Literal[
+    "resource-claim", "dispatch-task", "issue", "pull-request", "file",
+    "effort", "other",
+]
+
+
+@dataclass
+class FollowUpRef:
+    """One typed pointer from a follow-up to the objective it tracks.
+
+    The referenced subsystem (its own claim ledger, the issue tracker, the PR
+    provider, ...) remains authoritative for its own lifecycle -- this is a
+    cross-reference, never a second owner (design invariant #4).
+    """
+
+    kind: FollowUpRefKind = "other"
+    ref: str = ""
+
+
+@dataclass
+class FollowUpRecord:
+    """One itemized worktree-local obligation (worktree-finality-and-obligations,
+    Phase 3 -- replaces the boolean-only ``follow_up`` flag).
+
+    A follow-up may point at a resource claim, dispatch task, issue, pull
+    request, file, effort, or other durable objective (``refs``), but it does
+    not duplicate ownership from the subsystem that owns the referenced object
+    -- resolving/dismissing/transferring a follow-up never mutates the
+    referenced object's own state.
+
+    ``revision`` is a per-item monotonic counter (bumped on every mutation) so
+    the record merge path can reconcile concurrent writers by highest revision
+    per ID rather than by list-replacement (stale background stamp writes must
+    never drop, resurrect, or reorder a concurrently-mutated item). Deletion is
+    a tombstone (``dismissed``/``transferred``/``resolved`` with the item kept,
+    never a list removal) so history and revision continuity survive.
+    """
+
+    id: str
+    summary: str
+    state: FollowUpState = FOLLOW_UP_OPEN
+    revision: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+    refs: list[FollowUpRef] = field(default_factory=list)
+    result_ref: str | None = None
+    transfer_target: str | None = None  # qualified ref while pending-transfer
+    reason: str = ""  # dismiss/transfer reason, optional
+
+    @property
+    def is_effective_open(self) -> bool:
+        """True while this follow-up still counts as an open obligation."""
+        return self.state in _FOLLOW_UP_EFFECTIVE_OPEN
+
+    def to_dict(self) -> dict:
+        d: dict = {
+            "id": self.id,
+            "summary": self.summary,
+            "state": self.state,
+            "revision": self.revision,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+        if self.refs:
+            d["refs"] = [{"kind": r.kind, "ref": r.ref} for r in self.refs]
+        if self.result_ref:
+            d["result_ref"] = self.result_ref
+        if self.transfer_target:
+            d["transfer_target"] = self.transfer_target
+        if self.reason:
+            d["reason"] = self.reason
+        return d
+
+    @staticmethod
+    def from_dict(data: dict) -> FollowUpRecord:
+        raw_refs = data.get("refs") or []
+        refs = [
+            FollowUpRef(kind=str(r.get("kind", "other")), ref=str(r.get("ref", "")))
+            for r in raw_refs if isinstance(r, dict)
+        ]
+        state = str(data.get("state", FOLLOW_UP_OPEN))
+        if state not in (FOLLOW_UP_OPEN, FOLLOW_UP_RESOLVED, FOLLOW_UP_DISMISSED,
+                        FOLLOW_UP_PENDING_TRANSFER, FOLLOW_UP_TRANSFERRED):
+            state = FOLLOW_UP_OPEN
+        # YAML may parse a bare ISO timestamp into a datetime -- normalize
+        # back to text (mirrors the completed_at/last_finalized_at handling
+        # in load_record).
+        created_raw = data.get("created_at", "")
+        if hasattr(created_raw, "isoformat"):
+            created_raw = created_raw.isoformat()
+        updated_raw = data.get("updated_at", "")
+        if hasattr(updated_raw, "isoformat"):
+            updated_raw = updated_raw.isoformat()
+        return FollowUpRecord(
+            id=str(data.get("id", "")),
+            summary=str(data.get("summary", "")),
+            state=state,  # type: ignore[arg-type]
+            revision=int(data.get("revision", 1) or 1),
+            created_at=str(created_raw or ""),
+            updated_at=str(updated_raw or ""),
+            refs=refs,
+            result_ref=(str(data["result_ref"]) if data.get("result_ref") else None),
+            transfer_target=(str(data["transfer_target"])
+                             if data.get("transfer_target") else None),
+            reason=str(data.get("reason", "") or ""),
+        )
+
+
 @dataclass
 class ControllerRelation:
     """One authoritative controller relationship for a child worktree.
@@ -567,6 +701,48 @@ class ControllerRelationError(ValueError):
     """A controller relation is invalid or cannot be mutated safely."""
 
 
+def _owning_tracking_dir(worktree_id: str, repo: str | None = None) -> Path:
+    """Resolve the tracking directory that actually owns ``worktree_id``.
+
+    ``cfg.tracking_dir()`` is ambient: it reflects whichever project the
+    *current process* resolved (``-p``/CWD), not the project that actually
+    owns ``worktree_id``. A caller that knows the record's own ``repo``
+    (e.g. an already-loaded :class:`WorktreeRecord`) gets an exact answer.
+    Otherwise, prefer the ambient project's tracking dir (the fast, common
+    case), and only fall back to scanning every other adopted project's
+    tracking dir when the ambient one doesn't have the file -- so a
+    cross-project caller (notably the machine-wide resident status-monitor,
+    which sweeps every ``wt-*`` session from one process) can't silently
+    duplicate a foreign project's record into its own ambient directory
+    (see copilot-extensions#2788).
+    """
+    if repo:
+        return cfg.project_dir(repo) / "worktrees"
+
+    ambient = cfg.tracking_dir()
+    if (ambient / f"{worktree_id}.yaml").exists():
+        return ambient
+
+    try:
+        from . import repos as repos_mod
+
+        candidate_names = repos_mod._adopted_project_names()
+    except Exception:
+        candidate_names = set()
+
+    for name in candidate_names:
+        try:
+            candidate_dir = cfg.project_dir(name) / "worktrees"
+        except Exception:
+            continue
+        if candidate_dir == ambient:
+            continue
+        if (candidate_dir / f"{worktree_id}.yaml").exists():
+            return candidate_dir
+
+    return ambient
+
+
 @dataclass
 class WorktreeRecord:
     """Parsed worktree tracking record."""
@@ -585,24 +761,16 @@ class WorktreeRecord:
     completed_at: str | None
     sessions: list[SessionEntry] | None = field(default=None)
     session_backend: SessionBackendBinding | None = None
-    session_backend_opaque: bool = field(
-        default=False, repr=False, compare=False
-    )
-    session_backend_raw: object = field(
-        default=None, repr=False, compare=False
-    )
+    session_backend_opaque: bool = field(default=False, repr=False, compare=False)
+    session_backend_raw: object = field(default=None, repr=False, compare=False)
     # Generic, provider-neutral successor to ``session_backend`` (see
     # ``ExecutionLegBinding``). Parsed only from an actual on-disk
     # ``execution_leg:`` key -- never derived from a legacy ``session_backend``
     # record here (that translation is a pure, on-demand read via
     # ``derive_execution_leg()`` so nothing here changes what gets written).
     execution_leg: ExecutionLegBinding | None = None
-    execution_leg_opaque: bool = field(
-        default=False, repr=False, compare=False
-    )
-    execution_leg_raw: object = field(
-        default=None, repr=False, compare=False
-    )
+    execution_leg_opaque: bool = field(default=False, repr=False, compare=False)
+    execution_leg_raw: object = field(default=None, repr=False, compare=False)
     # PR records (PR mode).  A worktree can track multiple PRs -- serially
     # (re-PR after a merge) or in parallel -- each self-describing (including
     # its target ``repo``).  Empty when the worktree has not entered the PR
@@ -695,6 +863,19 @@ class WorktreeRecord:
     follow_up: bool = False
     summary: str = ""
     status_note_at: str | None = None
+    # worktree-finality-and-obligations: the most recent timestamp this record
+    # was `finalized` before being atomically reopened (a new/reactivated held
+    # claim arrived after finalize). Preserves the historical fact "this was
+    # finalized as of X" once `completed_at` is cleared by the reopen -- see
+    # `reopen_finalized_owner`. Never set except by a reopen transition.
+    last_finalized_at: str | None = None
+    # worktree-finality-and-obligations, Phase 3: the itemized follow-up
+    # ledger replacing the boolean-only flag above. `follow_up` (the legacy
+    # boolean) is preserved as-is for back-compat callers/YAMLs and is treated
+    # as one synthetic effective-open item when no explicit items exist (see
+    # `effective_open_follow_up_count`) -- it is NOT auto-migrated into this
+    # list. Absent/empty keeps legacy YAML byte-identical.
+    follow_ups: list[FollowUpRecord] = field(default_factory=list)
     # One worktree-local pointer to the canonical effort and declared slice.
     # It is identity, not a second responsibility flag: an open binding derives
     # the existing follow_up/summary status core. Absent keeps legacy YAML
@@ -987,672 +1168,79 @@ class WorktreeRecord:
 
     @property
     def yaml_path(self) -> Path:
-        """Path to this record's YAML file in the tracking directory."""
-        from . import config as cfg
+        """Path to this record's YAML file in the tracking directory.
 
-        return cfg.tracking_dir() / f"{self.worktree_id}.yaml"
-
-
-def _valid_relation_session_id(session_id: str) -> bool:
-    return bool(
-        session_id
-        and session_id not in {".", ".."}
-        and "/" not in session_id
-        and "\\" not in session_id
-        and "\x00" not in session_id
-        and Path(session_id).name == session_id
-    )
-
-
-def _normalize_controller_ref(
-    controller_ref: str,
-    *,
-    session_id: str | None = None,
-) -> tuple[str, ClaimRef]:
-    """Validate and canonicalize one controller ClaimRef."""
-    if not controller_ref or controller_ref.count("#") > 1:
-        raise ControllerRelationError(
-            "controller_ref must be a worktree ClaimRef"
-        )
-    body, _, ref_session = controller_ref.partition("#")
-    parts = body.split("/")
-    if len(parts) not in (1, 3) or any(not part for part in parts):
-        raise ControllerRelationError(
-            "controller_ref must be worktree_id or "
-            "machine/project/worktree_id[#session]"
-        )
-    parsed = parse_claim_ref(controller_ref)
-    if parsed is None or not parsed.worktree_id:
-        raise ControllerRelationError(
-            "controller_ref must identify a worktree"
-        )
-    if any(token in parsed.worktree_id for token in ("/", "\\", "\x00")):
-        raise ControllerRelationError(
-            "controller_ref worktree_id must be one path-safe identifier"
-        )
-    exact_session = session_id or ref_session or None
-    if session_id and ref_session and session_id != ref_session:
-        raise ControllerRelationError(
-            "controller_ref session does not match controller_session_id"
-        )
-    if exact_session and not _valid_relation_session_id(exact_session):
-        raise ControllerRelationError(
-            f"invalid controller session id {exact_session!r}"
-        )
-    normalized = format_claim_ref(
-        parsed.machine,
-        parsed.project,
-        parsed.worktree_id,
-        exact_session,
-    )
-    return normalized, ClaimRef(
-        worktree_id=parsed.worktree_id,
-        machine=parsed.machine,
-        project=parsed.project,
-        session=exact_session,
-    )
+        Prefers the exact file this record was loaded from (set by
+        :func:`load_record`/:func:`save_record`), so a read-modify-write via
+        a bare ``save_record(record)`` always writes back to the same file
+        it came from -- even one found via :func:`_owning_tracking_dir`'s
+        cross-project fallback scan. Only a record that was never loaded or
+        saved (e.g. freshly constructed, not yet persisted) falls back to
+        resolving from its own ``repo``, never the ambient/current process's
+        project -- see copilot-extensions#2788.
+        """
+        loaded_from = getattr(self, "_loaded_from", None)
+        if loaded_from is not None:
+            return loaded_from
+        return _owning_tracking_dir(self.worktree_id, self.repo) / f"{self.worktree_id}.yaml"
 
 
-def _controller_ref_key(controller_ref: str | None) -> tuple[
-    str | None, str | None, str
-] | None:
-    if not controller_ref:
-        return None
-    _normalized, parsed = _normalize_controller_ref(controller_ref)
-    return parsed.machine, parsed.project, parsed.worktree_id
+from .tracking_controller_relations import (
+    _derive_initial_controller_relations,
+    _limit_controller_relations,
+    _mark_controller_projection_dirty,
+    _normalize_controller_ref,
+    _valid_relation_session_id,
+    _validate_controller_relation_set,
+    backfill_legacy_controller_relations,  # noqa: F401 -- re-export for tests
+    controller_relation_to_dict,  # noqa: F401 -- re-export for tests
+    derive_legacy_controller_relations,  # noqa: F401 -- re-export for callers (e.g. __main__)
+    end_controller_relation,  # noqa: F401 -- re-export for tests
+    remove_controller_relation,  # noqa: F401 -- re-export for tests
+    set_controller_relation,  # noqa: F401 -- re-export for tests
+)
 
 
-def _controller_refs_overlap(
-    left: str | None,
-    right: str | None,
-) -> bool:
-    left_key = _controller_ref_key(left)
-    right_key = _controller_ref_key(right)
-    if left_key is None or right_key is None:
-        return False
-    if left_key[2] != right_key[2]:
-        return False
-    left_qualified = bool(left_key[0] and left_key[1])
-    right_qualified = bool(right_key[0] and right_key[1])
-    return (
-        left_key == right_key
-        if left_qualified and right_qualified
-        else True
-    )
+def _controller_metadata(
+    rec: WorktreeRecord,
+) -> list[dict[str, object]]:
+    """Normalized controller relations shared by machine-readable surfaces.
 
-
-def controller_relation_to_dict(
-    relation: ControllerRelation,
-) -> dict[str, object]:
-    """Render one normalized controller relation for JSON surfaces."""
-    return {
-        "kind": relation.kind,
-        "source": relation.source,
-        "controller_ref": relation.controller_ref,
-        "controller_session_id": relation.controller_session_id,
-        "state": relation.state,
-        "relation_revision": relation.relation_revision,
-        "created_at": relation.created_at,
-        "ended_at": relation.ended_at,
-    }
-
-
-def _mark_controller_projection_dirty(
-    record: WorktreeRecord,
-    *session_ids: str | None,
-) -> None:
-    dirty = set(getattr(record, "_controller_projection_dirty", set()))
-    dirty.update(
-        session_id for session_id in session_ids
-        if session_id and _valid_relation_session_id(session_id)
-    )
-    record._controller_projection_dirty = dirty
-
-
-def _next_controller_revision(record: WorktreeRecord) -> int:
-    highest = max(
-        (relation.relation_revision for relation in record.controllers),
-        default=0,
-    )
-    revision = max(record.controller_revision, highest) + 1
-    if revision > MAX_PERSISTED_COUNTER:
-        raise ControllerRelationError("controller revision counter is exhausted")
-    record.controller_revision = revision
-    return revision
-
-
-def _limit_controller_relations(
-    relations: list[ControllerRelation],
-) -> tuple[list[ControllerRelation], list[ControllerRelation]]:
-    if len(relations) <= _MAX_CONTROLLER_RELATIONS:
-        return relations, []
-    active = sorted(
-        (relation for relation in relations if relation.state == "active"),
-        key=lambda relation: relation.relation_revision,
-    )
-    if len(active) > _MAX_CONTROLLER_RELATIONS:
-        raise ControllerRelationError(
-            f"at most {_MAX_CONTROLLER_RELATIONS} active controller relations "
-            "may be recorded"
-        )
-    ended = sorted(
-        (relation for relation in relations if relation.state == "ended"),
-        key=lambda relation: relation.relation_revision,
-    )
-    keep_ended = _MAX_CONTROLLER_RELATIONS - len(active)
-    retained = active + ended[-keep_ended:] if keep_ended else active
-    retained_ids = {id(relation) for relation in retained}
-    removed = [
-        relation for relation in relations if id(relation) not in retained_ids
-    ]
-    retained.sort(key=lambda relation: relation.relation_revision)
-    return retained, removed
-
-
-def _validate_controller_relation_set(
-    relations: list[ControllerRelation],
-) -> None:
-    for index, relation in enumerate(relations):
-        for prior in relations[:index]:
-            if (
-                relation.controller_session_id
-                and relation.controller_session_id
-                == prior.controller_session_id
-            ):
-                raise ControllerRelationError(
-                    "controller session is assigned to multiple relations"
-                )
-            if _controller_refs_overlap(
-                relation.controller_ref, prior.controller_ref
-            ):
-                raise ControllerRelationError(
-                    "controller worktree is assigned to multiple relations"
-                )
-
-
-def _derive_initial_controller_relations(
-    *,
-    machine: str,
-    project: str,
-    owner_ref: str | None,
-    caller_worktree: str | None,
-    parent_session: str | None,
-    created_at: str,
-) -> tuple[list[ControllerRelation], int]:
-    """Derive deterministic initial control from legacy creation metadata."""
-    if parent_session and not _valid_relation_session_id(parent_session):
-        raise ControllerRelationError(
-            f"invalid controller session id {parent_session!r}"
-        )
-    relations: list[ControllerRelation] = []
-
-    def add_reference(
-        source: ControllerRelationSource,
-        raw_ref: str,
-    ) -> None:
-        normalized, parsed = _normalize_controller_ref(raw_ref)
-        for relation in relations:
-            if _controller_refs_overlap(relation.controller_ref, normalized):
-                if parsed.session and not relation.controller_session_id:
-                    relation.controller_session_id = parsed.session
-                    relation.controller_ref = normalized
-                elif (
-                    parsed.is_qualified
-                    and relation.controller_ref
-                    and not all(
-                        _controller_ref_key(relation.controller_ref)[:2]
-                    )
-                ):
-                    relation.controller_ref = normalized
-                return
-            if (parsed.session and
-                    relation.controller_session_id == parsed.session):
-                if relation.controller_ref is None:
-                    relation.controller_ref = normalized
-                    relation.kind = "worktree"
-                return
-        relations.append(ControllerRelation(
-            kind="worktree",
-            source=source,
-            controller_ref=normalized,
-            controller_session_id=parsed.session,
-            relation_revision=len(relations) + 1,
-            created_at=created_at,
-        ))
-
-    if owner_ref:
-        add_reference("owner-ref", owner_ref)
-    if caller_worktree:
-        caller_ref = caller_worktree
-        parsed_caller = parse_claim_ref(caller_worktree)
-        matches_richer_owner = bool(
-            parsed_caller is not None
-            and not parsed_caller.is_qualified
-            and any(
-                (
-                    key := _controller_ref_key(
-                        relation.controller_ref
-                    )
-                ) is not None
-                and key[2] == parsed_caller.worktree_id
-                for relation in relations
-            )
-        )
-        if (
-            parsed_caller is not None
-            and not parsed_caller.is_qualified
-            and machine
-            and project
-            and not matches_richer_owner
-        ):
-            caller_ref = format_claim_ref(
-                machine,
-                project,
-                parsed_caller.worktree_id,
-                parsed_caller.session,
-            )
-        add_reference("caller-worktree", caller_ref)
-    if parent_session:
-        matching = next((relation for relation in relations
-                         if relation.source == "caller-worktree"), None)
-        if matching is None:
-            matching = next((relation for relation in relations
-                             if relation.controller_session_id == parent_session), None)
-        if matching is None:
-            unbound_refs = [
-                relation for relation in relations
-                if relation.controller_session_id is None
-            ]
-            if len(unbound_refs) == 1:
-                matching = unbound_refs[0]
-                matching.controller_session_id = parent_session
-                normalized, _parsed = _normalize_controller_ref(
-                    matching.controller_ref or "",
-                    session_id=parent_session,
-                )
-                matching.controller_ref = normalized
-            else:
-                relations.append(ControllerRelation(
-                    kind="session",
-                    source="parent-session",
-                    controller_session_id=parent_session,
-                    relation_revision=len(relations) + 1,
-                    created_at=created_at,
-                ))
-    return relations, len(relations)
-
-
-def derive_legacy_controller_relations(
-    record: WorktreeRecord,
-) -> list[ControllerRelation]:
-    """Derive explicit controller state from one legacy creation record.
-
-    Ordinary loads and saves deliberately leave legacy creation fields alone.
-    This helper is reserved for explicit doctor/backfill flows.
+    Moved from ``__main__.py`` (module-size split, copilot-extensions#2614):
+    lives alongside ``WorktreeRecord``/``controller_relation_to_dict`` rather
+    than being re-imported back from the CLI entry point by sibling CLI
+    modules (e.g. ``session_tracking_cli.py``).
     """
-    if record.controller_metadata_opaque:
-        raise ControllerRelationError(
-            "controller metadata contains unsupported entries"
-        )
-    if record.controller_revision or record.controllers:
+    return [controller_relation_to_dict(relation) for relation in rec.controllers]
+
+
+def _controller_findings(
+    rec: WorktreeRecord,
+) -> list[dict[str, object]]:
+    """Derived terminal-controller findings shared by JSON surfaces."""
+    from . import controller_lineage
+
+    try:
+        return controller_lineage.controller_findings(rec)
+    except Exception:
         return []
-    if (
-        record.controller_raw_revision_present
-        or record.controller_raw_entries_present
-    ):
-        return []
-    if not (record.owner_ref or record.caller_worktree or record.parent_session):
-        return []
-    relations, _revision = _derive_initial_controller_relations(
-        machine=record.machine,
-        project=record.repo,
-        owner_ref=record.owner_ref,
-        caller_worktree=record.caller_worktree,
-        parent_session=record.parent_session,
-        created_at=record.started_at,
-    )
-    return relations
 
 
-def backfill_legacy_controller_relations(
-    record: WorktreeRecord,
-    *,
-    path: Path | None = None,
-) -> list[ControllerRelation]:
-    """Persist controller relations derived from legacy creation metadata."""
-    target = path or record.yaml_path
-    with _RecordLock(target, require_sidecar=True):
-        authoritative = load_record(target) if target.exists() else record
-        relations = derive_legacy_controller_relations(authoritative)
-        if not relations:
-            _sync_record_instance(record, authoritative)
-            return []
-        authoritative.controllers = relations
-        authoritative.controller_revision = max(
-            relation.relation_revision for relation in relations
-        )
-        _mark_controller_projection_dirty(
-            authoritative,
-            *(
-                relation.controller_session_id
-                for relation in relations
-                if relation.controller_session_id
-            ),
-        )
-        _save_record_unlocked(authoritative, target)
-    _flush_session_projections(authoritative)
-    _sync_record_instance(record, authoritative)
-    return relations
+def _repo_for_record(config, record):
+    """Resolve a record's repository with the legacy/default fallback.
 
-
-def _controller_relation_matches(
-    relation: ControllerRelation,
-    *,
-    controller_ref: str | None,
-    controller_session_id: str | None,
-) -> bool:
-    selector_session = controller_session_id
-    if controller_ref is not None:
-        normalized, parsed = _normalize_controller_ref(
-            controller_ref,
-            session_id=controller_session_id,
-        )
-        selector_session = parsed.session
-        if not _controller_refs_overlap(
-            relation.controller_ref, normalized
-        ):
-            return False
-    if (selector_session is not None and
-            relation.controller_session_id != selector_session):
-        return False
-    return True
-
-
-def _sync_record_instance(
-    target: WorktreeRecord,
-    source: WorktreeRecord,
-) -> None:
-    """Refresh a caller-held record after a relation-only transaction."""
-    if target is source:
-        return
-    target.controller_revision = source.controller_revision
-    target.controllers = source.controllers
-    target.controller_metadata_opaque = source.controller_metadata_opaque
-    target.controller_raw_revision = source.controller_raw_revision
-    target.controller_raw_entries = source.controller_raw_entries
-    target.controller_raw_revision_present = (
-        source.controller_raw_revision_present)
-    target.controller_raw_entries_present = (
-        source.controller_raw_entries_present)
-    target._controller_projection_dirty = (
-        set(getattr(target, "_controller_projection_dirty", set()))
-        | set(getattr(source, "_controller_projection_dirty", set()))
-    )
-
-
-def set_controller_relation(
-    record: WorktreeRecord,
-    *,
-    controller_ref: str | None = None,
-    controller_session_id: str | None = None,
-    source: ControllerRelationSource = "explicit",
-    created_at: str | None = None,
-    save: bool = True,
-    path: Path | None = None,
-) -> ControllerRelation:
-    """Add or refresh a controller without changing session binding or head.
-
-    The default write path is a locked reload-mutate-save transaction, so two
-    processes cannot allocate the same revision from stale snapshots. Callers
-    using ``save=False`` must already hold the record lock through their final
-    :func:`save_record`.
+    Moved from ``__main__.py`` (module-size split, copilot-extensions#2614):
+    a pure ``WorktreeRecord``-shaped helper with no entry-point dependency.
     """
-    if save:
-        target = path or record.yaml_path
-        with _RecordLock(target, require_sidecar=True):
-            authoritative = load_record(target) if target.exists() else record
-            relation = set_controller_relation(
-                authoritative,
-                controller_ref=controller_ref,
-                controller_session_id=controller_session_id,
-                source=source,
-                created_at=created_at,
-                save=False,
-                path=target,
-            )
-            _save_record_unlocked(authoritative, target)
-        _flush_session_projections(authoritative)
-        _sync_record_instance(record, authoritative)
-        return relation
-    if source not in (
-        "explicit", "owner-ref", "caller-worktree", "parent-session"
-    ):
-        raise ControllerRelationError(f"unsupported controller source {source!r}")
-    if record.controller_metadata_opaque:
-        raise ControllerRelationError(
-            "controller metadata contains unsupported entries; explicit repair "
-            "is required before mutation"
-        )
-    normalized_ref = None
-    parsed = None
-    if controller_ref:
-        normalized_ref, parsed = _normalize_controller_ref(
-            controller_ref,
-            session_id=controller_session_id,
-        )
-        controller_session_id = parsed.session
-    elif controller_session_id:
-        if not _valid_relation_session_id(controller_session_id):
-            raise ControllerRelationError(
-                f"invalid controller session id {controller_session_id!r}"
-            )
-    else:
-        raise ControllerRelationError(
-            "controller_ref or controller_session_id is required"
-        )
-
-    ref_matches = [
-        candidate for candidate in record.controllers
-        if normalized_ref is not None and _controller_refs_overlap(
-            candidate.controller_ref, normalized_ref
-        )
-    ]
-    session_matches = [
-        candidate for candidate in record.controllers
-        if (
-            controller_session_id is not None
-            and candidate.controller_session_id == controller_session_id
-        )
-    ]
-    if len(ref_matches) > 1 or len(session_matches) > 1:
-        raise ControllerRelationError(
-            "existing controller identity is ambiguous"
-        )
-    if (
-        ref_matches
-        and session_matches
-        and ref_matches[0] is not session_matches[0]
-    ):
-        raise ControllerRelationError(
-            "controller_ref and controller_session_id identify "
-            "different relations"
-        )
-    relation = (
-        ref_matches[0]
-        if ref_matches
-        else session_matches[0] if session_matches else None
-    )
-    prior_session = relation.controller_session_id if relation else None
-    if (
-        relation is None
-        and len(record.active_controllers) >= _MAX_CONTROLLER_RELATIONS
-    ):
-        raise ControllerRelationError(
-            f"at most {_MAX_CONTROLLER_RELATIONS} active controller relations "
-            "may be recorded"
-        )
-    revision = _next_controller_revision(record)
-    if relation is None:
-        relation = ControllerRelation(
-            kind="worktree" if normalized_ref else "session",
-            source=source,
-            controller_ref=normalized_ref,
-            controller_session_id=controller_session_id,
-            relation_revision=revision,
-            created_at=created_at or _now_iso(),
-        )
-        record.controllers.append(relation)
-    else:
-        if normalized_ref:
-            relation.controller_ref = normalized_ref
-            relation.kind = "worktree"
-        if controller_session_id:
-            relation.controller_session_id = controller_session_id
-        relation.source = source
-        relation.state = "active"
-        relation.ended_at = None
-        relation.relation_revision = revision
-        if created_at:
-            relation.created_at = created_at
-
-    _validate_controller_relation_set(record.controllers)
-    record.controllers, removed = _limit_controller_relations(record.controllers)
-    _mark_controller_projection_dirty(
-        record,
-        prior_session,
-        relation.controller_session_id,
-        *(item.controller_session_id for item in removed),
-    )
-    if save:
-        save_record(record)
-    return relation
-
-
-def end_controller_relation(
-    record: WorktreeRecord,
-    *,
-    controller_ref: str | None = None,
-    controller_session_id: str | None = None,
-    ended_at: str | None = None,
-    save: bool = True,
-    path: Path | None = None,
-) -> ControllerRelation:
-    """End one exact controller relation without altering the bound head."""
-    if save:
-        target = path or record.yaml_path
-        with _RecordLock(target, require_sidecar=True):
-            authoritative = load_record(target) if target.exists() else record
-            relation = end_controller_relation(
-                authoritative,
-                controller_ref=controller_ref,
-                controller_session_id=controller_session_id,
-                ended_at=ended_at,
-                save=False,
-                path=target,
-            )
-            _save_record_unlocked(authoritative, target)
-        _flush_session_projections(authoritative)
-        _sync_record_instance(record, authoritative)
-        return relation
-    if controller_ref is None and controller_session_id is None:
-        raise ControllerRelationError(
-            "controller_ref or controller_session_id is required"
-        )
-    if record.controller_metadata_opaque:
-        raise ControllerRelationError(
-            "controller metadata contains unsupported entries; explicit repair "
-            "is required before mutation"
-        )
-    if (controller_session_id is not None and
-            not _valid_relation_session_id(controller_session_id)):
-        raise ControllerRelationError(
-            f"invalid controller session id {controller_session_id!r}"
-        )
-    matching = [
-        relation for relation in record.controllers
-        if _controller_relation_matches(
-            relation,
-            controller_ref=controller_ref,
-            controller_session_id=controller_session_id,
-        )
-    ]
-    if len(matching) != 1:
-        raise ControllerRelationError(
-            "controller relation was not found"
-            if not matching else "controller relation selector is ambiguous"
-        )
-    relation = matching[0]
-    revision = _next_controller_revision(record)
-    relation.state = "ended"
-    relation.ended_at = ended_at or _now_iso()
-    relation.relation_revision = revision
-    _mark_controller_projection_dirty(
-        record, relation.controller_session_id
-    )
-    if save:
-        save_record(record)
-    return relation
-
-
-def remove_controller_relation(
-    record: WorktreeRecord,
-    *,
-    controller_ref: str | None = None,
-    controller_session_id: str | None = None,
-    save: bool = True,
-    path: Path | None = None,
-) -> None:
-    """Remove one relation for explicit repair and retract its projection."""
-    if save:
-        target = path or record.yaml_path
-        with _RecordLock(target, require_sidecar=True):
-            authoritative = load_record(target) if target.exists() else record
-            remove_controller_relation(
-                authoritative,
-                controller_ref=controller_ref,
-                controller_session_id=controller_session_id,
-                save=False,
-                path=target,
-            )
-            _save_record_unlocked(authoritative, target)
-        _flush_session_projections(authoritative)
-        _sync_record_instance(record, authoritative)
-        return
-    if controller_ref is None and controller_session_id is None:
-        raise ControllerRelationError(
-            "controller_ref or controller_session_id is required"
-        )
-    if record.controller_metadata_opaque:
-        raise ControllerRelationError(
-            "controller metadata contains unsupported entries; explicit repair "
-            "is required before mutation"
-        )
-    if (controller_session_id is not None and
-            not _valid_relation_session_id(controller_session_id)):
-        raise ControllerRelationError(
-            f"invalid controller session id {controller_session_id!r}"
-        )
-    matching = [
-        relation for relation in record.controllers
-        if _controller_relation_matches(
-            relation,
-            controller_ref=controller_ref,
-            controller_session_id=controller_session_id,
-        )
-    ]
-    if len(matching) != 1:
-        raise ControllerRelationError(
-            "controller relation was not found"
-            if not matching else "controller relation selector is ambiguous"
-        )
-    relation = matching[0]
-    _next_controller_revision(record)
-    record.controllers.remove(relation)
-    _mark_controller_projection_dirty(
-        record, relation.controller_session_id
-    )
-    if save:
-        save_record(record)
+    repos = getattr(config, "repos", {})
+    record_repo = getattr(record, "repo", "")
+    repo = repos.get(record_repo) if hasattr(repos, "get") else None
+    if repo is None and (not record_repo or record_repo == getattr(config, "repo_name", None)):
+        try:
+            repo = config.default_repo
+        except (AttributeError, KeyError, ValueError):
+            repo = None
+    return repo
 
 
 def _now_iso() -> str:
@@ -1890,13 +1478,28 @@ def derive_execution_leg(record: WorktreeRecord) -> ExecutionLegBinding | None:
     )
 
 
+#: The resident status-monitor calls `load_record` for every registered
+#: worktree on every sweep interval (copilot-extensions#2615): `yaml.safe_load`
+#: always uses PyYAML's pure-Python `SafeLoader`, even when the much faster
+#: libyaml-backed `CSafeLoader` is available, which py-spy profiling showed
+#: accounted for ~86% of the daemon's sampled CPU time. Prefer `CSafeLoader`
+#: where the C extension is present; fall back to the pure-Python loader on a
+#: host without libyaml bindings (e.g. some non-Windows/non-x64 builds).
+_FastSafeLoader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
+
+def _yaml_safe_load(raw: str) -> object:
+    """`yaml.safe_load`, but via the C-accelerated loader when available."""
+    return yaml.load(raw, Loader=_FastSafeLoader)
+
+
 def load_record(path: Path) -> WorktreeRecord:
     """Load a worktree tracking record from a YAML file."""
     raw = _read_text_with_retry(path)
     try:
-        data = yaml.safe_load(raw)
+        data = _yaml_safe_load(raw)
     except yaml.reader.ReaderError:
-        # tmichon_microsoft/dotfiles#1789: a stray C0 control char (e.g. BEL)
+        # alice_example/dotfiles#1789: a stray C0 control char (e.g. BEL)
         # persisted into a
         # value makes the YAML reader raise on every load, wedging all future
         # disposition writes. Self-heal by stripping the illegal control chars
@@ -1905,7 +1508,7 @@ def load_record(path: Path) -> WorktreeRecord:
         repaired = _strip_control_chars(raw)
         if repaired == raw:
             raise
-        data = yaml.safe_load(repaired)
+        data = _yaml_safe_load(repaired)
 
     if not isinstance(data, dict):
         raise yaml.YAMLError("worktree tracking record must be a YAML mapping")
@@ -1927,6 +1530,12 @@ def load_record(path: Path) -> WorktreeRecord:
         completed_raw = None
     elif hasattr(completed_raw, "isoformat"):
         completed_raw = completed_raw.isoformat()
+
+    # worktree-finality-and-obligations: same YAML-parses-bare-timestamp
+    # gotcha as completed_at above.
+    last_finalized_raw = data.get("last_finalized_at")
+    if hasattr(last_finalized_raw, "isoformat"):
+        last_finalized_raw = last_finalized_raw.isoformat()
 
     # #4057: YAML may parse an ISO timestamp into a datetime -- normalize back to
     # an isoformat string (mirrors started_at/last_resumed_at handling) so the
@@ -2201,7 +1810,9 @@ def load_record(path: Path) -> WorktreeRecord:
                     raise ControllerRelationError(
                         "controller kind does not match its identity"
                     )
-                revision = _bounded_nonnegative_int(raw.get("relation_revision", 0), field="controller relation_revision")
+                revision = _bounded_nonnegative_int(
+                    raw.get("relation_revision", 0), field="controller relation_revision"
+                )
                 if revision <= 0 or raw.get("state", "active") not in ("active", "ended"):
                     raise ControllerRelationError("invalid controller relation state")
                 created = raw.get("created_at") or started_at_raw
@@ -2224,6 +1835,16 @@ def load_record(path: Path) -> WorktreeRecord:
         for raw in raw_resources:
             if isinstance(raw, dict) and raw.get("ref"):
                 resources_list.append(_parse_claim_mapping(raw))
+
+    # worktree-finality-and-obligations Phase 3: itemized follow-up ledger.
+    # Absent in un-annotated worktrees, so legacy records parse to an empty
+    # list and re-serialize byte-identically.
+    follow_ups_list: list[FollowUpRecord] = []
+    raw_follow_ups = data.get("follow_ups")
+    if isinstance(raw_follow_ups, list):
+        for raw in raw_follow_ups:
+            if isinstance(raw, dict) and raw.get("id"):
+                follow_ups_list.append(FollowUpRecord.from_dict(raw))
 
     head_transitions: list[HeadTransition] = []
     raw_transitions = data.get("head_transitions")
@@ -2462,12 +2083,14 @@ def load_record(path: Path) -> WorktreeRecord:
                    if data.get("owner_ref") else None),
         resources=resources_list,
         follow_up=bool(data.get("follow_up", False)),
+        follow_ups=follow_ups_list,
         summary=str(data.get("summary", "") or ""),
         active_effort=active_effort_from_mapping(data.get("active_effort")),
         effort_revision=int(data.get("effort_revision", 0) or 0),
         title_asserted=bool(data.get("title_asserted", False)),
         status_note_at=(str(data["status_note_at"])
                         if data.get("status_note_at") else None),
+        last_finalized_at=(str(last_finalized_raw) if last_finalized_raw else None),
         mux_live=(bool(data["mux_live"])
                   if data.get("mux_live") is not None else None),
         mux_live_at=(str(mux_live_at_raw) if mux_live_at_raw else None),
@@ -2490,6 +2113,7 @@ def load_record(path: Path) -> WorktreeRecord:
                    if data.get("pair_kind") in ("worktree", "anchor") else None),
         reaped_at=(str(data["reaped_at"]) if data.get("reaped_at") else None),
     )
+    record._loaded_from = path
     return record
 
 
@@ -2782,6 +2406,8 @@ def _save_record_unlocked(
         content += "title_asserted: true\n"
     if record.status_note_at:
         content += f"status_note_at: {record.status_note_at}\n"
+    if record.last_finalized_at:
+        content += f"last_finalized_at: {record.last_finalized_at}\n"
     if record.active_effort is not None:
         content += yaml.safe_dump(
             {"active_effort": record.active_effort.to_dict()},
@@ -2997,6 +2623,16 @@ def _save_record_unlocked(
             sort_keys=False,
         )
 
+    # worktree-finality-and-obligations Phase 3: itemized follow-up ledger.
+    # Emitted only when non-empty, keeping legacy YAMLs (boolean-only
+    # `follow_up`) identical.
+    if record.follow_ups:
+        content += yaml.safe_dump(
+            {"follow_ups": [fu.to_dict() for fu in record.follow_ups]},
+            default_flow_style=False,
+            sort_keys=False,
+        )
+
     # Serialize PR records.  Emit the multi-PR ``prs:`` list and mirror the
     # active PR to a legacy ``pr:`` block for one release, so a same-machine
     # tool *downgrade* still finds the active PR.  Zero-PR worktrees emit
@@ -3124,6 +2760,7 @@ def save_record(
             path,
             preserve_handoff_reservations=preserve_handoff_reservations,
         )
+    record._loaded_from = path
     _flush_session_projections(record)
 
 
@@ -3356,7 +2993,7 @@ def update_status(
 #: LF (\x0a) and CR (\x0d) are legitimate YAML stream characters and are kept;
 #: the rest (BEL \x07, etc.) are illegal in a YAML scalar and, once persisted,
 #: make ``yaml.safe_load`` raise a ``ReaderError`` on EVERY subsequent read --
-#: wedging all future disposition writes (tmichon_microsoft/dotfiles#1789). A
+#: wedging all future disposition writes (alice_example/dotfiles#1789). A
 #: stray BEL is easy to
 #: introduce from a caller (e.g. PowerShell renders a literal backtick-a ``` `a ```
 #: as \x07), so sanitize defensively on write and self-heal on read.
@@ -3432,6 +3069,13 @@ def set_disposition(
     if follow_up is not None:
         record.follow_up = follow_up
         changed.append("follow_up")
+        # worktree-finality-and-obligations Phase 3: any caller that asserts a
+        # NEW open obligation via the legacy boolean (manual `status
+        # --follow-up`, or `effort-focus bind`'s automatic follow_up=True)
+        # reopens a finalized owner too -- not just the itemized ledger path
+        # in `add_follow_up`. Idempotent/no-op when already non-finalized.
+        if follow_up and record.status == "finalized":
+            reopen_finalized_owner(record, reason="follow_up flag set")
     record.status_note_at = _now_iso()
     if changed:
         disposition_history.append(
@@ -3472,7 +3116,7 @@ def _stamp_liveness(
     stamp has aged past ``throttle_secs`` (a value CHANGE always writes). See the
     public wrappers for the semantics.
     """
-    yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+    yaml_path = _owning_tracking_dir(worktree_id) / f"{worktree_id}.yaml"
     if not yaml_path.exists():
         return
     try:
@@ -3610,7 +3254,7 @@ def _apply_session_state_stamp(
     run by the async writer thread (or inline when ``sync=True``). Serialized
     per path (``_RecordLock`` -> in-process lock) and best-effort; returns True
     iff the record was rewritten."""
-    yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+    yaml_path = _owning_tracking_dir(worktree_id) / f"{worktree_id}.yaml"
     if not yaml_path.exists():
         return False
     try:
@@ -4357,6 +4001,50 @@ def claim_handoff_reservation(
         return "unverified-handoff-registry"
 
 
+def reopen_finalized_owner(record: WorktreeRecord, *, reason: str) -> bool:
+    """Atomically reopen a `finalized` record to `active` (Ph2, reopen txn).
+
+    Called only when a mutation actually **increases** the held-obligation set
+    (a new/reactivated live claim, or -- once Phase 3 lands -- a new/reopened
+    follow-up). Idempotent replays, pure settlement/release, and metadata
+    refreshes never call this (see the design table in
+    `efforts/active/worktree-finality-and-obligations/design.md` § "Finalized
+    reopening"). No-op (returns ``False``) unless ``record.status ==
+    "finalized"`` -- `finalizing`/`orphaned` remain hard-reject states enforced
+    by the caller before this is ever reached.
+
+    Preserves the historical fact "this was finalized as of X" in
+    ``last_finalized_at`` rather than destroying it, and re-arms the
+    disposition-nudge overlay (clears ``status_note_at`` so a stale "nothing
+    left to do" note doesn't linger on a record that just reopened).
+    """
+    if record.status != "finalized":
+        return False
+    if record.completed_at:
+        record.last_finalized_at = record.completed_at
+    update_status(record, "active", save=False)
+    record.status_note_at = None
+    return True
+
+
+def _claim_reopens_owner(record: WorktreeRecord, claim: ResourceClaim) -> bool:
+    """Would journaling ``claim`` onto ``record`` increase its held claims?
+
+    True for a brand-new live (``active``/``at-rest``) claim, or an existing
+    claim's disposition moving from a non-held state (``released``/
+    ``abandoned``) to a held one. False for an idempotent replay (same
+    kind/state/note) and for a mutation that only *decreases* or preserves
+    held-ness (e.g. settling ``active -> at-rest``, or adding an already
+    released/abandoned claim).
+    """
+    if not claim.is_live:
+        return False
+    existing = next((c for c in record.resources if c.ref == claim.ref), None)
+    if existing is None:
+        return True
+    return not existing.is_live
+
+
 def add_resource_claim(
     record: WorktreeRecord,
     claim: ResourceClaim,
@@ -4368,9 +4056,21 @@ def add_resource_claim(
     If a claim with the same ``ref`` already exists it is refreshed in place
     (kind/state/note/created_at) rather than duplicated, so re-running the
     owning ``run`` wrapper is idempotent. Returns the stored claim.
+
+    ``finalized`` is deliberately **not** in the blocked set: finalize is a
+    non-terminal safe-to-prune assertion, not a frozen end state (a finalized
+    worktree can still be resumed and given follow-up work -- see
+    docs/worktree-lifecycle.md "Finalized is not terminal"). Only
+    ``finalizing`` (the in-flight finalize RMW window) and ``orphaned`` (a
+    genuinely broken/abandoned record) freeze creator ownership.
+
+    When this mutation actually increases the held-obligation set on a
+    currently-``finalized`` record, it is atomically reopened to ``active``
+    (see :func:`reopen_finalized_owner`) -- an idempotent replay or a
+    non-increasing change (e.g. re-adding an already-released claim) does not.
     """
     if (
-        record.status in {"finalizing", "finalized", "orphaned"}
+        record.status in {"finalizing", "orphaned"}
         or (
             record.kind in MANAGED_KINDS
             and record.status in {"complete", "completed"}
@@ -4379,6 +4079,7 @@ def add_resource_claim(
         raise ValueError(
             f"owner worktree {record.worktree_id} is {record.status}; "
             "creator ownership is frozen")
+    reopens = _claim_reopens_owner(record, claim)
     for existing in record.resources:
         if existing.ref == claim.ref:
             reservation = claim_handoff_reservation(record, existing)
@@ -4399,10 +4100,15 @@ def add_resource_claim(
                 existing.note = claim.note
             if claim.created_at:
                 existing.created_at = claim.created_at
+            if reopens:
+                reopen_finalized_owner(
+                    record, reason=f"reactivated claim {claim.ref}")
             if save:
                 save_record(record)
             return existing
     record.resources.append(claim)
+    if reopens:
+        reopen_finalized_owner(record, reason=f"new claim {claim.ref}")
     if save:
         save_record(record)
     return claim
@@ -4435,6 +4141,145 @@ def settle_resource_claim(
     if save:
         save_record(record, path)
     return match
+
+
+def release_resource_claim(
+    record: WorktreeRecord,
+    ref: str,
+    *,
+    save: bool = True,
+    path: Path | None = None,
+) -> ResourceClaim | None:
+    """Release one outbound claim by ``ref`` outright (Phase 8 session lifecycle).
+
+    Mirrors :func:`settle_resource_claim` but writes
+    ``obligations.RELEASED`` instead of ``AT_REST`` -- an explicit hand-back,
+    not merely "safe but still held". A clean process exit (``sessionEnd``)
+    releases its own ``session`` claim outright rather than only settling it,
+    since the process is genuinely gone, not just done-but-lingering. Returns
+    the released claim, or ``None`` when no claim matches the ref (a no-op,
+    degrade-safe) or the claim is reserved by an in-flight handoff bundle.
+    """
+    match = next((c for c in record.resources if c.ref == ref), None)
+    if match is None:
+        return None
+    if claim_handoff_reservation(record, match):
+        return None
+    match.state = obligations.RELEASED
+    if save:
+        save_record(record, path)
+    return match
+
+
+# ── Follow-up ledger CRUD (worktree-finality-and-obligations, Phase 3) ──────
+
+def effective_open_follow_up_count(record: WorktreeRecord) -> int:
+    """The number of obligations this worktree's follow-up model reports open.
+
+    Sums explicit ``open``/``pending-transfer`` ``FollowUpRecord`` items. When
+    the itemized list is empty, the legacy boolean ``follow_up`` contributes
+    one synthetic open item (compatibility -- see the Phase 3 design), so an
+    un-migrated record still counts as having an obligation. An active effort
+    binding is a SEPARATE compatibility source (not counted here; callers that
+    also want that signal add it themselves) since this worktree cannot
+    observe another repository's effort completion.
+    """
+    items_open = sum(1 for fu in record.follow_ups if fu.is_effective_open)
+    if items_open:
+        return items_open
+    return 1 if record.follow_up else 0
+
+
+def _follow_up_id(id_factory: Callable[[], str] | None = None) -> str:
+    make = id_factory or (lambda: secrets.token_hex(4))
+    return f"fu-{make()}"
+
+
+def add_follow_up(
+    record: WorktreeRecord,
+    summary: str,
+    *,
+    refs: list[FollowUpRef] | None = None,
+    id_factory: Callable[[], str] | None = None,
+    save: bool = True,
+) -> FollowUpRecord:
+    """Journal a new open follow-up onto ``record`` (Phase 3).
+
+    Reopens a currently-``finalized`` owner (a new open obligation always
+    increases the held-obligation set -- see the reopen table in
+    ``design.md``). ``finalizing``/``orphaned`` are hard-reject states, mirroring
+    ``add_resource_claim``.
+    """
+    if record.status in {"finalizing", "orphaned"}:
+        raise ValueError(
+            f"owner worktree {record.worktree_id} is {record.status}; "
+            "creator ownership is frozen")
+    now = _now_iso()
+    item = FollowUpRecord(
+        id=_follow_up_id(id_factory),
+        summary=summary,
+        state=FOLLOW_UP_OPEN,
+        revision=1,
+        created_at=now,
+        updated_at=now,
+        refs=list(refs or []),
+    )
+    record.follow_ups.append(item)
+    if record.status == "finalized":
+        reopen_finalized_owner(record, reason=f"new follow-up {item.id}")
+    if save:
+        save_record(record)
+    return item
+
+
+def _resolve_follow_up_item(
+    record: WorktreeRecord, follow_up_id: str,
+) -> FollowUpRecord | None:
+    return next((fu for fu in record.follow_ups if fu.id == follow_up_id), None)
+
+
+def resolve_follow_up(
+    record: WorktreeRecord,
+    follow_up_id: str,
+    *,
+    result_ref: str | None = None,
+    save: bool = True,
+) -> FollowUpRecord | None:
+    """Mark a follow-up ``resolved`` (does not reopen; only decreases open count).
+
+    Returns ``None`` (no-op) when no item matches the ID -- degrade-safe, like
+    ``settle_resource_claim``.
+    """
+    item = _resolve_follow_up_item(record, follow_up_id)
+    if item is None:
+        return None
+    item.state = FOLLOW_UP_RESOLVED
+    item.result_ref = result_ref
+    item.updated_at = _now_iso()
+    item.revision += 1
+    if save:
+        save_record(record)
+    return item
+
+
+def dismiss_follow_up(
+    record: WorktreeRecord,
+    follow_up_id: str,
+    *,
+    reason: str,
+    save: bool = True,
+) -> FollowUpRecord | None:
+    """Mark a follow-up ``dismissed`` (explicitly not requiring action)."""
+    item = _resolve_follow_up_item(record, follow_up_id)
+    if item is None:
+        return None
+    item.state = FOLLOW_UP_DISMISSED
+    item.reason = reason
+    item.updated_at = _now_iso()
+    item.revision += 1
+    if save:
+        save_record(record)
+    return item
 
 
 def sweep_abandoned_obligations(
@@ -4504,8 +4349,18 @@ def release_all_resources(
     child records are untouched (they keep their own ``owner_ref``; the
     claimant-liveness gate now sees the parent as terminal -> gone). Idempotent:
     returns the claims it flipped this call (empty when none were live).
+
+    Excludes ``kind == "session"`` claims (Phase 8,
+    worktree-finality-and-obligations): a live Copilot session claim has its
+    own lifecycle (settled to ``at-rest`` on finalize, released outright only
+    by its own ``deregister_session``/``sessionEnd``) -- this generic cascade
+    must not release it out from under a still-running process, nor silently
+    forgive a genuinely-other live session that `_advise_other_live_sessions`
+    just warned about.
     """
-    released = [c for c in record.resources if c.is_live]
+    released = [
+        c for c in record.resources if c.is_live and c.kind != "session"
+    ]
     for c in released:
         c.state = "released"
     if released and save:
@@ -5076,11 +4931,16 @@ def register_session(
     recorded_at: str | None = None,
     handoff_token: str | None = None,
     initial_projection: bool = False,
-) -> None:
-    """Register a Copilot session against a worktree (called from sessionStart hook)."""
-    yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+) -> SessionHandoff | None:
+    """Register a Copilot session against a worktree (called from sessionStart hook).
+
+    Returns the :class:`SessionHandoff` this call *newly* linked (the head
+    authoritatively transferred to ``session_id``), or ``None`` when no fresh
+    link happened -- callers use this to emit Stage 10/11 events exactly once.
+    """
+    yaml_path = _owning_tracking_dir(worktree_id) / f"{worktree_id}.yaml"
     if not yaml_path.exists():
-        return
+        return None
 
     with _RecordLock(yaml_path):
         record = load_record(yaml_path)
@@ -5097,6 +4957,42 @@ def register_session(
         event_at = started_at or _now_iso()
         observed_at = recorded_at or _now_iso()
         _ensure_head_ledger(record)
+        # Phase 8 (worktree-finality-and-obligations): claim this session as a
+        # live outbound resource, in the same locked transaction as the
+        # SessionEntry create/update below. ``add_resource_claim`` dedups by
+        # ``ref`` and already reopens a finalized owner for any new live claim
+        # (`_claim_reopens_owner`), so this is a pure application of existing
+        # machinery -- not a new mechanism. ``save=False``: the pending
+        # SessionEntry mutation below shares this same ``save_record`` call.
+        self_session_ref = format_claim_ref(
+            record.machine, record.repo, record.worktree_id, session=session_id,
+        )
+        add_resource_claim(
+            record,
+            ResourceClaim(
+                kind="session",
+                ref=self_session_ref,
+                created_at=event_at,
+                state=obligations.ACTIVE,
+                note="live Copilot session",
+            ),
+            save=False,
+        )
+
+        def _link_if_fresh() -> SessionHandoff | None:
+            """Link, reporting a fresh transfer only (idempotent re-links -> None)."""
+            prior = next(
+                (h for h in record.handoffs if h.token == handoff_token), None,
+            )
+            already_linked = (
+                prior is not None and prior.state == "linked"
+                and prior.successor == session_id
+            )
+            linked = link_handoff(
+                record, handoff_token, session_id,
+                linked_at=event_at, save=False,
+            )
+            return None if already_linked else linked
 
         # Dedupe -- update existing entry instead of appending
         for entry in record.sessions:
@@ -5113,15 +5009,14 @@ def register_session(
                     entry.pane_id = pane_id
                 if handoff_token:
                     try:
-                        link_handoff(
-                            record, handoff_token, session_id,
-                            linked_at=event_at, save=False,
-                        )
+                        linked_handoff = _link_if_fresh()
                     except SessionLifecycleError:
                         if activation_added:
                             _next_lifecycle_revision(record, session_id)
                         save_record(record)
                         raise
+                    save_record(record)
+                    return linked_handoff
                 elif (
                     record.resolved_head_session is None
                     and entry.state == "active"
@@ -5171,12 +5066,10 @@ def register_session(
             record._session_projection_initial_registration = initial_sessions
         # A successor claims one exact, previously opened handoff token. Merely
         # starting another session never steals the head.
+        linked_handoff = None
         if handoff_token:
             try:
-                link_handoff(
-                    record, handoff_token, session_id,
-                    linked_at=event_at, save=False,
-                )
+                linked_handoff = _link_if_fresh()
             except SessionLifecycleError:
                 save_record(record)
                 raise
@@ -5191,6 +5084,7 @@ def register_session(
                 at=event_at,
             )
         save_record(record)
+        return linked_handoff
 
 
 def _record_has_open_session(record: WorktreeRecord) -> bool:
@@ -5243,6 +5137,102 @@ def stop_fsmonitor_daemon(worktree_path: str) -> None:
         pass
 
 
+# ── Repo-scoped freshness ledger (worktree-finality-and-obligations Phase 9) ─
+# A single machine-wide, repo-keyed record of "when was this repo's
+# remote-tracking refs last confirmed fresh by a real fetch". Lets any
+# worktree's classify pass treat a fetch performed by a SIBLING worktree of
+# the same repo (its own classify pass, `finalize`/`pr-merge`, or the
+# resident status-monitor's periodic sweep) as current upstream-containment
+# evidence, without paying for its own fetch -- see
+# `prune.assemble_closure_descriptor`'s `repo_fetch_fresh` parameter.
+
+_REPO_FRESHNESS_FILENAME = "repo-freshness.json"
+
+#: Default freshness window: a confirmed fetch older than this no longer
+#: counts as current evidence for a caller that didn't fetch itself. On the
+#: same order of magnitude as the resident status-monitor's planned periodic
+#: per-repo revalidation sweep (still unstarted -- a separate Phase 9 Plan
+#: item), plus slack for a classify pass that runs slightly behind it.
+REPO_FRESHNESS_MAX_AGE_S = 120.0
+
+
+def _repo_freshness_path() -> Path:
+    from . import registry_paths
+    return registry_paths.registry_path(_REPO_FRESHNESS_FILENAME)
+
+
+def _load_repo_freshness(path: Path) -> dict:
+    try:
+        raw = json.loads(path.read_text("utf-8"))
+    except (FileNotFoundError, OSError, ValueError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def record_repo_fetch_confirmed(repo: str, *, at: str | None = None) -> None:
+    """Record that ``repo``'s remote-tracking refs were just confirmed fresh
+    (a successful fetch), in the machine-wide repo freshness ledger.
+
+    Best-effort background writer semantics (mirrors
+    :class:`_RecordLock`'s ``blocking=False`` contract): a single non-blocking
+    attempt at the ledger's lock; skips silently if another process holds it
+    -- the next successful fetch self-heals the entry, so a skipped write here
+    is never a correctness problem, only a missed opportunity to share
+    freshness one pass earlier. Never raises.
+    """
+    if not repo:
+        return
+    path = _repo_freshness_path()
+    try:
+        with _RecordLock(path, blocking=False) as lock:
+            if not lock.acquired:
+                return
+            data = _load_repo_freshness(path)
+            data[repo] = {"confirmed_at": at or _now_iso()}
+            _atomic_write(path, json.dumps(data))
+    except Exception:
+        pass
+
+
+def repo_fetch_confirmed_at(repo: str) -> str | None:
+    """Best-effort read of ``repo``'s last-confirmed-fetch timestamp from the
+    freshness ledger, or ``None`` if never recorded / unreadable. Never
+    raises."""
+    if not repo:
+        return None
+    try:
+        entry = _load_repo_freshness(_repo_freshness_path()).get(repo)
+    except Exception:
+        return None
+    if not isinstance(entry, dict):
+        return None
+    value = entry.get("confirmed_at")
+    return value if isinstance(value, str) else None
+
+
+def is_repo_fetch_fresh(
+    repo: str,
+    *,
+    max_age_seconds: float = REPO_FRESHNESS_MAX_AGE_S,
+    now: str | None = None,
+) -> bool:
+    """Whether ``repo``'s freshness-ledger entry is within ``max_age_seconds``
+    of ``now`` (default: current time). ``False`` for no entry, an unparsable
+    timestamp, or one older than the window -- never raises."""
+    confirmed_at = repo_fetch_confirmed_at(repo)
+    if not confirmed_at:
+        return False
+    try:
+        confirmed_dt = datetime.strptime(confirmed_at, "%Y-%m-%dT%H:%M:%S")
+        now_dt = (
+            datetime.strptime(now, "%Y-%m-%dT%H:%M:%S") if now
+            else datetime.now()
+        )
+    except ValueError:
+        return False
+    return (now_dt - confirmed_dt).total_seconds() <= max_age_seconds
+
+
 def deregister_session(
     worktree_id: str,
     session_id: str,
@@ -5252,7 +5242,7 @@ def deregister_session(
     recorded_at: str | None = None,
 ) -> None:
     """Mark a session as ended on a worktree (called from sessionEnd hook)."""
-    yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+    yaml_path = _owning_tracking_dir(worktree_id) / f"{worktree_id}.yaml"
     if not yaml_path.exists():
         return
 
@@ -5271,6 +5261,16 @@ def deregister_session(
                 )
                 if changed:
                     _next_lifecycle_revision(record, session_id)
+                    # Phase 8 (worktree-finality-and-obligations): a clean
+                    # process exit releases (not just settles) this session's
+                    # own outbound claim -- matching the Plan's "clean process
+                    # exit" requirement. Best-effort: a missing/reserved claim
+                    # is a no-op, never blocks the session from ending.
+                    self_session_ref = format_claim_ref(
+                        record.machine, record.repo, record.worktree_id,
+                        session=session_id,
+                    )
+                    release_resource_claim(record, self_session_ref, save=False)
                     save_record(record)
                     if not _record_has_open_session(record):
                         stop_fsmonitor_daemon(record.worktree_path)

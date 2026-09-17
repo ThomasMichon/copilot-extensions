@@ -17,17 +17,6 @@ from plugin_activation import ActivationReport, ActivePlugin, ActivePluginRoot
 
 from agent_worktrees import config_dropins as dropins
 
-
-def test_session_backend_timeout_rejects_boolean():
-    assert dropins._validate_config({
-        "session_backend": {
-            "kind": "ahp",
-            "endpoint_url": "ws://127.0.0.1:8765",
-            "connect_timeout_seconds": True,
-        }
-    }) == "session_backend.connect_timeout_seconds must be a number"
-
-
 def _active_report(
     source: str,
     root: Path,
@@ -512,7 +501,7 @@ def test_scanner_generated_entry_finding_and_no_project_report(tmp_path):
 
 def test_doctor_json_runs_without_project_context(tmp_path, monkeypatch, capfd):
     from agent_worktrees import __main__ as main
-    from agent_worktrees.picker_tui import pivots
+    from agent_worktrees.picker_support import pivots
 
     pivot_report = pivots.scan_pivot_registry(
         tmp_path / "absent-pivots",

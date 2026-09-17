@@ -446,15 +446,36 @@ class TestWindowsSupervisorInstall:
         assert "Stop-DispatchProcess -Subcommand supervise" not in body
         assert "Retire-SupervisorProcesses" not in body
         assert "Start-ScheduledTask -TaskName $Name" in body
-        # Install-SupervisorTaskInstance short-circuits to the in-place restart when
-        # non-elevated and the task already exists (never re-registering on update).
+        # Install-SupervisorTaskInstance short-circuits to the in-place restart
+        # whenever the existing task's action already matches the desired one --
+        # regardless of the caller's elevation state (#1837): re-registering is
+        # reserved for a first install or a genuine task-definition drift.
         inst = text.index("function Install-SupervisorTaskInstance")
         instbody = text[inst:]
-        assert "(-not (Test-Elevated)) -and (Get-ScheduledTask -TaskName $Name" in instbody, (
-            "a non-elevated update with an existing task must restart in place, "
-            "not attempt a re-registration that needs elevation"
+        assert "$existingTask = Get-ScheduledTask -TaskName $Name" in instbody
+        assert "$matchesDesired = $existingAction -and" in instbody, (
+            "an already-registered task with a matching action must be detected "
+            "without relying on the caller's elevation state"
         )
+        assert "if ($matchesDesired) {" in instbody
         assert "Restart-SupervisorTaskInPlace -Name $Name" in instbody
+
+    def test_supervisor_task_instance_migrates_drifted_definition_when_elevated(self):
+        """#1837: an ordinary update (elevated or not) must never force-register
+        an already-correct supervisor task; only a genuine drift between the
+        registered action and the desired one -- and elevation being available --
+        may re-register. A drift without elevation must degrade to an in-place
+        restart (stale definition kept) rather than losing the task."""
+        text = _ps1_text()
+        inst = text.index("function Install-SupervisorTaskInstance")
+        instbody = text[inst:]
+        matches_idx = instbody.index("if ($matchesDesired) {")
+        drift_block = instbody[matches_idx : instbody.index("$trigger = New-ScheduledTaskTrigger -AtLogOn", matches_idx)]
+        assert "if (-not (Test-Elevated)) {" in drift_block, (
+            "a drifted-but-unelevated definition must degrade to an in-place "
+            "restart of the stale task, not silently attempt Register -Force"
+        )
+        assert drift_block.count("Restart-SupervisorTaskInPlace -Name $Name") == 2
 
     def test_interactive_update_retires_wrapper_master_and_children_once(self):
         text = _ps1_text()

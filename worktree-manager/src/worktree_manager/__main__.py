@@ -468,6 +468,21 @@ def _cmd_contracts(rest: list[str]) -> int:
     return 0
 
 
+def _cmd_companion(rest: list[str]) -> int:
+    """Launch the Mux Companion: a read-only status + session-lineage view
+    for the CURRENT worktree, resolved from cwd (visions/mux-companion).
+
+    v1 is view-only -- explains the worktree's status in plain language and
+    lists its session lineage with the current head marked. No session
+    switching, resume, or head-override action lives here yet; that is a
+    distinct, later feature (see the vision's Non-Goals).
+    """
+    del rest  # no options yet
+    from .mux_companion import run as run_companion
+
+    return run_companion()
+
+
 def _cmd_picker(rest: list[str]) -> int:
     """Run, mock, or capture the Manager-owned production Picker."""
     args = list(rest)
@@ -538,8 +553,33 @@ def _cmd_picker(rest: list[str]) -> int:
             print()
             return 1
         projects = build_projects()
-        project = positionals[0] if positionals else (
-            projects[0].name if projects else "")
+        # A knowledge-only repo (repo class "knowledge", see #knowledge_only)
+        # exists solely to be carved as another project's paired "-k"
+        # companion -- it must never be silently picked as an implicit
+        # default or offered in the ambiguous-selection prompt below.
+        launchable = [
+            p for p in projects if not (p.repo and p.repo.klass == "knowledge")
+        ]
+        if positionals:
+            project = positionals[0]
+        elif len(launchable) == 1:
+            # Exactly one registered launchable project is an unambiguous
+            # default -- no risk of silently opening the wrong one.
+            project = launchable[0].name
+        elif not launchable:
+            project = ""
+        else:
+            # #2426: multiple registered projects with no explicit selection
+            # is genuinely ambiguous -- picking projects[0] here silently
+            # opened an arbitrary (registration-order-dependent, not
+            # caller-intent-dependent) project's content with no visible
+            # error. Refuse instead of guessing.
+            print(
+                "error: multiple projects are registered and none was "
+                "specified. Pass a project name: "
+                f"{', '.join(p.name for p in launchable)}"
+            )
+            return 2
         if not project:
             print("error: no project to open. Adopt one, or pass a project name.")
             return 2
@@ -1175,6 +1215,12 @@ def _cmd_self_install(rest: list[str]) -> int:
     else:
         print(f"  ! {res.reason}")
         return 1
+    if res.cleaned:
+        verb = "removed" if do_apply else "would remove"
+        print()
+        print(f"  legacy artifacts {verb}:")
+        for c in res.cleaned:
+            print(f"      {c}")
     print()
     return 0
 
@@ -1343,6 +1389,7 @@ def main(argv: list[str] | None = None) -> int:
         print("                         capture the production Picker headlessly")
         print("  picker --demo          preview the retired minimal scaffold")
         print("                         (in the Picker: l launch/resume · b bare-resume · n new)")
+        print("  companion              Mux Companion: read-only status + session lineage for the current worktree (visions/mux-companion)")
         print()
         print("Phase 2 provisions prerequisites + drives the core install; Phase 3")
         print("adds the Manager state views (projects/repos/plugin enablement); later")
@@ -1360,6 +1407,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_contracts(args[1:])
     if args and args[0] == "picker":
         return _cmd_picker(args[1:])
+    if args and args[0] == "companion":
+        return _cmd_companion(args[1:])
     if args and args[0] == "doctor":
         return _cmd_doctor()
     if args and args[0] == "setup":

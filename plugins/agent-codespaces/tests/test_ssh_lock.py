@@ -269,6 +269,30 @@ class TestAuthCacheWarmup:
             relay_env="export LC_GIT_CREDENTIAL_RELAY=9857;",
         )
 
+    @pytest.mark.asyncio
+    async def test_warmup_uses_ado_helper_for_scoped_and_bare_tokens(self):
+        commands: list[str] = []
+
+        class CapturingManager:
+            async def exec_command(self, _name, command, **_kwargs):
+                commands.append(command)
+                return _FakeCommandResult()
+
+        await cli._warm_remote_auth_cache(
+            CapturingManager(),
+            "cs-auth",
+            _fake_config(),
+            relay_env="export LC_GIT_CREDENTIAL_RELAY=9857;",
+        )
+
+        warmup = commands[-1]
+        assert "azure-auth-helper" not in warmup
+        assert (
+            "ado-auth-helper get-access-token "
+            "--resource 499b84ac-1321-427f-aa17-267ca6975798"
+        ) in warmup
+        assert "ado-auth-helper get-access-token >/dev/null" in warmup
+
     def test_auth_cache_warmup_can_be_requested_for_diagnostic_remote_cmd(
         self, tmp_path, monkeypatch
     ):

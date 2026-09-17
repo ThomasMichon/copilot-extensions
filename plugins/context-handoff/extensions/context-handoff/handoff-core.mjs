@@ -25,6 +25,7 @@ import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import {
   CONTINUATION_DIRECTIVE,
+  HANDOFF_MECHANISM_AWARENESS,
   leadFrom,
   buildCutoverSeed,
 } from "./cutover-seed.mjs";
@@ -478,6 +479,152 @@ function discoverFileHandoffPath(
     if (existsSync(candidate)) return candidate;
   }
   return null;
+}
+
+function knownWorktreeRows(cwd, execute = runCli) {
+  let reposJson;
+  try {
+    reposJson = cliJson(
+      "agent-worktrees",
+      ["repos", "list", "--class", "worktree", "--json"],
+      cwd,
+      AGENT_WORKTREES_QUERY_TIMEOUT_MS,
+      execute,
+    );
+  } catch {
+    return [];
+  }
+  const rows = new Map();
+  for (const repo of reposJson?.repos || []) {
+    for (const anchorPath of registeredRepoPaths(repo?.paths)) {
+      let listed;
+      try {
+        listed = cliJson(
+          "agent-worktrees",
+          ["list", "--all", "--json"],
+          anchorPath,
+          AGENT_WORKTREES_QUERY_TIMEOUT_MS,
+          execute,
+        );
+      } catch {
+        continue;
+      }
+      for (const worktree of listed?.worktrees || []) {
+        if (!worktree?.id || !worktree?.path) continue;
+        const key = [
+          worktree.machine || "",
+          worktree.repo || repo?.name || "",
+          worktree.id,
+        ].join(":");
+        if (!rows.has(key)) rows.set(key, worktree);
+      }
+    }
+  }
+  return [...rows.values()];
+}
+
+function normalizeComparePath(value) {
+  if (!value) return "";
+  let normalized = String(value).trim().replace(/[\\/]+/g, "/");
+  normalized = normalized.replace(/\/+$/, "");
+  return process.platform === "win32"
+    ? normalized.toLowerCase()
+    : normalized;
+}
+
+export function readStatusMonitorRegistry(home = homedir()) {
+  const dir = join(home, ".agent-worktrees", "status-monitor.d");
+  const entries = {};
+  if (!existsSync(dir)) return entries;
+  for (const name of readdirSync(dir)) {
+    const path = join(dir, name);
+    try {
+      entries[name] = readFileSync(path, "utf-8").trim();
+    } catch {
+      // Best-effort diagnostic only.
+    }
+  }
+  return entries;
+}
+
+export function checkHeadAlignment(cwd, execute = runCli) {
+  const worktrees = knownWorktreeRows(cwd, execute);
+  const registry = readStatusMonitorRegistry();
+  const findings = [];
+  for (const worktree of worktrees) {
+    let head;
+    try {
+      head = cliJson(
+        "agent-worktrees",
+        ["head-session", "--worktree", worktree.id, "--json"],
+        cwd,
+        AGENT_WORKTREES_QUERY_TIMEOUT_MS,
+        execute,
+      );
+    } catch (error) {
+      findings.push({
+        reason: "head-query-failed",
+        worktree,
+        error: describeCliError(error),
+      });
+      continue;
+    }
+    const pending = Array.isArray(head?.pending_handoffs) ? head.pending_handoffs : [];
+    if (!pending.length) continue;
+    const monitorSession = `wt-${worktree.id}`;
+    const registeredPath = registry[monitorSession] || null;
+    const expectedPath = worktree.path || null;
+    const pathMatches = registeredPath
+      ? normalizeComparePath(registeredPath) === normalizeComparePath(expectedPath)
+      : null;
+    if (!registeredPath) {
+      findings.push({
+        reason: "pending-handoff-unregistered",
+        worktree,
+        head,
+        monitorSession,
+        monitorPath: null,
+      });
+      continue;
+    }
+    if (!pathMatches) {
+      findings.push({
+        reason: "pending-handoff-registry-path-mismatch",
+        worktree,
+        head,
+        monitorSession,
+        monitorPath: registeredPath,
+      });
+    }
+  }
+  return {
+    ok: true,
+    checked: worktrees.length,
+    findings,
+  };
+}
+
+export function retryStoredHandoffCutover(cwd, sid, execute = runCli) {
+  if (!sid) {
+    return {
+      ok: false,
+      error: "retry-cutover requires --session-id or COPILOT_AGENT_SESSION_ID",
+    };
+  }
+  try {
+    return cliJson(
+      "agent-worktrees",
+      ["handoff-cutover", "--retry", "--session-id", sid, "--json"],
+      cwd,
+      30000,
+      execute,
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      error: describeCliError(error) || "Could not retry handoff cutover.",
+    };
+  }
 }
 
 export function writeJsonAtomic(path, value) {
@@ -1263,6 +1410,8 @@ export function formatConsumeResult(
     "",
     CONTINUATION_DIRECTIVE,
     "",
+    HANDOFF_MECHANISM_AWARENESS,
+    "",
     "---",
     "",
     result.payload || "(The handoff payload was empty.)",
@@ -1280,6 +1429,8 @@ export function buildResumePrompt(
       ? `Keep agent-dispatch task ${deferredTaskId} owned. Only after the handoff objective's completion gate is met run: agent-dispatch complete ${deferredTaskId}`
       : null,
     CONTINUATION_DIRECTIVE,
+    "",
+    HANDOFF_MECHANISM_AWARENESS,
     "",
     "---",
     "",
@@ -1317,7 +1468,18 @@ function logHandoffActivity(
       "--field", `handoff_id=${stored.id}`,
       "--field", `storage=${stored.storage}`,
       "--field", `session_state=${sessionStatePath}`,
-      "--field", `predecessor_pid=${process.pid}`,
+      // `process.ppid`, NOT `process.pid`: this MCP-extension host runs as a
+      // direct child of the actual `copilot` CLI process, so its own pid is
+      // never the process the status-monitor daemon needs to identify and
+      // eventually retire -- recording `process.pid` here fed a wrong "expected
+      // copilot pid" into the daemon's spawn/retire identity check, which
+      // (harmlessly for spawning, but permanently for retiring, since a failed
+      // attempt was recorded as "handled") silently stranded every predecessor
+      // pane past the first handoff on a worktree. The daemon now resolves the
+      // authoritative pid itself via a live mux binding lookup and no longer
+      // gates on this value, but it stays correct here as defense in depth and
+      // for any future consumer that reads it verbatim.
+      "--field", `predecessor_pid=${process.ppid}`,
     ], {
       cwd,
       timeout: 5000,
@@ -1399,6 +1561,73 @@ function worktreeSpawnInFlight(cwd, stored, execute = runCli) {
   return { inFlight: false, worktreeId };
 }
 
+// The deterministic "did my launch actually land" signal (Phase 3 item 3):
+// the successor's own extension.mjs greps its first submitted prompt for the
+// exact recovery locator (see cutover-seed.mjs's extractRecoveryLocatorFromPrompt)
+// and best-effort logs a `context_handoff_prompt_received` activity event --
+// distinct from agent-worktrees' own numbered-handoff `handoff_token` identity
+// space (used by `handoff_cutover_spawn`), so this uses its own `locator`
+// field carrying context-handoff's own task/file id, unambiguously.
+export function logHandoffPromptReceived(
+  cwd,
+  worktreeId,
+  sid,
+  locator,
+  execute = runCli,
+) {
+  if (!worktreeId || !locator) return { logged: false };
+  try {
+    execute("agent-worktrees", [
+      "activity-log",
+      "context_handoff_prompt_received",
+      "--worktree-id", worktreeId,
+      "--session-id", sid || "",
+      "--source", "context-handoff",
+      "--field", `locator=${locator}`,
+    ], { cwd, timeout: 5000, stdio: "ignore" });
+    return { logged: true };
+  } catch (error) {
+    return { logged: false, error: describeCliError(error) };
+  }
+}
+
+// Predecessor-side read: has the successor's own extension already confirmed
+// receipt of exactly this handoff's recovery locator as a real submitted
+// prompt? A stronger, more direct signal than `worktreeSpawnInFlight` (which
+// only proves a pane/process was created, not that Copilot itself received
+// the seed) -- feeds `pickupSignals` below.
+function worktreePromptReceived(cwd, stored, execute = runCli) {
+  const worktreeId = stored.metadata?.worktree || null;
+  if (!worktreeId) return { received: false, worktreeId };
+  const expected = `${stored.storage === "agent-dispatch" ? "task" : "file"}:${stored.id}`;
+  let raw;
+  try {
+    raw = execute(
+      "agent-worktrees",
+      [
+        "activity", "--worktree-id", worktreeId,
+        "--event", "context_handoff_prompt_received", "--json",
+      ],
+      { cwd, timeout: 10000 },
+    );
+  } catch (error) {
+    return { received: false, worktreeId, error: describeCliError(error) };
+  }
+  const lines = String(raw || "").split("\n").map((line) => line.trim()).filter(Boolean);
+  for (const line of lines) {
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (String(event?.locator || "") === expected) {
+      return { received: true, worktreeId, event };
+    }
+  }
+  return { received: false, worktreeId };
+}
+
 function dispatchTaskConsumed(cwd, taskId) {
   if (!taskId) return { consumed: false, task: null };
   const task = agentDispatchJson(["show", taskId], cwd);
@@ -1460,6 +1689,13 @@ function pickupSignals(cwd, sid, stored, sessionStatePath, execute = runCli) {
   if (sessionConsumed) via.push("session-state-consumed");
   if (worktree.pickedUp) via.push("worktree-successor");
   if (dispatch.consumed) via.push("dispatch-consumed");
+  let promptReceived = { received: false, worktreeId: worktree.worktreeId };
+  if (via.length === 0) {
+    // Only worth a separate CLI round-trip when full pickup isn't already
+    // confirmed some other way.
+    promptReceived = worktreePromptReceived(cwd, stored, execute);
+    if (promptReceived.received) via.push("prompt-received");
+  }
   const pickedUp = via.length > 0;
   // Only worth a separate CLI round-trip when full pickup hasn't already
   // been confirmed -- the spawn marker is strictly implied by pickedUp.
@@ -1476,6 +1712,7 @@ function pickupSignals(cwd, sid, stored, sessionStatePath, execute = runCli) {
     },
     worktree,
     dispatch,
+    promptReceived,
     spawn,
   };
 }

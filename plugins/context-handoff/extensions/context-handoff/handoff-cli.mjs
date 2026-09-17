@@ -22,6 +22,8 @@
 //   node handoff-cli.mjs consume --locator "task:<id>"            # consume a task baton
 //   node handoff-cli.mjs consume --locator "file:<id>"            # consume a file baton
 //   node handoff-cli.mjs facts --json                             # basic extension-free handoff facts
+//   node handoff-cli.mjs check-heads --json                       # audit pending-handoff head alignment
+//   node handoff-cli.mjs retry-cutover --json                     # refocus/live-retry a superseded session
 //   node handoff-cli.mjs help
 //
 // Options:
@@ -39,10 +41,12 @@
 import { readFileSync } from "node:fs";
 import { parseRecoveryLocator } from "./cutover-seed.mjs";
 import {
+  checkHeadAlignment,
   storeHandoff, buildSeedForStored,
   consumeFileHandoff, consumeDispatchHandoffTask,
   collectCliHandoffFacts, formatConsumeResult,
   normalizeHandoffTitle,
+  retryStoredHandoffCutover,
   triggerHandoff,
 } from "./handoff-core.mjs";
 
@@ -94,6 +98,8 @@ const HELP = `handoff-cli -- invoke a context handoff from the CLI (extension-fr
   node handoff-cli.mjs consume --locator "task:<id>"            consume a task baton
   node handoff-cli.mjs consume --locator "file:<id>"            consume a file baton
   node handoff-cli.mjs facts --json                             emit basic extension-free facts
+  node handoff-cli.mjs check-heads --json                       audit pending-handoff head alignment
+  node handoff-cli.mjs retry-cutover --json                     refocus or respawn a stuck cutover
 
 Options: --prompt-file|--prompt|stdin, --title, --session-id ($COPILOT_AGENT_SESSION_ID),
          --cwd, --no-task, --handoff-token,
@@ -262,6 +268,52 @@ function cmdFacts(args) {
   process.stdout.write(JSON.stringify(result, null, 2) + "\n");
 }
 
+function cmdCheckHeads(args) {
+  const cwd = args.cwd || process.cwd();
+  const result = checkHeadAlignment(cwd);
+  if (args.json) return emit(result, args);
+  if (!result.findings.length) {
+    process.stdout.write(
+      `Checked ${result.checked} worktree(s); no pending-handoff head alignment findings.\n`,
+    );
+    return;
+  }
+  process.stdout.write(
+    `Checked ${result.checked} worktree(s); found ${result.findings.length} pending-handoff alignment issue(s).\n`,
+  );
+  for (const finding of result.findings) {
+    const worktreeId = finding?.worktree?.id || "<unknown>";
+    const reason = finding?.reason || "unknown";
+    const monitorPath = finding?.monitorPath || "<none>";
+    process.stdout.write(
+      `- ${worktreeId}: ${reason} (monitor path: ${monitorPath})\n`,
+    );
+  }
+}
+
+function cmdRetryCutover(args) {
+  const cwd = args.cwd || process.cwd();
+  const sid = requireSid("retry-cutover", args);
+  const result = retryStoredHandoffCutover(cwd, sid);
+  if (!result.ok) {
+    process.stderr.write(
+      `handoff-cli retry-cutover: ${result.error || "failed"}\n`,
+    );
+    process.exit(1);
+  }
+  if (args.json) return emit(result, args);
+  if (result.outcome === "refocused") {
+    process.stdout.write(
+      `Refocused live successor ${result.successor_session || "<unknown>"} ` +
+      `(${result.successor_pane || "<unknown-pane>"}) in ${result.session || "<unknown-session>"}.\n`,
+    );
+    return;
+  }
+  process.stdout.write(
+    `Retried cutover by spawning a fresh successor in ${result.session || "<unknown-session>"}.\n`,
+  );
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   const args = parseArgs(argv);
@@ -271,6 +323,8 @@ async function main() {
     case "save": return cmdSave(args);
     case "consume": return cmdConsume(args);
     case "facts": return cmdFacts(args);
+    case "check-heads": return cmdCheckHeads(args);
+    case "retry-cutover": return cmdRetryCutover(args);
     case "help":
     case "-h":
     case "--help":

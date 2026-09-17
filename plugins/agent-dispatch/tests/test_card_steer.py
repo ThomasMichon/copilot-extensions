@@ -568,6 +568,118 @@ def test_steer_wake_failure_keeps_answer_durable(api, monkeypatch):
     assert log[0]["taken"] is False
 
 
+# -- card_draft (not-yet-submitted operator answer, distinct from a steer) --
+
+
+def test_save_card_draft_never_touches_awaiting_steer_or_status(q):
+    """Confirm/Save/Reset semantics: a draft is a durable scratchpad, not a
+    steer -- it must never resolve awaiting_steer or move the task."""
+    t = _held(q)
+    q.set_card(t.id, "w1", card=steering.build_card(
+        request_input=[{"name": "feedback", "type": "textarea"}]
+    ))
+    before = q.get(t.id)
+    assert before.awaiting_steer is True
+    assert before.status == Status.SUSPENDED
+
+    after = q.save_card_draft(t.id, fields={"feedback": "looks good, one nit"})
+
+    assert after.card_draft == {"fields": {"feedback": "looks good, one nit"}, "ts": after.card_draft["ts"]}
+    assert after.awaiting_steer is True
+    assert after.status == Status.SUSPENDED
+
+
+def test_save_card_draft_overwrites_latest_only(q):
+    t = _held(q)
+    q.set_card(t.id, "w1", card=steering.build_card(
+        request_input=[{"name": "feedback", "type": "textarea"}]
+    ))
+    q.save_card_draft(t.id, fields={"feedback": "first pass"})
+    after = q.save_card_draft(t.id, fields={"feedback": "revised"})
+    assert after.card_draft["fields"] == {"feedback": "revised"}
+
+
+def test_save_card_draft_rejects_terminal_task(q):
+    t = _held(q)
+    q.complete(t.id, "w1")
+    with pytest.raises(TaskError):
+        q.save_card_draft(t.id, fields={"x": "y"})
+
+
+def test_save_card_draft_not_owner_gated(q):
+    """Mirrors submit_steer: the operator, not the worker, owns the draft."""
+    t = _held(q, worker="w1")
+    q.set_card(t.id, "w1", card=steering.build_card(request_input=[{"name": "f", "type": "text"}]))
+    after = q.save_card_draft(t.id, fields={"f": "value"})
+    assert after.card_draft["fields"] == {"f": "value"}
+
+
+def test_clear_card_draft_is_noop_when_no_draft(q):
+    t = _held(q)
+    after = q.clear_card_draft(t.id)
+    assert after.card_draft is None
+
+
+def test_clear_card_draft_removes_existing_draft(q):
+    t = _held(q)
+    q.set_card(t.id, "w1", card=steering.build_card(
+        request_input=[{"name": "feedback", "type": "textarea"}]
+    ))
+    q.save_card_draft(t.id, fields={"feedback": "wip"})
+    after = q.clear_card_draft(t.id)
+    assert after.card_draft is None
+    # still blocked -- clearing a draft is not a steer either
+    assert after.awaiting_steer is True
+
+
+def test_clear_card_draft_missing_task_raises(q):
+    with pytest.raises(TaskError):
+        q.clear_card_draft("nope")
+
+
+def test_submit_steer_clears_existing_draft(q):
+    """Once the real answer lands, the scratchpad has served its purpose."""
+    t = _held(q)
+    q.set_card(t.id, "w1", card=steering.build_card(
+        request_input=[{"name": "feedback", "type": "textarea"}]
+    ))
+    q.save_card_draft(t.id, fields={"feedback": "wip"})
+    after = q.submit_steer(t.id, fields={"feedback": "final"}, sender="operator")
+    assert after.card_draft is None
+    assert after.awaiting_steer is False
+
+
+def test_card_draft_save_and_clear_over_http(api):
+    tid = _held_over_http(api)
+    card = {
+        "request_input": [{"name": "feedback", "type": "textarea"}],
+    }
+    api.post(f"/tasks/{tid}/card", json={"worker_id": "w1", "card": card})
+
+    r = api.post(f"/tasks/{tid}/card-draft", json={"fields": {"feedback": "wip answer"}})
+    assert r.status_code == 200
+    assert r.json()["card_draft"]["fields"] == {"feedback": "wip answer"}
+    assert r.json()["awaiting_steer"] is True
+
+    got = api.get(f"/tasks/{tid}").json()
+    assert got["card_draft"]["fields"] == {"feedback": "wip answer"}
+
+    r = api.delete(f"/tasks/{tid}/card-draft")
+    assert r.status_code == 200
+    assert r.json()["card_draft"] is None
+
+
+def test_card_draft_save_on_missing_task_is_404(api):
+    r = api.post("/tasks/nope/card-draft", json={"fields": {"x": "y"}})
+    assert r.status_code == 404
+
+
+def test_card_draft_clear_on_missing_task_is_404(api):
+    r = api.delete("/tasks/nope/card-draft")
+    assert r.status_code == 404
+
+
+
 def test_steer_atomically_resumes_suspended_task_before_wake(api, monkeypatch):
     from agent_dispatch import bridge
 

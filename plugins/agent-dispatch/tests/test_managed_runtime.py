@@ -16,12 +16,14 @@ from agent_dispatch.managed_runtime import (
     _BUILD_DIRS,
     _CELL_DIRS,
     _LAYOUT_VERSION_COMPACT,
-    RECEIPT_NAME,
     ManagedRuntimeError,
-    ManagedRuntimeMaterializer,
-    _layout_version,
     ManagedRuntimePolicy,
+    ManagedRuntimeMaterializer,
+    RECEIPT_NAME,
+    _cell_key,
+    _governed_uv_index_url,
     _is_reparse,
+    _layout_version,
     _python_path,
     _runtime_dir,
     _subprocess_environment,
@@ -143,9 +145,25 @@ def _policy(tmp_path: Path, *, windows: bool = False) -> ManagedRuntimePolicy:
             tools / f"python{sys.version_info.major}{sys.version_info.minor}.dll"
         )
         versioned_dll.write_bytes(b"python-dll")
+        (tools / "python3.dll").write_bytes(b"python3")
+        (tools / "pythonw.exe").write_bytes(b"pythonw")
+        (tools / "vcruntime140.dll").write_bytes(b"vcruntime")
+        (tools / "msvcp140.dll").write_bytes(b"msvcp")
         standard_library = tools / "Lib"
         standard_library.mkdir()
         (standard_library / "os.py").write_text("# stdlib\n", encoding="utf-8")
+        site_packages = standard_library / "site-packages" / "tool"
+        site_packages.mkdir(parents=True)
+        (site_packages / "launcher.exe").write_bytes(b"launcher")
+        dlls = tools / "DLLs"
+        dlls.mkdir()
+        (dlls / "_socket.pyd").write_bytes(b"socket")
+        (dlls / "libffi-8.dll").write_bytes(b"libffi")
+        tcl = tools / "tcl"
+        (tcl / "tix8.4.3").mkdir(parents=True)
+        (tcl / "tix8.4.3" / "ix84.dll").write_bytes(b"unsigned tcl")
+        (tcl / "nmake").mkdir(exist_ok=True)
+        (tcl / "nmake" / "x86_64-w64-mingw32-nmakehlp.exe").write_bytes(b"unsigned helper")
     else:
         standard_library = tools / "lib" / "python"
         standard_library.mkdir(parents=True)
@@ -633,6 +651,10 @@ def test_build_environment_drops_ambient_package_authority(tmp_path, monkeypatch
     monkeypatch.setenv("UV_INDEX_URL", "https://secret.example")
     monkeypatch.setenv("PYTHONPATH", str(tmp_path / "injected"))
     monkeypatch.setenv("AGENT_DISPATCH_TOKEN", "secret")
+    # No governed uv-feed config at this (empty) config home -- deterministic
+    # across machines regardless of whether the real box has one.
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
     python = tmp_path / "python"
     uv = tmp_path / "uv"
 
@@ -643,6 +665,62 @@ def test_build_environment_drops_ambient_package_authority(tmp_path, monkeypatch
     assert "PYTHONPATH" not in environment
     assert "AGENT_DISPATCH_TOKEN" not in environment
     assert environment["PIP_CONFIG_FILE"]
+    assert environment["UV_NO_CONFIG"] == "1"
+    assert "UV_DEFAULT_INDEX" not in environment
+
+
+def test_governed_uv_index_url_absent_without_config(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+    assert _governed_uv_index_url() is None
+
+
+def test_governed_uv_index_url_reads_managed_uv_toml(tmp_path, monkeypatch):
+    """Mirrors dotfiles' Restore-UvFeed.ps1 / restore-uv-feed.sh output shape."""
+    config_home = tmp_path / "config-home"
+    monkeypatch.setenv("APPDATA", str(config_home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+    uv_dir = config_home / "uv"
+    uv_dir.mkdir(parents=True)
+    (uv_dir / "uv.toml").write_text(
+        "# Managed by dotfiles agent-machines (governed-feeds / uv-feed).\n"
+        "[[index]]\n"
+        'url = "https://packagefeedproxy.microsoft.io/pypi/simple/"\n'
+        "default = true\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        _governed_uv_index_url()
+        == "https://packagefeedproxy.microsoft.io/pypi/simple/"
+    )
+
+
+def test_build_environment_forwards_governed_uv_index(tmp_path, monkeypatch):
+    monkeypatch.delenv("PIP_INDEX_URL", raising=False)
+    monkeypatch.delenv("UV_INDEX_URL", raising=False)
+    config_home = tmp_path / "config-home"
+    monkeypatch.setenv("APPDATA", str(config_home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+    uv_dir = config_home / "uv"
+    uv_dir.mkdir(parents=True)
+    (uv_dir / "uv.toml").write_text(
+        "[[index]]\n"
+        'url = "https://packagefeedproxy.microsoft.io/pypi/simple/"\n'
+        "default = true\n",
+        encoding="utf-8",
+    )
+    python = tmp_path / "python"
+    uv = tmp_path / "uv-bin"
+
+    environment = _subprocess_environment(base_python=python, package_manager=uv)
+
+    assert (
+        environment["UV_DEFAULT_INDEX"]
+        == "https://packagefeedproxy.microsoft.io/pypi/simple/"
+    )
+    # Still bounded: config-file discovery stays off, only the one resolved
+    # value is forwarded.
     assert environment["UV_NO_CONFIG"] == "1"
 
 
@@ -664,6 +742,7 @@ def test_windows_verifies_base_and_copied_python_before_install(tmp_path):
     assert verified[0] == policy.base_python
     assert any(".staging" in str(path) for path in verified[1:])
     assert result.python in verified
+    assert all("tcl" not in {part.casefold() for part in path.parts} for path in verified[1:])
     assert runner.calls.index(install_call) == 0
 
 
@@ -708,9 +787,6 @@ def test_windows_does_not_require_signatures_for_installed_launchers(tmp_path):
 def test_windows_trust_manifest_excludes_uncopied_site_packages(tmp_path):
     plugin = _project(tmp_path)
     policy = _policy(tmp_path, windows=True)
-    excluded = policy.base_python.parent / "Lib" / "site-packages" / "tool"
-    excluded.mkdir(parents=True)
-    (excluded / "launcher.exe").write_bytes(b"unsigned")
 
     result = ManagedRuntimeMaterializer(
         policy,
@@ -721,3 +797,86 @@ def test_windows_trust_manifest_excludes_uncopied_site_packages(tmp_path):
     assert not (
         _cell_runtime_dir(result.cell) / "Lib" / "site-packages" / "tool" / "launcher.exe"
     ).exists()
+
+
+def test_windows_trust_manifest_excludes_unsigned_tcl_binaries(tmp_path):
+    plugin = _project(tmp_path)
+    policy = _policy(tmp_path, windows=True)
+    result = ManagedRuntimeMaterializer(
+        policy,
+        runner=FakeRunner(windows=True),
+        trust_verifier=lambda path: path.name
+        not in {"ix84.dll", "x86_64-w64-mingw32-nmakehlp.exe"},
+    ).materialize(_registration(plugin))[0]
+
+    receipt = _receipt(result.cell)
+    assert set(receipt["windows_trust_files"]) == {
+        "DLLs/_socket.pyd",
+        "DLLs/libffi-8.dll",
+        "msvcp140.dll",
+        "python.exe",
+        "python3.dll",
+        f"python{sys.version_info.major}{sys.version_info.minor}.dll",
+        "pythonw.exe",
+        "vcruntime140.dll",
+    }
+    assert (_cell_runtime_dir(result.cell) / "tcl" / "tix8.4.3" / "ix84.dll").is_file()
+
+
+def test_windows_trust_scope_change_rebuilds_alongside_prior_cells(tmp_path):
+    plugin = _project(tmp_path)
+    policy = _policy(tmp_path, windows=True)
+    runner = FakeRunner(windows=True)
+    materializer = ManagedRuntimeMaterializer(
+        policy,
+        runner=runner,
+        trust_verifier=lambda _path: True,
+    )
+    current = materializer.materialize(_registration(plugin))[0]
+    receipt = _receipt(current.cell)
+    legacy_receipt = dict(receipt)
+    legacy_receipt.pop("windows_trust_scope_version")
+    legacy_receipt["windows_trust_files"] = sorted(
+        {
+            *receipt["windows_trust_files"],
+            "tcl/nmake/x86_64-w64-mingw32-nmakehlp.exe",
+            "tcl/tix8.4.3/ix84.dll",
+        },
+        key=str.casefold,
+    )
+    legacy_key = _cell_key(
+        {
+            "schema_version": legacy_receipt["schema_version"],
+            "name": legacy_receipt["name"],
+            "version": legacy_receipt["version"],
+            "profile": legacy_receipt["profile"],
+            "content_digest": legacy_receipt["content_digest"],
+            "authority_digest": legacy_receipt["authority_digest"],
+            "toolchain_digest": legacy_receipt["toolchain_digest"],
+        }
+    )
+    legacy_cell = current.cell.parent / legacy_key
+    shutil.copytree(current.cell, legacy_cell)
+    (legacy_cell / RECEIPT_NAME).write_text(
+        json.dumps(legacy_receipt, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    shutil.rmtree(current.cell)
+
+    rebuilt = materializer.materialize(_registration(plugin))[0]
+
+    assert rebuilt.cell != legacy_cell
+    assert rebuilt.cell.is_dir()
+    assert legacy_cell.is_dir()
+    assert runner.install_count == 2
+
+
+def test_windows_untrusted_core_runtime_file_still_fails(tmp_path):
+    plugin = _project(tmp_path)
+
+    with pytest.raises(ManagedRuntimeError, match="trust verification"):
+        ManagedRuntimeMaterializer(
+            _policy(tmp_path, windows=True),
+            runner=FakeRunner(windows=True),
+            trust_verifier=lambda path: path.name != "python.exe" or ".staging" not in str(path),
+        ).materialize(_registration(plugin))

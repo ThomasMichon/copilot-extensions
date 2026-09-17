@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import base64
 import gzip
+import os
 import re
+import shutil
+import subprocess
+
+import pytest
 
 from agent_codespaces.codespace_assets import (
     AUTH_ERROR_POLICY_INSTRUCTIONS_ROOT,
     AUTH_ERROR_POLICY_REMOTE_PATH,
+    _azure_auth_helper_repair_command,
     asset_text,
     build_auth_error_policy_command,
     build_provision_command,
@@ -68,13 +74,81 @@ class TestAssets:
 
 
 class TestProvisionCommand:
-    def test_command_installs_both_helpers(self) -> None:
+    def test_command_installs_only_ado_helper(self) -> None:
         cmd = build_provision_command()
         assert "$HOME/.local/bin/ado-auth-helper-relay" in cmd
         assert "base64 -d" in cmd
-        # Installed for both ado and azure auth helpers via the loop
-        assert "ado-auth-helper azure-auth-helper" in cmd
+        assert "for _n in ado-auth-helper; do" in cmd
+        assert "ado-auth-helper azure-auth-helper" not in cmd
         assert '"$HOME/$_n"' in cmd
+
+    def test_command_repairs_legacy_azure_helper_shadow(self) -> None:
+        cmd = build_provision_command()
+        assert 'grep -q ado-auth-helper-relay "$HOME/azure-auth-helper"' in cmd
+        assert (
+            'cp -f "$HOME/.azure-auth-helper-vscode" '
+            '"$HOME/azure-auth-helper"'
+        ) in cmd
+        assert 'else rm -f "$HOME/azure-auth-helper"; fi' in cmd
+        assert '[ ! -f "$HOME/azure-auth-helper" ]' in cmd
+        assert '[ -L "$HOME/.local/bin/azure-auth-helper" ]' in cmd
+        assert 'rm -f "$HOME/.local/bin/azure-auth-helper"' in cmd
+
+    @pytest.mark.skipif(
+        os.name == "nt" or shutil.which("bash") is None,
+        reason="requires a native POSIX shell",
+    )
+    @pytest.mark.parametrize("with_backup", [False, True])
+    def test_repair_removes_legacy_azure_shadow(
+        self, tmp_path, with_backup: bool
+    ) -> None:
+        home = tmp_path
+        local_bin = home / ".local" / "bin"
+        local_bin.mkdir(parents=True)
+        helper = home / "azure-auth-helper"
+        helper.write_text("# ado-auth-helper-relay\n", encoding="utf-8")
+        link = local_bin / "azure-auth-helper"
+        link.symlink_to(helper)
+        backup = home / ".azure-auth-helper-vscode"
+        if with_backup:
+            backup.write_text("#!/native/node\nnative\n", encoding="utf-8")
+
+        subprocess.run(
+            ["bash", "-c", _azure_auth_helper_repair_command()],
+            env={**os.environ, "HOME": str(home)},
+            check=True,
+        )
+
+        if with_backup:
+            assert helper.read_text(encoding="utf-8") == "#!/native/node\nnative\n"
+            assert os.access(helper, os.X_OK)
+            assert link.is_symlink()
+            assert link.resolve() == helper.resolve()
+        else:
+            assert not helper.exists()
+            assert not link.is_symlink()
+
+    @pytest.mark.skipif(
+        os.name == "nt" or shutil.which("bash") is None,
+        reason="requires a native POSIX shell",
+    )
+    def test_repair_leaves_native_azure_helper_untouched(self, tmp_path) -> None:
+        home = tmp_path
+        local_bin = home / ".local" / "bin"
+        local_bin.mkdir(parents=True)
+        helper = home / "azure-auth-helper"
+        helper.write_text("#!/native/node\nnative\n", encoding="utf-8")
+        link = local_bin / "azure-auth-helper"
+        link.symlink_to(helper)
+
+        subprocess.run(
+            ["bash", "-c", _azure_auth_helper_repair_command()],
+            env={**os.environ, "HOME": str(home)},
+            check=True,
+        )
+
+        assert helper.read_text(encoding="utf-8") == "#!/native/node\nnative\n"
+        assert link.is_symlink()
 
     def test_command_preserves_node_shebang(self) -> None:
         cmd = build_provision_command()
@@ -94,7 +168,7 @@ class TestProvisionCommand:
         # ...and only kept when it is actually executable; otherwise env-node.
         assert '[ -x "$_interp" ] || _sb="#!/usr/bin/env node"' in cmd
 
-    def test_command_backs_up_native_helper_once(self) -> None:
+    def test_command_backs_up_native_ado_helper_once(self) -> None:
         cmd = build_provision_command()
         # Only back up when the existing helper isn't already ours
         assert "grep -q ado-auth-helper-relay" in cmd
@@ -102,31 +176,50 @@ class TestProvisionCommand:
 
     def test_pins_relay_credential_helper_for_ado_and_github(self) -> None:
         """#133/#112/#159: git's per-host credential.<host>.helper must be
-        pinned to the relay-first ~/ado-auth-helper for the ADO hosts and
+        pinned to the relay-first ~/ado-auth-helper for dev.azure.com and
         github.com, with a leading empty reset so it overrides the native
         broker/codespace-token helpers, so headless `git push` works."""
         cmd = build_provision_command()
         for host in (
-            "https://your-org.visualstudio.com",
             "https://dev.azure.com",
             "https://github.com",
         ):
             assert host in cmd
+        # No un-substituted placeholder host when ado_host isn't configured (#383).
+        assert "your-org.visualstudio.com" not in cmd
         # The pin points at the relay-first wrapper...
         assert 'git config --global --add "credential.${_h}.helper" "$HOME/ado-auth-helper"' in cmd
         # ...preceded by an empty reset so lower-priority helpers don't win.
         assert 'git config --global --add "credential.${_h}.helper" ""' in cmd
 
+    def test_pins_relay_credential_helper_for_configured_ado_host(self) -> None:
+        """#383: the repo's configured `credentials.ado_host` (e.g.
+        `onedrive.visualstudio.com`) must be registered instead of the
+        un-substituted `your-org.visualstudio.com` placeholder."""
+        cmd = build_provision_command(ado_host="onedrive.visualstudio.com")
+        assert "https://onedrive.visualstudio.com" in cmd
+        assert "https://dev.azure.com" in cmd
+        assert "https://github.com" in cmd
+        assert "your-org.visualstudio.com" not in cmd
+
+    def test_configured_ado_host_not_duplicated(self) -> None:
+        """When the configured ado_host is itself dev.azure.com, it must not
+        be registered twice."""
+        cmd = build_provision_command(ado_host="dev.azure.com")
+        assert cmd.count("https://dev.azure.com") == 1
+
     def test_embedded_payload_roundtrips(self) -> None:
         cmd = build_provision_command()
         # Extract chunked gzip+base64 blobs and confirm they decode to the
-        # original asset text. There are four: the relay client, the wrapper,
-        # stale-npm-token scrub, and the #18 profile.d snippet.
+        # original asset text. There are five: the relay client, the
+        # wrapper, stale-npm-token scrub, the Rush bootstrap seed script,
+        # and the #18 profile.d snippet.
         decoded = set(_decoded_chunked_payloads(cmd))
-        assert len(decoded) == 4
+        assert len(decoded) == 5
         assert asset_text("ado-auth-helper-relay") in decoded
         assert asset_text("ado-auth-helper-wrapper") in decoded
         assert any(".npmrc" in d and "_authtoken" in d for d in decoded)
+        assert any("install-run-rush.js" in d for d in decoded)
         # One blob is the login-shell git hardening export.
         assert any("GIT_TERMINAL_PROMPT=0" in d for d in decoded)
 
@@ -137,6 +230,80 @@ class TestProvisionCommand:
         assert len(cmd) < 30_000
         assert max(len(line) for line in cmd.splitlines()) < 8_000
         assert max(len(c) for c in re.findall(r"printf %s '([^']+)'", cmd)) < 8_000
+
+
+class TestRushBootstrapSeed:
+    """#440: public Rush engine bootstrap must not depend on a private-feed
+    token, via a transient project-local .npmrc registry override."""
+
+    def test_command_is_backgrounded_and_best_effort(self) -> None:
+        cmd = build_provision_command()
+        assert "nohup python3" in cmd
+        assert ".agent-codespaces-rush-seed.py" in cmd
+        assert "& disown" in cmd
+        # The whole subshell swallows failures so a bad/missing python3
+        # never blocks connect, matching the npm-scrub step's pattern.
+        assert cmd.count(") || true") >= 2
+
+    def test_seed_script_only_targets_rush_workspaces(self) -> None:
+        text = _extract_rush_seed_script(build_provision_command())
+        assert "rush.json" in text
+        assert "install-run-rush.js" in text
+        assert "glob.glob" in text and "/workspaces/*" in text
+
+    def test_seed_script_never_persists_npmrc_override(self) -> None:
+        text = _extract_rush_seed_script(build_provision_command())
+        # Registers a transient override, then always restores/removes it.
+        assert "registry.npmjs.org" in text
+        assert "@microsoft:registry" in text
+        assert "finally" in text
+        assert 'os.remove(npmrc)' in text
+        assert "os.replace(backup, npmrc)" in text
+
+    @pytest.mark.skipif(
+        os.name == "nt" or shutil.which("python3") is None,
+        reason="requires a native python3",
+    )
+    def test_seed_script_backs_up_and_restores_existing_npmrc(
+        self, tmp_path
+    ) -> None:
+        """The script must never leave a workspace's real .npmrc clobbered,
+        even though the ``node`` bootstrap it wraps is unavailable here."""
+        ws = tmp_path / "workspaces" / "example"
+        (ws / "common" / "scripts").mkdir(parents=True)
+        (ws / "rush.json").write_text("{}", encoding="utf-8")
+        (ws / "common" / "scripts" / "install-run-rush.js").write_text(
+            "// stub\n", encoding="utf-8"
+        )
+        original = "registry=https://pkgs.dev.azure.com/example/\n"
+        (ws / ".npmrc").write_text(original, encoding="utf-8")
+
+        text = _extract_rush_seed_script(build_provision_command())
+        patched = text.replace(
+            'glob.glob("/workspaces/*")',
+            f'glob.glob({str(tmp_path / "workspaces" / "*")!r})',
+        )
+        subprocess.run(["python3", "-c", patched], check=True, timeout=30)
+
+        assert (ws / ".npmrc").read_text(encoding="utf-8") == original
+        assert not (ws / ".npmrc.agent-codespaces-bak").exists()
+
+    @pytest.mark.skipif(
+        os.name == "nt" or shutil.which("python3") is None,
+        reason="requires a native python3",
+    )
+    def test_seed_script_skips_non_rush_workspace(self, tmp_path) -> None:
+        ws = tmp_path / "workspaces" / "plain"
+        ws.mkdir(parents=True)
+
+        text = _extract_rush_seed_script(build_provision_command())
+        patched = text.replace(
+            'glob.glob("/workspaces/*")',
+            f'glob.glob({str(tmp_path / "workspaces" / "*")!r})',
+        )
+        subprocess.run(["python3", "-c", patched], check=True, timeout=30)
+
+        assert not (ws / ".npmrc").exists()
 
 
 class TestAuthErrorPolicyCommand:
@@ -171,3 +338,13 @@ def _decoded_chunked_payloads(cmd: str) -> list[str]:
         raw = base64.b64decode("".join(chunks))
         payloads.append(gzip.decompress(raw).decode("utf-8"))
     return payloads
+
+
+def _extract_rush_seed_script(cmd: str) -> str:
+    """Pull the Rush-bootstrap-seed payload (the one mentioning rush.json)
+    out of a built provision command, decoded back to plain Python text."""
+    for text in _decoded_chunked_payloads(cmd):
+        if "rush.json" in text:
+            return text
+    raise AssertionError("Rush bootstrap seed payload not found in command")
+

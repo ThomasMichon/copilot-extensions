@@ -97,6 +97,61 @@ def test_guard_permits_when_inactive(monkeypatch):
     assert sessions_route._enforce_worktree_head_guard("wt-a") is None
 
 
+class _KnownSessionsMgr:
+    """A stub session manager reporting a fixed set of known session ids."""
+
+    def __init__(self, session_ids):
+        self._ids = list(session_ids)
+
+    def list_sessions(self, status=None):  # noqa: ARG002
+        class _S:
+            def __init__(self, session_id):
+                self.session_id = session_id
+
+        return [_S(sid) for sid in self._ids]
+
+
+def test_guard_permits_when_head_session_absent_from_bridge_store(monkeypatch):
+    # The ground layer asserts an active head session, but agent-bridge's own
+    # session store has never heard of it (e.g. a stale/orphaned head pointer
+    # left behind when a worktree's cleanup was skipped). This must not block
+    # a create forever -- the ground-layer assertion is unverifiable, not a
+    # live conflict.
+    monkeypatch.setattr(
+        worktree_head, "resolve_head",
+        lambda wid: HeadInfo(active=True, occupied=True, head_session="ghost-sess",
+                             state="active", tracked=True),
+    )
+    mgr = _KnownSessionsMgr(["some-other-sess"])
+    assert sessions_route._enforce_worktree_head_guard("wt-a", mgr) is None
+
+
+def test_guard_still_blocks_when_head_session_known_to_bridge(monkeypatch):
+    # A session id agent-bridge does know about (in any status) still fully
+    # blocks -- only "never heard of it at all" downgrades the guard.
+    monkeypatch.setattr(
+        worktree_head, "resolve_head",
+        lambda wid: HeadInfo(active=True, occupied=True, head_session="sess-A",
+                             state="active", tracked=True),
+    )
+    mgr = _KnownSessionsMgr(["sess-A"])
+    with pytest.raises(HTTPException) as ei:
+        sessions_route._enforce_worktree_head_guard("wt-a", mgr)
+    assert ei.value.detail["reason"] == "worktree_head_active"
+
+
+def test_guard_blocks_when_no_mgr_supplied(monkeypatch):
+    # Without a manager to cross-check against, behavior is unchanged from
+    # before this fix: the ground-layer assertion is trusted as-is.
+    monkeypatch.setattr(
+        worktree_head, "resolve_head",
+        lambda wid: HeadInfo(active=True, occupied=True, head_session="sess-A",
+                             state="active", tracked=True),
+    )
+    with pytest.raises(HTTPException):
+        sessions_route._enforce_worktree_head_guard("wt-a")
+
+
 def test_guard_raises_on_pending_handoff(monkeypatch):
     monkeypatch.setattr(
         worktree_head, "resolve_head",
@@ -121,15 +176,25 @@ def test_guard_fails_open_on_untracked(monkeypatch):
 class _StubMgr:
     """Minimal session manager: satisfies the pre-guard drain check and, for the
     bypass test, a fake spawn that never touches a real subprocess.
+
+    ``known_session_ids`` seeds ``list_sessions()`` so the head-guard's
+    cross-check treats those ids as sessions agent-bridge knows about (see
+    ``test_guard_permits_when_head_session_absent_from_bridge_store``); any id
+    not listed is treated as an unverifiable/stale ground-layer assertion.
     """
 
     is_draining = False
 
-    def __init__(self):
+    def __init__(self, known_session_ids=()):
         self.started = False
+        self._known_session_ids = list(known_session_ids)
 
     def list_sessions(self, status=None):  # noqa: ARG002 - caller-affinity path
-        return []
+        class _S:
+            def __init__(self, session_id):
+                self.session_id = session_id
+
+        return [_S(sid) for sid in self._known_session_ids]
 
     async def start_session(self, target, **kwargs):  # noqa: ANN001, ARG002
         self.started = True
@@ -145,7 +210,7 @@ class _StubMgr:
 @pytest.fixture
 def client(monkeypatch):
     app = FastAPI()
-    mgr = _StubMgr()
+    mgr = _StubMgr(known_session_ids=("sess-A",))
     app.state.session_manager = mgr
     app.include_router(sessions_route.router)
     tc = TestClient(app)
@@ -166,6 +231,25 @@ def test_route_refuses_create_into_active_head(client, monkeypatch):
     assert detail["head_session"] == "sess-A"
     # The guard fired *before* any spawn.
     assert client._mgr.started is False
+
+
+def test_route_permits_create_when_head_session_is_a_bridge_ghost(monkeypatch):
+    # Same asserted-active ground layer as test_route_refuses_create_into_active_head,
+    # but agent-bridge's own store has no record of that session id at all --
+    # a stale head pointer must not block the create end-to-end.
+    app = FastAPI()
+    mgr = _StubMgr(known_session_ids=())
+    app.state.session_manager = mgr
+    app.include_router(sessions_route.router)
+    tc = TestClient(app)
+    monkeypatch.setattr(
+        worktree_head, "resolve_head",
+        lambda wid: HeadInfo(active=True, occupied=True, head_session="ghost-sess",
+                             state="active", tracked=True),
+    )
+    r = tc.post("/api/v1/sessions", json={"worktree_id": "wt-a"})
+    assert r.status_code == 201
+    assert mgr.started is True
 
 
 def test_route_reclaim_bypasses_guard(client, monkeypatch):

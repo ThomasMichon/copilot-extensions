@@ -271,6 +271,26 @@ downstream agent.
 
 ## Deployment
 
+### Declared lifecycle tier (per `service-lifecycle-supervision`)
+
+- **Default tier: 2 — scheduled activation**, layered around the tier-1
+  user-mode ensure path. `do_start` (POSIX) and `Invoke-Start`-equivalent
+  (Windows) both prefer the registered scheduled mechanism but **fall back
+  to a direct daemon launch** when it is unavailable or unregistered — the
+  scheduled trigger is a convenience, never a prerequisite for `start`/
+  `stop`/`update`/session-start readiness.
+- **Availability promise:** starts with the user's session; restarts at
+  logon; does not survive full logout or start before login (no concrete
+  requirement for either has been identified).
+- **Windows:** Scheduled Task, `AtLogOn`, 15-second delay, non-elevated.
+- **POSIX:** systemd **user** unit (`~/.config/systemd/user/`); no
+  requirement for lingering has been identified (the daemon is expected to
+  restart at the next logon, not persist across a full logout).
+- **macOS:** planned, not yet implemented.
+- **No escalation:** no tier-3 (system service) or tier-4
+  (container-managed) requirement has been identified for the standalone
+  deployment shape.
+
 ### Platform-Specific Service Management
 
 | Platform | Service manager | Install location | Config |
@@ -680,3 +700,54 @@ and `AgentResolver.refresh_provider_resolvers()` in `agent_registry.py`. Provide
 manifests are additive and idempotent; a provider dropped after daemon start is
 picked up on the next scan without a restart. The installer deliberately leaves
 sibling plugin packages and binstubs to their own installers.
+
+### Listing reliability: per-resolver timeout
+
+`AgentResolver.list_agents_async()` (the `agents` CLI/API listing) queries every
+registered namespace resolver concurrently via `asyncio.gather`, since each
+`list()` can be a slow, network-bound subprocess call (`agent-codespaces`
+enumerating CodeSpaces across accounts is documented at 4-10s). Without an
+individual bound, one straggling resolver made the whole listing wait for the
+slowest provider -- observed pushing `agent_dispatch`'s `registered_agents()`
+(a 20s caller-side timeout) past its limit, which surfaced as "could not read
+the local agent registry" and dead-lettered unrelated spawn reservations.
+
+Each resolver's `list()` call is now bounded by
+`AGENT_BRIDGE_NAMESPACE_LIST_RESOLVER_TIMEOUT` (default **8 seconds**; set to
+`0`/`off`/`false` to disable and restore the prior unbounded-wait behavior). A
+resolver that exceeds the bound is dropped from that call's result with a
+warning, exactly like an already-erroring resolver -- not raised, and its own
+short-TTL cache (`AGENT_BRIDGE_NAMESPACE_LIST_TTL`) is left untouched, so the
+next call retries fresh. For `CliNamespaceResolver`, the bound is threaded
+into the underlying `subprocess.run(..., timeout=...)` call so a wedged
+provider's **child process is actually killed** on expiry -- an outer
+`asyncio.wait_for` alone only cancels the awaiting task and cannot stop a
+blocking `subprocess.run` already running in a worker thread, which would
+otherwise keep the process (and thread) alive for its own much longer
+default subprocess timeout.
+
+### Fast single-agent lookup: skipping enumeration entirely
+
+The per-resolver timeout above bounds the worst case, but most callers never
+needed the full listing (and its namespace enumeration) in the first place:
+`agent_dispatch`'s spawn preflight and headless-lane resolution only ever
+check whether *one specific, known* agent name is registered. `agent-show
+<name>` (client: `BridgeClient.get_agent`, route: `GET /api/v1/agents/{name}`)
+answers that from static/topology config alone (`AgentResolver.
+get_agent_config`) and **never touches a namespace resolver at all** -- no
+CodeSpaces/container enumeration, no per-resolver timeout to wait out. It
+cannot resolve a namespace-prefixed name (`codespace:foo`, `container:bar`);
+`agent_dispatch`'s callers most commonly name a plain local/SSH-topology
+agent (the common case this fast path covers), but `--headless-agent` is
+user-configurable and can legitimately be namespace-prefixed. `agent_dispatch`'s
+`bridge._resolve_agent_record()` handles this transparently: it detects a
+namespace-prefixed name (or an older agent-bridge CLI that predates
+`agent-show`, a version-skew concern since these are independently-updated
+plugins) and falls back to the full `agents` listing for that one name,
+rather than misreporting it as unregistered. `agent_is_registered()` /
+`registered_agent_project()` build on this wrapper, with a much shorter
+default timeout (8s, was 20s) for the common plain-name case since there is
+no namespace enumeration latency to size for there. The full `agents` listing
+(and its per-resolver timeout) remains the right tool when the actual set of *all*
+registered agents is needed (the interactive `agents` command, `--all-projects`
+fleet catalogs, etc.).

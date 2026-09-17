@@ -129,11 +129,28 @@ _RESOLUTION_CLAUSE = (
 _SUSPEND_CLAUSE = (
     "You may reach a natural checkpoint where you are waiting on something outside "
     "your control (an update to the change, a review, a build). At such a point, "
-    "record your progress and suspend rather than busy-waiting: hand the wait to "
-    "the layer with `agent-dispatch run --detach --resume <your-worktree> -- "
-    "<blocking-wait-command>`, which tears your session down while a cheap waiter "
-    "owns the wait and resumes you -- with your context intact -- when the world "
-    "moves."
+    "hand the wait to the layer with `agent-dispatch run --detach --resume "
+    "<your-worktree> --task <this-task-id> -- <blocking-wait-command>`. Always "
+    "pass `--task` here: it atomically suspends this task the moment the detached "
+    "waiter is confirmed live, so status stops implying you're still actively "
+    "working it (do not also call `agent-dispatch suspend` separately -- that step "
+    "is now folded into `run --detach`). A cheap waiter then owns the wait and "
+    "resumes you -- with your context intact -- when the world moves."
+)
+
+_EXTERNAL_AUTHOR_CLAUSE = (
+    "Owning landing never means replacing the author's own contribution with a "
+    "competing pull request under your own identity -- not even a 'repair patch' "
+    "explicitly marked not to merge independently -- even when their fork or "
+    "branch is temporarily unreachable. If you cannot push directly to the "
+    "author's branch, leave specific, actionable review feedback and record the "
+    "blocking condition (the exact URL and head SHA) as a comment on the pull "
+    "request itself; do not open a second PR that repairs, patches, or "
+    "supersedes it. Prefer cooperative handling when the other contributor also "
+    "runs an agentic workflow: address feedback to that contributor's own "
+    "process so it can land the change on its own schedule, rather than acting "
+    "unilaterally. Escalate with a steering card if landing genuinely requires "
+    "access this identity does not have."
 )
 
 
@@ -182,6 +199,7 @@ _register(
             "resume only when the change updates or the non-response policy expires. "
             "Never merge on the author's behalf in that model. " + _SUSPEND_CLAUSE
             + " When the change updates, resume and re-review only what moved.\n\n"
+            + _EXTERNAL_AUTHOR_CLAUSE + "\n\n"
             + _RESOLUTION_CLAUSE
         ),
         suspend_on=("change-updated", "review-posted"),

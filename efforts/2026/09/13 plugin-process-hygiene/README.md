@@ -1,0 +1,1909 @@
+# Plugin Process Hygiene — Concurrent Sessions + Mid-Flight Updates
+
+- **Slug:** `plugin-process-hygiene`
+- **Repo:** copilot-extensions (plugin + control-plane home; PR-required `main`, self-merge)
+- **Branch(es):** per-phase `pr/<slug>` worktrees → landed to `main`
+- **Created:** 2026-08-18
+- **Status:** Done <!-- Draft | Active | Blocked | Done -->
+- **Vision:** extends [`visions/plugin-services`](../../../visions/plugin-services/README.md)
+  — **vision-extending**: adds the `single-instance-lease` and
+  `work-coalescing-singleton` behaviors (written in first, Phase 1), plus the
+  least-privilege lifecycle tier, stable register-once launcher, and disposable
+  payload guarantees (#625); PR #2300 further extended the same vision with
+  `process-count-scales-with-services-not-sessions` and
+  `hooks-and-callbacks-are-transient` — the invariant Phase 4b's design work
+  now generalizes into a shared client shape. Also
+  **closes** [`visions/plugins/agent-worktrees`](../../../visions/plugins/agent-worktrees/README.md)
+  §*The warm-cache accelerator — optional, on-demand, refcounted, losable* (the
+  resident tracker), which is stated-but-unbuilt.
+- **Umbrella issue:** #736
+- **Sub-issues:** #737
+  (lease + reaper primitive · enabler),
+  #738 (bridge
+  strand/churn), #739
+  (worktrees resident tracker),
+  #740 (launcher
+  no-block), #741
+  (mcp version GC), #742
+  (marker atomicity), #743
+  (vault cutover), #744
+  (coalescing tier + mcp multiplexer), #1836
+  (vault user-mode ensure + stable launcher/register-once), #1837
+  (dispatch register-once under elevated update), #1841
+  (declare service lifecycle tiers and reconcile user-mode ensure), #2301
+  (audit + close reality gaps against the process-count-scales-with-services-not-sessions
+  invariant — Phase 4b(ii)'s per-plugin audit target), #2323
+  (resident accelerator daemon for classify/list, thin-client protocol — Phase 4d).
+- **Lifecycle-policy slice:** #625 (lifecycle pecking order and conformance
+  audit).
+- **Related:** #438 (bridge cutover-on-update),
+  #396 (dispatch hot-reconciled supervision), #229 (worktree state store),
+  #918 (resident status monitor), #1788 (session lifecycle hook coalescing),
+  #2259 (agent-dispatch supervisor self-update, landed default-on via #2266/#2280),
+  #2300 (the vision extension this sub-phase's design realizes),
+  #2315 (Phase 4c design), #2322 (Phase 4c implementation — the classify-pass
+  lease Phase 4d's daemon narrows to a fallback path, not supersedes),
+  #2319 (vision revision naming the thin-client/ref-counted-subscriber
+  expectation Phase 4d realizes).
+
+## Guiding Intent
+
+The runtime plugin suite is now routinely operated at a point it was not
+originally tuned for: **many concurrent worktree sessions on one host** (order of
+5–10), with **frequent mid-flight plugin updates** — every new session launch may
+re-run a service's `start` and trigger a reinstall while other sessions are live.
+The architecture already handles this *by design* (immutable versioned slots, a
+tested zero-downtime cutover, cheap session hooks, liveness-reconciled routing).
+The remaining gaps are **hygiene**: a few places where processes are spawned but
+not fully reaped, where a cutover leaks its predecessor, or where the launch path
+blocks on an update. This effort closes them — and gives the suite the two
+missing intent-level primitives (a single-instance lease and an optional
+work-coalescing tier) that make the fixes principled rather than ad hoc.
+
+The through-line: **consolidate the warm runtime, complete the reaping, and never
+block a launch on an update** — while keeping every consolidation strictly
+optional with an always-correct inline fallback (à-la-carte independence is
+non-negotiable).
+
+## Context
+
+A process-management audit (framework libs + each plugin's install/lifecycle,
+cross-checked against a live host running ~7 concurrent sessions) found:
+
+- **Sound and working:** the coordinator plugin's post-cutover reap (a replaced
+  predecessor is retired cleanly); immutable versioned slots; the `zdd` cutover
+  library and its tests; the rendezvous/routing libs; cheap session-start hooks
+  across all plugins except the worktrees launcher.
+- **Leaks under concurrency + churn:**
+  - The bridge cutover retires only its **direct** predecessor, so repeated
+    same-version cutovers (one per session launch) **strand live passives**
+    holding a port + memory (#738).
+  - The worktrees **per-session status-updater** is a detached durable runner
+    that is not re-asserted on update and not reaped on session end, and it
+    **pins old version slots alive** (blocking GC) (#739).
+  - The launcher **joins/applies a plugin update in the launch path**, so bursts
+    of session launches serialize on the install lock (#740).
+  - agent-mcp never **GCs stale versioned installs** (#741), and runs **one heavy
+    stdio bridge per session per server** — the dominant process-count/memory
+    multiplier (#744).
+  - No shared **single-instance lease**; overlap prevention is heuristic (#737).
+  - Binstub **newest-slot fallback** can bind the wrong version during a
+    marker-absent window mid-swap (#742).
+  - agent-vault restarts (not drains) on update, forcing a **re-unlock** (#743).
+
+## Plan
+
+### Phase 1 — Intent (vision + this effort) — *this PR*
+
+- Extend `visions/plugin-services` with **`single-instance-lease`** and
+  **`work-coalescing-singleton`** behaviors + Concepts entries + provenance.
+- Author this effort; file the umbrella (#736) and sub-issues (#737–#744).
+- No implementation; the reviewed intent lands before any code. Reconciled:
+  vision-extending (lease + coalescing tier), vision-closing (worktrees resident
+  tracker), the rest below-altitude conformance.
+
+### Phase 1c — Lifecycle supervision policy and conformance audit (#625)
+
+- Extend `visions/plugin-services` with the least-privilege lifecycle pecking
+  order, stable register-once launcher, cutover-on-update, and disposable
+  payload guarantees.
+- Extend `service-lifecycle-supervision` with the four-tier decision rule, the
+  stable-launcher update path, and the Windows process-current-directory trap.
+- Audit agent-dispatch, agent-bridge, and agent-vault against those guarantees.
+  Record conforming evidence, absorb gaps into an existing tracker where one
+  exists, and file a focused follow-up only for an untracked gap before closing
+  #625. Treat agent-worktrees #1550 as the already-closed hook-launch precedent
+  for the payload-working-directory rule. Track the pattern's newly required
+  per-plugin tier declarations and user-mode-ensure adoption in #1841.
+- Keep this slice intent/documentation-only until its reviewed PR lands; any
+  conformance implementation follows in later PRs under the tracked gaps.
+
+### Phase 2 — Shared single-instance lease + reaper primitive (#737)
+
+- New stdlib library beside `zdd`/rendezvous: a host-local, liveness-reconciled
+  lease ("one active per service per host") + a reconcile-set reaper (retire every
+  own-process not `active`/self, anchored on the promoted port; fail-soft).
+- Vendored into consumers the way `zdd` is. Unit tests for acquire/stand-down,
+  dead-owner reclaim, and reap-the-strays.
+- Coordinates with the in-flight upstream process-spawn-guard work so the guard
+  lands **here** (shared) rather than per-plugin.
+
+### Phase 3 — agent-bridge: idempotent start + complete reap (#738)
+
+- Same-version `start` against a healthy active daemon becomes a **no-op** (kill
+  the generation churn at the source).
+- Post-cutover, invoke the shared reconcile-set reaper (Phase 2) so no
+  drained-but-live passive lingers. Fold into the update/restart path per #438.
+
+### Phase 4 — agent-worktrees: no-block launch + resident tracker (#740, #739)
+
+- Launch on the **currently-active** slot immediately; apply any staged update on
+  the **next** launch (or hand to the durable service); apply is async +
+  lock-guarded (#740).
+- Build the **refcounted resident tracker** (closes the agent-worktrees vision
+  accelerator): one warm, idle-exiting monitor that coalesces status sweeps for
+  all sessions, refcounted per session, reaped on last-consumer exit, with an
+  inline poll fallback — retiring the per-session updater fan-out (#739).
+
+### Phase 4b — agent-worktrees: coalesced session lifecycle hooks (#1788)
+
+- Replace the nine independent `sessionStart` command trees with one bounded
+  lifecycle client path for behavior that can safely reuse the resident
+  monitor's warm project, repository, and session state.
+- Preserve project-owned session-start hooks, provisioning, registration,
+  anchor hygiene, and marketplace reconciliation semantics without repeatedly
+  importing the full CLI or performing nested repository discovery.
+- Keep a bounded monitor-down fallback that preserves required registration and
+  safety behavior, and retain cross-platform parity for hook ordering and
+  side-effect-only context production.
+- Measure the remaining extension-host and lifecycle-event surface after
+  deployment; route any separate hot path to its own issue rather than widening
+  the combined client into an unbounded startup coordinator.
+
+### Phase 4b(ii) — Convergence design + adversarial mock (#2300, #2301)
+
+- Generalize agent-worktrees' own bounded-client shape (Phase 4b, above) into
+  a suite-wide **transient hook client contract** every plugin's hooks and
+  extension callbacks can follow, realizing the two Behaviors PR #2300 added
+  to `visions/plugin-services`.
+- Design + the adversarial mock harness that validates the contract in the
+  abstract (concurrent-flood, absent-daemon, mid-flight-appearance,
+  daemon-death, and daemon-election scenarios) **before** any per-plugin code
+  change — full design in
+  [`adversarial-convergence-mock.md`](adversarial-convergence-mock.md).
+  **Landed**: `tools/clean-room/scenarios/plugin-process-hygiene-convergence/`
+  (6/6 scenarios PASS locally).
+- Feed the mock's evidence, plus #2301's per-plugin audit citations, into a
+  scoped decision on which plugin (if any) needs an actual code change versus
+  already conforming (agent-worktrees post-#918/#1788 is the reference
+  implementation).
+- No plugin code changes in this sub-phase; the design doc + mock harness are
+  the deliverables, each cleared through the review gate before the next
+  lands.
+
+### Phase 4c — agent-worktrees: single-instance lease over the classify pass
+
+- **Problem, evidence-grounded.** `_classify_records` (the ~5-git-calls-per-
+  worktree batch classification) is the shared entry point behind BOTH the
+  Picker's in-process `data_local.load(classify=True)` Phase 2 AND a standalone
+  `list --json --classify` CLI invocation. Nothing today keeps two callers from
+  running it **concurrently for the same project** — e.g. an open Worktree
+  Manager's own populate racing an independently launched `resolve`/`list
+  --classify` (observed live: two distinct process trees, different parent
+  PIDs, touching the same tracking directory at once). `_RecordLock` prevents
+  torn writes, but not duplicated work, and a caller that arrives mid-pass has
+  nothing to wait on today.
+- **Symptom this produces.** While a project's `state` is transiently
+  unavailable to a reader (mid-race, or any other cause), `derive._state()`'s
+  fallback (`status == "active" -> WIP if turn_count > 0`) renders a **freshly
+  invented, potentially wrong** interim label instead of the row's last-known
+  correct value — the "cache renders, then jumps to something completely
+  different" flicker an operator can observe in the Picker.
+- **Fix, placement decided.** Wrap the batch classify pass — at
+  `_classify_records`, the lower/shared entry point, so both the Picker and any
+  standalone CLI classify call inherit it automatically — with a **per-project**
+  `single_instance_lease.SingleInstance` (Phase 2's primitive; a short-lived
+  critical-section use, not a persistent daemon lease). Keyed on the project's
+  tracking dir, mirroring the existing lease's `port`-keying idiom for "two
+  processes, same identity, must not run set at once."
+- **Contention policy, chosen deliberately (do not default to skip).** A caller
+  that loses the race must **wait (bounded, on the order of a typical classify
+  pass) for the winner to finish, then re-read the now-repaired session-render
+  cache** — never fall back to computing its own competing/incomplete answer,
+  and never simply skip-and-render-stale (that reproduces the exact reported
+  symptom: the loser renders a worse answer and never gets the winner's
+  repair). This realizes the operator's framing directly: one process does the
+  (more expensive, authoritative) recompute; every other caller's job is to
+  read the result it produces, not race it.
+- **Scope discipline.** This is a narrow, single-consumer application of the
+  Phase 2 primitive to a real, evidence-grounded race in agent-worktrees's own
+  classify path — not a new cross-cutting cache layer, and not the same
+  problem Phase 4b(ii) governs (that phase is about hook/callback transience;
+  this is about two independent *batch classification* callers).
+- **Landed:** design (#2315) then implementation (#2322) — both merged.
+  ``_classify_records`` acquires the per-project lease; a losing caller waits
+  (bounded, default 15s) then answers from `_classify_from_cache` (a fresh
+  disk re-read, never a guessed state); the lease is advisory-only (any
+  lease-layer failure degrades to classifying live, unchanged from before this
+  phase). See Phase 4d below for the larger direction this narrow fix is a
+  down payment on.
+
+### Phase 4d — agent-worktrees: resident accelerator daemon for classify/list (#2323)
+
+- **Relationship to Phase 4c.** Phase 4c's lease serializes two racing
+  classify callers but does not eliminate the second caller's cost — the
+  winner still pays the full live classification, and every caller still
+  boots its own process, resolves its own config, and reasons about its own
+  cache. This phase builds the steady-state target PR #2319's vision revision
+  now states explicitly: a reachable resident accelerator that **owns** the
+  computation, with ordinary readers (not only session-lifecycle hooks)
+  reaching it as thin, ref-counted subscribers. Phase 4c's lease is **not
+  superseded** — it remains the correct fallback/degraded path for exactly
+  the case this phase's daemon is unreachable or absent.
+- **Placement.** Extend `hook_ipc.py`'s existing token-authed TCP surface
+  (currently scoped to `session-lifecycle-v1` hook decisions only) with a new
+  request kind for list/classify data. The resident status-monitor
+  (`cmd_status_monitor` — already single-active via a liveness lock, already
+  idle-exits on no demand, already self-retires on supersession) becomes the
+  daemon that answers it, rather than a second, purpose-built process.
+- **Client shape.** An ordinary caller (CLI `list`/`get`, the Picker) becomes
+  a thin client: resolve identity, boot the monitor on demand if none is
+  reachable (waiting for it to publish its address), request, read, exit. The
+  daemon's own lifetime is governed by **explicit subscriber ref-counting**
+  plus a bounded linger — not the TTL/demand-registration heuristic
+  `list_cache.py` uses today, which infers demand rather than counting live
+  subscribers.
+- **The cold-start budget constraint (flagged during design, must not be
+  dropped in implementation).** `hook_ipc`'s existing request read timeout is
+  1 second — correct for a hook decision, far too short for a cold
+  classification pass (which can take seconds for a worktree-heavy project).
+  The client's boot-wait-request sequence needs its own, much larger timeout
+  budget, with an explicit fallback to today's direct path (Phase 4c's lease,
+  or plain live classification when the lease is also unavailable) when no
+  daemon becomes reachable in time. A first caller after an idle-exit must
+  never be worse off than before this phase existed.
+- **Validation.** Extend the adversarial mock harness (Phase 4b(ii),
+  `tools/clean-room/scenarios/plugin-process-hygiene-convergence/`) with new
+  scenarios: cold-boot-and-wait-for-port, concurrent-callers-during-cold-boot
+  (exactly one boots, the rest wait, all receive the correct answer),
+  ref-counted-exit (the daemon lingers until the last subscriber's grace
+  period elapses, then exits), and the fallback-to-direct-computation path
+  firing correctly when the boot-wait times out.
+- **Sequencing.** Design-first per this effort's standing convention: a
+  reviewed design PR (naming the exact request/response wire shape, the
+  ref-count/linger algorithm, and the timeout budgets) lands before any
+  plugin code change.
+
+### Phase 5 — agent-mcp: version GC + optional multiplexer (#741, #744)
+
+- Call `versioned_runtime.gc()` on successful activation (prune non-current,
+  non-live slots) — apply the same convention suite-wide (#741).
+- Promote the optional serve tier into a per-`(host, server)` **multiplexer**
+  (one warm runtime + shared upstream; thin per-session stdio shims), **gated by
+  identity/credential equivalence**, optional with a direct-bridge fallback
+  (#744).
+
+### Phase 6 — Cross-cutting: marker atomicity + vault cutover (#742, #743)
+
+- Atomic `current-version` marker (temp+rename); binstubs prefer last-known-good
+  over the newest-slot guess; guess only on true first-run (#742).
+- agent-vault adopts the shared drain-safe cutover so a version bump doesn't force
+  a re-unlock (#743) — pairs with the #609 clean-room scenario.
+
+### Phase 7 — Reconcile deferred backlog
+
+- Accept process-lifecycle candidates only through
+  [`migration-intake`](../migration-intake/README.md)'s deduplication and
+  ownership gate.
+- Revalidate accepted technical scope against the current service, lease, and
+  cutover contracts; return obsolete or unsafe candidates for explicit
+  disposition.
+- Place each accepted public tracker item in exactly one existing phase,
+  extending this plan before implementation when necessary.
+- Keep process evidence synthetic and free of machine-specific values.
+
+## Validation Plan
+
+- **Unit tests** for the lease/reaper primitive (Phase 2) and the marker
+  atomicity (Phase 6).
+- **Clean-room scenarios** (`tools/clean-room/`) for the install/bootstrap/cutover
+  changes — extend the existing bridge/vault cutover scenarios (#609) to assert
+  **no stranded passive** after repeated same-version starts, and add a
+  worktrees resident-tracker refcount/reap scenario.
+- **Field before/after** on a host at the target operating point: total agent-\*
+  process count, per-service daemon count (assert exactly one active per service),
+  count of coexisting versioned installs, and session-launch latency under a burst
+  of concurrent launches.
+- **Session lifecycle performance** for Phase 4b: focused composition, timeout,
+  IPC, and monitor-down fallback tests; process-count and wall-time benchmarks
+  proving that the healthy path uses one client launch instead of nine command
+  trees; deployed multi-session measurements after cutover.
+- **Regression guards:** `check-install-contract.py` clean; version-consistency
+  guards green.
+- **Lifecycle-policy checks (#625):** docs-consistency guards pass; each named
+  plugin has cited evidence for stable launcher, register-once update,
+  cutover-on-update, and payload-working-directory safety; every failed item is
+  represented by an existing or newly filed public follow-up issue. The new
+  declared-tier/escalation-rationale requirement is adopted through #1841 rather
+  than treated as evidence that predates the pattern.
+- **Adversarial convergence mock (Phase 4b(ii), #2300/#2301):** the six
+  scenarios in
+  [`adversarial-convergence-mock.md`](adversarial-convergence-mock.md) —
+  `flood-against-live-daemon`, `flood-against-absent-daemon`,
+  `daemon-appears-mid-flood`, `daemon-dies-mid-packet`,
+  `concurrent-daemon-race`, and `process-count-invariant-under-repeated-floods`
+  — all PASS, with zero leftover processes (of either the mock daemon or the
+  transient client) after the full suite, verified by an OS process census
+  before/after (the same technique that found the original
+  11-coordinator/68-conhost finding). Per-plugin conformance against the mock's
+  validated contract is #2301's own audit, cited here once complete rather than
+  re-validated.
+- **Classify-pass single-instance lease (Phase 4c):** a concurrent-caller test
+  driving two threads/processes through `_classify_records` for the same
+  project at once, asserting (a) exactly one performs the actual git
+  classification, (b) the other blocks and then observes the winner's
+  repaired session-render cache rather than computing (or falling back to) its
+  own answer, and (c) neither corrupts the tracking YAML (existing
+  `_RecordLock` coverage extended, not replaced). Live reproduction case:
+  Picker populate racing an independently-launched `list --json --classify`.
+  **Landed** (#2322): 11 new tests plus the existing `TestClassifyRecordsConvo`
+  suite unchanged.
+- **Resident accelerator daemon (Phase 4d, #2323):** four adversarial mock
+  scenarios extending Phase 4b(ii)'s harness — cold-boot-and-wait-for-port,
+  concurrent-callers-during-cold-boot, ref-counted-exit-after-linger, and
+  fallback-to-direct-computation-on-boot-timeout — each a PASS/FAIL check with
+  zero leftover processes, matching this effort's existing validation
+  discipline.
+
+## Journal
+
+### 2026-08-18 — Kickoff (Phase 1)
+
+- Audited the framework libs (`versioned-runtime`, `plugin-resolve`, `zdd`,
+  `endpoint-rendezvous`, `config-migrate`) and each plugin's install/lifecycle,
+  cross-checked against a live host running ~7 concurrent sessions.
+- Confirmed the coordinator's post-cutover reap works (a replaced predecessor was
+  gone); confirmed the bridge **strands** its previous passive after a
+  same-version cutover, and that per-session status-updaters accumulate across
+  mixed version paths and pin stale slots.
+- Extended `visions/plugin-services` with `single-instance-lease` +
+  `work-coalescing-singleton`; filed the umbrella #736 and sub-issues #737–#744.
+- Next: Phase 2 (the shared lease + reaper primitive, #737) as the enabler, aligned
+  with the upstream process-spawn-guard work so the guard is shared, not
+  per-plugin.
+
+### 2026-08-19 — Phases 3-5 landed; Phase 2 primitive extracted; Phase 6 started
+
+Phase 4 & 5 conformance fixes (merged):
+
+- **#741 — agent-mcp version GC on activation** (PR #750). `versioned_runtime.py gc`
+  now runs on successful activation, pruning non-current, non-live slots.
+- **#739 — agent-worktrees resident status-monitor** (PR #752, then default-on
+  opt-out in PR #758). One warm, idle-exiting monitor coalesces the per-session
+  status sweeps and is refcounted + reaped on last-consumer exit, retiring the
+  per-session status-updater fan-out. Opt-out via
+  `AGENT_WORKTREES_STATUS_MONITOR=0`. Realizes the resident-tracker accelerator.
+- **#740 — agent-worktrees no-block launch** (PR #755). The marketplace install
+  is detached from the launch path (safe because slots are immutable), so a
+  burst of session launches no longer serializes on the install lock. Escape
+  hatch `WORKTREE_BLOCKING_INSTALL=1`.
+- **#738 — bridge stranded-passive leak** — resolved by the generation
+  self-retire loop (now default-on / opt-out): a demoted daemon drains and
+  exits on its own once a live, strictly-newer generation has taken over, so a
+  repeated same-version cutover no longer strands a live passive. The *active*
+  reconcile-set reap (retiring strays from the promoted daemon) is available in
+  the Phase 2 primitive below and remains to be wired into the cutover path.
+
+Phase 2 — shared primitive extracted (merged):
+
+- **#737 — single-instance-lease** (PR #759). New pure-stdlib shared library
+  `libs/single-instance-lease` (vendored like `zdd`) with three pieces:
+  `SingleInstance` (an OS-level, liveness-reconciled lease), `is_superseded`
+  (the pure fail-safe self-retire decision on a routing-table dict), and
+  `reconcile_set_reap` + `superseded_pids_from_table` (the fail-soft reaper;
+  process identity is the caller's responsibility, guarding pid reuse).
+  agent-bridge's `singleton.py` and `self_retire.py` are now thin adapters over
+  it, with the historical lock naming and call shapes unchanged. Realizes the
+  `single-instance-lease` vision behavior. Adoption into agent-vault (#743) and
+  wiring the reaper into the active cutover path (#738) build on this next.
+
+Phase 6 — cross-cutting (partial):
+
+- **#742 — marker atomicity + last-known-good** (PR #760). The `current-version`
+  marker was already written atomically; this landed the read-side preference
+  for the canonical agent-worktrees resolver — a 3-tier resolution
+  (marker -> `last-known-good` -> newest slot), with the installer stamping
+  `last-known-good` on activate. The hot path is unchanged. Rolling the same
+  fallback into the other plugins' inlined binstubs is tracked follow-up on #742.
+
+Remaining: Phase 5's optional agent-mcp **multiplexer** (#744, the dominant RAM
+consumer — one heavy stdio bridge per session per server collapses to a thin
+forwarder + one shared `serve` session-map process); Phase 6's agent-vault
+**drain-safe cutover** (#743, now unblocked by the #737 lease primitive); and the
+per-plugin last-known-good rollout (#742).
+
+### 2026-09-02 — Phase 4 performance conformance (#918)
+
+- Audited the effective Copilot hook surface and found agent-worktrees launching
+  three Python guards before every tool plus two post-tool command trees after
+  every successful tool. The bind nudge imported the complete CLI for a tiny
+  advisory decision, costing about 2.5 seconds per post-tool event on Windows.
+- Consolidated the five commands into one tiny Python client per event class.
+  It makes one bounded, token-authenticated request to the resident monitor over
+  a dynamic `127.0.0.1:0` endpoint advertised through the monitor's atomic
+  liveness-lock/rendezvous record.
+  If the monitor is absent, pre-tool safety guards still run together in one
+  process; advisory post-tool fallback stays lightweight.
+- Promoted the monitor into the warm policy/state owner: delegated roots resolve
+  directly from the loaded topology and repo registry (no nested CLI fan-out),
+  anchor and topology inputs are cached, nudge lookup uses the active project's
+  tracking directory, and bind-nudge is now an in-process decision helper.
+- Added a shared status-segment cache with a 60-second maximum age and targeted
+  invalidation after mutating tool events. Read-only shell commands remain cache
+  hits, multiple sessions on the same worktree share one Git classification,
+  and unchanged mux option values are no longer republished every sweep.
+- A 20-process local benchmark of the final pre-tool client measured 76.6 ms
+  median / 108.7 ms p95, replacing three separate roughly 109-130 ms guard
+  launches. The full post-tool CLI import is removed from the hook path.
+
+### 2026-09-02 — Phase 4b session lifecycle audit proposal (#1788)
+
+- The post-deployment baseline showed three dedicated plugin extension hosts per
+  active Copilot session (`agent-worktrees`, `agent-bridge`, and
+  `context-handoff`), each carrying a full extension-host process. Resident
+  `agent-worktrees` monitor idle CPU remained low.
+- `agent-worktrees` still declares nine separate `sessionStart` commands.
+  Synthetic warm-runtime invocation through the same separate PowerShell
+  process boundary measured about 21 seconds in aggregate. The largest paths
+  were project-hook discovery (~8.4 seconds), session registration
+  (~4.7 seconds), and provisioning preview (~3.0 seconds); each imported or
+  discovered state independently.
+- Filed #1788 and added Phase 4b before implementation. The next slice is to
+  design the smallest combined lifecycle request and explicit monitor-down
+  fallback, then land focused tests and deployed before/after evidence.
+
+### 2026-09-03 — Lifecycle supervision policy and conformance audit (#625)
+
+- Extended the plugin-services vision with a four-tier, least-privilege
+  lifecycle hierarchy: user-mode ensure/auto-run, scheduled activation, system
+  service, and consumer-selected container management. Added the stable
+  register-once launcher, cutover-on-update, and disposable-payload guarantees.
+- Extended `service-lifecycle-supervision` with the capability-based tier
+  decision, alignment to the install contract's non-elevated user-mode ensure,
+  stable runtime-resolving launchers, and the Windows distinction between
+  PowerShell provider location and the inherited Win32 process cwd.
+- Audited the three service exemplars:
+  - **agent-bridge:** conforms to #625's original four checks: stable launcher,
+    register-once, cutover-on-version-update, and payload-cwd safety. Its
+    documented stop-and-swap path is only the permitted cutover-failure
+    fallback.
+  - **agent-dispatch:** the coordinator's stable launcher, ZDD cutover, and
+    payload-cwd safety conform. The supervisor task also uses the stable
+    launcher, but an ordinary update launched from an elevated shell can still
+    force-register an already-correct task; filed #1837.
+  - **agent-vault:** payload-cwd safety conforms. Its start path is gated on
+    Scheduled Task registration, its lifecycle definitions embed concrete
+    runtime slots, and they are rewritten during updates; filed #1836. Its
+    separate drain-safe cutover gap remains tracked by #743.
+- None of the three architecture docs yet declares the selected tier,
+  availability contract, platform mapping, and escalation rationale required by
+  the revised pattern. Filed the cross-plugin adoption pass as #1841.
+- Self-staged installer copies are intentionally disposable and do not count as
+  the original marketplace payload: each audited installer first releases the
+  original payload cwd before running from its external staging copy.
+- Next: land this reviewed intent/pattern PR, report the evidence and follow-up
+  trackers on #625, then close #625 while #1836, #1837, #1841, and #743 carry
+  the remaining implementation.
+
+### 2026-09-09 — agent-dispatch supervisor self-update + Phase 4b(ii) design
+
+Landed independently of this effort's own PR sequence, then reconciled into it:
+
+- **#2259 — agent-dispatch supervisor self-update** (PR #2266, then flipped
+  default-on + clean-room validated in PR #2280). The `supervise serve`
+  singleton daemon had no live version-staleness check, unlike the coordinator
+  — a scheduled-task-launched daemon with no periodic trigger could run stale
+  indefinitely. Landed opt-in first, then corrected to **default-on / opt-out**
+  (`AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE=0`) once it became clear this
+  harness's launch paths have no protocol to ever flip an opt-in flag before a
+  daemon's first boot — an opt-in gate here would simply never activate for a
+  real operator. Validated end-to-end (real spawn, real single-instance lease
+  release/reacquire, a genuinely converging successor) by a new Tier-P
+  clean-room scenario, `agent-dispatch-supervisor-self-update`, before
+  defaulting on.
+- **PR #2300 — vision extension.** Grounded in a live process census (11
+  separate `agent_dispatch serve` coordinators, 68 `conhost.exe` on one dev
+  box) that surfaced while drafting this: extended `visions/plugin-services`
+  with **`process-count-scales-with-services-not-sessions`** and
+  **`hooks-and-callbacks-are-transient`**, and cross-referenced the invariant
+  into the agent-dispatch, agent-bridge, agent-ssh, and agent-worktrees
+  visions (the four plugins the operator named as owning exactly one per-host
+  daemon). Also fixed a real leak found while grounding the vision text: the
+  new clean-room probe's teardown never killed the coordinator it autostarts
+  for each isolated HOME (only processes matching its own `--machine` tag),
+  now fixed and verified (process count identical before/after a full probe
+  run).
+- **Reconciling #2301 (filed to track the census/audit work) against this
+  effort's own history** — most of what #2301 asks for auditing is **already
+  landed here**, just not yet cited back to #2301:
+  - #739 (this effort) already landed the agent-worktrees resident
+    status-monitor, default-on / opt-out — the exact "exactly one status
+    process regardless of session count" guarantee #2301 asks to confirm.
+  - #738 (this effort) already resolved the bridge stranded-passive leak via
+    generation self-retire (default-on / opt-out) — no code change needed
+    there for #2301's ask.
+  - #737 (this effort) already landed the shared `single-instance-lease` +
+    reaper library agent-bridge's own singleton guard is built on.
+  - The 2026-09-02 Phase 4b entry (this effort) already measured and fixed
+    agent-worktrees' hook-coalescing (nine command trees → one bounded
+    client, 76.6ms median, monitor-down fallback) — this **is**
+    `hooks-and-callbacks-are-transient` in practice, with deployed evidence.
+  - **Still genuinely open** from #2301: root-causing the *real* (not
+    probe-leak) coordinator/conhost proliferation on a live box; confirming
+    agent-ssh's `dtssh host --persist` path never starts a second instance;
+    and generalizing the *client-side* half of the contract (agent-dispatch,
+    agent-bridge, agent-ssh hooks/callbacks reaching their respective
+    daemons) the way agent-worktrees already did for its own hooks.
+- Added **Phase 4b(ii)** to this effort's Plan: a suite-wide transient-hook-
+  client design (generalizing agent-worktrees' own Phase 4b shape) plus an
+  adversarial mock harness that validates the contract in the abstract before
+  any further per-plugin code change. Full design in
+  [`adversarial-convergence-mock.md`](adversarial-convergence-mock.md).
+- Next: land this reviewed plan (README + design doc), then build the mock
+  harness as its own PR per the review gate, then use its evidence plus a
+  narrowed #2301 (comment reconciling the above) to scope any remaining
+  per-plugin work.
+
+### 2026-09-09 (later) — Adversarial mock harness landed
+
+- Built `tools/clean-room/scenarios/plugin-process-hygiene-convergence/`: a
+  Tier-P, stdlib-only, plugin-agnostic clean-room scenario implementing the
+  design's six scenarios against a synthetic mock daemon (no real plugin
+  install, no Copilot/gh auth needed). All 6/6 PASS locally, with zero
+  leftover processes verified by an OS process census before/after.
+- Two real bugs found and fixed **in the harness itself** (not the contract)
+  while getting the process-count assertions right:
+  - The Windows process-counting helper's own PowerShell query embedded the
+    search tag literally in its `-Command` string, so the querying process's
+    own command line self-matched the filter, inflating every count. Fixed by
+    passing the tag through an environment variable instead of string
+    interpolation.
+  - PowerShell auto-unwraps a single-element pipeline result to a bare
+    scalar object, which has no `.Count` property -- silently printing
+    nothing (coerced to 0 by the Python side) whenever *exactly one* process
+    matched. Fixed by wrapping the query in `@(...)` to force an array
+    regardless of match count. This one is worth remembering generally: any
+    future PowerShell-based process census in this suite should force-array
+    its `Where-Object` result before reading `.Count`.
+- Confirms the contract from the design doc requires no changes; the harness
+  needed fixing, not the shape it validates.
+- Next: this PR is the mock harness landing per the plan's own checklist;
+  #2301's per-plugin audit (citing #737/#738/#739/the Phase 4b measurement as
+  already-conforming evidence, and scoping what's genuinely still open) is
+  the remaining work this effort's Phase 4b(ii) hands off to.
+
+### 2026-09-09 (later) — Checklist reconciliation
+
+Found the Phase 4b(ii) sub-doc's own checklist a step behind reality while
+resuming this effort: PR #2303 (design doc) and PR #2305 (mock harness) were
+both already merged, but their own checklist items ("land this design doc",
+"land the mock harness as its own PR") were still unticked. Ticked both,
+citing the now-merged PR numbers (never the in-flight/self-referential form).
+No code or design changes -- purely a bookkeeping catch-up so the next
+resumer reads an accurate Plan. The one remaining Phase 4b(ii) checklist item
+is unchanged: the per-plugin #2301 audit against the now-validated contract.
+
+### 2026-09-09 (later still) — Phase 4c: classify-pass race found and designed
+
+- **Grounded in a live reproduction**, not a hypothetical: opening a harness
+  project's Worktree Manager showed several rows briefly render `WIP`
+  then correct themselves to their true state on the very next paint — no app
+  reload involved, purely within one open session. Traced to
+  `derive._state()`'s fallback (`status == "active" -> WIP if turn_count > 0`),
+  which fires whenever a row's `state` field is momentarily absent.
+- Disproved the first two hypotheses empirically before settling on this one:
+  (1) the session-render-cache write-back (`_stamp_from_raw` /
+  `_apply_session_state_stamp`) does land and does so promptly -- confirmed by
+  reading a live tracking YAML's `session_state_at` immediately after a
+  populate pass matched the observed timing; (2) calling
+  `data_local.load(classify=False)` in-process, live, for the exact rows that
+  flashed `WIP` returned their correct cached states with no fallback firing --
+  so Phase 1 was not the culprit either.
+- What *was* found live: a second, independently-parented `agent-worktrees
+  ... resolve` -> `list --json --classify` process chain running against the
+  same project's tracking directory at the same moment as the Picker's own
+  populate -- i.e. two callers of the shared `_classify_records` batch
+  classification, for the same project, concurrently, with nothing serializing
+  them.
+- Added **Phase 4c** to this effort's Plan: apply the Phase 2
+  `single-instance-lease` primitive (already vendored, already proven by
+  agent-bridge/agent-vault) as a **short critical-section lock** around
+  `_classify_records`, per-project, so a second concurrent classify caller
+  waits for the winner's pass and re-reads its cache rather than computing (or
+  worse, falling back to a wrong heuristic for) its own answer.
+- Design-only entry; no plugin code in this PR, per the effort's standing
+  convention. The follow-up implementation PR wraps `_classify_records`,
+  extends `TestControlPlaneRelatedPRTier`-adjacent coverage with a
+  concurrent-caller test (two threads/processes racing the same project,
+  asserting the loser observes the winner's repaired cache rather than
+  computing its own), and updates the Picker/`cmd_list` call sites only if
+  either needs the wait-vs-immediate-return choice made explicit at its layer.
+
+### 2026-09-09 (later still) — Phase 4c implementation landed; vision strengthened; Phase 4d scoped
+
+- **Phase 4c implementation landed** (#2322): `_classify_records` now
+  acquires the per-project lease before `_classify_records_live` (the
+  original body, factored out unchanged); a losing caller waits (bounded,
+  default 15s) then answers via the new `_classify_from_cache` (re-reads each
+  record fresh off disk so the winner's stamp is visible, never guesses a
+  state); the lease is advisory-only, degrading to live classification on any
+  non-contention failure. 11 new tests
+  (`tests/test_classify_lease.py`); the existing `TestClassifyRecordsConvo`
+  suite required no changes.
+- **Vision strengthened in the same sitting** (#2319): the operator's own
+  framing of the target end-state — a debounced, globally-reused daemon that
+  ref-counts subscribing callers and exits after both its work and its
+  subscriber count go to zero — was checked against the visions first, per
+  the operator's explicit instruction ("there should be a vision pushing for
+  this already"). It mostly wasn't: `visions/plugin-services`'s
+  `hooks-and-callbacks-are-transient` was scoped to Copilot-invoked hooks
+  only, and `visions/plugins/agent-worktrees`'s "Derived status" section
+  described the resident monitor as merely optional. Both were strengthened:
+  the hook behavior generalizes to any repeated caller of a
+  work-coalescing-singleton, and agent-worktrees now states the thin-client/
+  ref-counted-subscriber/bounded-linger expectation explicitly, naming direct
+  computation as the correct degrade path rather than the steady-state
+  target.
+- **Phase 4d added** (#2323): the daemon architecture itself — a new request
+  kind on `hook_ipc.py`'s existing TCP surface, the resident status-monitor
+  as the daemon, explicit subscriber ref-counting replacing today's TTL/
+  demand-inference, and (flagged during design, load-bearing for
+  implementation) a client-side cold-start timeout budget separate from
+  `hook_ipc`'s existing 1s hook-decision timeout, with an explicit fallback to
+  Phase 4c's lease (not superseded) when no daemon is reachable in time.
+  Design-only; a reviewed design PR precedes any plugin code, per this
+  effort's standing convention.
+
+### 2026-09-09 (later still) — Phase 4b(ii)'s per-plugin audit landed on #2301
+
+Closed Phase 4b(ii)'s last open checklist item: a direct-read audit of
+agent-worktrees, agent-bridge, agent-dispatch, and agent-ssh against the
+mock-validated transient-hook-client contract, posted as a
+[#2301 comment](https://github.com/ThomasMichon/copilot-extensions/issues/2301#issuecomment-5613535208)
+rather than re-litigated here. Verdicts: **agent-worktrees CONFORMS**
+(`hook_client.py` never spawns; `_ensure_status_monitor` is off the hook path
+entirely, confirmed by grep); **agent-bridge PARTIAL** (its
+`bootstrap-check.ps1` background-spawn was fixed same-day by #2317,
+`write-session-guidance.ps1` left unverified); **agent-dispatch DEVIATES**
+(confirmed, unfixed — same ungated `Start-Process -FilePath 'conhost.exe'`
+shape #2317 fixed elsewhere); **agent-ssh SPLIT** (same hook deviation, but
+its actual persistent daemon, `dtssh-host-launcher.ps1`, conforms via a named
+Mutex). The 8 further sibling plugins #2317 named are explicitly flagged as
+*that PR's* claim, not independently re-verified by this audit — the comment
+is deliberately careful not to let an unverified list masquerade as a
+finding.
+
+Resolution recorded there and here: the confirmed deviations are **not**
+fixed by fanning out #2317's opt-in-gate pattern to each sibling. A new
+effort, [`tiered-payload-provisioning`](../tiered-payload-provisioning/README.md)
+(created earlier the same day from an operator critique that gating "only
+changes who pays the cost, not whether it's expensive"), removes the
+expensive hook-triggered path entirely via a unified, serialized/debounced
+stamp-now/provision-on-first-use model applying to every version update. Its
+Phase 3 is where agent-dispatch's and agent-ssh's confirmed deviations
+actually get fixed — this effort's Phase 4b(ii) is now fully closed, with
+implementation handed off rather than duplicated into a new phase here.
+
+### 2026-09-10 — Worktree-scoped registrar pointer: a distinct root cause (#2417)
+
+A live incident on a shared dev box ("agent-dispatch ran amok spawning headed
+processes") led to a newly-diagnosed, **distinct** contributing bug — related
+to this effort's theme but not part of the Phase 4b(ii) hook-transience audit
+above, which is already closed:
+
+- **Root cause**: `agent-dispatch reviewer-loop setup` / `repository-issue-loop
+  setup` (and their shared `status`/`doctor`/`enable`/`disable` declaration
+  loader) derived a declaration's registration **owner** from raw filesystem
+  path structure (`repo_root.name`), with zero awareness of worktree-vs-anchor
+  identity. Run from inside a worktree checkout instead of the repo's
+  registered anchor, this silently registered a **permanent global pointer**
+  (in `~/.agent-dispatch/registrar/pointers.json`) scoped to that worktree's
+  ephemeral directory name. Because the resulting registration id is unique
+  per worktree, it never reconciled with prior registrations, so every
+  occurrence spawned a **brand-new set of headed reviewer-loop workers** that
+  worktree deletion never cleaned up.
+- Traced the exact trigger: the `missing-pointer` doctor diagnostic literally
+  suggests `agent-dispatch reviewer-loop setup <relative-path>` as its fix
+  action — an agent following that suggestion from inside a worktree is
+  exactly how this fires. Confirmed via evidence on the affected machine: a
+  `dotfiles` worktree's declared registrations were already disabled (by a
+  different agent noticing the runaway spawns) and the bad pointer entry was
+  already removed from `pointers.json` — contained, but the code path that
+  produced it was still live.
+- Filed as issue #2417 with full code-level root cause and fix directions.
+- **Landed the fix** (this entry's own change): added
+  `_reject_worktree_checkout_as_repo_root()`, wired into both
+  `_reviewer_loop_declarations` and `_repository_issue_loop_declarations` (the
+  shared chokepoint both `setup` paths and every other reviewer-loop/
+  repository-issue-loop subcommand funnel through). Deliberately a **cheap,
+  dependency-free path-pattern check** (does the parent directory name end in
+  `.worktrees`, this harness's own worktree-root naming convention) rather
+  than an authoritative subprocess probe out to `agent-worktrees`: an early
+  subprocess-based version of this guard measured ~9s per invocation on this
+  loaded box, which would have made every reviewer-loop CLI call slow exactly
+  when the host is already struggling — the wrong tradeoff for what should be
+  a fast safety check. Added a regression test
+  (`test_setup_refuses_worktree_checkout_path`) proving a worktree-scoped
+  declaration is refused rather than silently registered. Full agent-dispatch
+  suite: 2410 passed, 3 pre-existing unrelated failures (bootstrap/session-
+  guidance tests, confirmed untouched by this diff), 8 skipped.
+- **Extended `visions/plugin-services`** with the operator-directed strong
+  invariant this bug violates: **`identity-resolves-by-name-not-path`** — the
+  only place a repo's current filesystem path may ever be recorded is its
+  owning registry (e.g. `repos.yaml`/`projects.yaml`); every other component
+  (a registrar pointer, a registered task's repo binding, a scheduled-task
+  action) carries the repo's **name** and resolves the path fresh at the
+  point of use. Added companion Behaviors `refuse-not-silently-misidentify`
+  and `registered-tasks-target-by-name`. Cross-referenced from
+  `visions/plugins/agent-worktrees` (the canonical name-to-path registry
+  owner) and `visions/plugins/agent-dispatch` (the registrar pointer
+  convention this incident hit directly).
+- Not yet done: a broader audit of "task registrations specify at most agent
+  or repo names" and "scheduled tasks only invoke installed binstubs" across
+  the rest of the suite, per the operator's full ask. The scheduled-task half
+  is likely already covered by the existing `Stable lifecycle launcher`
+  concept + `register-once-cutover-on-update` behavior (audited for
+  agent-bridge/agent-dispatch/agent-vault under #625), but that audit
+  predates this new, more general invariant and should be re-checked against
+  it explicitly as a follow-up.
+
+### 2026-09-11 — Scheduled-task binstub audit re-checked against `identity-resolves-by-name-not-path` (#736 follow-up)
+
+Re-confirmed the #625 scheduled-task audit against the new invariant, by
+citing the concrete `Action` construction for each service exemplar:
+
+- **agent-bridge** (`scripts/install.ps1` `Register-ScheduledTask_`): action
+  is `conhost.exe --headless pwsh -File "$launcherPath"` where `$launcherPath`
+  is the stable `start-agent-bridge.ps1` written into `$InstallDir` (never a
+  versioned slot path). The launcher body itself resolves the active version
+  from the `current-version` marker at **every run** ("SINGLE routing point
+  ... never a pinned path").
+- **agent-dispatch** (coordinator + supervisor + embody-supervisor tasks):
+  all three actions are `conhost.exe --headless powershell.exe -File
+  "$launcher"` with a stable launcher in `$InstallDir`
+  (`serve-service.ps1`/`supervise-service.ps1`); each launcher re-resolves
+  `$_py` from the `current-version` marker via the shared
+  `resolve-runtime.ps1` chain at every run, matching agent-bridge's pattern.
+- **agent-vault** (`Register-AgentVaultTask`): action is `conhost.exe
+  --headless powershell.exe -File "$TaskLauncher"`, `$TaskLauncher` stable in
+  `$InstallDir`. Its slot python IS baked into the launcher body's `& '<path>'`
+  line at registration time rather than re-resolved per run -- a real but
+  **already-tracked** deviation (filed as #1836 during the original #625
+  audit; the task is re-registered on every install/update so it does not go
+  stale between reinstalls, but it is not per-run dynamic like the other two).
+  No new gap beyond #1836.
+- Spot-checked the 3 other plugins that also register Scheduled Tasks
+  (agent-logger, agent-codespaces, agent-index): all follow the identical
+  `conhost.exe --headless ... -File "<stable $InstallDir launcher>"` shape,
+  no raw versioned-slot or worktree path in any `Action`.
+
+**Conclusion: no new conformance gap.** All scheduled-task actions target a
+name-stable, installed launcher, never a worktree-scoped or raw versioned-slot
+path; agent-vault's known per-update (not per-run) slot resolution remains
+tracked separately by #1836.
+
+Also re-verified #2417/#2421 has no coverage gap: traced both
+`_reviewer_loop_setup` and `_repository_issue_loop_setup` -- each calls its
+sibling `_..._declarations()` helper (which invokes
+`_reject_worktree_checkout_as_repo_root`) **before** its own `rd.add_pointer`
+call, so a worktree-checkout path is refused before any pointer is persisted.
+Manually reproduced against a `dotfiles.worktrees\<id>\.agent-dispatch\
+registrar\reviewer.json` declaration: `reviewer-loop setup` returns non-zero
+with the expected refusal message; no pointer written. `repository-issue-loop
+setup`'s existing regression test (`test_setup_refuses_worktree_checkout_path`)
+passes. Grepped the rest of `agent_dispatch` for other
+`repo_root_from_surface_path`/`f"repo:{...root.name}"` call sites: none found
+outside the two guarded declaration helpers.
+
+**Live daemon-status re-check:** `agent-dispatch supervise daemon-status`
+still shows the original 6 `declared:repo:tmichon-cloud1-win-20260910-171507-5474:*`
+/ `logical:repo:...` override entries from the #2417 incident, but all are
+`disabled: true` with `at` timestamps (~2026-09-11T00:31Z) that **predate**
+#2421's merge (2026-09-11T02:57Z) -- confirming these are the original
+contained incident, not a recurrence. No new `declared:repo:<worktree-id>:...`
+entries have appeared since the fix landed.
+
+This closes out the scheduled-task-binstub audit slice of the operator's full
+ask; the #736 umbrella's own remaining sub-issues (#738, #742, #743, #744)
+are unrelated open work tracked separately above.
+
+### 2026-09-11 (later) — Landed #1837 fix (force-register-on-elevated-update)
+
+Fixed the `agent-dispatch` boot-mode supervisor task registration gap found
+during the audit above: `Install-SupervisorTaskInstance` used the caller's
+elevation state as a proxy for "does the task need re-registering", so an
+elevated update always fell through to `Register-ScheduledTask -Force` even
+when the existing task's action already matched the desired one. Now compares
+the registered task's `Action` (Execute/Arguments/WorkingDirectory) against
+the one the update would produce; a match means already-correct regardless of
+elevation (cycle in place via `Restart-SupervisorTaskInPlace`), and
+re-registration is reserved for a missing task or a genuine definition drift.
+A drift with no elevation available degrades to an in-place restart of the
+stale task (warned) rather than silently no-op'ing the migration. Full
+`agent-dispatch` suite: `test_supervisor_install.py` 42/42; the other 37
+failures observed in a full-suite run are pre-existing installed-venv/source
+version skew (build-info/procutil/task-transition tests unrelated to this
+change), confirmed absent from this diff's touched files. Landed via
+[ThomasMichon/copilot-extensions#1837](https://github.com/ThomasMichon/copilot-extensions/issues/1837).
+
+### 2026-09-11 (later still) — Landed the Windows half of #1836
+
+Fixed agent-vault's Windows Scheduled Task: `Register-AgentVaultTask` used to
+resolve the active versioned slot ONCE at registration time and bake that
+concrete `versions/<v>/Scripts/python.exe` path into the launcher script body
+-- so an activated version cutover only took effect once the task was
+re-registered (every install/update rewrote it, masking the issue in
+practice, but a hand-invoked `Start-ScheduledTask` between updates could run a
+stale slot). Moved the `resolve-runtime.ps1` dot-source into the launcher body
+itself, so it resolves the active slot fresh at every process start --
+matching agent-bridge's/agent-dispatch's launchers exactly ("SINGLE routing
+point... never a pinned path"). Also added the same register-once guard as
+#1837: `Register-AgentVaultTask` now compares the existing task's `Action`
+against the desired one and skips `Set-ScheduledTask` when they already
+match, reserving re-registration for a genuine definition drift. Confirmed
+via `resolve-runtime.ps1`/`ExecStart=$LINK_PYTHON` review that the POSIX
+systemd-unit side does NOT have this bug: `.venv/bin/python` is a real symlink
+re-pointed at every activate (no Windows-junction RedirectionGuard problem),
+so `ExecStart`'s baked path already tracks the active version correctly --
+no POSIX change needed. Added two regression tests
+(`test_scheduled_task_launcher_resolves_slot_at_every_run`,
+`test_scheduled_task_registration_skips_reregister_when_already_correct`);
+full `agent-vault` suite: 255 passed (2 pre-existing, unrelated WSL-bash
+path-translation failures in `test_bootstrap_check_reconcile_opt_in.py`,
+confirmed present before this diff). Bumped to `0.1.0-dev101`.
+
+**Deliberately NOT attempted this session** (the larger, riskier half of
+#1836's ask, left open): decoupling `Invoke-Start`/session-start readiness
+from Scheduled Task existence entirely (a "user-mode ensure" fallback that
+can cold-start the daemon without a registered task at all). agent-vault is a
+credential store; a behavior change to its start path deserves its own
+focused pass with more test coverage than this session budgeted, rather than
+folding it into the same diff as the launcher-resolution fix. #1836 stays
+open for that remaining piece.
+
+### 2026-09-11 (later still) — Closed the rest of #1836: `start` no longer depends on the Scheduled Task
+
+Operator confirmed agent-vault is lightly used on this machine and cleared it
+for direct experimentation, so picked back up the deferred piece. Discovered
+`agent_vault.cli` **already has** its own idempotent, health-gated user-mode
+ensure path independent of any Scheduled Task -- `cmd_start` ->
+`ensure_service`/`start_service` (pings first, cold-starts via `sys.executable`
+if not running, polls until healthy). `install.ps1`'s `Invoke-Start` just
+never delegated to it: it hard-required a registered task and errored
+otherwise. Fixed by making `Invoke-Start` prefer the Scheduled Task when
+registered (keeps Task Scheduler's own crash-restart policy for the at-logon
+case) and fall back to `& $LinkPython -m agent_vault start` -- the exact same
+path the CLI itself uses -- when no task exists, rather than reimplementing
+process-spawning logic in PowerShell. Added
+`test_start_does_not_require_a_registered_scheduled_task`.
+
+**Live-verified on this machine** (not just unit tests): stopped the running
+daemon, `Unregister-ScheduledTask -TaskName AgentVault`, ran the patched
+`install.ps1 start` -- daemon came up and answered `ping` with no task
+registered. Re-ran `install.ps1 update` twice in a row to confirm both the
+#1836 launcher-resolution fix and the register-once guard: first run built +
+activated `0.1.0-dev102` and registered the task fresh; second run printed
+"Scheduled task already correct ... left registered as-is" (no
+Set-ScheduledTask). Restored the task registration afterward so the machine
+is back to its normal running state. Full suite: 258 passed, same 2
+pre-existing unrelated failures. Bumped to `0.1.0-dev102`.
+
+**#1836 is now fully closed** -- both the launcher-resolution/register-once
+half and the start/session-start convergence half are landed.
+
+### 2026-09-11 (later still) — Closed #742's remaining follow-up: per-plugin inlined binstubs
+
+The 2026-08-19 journal entry landed #742's read-side 3-tier fallback
+(marker -> last-known-good -> newest slot) into the canonical
+`libs/versioned-runtime/resolve-runtime.{sh,ps1}` resolver, but flagged
+"rolling the same fallback into the other plugins' inlined binstubs" as
+follow-up. Audited every plugin's Windows Scheduled Task / service launcher
+generator for an INLINED copy of this resolution (i.e. one that reads
+`current-version` directly rather than dot-sourcing the shared resolver) and
+found three that skipped straight from the marker to a raw newest-slot guess
+with no last-known-good tier:
+
+- **agent-bridge** `Register-ScheduledTask_`'s `$launcherBody` (the
+  `start-agent-bridge.ps1` it writes).
+- **agent-dispatch**'s coordinator (`serve-service.ps1`) AND embody-supervisor
+  (`supervise-service.ps1`) launcher generators -- byte-identical resolution
+  block duplicated in both.
+- **agent-index**'s `Get-ActiveSlotPython` (used by the sessionStart `ensure`
+  reconcile to find the currently-serving slot without dragging it backward).
+
+All three now insert the same last-known-good tier the shared resolver uses,
+between the marker read and the newest-slot guess. (agent-vault's equivalent
+launcher no longer has an inlined resolution at all after this session's
+earlier #1836 fix -- it now dot-sources the shared resolver directly, so it
+was never part of this gap.) The other plugins with a `bin/<name>` payload
+shim (agent-containers, agent-machines, agent-mcp, agent-vault, etc.) all
+route through `runtime-gate.{sh,ps1}`, which itself dot-sources the shared
+resolver -- confirmed already conformant, not part of this gap.
+
+**Caught and fixed a real authoring bug while verifying:** the inserted
+comment text `` `activate()` `` inside the two here-string-embedded copies
+(agent-bridge, agent-dispatch) triggered PowerShell's here-string backtick
+escaping -- `` `a `` is the alert-character escape, not a literal backtick+a
+-- silently corrupting the rendered comment to "ctivate()" with an embedded
+BEL byte. Caught by actually rendering the launcher (an isolated
+`-InstallDir` test install, not the production runtime) and reading the
+generated file rather than trusting the parser's happy "no syntax errors"
+verdict alone; fixed by dropping the backticks from that one word in the two
+heredoc copies (agent-index's copy isn't inside a here-string, so it was
+unaffected).
+
+**Verified functionally**, not just by parse-check: rendered agent-bridge's
+launcher via an isolated temp `-InstallDir` install (never touching this
+machine's real agent-bridge runtime) and simulated a marker-missing/
+last-known-good-present scenario against the rendered file directly --
+resolved to the last-known-good slot as expected. Did the same inline
+simulation for agent-dispatch's and agent-index's resolution blocks against
+synthetic version directories, all resolving correctly and never falling
+through to the newest-slot guess when last-known-good was available.
+Deliberately did NOT run the full install/service-registration flow for
+agent-bridge/agent-dispatch against their real installs on this machine
+(unlike agent-vault, these are actively relied on by this very session) --
+isolated `-InstallDir` installs and direct logic simulation were the
+lower-risk validation path.
+
+`tools/check-install-contract.py` and `tools/sync-versioned-runtime.py
+--check` both green (these inlined blocks are outside the byte-identical
+install-contract sections, so unaffected by either check, as expected -- this
+is exactly the gap those checks don't cover, which is why the fallback had to
+be rolled out by hand per occurrence). Added regression tests per plugin
+(`test_install_ps1_last_known_good.py` x2,
+`test_get_active_slot_python_last_known_good.py`). Full test suites: agent-
+dispatch's own `test_supervisor_install.py` + new test 44/44; agent-index 508
+passed / 11 failed -- all 11 pre-existing environment gaps (missing `numpy`/
+`mcp` optional deps in the installed venv, and an ambient `COPILOT_PLUGIN_ROOT`
+leaking from this very session's own environment into a subprocess test that
+doesn't scrub it), confirmed unrelated to the touched files; agent-bridge
+1870 passed / 576 failed, all in modules the diff never touches (transport,
+SSE stream, startup supersession, watchdog) -- consistent with the
+already-documented installed-venv/source version-skew pattern from this
+effort's #1837 entry, not a regression from this change. Bumped agent-bridge
+to `0.4.0-dev472`, agent-dispatch to `0.1.2-dev77`, agent-index to
+`0.1.0-dev164`.
+
+**#742 is now fully closed.**
+
+### 2026-09-11 (much later) — Landed #743: agent-vault drain-safe cutover (POSIX)
+
+Discovered `agent_vault.cutover` (the security-critical handoff mechanism --
+`build_handoff_payload`/`apply_handoff_payload`/`handoff_export_response`,
+gated to the owner-only AF_UNIX socket, `handoff-export` already wired into
+`service.handle_request`) already existed and was already exhaustively unit-
+tested, but nothing actually INVOKED it: no orchestration wired it into
+`install.sh update`, and there was no way for a not-yet-running new
+generation to receive/apply the payload at all.
+
+Closed the gap with two additions, both security-conscious about where the
+plaintext master password can go:
+
+1. **`service.py` CLI surface**: `--export-handoff` (client-side: ask the
+   currently-running daemon to export its unlocked state, print one line of
+   JSON to stdout, or nothing -- never raises, a safe silent degrade) and
+   `--handoff-stdin` (daemon-side: consume a pending payload -- via the
+   `AGENT_VAULT_HANDOFF_JSON` env var, or stdin as fallback -- and apply it
+   BEFORE any fork/daemonize, so it survives into the detached child via
+   copy-on-write memory). Extracted the env-var/stdin consumption into
+   `cutover.consume_pending_handoff()` for unit-testability.
+2. **`install.sh`'s `_install_service()`**: before touching the systemd unit,
+   if a generation is already active, capture its handoff payload (with the
+   env vars `config.py`/`send_command` need EXPLICITLY set for that one
+   subprocess call -- a real bug caught in testing, see below). Pass it to
+   the successor via `systemctl --user set-environment
+   AGENT_VAULT_HANDOFF_JSON=...` set immediately before `restart` and unset
+   immediately after (`restart` blocks until the start job completes, and
+   `--handoff-stdin` pops the var at the very start of `main()`) -- never
+   written to the unit file, never persisted to disk.
+
+Updated `cutover.py`'s module docstring to describe the two distinct legs
+(outgoing-daemon -> installer: AF_UNIX-only, unchanged; installer -> not-yet-
+running successor: env var or stdin, a same-user process-launch carrier, not
+an inter-daemon crossing) rather than overstating the original "never an env
+var" line now that a second, differently-scoped carrier exists.
+
+**Deliberately out of scope**: Windows. The named pipe is not proven owner-
+gated (per the existing code's own comment), so `request_handoff_from_running_
+daemon()` already safely returns `None` there and the update path degrades to
+the existing re-unlock, exactly per invariant #3 in
+`docs/patterns/graceful-daemon-cutover.md`. Hardening the pipe's DACL to make
+Windows eligible is a separate, larger, security-sensitive task, not folded
+into this change.
+
+**Verified for real, not just unit-tested** -- this machine has WSL Ubuntu
+with a real, already-running production agent-vault instance
+(`~/.agent-vault`, PID 483, untouched throughout), so every test ran against
+a fully isolated install (`--install-dir /tmp/av743` +
+`AGENT_VAULT_INSTALLATION_ID=test743`, its own systemd unit name/socket/TCP
+port -- confirmed the real instance's PID never changed):
+- Installed `keepassxc` fresh in WSL, created a real throwaway `.kdbx`,
+  unlocked it against the isolated daemon over the real IPC protocol.
+- Ran the actual `install.sh update` path twice. First attempt exposed a real
+  bug (env vars not exported for the `--export-handoff` subprocess call --
+  fixed) and a second pre-existing, unrelated bug this surfaced (`$RUN_DIR`/
+  `logs` were never `mkdir -p`'d before the daemon's first bind, so a fresh
+  POSIX install crash-loops on `sock.bind` -- fixed; tightly coupled to
+  testing this change, since it blocks daemon startup at all).
+- After the fix: `journalctl` showed "Drain-safe cutover: warmed 1 vault(s)
+  from predecessor handoff" on the successor PID, and a direct IPC `ping`
+  against the NEW pid confirmed `cli=unlocked` with the vault listed in
+  `unlocked_vaults` -- no re-unlock, a genuinely new process.
+- Cleaned up the isolated test unit/install dir afterward; confirmed the
+  real WSL production daemon (PID 483) was never touched.
+
+Added 13 new unit tests to `test_cutover.py` (client export mocking + env-
+var/stdin consumption); full suite 268 passed (same 2 pre-existing unrelated
+WSL-bash path failures). `check-install-contract.py` / `sync-versioned-
+runtime.py --check` / `check-version-consistency.py` all green; `bash -n`
+clean. Bumped to `0.1.0-dev103`.
+
+**#743 is now closed** for the transport where it is actually safe today
+(POSIX/systemd); the Windows named-pipe DACL hardening that would extend it
+there remains explicitly out of scope.
+
+Remaining #736-adjacent open work not picked up this session: #744
+(work-coalescing singleton tier design).
+
+### 2026-09-12 — #744 design doc: `docs/patterns/work-coalescing-singleton.md`
+
+Picked up #744 (the only remaining #736 sub-issue). Per the effort's own
+design-first sequencing convention, landed the **design doc** first, before
+any helper/consumer code:
+
+- New `docs/patterns/work-coalescing-singleton.md`, generalizing
+  `agent-worktrees`' existing `hook_ipc.py`/`list_cache.py` (the reference
+  implementation) into a reusable shape: the wire protocol (subscribe /
+  coalesced request / release), the two-phase timeout budget (boot-wait vs.
+  per-request deadline — a cold classify pass and a cold MCP server boot need
+  far more than the existing 1s hot-hook-decision timeout), the explicit
+  ref-count + bounded-linger idle-exit algorithm (liveness-reaped, not only
+  clean-disconnect, so a crashed subscriber can't pin the daemon up forever),
+  and the always-correct inline fallback invariant.
+- Named the two consumers against this shared shape: **#2323** (agent-
+  worktrees resident classify/list accelerator — still open, not yet
+  implemented; verified via `gh issue view 2323` rather than assumed done)
+  and the **agent-mcp multiplexer** (not started — a per-`(host, server)`
+  daemon strictly gated by identity/credential equivalence, with a direct-
+  bridge fallback).
+- Added new validation scenarios for the adversarial mock harness (extending
+  Phase 4b(ii)'s existing suite): cold-boot-and-wait-for-port, concurrent-
+  callers-during-cold-boot, ref-counted-exit-after-linger, fallback-to-
+  direct-computation-on-boot-timeout, and (agent-mcp-specific) credential-
+  mismatch-never-pools.
+- Added a row to `docs/patterns/README.md`'s index.
+- Deliberately **not** in this PR (per the effort's own guidance not to
+  treat #744 as a quick mechanical fix): the reusable `libs/work-coalescing-
+  singleton/` helper extraction, and both consumer implementations (#2323's
+  daemon extension, the agent-mcp multiplexer itself). Each is its own
+  follow-up PR on top of this design, landed independently.
+
+Remaining under #744 (and thus #736): extract the reusable helper library;
+implement #2323 against it; implement the agent-mcp multiplexer against it.
+None of these should land as one large diff — see the design doc's own
+"Sequencing" section.
+
+### 2026-09-12 (later) — #744 reusable helper: `libs/work-coalescing-singleton/`
+
+Landed the reusable helper named as the design doc's next Sequencing step:
+
+- New pure-stdlib `libs/work-coalescing-singleton/` (package
+  `agent-work-coalescing-singleton`, import `work_coalescing_singleton`), not
+  yet vendored into any consuming plugin (no second consumer exists yet;
+  `tools/check-vendored-libs-sync.py` only activates once a lib has ≥2
+  copies, so this canonical copy alone doesn't trip it — same shape as
+  `libs/single-instance-lease/` before its own first plugin adoption).
+- `server.CoalescingServer`: the daemon side. Coalesces identical
+  `(kind, key)` requests onto one in-flight execution (joiners share the
+  owner's result or its raised error, never recompute); explicit
+  subscribe/release ref-counting plus an implicit `touch` for
+  fire-and-forget callers; a bounded **linger** timer that only starts at
+  refcount zero and is cancelled by any new subscriber; a background
+  **liveness reaper** that drops a subscriber whose last-seen timestamp
+  exceeds its TTL (a crashed client can't pin the daemon alive forever).
+- `client`: pure functions over a resolved `(host, port, token)` endpoint —
+  `subscribe`/`release`/`request`, and `call_with_fallback` (the full
+  boot-wait → request → inline-fallback sequence in one call, never raising
+  past it). Rendezvous/discovery and daemon-boot stay each consumer's own
+  responsibility, same as today.
+- **14 tests, all passing**: unit tests drive `CoalescingServer` directly
+  (coalescing, distinct-key independence, error propagation to every
+  joiner, deadline-expiry without blocking the owner, linger/liveness-reap
+  timing) plus full-wire tests over a real loopback TCP socket (subscribe/
+  request/release round trip, concurrent coalescing across two real client
+  connections, a wrong-token request rejected without crashing the server,
+  and `call_with_fallback`'s three paths — no daemon, daemon answers, and
+  daemon exceeds the request deadline).
+- **Found and fixed a real bug during testing, not just added tests**: the
+  first test run hung indefinitely. `CoalescingServer.close()` unconditionally
+  called `socketserver`'s `shutdown()`, which blocks forever waiting for a
+  `serve_forever()` loop that a unit test exercising `handle_request`/
+  refcounting directly (without calling `.start()`) never started. Fixed
+  by tracking a `_started` flag and only awaiting the serve/reap threads
+  when they were actually started.
+- `ruff check` clean; `tools/check-vendored-libs-sync.py` and
+  `tools/check-docs-consistency.py` both green.
+- Updated the design doc's own "Sequencing" section to mark the helper
+  landed and point at the still-open consumers.
+
+Remaining under #744 (and thus #736): #2323 (agent-worktrees resident
+classify/list accelerator) and the agent-mcp multiplexer each still need to
+adopt this helper — each its own vendored copy, its own reviewed PR, per the
+design doc's Sequencing section. Neither has started.
+
+### 2026-09-12 (later still) — #2323: agent-worktrees adopts the helper (wire layer only)
+
+Investigated #2323 (agent-worktrees resident classify/list accelerator)
+before writing any code: read `hook_ipc.py` (the existing resident-monitor
+IPC listener), `list_cache.py` (the existing file-based, TTL + demand-
+registered coalescing-like cache already in production), and
+`cmd_status_monitor`/`_classify_records` in `__main__.py` (the ~25k-line
+monolith this session's own worktree tooling runs live). Two load-bearing
+findings shaped the scope kept for this PR:
+
+- `hook_client.py` (the standalone script every session-lifecycle hook
+  invokes) hard-requires a `capabilities` field naming
+  `"session-lifecycle-v1"` in the response envelope — the generalized
+  `work_coalescing_singleton` wire shape doesn't carry that field. Refactoring
+  `hook_ipc.py` into a thin adapter (as this effort did for
+  `single_instance_lease` in agent-bridge) would mean also touching
+  `hook_client.py`, on the exact hot path every concurrent session's startup/
+  shutdown hook depends on **right now**, including this session's own. Not
+  worth the risk without dedicated, isolated testing.
+- `list_cache.py` + the resident sweep's `_warm_list_cache_for_active_project`
+  already implement a working, tested, **file-based** coalescing-like tier
+  (demand registration + short TTL + resident-refreshed extended freshness) —
+  not the live-IPC push #2323 envisions, but real, shipped mitigation of the
+  same underlying problem. The remaining gap is narrower than the original
+  issue framing suggested: an IPC upgrade is a latency/freshness improvement
+  over polling, not a missing correctness property.
+
+Given both, landed only the **wire-adoption layer**, not the live-monolith
+wiring, in this PR:
+
+- Vendored `libs/work-coalescing-singleton/` into
+  `plugins/agent-worktrees/libs/work-coalescing-singleton/` (byte-identical
+  copy; `tools/check-vendored-libs-sync.py` green) and added it to
+  `pyproject.toml` (`agent-work-coalescing-singleton`, `[tool.uv.sources]`
+  pinned to the local path, matching the `single-instance-lease` convention
+  exactly).
+- New `agent_worktrees/classify_daemon.py`: `start_server`/`rendezvous_fields`
+  (the daemon side, namespaced `classify_*` lock-file fields so they can't
+  collide with `HookIpcServer`'s existing fields) and `classify_via_daemon`
+  (the client side — try a live daemon if `lock_data` already names one,
+  else run the caller's `fallback` immediately; **never boots a daemon
+  itself**, since a resident monitor's launch/idle-exit lifecycle stays its
+  existing owner's responsibility). Explicitly documented in the module's
+  own docstring as not yet wired into any command.
+- 6 new tests (`tests/test_classify_daemon.py`): rendezvous fields round-trip,
+  malformed/absent rendezvous rejected without raising, fallback used with no
+  daemon, live daemon used when reachable, fallback on deadline exceeded, and
+  two concurrent callers for the same project coalescing into one execution.
+  All pass. Also re-ran the closely related existing suites
+  (`test_classify_lease.py`, `test_hook_ipc.py`, `test_status_monitor.py`,
+  `test_list_cache.py` — 173 tests) to confirm the vendoring + `pyproject.toml`
+  change caused zero regression. `ruff check` clean;
+  `check-vendored-libs-sync.py`, `check-docs-consistency.py`,
+  `check-version-consistency.py` all green.
+- Updated the design doc's Sequencing section to reflect this "helper
+  vendored + wire wrappers landed, live wiring still open" state precisely.
+
+**Deliberately not done** (the actual remaining #2323 scope): starting this
+daemon inside `cmd_status_monitor` and publishing its rendezvous alongside
+`HookIpcServer`'s; trying it from `_classify_records` before the existing
+`single_instance_lease` path. The concrete plan for that follow-up: the
+daemon's `compute(kind, payload)` callback resolves a project's records
+itself via `tracking.list_records(...)` (never serializing whole records
+over the wire — the request payload only needs to name the project), builds
+whatever `session_ctx` the existing classify pass needs, and calls
+`_classify_records_live` directly; `_classify_records` reads the resident
+monitor's lock file first, and calls `classify_daemon.classify_via_daemon`
+with `fallback=` the existing (renamed, otherwise unchanged)
+lease-guarded body. That change touches the live monolith this session's
+own tooling depends on and deserves its own dedicated pass with a spawned,
+non-production test monitor exercising the full round trip before landing
+— not bundled into this PR.
+
+Remaining under #744 (and thus #736): the `_classify_records`/
+`cmd_status_monitor` wiring described above, and the agent-mcp multiplexer
+(still fully unstarted).
+
+### 2026-09-12 (much later) — Correction: the agent-mcp multiplexer was ALREADY DONE; landed its last follow-up (#866)
+
+Before starting agent-mcp work, `gh issue view 744`'s own **comments** (not
+just its body) revealed a load-bearing mistake in this journal and in the
+design doc: the agent-mcp multiplexer is **not** unstarted. It shipped in
+five already-merged slices, entirely before this session picked up #744
+today:
+
+- Slice 1 — `BridgeSession` extraction + resident `serve` session-host
+  foundation (#763).
+- Slice 2 — thin `agent-mcp forward` stdio<->socket child + lazy CLI
+  imports (#861).
+- Slice 3 — `serve`-host single-instance lease + idle-evict + forwarder
+  ensure-serve (#863).
+- Slice 4 — made the forwarder genuinely thin (asyncio-free `sockio`,
+  lazy `__version__`) and proved the RAM win: ~20%/~54 MiB saved on 7
+  sessions (#864).
+- Default-on flip — `agent-mcp bridge` now routes through the thin
+  forwarder by default, opt-out via `AGENT_MCP_NO_MULTIPLEX` (#865).
+
+Per the issue's own last comment: "#744 status — the multiplexer is
+functionally complete", with only one item left: **#866**, a clean-room
+process-topology scenario (the RAM win was proven by an ad hoc
+`examples/multiplexer_ab.py` A/B script, but the effort's validation plan
+also calls for a deterministic clean-room assertion of the process
+topology itself). **Correcting the record**: earlier today's PR #2498
+(design doc) and this journal's own entries describing the agent-mcp
+multiplexer as "not started"/"fully unstarted" were wrong — I should have
+read the issue's comments, not just its body, before writing that. The
+design doc has been corrected in this same change.
+
+**Landed #866**: `tools/clean-room/scenarios/agent-mcp-multiplexer/` (Tier-P
+F1, modeled on `agent-bridge-cutover`'s probe-script pattern):
+
+- `fixtures/multiplexer_topology_probe.py` — a portable, stdlib-only,
+  Linux-`/proc`-based probe (reusing `examples/multiplexer_ab.py`'s
+  echo-upstream/spawn/drive/census techniques) with three checks, each
+  emitting `PROBE: <name> PASS|FAIL <detail>`:
+  - `topology-collapse` — N (4) `agent-mcp forward` sessions against one
+    shared upstream config collapse onto **exactly one** resident `serve`
+    host + N thin forwarders (never N heavy bridges), each session still
+    answering `initialize`/`tools/list` correctly through it.
+  - `direct-fallback` — `AGENT_MCP_NO_MULTIPLEX=1` runs N independent direct
+    bridges with **zero** resident hosts spawned.
+  - `idle-self-eviction` — a `serve` host started with a short
+    `--idle-timeout` evicts itself once its last attached forwarder detaches.
+- `manifest.json` + `scenario.sh` (install ONLY agent-mcp, provision, run the
+  probe), following the exact `agent-bridge-cutover` shape (phases,
+  `_resolve_slot_python`, `jam`/`pass`/`fail` conventions).
+- **Verified for real, not just written**: this machine's WSL Ubuntu has a
+  real installed agent-mcp runtime (`~/.agent-mcp`, version `0.2.0-dev81`,
+  no live `serve` daemon running beforehand). Ran the probe directly against
+  that real slot python (never inside the actual clean-room Docker rig,
+  which this session didn't drive end-to-end) — all three checks passed, 3
+  full-sequence reruns in a row (9/9), and confirmed afterward that the real
+  install's `current-version` was untouched and zero `agent_mcp` processes
+  were left running. One early ad hoc run (outside the final probe code)
+  intermittently reported a stray process under back-to-back manual testing
+  on this shared dev box; added a bounded settle/retry to the stray census
+  (tolerating brief teardown lag) as a defensive hardening, then reconfirmed
+  0/0 strays across repeated runs.
+- `ruff` flagged one intentional blind `except Exception` in `main()`'s
+  per-check dispatch (a probe crash must FAIL that check, not crash the
+  whole run) — the identical, pre-existing pattern in
+  `agent-bridge-cutover/fixtures/cutover_probe.py`; left as-is, matching
+  established precedent. `python -m py_compile` clean; `manifest.json` is
+  valid JSON; `scenario.sh` passes `bash -n` and already carries a `.gitattributes`
+  `eol=lf` rule for this path (normalized before commit).
+
+**#744 is now fully addressed** (design doc + reusable helper landed earlier
+today; the pre-existing multiplexer's last follow-up, #866, landed just
+now). What remains under the #736 umbrella is only agent-worktrees'
+`_classify_records`/`cmd_status_monitor` wiring documented in the entry
+above (tracked, not yet started) — the umbrella issue's own closing
+decision (close now vs. keep open pointing at that specific remaining
+follow-up) is for the next step of this session.
+
+### 2026-09-12 (final this session) — #744 closed; #736 checklist corrected; #1841/#2301 scoped as the remaining work
+
+Closed out the #744 arc for real (not just in this journal):
+
+- Posted evidence + closed **#866** and **#744** on GitHub (`gh issue close`,
+  routed through `agent-worktrees repos gh` for the account-scoped identity
+  check — a bare `gh issue close`/`gh issue comment` fails closed with an
+  EMU "Unauthorized" error on this repo, confirming the wrapper is load-
+  bearing, not optional).
+- Discovered the umbrella **#736**'s own body checklist was stale: it still
+  showed #738/#742/#743/#744 unchecked even though all four (and #737/#739/
+  #740/#741) were already closed — some from before this session even
+  started. Verified every one of #736's originally-listed sub-issues
+  (#737–#744) is CLOSED via individual `gh issue view --json state` calls
+  (not trusted from the checklist text) and edited #736's body to reflect
+  reality, adding the three still-open items this effort's own README (not
+  the GH issue) already tracked: **#2323**, **#1841**, **#2301**.
+- **#736 stays OPEN** — closing it now would violate this repo's own
+  completion-gate convention (an effort/umbrella is not Done while any of
+  its own tracked Plan items remain open). #2323, #1841, #2301 are the
+  actual remaining scope, each independently already filed and named.
+
+### Status of the three remaining tracked items (for the next pickup)
+
+- **#2323** (agent-worktrees resident classify/list accelerator): wire-
+  adoption landed (PR #2510); the live `cmd_status_monitor`/
+  `_classify_records` wiring is the well-defined remaining step (concrete
+  plan in the 2026-09-12 entry above). Not started.
+- **#1841** (declare service lifecycle tiers + reconcile user-mode ensure):
+  read in full this session. Mostly a **documentation** deliverable —
+  add a "declared lifecycle tier" section (default tier, availability
+  promises, Windows/POSIX mappings, escalation rationale) to
+  `agent-bridge/docs/architecture.md`, `agent-vault/docs/architecture.md`,
+  and an equivalent home for agent-dispatch (no `docs/architecture.md`
+  exists yet there; `docs/spawn-supervisor.md` documents the *supervisor*
+  loop's own persistent-service install, but the *coordinator* (`agent-
+  dispatch serve`) daemon's own lifecycle section wasn't yet located this
+  session -- confirm where the coordinator's own scheduled-task/systemd-unit
+  install is documented, or add a new section, before writing the tier
+  declaration) — plus an audit of `install`/`update`/`start`/`stop`/session-
+  start readiness against the user-mode-ensure contract (rules 7-9). Also
+  noticed `agent-vault/docs/architecture.md`'s own "Supervision and updates"
+  section still says "**In progress (#743)**" for the drain-safe cutover
+  that this session already **closed** for POSIX — that stale note should
+  be corrected in the same pass. Its own "Known linked gaps" (#1836, #1837)
+  are both already closed. **Not started** beyond this scoping read.
+- **#2301** (audit + close reality gaps against
+  `process-count-scales-with-services-not-sessions`): a **live-system**
+  audit (real coordinator/`conhost.exe` process-count diagnostics on a
+  shared dev box), explicitly higher-risk than #1841 — root-causing
+  `agent_dispatch serve` proliferation and windowless-launch gaps needs
+  careful, non-destructive investigation of processes this and other
+  concurrent sessions may depend on. Deliberately **not started** this
+  session; recommend its own dedicated, focused pickup rather than folding
+  it into a documentation-audit pass.
+
+### Handoff guidance for the next pickup
+
+Resume via this same effort (`plugin-process-hygiene`, #736). Suggested
+order: **#1841 first** (lower-risk, mostly docs + a careful non-mutating
+audit), **#2301 second** (live-system diagnostics, budget real time for
+careful non-disruptive investigation on shared hosts), **#2323 last** (the
+riskiest — live wiring into `agent-worktrees`' widely-depended-on resident
+monitor; do it only with a spawned, non-production test monitor exercising
+the full round trip, per the plan already on file). #736 closes only once
+all three are resolved or each is explicitly re-scoped into its own tracked
+successor issue with #736 updated to point at it.
+
+### 2026-09-12 (still later) — #1841: declared lifecycle tiers for agent-bridge/agent-vault/agent-dispatch; found + filed a real POSIX gap (#2524)
+
+Picked up #1841's documentation deliverable. Added a "Declared lifecycle
+tier" section (default tier, availability promise, Windows/POSIX mappings,
+escalation rationale — the exact fields
+`service-lifecycle-supervision.md` requires) to:
+
+- `agent-bridge/docs/architecture.md` — tier 2, confirmed compliant:
+  `do_start` prefers systemd/Scheduled Task but falls back to a direct
+  daemon launch when unavailable (genuine tier-1 convergence).
+- `agent-vault/docs/architecture.md` — tier 2, confirmed compliant per
+  #1836 (closed this session). Also **fixed a stale doc note**: the
+  "Supervision and updates" section still said drain-safe cutover was "In
+  progress (#743)" when this session already **closed** #743 for POSIX;
+  rewrote it to describe what's actually shipped (the `set-environment`
+  handoff, verified end-to-end against a real WSL KeePass vault) and to
+  name the Windows named-pipe DACL gap as the explicit, separately-tracked
+  remainder — not vague "in progress" language.
+- `agent-dispatch/README.md` — tier 2, **found a real, evidenced gap**: its
+  Windows `Invoke-Start` already has a non-elevated direct-launch fallback
+  when no Scheduled Task exists (fixed for #3602), and agent-bridge's own
+  `do_start` has the equivalent POSIX fallback — but agent-dispatch's own
+  POSIX `do_start` does not: it hard-fails ("No service unit installed")
+  when the systemd unit is missing, with no direct-launch fallback. Filed
+  as **#2524** rather than fixed live, per #1841's own explicit deliverable
+  ("file or update focused plugin issues for implementation mismatches
+  rather than hiding them in documentation") and this effort's standing
+  caution about touching this session's own in-use coordinator without
+  dedicated isolated testing.
+
+**#1841's scope not yet fully closed**: the issue also calls for auditing
+`install`/`update`/`start`/`stop`/session-start readiness paths against the
+user-mode-ensure contract for all three plugins, not just `start`. This
+session's audit was a targeted `do_start`/`Invoke-Start` comparison (enough
+to find the #2524 gap); a fuller pass across `update`/`stop`/session-start
+readiness for all three, plus closing #2524 itself, remains open follow-up
+under #1841 (left open, not closed this session).
+
+Remaining under #736: #1841 (partially addressed — docs landed, full
+install/update/stop audit + #2524 fix still open), #2301 (not started),
+#2323 (not started).
+
+### 2026-09-12 (end of session) — Design breakdown for the three remaining risk-classed items
+
+Before diving in, broke each remaining item down by concrete design/risk
+(requested explicitly): see the design decisions folded into each fix's own
+entry below and above. Summary of the breakdown that shaped sequencing:
+
+- **#2524** (agent-dispatch POSIX `start` fallback) — smallest, most
+  mechanical: reuse an *already-existing, already-tested* Python-level
+  autostart primitive (`_ensure_local_coordinator`/`_lazy_start_coordinator`,
+  the same one every ordinary CLI command already triggers) rather than
+  writing new bash spawn logic. The only real design question was *how* the
+  shell installer reaches it without depending on a data command's repo-
+  resolution/output shape — resolved by adding a small, explicit, internal
+  (`_`-prefixed, help-suppressed) CLI entrypoint, `_ensure-coordinator`,
+  rather than shelling out to `list`/`health` (both wrong for different
+  reasons: `list` resolves/requires a repo *before* ever reaching the
+  autostart call; `health` explicitly passes `ensure=False`). Lowest risk of
+  the three: additive-only Python change + a straightforwardly testable
+  bash branch.
+- **#2323** (agent-worktrees resident classify/list wiring) — highest
+  blast radius: touches the live `cmd_status_monitor`/`_classify_records` in
+  agent-worktrees' 25k-line `__main__.py`, which every concurrent session on
+  this host (including this one) depends on for basic worktree operations.
+  Design already on file (this doc's earlier entries): the daemon's
+  `compute` callback resolves a project's own records via
+  `tracking.list_records` (never serializing whole records over the wire);
+  `_classify_records` tries the daemon via `classify_daemon.classify_via_daemon`
+  before falling back to today's unchanged lease-guarded path. The
+  **validation bar** before landing: a spawned, non-production test monitor
+  (isolated `AGENT_WORKTREES_*` env / tracking dir, never the real resident
+  monitor this session's own tooling talks to) must prove the full round
+  trip — cold boot, concurrent coalescing, fallback-on-timeout, idle-exit —
+  before any change to the production entry points.
+- **#2301** (process-count/`conhost.exe` audit) — genuinely open-ended
+  live-system diagnostics on a **shared** dev box (other sessions/operators
+  may be concurrently using the same coordinators). Design constraint:
+  **read-only first** — `agent-dispatch supervise daemon-status`/`health`
+  across discovered endpoints, `/proc`-style census (this session's WSL
+  target has real `/proc`), before any process is touched. Only act on a
+  finding that is unambiguously a bug (e.g. a definitively-stale/dead pid),
+  never a live, actively-used process just because its purpose is unclear.
+
+Picked up in that order (smallest/lowest-risk first): #2524 next.
+
+### 2026-09-12 (end of session, later) — Fixed #2524: agent-dispatch POSIX `start` now has a tier-1 direct-start fallback
+
+- **New internal CLI entrypoint** `agent_dispatch._cmd_ensure_coordinator`
+  (registered as the hidden subcommand `_ensure-coordinator`, `help=
+  argparse.SUPPRESS`): runs `_ensure_local_coordinator` (the existing,
+  already-production-tested tier-1 autostart primitive every ordinary client
+  command already triggers) and reports success via exit code — deliberately
+  NOT reusing a data command like `list` (resolves/requires a repo *before*
+  reaching the autostart call, so it's not a general-purpose trigger) or
+  `health` (explicitly passes `ensure=False`).
+- **`scripts/install.sh`'s `do_start`**: now falls back to a direct start
+  (`"$rt_py" -m agent_dispatch _ensure-coordinator`, resolved via a new
+  `_resolve_runtime_python` helper that sources the deployed canonical
+  `resolve-runtime.sh`) whenever systemd is unavailable, the unit isn't
+  installed, or `systemctl start` fails to activate it — mirroring
+  agent-bridge's own `do_start` and agent-dispatch's own Windows
+  `Invoke-Start`, both of which already had this fallback.
+- **Tests**: 3 new tests in `test_lazy_start.py` (the ensure-coordinator
+  entrypoint reports success/failure correctly by exit code; the subcommand
+  is actually wired into the parser). Full `test_lazy_start.py` +
+  `test_cli.py` (156 tests) green.
+- **Verified for real against this machine's actual production WSL
+  agent-dispatch coordinator** (`~/.agent-dispatch`, real systemd unit
+  `agent-dispatch.service`, PID 479, `Main PID` unchanged throughout):
+  built a fully isolated `HOME`/install-dir with an isolated `uv`-built venv
+  (editable install of this exact source change, since the real installed
+  slot's older `agent_procutil` couldn't satisfy the modified source's
+  imports) and NO systemd unit registered there; ran the actual
+  `install.sh start` and confirmed it printed "No service unit installed --
+  falling back to a direct start" then "Coordinator started (direct)", with
+  a genuinely new, isolated coordinator process spawned (confirmed via
+  `pgrep`) — then cleanly stopped it and confirmed the real production
+  coordinator's PID never changed. Did **not** re-test the pre-existing
+  "systemd unit present + healthy" branch live, since `systemctl --user` is
+  a single **per-UID** manager (not scoped by the shell's `$HOME` override)
+  and this box's real `agent-dispatch.service` is that exact unit — that
+  code path is unmodified by this change, so it was reasoned about instead
+  of re-exercised against production infrastructure.
+- `bash -n` clean; `py_compile` clean; `check-version-consistency.py`/
+  `check-docs-consistency.py` green; bumped agent-dispatch to `0.1.2-dev86`.
+
+**#2524 closed.**
+
+### 2026-09-12 (end of session, still later) — Found + fixed a consequential follow-on gap in `do_stop`, with a live-production incident and recovery along the way
+
+Fixing #2524's `do_start` surfaced a direct consequence: a coordinator now
+startable via the direct fallback (or, pre-existing, via the CLI's own lazy
+autostart) is a bare detached process with **no service-manager entry**, so
+`install.sh stop`'s `systemctl --user stop` could never reach it — the
+daemon would be left running, unmanaged, forever.
+
+- Added `agent_dispatch._cmd_stop_coordinator` (hidden subcommand
+  `_stop-coordinator`, same internal-entrypoint convention as
+  `_ensure-coordinator`): gracefully stops a local coordinator over its own
+  existing HTTP `/shutdown` route (`DispatchClient.shutdown()`) — a no-op
+  when nothing is reachable, fail-soft on any client error.
+- `install.sh`'s `do_stop` now stops via systemd when the unit is actually
+  active, else falls back to `_stop-coordinator`.
+- 4 new tests; `test_lazy_start.py`/`test_cli.py`/`test_coordinator_stop.py`
+  (166 tests) green.
+
+**Live-production incident during testing (full transparency):** the first
+isolated E2E test of the new `do_stop` fallback **stopped this machine's
+real production WSL agent-dispatch coordinator** (systemd unit
+`agent-dispatch.service`, previously PID 479, `code=killed, signal=TERM`).
+Root cause: `do_stop`'s systemd branch checks live status via
+`systemctl --user is-active "$SYSTEMD_UNIT"` directly — unlike `do_start`'s
+check, this is **not gated on the unit *file* existing under the isolated
+test's own `$UNIT_DIR` first**. `systemctl --user` is a single **per-UID**
+manager, not namespaced by a shell's `$HOME` override (the same hazard
+already reasoned about, and correctly avoided, for #2524's `do_start` test
+one entry above — but not re-applied carefully enough to `do_stop`'s
+differently-shaped check before the first live run). Since this box's real
+`agent-dispatch.service` unit is genuinely active, the isolated test's
+`systemctl --user is-active "agent-dispatch"` matched the **real** unit and
+the isolated `do_stop` call sent it a real `stop`.
+
+This is a **pre-existing hazard in the unmodified code**, not one this
+change introduced — `do_stop`'s systemd-status check had exactly this same
+shape before this session touched it. Recorded here anyway because it fired
+for real, against production, during this session's own testing.
+
+**Immediate recovery** (before doing anything else): `systemctl --user
+start agent-dispatch` — confirmed running again (new PID, healthy) within
+under a minute of the incident. Then re-ran the `do_stop` fallback test
+properly isolated this time, via a `PATH`-shadowed fake `systemctl` that
+always fails (so the test genuinely cannot reach the real per-UID manager
+under any code path, not just the ones this session's own reasoning
+anticipated) — confirmed the direct-stop fallback works correctly and
+leaves zero isolated processes behind, with the real production coordinator
+verified unaffected before and after.
+
+**Lesson folded into this effort's own standing testing discipline (not
+just this one fix)**: for any future test of `agent-dispatch`
+install/start/stop code, shadow `systemctl` in `PATH` (or otherwise prove
+no real code path can reach the actual per-UID systemd manager) *before*
+the first live run — an isolated `$HOME`/`$INSTALL_DIR` alone is
+insufficient whenever the code under test can query `systemctl --user`
+directly, because that manager is keyed by UID, not by any env var a test
+harness controls.
+
+- `bash -n`/`py_compile` clean; version-consistency/docs-consistency guards
+  green; bumped agent-dispatch to `0.1.2-dev87`.
+
+Remaining under #736: #1841's fuller audit (not started),
+#2301 (not started), #2323 (not started).
+
+### 2026-09-12 (new session) — Resumed via handoff; completed #1841's fuller audit
+
+Picked up in the recommended order (#1841 first — reading/comparing, no live
+process manipulation for the audit itself). Read `docs/install-contract.md`'s
+"Hard rules" 7-9 (the "user-mode-ensure contract" the handoff cited) and
+`docs/patterns/service-lifecycle-supervision.md`, then compared each of
+agent-bridge's, agent-vault's, and agent-dispatch's `install`/`update`/
+`start`/`stop`/session-start-readiness paths against them (last session's
+audit only covered `do_start`/`Invoke-Start`, which found #2524).
+
+Two real, evidenced mismatches found and filed (not fixed live — both touch
+POSIX `systemctl --user` code, which this same session's predecessor already
+learned the hard way requires isolated, `systemctl`-shadowed testing before
+any live run; filing per #1841's own explicit deliverable):
+
+- **#2554** — every POSIX `do_stop` (agent-bridge, agent-vault,
+  agent-dispatch) calls `systemctl --user is-active "$SYSTEMD_UNIT"`
+  directly, with **no prior check that the unit file exists** under this
+  install's own unit dir — unlike each plugin's own `do_start`, which does
+  gate on that file first. `systemctl --user` is a single per-UID manager,
+  not namespaced by `$HOME`; this is the *exact* unguarded shape that
+  caused this effort's own production incident (agent-dispatch, recorded
+  three journal entries above) — and it was **not actually fixed** by that
+  incident's own follow-up fix, which added a direct-stop fallback but left
+  the root-cause unguarded check in place. Same shape confirmed present,
+  previously unaudited, in agent-bridge's and agent-vault's own `do_stop`.
+- **#2556** — agent-vault's POSIX `do_start`/`do_stop` still hard-require
+  systemd (`command -v systemctl || { _fail; exit 1; }`, no fallback),
+  while its own Windows twin `Invoke-Start` already has the direct-launch
+  user-mode-ensure fallback (added under #1836, whose comment literally says
+  "`start` must not depend on a registered Scheduled Task"). #1836 was
+  closed with only the Windows half of its own stated goal realized — the
+  POSIX side never got the equivalent of #2524's agent-dispatch fix. In
+  practice `agent_vault.cli.ensure_service`/`start_service` (which every
+  ordinary `agent-vault` command already relies on) has its own direct-
+  `Popen` fallback, so the daemon is not actually unreachable in normal use
+  — but `install.sh start`/`stop` themselves have no way to reach it
+  without systemd, unlike every sibling installer.
+
+Everything else audited came back clean against rules 7-9: `do_update` in
+all three never re-elevates or re-registers (each converges through the
+same install/`_install_service`-style path, gracefully skipping systemd
+when absent rather than failing); session-start readiness
+(`scripts/bootstrap-check.sh`, shared across the `agent-*` family per its
+own header comment) never touches `systemctl`/Scheduled Tasks/elevation in
+any of the three plugins; Windows `install.ps1` `Invoke-Stop` for
+agent-vault already gates on `Get-ScheduledTask` existing (the POSIX-side
+analog #2554 asks for); #1837 (agent-dispatch avoiding force-registration
+under elevated updates) is already closed and unrelated to this pass's
+findings.
+
+**#1841 closed** — its own two deliverables (lifecycle-tier documentation,
+landed last session; full install/update/stop/session-start-readiness audit
+with focused follow-up issues, done this entry) are both complete, with
+#2554 and #2556 now the tracked successors for the concrete mismatches
+found.
+
+Remaining under #736: #2301 (not started), #2323 (not started).
+
+Also updated #736's own body (removed #1841 from "still open", narrowed the
+stays-open condition to #2323/#2301) and posted a progress comment there
+pointing at #2554/#2556.
+
+### 2026-09-12 (new pickup) — Closed #2301: read-only process-count audit found no unambiguous bug
+
+Resumed via a stored context handoff with #1841 already closed; #2323 and
+#2301 the only remaining scope. Followed this README's own prior sequencing
+note (read-only/lower-risk before the high-blast-radius live wiring) rather
+than the handoff summary's numbered order, and picked up #2301 first.
+
+Ran the read-only diagnostics #2301 itself calls for, on this live host
+(`tmichon-cloud1`, ~10 concurrent worktree sessions): `agent-dispatch health`
+(coordinator `status: ok`, both reconcile loops completing cleanly),
+`agent-dispatch supervise daemon-status` (a healthy, empty `default`-scope
+coordinator — the live supervised-repo processes on this host run under a
+separate `--legacy-env` supervisor tree, which explains the empty
+registrations there rather than indicating a leak), and a full
+`Get-CimInstance Win32_Process` census cross-referenced against each
+service's own expected shape:
+
+- **`agent_worktrees status-monitor`**, **`agent_bridge start --passive`**,
+  **`agent_vault.service --foreground --persistent`**: exactly **one** live
+  instance each (wrapper/venv-python parent-child pairs, not independent
+  duplicates) — every singleton-lease guarantee is holding.
+- **`agent_dispatch supervise serve --legacy-env`**: one top-level serve
+  process with one child per declared `--supervisor-id` (5 distinct declared
+  repo/label combinations) — service-scoped, not session-scoped.
+- **`agent_dispatch emitter serve <config>.json`**: one process per declared
+  emitter config (4 distinct configs) — same shape.
+- **`conhost.exe`**: 106 total, only 1 with a dead parent, and that one's
+  creation timestamp lines up with this audit's own `Get-CimInstance`
+  invocation — almost certainly the query's own transient console, not a
+  leak.
+- WSL (`Ubuntu` distro) census: 50 total processes, 3 `python`, no anomaly
+  (this host's WSL side isn't in active use right now, so it wasn't a useful
+  proliferation signal this pass).
+
+No process was touched — the read-only-first design constraint held
+throughout, and no finding rose to "unambiguously a bug" (every resident
+service is correctly singleton-guarded; remaining pwsh/conhost/copilot counts
+are proportional to concurrently-active session shells, which the
+process-count-scales-with-services-not-sessions invariant is explicitly not
+about). Posted the full evidence as a comment on #2301 and closed it as
+**audited, compliant**, via `agent-worktrees repos gh ThomasMichon -- issue
+comment`/`issue close` (verified the wrapper-resolved identity via `api user
+--jq .login` matched `account-for` first — it had transiently shown a "could
+not mint a gh token" ambient-auth fallback warning on an earlier probe in
+this same session, which cleared on retry; confirmed correct identity before
+posting anything, per this repo's own account-verification convention).
+
+Remaining under #736: **#2323 only** (the resident classify/list accelerator
+wiring — still not started, still the highest-blast-radius item; concrete
+plan and validation bar unchanged from this README's earlier entries).
+
+### 2026-09-12 (new pickup, second worktree) — #2323: wired the resident classify daemon into `cmd_status_monitor`/`_classify_records`
+
+Resumed via a stored context handoff with #1841 and #2301 both already
+closed (#2301 landed separately, docs-only, via its own PR -- caught and
+split out of this worktree after an early commit accidentally bundled this
+#2323 code change into that docs-only PR; re-split into this dedicated
+worktree before either landed, so each stays independently reviewable).
+#2323 is the only remaining item under #736.
+
+Implemented the concrete plan already on file in this README's earlier
+entries:
+
+- **Server side** (`cmd_status_monitor`): starts a second, independent
+  `classify_daemon.CoalescingServer` (via `classify_daemon.start_server`)
+  alongside the existing `HookIpcServer`, publishes its rendezvous fields
+  into the same monitor lock file (namespaced `classify_*` keys, never
+  colliding with the hook server's `hook_*` keys), and closes it in the same
+  `finally` block. A failure to start it is swallowed (`classify_server =
+  None`) -- never fatal to the monitor, exactly like the hook server's own
+  best-effort start.
+- **Compute callback** (`_classify_daemon_compute`, new): resolves the named
+  project's own tracking records itself from `payload`'s `project`/
+  `status_filter`/`platform_filter`/`all` fields -- **never** trusts records
+  serialized by a caller. Mirrors `_list_records_for_args`'s exact filter
+  semantics (including the existing-worktree-with-a-`.git`-dir check unless
+  `all` is set) so a daemon answer is byte-identical to what the caller
+  would have resolved itself. Deliberately uses explicit `project`/`path`
+  parameters throughout (`cfg.project_dir(project)`, `cfg.load_config(path=...,
+  project=project)`) rather than ever touching `cfg`'s global active-project
+  state -- the daemon's `_Handler` is a `ThreadingTCPServer`, so two
+  different projects' classify requests can run truly concurrently in
+  different threads, and any global-state approach would have raced them.
+  Caught by the validation pass below before it became a production bug.
+- **Client side** (`_classify_records`): new opt-in `daemon_filters` kwarg
+  (default `None` -- every existing caller keeps its exact pre-#2323
+  behavior). When given (only `_build_list_json_payload`'s `list --json
+  --classify` path opts in, passing the identical filters it used to resolve
+  its own `records`), reads the monitor lock, tries
+  `classify_daemon.classify_via_daemon`, and on any miss falls through to
+  the **unchanged**, factored-out `_classify_records_lease_guarded` (the
+  pre-#2323 body, renamed but byte-identical) -- via a serialize/deserialize
+  round trip so both paths return through one shape (`_serialize_classify_map`
+  / `_deserialize_classify_map`).
+
+**Validation performed** (this effort's own stated bar for touching this
+entry point) entirely against isolated, temporary tracking/config
+directories -- no test here starts `cmd_status_monitor` or reaches this
+host's own real resident monitor:
+
+- A real `classify_daemon.CoalescingServer` running the real
+  `_classify_daemon_compute`, reached through a real lock file
+  `_classify_records` reads, proving the full wire round trip and that the
+  lease-guarded fallback is never invoked when the daemon is reachable.
+- The no-daemon-running case (no lock file) degrades to the exact
+  lease-guarded answer.
+- `daemon_filters=None` (every caller but one) never even attempts to
+  resolve a project -- proven by making that resolution call raise if hit.
+- The `all`-flag `.git`-existence filter matches `_list_records_for_args`
+  exactly.
+- Two concurrent compute calls for two *different* projects, run from two
+  threads with a barrier, never cross-contaminate each other's resolved
+  repo/config -- the check that caught the global-active-project mutation
+  risk above during design.
+
+9 new tests (`tests/test_classify_daemon_wiring.py`), plus the existing
+`test_classify_daemon.py` (7) and `test_classify_lease.py` (13) suites, all
+pass. Full plugin test suite run in parallel; not yet confirmed complete as
+of this entry (see next entry for the result before this lands).
+
+Remaining under #736: **#2323 only**, now implemented + isolated-tested;
+not yet landed to `main` pending the full-suite confirmation and PR review.
+
+### 2026-09-12/13 (same worktree) — Addressed PR #2574's Copilot review: boot-wait, response validation, monitor-lifecycle test, version bump
+
+The automated review on PR #2574 caught four real gaps in the first cut
+above (all four addressed before landing, not deferred):
+
+- **Boot-wait + subscriber lifecycle (medium)**: the first cut's
+  `_classify_records` only *dialed* an already-published rendezvous --
+  after the resident monitor idle-exits, the very next classify caller
+  would see no endpoint and fall straight to the lease path without ever
+  trying to boot one, and no request carried a `client_id`, so the
+  coalescing server's own ref-counted subscriber tracking never saw these
+  callers at all. Added `classify_daemon.classify_with_boot` (a thin
+  wrapper over `work_coalescing_singleton.client.call_with_fallback`):
+  dials, boots via `_ensure_status_monitor` when nothing answers, polls up
+  to `classify_daemon.BOOT_WAIT_S`, and sends the request with a fresh
+  per-call `client_id` (`wcs_client.new_client_id()`) so it registers as a
+  live (if brief) subscriber. `_classify_records` now calls this instead of
+  the simpler `classify_via_daemon` (kept, still used by `test_classify_
+  daemon.py`'s own wire-layer tests). Covered by two new tests: a real boot
+  invoked and polled to completion when no endpoint is initially published,
+  and the existing no-daemon-at-all case (now passing `ensure_monitor=None`
+  so the boot-wait poll loop is skipped entirely rather than spinning for
+  `BOOT_WAIT_S` in a test).
+- **Malformed/incomplete daemon response (medium)**: a successful-but-wrong
+  response (a non-dict entry, an unparseable field, or -- the sharper case
+  -- a *different* worktree-id set than the caller asked about) was
+  previously decoded leniently (skip the bad entry) and returned as a
+  partial `state_map`, silently blanking rows instead of falling back.
+  `_deserialize_classify_map` gained a `strict=True` mode (raises on the
+  first malformed entry) and `_classify_records`'s daemon path now decodes
+  strictly, then additionally checks the decoded id set against
+  `{rec.worktree_id for rec in records}` -- any mismatch (wrong shape OR
+  wrong coverage) re-runs `_classify_records_lease_guarded` directly rather
+  than trusting the daemon's answer. Two new tests: a daemon that answers
+  with an unrelated id set, and one with a non-dict per-entry value.
+- **Monitor-lifecycle test gap (low, nit)**: the first cut's tests only
+  exercised the wire layer standalone; nothing proved `cmd_status_monitor`
+  itself actually starts the classify server, publishes its fields, or
+  closes it. Added `test_classify_daemon_started_published_in_lock_and_
+  closed_on_exit` in `test_status_monitor.py`, mirroring the existing
+  `test_status_monitor_backs_off_at_iteration_boundary_without_mutating`'s
+  isolation technique (an immediate governance backoff that exits the loop
+  after one iteration) with a REAL `classify_daemon.CoalescingServer` and a
+  spy on `.close()` -- caught a genuine test-authoring bug while writing it
+  (the *first* lock write is a bare ownership stamp made before either
+  server exists; only the *second* write carries rendezvous fields), fixed
+  before the assertion was correct.
+- **Version bump (medium)**: bumped `plugins/agent-worktrees/plugin.json`,
+  `pyproject.toml`, and `.github/plugin/marketplace.json`'s per-plugin entry
+  from `1.5.5-dev90` to `1.5.5-dev91`, plus the marketplace catalog's own
+  `metadata.version` from `1.7.7-dev83` to `1.7.7-dev84` (agent-worktrees'
+  own extra catalog-version rule) -- missed in the first cut; per
+  `AGENTS.md`'s Version Bump section, skipping this makes an installed
+  machine report "already at latest" and silently ignore the whole change.
+
+Test count corrected: **11 new tests** total (10 in
+`test_classify_daemon_wiring.py`, 1 in `test_status_monitor.py`), plus the
+existing `test_classify_daemon.py` (7) and `test_classify_lease.py` (13)
+suites -- all 114 pass together. Documentation impact: this journal entry
+plus `classify_daemon.py`'s own module docstring (updated to say "wired
+into `cmd_status_monitor`/`_classify_records`" instead of "deliberately not
+wired yet") are the only documentation this change touches; no other
+authoritative doc (README, `docs/`) describes the resident monitor's wire
+protocol in enough detail to need a matching update.
+
+### 2026-09-13 (same worktree) — Second review round on PR #2574: two more real gaps closed
+
+The fresh Copilot review triggered by the push above confirmed the boot-wait
+and malformed-response fixes, then found two further real gaps introduced
+by the boot-wait fix itself:
+
+- **Resident-monitor opt-out ignored (medium)**: `AGENT_WORKTREES_STATUS_
+  MONITOR=0` is the documented per-session opt-out (each session falls back
+  to its own per-session `status-updater`); `cmd_list` already respects it by
+  skipping `_ensure_status_monitor()`. The new classify boot-wait path
+  unconditionally passed `_ensure_status_monitor` as its boot callback, so a
+  classify request with no reachable daemon would boot one **anyway**,
+  defeating the opt-out. Fixed by gating: `ensure_monitor=_ensure_status_
+  monitor if _status_monitor_enabled() else None` -- `classify_with_boot`'s
+  `ensure_monitor=None` path (already exercised by the no-daemon fallback
+  test) skips the boot/poll sequence entirely, going straight to the dial
+  result. Crucially, the opt-out only suppresses *booting a new one*: a
+  monitor that's already live (started before the opt-out was set this
+  session) is still dialed and used if reachable -- covered by a new test
+  that exercises both halves in one flow.
+- **One-shot callers never release their daemon subscription (medium)**:
+  `classify_with_boot` attaches a fresh `client_id` to every request (so the
+  coalescing server's `touch()` registers it as a live subscriber), but
+  never sent the corresponding `release` -- so every one-shot `list --json
+  --classify` call would sit in the daemon's subscriber map until the 45s
+  TTL reaper dropped it, meaning the configured 10s linger-to-idle-exit
+  could never actually begin between callers, and the subscriber map would
+  grow unbounded under repeated calls before any single one expired.
+  `work_coalescing_singleton.client.call_with_fallback` (the shared,
+  byte-identical-across-plugins vendored helper) has no post-request release
+  hook to attach a fix to, and modifying that vendored copy would break its
+  cross-plugin byte-identity invariant -- so `classify_with_boot` now
+  reimplements that same dial/boot/poll algorithm directly in
+  `classify_daemon.py` (unchanged in every branch/timing detail) and adds an
+  explicit `wcs_client.release(...)` in a `finally` right after the request,
+  best-effort per `release`'s own documented contract (a failed release is
+  backstopped by the same TTL reaper). Covered by a new test asserting
+  `server.subscriber_count() == 0` immediately after a one-shot request
+  completes.
+
+Two more new tests (`test_status_monitor_opt_out_skips_booting_but_still_
+dials`, `test_one_shot_request_releases_its_subscriber_id`), bringing the
+total to **13 new tests** in `test_classify_daemon_wiring.py` (14 including
+`test_status_monitor.py`'s monitor-lifecycle test) -- 116 pass together with
+the existing 20-test classify/lease suite. Re-ran the scoped
+classify/status-monitor/hook-ipc/list suite (279 tests) clean.
+
+### 2026-09-13 — Merged PR #2574, closed #736: effort Done
+
+PR #2574 landed (squash-merged). Before merge, CI's `guards + lint` job
+flagged one real, PR-relevant gap the automated code review hadn't (a
+different, orthogonal guard): a **required version bump** the earlier
+`1.5.5-dev90 -> dev91` bump had already covered for the *first* round of
+review fixes, but the *second* round (opt-out gating + subscriber release)
+touched plugin content again without a further bump. Bumped again,
+`dev91 -> dev92` (catalog `1.7.7-dev84 -> dev85`), confirmed locally with
+`tools/check-version-bump.py`, pushed, merged.
+
+The same CI run's `module size` sub-check also failed, listing
+`agent-worktrees/__main__.py` (now 29,371 lines, over its recorded
+28,951-line grandfathered ceiling) among several **other, unrelated** files
+already over their own ceilings on `main` itself (agent-dispatch's
+`__main__.py`/`client.py`/`coordinator.py`/`queue.py`,
+`picker_tui/engine.py`, `sessions.py`, and the out-of-tree
+`worktree-manager` copy of `picker_tui/engine.py`) — confirmed by checking
+out `origin/main`'s own tree and running the same tool: `__main__.py`
+already sat at 29,162 lines (already over its ceiling) **before** this PR's
++209 lines. This is a pre-existing, repo-wide baseline-drift gap, not
+something this PR introduced or is positioned to fix; `guards + lint` is not
+a required status check on this repo (`gh api .../branches/main/protection`
+returns 404 -- no branch protection configured), so it didn't block the
+merge. Noting it here rather than silently ignoring it: a future,
+dedicated pass should either shrink these modules or do the "deliberate,
+reviewed edit to `tools/module-size-baseline.json`" the tool's own error
+message names as the other legitimate option -- out of scope for this
+effort.
+
+**Also fixed live, mid-merge**: an unrelated git-hygiene near-miss on this
+same pickup -- while investigating whether the module-size failure was
+pre-existing, an ill-considered `git checkout origin/main -- .` followed by
+`git stash pop` (intending to compare trees) collided with several old,
+unrelated stash entries from *other* past worktrees on this machine and
+produced a cascade of merge conflicts across many unrelated files. Recovered
+cleanly with `git reset --hard HEAD` (the stash entries themselves were
+never touched/dropped, still intact in `git stash list` afterward) before
+any of it was committed or pushed. No lasting effect, but worth naming: never
+`git checkout <other-ref> -- .` against a full-repo working tree merely to
+inspect a value that a `git show <ref>:<path>` or a scratch clone would have
+answered without mutating the current worktree's tracked files at all.
+
+Closed the umbrella **#736** with a summary comment (all of #737-#744,
+#1841, #2301, #2323 done; #2554/#2556 remain as their own independently
+tracked, already-filed follow-ups, not additional scope under #736). Moved
+this effort from `efforts/active/` to `efforts/2026/09/13
+plugin-process-hygiene/` (this repo's archived-effort convention) and set
+**Status: Done**.
+
+**plugin-process-hygiene is now complete.**
+

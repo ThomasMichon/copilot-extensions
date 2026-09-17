@@ -2046,9 +2046,12 @@ async def _provision_relay_helpers(manager, name: str) -> bool:
     but never raises. Required-relay callers use the result to gate launch.
     """
     from .codespace_assets import build_provision_command
+    from .config import load_merged_config
 
     try:
-        command = build_provision_command()
+        cfg = load_merged_config(include_cwd=False)
+        ado_host = getattr(cfg.credentials, "ado_host", None)
+        command = build_provision_command(ado_host=ado_host)
         result = await manager.exec_command(name, command, timeout=30.0)
         if result.exit_code == 0 and not getattr(result, "timed_out", False):
             log.debug("Relay helpers provisioned on %s", name)
@@ -2419,7 +2422,7 @@ async def _warm_remote_auth_cache(
     hosts plus the ADO REST/feed bare-token helpers. Failures are debug-only and
     never block the connect.
     """
-    from .auth_preflight import REMOTE_LIST_COMMAND, host_from_url, parse_remote_hosts
+    from . import auth_preflight as auth
 
     async def _run_remote(cmd: str, *, command_timeout: float) -> str:
         wrapped = f"bash -l -c {shlex.quote(cmd)}"
@@ -2430,16 +2433,14 @@ async def _warm_remote_auth_cache(
 
     hosts: list[str] = []
     try:
-        remote_output = await _run_remote(REMOTE_LIST_COMMAND, command_timeout=10.0)
-        hosts.extend(parse_remote_hosts(remote_output))
+        remote_output = await _run_remote(auth.REMOTE_LIST_COMMAND, command_timeout=10.0)
+        hosts.extend(auth.parse_remote_hosts(remote_output))
     except Exception as exc:
         log.debug("Auth-cache warm-up remote host discovery on %s failed: %s", name, exc)
-
     if config.dotfiles_repo:
-        dotfiles_host = host_from_url(f"https://github.com/{config.dotfiles_repo}")
+        dotfiles_host = auth.host_from_url(f"https://github.com/{config.dotfiles_repo}")
         if dotfiles_host:
             hosts.append(dotfiles_host)
-
     deduped_hosts = list(dict.fromkeys(h for h in hosts if h))
     commands = ["set +e"]
     for host in deduped_hosts:
@@ -2449,7 +2450,9 @@ async def _warm_remote_auth_cache(
             "| ado-auth-helper get >/dev/null 2>/dev/null || true"
         )
     commands.extend([
-        "azure-auth-helper get-access-token >/dev/null 2>/dev/null || true",
+        "ado-auth-helper get-access-token "
+        f"--resource {shlex.quote(auth.ADO_REST_RESOURCE)} "
+        ">/dev/null 2>/dev/null || true",
         "ado-auth-helper get-access-token >/dev/null 2>/dev/null || true",
     ])
     command = relay_env + " " + "; ".join(commands)
@@ -4850,8 +4853,11 @@ def _cmd_provision_command() -> int:
     Prints the idempotent bash command to stdout.
     """
     from .codespace_assets import build_provision_command
+    from .config import load_merged_config
 
-    print(build_provision_command())
+    cfg = load_merged_config(include_cwd=False)
+    ado_host = getattr(cfg.credentials, "ado_host", None)
+    print(build_provision_command(ado_host=ado_host))
     return 0
 
 

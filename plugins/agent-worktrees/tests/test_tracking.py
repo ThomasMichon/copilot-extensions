@@ -11,16 +11,20 @@ from agent_worktrees.effort_focus import ActiveEffort
 from agent_worktrees.tracking import (
     ClaimRef,
     ControllerRelation,
+    FollowUpRef,
     ResourceClaim,
     SessionEntry,
     WorktreeRecord,
     _atomic_write,
     _RecordLock,
     _strip_control_chars,
+    add_follow_up,
     add_resource_claim,
     cap_title,
     create_new_record,
     deregister_session,
+    dismiss_follow_up,
+    effective_open_follow_up_count,
     find_orphaned_children,
     find_paired_record,
     find_worktree_id_by_cwd,
@@ -30,9 +34,11 @@ from agent_worktrees.tracking import (
     load_record,
     load_record_by_id,
     mark_resumed,
+    open_handoff,
     parse_claim_ref,
     register_session,
     release_all_resources,
+    resolve_follow_up,
     resolve_worktree_path,
     retire_record,
     save_record,
@@ -857,6 +863,25 @@ completed_at: null
 class TestSessionRegistration:
     """Test hook-invoked session registration."""
 
+    @staticmethod
+    def _new_record(tracking_dir: Path, wt_id: str) -> None:
+        rec = WorktreeRecord(
+            worktree_id=wt_id,
+            branch=f"worktree/{wt_id}",
+            worktree_path=f"/tmp/{wt_id}",
+            repo="test-repo",
+            machine="test",
+            platform="wsl",
+            started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00",
+            resume_count=0,
+            title=None,
+            status="active",
+            completed_at=None,
+            sessions=[],
+        )
+        save_record(rec, tracking_dir / f"{wt_id}.yaml")
+
     def test_register_new_session(self, tmp_tracking_dir: Path, monkeypatch_config):
         rec = WorktreeRecord(
             worktree_id="reg-wt",
@@ -953,6 +978,49 @@ class TestSessionRegistration:
 
         loaded = load_record(tmp_tracking_dir / "end-wt.yaml")
         assert loaded.sessions[0].ended_at is not None
+
+    def test_register_session_adds_live_session_claim(
+        self, tmp_tracking_dir: Path, monkeypatch_config,
+    ):
+        """register_session journals a live ``session`` ResourceClaim (Phase 8)."""
+        self._new_record(tmp_tracking_dir, "claim-wt")
+
+        register_session("claim-wt", "session-claim-1")
+
+        loaded = load_record(tmp_tracking_dir / "claim-wt.yaml")
+        claims = [c for c in loaded.resources if c.kind == "session"]
+        assert len(claims) == 1
+        assert claims[0].ref == "test/test-repo/claim-wt#session-claim-1"
+        assert claims[0].state == "active"
+        assert claims[0].is_live
+
+    def test_register_session_claim_is_idempotent(
+        self, tmp_tracking_dir: Path, monkeypatch_config,
+    ):
+        """Re-registering the same session does not duplicate its claim."""
+        self._new_record(tmp_tracking_dir, "claim-dup-wt")
+
+        register_session("claim-dup-wt", "session-claim-2")
+        register_session("claim-dup-wt", "session-claim-2")
+
+        loaded = load_record(tmp_tracking_dir / "claim-dup-wt.yaml")
+        claims = [c for c in loaded.resources if c.kind == "session"]
+        assert len(claims) == 1
+
+    def test_deregister_session_releases_its_claim(
+        self, tmp_tracking_dir: Path, monkeypatch_config,
+    ):
+        """A clean sessionEnd releases (not just settles) the session's claim."""
+        self._new_record(tmp_tracking_dir, "release-wt")
+        register_session("release-wt", "session-claim-3")
+
+        deregister_session("release-wt", "session-claim-3")
+
+        loaded = load_record(tmp_tracking_dir / "release-wt.yaml")
+        claims = [c for c in loaded.resources if c.kind == "session"]
+        assert len(claims) == 1
+        assert claims[0].state == "released"
+        assert not claims[0].is_live
 
     def test_register_nonexistent_worktree(self, tmp_tracking_dir: Path, monkeypatch_config):
         """Registering against a missing worktree is a no-op."""
@@ -1069,6 +1137,68 @@ class TestSessionRegistration:
         loaded = load_record(tmp_tracking_dir / "noop-wt.yaml")
         assert len(loaded.sessions) == 1
         assert loaded.sessions[0].ended_at is None
+
+    def test_register_session_returns_fresh_handoff_for_new_entry(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        """#2457 Stage 10: a fresh session entry consuming a pending token via
+        ``handoff_token`` gets its head transferred, and the call reports the
+        just-linked SessionHandoff so callers can emit Stage 10/11 exactly
+        once."""
+        self._new_record(tmp_tracking_dir, "wt-fresh-link")
+        register_session("wt-fresh-link", "old")
+        rec = load_record(tmp_tracking_dir / "wt-fresh-link.yaml")
+        open_handoff(rec, "old", "token-a")
+
+        linked = register_session("wt-fresh-link", "new", handoff_token="token-a")
+
+        assert linked is not None
+        assert linked.token == "token-a"
+        assert linked.predecessor == "old"
+        assert linked.successor == "new"
+        rec = load_record(tmp_tracking_dir / "wt-fresh-link.yaml")
+        assert rec.resolved_head_session == "new"
+
+    def test_register_session_returns_fresh_handoff_for_existing_entry(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        """The same, but the successor session is already tracked (e.g. a
+        candidate registered earlier via associate_handoff_candidate)."""
+        self._new_record(tmp_tracking_dir, "wt-existing-link")
+        register_session("wt-existing-link", "old")
+        register_session("wt-existing-link", "new")
+        rec = load_record(tmp_tracking_dir / "wt-existing-link.yaml")
+        open_handoff(rec, "old", "token-b")
+
+        linked = register_session("wt-existing-link", "new", handoff_token="token-b")
+
+        assert linked is not None
+        assert linked.token == "token-b"
+        assert linked.predecessor == "old"
+        assert linked.successor == "new"
+
+    def test_register_session_reports_none_for_an_already_linked_token(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        """A second call for an already-linked token is idempotent at the
+        tracking layer (link_handoff no-ops) and must report no fresh link,
+        so callers don't re-emit Stage 10/11."""
+        self._new_record(tmp_tracking_dir, "wt-idempotent")
+        register_session("wt-idempotent", "old")
+        rec = load_record(tmp_tracking_dir / "wt-idempotent.yaml")
+        open_handoff(rec, "old", "token-c")
+        first = register_session("wt-idempotent", "new", handoff_token="token-c")
+        assert first is not None
+
+        second = register_session("wt-idempotent", "new", handoff_token="token-c")
+
+        assert second is None
+
+    def test_register_session_returns_none_without_a_handoff_token(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        self._new_record(tmp_tracking_dir, "wt-no-token")
+        assert register_session("wt-no-token", "solo") is None
 
 
 # ---------------------------------------------------------------------------
@@ -1601,6 +1731,100 @@ class TestPairedRecordResolution:
         assert find_paired_record(rec) is None
 
 
+class TestOwningTrackingDirResolution:
+    """Regression for copilot-extensions#2788: a foreign-project record must
+    never be looked up (or, worse, re-saved) into the ambient project's own
+    tracking directory just because that happens to be the current process's
+    resolved project.
+    """
+
+    def _rec(self, wt_id: str, *, repo: str, **overrides) -> WorktreeRecord:
+        base = dict(
+            worktree_id=wt_id,
+            branch=f"worktree/{wt_id}",
+            worktree_path=f"/tmp/src/{wt_id}",
+            repo=repo,
+            machine="test",
+            platform="wsl",
+            started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00",
+            resume_count=0,
+            title=None,
+            status="active",
+            completed_at=None,
+            sessions=[],
+        )
+        base.update(overrides)
+        return WorktreeRecord(**base)
+
+    def _wire_two_projects(self, monkeypatch, tmp_path: Path):
+        """Ambient project is 'harness-proj'; 'knowledge-proj' is a sibling
+        project on the same machine (mirrors a harness + bound knowledge
+        repo pairing, or simply two unrelated adopted projects)."""
+        from agent_worktrees import config as _cfg
+        from agent_worktrees import repos as _repos
+        from agent_worktrees import tracking as _t
+
+        harness_dir = tmp_path / ".harness-proj" / "worktrees"
+        knowledge_dir = tmp_path / ".knowledge-proj" / "worktrees"
+        harness_dir.mkdir(parents=True)
+        knowledge_dir.mkdir(parents=True)
+
+        _cfg.set_active_project("harness-proj")
+        monkeypatch.setattr(_cfg, "tracking_dir", lambda: harness_dir)
+        monkeypatch.setattr(
+            _cfg, "project_dir",
+            lambda name=None: tmp_path / f".{name or 'harness-proj'}",
+        )
+        monkeypatch.setattr(
+            _repos, "_adopted_project_names",
+            lambda: {"harness-proj", "knowledge-proj"},
+        )
+        return harness_dir, knowledge_dir, _t
+
+    def test_yaml_path_uses_records_own_repo_not_ambient_project(
+        self, tmp_path: Path, monkeypatch
+    ):
+        harness_dir, knowledge_dir, _t = self._wire_two_projects(monkeypatch, tmp_path)
+        rec = self._rec("wt-k", repo="knowledge-proj")
+        # Ambient project is 'harness-proj', but the record itself knows it
+        # belongs to 'knowledge-proj' -- yaml_path must honor that, not the
+        # ambient tracking_dir().
+        assert rec.yaml_path == knowledge_dir / "wt-k.yaml"
+        assert rec.yaml_path != harness_dir / "wt-k.yaml"
+
+    def test_bare_id_lookup_falls_back_to_owning_project_without_duplicating(
+        self, tmp_path: Path, monkeypatch
+    ):
+        harness_dir, knowledge_dir, _t = self._wire_two_projects(monkeypatch, tmp_path)
+        knowledge_rec = self._rec("wt-k", repo="knowledge-proj")
+        save_record(knowledge_rec, knowledge_dir / "wt-k.yaml")
+
+        # register_session only has a bare worktree_id -- ambient project is
+        # 'harness-proj', but 'wt-k' actually lives under 'knowledge-proj'.
+        # Pre-fix, this would silently create a stale duplicate under
+        # harness_dir instead of updating the real record.
+        _t.register_session("wt-k", "session-1")
+
+        assert not (harness_dir / "wt-k.yaml").exists()
+        updated = load_record(knowledge_dir / "wt-k.yaml")
+        assert updated.sessions and updated.sessions[-1].session_id == "session-1"
+
+    def test_bare_id_lookup_prefers_ambient_when_present_there(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """The fast path stays fast: when the id genuinely belongs to the
+        ambient project, no cross-project scan result is needed/used."""
+        harness_dir, knowledge_dir, _t = self._wire_two_projects(monkeypatch, tmp_path)
+        own_rec = self._rec("wt-own", repo="harness-proj")
+        save_record(own_rec, harness_dir / "wt-own.yaml")
+
+        _t.register_session("wt-own", "session-1")
+
+        assert (harness_dir / "wt-own.yaml").exists()
+        assert not (knowledge_dir / "wt-own.yaml").exists()
+
+
 class TestRetireRecord:
     """retire_record -- delete outright, or tombstone a paired sibling (#957/#220).
 
@@ -1797,6 +2021,27 @@ class TestCascadeAndOrphans:
         ])
         self._save(tmp_tracking_dir, parent)
         assert release_all_resources(parent) == []
+
+    def test_release_all_resources_excludes_session_claims(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        """A live ``session`` claim (Phase 8) survives the generic cascade.
+
+        It has its own lifecycle (settled on finalize, released only by
+        ``deregister_session``); the generic release-everything cascade must
+        not release it out from under a still-running session.
+        """
+        parent = self._rec("wt-session-cascade", resources=[
+            ResourceClaim(kind="worktree", ref="test/other/wt-child", state="active"),
+            ResourceClaim(kind="session", ref="test/p/wt-session-cascade#s1", state="active"),
+        ])
+        self._save(tmp_tracking_dir, parent)
+        released = release_all_resources(parent)
+        assert [c.ref for c in released] == ["test/other/wt-child"]
+        reloaded = load_record_by_id("wt-session-cascade")
+        session_claim = next(c for c in reloaded.resources if c.kind == "session")
+        assert session_claim.state == "active"
+        assert session_claim.is_live
 
     def test_find_orphaned_children_finalized_and_absent_parents(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
@@ -2118,6 +2363,21 @@ class TestSetDisposition:
         assert loaded.follow_up is True
         assert loaded.summary == "work left"
         assert loaded.status_note_at  # stamped
+
+    def test_set_follow_up_true_reopens_finalized_owner(self, tmp_path: Path, monkeypatch):
+        # worktree-finality-and-obligations Phase 3: any caller asserting
+        # follow_up=True (manual `status --follow-up`, or `effort-focus
+        # bind`'s automatic set_disposition(follow_up=True, ...)) reopens a
+        # finalized owner -- not just the itemized ledger path.
+        rec = self._rec(status="finalized", completed_at="2026-09-01T00:00:00")
+        p = tmp_path / "wt.yaml"
+        monkeypatch.setattr("agent_worktrees.tracking.save_record",
+                            lambda record, path=None: save_record(record, p))
+        set_disposition(rec, follow_up=True)
+        loaded = load_record(p)
+        assert loaded.status == "active"
+        assert loaded.completed_at is None
+        assert loaded.last_finalized_at == "2026-09-01T00:00:00"
 
     def test_partial_update_preserves_other_field(self, tmp_path: Path, monkeypatch):
         rec = self._rec(follow_up=True, summary="old")
@@ -2606,6 +2866,79 @@ class TestAddResourceClaim:
 
         assert [claim.ref for claim in rec.resources] == ["host/repo/wt-B"]
 
+    def test_finalized_worktree_can_add_claim(self, tmp_path: Path):
+        """``finalized`` is not terminal -- a resumed worktree may still take
+        on new outbound obligations (docs/worktree-lifecycle.md), and the
+        record atomically reopens to `active` (worktree-finality-and-
+        obligations, Phase 2 reopen transaction)."""
+        rec = self._rec(tmp_path)
+        rec.status = "finalized"
+        rec.completed_at = "2026-09-01T00:00:00"
+
+        add_resource_claim(
+            rec,
+            ResourceClaim(kind="worktree", ref="host/repo/wt-B"),
+            save=False,
+        )
+
+        assert [claim.ref for claim in rec.resources] == ["host/repo/wt-B"]
+        assert rec.status == "active"
+        assert rec.completed_at is None
+        assert rec.last_finalized_at == "2026-09-01T00:00:00"
+
+    def test_reactivating_a_released_claim_reopens_finalized_owner(
+        self, tmp_path: Path,
+    ):
+        rec = self._rec(tmp_path)
+        add_resource_claim(
+            rec, ResourceClaim(kind="worktree", ref="host/repo/wt-B",
+                                state="released"),
+            save=False,
+        )
+        rec.status = "finalized"
+
+        add_resource_claim(
+            rec, ResourceClaim(kind="worktree", ref="host/repo/wt-B",
+                                state="active"),
+            save=False,
+        )
+
+        assert rec.status == "active"
+        assert rec.resources[0].state == "active"
+
+    def test_idempotent_replay_does_not_reopen_finalized_owner(
+        self, tmp_path: Path,
+    ):
+        rec = self._rec(tmp_path)
+        claim = ResourceClaim(kind="worktree", ref="host/repo/wt-B",
+                               state="active", note="x")
+        add_resource_claim(rec, claim, save=False)
+        rec.status = "finalized"
+
+        # Re-adding the exact same kind/state/note is a no-op replay.
+        add_resource_claim(
+            rec, ResourceClaim(kind="worktree", ref="host/repo/wt-B",
+                                state="active", note="x"),
+            save=False,
+        )
+
+        assert rec.status == "finalized"
+
+    def test_adding_an_already_released_claim_does_not_reopen(
+        self, tmp_path: Path,
+    ):
+        rec = self._rec(tmp_path)
+        rec.status = "finalized"
+
+        # A claim that is not itself live never increases held obligations.
+        add_resource_claim(
+            rec, ResourceClaim(kind="worktree", ref="host/repo/wt-B",
+                                state="released"),
+            save=False,
+        )
+
+        assert rec.status == "finalized"
+
     def test_complete_managed_worktree_rejects_claim(self, tmp_path: Path):
         rec = self._rec(tmp_path)
         rec.kind = "bridge"
@@ -2628,3 +2961,91 @@ class TestAddResourceClaim:
         loaded = load_record(tmp_path / "wt-B.yaml")
         assert loaded.owner_ref == "anomalous-potato/test-chamber/wt-A#s1"
         assert loaded.owner_claim_ref.worktree_id == "wt-A"
+
+
+class TestFollowUpLedger:
+    """worktree-finality-and-obligations Phase 3: the itemized follow-up
+    ledger replacing the boolean-only `follow_up` flag."""
+
+    def _rec(self, tmp_path: Path) -> WorktreeRecord:
+        return create_new_record(
+            "wt-A", "worktree/wt-A", str(tmp_path / "wt-A"), "test-chamber",
+            "anomalous-potato", "wsl", tmp_path,
+        )
+
+    def test_add_creates_open_item(self, tmp_path: Path):
+        rec = self._rec(tmp_path)
+        item = add_follow_up(rec, "deploy the merged runtime", save=False)
+        assert item.state == "open"
+        assert item.revision == 1
+        assert rec.follow_ups == [item]
+        assert effective_open_follow_up_count(rec) == 1
+
+    def test_add_with_refs_round_trips_through_yaml(self, tmp_path: Path):
+        rec = self._rec(tmp_path)
+        add_follow_up(
+            rec, "file the bug", refs=[FollowUpRef(kind="issue", ref="org/repo#9")],
+            save=False,
+        )
+        path = tmp_path / "wt-A.yaml"
+        save_record(rec, path)
+        loaded = load_record(path)
+        assert len(loaded.follow_ups) == 1
+        fu = loaded.follow_ups[0]
+        assert fu.summary == "file the bug"
+        assert fu.refs == [FollowUpRef(kind="issue", ref="org/repo#9")]
+
+    def test_resolve_clears_effective_open_count(self, tmp_path: Path):
+        rec = self._rec(tmp_path)
+        item = add_follow_up(rec, "x", save=False)
+        resolved = resolve_follow_up(rec, item.id, result_ref="org/repo#PR", save=False)
+        assert resolved.state == "resolved"
+        assert resolved.result_ref == "org/repo#PR"
+        assert resolved.revision == 2
+        assert effective_open_follow_up_count(rec) == 0
+
+    def test_dismiss_clears_effective_open_count(self, tmp_path: Path):
+        rec = self._rec(tmp_path)
+        item = add_follow_up(rec, "x", save=False)
+        dismissed = dismiss_follow_up(rec, item.id, reason="not needed", save=False)
+        assert dismissed.state == "dismissed"
+        assert dismissed.reason == "not needed"
+        assert effective_open_follow_up_count(rec) == 0
+
+    def test_resolve_unknown_id_is_a_noop(self, tmp_path: Path):
+        rec = self._rec(tmp_path)
+        assert resolve_follow_up(rec, "fu-missing", save=False) is None
+
+    def test_legacy_boolean_counts_as_one_when_ledger_empty(self, tmp_path: Path):
+        rec = self._rec(tmp_path)
+        rec.follow_up = True
+        assert effective_open_follow_up_count(rec) == 1
+
+    def test_legacy_boolean_does_not_double_count_with_items(self, tmp_path: Path):
+        rec = self._rec(tmp_path)
+        rec.follow_up = True
+        add_follow_up(rec, "x", save=False)
+        add_follow_up(rec, "y", save=False)
+        assert effective_open_follow_up_count(rec) == 2
+
+    def test_adding_open_follow_up_reopens_finalized_owner(self, tmp_path: Path):
+        rec = self._rec(tmp_path)
+        rec.status = "finalized"
+        rec.completed_at = "2026-09-01T00:00:00"
+        add_follow_up(rec, "deploy it", save=False)
+        assert rec.status == "active"
+        assert rec.completed_at is None
+        assert rec.last_finalized_at == "2026-09-01T00:00:00"
+
+    def test_add_rejects_finalizing_owner(self, tmp_path: Path):
+        rec = self._rec(tmp_path)
+        rec.status = "finalizing"
+        with pytest.raises(ValueError, match="creator ownership is frozen"):
+            add_follow_up(rec, "x", save=False)
+
+    def test_add_rejects_orphaned_owner(self, tmp_path: Path):
+        rec = self._rec(tmp_path)
+        rec.status = "orphaned"
+        with pytest.raises(ValueError, match="creator ownership is frozen"):
+            add_follow_up(rec, "x", save=False)
+

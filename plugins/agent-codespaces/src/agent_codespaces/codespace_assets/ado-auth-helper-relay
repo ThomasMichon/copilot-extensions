@@ -22,9 +22,35 @@
 # the VS Code extension handle auth.
 
 ACTION="${1:-}"
-SCOPE="${2:-}"
-HELPER_NAME="${LC_GIT_CREDENTIAL_RELAY_HELPER:-}"
-ADO_REST_RESOURCE="499b84ac-1321-427f-aa17-267ca6975798"
+shift 2>/dev/null || true
+# get-access-token accepts either the historical bare positional
+# scope/resource, or an `az account get-access-token`-style `--scope VALUE`
+# / `--resource VALUE` flag (both forms are in the wild -- odsp-web's
+# odsp-npm-token.sh calls `get-access-token --resource <guid>`, and a bare
+# `--resource`/`--scope` was previously mis-parsed as the scope value
+# itself, silently denied by the host allowlist, and returned empty (#384)).
+SCOPE="${1:-}"
+if [ "$ACTION" = "get-access-token" ]; then
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --scope|--resource)
+                SCOPE="${2:-}"
+                shift 2 2>/dev/null || shift
+                ;;
+            --scope=*)
+                SCOPE="${1#--scope=}"
+                shift
+                ;;
+            --resource=*)
+                SCOPE="${1#--resource=}"
+                shift
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+fi
 DEFAULT_RELAY_PORT=9857
 RELAY_PORTS_DIR="$HOME/.agent-bridge/relay-ports"
 RELAY_PORT="${LC_GIT_CREDENTIAL_RELAY:-}"
@@ -265,16 +291,6 @@ sys.exit(1)
         ;;
 
     get-access-token)
-        # The relay wrapper is installed as both ado-auth-helper and
-        # azure-auth-helper. Preserve the historical ADO helper behavior for
-        # package/feed clients (no scope -> direct ADO host token), but make an
-        # unscoped azure-auth-helper request useful for ADO REST clients by
-        # defaulting it to the public ADO resource. Explicit scopes/resources
-        # still win and are checked by the host-side allowlist.
-        if [ -z "$SCOPE" ] && [ "$HELPER_NAME" = "azure-auth-helper" ]; then
-            SCOPE="$ADO_REST_RESOURCE"
-        fi
-
         # ADO host discovery for the DIRECT (non-scoped) token (never hardcoded):
         #   1. LC_GIT_CREDENTIAL_RELAY_ADO_HOST (explicit, plumbed by connect)
         #   2. the workspace's git remotes (the ADO host of the checked-out repo)
@@ -385,6 +401,29 @@ cached = _read_cache()          # relay unreachable -> serve a fresh-enough cach
 if cached:
     sys.stdout.write(cached + "\n")
     sys.exit(0)
+# Fail loudly (#384): a bare exit 1 with no diagnostic left a confusing
+# downstream 401/credential-prompt error far from the real cause. Reachable
+# vs. unreachable relay narrows the message without ever printing a secret.
+if port and mode == "azure":
+    print(
+        "ado-auth-helper-relay: get-azure-token denied for scope=%r "
+        "(relay reachable; resource likely not in the host's Azure allowlist)"
+        % keymat,
+        file=sys.stderr,
+    )
+elif port:
+    print(
+        "ado-auth-helper-relay: no ADO access token available for host=%r "
+        "(relay reachable but returned no credential; host git credential "
+        "helper may require interactive sign-in)" % keymat,
+        file=sys.stderr,
+    )
+else:
+    print(
+        "ado-auth-helper-relay: no credential relay reachable and no cached "
+        "token available",
+        file=sys.stderr,
+    )
 sys.exit(1)
 PY
         exit $?

@@ -16,6 +16,7 @@ from agent_worktrees.sessions import (
     find_latest_session_id_fast,
     list_worktree_sessions,
     mux_binding_for_session,
+    mux_focus_pane,
     mux_copilot_pane,
     mux_seed_pane,
     mux_session_index,
@@ -365,6 +366,54 @@ class TestMuxBindingForSession:
         )
 
         assert mux_binding_for_session("sess-a", mux="psmux") is None
+
+
+class TestMuxFocusPane:
+    def test_selects_the_window_containing_the_target_pane(
+        self, monkeypatch
+    ):
+        calls: list[tuple[list[str], dict]] = []
+
+        class _Result:
+            def __init__(self, *, returncode=0, stdout=""):
+                self.returncode = returncode
+                self.stdout = stdout
+
+        def _run(argv, **kwargs):
+            calls.append((list(argv), dict(kwargs)))
+            if argv == ["tmux", "display-message", "-p", "-t", "%9", "#{session_name}"]:
+                return _Result(stdout="wt-demo\n")
+            if argv == ["tmux", "display-message", "-p", "-t", "%9", "#{window_id}"]:
+                return _Result(stdout="@7\n")
+            if argv == ["tmux", "display-message", "-p", "-t", "=wt-demo", "#{window_id}"]:
+                if len([item for item in calls if item[0][1] == "select-window"]) == 0:
+                    return _Result(stdout="@2\n")
+                return _Result(stdout="@7\n")
+            if argv == ["tmux", "select-window", "-t", "@7"]:
+                return _Result()
+            raise AssertionError(f"unexpected argv: {argv!r}")
+
+        monkeypatch.setattr("subprocess.run", _run)
+
+        assert mux_focus_pane("wt-demo", "%9", mux="tmux") is True
+        assert [argv for argv, _ in calls] == [
+            ["tmux", "display-message", "-p", "-t", "%9", "#{session_name}"],
+            ["tmux", "display-message", "-p", "-t", "%9", "#{window_id}"],
+            ["tmux", "display-message", "-p", "-t", "=wt-demo", "#{window_id}"],
+            ["tmux", "select-window", "-t", "@7"],
+            ["tmux", "display-message", "-p", "-t", "=wt-demo", "#{window_id}"],
+        ]
+        assert calls[3][1]["capture_output"] is True
+        assert calls[3][1]["timeout"] == 5
+
+    def test_refuses_to_focus_a_pane_from_another_session(self, monkeypatch):
+        class _Result:
+            returncode = 0
+            stdout = "wt-other\n"
+
+        monkeypatch.setattr("subprocess.run", lambda *args, **kwargs: _Result())
+
+        assert mux_focus_pane("wt-demo", "%9", mux="tmux") is False
 
 
 # ---------------------------------------------------------------------------

@@ -84,6 +84,92 @@ def test_apply_is_idempotent_and_version_gated(tmp_path, monkeypatch):
     assert again.action == "already-current"
 
 
+def test_stale_legacy_binstub_content_forces_redeploy(tmp_path, monkeypatch):
+    """Regression: a version-current marker + slot must not mask a stale or
+    legacy binstub. copilot-extensions#2788-adjacent report -- a prior
+    cutover left an old/incompatible ``worktree-manager`` file occupying the
+    binstub name, which then failed the consuming agent-worktrees seam's
+    ``--version`` health probe and silently fell back to the bundled picker.
+    Presence-only idempotency checking hid the problem; content must match.
+    """
+    pd = _fake_payload(tmp_path, "1.2.3")
+    root = tmp_path / "root"
+    lb = _patch_local_bin(monkeypatch, tmp_path)
+    self_install(pd, root=root, dry_run=False)
+
+    # Simulate a legacy/incompatible binstub clobbering the deployed one --
+    # e.g. left over from an ancient pre-versioned install attempt.
+    stub = lb / "worktree-manager"
+    stub.write_text("#!/usr/bin/env bash\necho legacy stub; exit 1\n")
+
+    # The marker + slot still say "1.2.3 is installed" -- but the binstub on
+    # disk no longer matches what this version would deploy.
+    assert needs_install("1.2.3", root) is True
+
+    res = self_install(pd, root=root, dry_run=False)
+    assert res.action == "installed"
+    assert "legacy stub" not in stub.read_text()
+    assert needs_install("1.2.3", root) is False
+
+
+def test_known_legacy_prerename_binstub_is_recognized_and_cleaned(tmp_path, monkeypatch):
+    """The pre-rename ``worktree-manager`` plugin prototype (before it became
+    agent-worktrees, commit ab0716e28..6512114be) shipped this exact
+    ``~/.local/bin/worktree-manager`` (+ ``.cmd``) content and a non-versioned
+    ``~/.worktree-manager/.venv`` + ``.../lib`` runtime -- both colliding with
+    this Manager's own binstub name and root. A machine that installed that
+    prototype before the rename can still carry these exact artifacts; a real
+    self-install must positively recognize and remove them, not just
+    overwrite the binstub incidentally.
+    """
+    pd = _fake_payload(tmp_path, "1.2.3")
+    root = tmp_path / "root"
+    lb = _patch_local_bin(monkeypatch, tmp_path)
+
+    lb.mkdir(parents=True)
+    (lb / "worktree-manager").write_text(si._LEGACY_PRERENAME_SH, encoding="utf-8", newline="")
+    (lb / "worktree-manager.cmd").write_text(
+        si._LEGACY_PRERENAME_CMD, encoding="utf-8", newline=""
+    )
+    legacy_venv = root / ".venv" / "bin"
+    legacy_venv.mkdir(parents=True)
+    (legacy_venv / "python").write_text("#!/usr/bin/env python\n")
+    (root / "lib").mkdir(parents=True)
+
+    # Dry-run reports, but never touches, the recognized legacy artifacts.
+    planned = si.plan_legacy_cleanup(root)
+    assert any("legacy binstub" in p and "worktree-manager" in p for p in planned)
+    assert any("legacy binstub" in p and "worktree-manager.cmd" in p for p in planned)
+    assert any("legacy root artifact" in p and ".venv" in p for p in planned)
+    assert any("legacy root artifact" in p and str(root / "lib") in p for p in planned)
+    assert (root / ".venv").exists() and (root / "lib").exists()
+
+    res = self_install(pd, root=root, dry_run=False)
+    assert res.action == "installed"
+    assert len(res.cleaned) == 4
+    assert not (root / ".venv").exists()
+    assert not (root / "lib").exists()
+    # The binstub is now this version's own content, not the legacy one.
+    assert (lb / "worktree-manager").read_text() != si._LEGACY_PRERENAME_SH
+
+
+def test_unrecognized_binstub_content_is_never_attributed_as_legacy(tmp_path, monkeypatch):
+    """Only the byte-exact known prototype signature is auto-attributed as
+    legacy and named in ``cleaned`` -- an operator's own unrelated file at
+    the same path is still replaced (the general staleness fix), but never
+    mislabeled or specially called out as a *recognized* legacy artifact."""
+    pd = _fake_payload(tmp_path, "1.2.3")
+    root = tmp_path / "root"
+    lb = _patch_local_bin(monkeypatch, tmp_path)
+    lb.mkdir(parents=True)
+    (lb / "worktree-manager").write_text("#!/usr/bin/env bash\necho mine\n")
+
+    assert si.plan_legacy_cleanup(root) == []
+    res = self_install(pd, root=root, dry_run=False)
+    assert res.action == "installed"
+    assert res.cleaned == ()
+
+
 def test_new_version_publishes_new_slot(tmp_path, monkeypatch):
     root = tmp_path / "root"
     _patch_local_bin(monkeypatch, tmp_path)
@@ -138,7 +224,74 @@ def test_relocated_launchers_resolve_pane_wrappers_from_their_own_bin():
     assert 'RUNTIME_DIR="${AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT:-}"' in sh
     assert 'AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR' in sh
     assert '$RuntimeDir = $env:AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT' in ps1
+
+
+def test_relocated_launchers_resume_existing_ahp_legs_without_ensuring_new_ones():
+    root = Path(__file__).resolve().parents[1] / "bin"
+    sh = (root / "launch-session.sh").read_text(encoding="utf-8")
+    ps1 = (root / "launch-session.ps1").read_text(encoding="utf-8")
+    assert "execution-leg get" in sh
+    assert "'execution-leg', 'get'" in ps1
+    assert "session-backend" not in sh
+    assert "session-backend" not in ps1
+    assert 'AGENT_WORKTREES_AHP_AUTH_TOKEN="$GH_TOKEN"' not in sh
+    assert "$env:AGENT_WORKTREES_AHP_AUTH_TOKEN = $token.Trim()" not in ps1
+    assert "launching via the Worktree Manager Picker" in sh
+    assert "launching via the Worktree Manager Picker" in ps1
+
+
+def test_relocated_launcher_ships_the_mux_status_bar_scripts_it_needs():
+    """``launch-session.ps1`` dot-sources ``session-options.ps1`` and
+    ``psmux-path.ps1`` (and ``session-options.ps1`` in turn resolves
+    ``psmux-passthrough.conf``) via ``$PSScriptRoot``-relative paths, so all
+    must be deployed as siblings of the relocated launcher. Omitting them
+    left Worktree Manager-launched sessions with a silently unconfigured
+    psmux status bar (the failure is swallowed, not a launch error) once
+    ``launch-session.ps1`` moved out of ``plugins/agent-worktrees/bin/``."""
+    root = Path(__file__).resolve().parents[1] / "bin"
+    ps1 = (root / "launch-session.ps1").read_text(encoding="utf-8")
+    assert "$script:AwSessionOptions = Join-Path $PSScriptRoot 'session-options.ps1'" in ps1
+    assert "$pathHelper = Join-Path $PSScriptRoot 'psmux-path.ps1'" in ps1
+    for name in (
+        "session-options.ps1",
+        "session-options.sh",
+        "apply-mux-keybinds.ps1",
+        "apply-mux-keybinds.sh",
+        "psmux-passthrough.conf",
+        "psmux-path.ps1",
+    ):
+        assert (root / name).is_file(), f"missing {name} beside the relocated launcher"
+    session_options_ps1 = (root / "session-options.ps1").read_text(encoding="utf-8")
+    assert "Join-Path $PSScriptRoot 'psmux-passthrough.conf'" in session_options_ps1
     assert '$env:AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR' in ps1
+
+
+def test_copied_mux_status_bar_helpers_match_their_canonical_source():
+    """Unlike ``launch-session.*``/``pane-wrapper.*`` (which the Phase 3b
+    Slice 2 migration deliberately allows to diverge as agent-worktrees' own
+    copy settles into a legacy fallback), the terminal/helper scripts this
+    sub-slice added are not being relocated away from agent-worktrees -- they
+    are shipped in parity with agent-worktrees' own deployment
+    (``scripts/install.{sh,ps1}``) and must stay byte-identical. A silent
+    edit to only one copy would reintroduce exactly the kind of unnoticed
+    status-bar drift this sub-slice fixed."""
+    repo_root = Path(__file__).resolve().parents[2]
+    wm_bin = repo_root / "worktree-manager" / "bin"
+    aw_terminal = repo_root / "plugins" / "agent-worktrees" / "terminal"
+    aw_scripts = repo_root / "plugins" / "agent-worktrees" / "scripts"
+    pairs = [
+        (wm_bin / "session-options.ps1", aw_terminal / "session-options.ps1"),
+        (wm_bin / "session-options.sh", aw_terminal / "session-options.sh"),
+        (wm_bin / "apply-mux-keybinds.ps1", aw_terminal / "apply-mux-keybinds.ps1"),
+        (wm_bin / "apply-mux-keybinds.sh", aw_terminal / "apply-mux-keybinds.sh"),
+        (wm_bin / "psmux-passthrough.conf", aw_terminal / "psmux-passthrough.conf"),
+        (wm_bin / "psmux-path.ps1", aw_scripts / "psmux-path.ps1"),
+    ]
+    for copy, canonical in pairs:
+        assert copy.read_bytes() == canonical.read_bytes(), (
+            f"{copy} has drifted from its canonical source {canonical}; "
+            "re-sync both copies verbatim"
+        )
 
 
 def test_self_install_command_dry_run(capsys):

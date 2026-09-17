@@ -30,6 +30,12 @@ log = logging.getLogger("agent-bridge")
 router = APIRouter(tags=["worktrees"])
 
 _CMD_TIMEOUT = 30.0
+# Phase-5 (worktree-finality-and-obligations): a longer budget specifically
+# for a `--classify` crawl -- the extra ~5 git calls per worktree can exceed
+# the base _CMD_TIMEOUT on a large/slow target. Mirrors the Picker's own
+# `picker_tui.data_ssh._CLASSIFY_TIMEOUT` (60s) so the two surfaces agree on
+# how patient a classify pass is allowed to be.
+_CLASSIFY_CMD_TIMEOUT = 60.0
 _GOVERNANCE_BACKOFF_SECONDS = 10.0
 
 #: Per-worktree locks serializing the fresh-start spawn (#1683) so two
@@ -85,6 +91,16 @@ class _WorktreeEntry:
     live_intent: str | None = None
     live_intent_at: str | None = None
     live_intent_idle: bool = False
+    # worktree-finality-and-obligations (Phase 5): the canonical closure
+    # descriptor (``prune.assemble_closure_descriptor``'s ``to_dict()``
+    # shape), surfaced raw/opaque from ``agent-worktrees list --json
+    # --classify``. This route intentionally does NOT interpret it (label,
+    # final-ness, action disposition) -- a cross-machine crawl may reach an
+    # older/newer agent-worktrees runtime, so only the consumer that knows
+    # the current ``DESCRIPTOR_VERSION`` (e.g. via
+    # ``prune.interpret_descriptor_payload``) may treat it as authoritative.
+    # Absent on an older runtime or when git classification wasn't run.
+    closure: dict[str, Any] | None = None
 
     def interactive_cli_state(self) -> str:
         """Classify interactive-CLI ownership from mux liveness.
@@ -131,6 +147,7 @@ class _WorktreeEntry:
             "live_intent": self.live_intent,
             "live_intent_at": self.live_intent_at,
             "live_intent_idle": self.live_intent_idle,
+            "closure": self.closure,
         }
 
 
@@ -150,6 +167,19 @@ class WorktreeDiscoveryCache:
         self._resolver: AgentResolver | None = None
         self._crawl_lock = asyncio.Lock()
         self._governance: LoopGovernance | None = None
+        # worktree-finality-and-obligations (Phase 5): the classify-backfill
+        # tasks crawl_if_empty() spawns must obey the same daemon lifecycle as
+        # the periodic loop -- retained here so stop() can cancel/await them
+        # instead of leaving a live _exec_ex subprocess mutating the cache
+        # during the remainder of application shutdown.
+        self._backfill_tasks: set[asyncio.Task[None]] = set()
+        # Phase-5 follow-up (review): an agent whose remote agent-worktrees
+        # rejects --classify stays that way for the life of the process (it
+        # doesn't get upgraded without a redeploy) -- cache the verdict per
+        # agent so a long-lived bridge daemon doesn't repeat a failed
+        # classify probe on every periodic sweep. Mirrors the Picker's own
+        # per-source `use_classify` caching (picker_tui.data_ssh).
+        self._classify_unsupported: set[str] = set()
 
     def configure(self, *, interval: float) -> None:
         """Update the discovery interval (must be called before start)."""
@@ -182,6 +212,18 @@ class WorktreeDiscoveryCache:
                 await self._task
             except asyncio.CancelledError:
                 pass
+        # Cancel/await any in-flight classify backfills too -- same shutdown
+        # discipline as the periodic loop above (#discussion_r4004943069).
+        pending = [t for t in self._backfill_tasks if not t.done()]
+        for task in pending:
+            task.cancel()
+        for task in pending:
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                log.exception("Worktree classify backfill raised during shutdown")
 
     def get_all(self) -> dict[str, list[_WorktreeEntry]]:
         return dict(self._cache)
@@ -191,13 +233,43 @@ class WorktreeDiscoveryCache:
 
         Uses the crawl lock to prevent concurrent callers from stampeding
         multiple crawls simultaneously.
+
+        worktree-finality-and-obligations (Phase 5): this FIRST, blocking
+        crawl never attempts ``--classify`` -- it mirrors the Picker's own
+        fast-then-classify two-phase pattern (``picker_tui.data_ssh``) so a
+        slow or old target never turns "no cache yet" into an ~90s stall for
+        whichever request happens to arrive first (classify's own timeout
+        budget plus a legacy fallback). A classify pass is kicked off as a
+        fire-and-forget background backfill immediately after, so the
+        closure descriptor still populates without blocking this response.
+        The task is tracked in ``_backfill_tasks`` so :meth:`stop` can
+        cancel/await it instead of leaving it running past shutdown.
         """
         if self._cache or not self._resolver:
             return
         async with self._crawl_lock:
             if self._cache:
                 return
-            await self._do_crawl(self._resolver)
+            await self._do_crawl(self._resolver, classify=False)
+        task = asyncio.create_task(
+            self._backfill_classify(self._resolver), name="worktree-classify-backfill",
+        )
+        self._backfill_tasks.add(task)
+        task.add_done_callback(self._backfill_tasks.discard)
+
+    async def _backfill_classify(self, resolver: AgentResolver) -> None:
+        """Fire-and-forget classify backfill after the fast first paint.
+
+        Best-effort: any failure just leaves the cache at its unclassified
+        (no ``closure``) state until the next successful crawl.
+        """
+        try:
+            if self._crawl_lock.locked():
+                return
+            async with self._crawl_lock:
+                await self._do_crawl(resolver, classify=True)
+        except Exception:
+            log.exception("Worktree classify backfill failed")
 
     async def crawl(self, resolver: AgentResolver) -> None:
         """Crawl all eligible agents -- **single-flight**.
@@ -221,13 +293,16 @@ class WorktreeDiscoveryCache:
             async with self._crawl_lock:
                 return
         async with self._crawl_lock:
-            await self._do_crawl(resolver)
+            await self._do_crawl(resolver, classify=True)
 
-    async def _do_crawl(self, resolver: AgentResolver) -> None:
+    async def _do_crawl(self, resolver: AgentResolver, *, classify: bool = True) -> None:
         """Crawl all eligible agents concurrently (the actual work).
 
         Callers hold ``_crawl_lock`` around this, so at most one crawl's worth of
-        ``list`` subprocesses is ever in flight.
+        ``list`` subprocesses is ever in flight. ``classify=False`` is the fast,
+        bounded first-paint pass (:meth:`crawl_if_empty`); ``classify=True`` is
+        the periodic loop and the background backfill, both of which can afford
+        the longer classify budget without blocking a synchronous caller.
         """
         eligible = [
             (name, cfg) for name, cfg in resolver.agents.items()
@@ -237,7 +312,8 @@ class WorktreeDiscoveryCache:
             return
 
         results = await asyncio.gather(
-            *(self._crawl_agent(name, cfg, resolver) for name, cfg in eligible),
+            *(self._crawl_agent(name, cfg, resolver, classify=classify)
+              for name, cfg in eligible),
             return_exceptions=True,
         )
         result = self._governance.recheck("pre-mutation:update-worktree-cache") if self._governance else None
@@ -258,33 +334,90 @@ class WorktreeDiscoveryCache:
         agent_name: str,
         config: AgentConfig,
         resolver: AgentResolver,
+        *,
+        classify: bool = True,
     ) -> list[_WorktreeEntry]:
-        """List worktrees for a single agent via subprocess or SSH."""
+        """List worktrees for a single agent via subprocess or SSH.
+
+        ``classify=False`` skips ``--classify`` entirely (a single legacy call
+        bounded by the base ``_CMD_TIMEOUT``) -- used for the fast, blocking
+        first-paint crawl (:meth:`WorktreeDiscoveryCache.crawl_if_empty`) so a
+        synchronous caller is never exposed to the longer classify budget.
+        """
         if not config.project:
             return []
 
-        if not config.host:
-            # Local
-            raw = await _run_local(config.project, ["list", "--json", "--mux-details"])
-        else:
+        is_local = not config.host
+        host: str | None = None
+        user: str | None = None
+        if not is_local:
             # SSH -- resolve through topology for correct alias/user
             try:
                 target = resolver.resolve(agent_name)
             except (KeyError, ValueError) as exc:
                 log.warning("Cannot resolve agent %s for discovery: %s", agent_name, exc)
                 return []
-
             # If the resolved target is the local machine, run locally
             # instead of SSH (avoids loopback SSH failures)
             if _is_local_target(target.host, resolver):
-                raw = await _run_local(config.project, ["list", "--json", "--mux-details"])
+                is_local = True
             else:
-                raw = await _run_ssh(
-                    host=target.host or config.host,
-                    user=target.user or config.ssh_user,
-                    project=config.project,
-                    args=["list", "--json", "--mux-details"],
+                host = target.host or config.host
+                user = target.user or config.ssh_user
+
+        async def _run(args: list[str], *, timeout: float | None = None):
+            if is_local:
+                return await _run_local_ex(config.project, args, timeout=timeout)
+            return await _run_ssh_ex(
+                host=host, user=user, project=config.project, args=args,
+                timeout=timeout,
+            )
+
+        legacy_args = ["list", "--json", "--mux-details"]
+        if not classify or agent_name in self._classify_unsupported:
+            raw, _stderr = await _run(legacy_args)
+            if raw is None:
+                return []
+            return _parse_worktree_list(raw, agent_name)
+
+        # worktree-finality-and-obligations (Phase 5): --classify is included
+        # so the crawl carries the canonical closure descriptor (label,
+        # held-claim/follow-up counts, action disposition) through to the
+        # cockpit projection. Two safety nets, both mirroring the Picker's own
+        # (``picker_tui.data_ssh``) classify handling so a slow/old target
+        # never loses discovery entirely:
+        #   1. a longer, classify-specific timeout budget (the extra ~5 git
+        #      calls per worktree can genuinely exceed the base
+        #      _CMD_TIMEOUT on a large/slow target) -- a timeout here falls
+        #      back to the legacy (unclassified) call rather than dropping
+        #      the whole crawl to []. Only reachable from the periodic loop
+        #      or the background backfill (never the blocking first paint --
+        #      see ``classify=False`` above), so this budget never stalls a
+        #      synchronous caller.
+        #   2. an explicit "--classify unrecognized" stderr check -- an older
+        #      agent-worktrees runtime that doesn't support the flag falls
+        #      back the same way, instead of _exec's generic nonzero-exit
+        #      handling silently emptying the cache for that agent. The
+        #      verdict is cached per agent (``_classify_unsupported``) so a
+        #      long-lived bridge daemon probes a permanently-old runtime
+        #      exactly once, not on every periodic sweep.
+        classify_args = ["list", "--json", "--mux-details", "--classify"]
+
+        raw, stderr = await _run(classify_args, timeout=_CLASSIFY_CMD_TIMEOUT)
+        if raw is None:
+            if stderr and _is_classify_unsupported(stderr):
+                log.info(
+                    "agent %s: --classify unsupported by remote agent-worktrees; "
+                    "falling back to unclassified list (cached for future crawls)",
+                    agent_name,
                 )
+                self._classify_unsupported.add(agent_name)
+            else:
+                log.warning(
+                    "agent %s: classified worktree list failed/timed out; "
+                    "falling back to unclassified list", agent_name,
+                )
+            raw, _stderr = await _run(legacy_args)
 
         if raw is None:
             return []
@@ -318,8 +451,20 @@ class WorktreeDiscoveryCache:
 # -- Subprocess helpers -------------------------------------------------------
 
 
-async def _run_local(project: str, args: list[str] | None = None) -> str | None:
+async def _run_local(
+    project: str, args: list[str] | None = None, *, timeout: float | None = None,
+) -> str | None:
     """Run ``<project> <args>`` locally (defaults to ``list --json``)."""
+    stdout, _stderr = await _run_local_ex(project, args, timeout=timeout)
+    return stdout
+
+
+async def _run_local_ex(
+    project: str, args: list[str] | None = None, *, timeout: float | None = None,
+) -> tuple[str | None, str]:
+    """Like :func:`_run_local`, also returning stderr (empty on success) so a
+    caller can distinguish a timeout/crash from a specific rejected flag
+    (see :func:`_is_classify_unsupported`)."""
     from pathlib import Path
 
     home = Path.home()
@@ -331,7 +476,7 @@ async def _run_local(project: str, args: list[str] | None = None) -> str | None:
         binstub_str = str(binstub)
 
     cmd = [binstub_str, *(args if args is not None else ["list", "--json"])]
-    return await _exec(cmd)
+    return await _exec_ex(cmd, timeout=timeout)
 
 
 def _is_local_target(ssh_host: str | None, resolver: AgentResolver) -> bool:
@@ -374,8 +519,20 @@ def _is_local_target(ssh_host: str | None, resolver: AgentResolver) -> bool:
 
 async def _run_ssh(
     host: str, user: str | None, project: str, args: list[str] | None = None,
+    *, timeout: float | None = None,
 ) -> str | None:
     """Run ``<project> <args>`` on a remote machine via SSH."""
+    stdout, _stderr = await _run_ssh_ex(
+        host=host, user=user, project=project, args=args, timeout=timeout,
+    )
+    return stdout
+
+
+async def _run_ssh_ex(
+    host: str | None, user: str | None, project: str,
+    args: list[str] | None = None, *, timeout: float | None = None,
+) -> tuple[str | None, str]:
+    """Like :func:`_run_ssh`, also returning stderr (empty on success)."""
     ssh_target = f"{user}@{host}" if user else host
     sub = " ".join(shlex.quote(a) for a in (args if args is not None else ["list", "--json"]))
     remote_cmd = f"{shlex.quote(project)} {sub}"
@@ -388,12 +545,32 @@ async def _run_ssh(
         ssh_target,
         remote_cmd,
     ]
-    return await _exec(cmd)
+    return await _exec_ex(cmd, timeout=timeout)
 
 
-async def _exec(cmd: list[str]) -> str | None:
+def _is_classify_unsupported(stderr: str) -> bool:
+    """True if *stderr* is agent-worktrees rejecting an unrecognized
+    ``--classify`` flag (an agent-worktrees runtime older than the
+    worktree-finality-and-obligations closure-descriptor work). Mirrors
+    ``picker_tui.data_ssh._is_classify_unsupported``."""
+    s = stderr or ""
+    return "unrecognized arguments" in s and "--classify" in s
+
+
+async def _exec(cmd: list[str], *, timeout: float | None = None) -> str | None:
     """Execute a command and return stdout, or None on failure."""
+    stdout, _stderr = await _exec_ex(cmd, timeout=timeout)
+    return stdout
+
+
+async def _exec_ex(
+    cmd: list[str], *, timeout: float | None = None,
+) -> tuple[str | None, str]:
+    """Like :func:`_exec`, also returning stderr (empty string on success or
+    when unavailable) so a caller can distinguish a timeout/crash from a
+    specific rejected flag (see :func:`_is_classify_unsupported`)."""
     proc: asyncio.subprocess.Process | None = None
+    eff_timeout = _CMD_TIMEOUT if timeout is None else timeout
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -408,25 +585,26 @@ async def _exec(cmd: list[str]) -> str | None:
             start_new_session=True,
         )
         stdout, stderr = await asyncio.wait_for(
-            proc.communicate(), timeout=_CMD_TIMEOUT,
+            proc.communicate(), timeout=eff_timeout,
         )
+        stderr_text = stderr.decode(errors="replace")
         if proc.returncode != 0:
             log.error(
                 "Command failed (rc=%d): %s\nstderr: %s",
                 proc.returncode, " ".join(cmd),
-                stderr.decode(errors="replace")[:500],
+                stderr_text[:500],
             )
-            return None
-        return stdout.decode()
+            return None, stderr_text
+        return stdout.decode(), stderr_text
     except TimeoutError:
-        log.error("Command timed out after %.0fs: %s", _CMD_TIMEOUT, " ".join(cmd))
+        log.error("Command timed out after %.0fs: %s", eff_timeout, " ".join(cmd))
         _kill_process_tree(proc)
         if proc:
             try:
                 await asyncio.wait_for(proc.communicate(), timeout=5)
             except Exception:
                 pass
-        return None
+        return None, ""
     except asyncio.CancelledError:
         if proc and proc.returncode is None:
             _kill_process_tree(proc)
@@ -437,7 +615,7 @@ async def _exec(cmd: list[str]) -> str | None:
         raise
     except Exception:
         log.exception("Failed to run: %s", " ".join(cmd))
-        return None
+        return None, ""
 
 
 def _kill_process_tree(proc: asyncio.subprocess.Process | None) -> None:
@@ -507,6 +685,10 @@ def _parse_worktree_list(raw: str, agent_name: str) -> list[_WorktreeEntry]:
             live_intent=w.get("live_intent"),
             live_intent_at=w.get("live_intent_at"),
             live_intent_idle=bool(w.get("live_intent_idle", False)),
+            # worktree-finality-and-obligations (Phase 5): raw/opaque passthrough
+            # -- absent unless the crawl ran with --classify and the remote's
+            # agent-worktrees emits it.
+            closure=w.get("closure") if isinstance(w.get("closure"), dict) else None,
         ))
     return entries
 

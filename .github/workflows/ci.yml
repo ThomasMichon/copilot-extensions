@@ -56,6 +56,14 @@ jobs:
         # Scoped to the PR diff so a pre-existing state never blocks unrelated PRs.
         if: github.event_name == 'pull_request'
         run: python tools/check-version-bump.py --base ${{ github.event.pull_request.base.sha }}
+      - name: Module size (hard cap + shrink-only baseline)
+        # Every tracked, non-test source module must stay within its line-count
+        # cap, or its grandfathered ceiling for pre-existing offenders -- the
+        # componentization failure that let queue.py reach ~7,200 lines had no
+        # automated guard before this. See CONTRIBUTING.md § Code Style.
+        run: python tools/check-module-size.py
+      - name: Module size guard tests
+        run: python -m pytest -q tools/test_check_module_size.py
       - name: Install contract
         run: python tools/check-install-contract.py
       - name: Runtime resolution (marker-only, uniform)

@@ -521,7 +521,7 @@ for key, value in update.get('environment', {}).items():
 # Subcommands that agent_worktrees's main() handles directly — these
 # must NOT fall through to the resolve→picker flow.  Keep in sync with
 # COMMAND_MAP in __main__.py, plus "services" and "agent-worktrees".
-_DIRECT_COMMANDS="services repos knowledge worktree agent-worktrees resolve session-backend post-exit finalize push-changes mark-complete status list create cleanup validate install register unregister uninstall update install-status deploy-instructions get pre-launch stage-update reconcile-plugins dev handoff-cutover register-session deregister-session backfill-sessions anchor-check activity activity-log"
+_DIRECT_COMMANDS="services repos knowledge worktree agent-worktrees resolve execution-leg post-exit finalize push-changes mark-complete status list create cleanup validate install register unregister uninstall update install-status deploy-instructions get pre-launch stage-update reconcile-plugins dev handoff-cutover register-session deregister-session backfill-sessions anchor-check activity activity-log"
 _IS_DIRECT=""
 if [[ $# -gt 0 ]]; then
     for _dc in $_DIRECT_COMMANDS; do
@@ -573,7 +573,7 @@ print(json.dumps(d['launch'] if isinstance(d, dict) and 'launch' in d else d))")
 # actually targets -- it can legitimately differ from this script's own
 # ambient/starting project (e.g. an initial --project inherited from how this
 # launcher was invoked). Always prefer it over a stale ambient value so every
-# downstream direct call (session-backend status, etc.) is scoped to the
+# downstream direct call (execution-leg get, etc.) is scoped to the
 # project that really owns the resolved worktree, not wherever this script
 # happened to start (#2338).
 _PLAN_PROJECT=$(printf '%s' "$JSON" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('project',''))")
@@ -732,34 +732,46 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
 ") )"
 
     SESSION_BACKEND_JSON=""
-    _BACKEND_ENABLED=0
+    _AHP_RESUME_AVAILABLE=0
     if [[ -n "$WORKTREE_ID" && "$_JOINING_LIVE" != "1" ]]; then
         _BACKEND_BASE_ARGS=(-m agent_worktrees)
         [[ -n "$LAUNCH_PROJECT" ]] \
             && _BACKEND_BASE_ARGS+=(--project "$LAUNCH_PROJECT")
-        _BACKEND_STATUS_ARGS=(
-            "${_BACKEND_BASE_ARGS[@]}" session-backend status
+        _EXECUTION_LEG_ARGS=(
+            "${_BACKEND_BASE_ARGS[@]}" execution-leg get
             --worktree-id "$WORKTREE_ID" --json
         )
-        if SESSION_BACKEND_STATUS_JSON=$(
-            "$PYTHON" "${_BACKEND_STATUS_ARGS[@]}" 2>&1
+        if EXECUTION_LEG_JSON=$(
+            "$PYTHON" "${_EXECUTION_LEG_ARGS[@]}" 2>&1
         ); then
             :
         else
             _BACKEND_RC=$?
-            setup_log ERROR "Session backend status failed (exit $_BACKEND_RC): $SESSION_BACKEND_STATUS_JSON"
-            printf 'ERROR: Session backend status failed: %s\n' \
-                "$SESSION_BACKEND_STATUS_JSON" >&2
+            setup_log ERROR "Execution-leg get failed (exit $_BACKEND_RC): $EXECUTION_LEG_JSON"
+            printf 'ERROR: Execution-leg get failed: %s\n' \
+                "$EXECUTION_LEG_JSON" >&2
             exit "$_BACKEND_RC"
         fi
-        _BACKEND_ENABLED=$(printf '%s' "$SESSION_BACKEND_STATUS_JSON" | "$PYTHON" -c "
+        _AHP_STATE=$(printf '%s' "$EXECUTION_LEG_JSON" | "$PYTHON" -c "
 import json, sys
 d = json.load(sys.stdin)
-print('1' if d.get('enabled') and d.get('kind') == 'ahp' else '0')
+leg = d.get('execution_leg')
+print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider') == 'ahp' else '')
 ")
-        if [[ "$_BACKEND_ENABLED" == "1" ]]; then
-            _AHP_ACCOUNT=$(printf '%s' "$SESSION_BACKEND_STATUS_JSON" | "$PYTHON" -c \
-                "import json,sys; print(json.load(sys.stdin)['auth_account'])")
+        if [[ "$_AHP_STATE" == "active" || "$_AHP_STATE" == "unknown" ]]; then
+            _AHP_RESUME_AVAILABLE=1
+            _AHP_ACCOUNT=$(printf '%s' "$EXECUTION_LEG_JSON" | "$PYTHON" -c \
+                "import json,sys; leg=json.load(sys.stdin)['execution_leg']; print((leg.get('blob') or {}).get('auth_account',''))")
+            _AHP_ENDPOINT=$(printf '%s' "$EXECUTION_LEG_JSON" | "$PYTHON" -c \
+                "import json,sys; leg=json.load(sys.stdin)['execution_leg']; print((leg.get('blob') or {}).get('endpoint_url',''))")
+            _AHP_SESSION=$(printf '%s' "$EXECUTION_LEG_JSON" | "$PYTHON" -c \
+                "import json,sys; leg=json.load(sys.stdin)['execution_leg']; print((leg.get('blob') or {}).get('session_id',''))")
+            if [[ -z "$_AHP_ACCOUNT" || -z "$_AHP_ENDPOINT" || -z "$_AHP_SESSION" ]]; then
+                setup_log ERROR "Persisted AHP execution leg for $WORKTREE_ID is missing auth_account, endpoint_url, or session_id."
+                printf 'ERROR: Persisted AHP execution leg for %s is missing auth_account, endpoint_url, or session_id.\n' \
+                    "$WORKTREE_ID" >&2
+                exit 3
+            fi
             if ! GH_TOKEN="$(gh auth token --user "$_AHP_ACCOUNT" 2>/dev/null)" \
                 || [[ -z "$GH_TOKEN" ]]; then
                 setup_log ERROR "Could not mint the AHP client token for account $_AHP_ACCOUNT."
@@ -767,26 +779,6 @@ print('1' if d.get('enabled') and d.get('kind') == 'ahp' else '0')
                     "$_AHP_ACCOUNT" >&2
                 exit 3
             fi
-            _BACKEND_ENSURE_ARGS=(
-                "${_BACKEND_BASE_ARGS[@]}" session-backend ensure
-                --worktree-id "$WORKTREE_ID" --json
-            )
-            if SESSION_BACKEND_JSON=$(
-                AGENT_WORKTREES_AHP_AUTH_TOKEN="$GH_TOKEN" \
-                    "$PYTHON" "${_BACKEND_ENSURE_ARGS[@]}" 2>&1
-            ); then
-                :
-            else
-                _BACKEND_RC=$?
-                setup_log ERROR "Session backend ensure failed (exit $_BACKEND_RC): $SESSION_BACKEND_JSON"
-                printf 'ERROR: Session backend ensure failed: %s\n' \
-                    "$SESSION_BACKEND_JSON" >&2
-                exit "$_BACKEND_RC"
-            fi
-            _AHP_ENDPOINT=$(printf '%s' "$SESSION_BACKEND_JSON" | "$PYTHON" -c \
-                "import json,sys; print(json.load(sys.stdin)['endpoint_url'])")
-            _AHP_SESSION=$(printf '%s' "$SESSION_BACKEND_JSON" | "$PYTHON" -c \
-                "import json,sys; print(json.load(sys.stdin)['session_id'])")
             export -n GH_TOKEN 2>/dev/null || true
             if [[ ",${COPILOT_CLI_ENABLED_FEATURE_FLAGS:-}," != *",AHP_CLIENT,"* ]]; then
                 if [[ -n "${COPILOT_CLI_ENABLED_FEATURE_FLAGS:-}" ]]; then
@@ -797,6 +789,10 @@ print('1' if d.get('enabled') and d.get('kind') == 'ahp' else '0')
             fi
             POST_EXIT=0
             setup_log INFO "AHP client bound to session $_AHP_SESSION at $_AHP_ENDPOINT"
+        elif [[ "$_AHP_STATE" == "disposed" ]]; then
+            _AHP_WARNING="Persisted AHP execution leg for $WORKTREE_ID is disposed; launching direct. Establishing a new AHP session now requires launching via the Worktree Manager Picker."
+            setup_log WARN "$_AHP_WARNING"
+            printf 'WARNING: %s\n' "$_AHP_WARNING" >&2
         fi
     fi
 
@@ -805,7 +801,7 @@ print('1' if d.get('enabled') and d.get('kind') == 'ahp' else '0')
         CMD_ARRAY+=("${COPILOT_PASSTHROUGH[@]}")
     fi
 
-    if [[ "$_BACKEND_ENABLED" == "1" ]]; then
+    if [[ "$_AHP_RESUME_AVAILABLE" == "1" ]]; then
         _FILTERED_CMD=()
         _SKIP_NEXT=0
         _HAS_EXPERIMENTAL=0
@@ -871,18 +867,6 @@ print('1' if d.get('enabled') and d.get('kind') == 'ahp' else '0')
         printf 'ERROR: Knowledge plugin preflight failed: %s\n' \
             "${_KNOWLEDGE_JSON:-no details}" >&2
         exit "$_KNOWLEDGE_RC"
-    fi
-
-    _MARKETPLACE_ARGS=(-m agent_worktrees reconcile-marketplaces
-        --cwd "$_KNOWLEDGE_CWD" --ensure-ignored --json)
-    if _MARKETPLACE_JSON=$("$PYTHON" "${_MARKETPLACE_ARGS[@]}" 2>&1); then
-        setup_log INFO "Marketplace override preflight completed: $_MARKETPLACE_JSON"
-    else
-        _MARKETPLACE_RC=$?
-        setup_log ERROR "Marketplace override preflight failed (exit $_MARKETPLACE_RC): ${_MARKETPLACE_JSON:-no details}"
-        printf 'ERROR: Marketplace override preflight failed: %s\n' \
-            "${_MARKETPLACE_JSON:-no details}" >&2
-        exit "$_MARKETPLACE_RC"
     fi
 
     if [[ "$NO_MUX" == "1" ]]; then

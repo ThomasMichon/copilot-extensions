@@ -2562,8 +2562,11 @@ def test_bucket_sections_key_off_state():
            rec("wip", 2), rec("unused", 3)]
     active, recent, completed = derive.bucket(wts)
     assert [w["state"] for w in active] == ["ACTIVE"]
-    # Both FINALs land in Completed regardless of age (1h and 60h).
-    assert sorted(w["state"] for w in completed) == ["FINAL", "FINAL"]
+    # Both completed rows land in Completed regardless of age (1h and 60h).
+    # No ``closure`` descriptor here, so ``_state()`` degrades to MERGED
+    # rather than trusting a raw FINAL claim -- ``bucket()`` still treats
+    # FINAL and MERGED alike as "completed".
+    assert sorted(w["state"] for w in completed) == ["MERGED", "MERGED"]
     # Recent is whatever is neither in-session nor final.
     assert sorted(w["state"] for w in recent) == ["UNUSED", "WIP"]
 
@@ -2784,11 +2787,13 @@ def test_maybe_repoll_gating(monkeypatch):
 
 def test_bucket_fallback_no_classify_finalized_is_clean_not_wip():
     """An old remote (no --classify -> no state) must not show FINAL + unmerged."""
-    # status finalized, no git classification -> display FINAL, bucket clean.
+    # status finalized, no git classification -> no closure descriptor either,
+    # so state degrades to MERGED (never FINAL). cleanup_bucket is independent
+    # of state and still reads clean/SAFE.
     w = derive.norm(
         {"id": "emancipation-cube-wsl-1234", "status": "finalized",
          "started_at": "2026-06-25T10:00:00"}, "Emancipation-Cube", "WSL")
-    assert w["state"] == "FINAL"
+    assert w["state"] == "MERGED"
     assert w["cleanup_bucket"] == "clean"          # not 'wip'/'unmerged'
     assert derive.BUCKET_DISPO[w["cleanup_bucket"]] == "SAFE"
 
@@ -2812,7 +2817,10 @@ def test_tui_renders_local_worktrees():
             # Canonical state vocabulary (test-chamber #1290).
             assert "ACTIVE" in out
             assert "UNUSED" in out
-            assert "FINAL" in out
+            # "Done work" is COMPLETED with no closure descriptor in this
+            # fixture, so ``_state()`` degrades to MERGED rather than
+            # trusting a raw FINAL claim.
+            assert "MERGED" in out
             # Real machine identity from the source.
             assert "anomalous-potato" in out
 
@@ -2929,8 +2937,19 @@ def test_tui_live_multi_machine():
             scr = app.query_one(PickerScreen)
             # Switch to the "All" tab so every ready machine interleaves.
             scr.machine_idx = 0
-            # Drive a render tick so live records stream in from the loader.
-            scr._tick()
+            # Live mode now paints a chrome-only first frame, then starts the
+            # background loader after that refresh boundary.
+            await pilot.pause()
+            await pilot.pause()
+            for _ in range(20):
+                scr._tick()
+                await pilot.pause()
+                scr.machine_idx = 0
+                out = pcap.screen_to_text(scr)
+                if "Local wip" in out and "Remote work" in out:
+                    break
+            scr.machine_idx = 0
+            scr.refresh()
             await pilot.pause()
             out = pcap.screen_to_text(scr)
             assert "Worktree Manager" in out
@@ -3964,6 +3983,13 @@ def test_update_indicator_focus_glyph_and_refresh():
     assert not s._update_actionable()
     assert "\u2713" in s._update_seg(False).plain          # ✓
 
+    # paused: truthful informational state with no refresh action.
+    s.update_state = "paused"
+    assert ("UPD", 0) not in s.stops()
+    assert not s._update_actionable()
+    assert "\u2016" in s._update_seg(False).plain          # ‖
+    assert "Updates paused" in "".join(row.plain for row in s.topbar(118))
+
     # available: focusable refresh stop, refresh glyph.
     s.update_state = "available"
     assert ("UPD", 0) in s.stops()
@@ -4293,52 +4319,6 @@ def test_nf_compose_is_the_sole_path(monkeypatch):
         asyncio.run(_composes())
 
 
-def test_nf_compose_skeleton_mounts_identical_segments(monkeypatch):
-    """NF2/NF3 (#88): with the toggle on, PickerScreen composes the leaf segment
-    widgets (header split into title + pivots; body split into fixed chrome +
-    scrolling data). At the top of an unscrolled list the composed tree is
-    byte-identical to ``render()``."""
-    from worktree_manager.production_picker.picker_tui.engine import (
-        _PickerBodyData, _PickerButtons, _PickerMachine, _PickerSegment)
-    monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "0")
-    src = _fixture_source()
-
-    def _rstrip_blank(lines):
-        out = list(lines)
-        while out and out[-1].strip() == "":
-            out.pop()
-        return out
-
-    async def run():
-        app = PickerApp(src, live=False)
-        async with app.run_test(size=(118, 36)) as pilot:
-            await pilot.pause()
-            scr = app.query_one(PickerScreen)
-            segs = {w.id: w for w in scr.query(_PickerSegment)}
-            assert set(segs) == {"nf-title", "nf-chrome", "nf-footer"}
-            machine = scr.query_one("#nf-machine", _PickerMachine)
-            buttons = scr.query_one("#nf-buttons", _PickerButtons)
-            body_data = scr.query_one("#nf-body-data", _PickerBodyData)
-            frame = scr._frame_segments()
-            # Title + pivots recompose the header segment.
-            title_p = segs["nf-title"].render().plain
-            pivots_p = scr.query_one("#nf-pivots").render().plain
-            assert (title_p + "\n" + pivots_p
-                    == scr._join_lines(frame["header"], frame["W"]).plain)
-            for key, sid in (("chrome", "nf-chrome"), ("footer", "nf-footer")):
-                expect = scr._join_lines(frame[key], frame["W"]).plain
-                assert segs[sid].render().plain == expect
-            # Body: machine + buttons (fixed chrome) + scrolling data recompose
-            # the monolith body at the top of an unscrolled list.
-            combined = (machine.render().plain.split("\n")
-                        + buttons.render().plain.split("\n")
-                        + body_data.render().plain.split("\n"))
-            body_p = scr._join_lines(frame["body"], frame["W"]).plain.split("\n")
-            assert _rstrip_blank(combined) == _rstrip_blank(body_p)
-
-    asyncio.run(run())
-
-
 def test_nf_focus_bridge_tab_moves_between_regions(monkeypatch):
     """NF3 (#88): with the toggle on, the chrome + data regions are focusable
     widgets. Native Tab cycles through them via ``region_heads``, and native
@@ -4377,70 +4357,6 @@ def test_nf_focus_bridge_tab_moves_between_regions(monkeypatch):
     asyncio.run(run())
 
 
-def test_nf_pointer_click_selects_data_row(monkeypatch):
-    """NF4 (#88): clicking a data row in the compose tree points sel at that row
-    (pointer parity the manual model never had), and focuses the data region."""
-    from worktree_manager.production_picker.picker_tui.engine import _PickerBodyData
-    monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "0")
-    src = _fixture_source()
-
-    async def run():
-        app = PickerApp(src, live=False)
-        async with app.run_test(size=(118, 24)) as pilot:
-            await pilot.pause()
-            await pilot.pause()
-            scr = app.query_one(PickerScreen)
-            scr.machine_idx = scr.local_index()
-            await pilot.pause()
-            bd = scr.query_one("#nf-body-data", _PickerBodyData)
-            W = scr.size.width or 100
-            _c, data = scr._build_body_split(W)
-            h = max(1, bd.size.height or 1)
-            # Find a visible offset that maps to a real worktree row.
-            target = None
-            for y in range(h):
-                stop = scr._data_stop_at(data, h, y)
-                if stop and stop[0] == "L":
-                    target = (y, stop)
-                    break
-            assert target is not None, "no data row visible to click"
-            y, stop = target
-            await pilot.click(bd, offset=(10, y))
-            await pilot.pause()
-            assert scr.sel == stop
-            assert app.focused.id == "nf-body-data"
-
-    asyncio.run(run())
-
-
-def test_nf_pointer_double_click_opens_row(monkeypatch):
-    """NF4 (#88): double-clicking a worktree row activates it (opens the submenu)
-    -- the pointer parallel to Enter."""
-    from worktree_manager.production_picker.picker_tui.engine import _PickerBodyData, SubMenuScreen
-    monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "0")
-    src = _fixture_source()
-
-    async def run():
-        app = PickerApp(src, live=False)
-        async with app.run_test(size=(118, 24)) as pilot:
-            await pilot.pause()
-            await pilot.pause()
-            scr = app.query_one(PickerScreen)
-            scr.machine_idx = scr.local_index()
-            await pilot.pause()
-            bd = scr.query_one("#nf-body-data", _PickerBodyData)
-            W = scr.size.width or 100
-            _c, data = scr._build_body_split(W)
-            h = max(1, bd.size.height or 1)
-            y = next(yy for yy in range(h)
-                     if (scr._data_stop_at(data, h, yy) or (None,))[0] == "L")
-            await pilot.click(bd, offset=(10, y), times=2)
-            await pilot.pause()
-            assert any(isinstance(s, SubMenuScreen) for s in app.screen_stack)
-
-    asyncio.run(run())
-
-
 def test_size_mb_handles_non_hex_id():
     """NF5 parity (#88): the cleanup pseudo-size ``_size_mb`` must never raise on
     a non-hex ``id4``. Real/demo worktree suffixes are hex (kept byte-identical
@@ -4459,45 +4375,14 @@ def test_size_mb_handles_non_hex_id():
     assert _size_mb({"id4": "cl00"}) == _size_mb({"id4": "cl00"})
 
 
-def test_nf_maintenance_pivot_renders_under_toggle(monkeypatch):
-    """NF5 parity (#88): with the toggle on, switching to the Maintenance pivot
-    renders its body (select-all / group headers / data rows) and the '~N MiB'
-    size counter through the compose/segment path without raising -- the native
-    path that the flip makes the default. Guards the ``_size_mb`` hardening end
-    to end (the fixture uses non-hex ids)."""
-    from worktree_manager.production_picker.picker_tui.engine import _PickerBodyData
-    monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "0")
-    src = _maint_source()
-
-    async def run():
-        app = PickerApp(src, live=False)
-        async with app.run_test(size=(118, 36)) as pilot:
-            await pilot.pause()
-            scr = app.query_one(PickerScreen)
-            scr.machine_idx = scr.local_index()
-            scr.htab = 1                          # Maintenance pivot
-            scr.sel = scr.default_sel()
-            scr.refresh()
-            await pilot.pause()
-            assert scr._kind() == "maintenance"
-            # The maintenance status counter (status_text -> _size_mb) renders.
-            assert "MiB" in scr.status_text(False).plain
-            # The composed data region renders the maintenance rows without error.
-            bd = scr.query_one("#nf-body-data", _PickerBodyData)
-            assert bd.render().plain  # non-empty; no ValueError raised
-
-    asyncio.run(run())
-
-
 def test_native_list_body_mounts_and_navigates(monkeypatch):
-    """NF5-5 (#88): with AGENT_WORKTREES_PICKER_NATIVE_LIST=1, the data body is a
-    native OptionList (`_PickerNativeData`) instead of the text-line body. Its
-    data rows are selectable options (column/section header rows are disabled),
-    Tab lands focus on it, and native up/down move the cursor -- mirrored into the
-    engine's `sel` (the swappable native-list slice; default OFF keeps the
-    text-line body)."""
+    """NF5-5 (#88): the data body is a native OptionList (`_PickerNativeData`).
+
+    Its data rows are selectable options (column/section header rows are
+    disabled), Tab lands focus on it, and native up/down move the cursor --
+    mirrored into the engine's `sel`.
+    """
     from worktree_manager.production_picker.picker_tui.engine import _PickerNativeData
-    monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "1")
     src = _fixture_source()
 
     async def run():
@@ -4540,7 +4425,6 @@ def test_native_list_multiselect_and_activation(monkeypatch):
     Space toggles the focused row's multi-select, Shift+Down range-selects, and
     Enter activates the row (opens its submenu)."""
     from worktree_manager.production_picker.picker_tui.engine import SubMenuScreen
-    monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "1")
     src = _fixture_source()
 
     async def run():
@@ -4579,58 +4463,6 @@ def test_native_list_multiselect_and_activation(monkeypatch):
     asyncio.run(run())
 
 
-def test_native_list_default_with_opt_out(monkeypatch):
-    """NF5-5 (#88): the native OptionList body is now the **default**; setting
-    ``AGENT_WORKTREES_PICKER_NATIVE_LIST`` to a falsey value opts back to the
-    text-line ``_PickerBodyData`` (the rollback hatch)."""
-    from worktree_manager.production_picker.picker_tui.engine import (
-        _PickerBodyData, _PickerNativeData)
-    src = _fixture_source()
-
-    async def _body_is(native):
-        app = PickerApp(src, live=False)
-        async with app.run_test(size=(118, 24)) as pilot:
-            await pilot.pause()
-            scr = app.query_one(PickerScreen)
-            w = scr.query_one("#nf-body-data")
-            assert isinstance(
-                w, _PickerNativeData if native else _PickerBodyData)
-
-    # Default (env unset): native list.
-    monkeypatch.delenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", raising=False)
-    asyncio.run(_body_is(True))
-    # Opt-out: legacy text-line body.
-    for off in ("0", "false", "off", "no"):
-        monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", off)
-        asyncio.run(_body_is(False))
-
-
-def test_native_list_maintenance_grid_parity(monkeypatch):
-    """NF5-5 (#88): the native list holds byte-identical grid parity on the
-    Maintenance pivot too (group sections + the select-all/data-row structure),
-    not just Worktrees -- both bodies derive from the same `_build_data_vrows`
-    source, so the swap stays a drop-in across pivots."""
-    from worktree_manager.production_picker.picker_tui import capture as _pcap
-
-    async def to_maint(scr, pilot):
-        scr.machine_idx = scr.local_index()
-        scr.htab = scr.htabs.index("Maintenance")
-        scr.sel = scr.default_sel()
-        scr.refresh()
-        await pilot.pause()
-
-    def grid(native):
-        if native:
-            monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "1")
-        else:
-            monkeypatch.delenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", raising=False)
-        lines = _pcap.capture(_maint_source(), live=False, size=(118, 30),
-                              prepare=to_maint)["text"].split("\n")
-        return [ln.rstrip() for ln in lines[1:]]   # drop the volatile topbar
-
-    assert grid(True) == grid(False)
-
-
 def test_native_list_sticky_header(monkeypatch):
     """NF5-5 (#88): the native list pins the current section header above the list
     once that section's own header row has scrolled off the top; it is hidden at
@@ -4640,7 +4472,6 @@ def test_native_list_sticky_header(monkeypatch):
 
     from worktree_manager.production_picker.picker_tui import derive
     from worktree_manager.production_picker.picker_tui.engine import _PickerStickyHeader
-    monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "1")
 
     def _tall_src():
         derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
@@ -4697,7 +4528,6 @@ def test_native_list_sticky_no_reflow_flicker(monkeypatch):
 
     from worktree_manager.production_picker.picker_tui import derive
     from worktree_manager.production_picker.picker_tui.engine import _PickerStickyHeader
-    monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "1")
 
     def _multi_section_src():
         # Mixed statuses / ages so bucket() yields several sections (Active /
@@ -4787,7 +4617,6 @@ def test_native_list_no_rowwrap_and_incremental_repaint(monkeypatch):
     from rich.text import Text as _Text
 
     from worktree_manager.production_picker.picker_tui import derive
-    monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "1")
     # Freeze the 0.1s pulse tick: ``pulse`` is part of the native-list signature
     # (it drives the live ● indicator), so a tick coinciding with a keypress
     # legitimately forces a full rebuild -- pinning it keeps the incremental-path
@@ -4884,7 +4713,6 @@ def test_native_list_checkbox_click_toggles(monkeypatch):
     activates (opens the submenu). The mouse multi-select the always-visible
     checkbox affords."""
     from worktree_manager.production_picker.picker_tui.engine import SubMenuScreen
-    monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "1")
     src = _fixture_source()
 
     async def run():
@@ -6236,6 +6064,100 @@ def test_steer_submit_is_offloaded_off_the_render_flow(tmp_path, monkeypatch):
             ]
 
     asyncio.run(run())
+
+
+def test_run_bg_logs_when_marshalling_the_outcome_back_to_the_ui_fails(caplog):
+    """`_run_bg` must never let a worker's outcome vanish with zero signal.
+
+    Normally `_apply` (marshalled via `app.call_from_thread`) is the only place
+    that surfaces ok/failed on the status line -- but if that marshal itself
+    raises (app already exited, screen gone, ...), the action's real result
+    (which may have genuinely succeeded, e.g. a steer submission that reached
+    the coordinator) is otherwise dropped with the operator seeing nothing
+    change and no error at all. This proves the failure is at least logged so
+    it is diagnosable, since the status line itself is unreachable at that
+    point.
+    """
+    import logging as _logging
+    import threading as _threading
+    import time as _time
+
+    from worktree_manager.production_picker.picker_tui import engine as engine_mod
+
+    class _FakeApp:
+        def call_from_thread(self, fn):
+            raise RuntimeError("app already exited")
+
+    class _Screen:
+        pass
+
+    screen = _Screen()
+    screen.app = _FakeApp()
+    screen._busy_label = None
+    screen._bg_cancel = _threading.Event()
+    screen._bg_threads = set()
+
+    with caplog.at_level(_logging.WARNING, logger="agent-worktrees.picker"):
+        engine_mod.PickerScreen._run_bg(
+            screen, "steer", lambda: (True, "ok"),
+        )
+        for _ in range(100):
+            if caplog.records:
+                break
+            _time.sleep(0.02)
+
+    assert any(
+        "could not marshal its outcome back to the UI" in r.message
+        for r in caplog.records
+    )
+
+
+def test_run_bg_drops_quietly_when_the_picker_already_cancelled_it(caplog):
+    """When ``on_unmount`` has already set ``_bg_cancel`` (the picker itself is
+    tearing down -- a launch decision, cancel, or quit), a worker still
+    finishing its blocking ``work()`` at that moment must NOT attempt
+    ``app.call_from_thread`` at all, and must NOT log a WARNING: this is an
+    expected, intentional exit, not an unforeseen marshal failure. Distinguishes
+    this case from
+    ``test_run_bg_logs_when_marshalling_the_outcome_back_to_the_ui_fails``,
+    which covers a genuinely unexpected marshal failure."""
+    import logging as _logging
+    import threading as _threading
+    import time as _time
+
+    from worktree_manager.production_picker.picker_tui import engine as engine_mod
+
+    class _FakeApp:
+        def __init__(self):
+            self.called = False
+
+        def call_from_thread(self, fn):
+            self.called = True
+            fn()
+
+    class _Screen:
+        pass
+
+    screen = _Screen()
+    app = _FakeApp()
+    screen.app = app
+    screen._busy_label = None
+    screen._bg_cancel = _threading.Event()
+    screen._bg_cancel.set()  # picker already tore down before work() finished
+    screen._bg_threads = set()
+
+    with caplog.at_level(_logging.DEBUG, logger="agent-worktrees.picker"):
+        engine_mod.PickerScreen._run_bg(
+            screen, "steer", lambda: (True, "ok"),
+        )
+        deadline = _time.monotonic() + 2
+        while screen._bg_threads and _time.monotonic() < deadline:
+            _time.sleep(0.02)
+
+    assert app.called is False
+    assert not any(
+        r.levelno >= _logging.WARNING for r in caplog.records
+    )
 
 
 def test_actions_menu_liveness_verify_is_offloaded(tmp_path, monkeypatch):

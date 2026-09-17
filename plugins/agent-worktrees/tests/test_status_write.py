@@ -68,3 +68,46 @@ def test_summary_only_preserves_finalized_status(status_env):
     record = tracking.load_record(status_env)
     assert record.status == "finalized"
     assert record.completed_at == "2026-08-28T01:00:00"
+
+
+def test_first_write_in_session_emits_stage_5_status_reported(status_env, monkeypatch):
+    """Stage 5 (status_reported): the first status-report write in a session
+    marks "Copilot did something here"."""
+    from agent_worktrees import activity
+
+    monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "sess-1")
+    args = argparse.Namespace(worktree_id=None)
+
+    main._cmd_status_write(args, summary="First summary")
+
+    events = activity.read_events(worktree_id="wt-status", event="status_reported")
+    assert len(events) == 1
+    assert events[0]["stage"] == 5
+    assert events[0]["stage_name"] == "status_reported"
+    assert events[0]["session_id"] == "sess-1"
+
+
+def test_second_write_in_same_session_does_not_duplicate_stage_5(
+    status_env, monkeypatch,
+):
+    from agent_worktrees import activity
+
+    monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "sess-1")
+    args = argparse.Namespace(worktree_id=None)
+
+    main._cmd_status_write(args, summary="First summary")
+    main._cmd_status_write(args, summary="Second summary")
+
+    events = activity.read_events(worktree_id="wt-status", event="status_reported")
+    assert len(events) == 1
+
+
+def test_write_without_session_id_does_not_emit_stage_5(status_env, monkeypatch):
+    from agent_worktrees import activity
+
+    monkeypatch.delenv("COPILOT_AGENT_SESSION_ID", raising=False)
+    args = argparse.Namespace(worktree_id=None)
+
+    main._cmd_status_write(args, summary="No session")
+
+    assert activity.read_events(worktree_id="wt-status", event="status_reported") == []

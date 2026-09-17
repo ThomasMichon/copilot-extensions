@@ -213,6 +213,34 @@ Write-Host "  Path:     $PWD"
 Write-Host ''
 
 # ── Launch Copilot ───────────────────────────────────────────────────────
+# Stage 3 (copilot_invoked): fired right before Copilot actually starts, so a
+# setup failure earlier never falsely reports invocation. Best-effort and
+# detached, mirroring launch-session.ps1's Write-ActivityLog.
+function Invoke-CopilotInvokedLog {
+    $awPy = $RuntimePython
+    if (-not $awPy) {
+        # Honor a contextual/cell launch's validated runtime root (same
+        # precedence as launch-session.ps1) before the legacy per-user
+        # fallback, which may not exist for a cell-based install.
+        $runtimeRoot = if ($env:AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT) {
+            $env:AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT
+        } else {
+            Join-Path $env:USERPROFILE '.agent-worktrees'
+        }
+        $resolver = Join-Path $runtimeRoot 'bin\resolve-runtime.ps1'
+        if (Test-Path -LiteralPath $resolver) { . $resolver; $awPy = $AwPy }
+    }
+    if (-not ($awPy -and (Test-Path -LiteralPath $awPy))) { return }
+    try {
+        $wtId = & $awPy -I -m agent_worktrees get worktree-id 2>$null
+        if (-not $wtId) { return }
+        Start-Process -FilePath 'conhost.exe' -ArgumentList (@('--headless', "`"$awPy`"",
+            '-I', '-m', 'agent_worktrees', 'activity-log', 'copilot_invoked',
+            '--worktree-id', $wtId, '--source', 'launcher')) `
+            -WindowStyle Hidden -ErrorAction Stop | Out-Null
+    } catch { }
+}
+
 function Resolve-CopilotApplication {
     <# A broken Windows App Execution Alias can shadow a concrete CLI later on
        PATH. Prefer an existing non-WindowsApps application, but retain the
@@ -233,23 +261,57 @@ function Resolve-CopilotApplication {
 }
 
 $copilotCmd = Resolve-CopilotApplication
-if ($CopilotPath) {
-    $overrideCmd = Get-Command $CopilotPath -ErrorAction SilentlyContinue
-    if (-not $overrideCmd) {
-        Write-Error "Configured Copilot executable not found: $CopilotPath"
-        exit 1
-    }
-    & $overrideCmd.Source @CopilotArgs
-} elseif (-not $copilotCmd) {
-    $ghCmd = Get-Command gh -ErrorAction SilentlyContinue
-    if ($ghCmd) {
-        gh copilot @CopilotArgs
+# This session's own worktree directory -- captured before launch so the
+# fsmonitor teardown below (in `finally`) targets the exact directory this
+# script's `git`/Copilot invocations may have lazily started a daemon for,
+# regardless of which branch below (or none, on an early error exit) ran.
+$launchWorktreePath = $PWD.ProviderPath
+try {
+    if ($CopilotPath) {
+        $overrideCmd = Get-Command $CopilotPath -ErrorAction SilentlyContinue
+        if (-not $overrideCmd) {
+            Write-Error "Configured Copilot executable not found: $CopilotPath"
+            exit 1
+        }
+        Invoke-CopilotInvokedLog
+        & $overrideCmd.Source @CopilotArgs
+    } elseif (-not $copilotCmd) {
+        $ghCmd = Get-Command gh -ErrorAction SilentlyContinue
+        if ($ghCmd) {
+            Invoke-CopilotInvokedLog
+            gh copilot @CopilotArgs
+        } else {
+            Write-Error 'Neither copilot nor gh found on PATH.'
+            exit 1
+        }
     } else {
-        Write-Error 'Neither copilot nor gh found on PATH.'
-        exit 1
+        Invoke-CopilotInvokedLog
+        & $copilotCmd.Source @CopilotArgs
     }
-} else {
-    & $copilotCmd.Source @CopilotArgs
+} finally {
+    # worktree-finality-and-obligations: stop this worktree's fsmonitor
+    # daemon deterministically when the hosted Copilot process exits -- for
+    # ANY reason (clean exit, Ctrl+C, mux pane/window close) -- instead of
+    # relying solely on the resident status-monitor's best-effort mux-dark
+    # reap sweep, which only reaps while that SEPARATE process happens to be
+    # alive and observing this worktree's mux session at the right moment.
+    # This is the deterministic owner of the relationship: the process that
+    # hosts Copilot in this worktree is exactly the one whose lifecycle
+    # should bound the daemon's. Best-effort/non-fatal -- a missing git, a
+    # missing daemon, a disabled fsmonitor, or a since-removed directory are
+    # all silently fine outcomes here (mirrors
+    # `tracking.stop_fsmonitor_daemon`'s own contract).
+    $copilotExitCode = $LASTEXITCODE
+    $fsmonitorGitCmd = $gitCmd
+    if (-not $fsmonitorGitCmd) {
+        $fsmonitorGitCmd = Get-Command git -ErrorAction SilentlyContinue
+    }
+    if ($fsmonitorGitCmd -and (Test-Path -LiteralPath $launchWorktreePath)) {
+        try {
+            & $fsmonitorGitCmd.Source -C $launchWorktreePath `
+                fsmonitor--daemon stop 2>$null | Out-Null
+        } catch { }
+    }
 }
 
-exit $LASTEXITCODE
+exit $copilotExitCode

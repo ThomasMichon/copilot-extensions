@@ -7,7 +7,7 @@ from agent_worktrees import __main__ as cli
 from agent_worktrees import finalize, git_ops, tracking
 
 
-def test_active_ahp_binding_blocks_finalize(monkeypatch):
+def test_active_ahp_execution_leg_blocks_finalize(monkeypatch):
     monkeypatch.setattr(
         finalize.sessions,
         "worktree_has_live_session",
@@ -20,21 +20,20 @@ def test_active_ahp_binding_blocks_finalize(monkeypatch):
     )
     record = SimpleNamespace(
         worktree_id="host-win-20260903-abcd",
-        session_backend=tracking.SessionBackendBinding(
-            kind="ahp",
-            endpoint_url="ws://127.0.0.1:8765",
-            session_id="11111111-1111-1111-1111-111111111111",
-            protocol_version="0.7.0",
-            auth_account="example-user",
-            created_at="2026-09-03T00:00:00+00:00",
-            last_seen_at="2026-09-03T00:00:00+00:00",
+        execution_leg=tracking.ExecutionLegBinding(
+            provider="ahp",
             state="active",
+            binding_revision=1,
+            blob={"session_id": "11111111-1111-1111-1111-111111111111"},
         ),
+        session_backend=None,
+        session_backend_opaque=False,
+        execution_leg_opaque=False,
     )
     assert finalize._has_live_session(record) is True
 
 
-def test_disposed_ahp_binding_does_not_block_finalize(monkeypatch):
+def test_disposed_ahp_execution_leg_does_not_block_finalize(monkeypatch):
     monkeypatch.setattr(
         finalize.sessions,
         "worktree_has_live_session",
@@ -47,16 +46,15 @@ def test_disposed_ahp_binding_does_not_block_finalize(monkeypatch):
     )
     record = SimpleNamespace(
         worktree_id="host-win-20260903-abcd",
-        session_backend=tracking.SessionBackendBinding(
-            kind="ahp",
-            endpoint_url="ws://127.0.0.1:8765",
-            session_id="11111111-1111-1111-1111-111111111111",
-            protocol_version="0.7.0",
-            auth_account="example-user",
-            created_at="2026-09-03T00:00:00+00:00",
-            last_seen_at="2026-09-03T00:00:00+00:00",
+        execution_leg=tracking.ExecutionLegBinding(
+            provider="ahp",
             state="disposed",
+            binding_revision=1,
+            blob={"session_id": "11111111-1111-1111-1111-111111111111"},
         ),
+        session_backend=None,
+        session_backend_opaque=False,
+        execution_leg_opaque=False,
     )
     assert finalize._has_live_session(record) is False
 
@@ -117,15 +115,11 @@ def _record(tmp_path, *, state: str) -> tracking.WorktreeRecord:
         status="finalized",
         completed_at="2026-09-03T00:00:01+00:00",
     )
-    record.session_backend = tracking.SessionBackendBinding(
-        kind="ahp",
-        endpoint_url="ws://127.0.0.1:8765",
-        session_id="11111111-1111-1111-1111-111111111111",
-        protocol_version="0.7.0",
-        auth_account="octocat",
-        created_at="2026-09-03T00:00:00+00:00",
-        last_seen_at="2026-09-03T00:00:00+00:00",
+    record.execution_leg = tracking.ExecutionLegBinding(
+        provider="ahp",
         state=state,
+        binding_revision=1,
+        blob={"session_id": "11111111-1111-1111-1111-111111111111"},
     )
     return record
 
@@ -207,8 +201,8 @@ def test_cleanup_rechecks_hosted_binding_under_finalize_lock(
 
         def acquire(self):
             latest = tracking.load_record(record_path)
-            latest.session_backend.state = "active"
-            latest.session_backend.binding_revision += 1
+            latest.execution_leg.state = "active"
+            latest.execution_leg.binding_revision += 1
             tracking.save_record(latest, record_path)
 
         def release(self):

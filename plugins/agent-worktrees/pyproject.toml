@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-worktrees"
-version = "1.5.5-dev65"
+version = "1.5.5-dev135"
 description = "Worktree isolation system for concurrent Copilot CLI sessions"
 readme = "README.md"
 license = "MIT"
@@ -15,13 +15,13 @@ authors = [
 dependencies = [
     "pyyaml>=6.0.3",
     "textual>=8.2.8",
-    "websocket-client>=1.8.0",
     "agent-config-migrate",
     "agent-plugin-resolve",
     "agent-procutil",
     "agent-dropin-registry",
     "agent-plugin-activation",
     "agent-single-instance-lease",
+    "agent-work-coalescing-singleton",
 ]
 
 [tool.uv.sources]
@@ -49,6 +49,10 @@ agent-plugin-activation = { path = "libs/plugin-activation" }
 # session-render cache instead of racing it or falling back to a wrong
 # heuristic.
 agent-single-instance-lease = { path = "libs/single-instance-lease" }
+# Work-coalescing-singleton daemon shape (module ``work_coalescing_singleton``):
+# coalesce/refcount/idle-exit wire protocol + client (plugin-process-hygiene
+# #744/#2323). Vendored per plugin; byte-identical src across copies.
+agent-work-coalescing-singleton = { path = "libs/work-coalescing-singleton" }
 
 [project.scripts]
 agent-worktrees = "agent_worktrees.__main__:main"
@@ -70,15 +74,6 @@ line-length = 99
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "RUF"]
-
-[tool.ruff.lint.per-file-ignores]
-# Ported TUI rendering engine: intentional box/arrow glyphs (â€¹ â€º â—€ â–¶ etc.) trip
-# the ambiguous-unicode checks (RUF001-003), and the dense render loops use
-# tuple-unpacking where not every field is read (B007/RUF005/RUF059). These are
-# faithful to the design prototype and harmless in a self-contained UI module.
-"src/agent_worktrees/picker_tui/engine.py" = [
-    "RUF001", "RUF002", "RUF003", "B007", "RUF005", "RUF059",
-]
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -43,8 +43,10 @@ copilot-extensions create            # isolated worktree (no mux/session)
 #   Complete the documentation-impact review below.
 copilot-extensions create-pr         # squashes the worktree, pushes pr/<slug>,
                                      # and (auto_open) opens the GitHub PR
-#   → Copilot posts its review on the PR (non-blocking)
+#   → Copilot posts its review on the PR (non-blocking; never a merge gate)
 #   …address anything worth addressing, re-run push-changes to update the PR…
+#   → merge regardless of remaining low/medium findings -- there is no
+#     approval or "clean" verdict to wait for; see the note below.
 copilot-extensions pr-merge ThomasMichon/copilot-extensions <#> --now   # MANUAL squash-merge (you own the merge)
 copilot-extensions finalize          # clean up the worktree
 ```
@@ -53,11 +55,32 @@ copilot-extensions finalize          # clean up the worktree
   `pr/<slug>` head; it will NOT land on `main`).
 - **Merge is deliberately manual.** No auto-merge label is bound (the repo's
   `pr-self-merge` profile authorizes the submitter to merge directly): open the
-  PR, give Copilot's review a chance to land, then squash-merge it yourself with
-  `pr-merge <#> --now` (equivalent to a plain `gh pr merge <#> --squash
-  --delete-branch`, but it resolves the right account and squashes uniformly). (0
-  approvals are required by policy — a solo owner can't approve their own PR, and
-  Copilot's review is advisory.)
+  PR, give Copilot's review a bounded window of **about 5 minutes** (order of
+  minutes, not hours) to land, then squash-merge it yourself with `pr-merge <#>
+  --now` (equivalent to a plain `gh pr merge <#> --squash --delete-branch`, but
+  it resolves the right account and squashes uniformly). (0 approvals are
+  required by policy — a solo owner can't approve their own PR, and Copilot's
+  review is advisory.) **As the repo's maintainer, self-merge after that ~5
+  minute window regardless of whether a review has posted yet** -- address any
+  findings that *did* land in time, but do not extend the wait chasing a
+  verdict that may never come; a review arriving after merge can still be
+  addressed in a follow-up commit/PR.
+- **There is no verdict to wait for.** Copilot's review is always a
+  non-blocking comment, never a required approval, no matter how many
+  findings it reports or how many rounds you go through. Address genuinely
+  valuable findings, explain or dismiss the rest, and merge -- do not leave a
+  PR sitting untouched after a review lands "waiting" for a subsequent
+  approval or a zero-finding pass that may never come. If a PR has had a
+  review and nothing has happened since, that is a stuck PR: merge it or
+  explicitly abandon it, don't leave it idle.
+- **Do not comment `@copilot review` (or similar) to request a fresh pass.**
+  An `@copilot` mention on GitHub does not nudge the `copilot-pull-request-reviewer`
+  bot -- it delegates a task to the separate Copilot **cloud coding agent**,
+  which will start pushing its own commits directly to your PR branch (it can
+  and will act on open review findings, which may or may not be what you
+  want, and consumes its own credit budget independent of your session).
+  The review bot already re-runs automatically on every push; if you want a
+  fresh verdict, just push a commit.
 - **Never** `git push origin main` or `push-changes` direct-to-`main`; both the
   tooling and the branch policy reject it. Break-glass (a genuine recovery)
   means temporarily relaxing the ruleset — not routing around it.
@@ -253,6 +276,16 @@ file is out of sync:
 - After a set of changes is committed and ready to push.
 - Before pushing to GitHub — the push is the "release."
 - One bump per push is fine; don't bump on every commit.
+- **On a hot plugin with concurrent agents** (several agents landing PRs to the
+  same plugin within minutes of each other — `agent-worktrees` is the frequent
+  case), the version you read is stale the moment another PR merges. Don't
+  precompute the bump early and carry it through several commits: re-fetch
+  `origin/main` and set the version to *(current main's version) + 1*
+  immediately before your final push, and again after any rebase the
+  `check-version-bump` CI gate forces on you. A collision here isn't
+  data loss — `check-version-bump`/`check-version-consistency` catch it every
+  time and force a quick re-bump — but re-checking right before push avoids
+  the wasted round trip.
 
 ## Deploying: one command — `<repo> update`
 
@@ -523,6 +556,56 @@ binstub in `~/.local/bin/`.
   so the committed `pre-commit` hook lints only **staged** files and only the
   high-signal `F` (pyflakes) + `E9` (syntax) rule groups — fix those as you go.
 - Docstrings for public functions
+- **Componentization: a 1,000-line hard cap per source module**
+  (`tools/check-module-size.py`). A single module growing without bound is a
+  real failure mode this repo hit in practice (`agent-dispatch`'s `queue.py`
+  reached ~7,200 lines with no guard catching it) — a 1,000-line file is
+  already a lot to hold in your head at once; split by responsibility (an
+  adapter, an evaluator, a policy table) well before that, not after. Dozens
+  of pre-existing files exceed the cap by a wide margin (some by an order of
+  magnitude), so a **shrink-only baseline**
+  (`tools/module-size-baseline.json`) grandfathers each one in at its current
+  size as a temporary ceiling — the guard still fails if a baselined file
+  grows even one line further, or if any non-baselined file newly crosses the
+  cap. Shrinking a file is always fine and never itself a failure. Widening a
+  baselined ceiling is a **manual, reviewed edit** to the JSON, never
+  something a refresh does silently — `--refresh-baseline` only lowers or
+  removes entries, it never raises one. Test files (`tests/`, `test_*.py`,
+  `conftest.py`) are exempt — `TESTING.md` already directs splitting those by
+  behavioral contract, not arbitrary line count, a different rule for a
+  different failure mode.
+  - **The cap is a backstop, not a target.** Treat "a couple of related
+    classes/functions per module" as the working ceiling in normal
+    development, and split proactively as a module grows toward it — waiting
+    for `check-module-size.py` to fail is already too late; by then the
+    module has usually accreted several unrelated responsibilities that are
+    now entangled and harder to separate than if each had landed in its own
+    file from the start.
+  - **CLI/registration surfaces are a named recurring shape, not a special
+    case.** A large `__main__.py` (or any command/route/handler registry) is
+    almost always several independent subcommands sharing one dispatch table,
+    not one cohesive module. Split it into one module per subcommand (or
+    cohesive subcommand family) plus a thin registrar that only imports and
+    wires them — `agent-dispatch`'s extraction of `producers_cli.py`,
+    `recipes_cli.py`, and `supervise_cli.py` out of its `__main__.py` is the
+    model to follow for any other CLI that's grown the same way.
+  - **This is a language-agnostic discipline**, not a Python-only rule. The
+    same "one cohesive responsibility, split proactively, no giant CLI
+    registration blob" standard applies to `.sh`, `.ps1`, and `.ts` sources
+    even though `tools/check-module-size.py` currently only scans tracked
+    `*.py` files — extending the guard to other extensions is tracked
+    separately (see the `module-componentization-discipline` effort); do not
+    treat the tool's current Python-only scope as license to let a large
+    shell/PowerShell/TypeScript file grow unchecked in the meantime.
+  - **How to actually do a split safely:** see the
+    `customizing-copilot:componentizing-modules` skill (a runbook for
+    identifying seams, extracting them, and re-validating — including the
+    `--refresh-baseline` step once a baselined file shrinks below its prior
+    ceiling). Use `python tools/rank-module-size.py` to find which
+    already-grandfathered files are the biggest offenders (it folds identical
+    vendored copies — e.g. the `installation-context`/`versioned-runtime`
+    sync targets — into one row so the ranking reflects distinct real work,
+    not duplicated line counts).
 
 ### Git Hooks
 
@@ -540,10 +623,12 @@ The repo ships git hooks under `tools/hooks/`:
   `tools/check-docs-consistency.py`, `tools/check-runbook-references.py`,
   `tools/check-version-consistency.py` (every plugin's version identical across
   `plugin.json` / `pyproject.toml` / its `marketplace.json` entry — a one-file
-  bump wedges the Picker's update indicator), and `tools/check-feed-neutrality.py`
+  bump wedges the Picker's update indicator), `tools/check-feed-neutrality.py`
   (no config/Dockerfile/install-script/CI-workflow file may hardcode a public
   package-feed URL as the only usable endpoint — this repo runs on machines
-  whose default feed is network-blocked and replaced with an internal mirror).
+  whose default feed is network-blocked and replaced with an internal mirror),
+  and `tools/check-module-size.py` (the 1,000-line-per-module cap and
+  shrink-only baseline described above).
 
 CI also runs `tools/check-marketplace-isolation.py` in report-only mode. It
 inventories legacy unqualified runtime roots, generic global plugin commands,

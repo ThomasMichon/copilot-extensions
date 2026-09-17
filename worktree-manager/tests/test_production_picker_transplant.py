@@ -14,6 +14,21 @@ from worktree_manager import __main__ as entrypoint
 from worktree_manager.production_picker import runner
 from worktree_manager.production_picker import _engine_runtime as engine_runtime
 
+from _installation_context_fixtures import namespaced_fixture, patch_profile
+
+
+def _write_policy(profile: Path, *, enabled: bool) -> None:
+    policy_dir = profile / ".copilot-extensions"
+    policy_dir.mkdir(parents=True, exist_ok=True)
+    (policy_dir / "installation-mode.json").write_text(
+        json.dumps({
+            "schema": "copilot-extensions.installation-mode",
+            "version": 1,
+            "installationMode": {"enabled": enabled},
+        }),
+        encoding="utf-8",
+    )
+
 
 @pytest.fixture(autouse=True)
 def _no_relocated_launch_script_by_default(monkeypatch):
@@ -45,6 +60,33 @@ def test_transplanted_picker_sources_match_production_copy():
                 "engine.py",
                 "maintenance.py",
                 "pivots.py",
+                # derive.py now imports agent_worktrees.reciprocal_state
+                # (relocated out of agent-worktrees' picker_tui/, 2026-09-16,
+                # worktree-manager-control-plane Phase 3/6 Step 1.5 -- that
+                # module is load-bearing for agent-worktrees' non-TUI CLI and
+                # can't live inside a package Worktree Manager also vendors
+                # byte-for-byte). Worktree Manager keeps its own local
+                # picker_tui/reciprocal.py sibling instead, so derive.py's
+                # import line necessarily diverges between the two copies.
+                "derive.py",
+                # __init__.py's launch call now imports
+                # agent_worktrees.launch_trace for the same Step 1.5 reason
+                # (append_launch_event moved out of picker_tui/frame_health.py
+                # on the agent-worktrees side; Worktree Manager keeps its own
+                # local frame_health.append_launch_event untouched).
+                "__init__.py",
+                # frame_health.py's own _timestamp/_launch_trace_path helpers
+                # now import from agent_worktrees.launch_trace instead of
+                # defining them locally (same Step 1.5 relocation); Worktree
+                # Manager's copy keeps its original self-contained version.
+                "frame_health.py",
+                # profiles_io.py now imports agent_worktrees.roster (roster.py
+                # relocated out of picker_tui/ for the same Step 1.5 reason --
+                # local_host() is called from agent-worktrees' standalone
+                # cmd_profiles CLI command, not just the Picker's Profiles
+                # view). Worktree Manager keeps its own local
+                # picker_tui/roster.py sibling instead.
+                "profiles_io.py",
             }
         ),
     ]
@@ -133,32 +175,92 @@ def test_production_runner_activates_project_and_uses_transplanted_ui(monkeypatc
 
 
 def test_engine_runtime_prefers_explicit_context_over_checkout(monkeypatch, tmp_path):
-    root = (
-        tmp_path
-        / "durable"
-        / "marketplaces"
-        / "cell-a"
-        / "plugins"
-        / "agent-worktrees"
-    )
-    slot = root / "versions" / "1.2.3"
+    home = tmp_path / "home"
+    home.mkdir()
+    install, _python = namespaced_fixture(home, windows=engine_runtime.os.name == "nt")
+    slot = install.parent / "versions" / "1.2.3"
     source = (
         slot / "Lib" / "site-packages"
         if engine_runtime.os.name == "nt"
         else slot / "lib" / "python3.10" / "site-packages"
     )
-    package = source / "agent_worktrees"
-    package.mkdir(parents=True)
-    (root / "current-version").write_text("1.2.3", encoding="utf-8")
-    (root / "install.json").write_text(
-        json.dumps({"pluginId": "agent-worktrees"}),
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(root / "install.json"))
+    (source / "agent_worktrees").mkdir(parents=True)
+    _write_policy(home, enabled=True)
+    patch_profile(monkeypatch, engine_runtime.agent_plugin_runtime, home)
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(install))
     monkeypatch.delenv(engine_runtime.ENGINE_SOURCE_ENV, raising=False)
     monkeypatch.setattr(engine_runtime, "_checkout_source", lambda: tmp_path / "checkout")
 
     assert engine_runtime._active_runtime_source() == source
+
+
+def test_engine_runtime_falls_back_to_last_known_good_slot(monkeypatch, tmp_path):
+    """A stale/missing current-version marker must not blank out the source
+    when last-known-good still names a real, importable, COMPLETE slot --
+    the same marker/fallback walk engine_client's resolver already does."""
+    root = tmp_path / "legacy" / ".agent-worktrees"
+    good_slot = root / "versions" / "1.2.2"
+    good_source = (
+        good_slot / "Lib" / "site-packages"
+        if engine_runtime.os.name == "nt"
+        else good_slot / "lib" / "python3.10" / "site-packages"
+    )
+    (good_source / "agent_worktrees").mkdir(parents=True)
+    (good_slot / ".install-complete.json").write_text("{}", encoding="utf-8")
+    python = good_slot / ("Scripts/python.exe" if engine_runtime.os.name == "nt" else "bin/python")
+    python.parent.mkdir(parents=True, exist_ok=True)
+    python.write_text("", encoding="utf-8")
+    (root / "current-version").write_text("missing", encoding="utf-8")
+    (root / "last-known-good").write_text("1.2.2", encoding="utf-8")
+    (root / "deploy-manifest.json").write_text(
+        json.dumps({
+            "service": "agent-worktrees",
+            "source": {"plugin": "agent-worktrees", "version": "1.2.2"},
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path / "legacy"))
+
+    assert engine_runtime._active_runtime_source() == good_source
+
+
+def test_engine_runtime_skips_incomplete_slot_for_picker_source(monkeypatch, tmp_path):
+    """A current slot that exists but has not finished installing (no
+    ``.install-complete.json``) must not be importable by the Picker, even
+    though its ``agent_worktrees`` package directory is already present --
+    matching the command resolver's own completion-marker requirement."""
+    root = tmp_path / "legacy" / ".agent-worktrees"
+    incomplete_slot = root / "versions" / "1.2.3"
+    incomplete_source = (
+        incomplete_slot / "Lib" / "site-packages"
+        if engine_runtime.os.name == "nt"
+        else incomplete_slot / "lib" / "python3.10" / "site-packages"
+    )
+    (incomplete_source / "agent_worktrees").mkdir(parents=True)
+    # Deliberately no .install-complete.json under incomplete_slot.
+    (root / "current-version").write_text("1.2.3", encoding="utf-8")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path / "legacy"))
+
+    assert engine_runtime._active_runtime_source() is None
+
+
+def test_engine_runtime_ignores_context_when_cells_policy_disabled(monkeypatch, tmp_path):
+    """The 'same config' invariant: a context that names agent-worktrees is
+    never trusted on its own. When the shared installation-mode policy
+    (mirrored across every agent-* plugin's own bootstrap) has marketplace
+    cells off, the context is ignored exactly as if it were absent."""
+    home = tmp_path / "home"
+    home.mkdir()
+    install, _python = namespaced_fixture(home, windows=engine_runtime.os.name == "nt")
+    # No policy file written -- absent policy means disabled by default.
+    patch_profile(monkeypatch, engine_runtime.agent_plugin_runtime, home)
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(install))
+    monkeypatch.delenv(engine_runtime.ENGINE_SOURCE_ENV, raising=False)
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path / "no-legacy-here"))
+
+    assert engine_runtime._active_runtime_source() is None
 
 
 def test_engine_runtime_rejects_foreign_explicit_context(monkeypatch, tmp_path):
@@ -1249,7 +1351,7 @@ def test_picker_mock_uses_production_transplant_without_acting(monkeypatch, caps
     monkeypatch.setattr(
         entrypoint,
         "build_projects",
-        lambda: [type("Project", (), {"name": "demo"})()],
+        lambda: [type("Project", (), {"name": "demo", "repo": None})()],
     )
     calls = []
     monkeypatch.setattr(
@@ -1279,7 +1381,7 @@ def test_picker_screenshot_uses_production_capture(monkeypatch, tmp_path):
     monkeypatch.setattr(
         entrypoint,
         "build_projects",
-        lambda: [type("Project", (), {"name": "demo"})()],
+        lambda: [type("Project", (), {"name": "demo", "repo": None})()],
     )
     calls = []
     monkeypatch.setattr(
@@ -1319,7 +1421,7 @@ def test_picker_screenshot_keeps_relative_output_at_caller_cwd(monkeypatch, tmp_
     monkeypatch.setattr(
         entrypoint,
         "build_projects",
-        lambda: [type("Project", (), {"name": "demo"})()],
+        lambda: [type("Project", (), {"name": "demo", "repo": None})()],
     )
 
     def capture(*args, **kwargs):
@@ -1345,7 +1447,7 @@ def test_legacy_screenshot_flag_uses_production_capture(monkeypatch, tmp_path):
     monkeypatch.setattr(
         entrypoint,
         "build_projects",
-        lambda: [type("Project", (), {"name": "demo"})()],
+        lambda: [type("Project", (), {"name": "demo", "repo": None})()],
     )
     monkeypatch.setattr(
         runner,

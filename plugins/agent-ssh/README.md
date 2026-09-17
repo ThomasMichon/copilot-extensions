@@ -16,6 +16,7 @@ agent-ssh doctor
 agent-ssh verify --timeout 8 my-machine
 agent-ssh explore my-machine --json
 agent-ssh mesh-status
+agent-ssh refresh-mesh --json
 ```
 
 The CLI manages only SSH aliases. Once `ssh <name>` works, sibling plugins such
@@ -62,6 +63,18 @@ optional static machine metadata shared with agent-worktrees and agent-bridge:
 `role` is a stable terse classification, `description` explains the machine's
 purpose, and `capabilities` is an ordered list of broad discovery hints. These
 fields describe topology, not live machine state.
+
+`refresh-mesh [--path machines.yaml] [--config-d dir] [--timeout N] [--json]`
+reconciles this machine's *outbound* reach into the mesh: it re-runs the
+transport's own discovery (e.g. `dtssh discover` for the dtssh transport) to
+capture live tunnel/host ids, re-renders this machine's managed
+`config.d` fragment from that live state, and probes reachability of every
+declared alias. It never trusts a previously cached id -- transports such as
+dtssh rotate tunnel ids on every host restart, and nothing else re-validates a
+peer's cached id once it goes stale. `agent-machines`' hourly `watchdog`
+self-update tier calls this on every opted-in machine, so a stale cached id
+self-heals within about an hour instead of silently breaking inbound SSH until
+an operator notices and re-runs discovery by hand.
 
 The repository-gated mesh pointer also names the maintenance fallback for a
 machine that remains unreachable after bounded diagnosis. Repeatable state

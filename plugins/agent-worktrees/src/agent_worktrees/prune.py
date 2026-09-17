@@ -245,7 +245,8 @@ class CleanupDisposition:
 
     cleanable: bool
     bucket: str   # clean | active | unused | conversation | follow-up |
-    #               open-pr | closed-unmerged | dirty | wip | unmerged
+    #               held-claims | open-pr | closed-unmerged | dirty | wip |
+    #               unmerged
     reason: str
 
 
@@ -265,19 +266,25 @@ def cleanup_disposition(
     needs a git branch-merged check the caller owns.  Everything else flows
     from :func:`assess`.
 
-    Safety invariant: a ``finalized`` worktree (or one git proves COMPLETED) is
-    always cleanable -- its work is at minimum pushed to the remote feature
-    branch, so removing the local copy loses nothing.  This preserves the
-    long-standing default and avoids over-preserving on a *stale* local PR
-    state (use ``--reconcile-prs`` / live reconcile to refine those).
+    Safety invariant: a ``finalized`` worktree (or one git proves COMPLETED)
+    is cleanable **provided its working tree carries no uncommitted content**
+    (``info.dirty == 0``) -- at that point its work is at minimum pushed to
+    the remote feature branch, so removing the local copy loses nothing. This
+    preserves the long-standing default and avoids over-preserving on a
+    *stale* local PR state (use ``--reconcile-prs`` / live reconcile to
+    refine those). A worktree finalized earlier and modified afterward
+    (``info.dirty > 0``, whether classified ``DIRTY`` or an ``ORPHAN`` that
+    still carries a dirty count) is excluded from this shortcut regardless of
+    ``rec.status`` -- see the ``info.dirty > 0`` guard below.
 
-    The **one exception** is an IN-FLIGHT claimed resource (agent-fabric
-    `claimed-resource-not-reclaimed`): when ``claimant_alive`` is injected and
-    the claimant is alive / not-confirmed-gone, a still-in-flight resource is
-    spared because its owner may still be using it. A FINISHED claimed resource
-    (finalized / merged / git-COMPLETED) is NOT spared -- it is collectable even
-    under a live claimant, so a host kept open for days does not
-    pin its merged children.
+    Beyond the dirty exclusion, the other exception is an IN-FLIGHT claimed
+    resource (agent-fabric `claimed-resource-not-reclaimed`): when
+    ``claimant_alive`` is injected and the claimant is alive /
+    not-confirmed-gone, a still-in-flight resource is spared because its
+    owner may still be using it. A FINISHED claimed resource (finalized /
+    merged / git-COMPLETED) is NOT spared -- it is collectable even under a
+    live claimant, so a host kept open for days does not pin its merged
+    children.
     """
     v = assess(rec, info, turn_count=turn_count, claimant_alive=claimant_alive)
     S = git_ops.WorktreeState
@@ -293,19 +300,40 @@ def cleanup_disposition(
     if v.category == "claimed":
         return CleanupDisposition(False, "claimed", v.reason)
 
+    # worktree-finality-and-obligations (effort): a HELD outbound resource
+    # claim (``active`` or ``at-rest`` -- see ``ResourceClaim.is_live``)
+    # overrides a would-be SAFE verdict, mirroring the follow-up gate below.
+    # Since a finalized owner can now accept a new claim (finalize is not
+    # terminal; see ``tracking.add_resource_claim``), cleanup must not treat
+    # ``status == finalized`` as proof the worktree is claim-free -- only
+    # ``finalize`` itself re-validates and releases at-rest claims. A
+    # ``released``/``abandoned`` claim is not held and does not block.
+    held_claims = [c for c in rec.resources if c.is_live]
+    if held_claims and (
+        rec.status == "finalized" or info.state == S.COMPLETED
+        or v.category == "merged"
+    ):
+        return CleanupDisposition(
+            False, "held-claims",
+            f"{v.reason} · {len(held_claims)} held resource claim(s) pending")
+
     # worktree-status-core: an agent-asserted follow-up overrides a would-be
-    # SAFE verdict. A finalized/merged/completed worktree the agent flagged as
-    # having actionable follow-ups (un-pushed change, undeployed merge, leftover
-    # temp state) is REVIEW -- never auto-pruned SAFE. Only downgrades the
-    # clean/SAFE path; a dirty/wip/open-pr worktree is already non-cleanable, so
-    # the flag adds nothing there.
-    if rec.follow_up and (
+    # SAFE verdict. A finalized/merged/completed worktree with actionable
+    # follow-ups (un-pushed change, undeployed merge, leftover temp state) is
+    # REVIEW -- never auto-pruned SAFE. Only downgrades the clean/SAFE path; a
+    # dirty/wip/open-pr worktree is already non-cleanable, so this adds nothing
+    # there. worktree-finality-and-obligations Phase 3: counts the itemized
+    # `follow_ups` ledger (open/pending-transfer items), falling back to the
+    # legacy boolean when the ledger is empty -- see
+    # `tracking.effective_open_follow_up_count`.
+    open_follow_ups = tracking.effective_open_follow_up_count(rec)
+    if open_follow_ups and (
         rec.status == "finalized" or info.state == S.COMPLETED
         or v.category == "merged"
     ):
         return CleanupDisposition(
             False, "follow-up",
-            f"{v.reason} · agent flagged follow-ups pending")
+            f"{v.reason} · {open_follow_ups} open follow-up(s) pending")
 
     # citadel paired-worktree BOTH-gate (#957): a paired -harness/-knowledge
     # worktree is prunable only once BOTH halves are finalized. When the
@@ -328,6 +356,39 @@ def cleanup_disposition(
                 f"{v.reason} · held until BOTH paired worktrees finalized "
                 f"({why})")
 
+    # (#2635-class ordering fix, extended by the cleanup-toctou-revalidation
+    # effort): WIP and un-included conversation-only must be checked BEFORE
+    # the finalized/COMPLETED shortcut below -- a record whose tracking
+    # status is "finalized" (or whose git state reads COMPLETED) can still
+    # gain a committed WIP change or a fresh conversation turn since that
+    # status was set. Trusting the shortcut first would let a stale
+    # "finalized" status silently mask fresh unsafe content, mirroring the
+    # `dirty` ordering bug PR #2635 already fixed one check below. When
+    # `include_conversations` is set, conversation-only content is meant to
+    # be cleanable, so it is intentionally left to fall through to its later
+    # category check rather than being blocked here.
+    if info.state == S.WIP:
+        return CleanupDisposition(False, "wip", v.reason)
+    if v.category == "conversation-only" and not include_conversations:
+        return CleanupDisposition(False, "conversation", v.reason)
+
+    # Safety invariant (mirrors _apply_tracking_override in __main__.py): any
+    # uncommitted content must never be treated as cleanable via the raw
+    # rec.status == "finalized" shortcut below. A worktree finalized earlier
+    # and modified afterward still carries a tracking status of "finalized",
+    # but that status describes work already verified safe on the default
+    # branch at finalize time -- it says nothing about content added since.
+    # Checked two ways so neither a missing count nor a stale state label
+    # slips through: info.state == S.DIRTY is kept as an explicit fallback
+    # because some callers (e.g. __main__._classify_from_cache) reconstruct
+    # a WorktreeStateInfo from a cached git_state string without
+    # repopulating `dirty`, so state == DIRTY, dirty == 0 can reach here;
+    # info.dirty > 0 is needed separately because an ORPHAN classification
+    # (no merge base) can also carry a nonzero dirty count with state !=
+    # DIRTY. Neither check alone covers both gaps.
+    if info.state == S.DIRTY or info.dirty > 0:
+        return CleanupDisposition(False, "dirty", v.reason)
+
     if rec.status == "finalized" or info.state == S.COMPLETED:
         return CleanupDisposition(True, "clean", v.reason)
 
@@ -342,11 +403,463 @@ def cleanup_disposition(
             include_unused or include_conversations, "unused", v.reason)
     if v.category == "conversation-only":
         return CleanupDisposition(include_conversations, "conversation", v.reason)
-    if info.state == S.DIRTY:
-        return CleanupDisposition(False, "dirty", v.reason)
-    if info.state == S.WIP:
-        return CleanupDisposition(False, "wip", v.reason)
     return CleanupDisposition(False, "unmerged", v.reason)
+
+
+# ── Canonical closure descriptor (worktree-finality-and-obligations, Phase 4) ─
+
+#: Descriptor schema version. Bump on any incompatible shape change; older
+#: consumers must treat an unrecognized version as provisional, never FINAL.
+#: Bumped to 2 for worktree-finality-and-obligations Phase 9: the top-level
+#: ``evidence_mode``/``evidence_complete`` pair (a single all-or-nothing
+#: freshness flag for the whole descriptor) is replaced by ``facts``, a named
+#: sub-state map where each fact carries its OWN ``confirmed`` freshness --
+#: see :data:`FACT_NAMES` and :func:`assemble_closure_descriptor`.
+DESCRIPTOR_VERSION = 2
+
+#: The fixed, named sub-state facts a closure descriptor decomposes into
+#: (worktree-finality-and-obligations Phase 9). Each fact is tracked and
+#: freshness-marked independently -- an unconfirmed fact is marked in place,
+#: never collapsed into (or spawning) a separate whole state.
+#:
+#: * ``checkpoint_activity`` -- turns since the last checkpoint; always
+#:   locally computed, so always confirmed.
+#: * ``upstream_containment`` -- whether the branch's content is at or ahead
+#:   of ``origin/[main|master]``; requires a fresh fetch to be ``confirmed``.
+#: * ``local_dirtiness`` -- uncommitted change count; always locally
+#:   computed, so always confirmed.
+#: * ``open_claims`` -- held resource claims, open follow-ups, and any
+#:   PR/blocker state that depends on a provider lookup; ``confirmed`` when
+#:   that lookup is fresh (mirrors ``upstream_containment``'s freshness input
+#:   until the Phase 9 repo-scoped ledger lets them diverge).
+#: * ``pending_handoff`` -- opened-but-unlinked session handoffs on this
+#:   worktree (``rec.pending_handoffs``: a predecessor recorded a token, no
+#:   successor session linked yet). Read-only, always confirmed (a local
+#:   tracking-record read, no fetch/staleness concept); purely informational
+#:   -- does not gate FINAL.
+FACT_NAMES = (
+    "checkpoint_activity", "upstream_containment", "local_dirtiness",
+    "open_claims", "pending_handoff",
+)
+
+#: The closed blocker-code vocabulary (design.md). A future code requires a
+#: version bump. NOTE: this module only ever emits a SUBSET of this set (the
+#: codes it can actually derive from `assess`/`cleanup_disposition` -- see
+#: `assemble_closure_descriptor`'s docstring for what's not yet wired).
+BLOCKER_CODES = frozenset({
+    "held-claims", "open-follow-ups", "open-pr", "closed-unmerged", "unmerged",
+    "dirty", "wip", "claimed-live", "paired-pending", "active-effort",
+    "inbound-obligation", "unverified-squash", "live-session", "finalizing",
+    "checkout-missing", "prune-review-required", "incomplete-evidence",
+    "unsupported-descriptor",
+})
+
+_BASE_STATE_LABELS: dict[git_ops.WorktreeState, str] = {
+    git_ops.WorktreeState.ACTIVE: "ACTIVE",
+    git_ops.WorktreeState.DIRTY: "DIRTY",
+    git_ops.WorktreeState.WIP: "WIP",
+    git_ops.WorktreeState.UNUSED: "UNUSED",
+    git_ops.WorktreeState.CONVO: "CONVO",
+    git_ops.WorktreeState.GONE: "GONE",
+    git_ops.WorktreeState.ORPHAN: "ORPHAN",
+    git_ops.WorktreeState.UNKNOWN: "UNKNOWN",
+}
+
+#: cleanup_disposition bucket -> the single blocker code it maps to (a bucket
+#: not listed here contributes no bucket-derived blocker of its own; held
+#: claims / open follow-ups are still added independently below by count).
+_BUCKET_TO_BLOCKER: dict[str, str] = {
+    "follow-up": "open-follow-ups",
+    "held-claims": "held-claims",
+    "open-pr": "open-pr",
+    "closed-unmerged": "closed-unmerged",
+    "unmerged": "unmerged",
+    "dirty": "dirty",
+    "wip": "wip",
+    "claimed": "claimed-live",
+    "paired-pending": "paired-pending",
+}
+
+#: cleanup_disposition bucket -> graded action disposition (design.md's
+#: `unsafe > blocked > opt-in/record-reap > safe` precedence). ``gone`` /
+#: managed-record-reap buckets aren't produced by `cleanup_disposition`
+#: itself (its own docstring: GONE is handled by the caller), so
+#: `record-reap` is not reachable from this mapping yet.
+_BUCKET_TO_ACTION_DISPOSITION: dict[str, str] = {
+    "clean": "safe",
+    "active": "unsafe",
+    "unused": "opt-in",
+    "conversation": "opt-in",
+    "follow-up": "blocked",
+    "held-claims": "blocked",
+    "open-pr": "blocked",
+    "closed-unmerged": "blocked",
+    "dirty": "unsafe",
+    "wip": "unsafe",
+    "unmerged": "unsafe",
+    "claimed": "blocked",
+    "paired-pending": "blocked",
+}
+
+
+@dataclass
+class ClosureDescriptor:
+    """The one canonical closure/display descriptor (design.md).
+
+    Preserves Git settlement, held-claim count, and open-follow-up count as
+    INDEPENDENT facts (never re-derived per surface); ``closure.final`` and
+    ``action`` are computed FROM them, not stored opinions. ``facts`` (Phase
+    9) carries per-fact provenance: ``FINAL`` requires the
+    ``upstream_containment`` and ``open_claims`` facts to BOTH be
+    independently ``confirmed`` -- a fact that isn't is marked unconfirmed in
+    place, and the whole descriptor is downgraded defensively (see
+    :func:`assemble_closure_descriptor`), never collapsed into a separate
+    whole state.
+    """
+
+    version: int
+    computed_at: str
+    facts: dict
+    base_state: str
+    label: str
+    style: str
+    compact: str
+    git: dict
+    claims: dict
+    follow_ups: dict
+    blockers: list[dict]
+    final: bool
+    action_disposition: str
+    action_bucket: str
+
+    def to_dict(self) -> dict:
+        return {
+            "version": self.version,
+            "computed_at": self.computed_at,
+            "facts": self.facts,
+            "base_state": self.base_state,
+            "label": self.label,
+            "style": self.style,
+            "compact": self.compact,
+            "git": self.git,
+            "claims": self.claims,
+            "follow_ups": self.follow_ups,
+            "blockers": self.blockers,
+            "closure": {"final": self.final},
+            "action": {
+                "disposition": self.action_disposition,
+                "bucket": self.action_bucket,
+            },
+        }
+
+
+def assemble_closure_descriptor(
+    rec: tracking.WorktreeRecord,
+    info: git_ops.WorktreeStateInfo,
+    disposition: CleanupDisposition,
+    *,
+    held_claims: int,
+    open_follow_ups: int,
+    evidence_mode: str = "refreshed",
+    evidence_complete: bool = True,
+    turn_count: int = 0,
+    repo_fetch_fresh: bool = False,
+    now: str | None = None,
+) -> ClosureDescriptor:
+    """Assemble the canonical closure descriptor from already-computed facts.
+
+    Pure -- no I/O; the caller supplies fresh (or cached) ``info``/
+    ``disposition``/counts (including ``repo_fetch_fresh``, itself sourced
+    from :func:`tracking.is_repo_fetch_fresh` -- this function does not read
+    the ledger itself). Decomposes into the named :data:`FACT_NAMES`
+    sub-states (worktree-finality-and-obligations Phase 9), each carrying its
+    own ``confirmed`` freshness rather than one all-or-nothing flag:
+
+    * ``checkpoint_activity``/``local_dirtiness`` are always locally computed,
+      so always ``confirmed``.
+    * ``upstream_containment`` is ``confirmed`` when THIS call's own evidence
+      is fresh (``evidence_mode == "refreshed"`` and ``evidence_complete``)
+      OR ``repo_fetch_fresh`` is true -- a fetch performed by any sibling
+      worktree of the same repo (its own classify pass, `finalize`/
+      `pr-merge`, or the resident status-monitor's periodic sweep) counts as
+      current evidence for every worktree of that repo, without each needing
+      its own fetch.
+    * ``open_claims`` depends on evidence that can go stale (held claims,
+      open follow-ups, a provider PR lookup); ``confirmed`` only when THIS
+      call's own evidence is fresh -- the repo-scoped ledger covers git
+      upstream refs specifically, not provider/claim state, so it does not
+      extend to this fact.
+    * ``pending_handoff`` reads ``rec.pending_handoffs`` (agent-worktrees'
+      own cooperative, already-tracked record of opened-but-not-yet-linked
+      session handoffs -- a predecessor recorded a token with no successor
+      session linked yet) -- read-only here, never composed or consumed by
+      this function. Always ``confirmed`` (a local tracking-record read, no
+      fetch/staleness concept), and purely informational: it does NOT gate
+      ``FINAL`` -- a pending handoff signals someone intends to resume this
+      worktree, but that is a distinct concern from whether its CONTENT is
+      safely landed.
+
+    ``FINAL`` requires ALL of: the ``upstream_containment`` AND ``open_claims``
+    facts BOTH independently ``confirmed``, Git upstream-complete (git state
+    ``completed`` or the disposition bucket is already ``clean``), zero held
+    claims, zero open follow-ups, no other blocker, and the worktree is not
+    live (``ACTIVE`` has display precedence -- see design.md). An unconfirmed
+    ``upstream_containment`` or ``open_claims`` fact NEVER lets the descriptor
+    report FINAL or a ``safe`` action, even if the underlying values would
+    otherwise qualify -- destructive authorization always requires a fresh
+    recomputation immediately before acting.
+
+    ``compact`` renders an ``U*``/``OC*`` marker for an unconfirmed
+    ``upstream_containment``/``open_claims`` fact respectively (independent
+    of each other and of the base label) -- the general per-fact marker
+    convention that replaces the old implicit "COMPLETED reads MERGED unless
+    freshly fetched" special case. Neither marker ever appears when the
+    corresponding fact is confirmed, and ``FINAL`` never carries either
+    (both facts are confirmed by construction whenever ``final`` is True).
+
+    ``rec.status == "finalizing"`` is surfaced as an explicit ``finalizing``
+    blocker so a wedged record self-reports rather than rendering as
+    blocked-for-no-visible-reason.
+
+    **Not yet wired** (tracked in the effort, not silently omitted): the
+    ``active-effort``, ``inbound-obligation``, ``unverified-squash``,
+    ``live-session``, ``checkout-missing``, ``prune-review-required``,
+    ``incomplete-evidence``, and ``unsupported-descriptor`` blocker codes: a
+    caller can still append them itself (this function only owns what it can
+    derive from `assess`/`cleanup_disposition`'s existing output), and a GONE
+    worktree/managed-record-reap disposition isn't handled here (mirrors
+    `cleanup_disposition` itself, which defers GONE to its caller).
+    """
+    S = git_ops.WorktreeState
+    upstream_complete = (
+        disposition.bucket == "clean" or info.state == S.COMPLETED
+    )
+
+    blockers: list[dict] = []
+    if rec.status == "finalizing":
+        blockers.append({"code": "finalizing", "count": 1})
+    bucket_code = _BUCKET_TO_BLOCKER.get(disposition.bucket)
+    if bucket_code:
+        count = (
+            held_claims if bucket_code == "held-claims"
+            else open_follow_ups if bucket_code == "open-follow-ups"
+            else 1
+        )
+        blockers.append({"code": bucket_code, "count": count})
+    if held_claims and bucket_code != "held-claims":
+        blockers.append({"code": "held-claims", "count": held_claims})
+    if open_follow_ups and bucket_code != "open-follow-ups":
+        blockers.append({"code": "open-follow-ups", "count": open_follow_ups})
+
+    fresh_and_complete = evidence_mode == "refreshed" and evidence_complete
+    upstream_confirmed = fresh_and_complete or repo_fetch_fresh
+
+    facts = {
+        "checkpoint_activity": {
+            "confirmed": True,
+            "turns_since_checkpoint": turn_count,
+        },
+        "upstream_containment": {
+            "confirmed": upstream_confirmed,
+            "complete": upstream_complete,
+        },
+        "local_dirtiness": {
+            "confirmed": True,
+            "dirty": info.dirty,
+        },
+        "open_claims": {
+            "confirmed": fresh_and_complete,
+            "held": held_claims,
+            "open_follow_ups": open_follow_ups,
+        },
+        "pending_handoff": {
+            "confirmed": True,
+            "count": len(rec.pending_handoffs),
+            "tokens": [h.token for h in rec.pending_handoffs],
+        },
+    }
+
+    final = (
+        facts["upstream_containment"]["confirmed"]
+        and facts["open_claims"]["confirmed"]
+        and upstream_complete
+        and held_claims == 0
+        and open_follow_ups == 0
+        and not blockers
+        and info.state != S.ACTIVE
+    )
+
+    base_label = _BASE_STATE_LABELS.get(info.state, "UNKNOWN")
+    if info.state == S.COMPLETED:
+        label = "FINAL" if final else "MERGED"
+    else:
+        label = base_label
+
+    if final:
+        style = "final"
+    elif info.state == S.ACTIVE:
+        style = "active"
+    elif label == "MERGED":
+        style = "merged-blocked"
+    else:
+        style = base_label.lower()
+
+    compact_parts = [label]
+    if held_claims:
+        compact_parts.append(f"C{held_claims}")
+    if open_follow_ups:
+        compact_parts.append(f"F{open_follow_ups}")
+    # worktree-finality-and-obligations Phase 9: render the marker on the
+    # SPECIFIC unconfirmed fact, not a whole separate state -- replaces the
+    # old implicit "COMPLETED reads MERGED unless freshly fetched" special
+    # case with a general per-fact marker that applies regardless of base
+    # state. `checkpoint_activity`/`local_dirtiness` are always confirmed
+    # (see `facts` above), so never marked; `pending_handoff` is
+    # deliberately excluded here too -- it always reports `confirmed=False`
+    # until wired (a later Phase 9 slice), so marking it now would put a
+    # meaningless asterisk on every single row.
+    if not facts["upstream_containment"]["confirmed"]:
+        compact_parts.append("U*")
+    if not facts["open_claims"]["confirmed"]:
+        compact_parts.append("OC*")
+    compact = " ".join(compact_parts)
+
+    action_disposition = _BUCKET_TO_ACTION_DISPOSITION.get(
+        disposition.bucket, "blocked")
+    if action_disposition == "safe" and not (
+        upstream_confirmed and facts["open_claims"]["confirmed"]
+    ):
+        # Cached/fetch-free evidence never authorizes a destructive action,
+        # even when the underlying facts look clean -- unless BOTH facts
+        # are independently confirmed (a repo-scoped ledger hit alone
+        # confirms upstream_containment, not open_claims -- see FINAL's own
+        # identical two-fact gate above).
+        action_disposition = "blocked"
+
+    return ClosureDescriptor(
+        version=DESCRIPTOR_VERSION,
+        computed_at=now or tracking._now_iso(),
+        facts=facts,
+        base_state=base_label,
+        label=label,
+        style=style,
+        compact=compact,
+        git={
+            "upstream_complete": upstream_complete,
+            "dirty": info.dirty,
+            "ahead": info.ahead,
+        },
+        claims={"held": held_claims},
+        follow_ups={"open": open_follow_ups},
+        blockers=blockers,
+        final=final,
+        action_disposition=action_disposition,
+        action_bucket=disposition.bucket,
+    )
+
+
+def interpret_descriptor_payload(payload: dict | None) -> dict:
+    """Mixed-version fleet safety (Phase 5): interpret a raw closure-descriptor
+    payload from a remote/cached source without trusting fields it may not
+    understand. An absent/malformed/version-mismatched payload is NEVER
+    final or prune-safe, regardless of what its own fields claim. Only an
+    EXACT ``version == DESCRIPTOR_VERSION`` match is trusted.
+
+    A matched payload is further validated before being trusted:
+    ``closure``/``action``/``claims``/``follow_ups`` must each be present
+    mappings; ``label``/``style``/``action.disposition``/``compact`` must be
+    ``str`` and ``closure.final`` a ``bool`` (never truthiness-coerced);
+    ``label == "FINAL"`` must agree with ``closure.final``; a ``final: True``
+    payload must carry zero held claims, zero open follow-ups, and a
+    ``safe`` action (the only combination :func:`assemble_closure_descriptor`
+    ever produces for FINAL); and the claim/follow-up counts must be genuine
+    non-negative ints (never laundered from a malformed value into a ``0``
+    that would look like verified evidence of no blockers). Any violation
+    degrades the whole payload to unsupported.
+
+    Returns ``{"supported": bool, "final": bool, "label": str, "style": str,
+    "compact": str, "held_claims": int, "open_follow_ups": int,
+    "action_disposition": str, "reason": str | None}`` -- an unsupported
+    payload degrades every field to a neutral/zero value.
+    """
+    if not isinstance(payload, dict):
+        return _unsupported_descriptor("unsupported-descriptor")
+    version = payload.get("version")
+    if version != DESCRIPTOR_VERSION:
+        return _unsupported_descriptor(f"unsupported-descriptor:version={version!r}")
+    closure = payload.get("closure")
+    action = payload.get("action")
+    claims = payload.get("claims")
+    follow_ups = payload.get("follow_ups")
+    # A missing/wrong-shaped required nested field is a malformed/truncated
+    # payload -- a genuine descriptor always emits all four sections.
+    for field_name, field_value in (
+        ("closure", closure), ("action", action),
+        ("claims", claims), ("follow_ups", follow_ups),
+    ):
+        if not isinstance(field_value, dict):
+            return _unsupported_descriptor(
+                f"unsupported-descriptor:{field_name}-missing-or-not-a-mapping")
+    label = payload.get("label")
+    style = payload.get("style")
+    final_value = closure.get("final")
+    action_disposition = action.get("disposition")
+    if (not isinstance(label, str) or not isinstance(style, str)
+            or not isinstance(final_value, bool)
+            or not isinstance(action_disposition, str)):
+        return _unsupported_descriptor("unsupported-descriptor:scalar-field-type")
+    compact = payload.get("compact")
+    if not isinstance(compact, str):
+        return _unsupported_descriptor("unsupported-descriptor:scalar-field-type")
+    # label/final consistency: never trust either half in isolation.
+    if (label == "FINAL") != final_value:
+        return _unsupported_descriptor("unsupported-descriptor:label-final-mismatch")
+    held_claims = _non_negative_int(claims.get("held"))
+    open_follow_ups = _non_negative_int(follow_ups.get("open"))
+    if held_claims is None or open_follow_ups is None:
+        return _unsupported_descriptor("unsupported-descriptor:invalid-count")
+    # FINAL only ever combines with zero blockers + a safe action.
+    if final_value and (
+        held_claims != 0 or open_follow_ups != 0 or action_disposition != "safe"
+    ):
+        return _unsupported_descriptor(
+            "unsupported-descriptor:final-with-blockers")
+    return {
+        "supported": True,
+        "final": final_value,
+        "label": label,
+        "style": style,
+        "compact": compact,
+        "held_claims": held_claims,
+        "open_follow_ups": open_follow_ups,
+        "action_disposition": action_disposition,
+        "reason": None,
+    }
+
+
+def _unsupported_descriptor(reason: str) -> dict:
+    """The shared degrade-to-neutral result for any ``interpret_descriptor_
+    payload`` rejection path -- every field renders as if there were no
+    descriptor at all, never partially trusting a malformed payload."""
+    return {
+        "supported": False, "final": False, "label": "UNKNOWN",
+        "style": "unknown", "compact": "UNKNOWN",
+        "held_claims": 0, "open_follow_ups": 0,
+        "action_disposition": "blocked", "reason": reason,
+    }
+
+
+def _non_negative_int(value) -> int | None:
+    """Validate a claim/follow-up count from an untrusted descriptor payload
+    as a non-negative int, returning ``None`` for anything else (a string, a
+    list, ``None``, a bool, or a negative number) rather than silently
+    coercing it to ``0`` -- a coerced ``0`` would be indistinguishable from a
+    verified zero count and could launder a malformed payload into apparent
+    evidence that no blockers exist. The caller rejects the whole payload as
+    unsupported when this returns ``None``."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if value >= 0 else None
 
 
 def default_paired_sibling_final(

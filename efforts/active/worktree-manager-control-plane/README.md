@@ -99,6 +99,18 @@ all of it to the `installer` and `picker` visions. It records **delta-closure
 state only** — the visions themselves state the target and are not edited to log
 progress.
 
+## Request
+
+Build the standalone, out-of-plugin **Worktree Manager** app so the harness is
+turnkey even before any plugin's own installer can run, and make it the single
+home for the interactive Picker and Mux/session-multiplexer management —
+extracted out of the `agent-worktrees` plugin, not duplicated alongside it.
+Keep every plugin (including `agent-worktrees`) fully self-sufficient without
+the Manager; a bare invocation hands off to it when present and offers a
+trustworthy install/onboarding trigger when absent. Retire the bundled,
+in-plugin Picker once the extracted one reaches parity — this is the
+operator-visible end-state, not an indefinite dual-implementation state.
+
 ## Plan
 
 Phases are ordered by dependency, not calendar. Checked items are already
@@ -144,11 +156,14 @@ realized in `main`; unchecked items are the remaining delta.
 - [x] Pin the engine ↔ Picker `--json` contract
       ([`docs/engine-picker-contract.md`](../../../plugins/agent-worktrees/docs/engine-picker-contract.md));
       client tolerates an older engine by degrading a request rather than failing.
-- [ ] Bring the Manager Picker to **feature parity** with the bundled Picker:
+- [x] Bring the Manager Picker to **feature parity** with the bundled Picker:
       full worktree list interaction (filter · sort · select), resume/join/create
       actions, multi-machine at-a-glance, session/PR status columns. Closes picker
       §`front-door-entry`, §`decision-support-before-cost`, §`programmatic-parity`,
-      §`render-derive-not-own`, §`live-not-snapshot`.
+      §`render-derive-not-own`, §`live-not-snapshot`. **Ordered plan, including the
+      2026-09-15 divergence audit (which agent-worktrees-only Picker fixes since the
+      #1244 transplant still need porting before this box is honestly checked):**
+      [`phase-3-picker-parity-and-retirement.md`](phase-3-picker-parity-and-retirement.md).
 - [x] Add an engine-owned **manual mux restoration** operation for a worktree
       whose bound Copilot process remains live but unreachable after its terminal
       or mux wrapper disappears. The engine must refuse an existing live mux or
@@ -169,7 +184,7 @@ realized in `main`; unchecked items are the remaining delta.
       §`programmatic-parity`.
 
 ### Phase 3b — Relocate Mux + AHP execution mechanics out of agent-worktrees (Planned — #2062)
-- [ ] **Slice 1 (AHP):** move the AHP session backend
+- [x] **Slice 1 (AHP):** move the AHP session backend
       (`agent_worktrees/ahp_backend.py`, the `session_backend`/`is_ahp` config
       schema, and the branches it threads through `__main__.py`,
       `tracking.py`, `finalize.py`, and `config_dropins.py`) out of the
@@ -190,7 +205,7 @@ realized in `main`; unchecked items are the remaining delta.
             Manager-owned AHP provider/config/dependency over the public engine
             subprocess boundary; production Picker default-off AHP controls and
             launch/resume/create cutover for exact engine-created worktrees.
-      - [ ] Steps 5-6: delete the legacy agent-worktrees AHP backend/config path
+      - [x] Steps 5-6: delete the legacy agent-worktrees AHP backend/config path
             and complete the remaining launcher-contract test migration.
 - [ ] **Slice 2 (Mux):** relocate Mux launch/reattach/remux mechanics
       (`launch-session.{sh,ps1,cmd}`, `pane-wrapper.{sh,ps1}`, `cmd_remux`)
@@ -221,8 +236,76 @@ realized in `main`; unchecked items are the remaining delta.
             against the full test suites (see journal). **Deletion of the
             old in-plugin scripts deliberately deferred** to a follow-up PR
             pending live-hardware proof.
-      - [ ] Sub-slice 2b: split `cmd_remux` (detection stays, relaunch action
-            moves).
+      - [x] Sub-slice 2b: added purely-additive `mux-remux-plan`/
+            `mux-pane-status` queries plus a Worktree Manager executor that
+            drives them; agent-worktrees' own `cmd_remux`/`_perform_remux`/
+            `remux_bare_copilot` remain untouched as its zero-provider-mode
+            fallback (the bundled Picker's standalone Restore action).
+      - [x] Sub-slice 2c (fixed 2026-09-14): the launcher scripts relocated
+            into `worktree-manager/bin/` dot-source `session-options.ps1`
+            and `psmux-path.ps1` (which itself resolves
+            `psmux-passthrough.conf`) via a `$PSScriptRoot`-relative path —
+            the copy in Sub-slice 2a Step 1 omitted these terminal/helper
+            scripts, so Worktree Manager-launched sessions had a silently
+            unconfigured psmux status bar. Copied
+            `session-options.{sh,ps1}`, `apply-mux-keybinds.{sh,ps1}`,
+            `psmux-passthrough.conf`, and `psmux-path.ps1` verbatim into
+            `worktree-manager/bin/` alongside the launcher, with a
+            regression test asserting the sibling files exist and are
+            wired, and bumped `__version__` (`0.1.0-dev36` →
+            `0.1.0-dev37`) so already-installed machines actually redeploy
+            the corrected payload.
+      - [ ] **Sub-slice 3 (direction set 2026-09-14; planned 2026-09-17, not yet implemented):**
+            split the resident status-monitor's push/observe legs into
+            Worktree Manager — agent-worktrees keeps sole ownership of
+            accumulating/tracking session status; Worktree Manager takes a
+            **companion mux daemon** that owns the worktree⇄mux mapping,
+            notifies agent-worktrees when managed worktrees gain/lose live
+            panes, and applies the resident monitor's rendered status back
+            into mux status bars. Reviewed, ordered plan:
+            [`phase-3b-substatus-monitor-relocation.md`](phase-3b-substatus-monitor-relocation.md).
+      - [x] **Sub-slice 4 (landed 2026-09-14): same-config marketplace-cell
+            resolution + generic installed-binstub invocation.** Cross-cuts
+            the `marketplace-scoped-installations` effort's installation-mode
+            governance. Two prior gaps: `engine_client.py`'s
+            `installed_engine_command()` was hardcoded to agent-worktrees
+            only, and `production_picker/_engine_runtime.py`'s "temporary
+            compatibility boundary" decided legacy-vs-namespaced by checking
+            only whether `COPILOT_EXTENSIONS_CONTEXT` was *set*, never the
+            actual shared installation-mode policy — so Worktree Manager
+            could disagree with what agent-worktrees itself would decide for
+            the identical policy file. Fixed by:
+            - New generic `agent_plugin_runtime.py`: `legacy_plugin_root`,
+              `resolve_installed_plugin_slot`/`_command` walk the same
+              marker-selected immutable slot (`current-version` /
+              `last-known-good` / newest `versions/*`) for **any** `agent-*`
+              plugin id, not just agent-worktrees — never PATH, never a bare
+              command name.
+            - `marketplace_cells_enabled()` vendors
+              `libs/installation-context/installation_context.py` byte-
+              identical (via `tools/sync-installation-context.py`, extended
+              with a `STANDALONE_PYTHON_ADOPTERS` list for non-plugin
+              payloads) and calls its own `resolve_installation_mode()` for
+              the global `installationMode.enabled` policy bit — the exact
+              function every agent-* plugin's own bootstrap/doctor path
+              calls. A namespaced root is only ever considered when this
+              returns true **and** an explicit context names the exact
+              plugin; absent/disabled policy always falls back to legacy,
+              matching the resolver's own documented default.
+            - `engine_client.installed_engine_command()` and
+              `_engine_runtime._active_runtime_source()` both now resolve
+              through this shared module instead of two divergent, ad-hoc
+              mechanisms.
+            - **Explicitly deferred, by design:** this is the vision's
+              "explicit management context" path (Worktree Manager is not a
+              marketplace plugin and has no cell identity), not a fourth
+              `libs/peer-launch` consumer. `peer_launch.py`'s `OWNERS`/
+              structural cell-root validation remains plugin-to-plugin only;
+              extending it to a non-plugin caller category is a separate,
+              explicitly-scoped follow-on if ever needed for a use case that
+              requires peer-launch's stronger activation-generation
+              revalidation-at-execution-time guarantees (which this read-only
+              discovery boundary does not attempt to provide).
 - [ ] Update the Worktree Manager Picker to select Mux presentation and/or the
       AHP backend independently per launch/resume/create action, rather than
       assuming exactly one of them.
@@ -241,6 +324,25 @@ realized in `main`; unchecked items are the remaining delta.
       as a **guided first-run onboarding**, not an error, and points at the
       trustworthy bootstrap. Closes picker §`first-run-onboarding-entry`, installer
       §`onboards-from-empty-gracefully`.
+- [ ] **Open question, not yet designed:** the bare-invocation seam currently
+      health-probes specifically for a `worktree-manager` binstub on `PATH` --
+      it is not yet a generic, pluggable **registration** a third-party
+      control-plane provider could satisfy without being named `worktree-manager`
+      literally. If the seam is meant to stay open to a future alternative
+      Picker/control-plane provider (not just the one shipped here), this needs
+      an explicit registration contract (e.g. a well-known marker file/env var/
+      capability probe any conforming provider can satisfy), not a hardcoded
+      binstub-name check. Until that's decided, the seam is de facto
+      single-provider.
+- [ ] **Clarifying note (not a gap):** worktree creation does **not** need a
+      callback *from* agent-worktrees *into* Worktree Manager to set up Mux.
+      The interactive path already inverts that: Worktree Manager itself drives
+      creation through agent-worktrees' `--json` engine boundary and then owns
+      launch (Phase 3b), so it already knows when a worktree it just created
+      needs a Mux session -- there is no async notification gap to design there.
+      The *programmatic* path (`agent-worktrees create`, docs/mux.md's
+      automated/scripted case) is deliberately non-mux by design (a script
+      edits in its own process), so it correctly never needs one either.
 
 ### Phase 5 — Configurator: adoption, discovery, per-plugin config (Planned — #356 / #357)
 - [ ] First-harness-repo adoption + repo discovery/registration; edit config the
@@ -251,13 +353,18 @@ realized in `main`; unchecked items are the remaining delta.
 - [ ] Visual configurator surface (beyond today's read-only state views). Closes
       installer §`visual-configurator`.
 
-### Phase 6 — Retire the bundled Picker (Planned — the operator-visible end-state)
-- [ ] Once the Manager Picker reaches parity (Phase 3), remove the in-plugin
+### Phase 6 — Retire the bundled Picker (Done — the operator-visible end-state)
+- [x] Once the Manager Picker reaches parity (Phase 3), remove the in-plugin
       Textual `picker_tui`. The seam's fallback then flips **automatically**
       (detected by the absence of the `picker_tui` package): with no Manager
       installed, a bare launch surfaces the **install trigger** instead of any
       in-plugin Picker. This is the behavior a user currently expects but does not
       yet get, because the bundled Picker is deliberately retained until parity.
+      Deletion + validation steps:
+      [`phase-3-picker-parity-and-retirement.md`](phase-3-picker-parity-and-retirement.md)
+      § Step 2/3. Closes
+      [#117](https://github.com/ThomasMichon/copilot-extensions/issues/117) (the
+      smaller opt-out-toggle cleanup this supersedes).
 
 ### Phase 7 — Health, updating & presets (Ongoing)
 - [ ] `doctor`/validation breadth, plugin updating & alignment, and
@@ -276,7 +383,7 @@ realized in `main`; unchecked items are the remaining delta.
       extending this plan before implementation when necessary.
 - [ ] Keep configuration examples synthetic and repository-neutral.
 
-## Validation
+## Validation Plan
 
 - **Headless render + golden checks.** The Manager Picker's `capture_svg` renders
   with no terminal, so list/interaction states are asserted as fixtures — closes
@@ -307,7 +414,49 @@ a slice there (comment/assign) before starting, and land changes serially throug
 the PR-required `main`. Downstream private plans may **link to** this effort and
 its issues; the public artifacts stay self-contained and general-purpose.
 
+This effort has already paid the cost of two sessions landing independently
+diverging work on the same Picker/Mux surface without being aware of each
+other (see the linked duplicate-implementation issue this effort's Phase 3b
+exists to correct). **[#2530](https://github.com/ThomasMichon/copilot-extensions/issues/2530)**
+tracks a related `agent-bridge` capability gap -- no way for a session to
+discover a same-machine peer working a different repo, or a same-repo peer on
+a different machine -- that would give future contributors a way to *notice*
+overlapping work before it diverges, rather than relying on issue-comment
+claiming discipline alone.
+
 ## Journal
+
+- **2026-09-17** — Finished Phase 3b Slice 1 Steps 5-6. Deleted
+  agent-worktrees' remaining AHP implementation path
+  (`cmd_session_backend`, `ahp_backend.py`, `SessionBackendConfig`, the
+  `config.d` `session_backend` validation block, and the
+  `websocket-client` dependency) while keeping the reader-side legacy
+  `session_backend:` → `execution_leg` translation shim in `tracking.py`.
+  Closed an inventory gap the design doc had missed: both the in-plugin and
+  relocated Worktree Manager `launch-session.{sh,ps1}` copies still shelled
+  into the legacy `session-backend status`/`ensure` verbs on the **bare/direct**
+  launch path. They now read only `execution-leg get`: an already-persisted
+  AHP leg still resumes exactly as before, but creating a **new** AHP session
+  through the bare path is deliberately gone and now warns to use the
+  Worktree Manager Picker, keeping AHP session establishment fully owned by
+  `worktree_manager.ahp_provider`. Completed the remaining test migration:
+  retargeted the launcher contract and agent-worktrees JSON/live-signal tests
+  to `execution_leg`, removed the obsolete plugin-local AHP backend/command
+  tests, and added missing Worktree Manager provider + relocated-launcher
+  regression coverage. Version bumps: agent-worktrees `1.5.5-dev134`,
+  marketplace metadata `1.7.7-dev120`, Worktree Manager `0.1.0-dev47`.
+  Validation: changed-file targeted tests passed (`agent-worktrees` 103;
+  `worktree-manager` 42); full `worktree-manager` suite passed with the two
+  known hanging production-picker tests excluded (`805 passed, 1 skipped`).
+  Full `agent-worktrees` suite ran to completion and now shows only five
+  unrelated pre-existing failures in this environment —
+  `tests/test_pr_ops.py::TestRefreshHeadObservation::test_concurrent_reassociation_rejects_returned_observation`
+  plus four `tests/test_update_stage.py` indicator tests that pass in
+  isolation but fail after earlier suite pollution — with `4481 passed,
+  47 skipped` otherwise. `ruff check --select F,E9` on both packages,
+  `python tools/check-install-contract.py`,
+  `python tools/check-version-consistency.py`, and
+  `python tools/check-version-bump.py` all passed.
 
 - **2026-08-17** — Effort authored to give the Worktree Manager rework a single
   coherent home in-repo, tying the Manager-build issues (#352 / #355 / #356 /
@@ -474,6 +623,68 @@ its issues; the public artifacts stay self-contained and general-purpose.
   Worktree Manager binstub was temporarily removed from `PATH` so the
   bare-invocation seam fell back to the bundled, already-mux-capable Picker;
   it should be safe to restore once this fix is deployed.
+- **2026-09-10** — A second, independent session hit the same live
+  regression on the same machine before the fix above had landed, and drafted
+  its own `agent-worktrees`-side safety gate (raising
+  `_WORKTREE_MANAGER_MIN_PICKER_VERSION` past every released Worktree Manager
+  build). Rebasing onto the real fix (the two entries above,
+  [#2429](https://github.com/ThomasMichon/copilot-extensions/pull/2429))
+  made that gate redundant, so it was reverted rather than landed alongside
+  the real fix — avoiding two competing mitigations for the same regression.
+  While independently re-running the full `agent-worktrees` suite to validate
+  against the merged fix, found and fixed three real, previously-masked test
+  bugs (unrelated to the regression itself): `test_registry_paths.py` and
+  `test_session_context_companions.py` both spawned subprocesses without
+  scrubbing this test process's own inherited Copilot session-identity env
+  vars (`COPILOT_PLUGIN_ROOT`, `COPILOT_AGENT_SESSION_ID`, etc. — leaked
+  whenever the suite runs, as it normally does, from inside a live Copilot CLI
+  session), and `test_config.py`'s
+  `test_cp_related_pr_map_includes_knowledge_overlay` had a stale mock
+  signature masked by the code under test's own `except Exception` fallback.
+  Landed as [#2439](https://github.com/ThomasMichon/copilot-extensions/pull/2439)
+  (full suite: 4092 passed, 47 skipped, 0 failed). Also filed
+  [#2523](https://github.com/ThomasMichon/copilot-extensions/issues/2523)
+  (unrelated, general session-guidance gap surfaced in the same session:
+  agent-worktrees' cross-repo session guidance should require fully-qualified
+  `owner/repo#N` issue/PR references, since a bare `#N` auto-links to the
+  current session's backing repo and can silently 404 against the wrong one).
+- **2026-09-12** — Taking sole ownership of this effort going forward (no
+  other agent actively claiming a slice via #352 at this time). Revised
+  Sub-slice 2b's design in
+  [`phase-3b-mux-relocation.md`](phase-3b-mux-relocation.md) after
+  discovering the coupling runs deeper than originally scoped: `remux.py`'s
+  POSIX action calls `sessions.py` mux-naming/argv-building helpers
+  (`mux_session_name`, `build_mux_new_window_argv`,
+  `build_mux_new_session_argv`) that are pervasive utilities used well beyond
+  remux, not remux-specific logic safe to duplicate into Worktree Manager.
+  Revised design mirrors the resolve/execute pattern Sub-slice 2a already
+  established: a new planning-only `agent-worktrees mux-remux-plan --json`
+  query keeps all tmux-naming/argv-building and guard logic in
+  agent-worktrees (unchanged in substance, just relocated out of
+  `_perform_remux`), and Worktree Manager becomes a thin executor — running
+  the returned POSIX `argv` directly, or (Windows) calling the
+  already-existing `agent-worktrees reclaim --bare-only --yes --json` then
+  relaunching through its own relocated launcher in ordinary resume mode.
+  This means the Windows path needs **no new relaunch code** in Worktree
+  Manager at all. Docs-only; implementation not started.
+- **2026-09-12** — Second correction to Sub-slice 2b's design, made before
+  any implementation code was written. The prior revision's step 3 still
+  said `cmd_remux`/`_perform_remux`/`remux_bare_copilot`'s execution gets
+  **deleted** from agent-worktrees. That's unsafe: `_perform_remux` is not
+  solely the standalone `remux` verb's backend -- `_restore_before_resume`
+  also calls it internally, backing `resolve --restore` and, through it, the
+  bundled Picker's own **"Restore"** action, which must keep working with
+  **zero** session-host providers present (the bundled Picker still ships
+  and is still mux-capable until Phase 6c retires it). Deleting the action
+  would have regressed exactly the class of live bug this effort exists to
+  prevent. Sub-slice 2b is now **purely additive**: agent-worktrees' existing
+  remux/`--restore` action machinery is untouched and permanently stays (its
+  own zero-provider fallback); the new `mux-remux-plan` query only extracts
+  the guard/target-resolution logic into a shared function both the existing
+  action and the new query call, so Worktree Manager gains an independent
+  second consumer of the same plan for its own eventual "Restore"
+  Picker-parity action, without duplicating any tmux-naming logic. No
+  deletion, no cutover, no regression risk to the existing standalone path.
 - **2026-09-09** — Implemented the reviewed Phase 3b AHP relocation Steps 2-4
   without deleting the legacy path. agent-worktrees now exposes fenced,
   provider-neutral `execution-leg get/set/clear` JSON verbs, preserves legacy
@@ -488,3 +699,284 @@ its issues; the public artifacts stay self-contained and general-purpose.
   version consistency, install contract, docs consistency, and `git diff
   --check`; all passed. Bumped agent-worktrees to `1.5.5-dev49`, marketplace
   metadata to `1.7.7-dev45`, and Worktree Manager to `0.1.0-dev34`.
+- **2026-09-12** — Landed the (twice design-corrected, see the two entries
+  above) Sub-slice 2b implementation as
+  [#2552](https://github.com/ThomasMichon/copilot-extensions/pull/2552):
+  purely additive `mux-remux-plan`/`mux-pane-status` queries in
+  agent-worktrees (extracting the guard/target-resolution logic out of
+  `_perform_remux` into a shared function, called by both the existing
+  standalone `remux`/`--restore` action and the new queries) plus a thin
+  Worktree Manager executor that runs the returned POSIX `argv` directly, or
+  on Windows calls `reclaim --bare-only --yes --json` then relaunches through
+  the already-relocated launcher in ordinary resume mode. Confirmed
+  agent-worktrees' own `cmd_remux`/`_perform_remux`/`remux_bare_copilot`
+  remain completely untouched — they stay as agent-worktrees' permanent
+  zero-provider-mode fallback backing the bundled Picker's standalone
+  "Restore" action, per the corrected design. Marks Phase 3b Slice 2
+  (Mux relocation) fully landed except the still-deliberately-deferred
+  Sub-slice 2a old-in-plugin-script deletion, and there is still no Picker
+  UI wiring for a Worktree Manager-side "Restore" action (CLI-only for now).
+
+- **2026-09-14** — Fixed a live regression (Sub-slice 2c): Worktree Manager
+  was not properly configuring the Mux (psmux) status bar for sessions it
+  launches. Root cause: `launch-session.ps1` dot-sources
+  `session-options.ps1` and `psmux-path.ps1` (and `session-options.ps1`
+  itself resolves `psmux-passthrough.conf`) via `$PSScriptRoot`-relative
+  paths, but Sub-slice 2a Step 1's verbatim copy into
+  `worktree-manager/bin/` only carried `launch-session.{sh,ps1,cmd}` and
+  `pane-wrapper.{sh,ps1}` — not the terminal/helper scripts. The dot-source
+  failure is swallowed (a status-bar tweak must never block a launch), so
+  the gap was silent rather than an error. Copied
+  `session-options.{sh,ps1}`, `apply-mux-keybinds.{sh,ps1}`,
+  `psmux-passthrough.conf`, and `psmux-path.ps1` verbatim from
+  `plugins/agent-worktrees/terminal/` and `plugins/agent-worktrees/scripts/`
+  into `worktree-manager/bin/` (hash matched), documented the sibling
+  requirement in `worktree-manager/bin/README.md`, added a regression test
+  asserting the dot-source strings and files' presence, and bumped
+  `__version__` (`0.1.0-dev36` → `0.1.0-dev37`) so already-installed
+  machines actually redeploy the corrected payload (caught by Copilot
+  review on [#2666](https://github.com/ThomasMichon/copilot-extensions/pull/2666),
+  which also flagged the initially-missed `psmux-path.ps1` dependency, a
+  drift-guard gap, and a version-consistency gap). Also found and fixed,
+  via the same review round, a genuine pre-existing infinite-loop bug in
+  `apply-mux-keybinds.ps1`'s `Persist-Block` trailing-blank-line trim: when
+  exactly one blank line remains, `$lines[0..($lines.Count - 2)]` evaluates
+  PowerShell's `0..-1` range as two elements instead of shrinking to empty,
+  so the trim loop never terminates. Fixed identically in both the
+  canonical `plugins/agent-worktrees/terminal/apply-mux-keybinds.ps1` and
+  the copied `worktree-manager/bin/apply-mux-keybinds.ps1` (kept
+  byte-identical), with a structural regression test in
+  `test_terminal_decoupling.py` and a byte-identity drift guard in
+  `test_self_install.py`. Bumped agent-worktrees' own version surfaces
+  (`plugin.json`, `pyproject.toml`, `.github/plugin/marketplace.json`:
+  `1.5.5-dev110` → `1.5.5-dev111`) so version-gated plugin updates don't skip
+  this fix for installed agent-worktrees copies (a repeat of the same
+  version-consistency lesson, this time on the plugin side rather than
+  Worktree Manager's). `worktree-manager`'s `test_self_install.py` suite
+  passes (12/12); `agent-worktrees`' `test_terminal_decoupling.py` passes
+  (14/14); `tools/check-version-consistency.py` passes across both.
+
+- **2026-09-14** — Operator direction for a new Sub-slice 3 (not yet
+  designed): migrating the Picker and Mux handling to Worktree Manager is
+  explicitly a **separate concern from the AHP effort**. Going forward,
+  Worktree Manager takes ownership of the Mux-facing legs of the resident
+  status-monitor: agent-worktrees' daemon keeps accumulating/tracking
+  session status (unchanged, sole authority), Worktree Manager owns a new
+  **push subscriber** that writes that status into Mux, and Worktree Manager
+  owns a new **Mux subscriber** that observes session create/destroy and
+  writes the observation back to agent-worktrees. Recorded as direction only
+  in `phase-3b-mux-relocation.md`'s new Sub-slice 3 section — the transport,
+  write-back contract, and relationship to the existing per-session
+  `status-updater` fallback still need an ordered plan, per this effort's
+  own "plan before code" discipline (mirrors how Sub-slices 1/2 each got a
+  reviewed plan doc before implementation started).
+
+- **2026-09-14** — Landed Sub-slice 4: same-config marketplace-cell
+  resolution + generic installed-binstub invocation. Prompted by an operator
+  question about how Worktree Manager and agent-worktrees interact, which
+  surfaced two divergent, non-cell-aware resolution mechanisms:
+  `engine_client.installed_engine_command()` (agent-worktrees-only,
+  legacy-root-only) and `production_picker/_engine_runtime.py` (checked only
+  whether `COPILOT_EXTENSIONS_CONTEXT` was set, never the actual
+  installation-mode policy). Neither could ever disagree with agent-worktrees
+  in practice today (namespaced installation remains clean-room-only per
+  `installation-mode-governance.md`), but neither was *structurally*
+  guaranteed to agree either, once namespaced rollout reaches persistent
+  machines.
+
+  Added `worktree_manager/agent_plugin_runtime.py`: a generic,
+  plugin-id-parameterized resolver reusable for any `agent-*` plugin (not
+  just agent-worktrees), and `marketplace_cells_enabled()`, which vendors
+  `libs/installation-context/installation_context.py` byte-identical
+  (`tools/sync-installation-context.py`, extended with a new
+  `STANDALONE_PYTHON_ADOPTERS` list for non-plugin standalone payloads) and
+  calls its own `resolve_installation_mode()` for the global policy bit --
+  the exact function every agent-* plugin's own bootstrap/doctor path
+  already calls. Rewired both `engine_client.py` and `_engine_runtime.py` to
+  resolve through this one shared module. Deliberately did **not** make
+  Worktree Manager a fourth `libs/peer-launch` consumer: peer-launch's
+  `OWNERS`/structural cell-root validation is a plugin-to-plugin contract
+  requiring the caller to itself own a cell identity, which Worktree Manager
+  (an explicit management-context caller per the `installation-cells`
+  vision, not a marketplace plugin) structurally cannot satisfy without a
+  separate, explicitly-scoped design decision -- recorded as an open
+  follow-on, not silently hacked around.
+
+  Validation: new `tests/test_agent_plugin_runtime.py` (7 tests) proves the
+  "same config" guarantee directly -- an explicit context matching plugin id
+  is ignored whenever the shared policy is absent/disabled, and only used
+  when the policy is enabled, exactly mirroring what agent-worktrees' own
+  bootstrap would decide for the identical file. Updated
+  `test_production_picker_transplant.py`'s existing context-preference test
+  to require the policy gate too, and added the disabled-policy fallback
+  case. `libs/installation-context/tests/test_vendoring.py` updated so its
+  synthetic-adopter sandboxing isn't polluted by the new standalone-payload
+  list. Full `worktree-manager` suite: 798 passed (pre-existing, unrelated
+  environment failures confirmed present on `main` before this change).
+  `engine_client`/`agent_plugin_runtime`/`production_picker_transplant`
+  targeted runs: 64+43+7 all green.
+
+  **Follow-up review rounds on [#2674](https://github.com/ThomasMichon/copilot-extensions/pull/2674)
+  found four more real issues, all fixed in the same PR before merge:**
+  bumped Worktree Manager's own payload version (`0.1.0-dev37` → `dev38`, in
+  sync with `pyproject.toml`, so version-gated installs actually redeploy
+  this resolver); `resolve_installed_plugin_slot` now checks the interpreter
+  exists *before* selecting a slot, so a complete-but-damaged
+  `current-version` slot correctly falls through to `last-known-good` / the
+  newest remaining `versions/*` (matching the original single-function
+  resolver's behavior, which the refactor into two functions had
+  regressed); `_engine_runtime`'s legacy fallback now shares
+  `legacy_plugin_root()` instead of a second, `AGENT_HOME`-blind
+  `USERPROFILE`-only computation; and, most importantly, a **HIGH-severity
+  finding**: `_namespaced_plugin_root` originally trusted `pointer.parent`
+  after only checking the raw JSON's `pluginId` field, so any
+  user-controlled directory containing a minimal `{"pluginId": ...}` blob
+  plus a crafted `versions/*/bin/python` would be accepted and later
+  executed. Fixed by validating the receipt through the vendored
+  `validate_context_receipt` (real schema/version, canonical
+  marketplace-id format, and -- critically -- that the receipt sits at the
+  exact canonical path derived from its own declared identity under the
+  real durable home) instead of trusting any file that merely claims the
+  right `pluginId`. Also fixed a self-inflicted regression along the way: an
+  early `if profile is None: return False` in `marketplace_cells_enabled()`
+  made every POSIX policy check return `False` unconditionally, since
+  `_canonical_os_profile` deliberately returns `None` on POSIX so the
+  vendored resolver derives the canonical passwd-database home itself.
+  New/updated tests include a forged-receipt rejection test and real
+  `namespace.json`/`install.json` fixtures built from
+  `libs/installation-context/fixtures/source-identities.json`'s existing
+  vectors (mirroring the construction `libs/installation-context`'s own
+  governance tests use), replacing the earlier minimal JSON stand-ins.
+
+  **A further review round on the same PR found six more issues, all fixed
+  before merge:** the vendored `_installation_context.py` (9,169 lines)
+  needed a `tools/module-size-baseline.json` entry, exactly like the other
+  vendored copies already have, or the module-size guard would fail CI.
+  More substantively: `_validated_plugin_root` (renamed
+  `_validated_legacy_root`) accepted a bare `install.json` for the **legacy**
+  root too, so a forged receipt dropped directly into `~/.agent-worktrees`
+  could still bypass `validate_context_receipt` entirely -- fixed by
+  restricting the legacy root to the `deploy-manifest.json` shape only, and
+  reusing `_namespaced_plugin_root`'s already-fully-validated root
+  (never re-validated the weaker way) for the namespaced case.
+  `_engine_runtime._context_runtime_root()` still separately checked only
+  the raw `pluginId` and returned `pointer.parent` directly, bypassing the
+  new validated resolver entirely for the Picker's own import path -- fixed
+  by routing it through `agent_plugin_runtime._namespaced_plugin_root`, the
+  exact same function `resolve_installed_plugin_command` uses.
+  `marketplace_cells_enabled()`'s one global-only policy check couldn't see
+  marketplace- or plugin-scoped overrides; `_namespaced_plugin_root` now
+  evaluates the effective policy from the *validated receipt's own*
+  marketplace id via a second `resolve_installation_mode` call, so a
+  marketplace- or plugin-scoped override is honored with full precedence,
+  not just the coarse global bit. `_engine_runtime`'s marker walk didn't
+  require `.install-complete.json` the way the command resolver does, so an
+  in-progress install's `agent_worktrees` package directory could be
+  imported early. And several tests set `USERPROFILE`/`HOME` directly, which
+  the resolver deliberately ignores on POSIX (by design, to avoid trusting a
+  possibly-spoofed variable) -- replaced with a shared `patch_profile` test
+  helper (`tests/_installation_context_fixtures.py`) that patches the two
+  profile-resolution seams directly, making the tests platform-portable
+  instead of silently depending on the real test-runner account's home
+  directory. Full `worktree-manager` suite after this round: 806 passed (the
+  same 6 pre-existing, unrelated environment failures).
+- **2026-09-17** — Authored the ordered plan for Phase 3b Slice 2
+  Sub-slice 3 in
+  [`phase-3b-substatus-monitor-relocation.md`](phase-3b-substatus-monitor-relocation.md),
+  sharpening the earlier 2026-09-14 direction into the operator-mandated
+  **two-daemon** architecture: `agent-worktrees` retains the resident
+  status-monitor as sole status-data authority, `worktree-manager` gains a
+  host-wide companion mux daemon that owns the worktree⇄mux-session/pane
+  mapping, Worktree Manager notifies agent-worktrees about live-pane
+  create/destroy, and agent-worktrees relays rendered status back through
+  Worktree Manager for the actual `set-option` writes. The plan chooses the
+  existing lockfile-rendezvous + loopback JSON IPC pattern (mirroring
+  `hook_ipc.py` / `classify_daemon.py`) over inventing a new transport, and
+  sequences the migration as additive seam → managed-session cutover →
+  retirement of the per-session `status-updater` as a manager-owned path.
+  Docs-only; no implementation started and no Phase 3b Plan checkbox changed.
+- **2026-09-15** — Reconciliation: closed
+  [#2532](https://github.com/ThomasMichon/copilot-extensions/pull/2532)
+  ("reconcile mux status-bar parity gap + open items") as superseded without
+  merging -- its branch predated (and its diff would have reverted) the
+  already-landed Sub-slice 2b/2c/4 checkmarks and journal entries above,
+  since the exact status-bar gap it tracked as an open checklist item was
+  independently found and fixed via Sub-slice 2c (#2666) before this PR was
+  reconciled. Extracted its three genuinely new, non-duplicated reconciliation
+  notes (not lost in the supersession) directly into this document: the
+  Phase 4 "open question" about a generic pluggable control-plane-provider
+  registration contract (vs. today's hardcoded `worktree-manager` binstub-name
+  probe), the "clarifying note" that no agent-worktrees→Worktree Manager
+  creation callback is needed (Worktree Manager already drives creation
+  through the `--json` engine boundary and owns launch itself), and the
+  Coordination-section link to #2530 (the related `agent-bridge`
+  session-discovery gap this effort's own Phase 3b duplicate-implementation
+  history motivates). Docs-only.
+- **2026-09-15** — Fixed [#2426](https://github.com/ThomasMichon/copilot-extensions/issues/2426)
+  ("Worktree Manager/Picker can show/act on the wrong project's content"),
+  candidate #1 of its two code-confirmed leads, in
+  [#2732](https://github.com/ThomasMichon/copilot-extensions/pull/2732):
+  `worktree-manager`'s `_cmd_picker` silently fell back to `projects[0].name`
+  -- an arbitrary, registration-order-dependent project, not tied to caller
+  intent -- whenever invoked with no explicit project and 2+ projects were
+  registered, with no visible error. Confirmed live (via code trace) that the
+  common `agent-worktrees` → `worktree-manager` binstub handoff seam always
+  threads `--project` explicitly and never hits this path; the bug is only
+  reachable via a more direct `worktree-manager picker` invocation with no
+  positional project. Fixed by refusing with the full list of registered
+  project names instead of guessing, when ambiguous; exactly one registered
+  project remains a safe, unambiguous default. Also fixed a real module-size-
+  baseline overage this fix itself introduced in `worktree_manager/__main__.py`
+  (deliberately bumped the grandfathered ceiling in
+  `tools/module-size-baseline.json` to match, per the guard's own documented
+  escape hatch) -- unrelated to the two other pre-existing, already-tracked
+  module-size failures on `main` (#2572/#2614) confirmed present independent
+  of this PR. 4 new regression tests + full `worktree-manager` suite (322
+  passed) + golden Picker-capture suite (12 passed, no rendering
+  regression). **Candidate #2 from #2426 remains open**: the `<repo> <slug>`
+  command-surface router in `agent-worktrees` only threads `--project` for
+  `bridge`/`codespaces` (`_PROJECT_ARG_SLUGS`); every other routed sibling
+  slug falls back to CWD-based project resolution, which could act on the
+  wrong project if invoked from a foreign checkout's CWD. Distinct from the
+  Worktree Manager Picker fix above -- affects other sibling plugins, not
+  this effort's own Picker/Mux surface -- and is a candidate for whoever
+  picks it up next.
+- **2026-09-15** — Audited the Picker/Mux duplicate-implementation problem
+  aperture-labs #6764 was filed against, from the `agent-worktrees` (bundled
+  Picker) side: `git log` comparison of the two `engine.py` files since the
+  `#1244` transplant shows both sides have continued receiving independent
+  commits (agent-worktrees-only: #1938, #2453/#2499, #2589, #2590;
+  Worktree-Manager-only: #2355, #2586). Recorded the audit + an ordered
+  reconciliation-then-retirement plan (closing Phase 3's parity checklist item
+  honestly, then executing Phase 6's deletion of the bundled `picker_tui`) in
+  [`phase-3-picker-parity-and-retirement.md`](phase-3-picker-parity-and-retirement.md),
+  linked from both phases. This also formally supersedes
+  [#117](https://github.com/ThomasMichon/copilot-extensions/issues/117) (a
+  smaller, earlier-filed cleanup of just the bundled Picker's native-list
+  opt-out toggle) -- Phase 6 now covers deleting the whole module, not just
+  its toggle. Docs-only; no code changed. Slice claimed on #352 before
+  landing, per this effort's own Coordination-section discipline.
+- **2026-09-15** — Re-ran the full `picker_tui/` divergence audit across both
+  trees before retirement. Classified the old-only history as: already present
+  or superseded (`#1412`'s old Bare Resume warning path, `#1938`'s last-good row
+  preservation, `#2453/#2499` superseded by Worktree Manager's `#2586`,
+  `#2590` as the reverse-port of that same draft-semantics work, and `#1589`'s
+  shared frame-health/reporting additions already landed on both sides), with
+  one real remaining Manager gap: the bundled Pickers' later first-paint /
+  uncached-local-identity hardening (`#1511`, `#1562`, `#2589`). Ported that
+  parity slice into `worktree-manager` (chrome-first live startup, bootstrap row
+  preservation until the roster becomes authoritative, lazy config-backed local
+  metadata, and neutral placeholders instead of `None` crashes), then retired
+  the last rollback-only surface by removing the old `AGENT_WORKTREES_PICKER_NATIVE_LIST`
+  toggle so the native list is the sole remaining body. With parity proven by
+  the Worktree Manager capture/TUI corpus, checked Phase 3's parity box, deleted
+  `plugins/agent-worktrees/src/agent_worktrees/picker_tui/`, moved the
+  plugin-still-needed non-UI support into `picker_support/`, updated the
+  no-Manager seam/docs/installers to the install-trigger-only end-state, and
+  superseded [#117](https://github.com/ThomasMichon/copilot-extensions/issues/117)
+  by completion rather than a smaller toggle cleanup. Validation: full
+  `worktree-manager` suite green (`843 passed, 2 skipped`), full
+  `agent-worktrees` runner suite green, `ruff check --select F,E9`
+  clean on both trees, `python tools/check-install-contract.py` still reports
+  12 plugins, and a direct bare-launch smoke with no `worktree-manager` on
+  `PATH` produced the documented install trigger instead of a crash.

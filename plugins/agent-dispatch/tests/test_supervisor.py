@@ -115,13 +115,21 @@ class QueueBackedClient:
         return asdict(self._q.defer_spawn(key, detail=detail))
 
     def request_spawn_release(
-        self, key, *, detail=None, disposition="failed"
+        self,
+        key,
+        *,
+        detail=None,
+        disposition="failed",
+        session_handle=None,
+        worktree=None,
     ):
         return asdict(
             self._q.request_spawn_release(
                 key,
                 detail=detail,
                 disposition=disposition,
+                session_handle=session_handle,
+                worktree=worktree,
             )
         )
 
@@ -360,6 +368,70 @@ def test_poll_spawns_eligible_task_once(q, client):
     assert spawn.calls == [t.id]
 
 
+def test_poll_treats_a_sessionless_success_as_a_failure(q, client):
+    # A spawn_fn (built-in or custom) reporting success with no session id
+    # must not be recorded as SPAWNED with session_handle=None --
+    # indistinguishable from a reservation that never launched anything at
+    # all, which release_requested_bodies' absent-worktree shortcut relies on
+    # to avoid bypassing a real (if unidentifiable) body's own liveness
+    # resolution.
+    t = q.create("work")
+    calls = []
+
+    def sessionless_spawn(task):
+        calls.append(task["id"])
+        return True, {"worktree": "wt-1"}  # no "session" key at all
+
+    sup = Supervisor(client, spawn_fn=sessionless_spawn, repo=TEST_REPO, max_concurrent=5)
+
+    assert sup.poll_once() == []
+    assert calls == [t.id]
+    res = q.latest_reservation(t.id)
+    assert res.state != SpawnState.SPAWNED
+    assert res.session_handle is None
+
+
+def test_poll_records_failed_headless_session_before_releasing_worktree(
+    monkeypatch, q, client
+):
+    from agent_dispatch import embody
+
+    task = q.create("work")
+
+    def failed_spawn(_task):
+        return False, {
+            "error": "ACP launch failed",
+            "session": "local-body:failed-session",
+        }
+
+    failed_spawn.requires_reusable_worktree = True
+    failed_spawn.allocation_interface = "acp"
+    failed_spawn.allocation_project = "worker-harness"
+    monkeypatch.setattr(
+        embody,
+        "prepare_reusable_worktree",
+        lambda *_args, **_kwargs: {
+            "worktree": "wt-created",
+            "path": "/tmp/wt-created",
+            "created": True,
+            "replaced": False,
+            "ownership": "created",
+        },
+    )
+    sup = Supervisor(
+        client,
+        spawn_fn=failed_spawn,
+        repo=TEST_REPO,
+        machine="host-a",
+    )
+
+    assert sup.poll_once() == []
+    reservation = q.latest_reservation(task.id)
+    assert reservation.state == SpawnState.RELEASING
+    assert reservation.session_handle == "local-body:failed-session"
+    assert reservation.worktree == "wt-created"
+
+
 def test_protected_label_pool_does_not_claim_unlabeled_task(q, client):
     q.handoff_producer_scope(
         TEST_REPO,
@@ -467,12 +539,23 @@ def _raise_probe_error(*_args):
         (
             "session-unknown",
             "wt-unknown",
-            {"verdict_fn": lambda *_args: tracking.UNKNOWN},
+            {
+                "verdict_fn": lambda *_args: tracking.UNKNOWN,
+                # Pin the local agent-worktrees registry probe to "unresolved"
+                # so this stays a genuinely-unresolvable-probe case (this
+                # test's actual point), independent of whatever
+                # worktree_directory_present_fn's real default would report
+                # for a fabricated, never-created worktree id on this host.
+                "worktree_directory_present_fn": lambda _wt, _project: None,
+            },
         ),
         (
             "session-error",
             "wt-error",
-            {"verdict_fn": _raise_probe_error},
+            {
+                "verdict_fn": _raise_probe_error,
+                "worktree_directory_present_fn": lambda _wt, _project: None,
+            },
         ),
     ],
 )
@@ -2940,6 +3023,34 @@ def test_make_embody_spawn_records_handle_on_success(monkeypatch):
     assert handle["session"] == "sess-9"
 
 
+def test_make_embody_spawn_fails_when_a_zero_exit_yields_no_session_id(
+    monkeypatch,
+):
+    # A zero exit with no recognizable session id (e.g. an embody JSON shape
+    # this parser doesn't recognize) must not be reported as a usable
+    # success: record_spawn would otherwise persist a SPAWNED reservation
+    # with session_handle=None -- indistinguishable from a reservation that
+    # never reached spawning anything at all, which release_requested_bodies'
+    # absent-worktree shortcut could then wrongly treat as confirmed-gone
+    # without ever resolving whether a real, unidentifiable body exists.
+    import subprocess
+
+    from agent_dispatch import embody
+    from agent_dispatch.supervisor import make_embody_spawn
+
+    def fake_spawn_embodied_worker(task_id, **_kwargs):
+        return subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="{}", stderr="",
+        )
+
+    monkeypatch.setattr(embody, "spawn_embodied_worker", fake_spawn_embodied_worker)
+    ok, handle = make_embody_spawn()(
+        {"id": "t", "repo": "gitea.example/org/widgets"}
+    )
+    assert ok is False
+    assert "error" in handle
+
+
 def test_parse_handle_accepts_nested_worktree_object():
     """Older/newer agent-worktrees JSON shapes both preserve the worktree handle."""
     import subprocess
@@ -3083,11 +3194,20 @@ def test_make_headless_spawn_resolves_allocation_project_lazily(monkeypatch):
     assert calls == []
     assert spawn.allocation_project_for({"id": "task-1"}) == "review-harness"
     assert calls == [
-        ("review-worker", {"timeout": 30.0, "strict": True}),
+        ("review-worker", {"strict": True}),
     ]
 
 
-def test_make_headless_spawn_reports_failure_on_nonzero(monkeypatch):
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "[FAIL] Session failed-123 entered failed: Connection closed",
+        "[FAIL] Session failed-123 entered ended",
+        "[FAIL] Session failed-123 entered stopped",
+        "[FAIL] Timed out waiting for session failed-123 to become idle",
+    ],
+)
+def test_make_headless_spawn_reports_failure_on_nonzero(monkeypatch, stderr):
     import subprocess
 
     from agent_dispatch import bridge, embody
@@ -3096,11 +3216,12 @@ def test_make_headless_spawn_reports_failure_on_nonzero(monkeypatch):
     monkeypatch.setattr(embody, "autopilot_worker_prompt", lambda *a, **k: "seed")
     monkeypatch.setattr(
         bridge, "spawn_worker",
-        lambda *a, **k: subprocess.CompletedProcess([], 1, "", "boom"),
+        lambda *a, **k: subprocess.CompletedProcess([], 1, "", stderr),
     )
     ok, handle = make_headless_spawn()({"id": "t"})
     assert ok is False
-    assert "boom" in handle["error"]
+    assert "failed-123" in handle["error"]
+    assert handle["session"] == "local-body:failed-123"
 
 
 def test_make_headless_spawn_reuses_carried_session(monkeypatch):
@@ -3851,6 +3972,488 @@ def test_failed_attempt_cleanup_retries_after_body_release(q, client):
     assert q.get_reservation(reservation.key).state == SpawnState.FAILED
     assert q.get_reservation(reservation.key).conclusion_state == "complete"
     assert replacement.worktree is None
+
+
+# -- unleased worktree-only retirement: no captured owner_session_id --------
+#
+# A RESERVING-stage spawn failure (worktree preparation failed before any
+# claim/session ever existed) leaves the task without an owner_session_id.
+# verdict_fn alone can never resolve this to "gone" (identity-keyed, by
+# design), so release_requested_bodies additionally cross-checks the local
+# agent-worktrees registry directly for this reservation's own recorded
+# worktree -- see supervisor.py's worktree_directory_present_fn.
+
+
+def test_retires_unleased_worktree_reservation_when_directory_confirmed_absent(
+    q, client
+):
+    from agent_dispatch import embody
+
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-gone",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    q.request_spawn_release(
+        reservation.key,
+        detail="worktree preparation failed",
+        disposition="failed",
+    )
+    assert q.get(task.id).owner is None  # never claimed -> no owner_session_id
+    probe_calls = []
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        machine="host-a",
+        verdict_fn=lambda *_args: "unknown",
+        worktree_directory_present_fn=lambda wt, project: probe_calls.append(
+            (wt, project)
+        ) or False,
+        attempt_conclusion_fn=lambda *_args: {
+            "action": "failed",
+            "reason": "lifecycle lock busy",
+        },
+        nudge=False,
+    )
+
+    assert sup.release_requested_bodies() == 1
+    assert q.get_reservation(reservation.key).state == SpawnState.FAILED
+    # The project (derived from the task's repo, not the CWD) must be threaded
+    # through -- this daemon is CWD-neutral.
+    assert probe_calls == [("wt-gone", embody.project_for_task({"repo": TEST_REPO}))]
+
+
+def test_probes_the_spawn_fns_own_allocation_project_when_overridden(q, client):
+    # A routed/headless spawn_fn can select an allocation project different
+    # from plain embody.project_for_task(task) (e.g. via an
+    # `allocation_project_for` selector) -- the same one _prepare_spawn_task
+    # would have used to actually create this worktree. The absence probe
+    # must be scoped to THAT project, not silently re-derive a possibly
+    # different one, or it can query the wrong project's registry and
+    # wrongly retire a still-present worktree.
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-routed",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    q.request_spawn_release(
+        reservation.key,
+        detail="worktree preparation failed",
+        disposition="failed",
+    )
+    spawn = _ok_spawn()
+    spawn.allocation_project_for = lambda _task: "routed-project"
+    probe_calls = []
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        machine="host-a",
+        verdict_fn=lambda *_args: "unknown",
+        worktree_directory_present_fn=lambda wt, project: probe_calls.append(
+            (wt, project)
+        ) or False,
+        attempt_conclusion_fn=lambda *_args: {
+            "action": "failed",
+            "reason": "lifecycle lock busy",
+        },
+        nudge=False,
+    )
+
+    assert sup.release_requested_bodies() == 1
+    assert probe_calls == [("wt-routed", "routed-project")]
+
+
+def test_allocation_project_resolution_failure_degrades_to_unknown(q, client):
+    # `_spawn_attribute` can invoke an I/O-backed `allocation_project_for`
+    # selector (the default headless one calls a strict registry lookup)
+    # that may raise when a backing registry is unavailable. That failure
+    # must degrade this reservation to unknown for this cycle -- never
+    # propagate out of release_requested_bodies and abort the whole polling
+    # pass over every other reservation.
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    other_task = q.create("other-work")
+    other_reservation, _ = q.reserve_spawn(other_task.id)
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-project-resolution-fails",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    q.record_spawn_worktree(
+        other_reservation.key,
+        "wt-other",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    q.request_spawn_release(
+        reservation.key,
+        detail="worktree preparation failed",
+        disposition="failed",
+    )
+    q.request_spawn_release(
+        other_reservation.key,
+        detail="worktree preparation failed",
+        disposition="failed",
+    )
+
+    def raising_project_selector(task_dict):
+        if task_dict.get("id") == task.id:
+            raise RuntimeError("bridge registry unavailable")
+        return "other-project"
+
+    spawn = _ok_spawn()
+    spawn.allocation_project_for = raising_project_selector
+    probed = []
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        machine="host-a",
+        verdict_fn=lambda *_args: "unknown",
+        worktree_directory_present_fn=lambda wt, project: probed.append(wt) or False,
+        attempt_conclusion_fn=lambda *_args: {
+            "action": "failed",
+            "reason": "lifecycle lock busy",
+        },
+        nudge=False,
+    )
+
+    # Both reservations get processed this cycle -- the raising selector for
+    # the first must not abort the loop before reaching the second.
+    assert sup.release_requested_bodies() == 1
+    assert q.get_reservation(reservation.key).state == SpawnState.RELEASING
+    assert q.get_reservation(other_reservation.key).state == SpawnState.FAILED
+    assert probed == ["wt-other"]
+
+
+def test_keeps_unleased_worktree_reservation_when_directory_still_present(
+    q, client
+):
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-finalized-but-present",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    q.request_spawn_release(
+        reservation.key,
+        detail="worktree preparation failed",
+        disposition="failed",
+    )
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        machine="host-a",
+        verdict_fn=lambda *_args: "unknown",
+        worktree_directory_present_fn=lambda _wt, _project: True,
+        nudge=False,
+    )
+
+    assert sup.release_requested_bodies() == 0
+    assert q.get_reservation(reservation.key).state == SpawnState.RELEASING
+
+
+def test_keeps_unleased_worktree_reservation_when_directory_probe_unresolved(
+    q, client
+):
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-unresolved",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    q.request_spawn_release(
+        reservation.key,
+        detail="worktree preparation failed",
+        disposition="failed",
+    )
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        machine="host-a",
+        verdict_fn=lambda *_args: "unknown",
+        worktree_directory_present_fn=lambda _wt, _project: None,
+        nudge=False,
+    )
+
+    assert sup.release_requested_bodies() == 0
+    assert q.get_reservation(reservation.key).state == SpawnState.RELEASING
+
+
+def test_does_not_confirm_absence_for_a_captured_owner_session(q, client):
+    # Once owner_session_id IS captured, this exception must not apply --
+    # verdict_fn's ordinary identity-keyed contract governs alone, exactly as
+    # before this change.
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-claimed",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    q.claim_one("host-a/wt-claimed", machine="host-a", worktree="wt-claimed",
+                task_id=task.id)
+    q.start(task.id, "host-a/wt-claimed", owner_session_id="S1")
+    q.request_spawn_release(
+        reservation.key,
+        detail="worktree preparation failed",
+        disposition="failed",
+    )
+
+    def forbidden(_wt, _project):
+        raise AssertionError(
+            "must not probe worktree_directory_present_fn once owner_session_id "
+            "is captured"
+        )
+
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        machine="host-a",
+        verdict_fn=lambda *_args: "unknown",
+        worktree_directory_present_fn=forbidden,
+        nudge=False,
+    )
+
+    assert sup.release_requested_bodies() == 0
+    assert q.get_reservation(reservation.key).state == SpawnState.RELEASING
+
+
+def test_does_not_confirm_absence_for_a_remote_owner(q, client):
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-remote",
+        ownership="created",
+        creating_host="peer-box",
+        driver="agent-dispatch",
+    )
+    q.request_spawn_release(
+        reservation.key,
+        detail="worktree preparation failed",
+        disposition="failed",
+    )
+    # Claim (but never start) the task under a remote-machine owner, leaving
+    # owner_session_id uncaptured -- the claim-before-registration race window
+    # -- while `_machine_from_owner` still resolves non-None from the stored
+    # "<machine>/<worktree>" owner string.
+    q.claim_one("peer-box/wt-remote", machine="peer-box", worktree="wt-remote",
+                task_id=task.id)
+
+    def forbidden(_wt, _project):
+        raise AssertionError(
+            "must not probe the local agent-worktrees registry for a remote owner"
+        )
+
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        machine="host-a",
+        verdict_fn=lambda *_args: "unknown",
+        worktree_directory_present_fn=forbidden,
+        nudge=False,
+    )
+
+    assert sup.release_requested_bodies() == 0
+    assert q.get_reservation(reservation.key).state == SpawnState.RELEASING
+
+
+def test_does_not_confirm_absence_when_creating_host_is_a_different_machine(
+    q, client
+):
+    # The reviewer's exact scenario: the task is never claimed (owner is
+    # None, so `_machine_from_owner` alone can't gate this), but the
+    # reservation's worktree was created on a DIFFERENT host than this
+    # supervisor's own. A supervisor polling a shared cross-machine queue
+    # must not probe its own local registry for a worktree that in fact
+    # lives elsewhere.
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-on-other-host",
+        ownership="created",
+        creating_host="peer-box",
+        driver="agent-dispatch",
+    )
+    q.request_spawn_release(
+        reservation.key,
+        detail="worktree preparation failed",
+        disposition="failed",
+    )
+    assert q.get(task.id).owner is None
+
+    def forbidden(_wt, _project):
+        raise AssertionError(
+            "must not probe the local agent-worktrees registry for a "
+            "reservation created on a different host"
+        )
+
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        machine="host-a",
+        verdict_fn=lambda *_args: "unknown",
+        worktree_directory_present_fn=forbidden,
+        nudge=False,
+    )
+
+    assert sup.release_requested_bodies() == 0
+    assert q.get_reservation(reservation.key).state == SpawnState.RELEASING
+
+
+def test_does_not_confirm_absence_for_a_spawned_body_with_a_session_handle(
+    q, client
+):
+    # The reviewer's exact scenario: a body was actually spawned (a raw
+    # CLI/mux session handle recorded -- not the "fleet-body:"/"local-body:"
+    # prefixes the branches above already special-case) but never claimed
+    # its task, so owner/owner_session_id are both still None, same as a
+    # pure RESERVING-stage failure. Unlike that case, a real body may still
+    # be alive under this handle; the worktree-directory-only shortcut must
+    # not bypass resolving it and wrongly retire a still-live reservation.
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-spawned-unclaimed",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    q.record_spawn(
+        reservation.key,
+        session_handle="cli-session-xyz",
+        worktree="wt-spawned-unclaimed",
+    )
+    assert q.get_reservation(reservation.key).state == SpawnState.SPAWNED
+    q.request_spawn_release(
+        reservation.key,
+        detail="yielded",
+        disposition="failed",
+    )
+    assert q.get(task.id).owner is None
+
+    def forbidden(_wt, _project):
+        raise AssertionError(
+            "must not probe the local agent-worktrees registry for a "
+            "reservation with a recorded session_handle"
+        )
+
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        machine="host-a",
+        verdict_fn=lambda *_args: "unknown",
+        worktree_directory_present_fn=forbidden,
+        nudge=False,
+    )
+
+    assert sup.release_requested_bodies() == 0
+    assert q.get_reservation(reservation.key).state == SpawnState.RELEASING
+
+
+    # claim_one accepts arbitrary worker IDs (e.g. "worker-1", no
+    # "<machine>/<worktree>" separator) -- `_machine_from_owner` on such a
+    # string returns None just like an actually-unset owner, so the gate must
+    # check `task.get("owner") is None` explicitly rather than relying on
+    # that parse result alone.
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-malformed-owner",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    q.claim_one("worker-1", task_id=task.id)
+    assert q.get(task.id).owner == "worker-1"
+    q.request_spawn_release(
+        reservation.key,
+        detail="worktree preparation failed",
+        disposition="failed",
+    )
+
+    def forbidden(_wt, _project):
+        raise AssertionError(
+            "must not probe the local agent-worktrees registry for a claimed "
+            "(even if malformed-owner) task"
+        )
+
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        machine="host-a",
+        verdict_fn=lambda *_args: "unknown",
+        worktree_directory_present_fn=forbidden,
+        nudge=False,
+    )
+
+    assert sup.release_requested_bodies() == 0
+    assert q.get_reservation(reservation.key).state == SpawnState.RELEASING
+
+
+def test_confirms_absence_with_case_insensitive_creating_host_match(q, client):
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-mixed-case-host",
+        ownership="created",
+        creating_host="Host-A",
+        driver="agent-dispatch",
+    )
+    q.request_spawn_release(
+        reservation.key,
+        detail="worktree preparation failed",
+        disposition="failed",
+    )
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        machine="host-a",
+        verdict_fn=lambda *_args: "unknown",
+        worktree_directory_present_fn=lambda _wt, _project: False,
+        attempt_conclusion_fn=lambda *_args: {
+            "action": "failed",
+            "reason": "lifecycle lock busy",
+        },
+        nudge=False,
+    )
+
+    assert sup.release_requested_bodies() == 1
+    assert q.get_reservation(reservation.key).state == SpawnState.FAILED
 
 
 def test_held_attempt_cleanup_remains_visible_without_fencing_replacement(

@@ -25,11 +25,13 @@ def test_windows_ssh_manager_selectors_match_vendored_distribution():
     commands = [
         line
         for line in installer.replace("`\n", " ").splitlines()
-        if "uv pip install" in line and '"$SshManagerDir"' in line
+        if "Invoke-UvPipInstallResilient" in line and "$SshManagerDir" in line
     ]
     assert len(commands) == 2, "Expected both install and update SSH commands"
     for command in commands:
-        selectors = re.findall(r"--(reinstall|refresh)-package\s+([\w.-]+)", command)
+        selectors = re.findall(
+            r"--(reinstall|refresh)-package['\"]?\s*,?\s*['\"]([\w.-]+)['\"]", command
+        )
         assert sorted(selectors) == [
             ("refresh", distribution),
             ("reinstall", distribution),

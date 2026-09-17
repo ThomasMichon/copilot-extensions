@@ -17,7 +17,7 @@ import datetime as _dt
 from pathlib import Path
 from unittest.mock import patch
 
-from agent_worktrees.picker_tui import derive
+from agent_worktrees.picker_support import derive
 from agent_worktrees.sessions import (
     _normalize_path,
     scan_sessions_fast,

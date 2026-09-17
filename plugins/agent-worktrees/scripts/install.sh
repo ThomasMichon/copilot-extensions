@@ -603,11 +603,6 @@ _versioned_activate() {
         err "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
         return 1
     fi
-    if ! PYTHONPATH= "$VENV_PYTHON" -m agent_worktrees.picker_tui.prewarm 2>/dev/null; then
-        err "Fresh runtime slot failed its Picker prewarm gate (versions/$SRC_VERSION) -- not activating"
-        return 1
-    fi
-    ok "Picker import path prewarmed in runtime version $SRC_VERSION"
     _versioned_mark_complete
     local prev
     prev="$("$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo "")"
@@ -664,9 +659,17 @@ _bootstrap_python() {
 }
 
 _payload_hash() {
-    # Cheap payload fingerprint for the completion marker (#935): sha256 of
-    # pyproject.toml + the vendored-lib version set. Detects a dev-checkout that
-    # changed the payload WITHOUT bumping the version. Empty on any error.
+    # Payload fingerprint for the completion marker (#935, hardened #2609):
+    # sha256 of pyproject.toml + the vendored-lib manifests + every actual
+    # source file under src/ (this plugin's own package) and libs/*/src/ (its
+    # vendored path-dependencies). #2609: hashing only the manifests missed
+    # any content change that didn't also bump the version string or touch a
+    # dependency list -- exactly a plugin bug fix landing in .py source with
+    # no pyproject.toml edit -- so `update`/`update --force` reported
+    # "already at latest" and left the venv silently stale even though the
+    # marketplace payload had genuinely changed. Deterministic (sorted
+    # relative paths) and content-based. Empty on any error, which the
+    # completion-marker check already treats as "unknown, force a rebuild".
     local __parts=""
     if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then __parts="$(cat "$PLUGIN_DIR/pyproject.toml")"; fi
     if [[ -d "$PLUGIN_DIR/libs" ]]; then
@@ -675,6 +678,20 @@ _payload_hash() {
             __parts="$__parts"$'\n'"$(cat "$__f")"
         done < <(find "$PLUGIN_DIR/libs" -name pyproject.toml 2>/dev/null | sort)
     fi
+    local __src_roots=("$PLUGIN_DIR/src")
+    if [[ -d "$PLUGIN_DIR/libs" ]]; then
+        local __libdir
+        while IFS= read -r __libdir; do
+            [[ -d "$__libdir/src" ]] && __src_roots+=("$__libdir/src")
+        done < <(find "$PLUGIN_DIR/libs" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
+    fi
+    local __root
+    for __root in "${__src_roots[@]}"; do
+        [[ -d "$__root" ]] || continue
+        while IFS= read -r __f; do
+            __parts="$__parts"$'\n'"${__f#"$PLUGIN_DIR"}"$'\n'"$(cat "$__f" 2>/dev/null)"
+        done < <(find "$__root" -type f ! -name '*.pyc' ! -name '*.pyo' ! -path '*/__pycache__/*' 2>/dev/null | sort)
+    done
     printf '%s' "$__parts" | sha256sum 2>/dev/null | awk '{print $1}' || true
 }
 
@@ -1057,7 +1074,7 @@ deploy_wrappers() {
     deploy_runtime_resolvers || return 1
 
     # Deploy hook scripts, including the consolidated pre/post client and its fallback modules.
-    for script in session-conduct.ps1 session-conduct.sh session-machine.ps1 session-machine.sh bootstrap-check.ps1 bootstrap-check.sh project-hooks.ps1 project-hooks.sh register-nudge.ps1 register-nudge.sh register-session.ps1 register-session.sh deregister-session.ps1 deregister-session.sh anchor-hygiene-check.ps1 anchor-hygiene-check.sh marketplace-overrides.ps1 marketplace-overrides.sh provision-check.ps1 provision-check.sh statelessness_guard.py cross_repo_guard.py anchor_write_guard.py pr_supersede_guard.py registry_root.py nudge_status.py bind_nudge.py hook_client.py bind-nudge.sh bind-nudge.ps1; do
+    for script in session-conduct.ps1 session-conduct.sh session-machine.ps1 session-machine.sh bootstrap-check.ps1 bootstrap-check.sh project-hooks.ps1 project-hooks.sh register-nudge.ps1 register-nudge.sh register-session.ps1 register-session.sh deregister-session.ps1 deregister-session.sh anchor-hygiene-check.ps1 anchor-hygiene-check.sh provision-check.ps1 provision-check.sh statelessness_guard.py cross_repo_guard.py anchor_write_guard.py pr_supersede_guard.py registry_root.py nudge_status.py bind_nudge.py hook_client.py bind-nudge.sh bind-nudge.ps1; do
         local script_src="$SCRIPT_DIR/$script"
         if [[ -f "$script_src" ]]; then
             tmp="$(mktemp "$BIN_DIR/$script.XXXXXX")"

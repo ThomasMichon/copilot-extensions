@@ -90,13 +90,13 @@ def test_session_guidance_projection_points_to_hook_written_file():
         _PLUGIN / "instructions" / "session-guidance.instructions.md"
     ).read_text(encoding="utf-8")
     assert "applyTo: \"**\"" in template
-    assert "COPILOT_AGENT_SESSION_ID" in template
+    assert "already-disclosed session folder" in template
     assert "~/.copilot/session-state" not in template
     assert (
         "instructions/agent-worktrees/session-guidance.instructions.md"
         in template
     )
-    assert "its absence is not an error" in template
+    assert "Its absence is not an error." in template
     guide = (
         _PLUGIN / "instructions" / "worktree-context-guide.instructions.md"
     ).read_text(encoding="utf-8")

@@ -5,26 +5,26 @@
       "customizationKind": "instructions",
       "destination": ".github/instructions/agent-dispatch/session-guidance.instructions.md",
       "plugin": "agent-dispatch@copilot-extensions",
-      "pluginVersion": "0.1.2-dev36",
-      "renderedBytes": 984,
-      "renderedSha256": "968368dd74b78a9c718cb75a0af07db4ed865995d796470de86abb62ceff8d72",
+      "pluginVersion": "0.1.2-dev94",
+      "renderedBytes": 784,
+      "renderedSha256": "1d402e7daf0bf30106c242e3157feff86b8d6c775dec27bad411cd981e95b0c3",
       "sourceId": "session-guidance",
       "template": "instructions/session-guidance.instructions.md",
-      "templateBytes": 444,
-      "templateSha256": "6335aaf6994816c3bcab1ddc48a16208106e491fc33022317e377e9f40dd6696"
+      "templateBytes": 244,
+      "templateSha256": "8969f4b96dfa1febf513b11827a4e94d6f0db32ea775a8c7b3610474b4668dd4"
     },
     {
       "applyTo": "**",
       "customizationKind": "instructions",
       "destination": ".github/instructions/copilot-extensions-harness/contribution-boundary.instructions.md",
       "plugin": "copilot-extensions-harness@copilot-extensions",
-      "pluginVersion": "0.1.0-dev38",
+      "pluginVersion": "0.1.0-dev40",
       "renderedBytes": 1019,
-      "renderedSha256": "aa9404f8110c88526f720f05e92ca1cdcb632c5a72984d6a89f932db1bf42641",
+      "renderedSha256": "84a8227a7ca8aec54df93f4d28c2612b89218dc59afe9100f95f201c280dd3ea",
       "sourceId": "contribution-boundary",
       "template": "instructions/contribution-boundary.instructions.md",
       "templateBytes": 439,
-      "templateSha256": "88b65373a8ca0daf6d1f03f68b7460969741ee4216de6d5fde3439dbbd356e73"
+      "templateSha256": "f482a287e533f53d982fc06cf4f6ba74bdd4f2665f9bcb66a77583a306a445dd"
     },
     {
       "applyTo": "**",

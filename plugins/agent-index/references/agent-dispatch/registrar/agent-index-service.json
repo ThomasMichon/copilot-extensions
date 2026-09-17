@@ -8,12 +8,10 @@
       "runtimes": [
         {
           "name": "service",
-          "version": "0.1.0-dev163",
+          "version": "0.1.0-dev175",
           "profile": "host",
           "python_env": "AGENT_INDEX_MANAGED_PYTHON",
           "projects": [
-            {"path": "libs/zdd"},
-            {"path": "libs/agent-procutil"},
             {"path": ".", "extras": ["store"]}
           ],
           "imports": [

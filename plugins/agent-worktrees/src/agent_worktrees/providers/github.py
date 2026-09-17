@@ -662,6 +662,40 @@ class GitHubProvider:
         _ = (repo, base, head_sha, api_base, token)
         return None
 
+    def ensure_fork(
+        self, repo: str, *, token: str | None = None,
+    ) -> tuple[str, str] | None:
+        """Create (or read, if it already exists) the caller's fork via
+        ``POST /repos/<repo>/forks`` -- idempotent on GitHub's own API.
+
+        Resolves the caller's login first (``gh api user``) purely for the
+        returned ``owner`` -- the actual fork-owner is whoever the token
+        belongs to regardless. Returns ``None`` on any failure: no ``gh``
+        auth, a non-2xx API response, or a payload missing ``clone_url``.
+        """
+        who = run_cli(["gh", "api", "user", "--jq", ".login"], env=self._env(token))
+        if who.returncode != 0:
+            return None
+        owner = who.stdout.strip()
+        if not owner:
+            return None
+        proc = run_cli(
+            ["gh", "api", "-X", "POST", f"repos/{repo}/forks"],
+            env=self._env(token),
+        )
+        if proc.returncode != 0:
+            return None
+        try:
+            data = json.loads(proc.stdout)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(data, dict):
+            return None
+        clone_url = data.get("clone_url") or data.get("ssh_url") or ""
+        if not isinstance(clone_url, str) or not clone_url:
+            return None
+        return (owner, clone_url)
+
     _THREADS_QUERY = (
         "query($owner:String!,$name:String!,$number:Int!){"
         "repository(owner:$owner,name:$name){pullRequest(number:$number){"

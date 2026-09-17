@@ -9,6 +9,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import time as time_module
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -57,6 +58,105 @@ def test_no_content_replaces_stale_guidance(monkeypatch, tmp_path):
     content = target.read_text(encoding="utf-8")
     assert "stale policy" not in content
     assert "unavailable" in content
+
+
+def test_cache_miss_calls_contributor_then_hits_cache(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_contributor(root, payload):
+        calls.append(payload)
+        return "[owner: ai-attribution@1.0.0]\npolicy"
+
+    monkeypatch.setattr(writer, "_run_contributor", fake_contributor)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    payload = {"sessionId": "session-1", "cwd": str(repo)}
+
+    assert writer.write_session_guidance(payload, home=tmp_path)
+    assert len(calls) == 1
+    assert "policy" in _target(tmp_path).read_text(encoding="utf-8")
+
+    # A second session (different sessionId, same repo cwd) must hit the
+    # cache rather than invoking the contributor again.
+    payload2 = {"sessionId": "session-2", "cwd": str(repo)}
+    assert writer.write_session_guidance(payload2, home=tmp_path)
+    assert len(calls) == 1, "second call should have been served from cache"
+    second_target = (
+        tmp_path
+        / ".copilot"
+        / "session-state"
+        / "session-2"
+        / "instructions"
+        / "ai-attribution"
+        / "session-guidance.instructions.md"
+    )
+    assert "policy" in second_target.read_text(encoding="utf-8")
+
+
+def test_cache_expired_recomputes(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(
+        writer, "_run_contributor", lambda *args: calls.append(1) or "fresh policy"
+    )
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    cache_dir = writer._cache_dir(tmp_path)
+    cache_dir.mkdir(parents=True)
+    key = writer._repo_cache_key(str(repo))
+    (cache_dir / f"{key}.json").write_text(
+        json.dumps(
+            {
+                "version": writer._CACHE_FORMAT_VERSION,
+                "computed_at": 0.0,
+                "guidance": "stale cached policy",
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert writer.write_session_guidance(
+        {"sessionId": "session-1", "cwd": str(repo)}, home=tmp_path
+    )
+    assert len(calls) == 1
+    assert "fresh policy" in _target(tmp_path).read_text(encoding="utf-8")
+
+
+def test_force_refresh_env_bypasses_fresh_cache(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(
+        writer, "_run_contributor", lambda *args: calls.append(1) or "recomputed"
+    )
+    monkeypatch.setenv("AI_ATTRIBUTION_FORCE_REFRESH", "1")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    cache_dir = writer._cache_dir(tmp_path)
+    cache_dir.mkdir(parents=True)
+    key = writer._repo_cache_key(str(repo))
+    (cache_dir / f"{key}.json").write_text(
+        json.dumps(
+            {
+                "version": writer._CACHE_FORMAT_VERSION,
+                "computed_at": time_module.time(),
+                "guidance": "fresh cached policy",
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert writer.write_session_guidance(
+        {"sessionId": "session-1", "cwd": str(repo)}, home=tmp_path
+    )
+    assert len(calls) == 1
+    assert "recomputed" in _target(tmp_path).read_text(encoding="utf-8")
+
+
+def test_missing_cwd_never_caches(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(
+        writer, "_run_contributor", lambda *args: calls.append(1) or "policy"
+    )
+    assert writer.write_session_guidance({"sessionId": "session-1"}, home=tmp_path)
+    assert writer.write_session_guidance({"sessionId": "session-2"}, home=tmp_path)
+    assert len(calls) == 2, "no cwd means no cache key, so every call recomputes"
+    assert not writer._cache_dir(tmp_path).exists()
 
 
 def test_over_budget_content_writes_explicit_status(monkeypatch, tmp_path):

@@ -49,7 +49,7 @@ MARKETPLACE_OVERLAYS_DIR = CANONICAL_INREPO_CONFIG_DIR / "marketplaces"
 
 # Global, machine-wide config: the user-owned BASE layer holding only
 # machine-wide settings -- top-level ``srcroot`` / ``machine`` / ``platform`` /
-# ``copilot_profiles`` / ``session_backend`` / ``auto_fast_forward`` /
+# ``copilot_profiles`` / ``auto_fast_forward`` /
 # ``headless``. It never carries
 # per-repo settings or a registry of repos/machines; the full merged config for
 # a target repo is computed on demand by ``load_config``. Lives at
@@ -64,22 +64,6 @@ class CopilotProfile:
     label: str
     env: dict[str, str] = field(default_factory=dict)
     copilot_args: list[str] = field(default_factory=list)
-
-
-@dataclass(frozen=True)
-class SessionBackendConfig:
-    """Machine-local interactive session host selection."""
-
-    kind: str = "direct"
-    endpoint_url: str = ""
-    github_account: str = ""
-    protocol_versions: tuple[str, ...] = ("0.7.0",)
-    auth_resource: str = "https://api.github.com"
-    connect_timeout_seconds: float = 15.0
-
-    @property
-    def is_ahp(self) -> bool:
-        return self.kind == "ahp"
 
 
 @dataclass(frozen=True)
@@ -98,6 +82,62 @@ class ProfileAssignmentPolicy:
 
 # Synthetic default when no profiles are configured.
 DEFAULT_PROFILE = CopilotProfile(name="cloud", label="☁️  Cloud (GitHub)")
+
+# The vocabulary ``pr_contract.RepoPolicy.viewer_permission`` /
+# ``providers.actor_viewer_permission()`` normalize every provider's live,
+# per-identity permission read to (see #2433's ``actor_merge_authority``).
+# ``"none"`` is a confident no-access read, distinct from an *unresolved* read
+# (empty string / unsupported provider), which callers must treat as unknown,
+# never as this level. Ordered lowest -> highest so a resolver can
+# compare/clamp against it. Excluding ``"none"``, this also matches the role
+# vocabulary the GitHub Inside Microsoft ACL policy uses for its own ``role:``
+# values (Read/Triage/Write/Maintain -- Admin is never grantable via that ACL).
+GITHUB_ROLE_LEVELS: tuple[str, ...] = (
+    "none", "read", "triage", "write", "maintain", "admin",
+)
+
+
+@dataclass(frozen=True)
+class ForkConfig:
+    """How ``create-pr`` should publish a PR head when a role can't push to
+    the repo directly (see ``efforts/active/role-aware-fork-pr-flow`` in
+    copilot-extensions).
+
+    ``enabled`` on the base ``pr.fork`` block is a repo-wide default; a role
+    override (``pr.roles.<role>.fork``) may turn it on/off for just that role
+    without repeating the other fields. When active, ``create-pr`` publishes
+    the PR head to the caller's fork instead of ``repo.remote`` and opens the
+    PR with a ``<fork-owner>:<branch>`` head. GitHub-only today; the
+    fork-push/PR-open integration in ``create_pr`` itself is a later phase of
+    the same effort, not yet implemented -- this config shape is accepted and
+    parsed now so repos can declare intent ahead of that landing. Other
+    providers ignore this block.
+    """
+
+    enabled: bool = False
+    remote: str = "fork"    # local git remote name used for the fork
+    owner: str = ""         # explicit fork-owner override; "" = caller's own account
+
+
+@dataclass(frozen=True)
+class PRRoleOverride:
+    """Per-role overrides layered onto the repo's base ``PRConfig`` (see
+    ``efforts/active/role-aware-fork-pr-flow`` in copilot-extensions).
+
+    Keyed in ``PRConfig.roles`` by one of ``GITHUB_ROLE_LEVELS``. Every field
+    is optional (``None`` = inherit the base ``PRConfig`` value unchanged) so a
+    role only needs to state what's *different* about its flow -- e.g. a
+    ``write``-permission "Contributor" role might set ``merge_actor=""`` (never
+    self-merge; derive to reviewer/consent-gate) and ``fork=ForkConfig(enabled=True)``,
+    while a ``maintain``-permission "Maintainer" role keeps the repo's default
+    ``submitter-direct`` merge_actor and leaves ``fork`` unset (direct push).
+    """
+
+    reviewer: str | None = None
+    review_blocking: bool | None = None
+    self_approve: bool | None = None
+    merge_actor: str | None = None
+    fork: ForkConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -281,6 +321,25 @@ class PRConfig:
     branch_update_strategy: str = "rebase"
     merge_strategy: str = "squash"
     prefer_auto_merge: bool = True
+    # ── Role-aware PR flow (see ``efforts/active/role-aware-fork-pr-flow`` in
+    # copilot-extensions). ``roles`` maps a GitHub permission level
+    # (``GITHUB_ROLE_LEVELS``) to a ``PRRoleOverride`` layered onto this
+    # PRConfig for a caller resolved at that level. Empty (the default) means
+    # every caller gets the same flow, exactly today's behavior. ``fork`` is
+    # the repo-wide fork-publish default (see ``ForkConfig``); a role may
+    # override it via its own ``fork`` field.
+    roles: dict[str, PRRoleOverride] = field(default_factory=dict)
+    fork: ForkConfig = field(default_factory=ForkConfig)
+    # ── Free-text repo-specific guidance (#pr-conduct-guidance-consolidation).
+    # Agents interact with PR config via ``agent-worktrees repos get``/the
+    # ``pr-*`` verbs, not by reading this file's comments directly -- so a
+    # comment explaining a non-obvious repo choice (e.g. "why bypass_mode:
+    # pull_request, not always/exempt") never reaches a calling agent unless
+    # it rides along through a command's own output. ``notes`` is that ride:
+    # free text surfaced as an extra ``Note:`` line in every ``pr_reminder``
+    # (the "Reminder [...]" text every pr-* verb already prints) whenever it's
+    # non-empty. Keep it short -- one or two sentences, not a policy essay.
+    notes: str = ""
 
 
 @dataclass(frozen=True)
@@ -351,31 +410,51 @@ class RepoConfig:
     ``launch`` command. Configured entirely from the user-local
     ``~/.<project>/config.yaml`` overlay -- nothing is written into the repo."""
     stateless: bool = False
-    """When true, this repo is a **stateless harness**: it holds the shareable
-    control-plane intelligence (instructions, config, skills, sub-agents) but no
-    personal state (efforts, logs, visions, artifacts). Personal state is routed
-    to a separately-bound **knowledge repo** (top-level ``knowledge_repo`` in the
-    machine-local config; see :attr:`Config.knowledge_repo`). Consumed by the
-    state-root resolver (``agent-worktrees state-root``) so effort/vision/log
-    plugins default their writes into the bound knowledge checkout instead of the
-    harness tree. Declared in the repo's own committed
-    ``<anchor>/.agent-worktrees/config.yaml`` (``stateless: true``) -- it is a
-    property of the harness, not of a machine. **Implies**
-    :attr:`requires_external_state_root` (a stateless harness by definition
-    requires an external state root). See the ``stateless-harness`` vision /
-    ``citadel-harness-split`` effort."""
+    """When true, this repo is a **stateless harness**: shareable control-plane
+    intelligence only, no personal state -- routed to a separately-bound
+    **knowledge repo** (top-level ``knowledge_repo``; see
+    :attr:`Config.knowledge_repo`). The state-root resolver defaults
+    effort/vision/log writes into that checkout instead of the harness tree.
+    Declared in the repo's own committed ``<anchor>/.agent-worktrees/config.yaml``
+    (``stateless: true``). **Implies** :attr:`requires_external_state_root`.
+    See the ``stateless-harness`` vision."""
     requires_external_state_root: bool = False
     """When true, personal state (efforts/visions/logs) **must** be written to a
     separately-bound external **knowledge repo**, not into this repo's checkout.
-    The state-root resolver routes to the bound knowledge repo and **refuses**
-    (rather than falling back to the launch repo) when nothing is bound. This is
-    the explicit, plugin-facing knob the ``efforts`` and ``visions`` plugins key
-    on; it is **decoupled** from :attr:`stateless` (a repo can require external
-    state without being a fully guarded/linted stateless harness), but
-    ``stateless: true`` **implies** it, so a harness never has to set both.
-    **Default false** -- a normal repo is its own state home (fully
-    backward-compatible). Declared in the repo's committed
-    ``<anchor>/.agent-worktrees/config.yaml``."""
+    The state-root resolver routes there and **refuses** (rather than falling
+    back to the launch repo) when nothing is bound. The explicit,
+    plugin-facing knob ``efforts``/``visions`` key on; **decoupled** from
+    :attr:`stateless` (a repo can require external state without being a
+    fully guarded stateless harness), but ``stateless: true`` **implies** it.
+    **Default false**. Declared in ``<anchor>/.agent-worktrees/config.yaml``."""
+    compose_knowledge_plugins: bool = True
+    """When false, never graft the paired knowledge repo's own
+    marketplaces/plugins into the harness session overlay (retiring any
+    prior composition) -- state (:attr:`requires_external_state_root`) is
+    unaffected. **Default true**; declare in ``~/.<project>/config.yaml``."""
+    knowledge_only: bool = False
+    """When true, this repo is a **knowledge-only companion**: it exists
+    solely to be carved as the paired ``-k`` knowledge worktree of some other
+    project's **stateless harness** (see :attr:`stateless` /
+    :attr:`Config.knowledge_repo`), never to be driven directly. Declaring it
+    (in the repo's own committed ``<anchor>/.agent-worktrees/config.yaml``):
+
+    * ``cmd_create``/the interactive new-worktree flow **refuses** a
+      standalone worktree for this repo (the internal pairing carve in
+      :func:`_carve_paired_knowledge` bypasses this gate, so pairing is
+      unaffected).
+    * binstub install/reconcile **skips** installing this repo's own
+      ``<repo>`` binstub.
+    * the Picker/Worktree Manager's top-level launchable project list
+      **excludes** it (a paired ``-k`` sibling row -- the existing ``⚭``
+      marker -- still renders it).
+
+    **Default false.** Orthogonal to :attr:`stateless`/
+    :attr:`requires_external_state_root` (those describe the *harness* side of
+    a pairing; this describes the *knowledge* side). The registry-level
+    ``repo_class`` counterpart is ``"knowledge"`` (see
+    ``agent_worktrees.repos.VALID_CLASSES``) -- set that too via
+    ``repos add/update --class knowledge`` so ``repos list`` reflects it."""
 
 
 @dataclass(frozen=True)
@@ -398,9 +477,6 @@ class Config:
     Empty means unbound -- the resolver then refuses to silently write state into
     the harness. See the ``stateless-harness`` vision."""
     copilot_profiles: list[CopilotProfile] = field(default_factory=list)
-    session_backend: SessionBackendConfig = field(
-        default_factory=SessionBackendConfig
-    )
     profile_assignment: ProfileAssignmentPolicy | None = None
     headless: bool = False
     """When true, the project is driven via CLI only -- its bare binstub
@@ -1072,12 +1148,6 @@ def load_config(
             or ""
         ),
         copilot_profiles=parsed_profiles,
-        session_backend=_parse_session_backend(
-            machine_raw.get(
-                "session_backend",
-                global_raw.get("session_backend"),
-            )
-        ),
         profile_assignment=_parse_profile_assignment(
             user_assignment_raw,
             repository_assignment_raw,
@@ -1098,67 +1168,6 @@ def load_config(
                 ),
             )
         ),
-    )
-
-
-def _parse_session_backend(raw: Any) -> SessionBackendConfig:
-    """Parse the user-owned same-machine session backend configuration."""
-    if raw in (None, "", {}):
-        return SessionBackendConfig()
-    if not isinstance(raw, dict):
-        raise ValueError("session_backend must be a mapping")
-    kind = str(raw.get("kind", "direct")).strip().lower()
-    if kind not in {"direct", "ahp"}:
-        raise ValueError("session_backend.kind must be 'direct' or 'ahp'")
-    if kind == "direct":
-        return SessionBackendConfig()
-
-    endpoint_url = str(raw.get("endpoint_url", "")).strip()
-    if not endpoint_url:
-        raise ValueError(
-            "session_backend.endpoint_url is required when kind is 'ahp'"
-        )
-    github_account = str(raw.get("github_account", "")).strip()
-    auth_resource = str(
-        raw.get("auth_resource", "https://api.github.com")
-    ).strip()
-    if not auth_resource:
-        raise ValueError("session_backend.auth_resource must be non-empty")
-
-    versions_raw = raw.get("protocol_versions", ["0.7.0"])
-    if not isinstance(versions_raw, list) or not versions_raw:
-        raise ValueError(
-            "session_backend.protocol_versions must be a non-empty list"
-        )
-    protocol_versions = tuple(
-        str(value).strip() for value in versions_raw if str(value).strip()
-    )
-    if not protocol_versions:
-        raise ValueError(
-            "session_backend.protocol_versions must contain a version"
-        )
-    timeout_raw = raw.get("connect_timeout_seconds", 15)
-    if isinstance(timeout_raw, bool):
-        raise ValueError(
-            "session_backend.connect_timeout_seconds must be a number"
-        )
-    try:
-        timeout = float(timeout_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            "session_backend.connect_timeout_seconds must be a number"
-        ) from exc
-    if timeout <= 0 or timeout > 120:
-        raise ValueError(
-            "session_backend.connect_timeout_seconds must be in (0, 120]"
-        )
-    return SessionBackendConfig(
-        kind="ahp",
-        endpoint_url=endpoint_url,
-        github_account=github_account,
-        protocol_versions=protocol_versions,
-        auth_resource=auth_resource,
-        connect_timeout_seconds=timeout,
     )
 
 
@@ -1528,6 +1537,10 @@ def _build_repo_config(
         requires_external_state_root=bool(
             data.get("requires_external_state_root", False)
         ),
+        compose_knowledge_plugins=bool(
+            data.get("compose_knowledge_plugins", True)
+        ),
+        knowledge_only=bool(data.get("knowledge_only", False)),
     )
 
 
@@ -1724,7 +1737,80 @@ def _parse_pr(raw: Any) -> PRConfig:
             raw.get("merge_strategy", "squash"), ("squash", "merge", "rebase"),
             "squash"),
         prefer_auto_merge=bool(raw.get("prefer_auto_merge", True)),
+        roles=_parse_pr_roles(raw.get("roles")),
+        fork=_parse_fork(raw.get("fork")),
+        notes=str(raw.get("notes", "")).strip(),
     )
+
+
+def _parse_fork(raw: Any) -> ForkConfig:
+    """Parse an optional ``pr.fork`` (or ``pr.roles.<role>.fork``) block."""
+    if not isinstance(raw, dict):
+        return ForkConfig()
+    return ForkConfig(
+        enabled=bool(raw.get("enabled", False)),
+        remote=str(raw.get("remote", "fork")).strip() or "fork",
+        owner=str(raw.get("owner", "")).strip(),
+    )
+
+
+def _parse_pr_roles(raw: Any) -> dict[str, PRRoleOverride]:
+    """Parse the optional ``pr.roles`` map into ``{role: PRRoleOverride}``.
+
+    Unknown role keys (not in ``GITHUB_ROLE_LEVELS``) are dropped rather than
+    raising -- a typo'd role name should degrade to "no override for anyone
+    matching it", not break config loading for the whole repo.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    result: dict[str, PRRoleOverride] = {}
+    for role, block in raw.items():
+        role_key = str(role).strip().lower()
+        if role_key not in GITHUB_ROLE_LEVELS or not isinstance(block, dict):
+            continue
+        fork_raw = block.get("fork")
+        result[role_key] = PRRoleOverride(
+            reviewer=(str(block["reviewer"]).strip()
+                      if "reviewer" in block else None),
+            review_blocking=(bool(block["review_blocking"])
+                              if "review_blocking" in block else None),
+            self_approve=(bool(block["self_approve"])
+                          if "self_approve" in block else None),
+            merge_actor=(str(block["merge_actor"]).strip().lower()
+                         if "merge_actor" in block else None),
+            fork=(_parse_fork(fork_raw) if fork_raw is not None else None),
+        )
+    return result
+
+
+def resolve_role_pr_config(prcfg: PRConfig, role: str | None) -> PRConfig:
+    """Layer ``prcfg.roles[role]`` (if any) onto the base ``PRConfig``.
+
+    Pure and total: an unrecognized/``None``/unconfigured ``role`` returns
+    ``prcfg`` unchanged (today's single-flow behavior). Only the fields the
+    matching :class:`PRRoleOverride` actually sets (non-``None``) are
+    replaced; everything else -- including ``fork`` when the override leaves
+    it ``None`` -- is inherited from ``prcfg``.
+    """
+    if not role:
+        return prcfg
+    override = prcfg.roles.get(str(role).strip().lower())
+    if override is None:
+        return prcfg
+    from dataclasses import replace
+
+    changes: dict[str, Any] = {}
+    if override.reviewer is not None:
+        changes["reviewer"] = override.reviewer
+    if override.review_blocking is not None:
+        changes["review_blocking"] = override.review_blocking
+    if override.self_approve is not None:
+        changes["self_approve"] = override.self_approve
+    if override.merge_actor is not None:
+        changes["merge_actor"] = override.merge_actor
+    if override.fork is not None:
+        changes["fork"] = override.fork
+    return replace(prcfg, **changes) if changes else prcfg
 
 
 def _parse_profiles(raw_list: list[Any]) -> list[CopilotProfile]:
