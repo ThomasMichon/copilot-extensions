@@ -9787,6 +9787,27 @@ def _monitor_pending_handoff_request(
     return None
 
 
+#: Retire-attempt outcomes that can never self-resolve merely by waiting --
+#: the predecessor's own process either is confirmed gone or a different,
+#: unrelated live session/pane now holds the identity a fresh check would
+#: match against. Distinct from an outcome not in this set (e.g. a race
+#: right after spawn, or "left-running" from a bad process-identity check
+#: input) which may legitimately succeed on a later sweep. See
+#: `_pending_handoff_retire_requests`'s abandonment logic below.
+_RETIRE_TERMINAL_FAILURE_METHODS = frozenset({
+    "process-identity-unavailable",
+    "identity-mismatch-skip",
+    "identity-unresolved-skip",
+    "last-window-skip",
+})
+#: Minimum span (seconds) between a token's oldest and current terminal-
+#: failure-method retry attempt before it is concluded "abandoned" rather
+#: than retried again. Generous -- long enough that a legitimately slow
+#: successor cold-start or a transient lock-file race is never mistaken for
+#: an unrecoverable predecessor.
+_RETIRE_ABANDON_GRACE_S = 600  # 10 minutes
+
+
 def _pending_handoff_retire_requests(
     record: tracking.WorktreeRecord,
 ) -> list[dict[str, object]]:
@@ -9805,6 +9826,15 @@ def _pending_handoff_retire_requests(
     own sweep had already long since moved past that handoff to newer ones
     -- permanently invisible to both the automatic sweep and this on-demand
     check, even though the mux pane was still sitting there alive.
+
+    A token whose retire attempts are ALL unrecoverable-class failures
+    (`_RETIRE_TERMINAL_FAILURE_METHODS`) for at least
+    `_RETIRE_ABANDON_GRACE_S` is concluded ("abandoned") rather than
+    surfaced again -- see the abandonment pass below. Before this fix, no
+    terminal condition existed at all: a predecessor whose own process had
+    already exited (so identity could never be proven again) was retried
+    every sweep forever, confirmed in production as thousands of no-op
+    retries spanning days across several worktrees.
     """
     worktree_id = getattr(record, "worktree_id", None)
     if not worktree_id:
@@ -9841,13 +9871,74 @@ def _pending_handoff_retire_requests(
     retired = {
         str(event.get("handoff_token") or "").strip()
         for event in retire_events
-        # Only a genuinely successful retirement counts as "handled" --
-        # matching Stage 13's own success gate (see _maybe_emit_stage_13).
-        # A failed attempt (e.g. "left-running" on a stale/incorrect
-        # identity hint) must stay retryable, not be permanently abandoned.
-        if event.get("outcome") == "gone"
+        # A genuinely successful retirement ("gone") or a confirmed-
+        # unrecoverable one ("abandoned", see below) both count as
+        # "handled" -- matching Stage 13's own success gate (see
+        # _maybe_emit_stage_13). A merely-failed attempt (e.g.
+        # "left-running" on a stale/incorrect identity hint) must stay
+        # retryable, not be permanently abandoned on its own.
+        if event.get("outcome") in ("gone", "abandoned")
         and str(event.get("handoff_token") or "").strip()
     }
+    # A predecessor whose retire attempts have ALL failed the same
+    # unrecoverable way for a sustained period is never coming back --
+    # most commonly because the predecessor's own Copilot process already
+    # exited on its own days ago, so mux_binding_for_session can never find
+    # a live lock to prove identity against again. Retrying that forever
+    # (previously: no terminal condition existed at all) wastes every sweep
+    # indefinitely and leaves a stale request permanently contesting a pane
+    # a much later, unrelated session has since legitimately reused --
+    # confirmed in production as thousands of no-op retries across several
+    # worktrees, one running 3+ days straight. `_RETIRE_TERMINAL_FAILURE_
+    # METHODS` are the outcomes that can never self-resolve by "the
+    # predecessor eventually starts responding" (unlike a fresh
+    # process-identity check racing a just-spawned successor); a token
+    # failing only with those, for at least `_RETIRE_ABANDON_GRACE_S`,
+    # is concluded rather than retried again. The conclusion is logged
+    # exactly once (that log event is itself what the `retired` set above
+    # picks up on the next sweep, self-limiting without extra state).
+    by_token: dict[str, list[dict[str, object]]] = {}
+    for event in retire_events:
+        token = str(event.get("handoff_token") or "").strip()
+        if token:
+            by_token.setdefault(token, []).append(event)
+    now_ts = time.time()
+    for token, events in by_token.items():
+        if token in retired:
+            continue
+        if not events or not all(
+            e.get("method") in _RETIRE_TERMINAL_FAILURE_METHODS for e in events
+        ):
+            continue
+        failure_times = []
+        for event in events:
+            try:
+                failure_times.append(
+                    datetime.fromisoformat(
+                        str(event.get("ts")).replace("Z", "+00:00")
+                    ).timestamp()
+                )
+            except (TypeError, ValueError):
+                continue
+        if not failure_times or (now_ts - min(failure_times)) < _RETIRE_ABANDON_GRACE_S:
+            continue
+        last = events[-1]
+        activity.log_event(
+            "handoff_predecessor_retire",
+            worktree_id=worktree_id,
+            session_id=last.get("session_id"),
+            source="python",
+            handoff_token=token,
+            old_pane=last.get("old_pane"),
+            successor_verified=True,
+            reason="monitor-abandoned",
+            method=last.get("method"),
+            outcome="abandoned",
+            copilot_found=0,
+            copilot_reaped=0,
+            copilot_survivors=0,
+        )
+        retired.add(token)
     requests: list[dict[str, object]] = []
     candidates = [h for h in record.handoffs if getattr(h, "state", None) != "cancelled"]
     for handoff in reversed(sorted(candidates, key=lambda h: getattr(h, "ordinal", 0))):
