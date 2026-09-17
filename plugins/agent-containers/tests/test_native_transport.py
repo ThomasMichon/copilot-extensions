@@ -86,6 +86,62 @@ def state(tmp_path, monkeypatch):
     return tmp_path
 
 
+@pytest.mark.parametrize("lease_owner", [None, "owner", "foreign"])
+def test_remote_preparation_owner_admission_precedes_effects(state, monkeypatch, lease_owner):
+    import os
+    import time
+    from types import SimpleNamespace
+    from agent_containers import __main__ as cli, native_transport
+    from agent_containers.config import ContainersConfig
+
+    monkeypatch.setattr("ssh_manager.locks.locks_dir", lambda: state / "locks")
+    monkeypatch.setattr(lease, "list_containers", lambda _: [SimpleNamespace(name="fixture", is_running=True)])
+    if lease_owner is not None:
+        lease._write_leases({"fixture": lease.Lease(
+            "fixture", lease_owner, os.getpid(), lease._this_host(), time.time(), time.time(),
+        )})
+    before = lease.LEASE_FILE.read_bytes() if lease.LEASE_FILE.exists() else None
+    effects = []
+
+    def prepare(args):
+        effects.append("prepare")
+        assert lease.active_session_admissions(args.name)
+        for borrower in (["another-owner", "owner"] if lease_owner is None else ["another-owner"]):
+            with pytest.raises(lease.ProviderAdmissionError, match="active provider session"):
+                lease.borrow(ContainersConfig(), borrower, container=args.name)
+        return {}
+
+    async def run(*args):
+        effects.append("run")
+        return 0
+
+    monkeypatch.setattr(cli, "_require_live_relay_port", lambda: effects.append("relay") or 12345)
+    monkeypatch.setattr(cli, "_prepare_session_host", prepare)
+    monkeypatch.setattr(native_transport, "_run", run)
+    result = main([
+        "remote-exec", "fixture", "--owner", "owner", "--command-file", "node-command",
+        "--stdin", "--require-relay",
+    ])
+    assert result == (75 if lease_owner == "foreign" else 0)
+    assert effects == ([] if lease_owner == "foreign" else ["relay", "prepare", "run"])
+    assert not lease.active_session_admissions("fixture")
+    assert (lease.LEASE_FILE.read_bytes() if lease.LEASE_FILE.exists() else None) == before
+
+
+def test_remote_preparation_requires_explicit_owner():
+    with pytest.raises(SystemExit) as rejected:
+        main(["remote-exec", "fixture", "--command-file", "node-command", "--stdin"])
+    assert rejected.value.code == 2
+
+
+@pytest.mark.parametrize("owner", ["", " "])
+def test_owner_bound_admission_rejects_blank_owner(state, owner):
+    with pytest.raises(lease.ProviderAdmissionError, match="nonblank"):
+        with lease.session_admission("fixture", expected_owner=owner):
+            pytest.fail("blank owner entered preparation")
+    assert not lease.active_session_admissions("fixture")
+
+
 def test_native_claim_survives_transport_loss_and_blocks_acp_and_lifecycle(state):
     identity = ("execution", "generation", "owner")
     native_claims.reserve("fixture", identity, "container-id")

@@ -66,11 +66,16 @@ The container adapter accepts only a running, discovered, trusted/trusted fleet
 member and pins its Docker incarnation. Its existing configured token bootstrap
 and SSH credential relay remain required; it does not invent a CodeSpace identity,
 project a local checkout, or install host plugins. To prepare official remote
-plugins, run `agent-containers remote-exec NAME --command-file FILE --stdin
+plugins, run `agent-containers remote-exec NAME --owner OWNER --command-file FILE --stdin
 --require-relay --no-plugin-staging --timeout 600`: the command file is UTF-8,
 stdin is forwarded unchanged (up to 1 MiB), and stdout/stderr and exit code are
 preserved. Container session files stay in the container; no host-workspace
 transcript projection is claimed.
+Preparation requires the launch's owner: an unleased member or an exact matching
+advisory lease owner is accepted, while a foreign lease is refused before any
+preparation. This check and the in-flight session admission share the provider's
+lease lock; new borrowing cannot race into preparation. No advisory lease is
+acquired, renewed, or released by remote preparation.
 
 HTTP protocol 15 exposes `/api/v1/native-executions`. Receipts use schema
 `copilot-extensions.native-execution`, version 1, with `executionId`, `generation`,

@@ -35,6 +35,7 @@ def add_arguments(sub):
             p.add_argument("--reverse-forward", action="append", default=[])
     p = sub.add_parser("remote-exec", help="Execute an exact UTF-8 command over trusted container SSH")
     p.add_argument("name")
+    p.add_argument("--owner", required=True, help="Exact advisory lease owner; an unleased member is also allowed")
     p.add_argument("--command-file", required=True)
     p.add_argument("--stdin", action="store_true")
     p.add_argument("--no-plugin-staging", action="store_true", default=True)
@@ -177,7 +178,10 @@ def command(args):
             args.native_input = InputPump()
             args.native_progress = lambda phase, status="started": emit_progress(args, phase, status)
             args.native_identity = identity
-        with lease.session_admission(args.name, native_identity=identity):
+        with lease.session_admission(
+            args.name, native_identity=identity,
+            expected_owner=args.owner if args.command == "remote-exec" else None,
+        ):
             if getattr(args, "retirement_only", False):
                 from dataclasses import asdict
                 _, _, user, _ = cli._trusted_session_host_context(args.name)

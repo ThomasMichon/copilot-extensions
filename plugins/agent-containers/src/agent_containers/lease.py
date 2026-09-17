@@ -902,9 +902,12 @@ def session_admission(
     container: str,
     *,
     expected_assignment: dict | None = None,
+    expected_owner: str | None = None,
     native_identity: tuple[str, str, str] | None = None,
 ) -> Iterator[SessionAdmission]:
     """Admit one provider launch only when no destructive hold is present."""
+    if expected_owner is not None and (not isinstance(expected_owner, str) or not expected_owner.strip()):
+        raise ProviderAdmissionError("Provider preparation requires a nonblank owner")
     token = uuid.uuid4().hex
     key = f"{container}:{token}"
     admission = SessionAdmission(
@@ -919,9 +922,12 @@ def session_admission(
     with _lease_lock():
         from .native_claims import assert_access
         assert_access(container, native_identity)
-        if expected_assignment is not None:
+        if expected_assignment is not None or expected_owner is not None:
             leases = _prune(_read_leases(), DEFAULT_TTL)
             lease = leases.get(container)
+            if expected_owner is not None and lease is not None and lease.effort != expected_owner:
+                raise ProviderAdmissionError(f"Container '{container}' is leased to another owner")
+        if expected_assignment is not None:
             actual_assignment = (
                 {
                     "kind": "lease",
