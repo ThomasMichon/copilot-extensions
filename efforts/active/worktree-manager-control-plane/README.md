@@ -255,19 +255,15 @@ realized in `main`; unchecked items are the remaining delta.
             wired, and bumped `__version__` (`0.1.0-dev36` →
             `0.1.0-dev37`) so already-installed machines actually redeploy
             the corrected payload.
-      - [ ] **Sub-slice 3 (direction set 2026-09-14, not yet designed):**
+      - [ ] **Sub-slice 3 (direction set 2026-09-14; planned 2026-09-17, not yet implemented):**
             split the resident status-monitor's push/observe legs into
             Worktree Manager — agent-worktrees keeps sole ownership of
             accumulating/tracking session status; Worktree Manager takes a
-            **push subscriber** that writes accumulated status into Mux
-            (replacing the daemon's own direct `set-option` calls for
-            Worktree-Manager-managed sessions) and a **Mux subscriber** that
-            observes session create/destroy and writes that observation back
-            to agent-worktrees. See
-            [`phase-3b-mux-relocation.md`](phase-3b-mux-relocation.md#sub-slice-3--split-the-resident-status-monitors-pushobserve-legs-into-worktree-manager-direction-set-2026-09-14-not-yet-designed-in-detail)
-            for the recorded direction; the transport, write-back contract,
-            and interaction with the existing per-session `status-updater`
-            fallback still need an ordered plan before implementation starts.
+            **companion mux daemon** that owns the worktree⇄mux mapping,
+            notifies agent-worktrees when managed worktrees gain/lose live
+            panes, and applies the resident monitor's rendered status back
+            into mux status bars. Reviewed, ordered plan:
+            [`phase-3b-substatus-monitor-relocation.md`](phase-3b-substatus-monitor-relocation.md).
       - [x] **Sub-slice 4 (landed 2026-09-14): same-config marketplace-cell
             resolution + generic installed-binstub invocation.** Cross-cuts
             the `marketplace-scoped-installations` effort's installation-mode
@@ -884,6 +880,21 @@ claiming discipline alone.
   instead of silently depending on the real test-runner account's home
   directory. Full `worktree-manager` suite after this round: 806 passed (the
   same 6 pre-existing, unrelated environment failures).
+- **2026-09-17** — Authored the ordered plan for Phase 3b Slice 2
+  Sub-slice 3 in
+  [`phase-3b-substatus-monitor-relocation.md`](phase-3b-substatus-monitor-relocation.md),
+  sharpening the earlier 2026-09-14 direction into the operator-mandated
+  **two-daemon** architecture: `agent-worktrees` retains the resident
+  status-monitor as sole status-data authority, `worktree-manager` gains a
+  host-wide companion mux daemon that owns the worktree⇄mux-session/pane
+  mapping, Worktree Manager notifies agent-worktrees about live-pane
+  create/destroy, and agent-worktrees relays rendered status back through
+  Worktree Manager for the actual `set-option` writes. The plan chooses the
+  existing lockfile-rendezvous + loopback JSON IPC pattern (mirroring
+  `hook_ipc.py` / `classify_daemon.py`) over inventing a new transport, and
+  sequences the migration as additive seam → managed-session cutover →
+  retirement of the per-session `status-updater` as a manager-owned path.
+  Docs-only; no implementation started and no Phase 3b Plan checkbox changed.
 - **2026-09-15** — Reconciliation: closed
   [#2532](https://github.com/ThomasMichon/copilot-extensions/pull/2532)
   ("reconcile mux status-bar parity gap + open items") as superseded without
