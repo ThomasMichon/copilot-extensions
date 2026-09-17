@@ -8,13 +8,23 @@ entry-points do **not** cross venvs; a filesystem manifest registry does.
 
 The contract:
 
-* A contributing plugin's installer drops a JSON manifest into the shared
-  runtime root at ``~/.agent-worktrees/pivots/<name>.json`` (overridable for
-  tests via ``AGENT_WORKTREES_PIVOTS_DIR``).
-* The manifest declares a display ``label``, a position hint (``after``), a
-  ``list`` command (an argv template that prints a JSON array of entries to
-  stdout), a field mapping so the generic renderer can pull id/title/worktree/
-  badges out of each entry, and an ``actions`` set (each an argv template).
+* A contributing plugin declares its pivot in a template at
+  ``<plugin_root>/pivots/<name>.json`` -- a display ``label``, a position hint
+  (``after``), a ``list`` command (an argv template that prints a JSON array
+  of entries to stdout), a field mapping so the generic renderer can pull
+  id/title/worktree/badges out of each entry, and an ``actions`` set (each an
+  argv template).
+* ``ensure_pivots``/``scan_pivot_registry`` materialize one **attributed
+  pointer** per active (plugin, template) pair into the shared runtime root
+  at ``~/.agent-worktrees/pivots/<name>.json`` (overridable for tests via
+  ``AGENT_WORKTREES_PIVOTS_DIR``) -- ``{schema_version, plugin, plugin_root,
+  template}``, mirroring ``config_dropins.py``'s managed pointer. The pointer
+  never carries baked content (no ``list``/``actions``): every scan re-reads
+  the template fresh out of the identity-verified ``plugin_root`` and
+  re-resolves its commands to absolute paths, so an ordinary plugin content
+  or version-directory update needs no on-disk rewrite of the pointer at all,
+  and there is exactly **one** file per plugin+template -- never a
+  fingerprint-suffixed duplicate.
 * The picker scans that directory at startup and renders a generic pivot per
   manifest -- no engine code per new pivot. Data flows only through the
   contributing plugin's CLI on ``PATH`` (never a cross-venv import), so the
@@ -27,7 +37,6 @@ absent pivot simply doesn't appear.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
@@ -62,7 +71,28 @@ PIVOTS_DIR_ENV = "AGENT_WORKTREES_PIVOTS_DIR"
 PLUGINS_ROOT_ENV = "AGENT_WORKTREES_PLUGINS_DIR"
 
 REGISTRY_NAME = "pivots"
-MANAGED_SCHEMA_VERSION = 2
+#: v3 is the attributed-**pointer** shape ({schema_version, plugin,
+#: plugin_root, template} only -- no baked content). v2 was the superseded
+#: fully-baked-manifest shape (absolute commands written into the shared
+#: runtime file itself, re-diffed byte-for-byte on every scan); it is still
+#: recognized read-only as a migrating "unknown-legacy" entry (see
+#: ``classify`` below) so pre-existing v2 files decay gracefully instead of
+#: breaking outright.
+MANAGED_SCHEMA_VERSION = 3
+#: Exact key set for a valid v3 managed pointer (mirrors
+#: ``agent_worktrees.config_dropins``'s ``_POINTER_KEYS``, with ``template``
+#: -- a bare filename resolved under ``plugin_root/pivots/`` -- standing in
+#: for that registry's absolute ``target``).
+_MANAGED_POINTER_KEYS = frozenset(
+    {"schema_version", "plugin", "plugin_root", "template"}
+)
+#: Schema versions this materializer may safely overwrite when refreshing a
+#: prior artifact: the current pointer shape, plus the one superseded shape
+#: (v2, the fully-baked manifest) still migrated read-only in ``classify``
+#: below. Deliberately NOT "any int" -- a hypothetical future schema (written
+#: by a newer agent-worktrees) must never be silently downgraded by an older
+#: materializer that doesn't understand it yet.
+_MIGRATABLE_SCHEMA_VERSIONS = frozenset({2, MANAGED_SCHEMA_VERSION})
 _PLUGIN_SOURCE_RE = re.compile(r"^[^@/\\\s]+@[^@/\\\s]+$")
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 _KNOWN_LEGACY_PIVOTS = {
@@ -812,6 +842,48 @@ def _compat_manifest_documents(
     return documents
 
 
+def _resolve_compat_document(
+    path: Path, data: Mapping[str, object]
+) -> Mapping[str, object] | None:
+    """See through our own managed pointer for the parser-only compat family.
+
+    These readers (``discover_pivots``/``discover_worktree_actions``/
+    ``discover_config_sections``) never did activation/identity verification
+    -- that is precisely their "parser-only, explicit-dir" contract -- so
+    resolving our own pointer format here to the template it names adds no
+    new trust boundary **beyond** what a malformed pointer could otherwise
+    smuggle in: the same shape/path checks ``_classify_managed`` applies
+    (absolute root, bare-basename ``.json`` template name -- which also
+    rejects ``..``/absolute-path traversal) are enforced here too before ever
+    touching the filesystem. Commands are deliberately left unrewritten
+    (unlike the identity-verified scan path in ``_classify_managed``): compat
+    callers historically pass synthetic command names that were never meant
+    to resolve on disk. A non-pointer document (an operator manifest, or a
+    superseded fully-baked one) passes through unchanged.
+    """
+    if not isinstance(data, dict) or set(data) != _MANAGED_POINTER_KEYS:
+        return data if isinstance(data, dict) else None
+    raw_root = data.get("plugin_root")
+    template_name = data.get("template")
+    if (
+        not isinstance(data.get("schema_version"), int)
+        or not isinstance(raw_root, str)
+        or not raw_root.strip()
+        or not isinstance(template_name, str)
+        or Path(template_name).name != template_name
+        or not template_name.endswith(".json")
+    ):
+        return None
+    root = Path(raw_root).expanduser()
+    if not root.is_absolute():
+        return None
+    try:
+        template = _read_json(root / "pivots" / template_name)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return template if isinstance(template, dict) else None
+
+
 def discover_worktree_actions(
     base: str | os.PathLike[str] | None = None,
 ) -> list[WorktreeAction]:
@@ -822,8 +894,11 @@ def discover_worktree_actions(
     """
     out: list[WorktreeAction] = []
     for path, data in _compat_manifest_documents(pivots_dir(base)):
+        resolved = _resolve_compat_document(path, data)
+        if resolved is None:
+            continue
         try:
-            out.extend(parse_worktree_actions(data, name=path.stem))
+            out.extend(parse_worktree_actions(resolved, name=path.stem))
         except ManifestError:
             continue
     return out
@@ -894,8 +969,11 @@ def discover_config_sections(
     """Return active config sections, with parser-only explicit-dir support."""
     out: list[ConfigSection] = []
     for path, data in _compat_manifest_documents(pivots_dir(base)):
+        resolved = _resolve_compat_document(path, data)
+        if resolved is None:
+            continue
         try:
-            out.extend(parse_config_sections(data, name=path.stem))
+            out.extend(parse_config_sections(resolved, name=path.stem))
         except ManifestError:
             continue
     return out
@@ -1093,8 +1171,58 @@ def _managed_manifest_data(
     return data
 
 
+def _managed_pointer_data(
+    *, source: str, root: Path, template_name: str
+) -> dict[str, object]:
+    """The small attributed pointer actually persisted for a managed pivot.
+
+    Deliberately carries none of the template's baked content (no ``list``/
+    ``actions``) -- only enough to relocate the identity-verified template at
+    read time (see ``_classify_managed``, which always re-resolves commands
+    fresh via :func:`_managed_manifest_data`). Because this is a pure function
+    of ``(source, root, template_name)``, it is stable across ordinary
+    template-content edits and only changes when the plugin's active root
+    itself changes (reinstall/version bump).
+    """
+    return {
+        "schema_version": MANAGED_SCHEMA_VERSION,
+        "plugin": source,
+        "plugin_root": str(root),
+        "template": template_name,
+    }
+
+
 def _read_json(path: Path) -> object:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _read_verified_template(canonical_root: Path, template_name: str) -> object:
+    """Read ``canonical_root/pivots/<template_name>``, applying the same
+    regular-file/non-reparse/containment checks the materializer's own
+    candidate scan uses.
+
+    A managed pointer's ``template`` is re-read from the identity-verified
+    plugin root on **every** scan -- it is the live source of the
+    contribution, not just a materialization-time input -- so it must be
+    just as hard to redirect via a symlinked file or a redirected ``pivots``
+    directory as materialization already requires. Raises
+    :class:`TargetUnusableError` for a non-regular/reparse target or one that
+    resolves outside ``canonical_root``; ``FileNotFoundError`` /
+    ``UnicodeDecodeError`` / ``json.JSONDecodeError`` propagate unchanged for
+    the caller's existing handling.
+    """
+    template_path = canonical_root / "pivots" / template_name
+    info = template_path.lstat()
+    if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode) or _is_reparse(info):
+        raise TargetUnusableError("pivot template must be a regular non-reparse file")
+    canonical_template = template_path.resolve(strict=True)
+    try:
+        canonical_template.relative_to(canonical_root)
+    except ValueError as exc:
+        raise TargetUnusableError(
+            "pivot template escapes the identity-verified plugin root"
+        ) from exc
+    return _read_json(canonical_template)
 
 
 def _exclusive_create_text(target: Path, content: str) -> bool:
@@ -1120,6 +1248,97 @@ def _exclusive_create_text(target: Path, content: str) -> bool:
             os.unlink(temporary)
         except FileNotFoundError:
             pass
+
+
+def _owned_pointer_identity(existing: object) -> tuple[str, str] | None:
+    """``(plugin, template)`` if ``existing`` self-declares as our own pointer.
+
+    An operator-authored file never carries a ``schema_version`` (see the
+    "operator" entry class); any file that does, **and whose schema_version
+    is one this materializer actually knows how to migrate**
+    (:data:`_MIGRATABLE_SCHEMA_VERSIONS` -- the current pointer shape plus the
+    one superseded baked shape), is unambiguously something a plugin
+    materializer previously wrote for itself, so it is safe for this same
+    materializer to refresh in place. A schema version outside that set --
+    e.g. one a *newer* agent-worktrees introduced that this build doesn't
+    understand yet -- is deliberately left untouched rather than silently
+    downgraded. This is the only thing that licenses overwriting an existing
+    file: refreshing our own prior, recognized artifact, never an operator's,
+    a different plugin's, or an unrecognized future one.
+    """
+    if (
+        not isinstance(existing, dict)
+        or existing.get("schema_version") not in _MIGRATABLE_SCHEMA_VERSIONS
+        or not isinstance(existing.get("plugin"), str)
+        or not isinstance(existing.get("template"), str)
+    ):
+        return None
+    return existing["plugin"], existing["template"]
+
+
+def _publish_managed_pointer(
+    target: Path, content: str, *, source: str, template_name: str
+) -> bool:
+    """Create ``target``, or refresh it in place if we already own it.
+
+    Exclusive-create covers the common "not published yet" case atomically
+    (unchanged race-safety from :func:`_exclusive_create_text`). When
+    ``target`` already exists, this only overwrites it after confirming --
+    via :func:`_owned_pointer_identity` -- that the existing content is
+    itself a materializer-owned pointer for this exact ``(source,
+    template_name)`` identity; an operator-authored file, or one belonging to
+    a different plugin/template, is never touched. Returns whether a write
+    actually happened -- ``False`` both when refused and when the file
+    already held this exact content (idempotent no-op), so a caller can use
+    the result to report only genuine changes.
+    """
+    if _exclusive_create_text(target, content):
+        return True
+
+    def _owned_and_stale() -> bool | None:
+        """``None`` => already correct (no-op); ``True`` => ours, safe to
+        refresh; ``False`` => not ours, or unreadable -- never touch it."""
+        try:
+            existing_raw = target.read_text(encoding="utf-8")
+        except OSError:
+            return False
+        if existing_raw == content:
+            return None
+        try:
+            existing = json.loads(existing_raw)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return False
+        return _owned_pointer_identity(existing) == (source, template_name)
+
+    if _owned_and_stale() is not True:
+        return False
+    # Prepare the replacement payload *before* the final ownership recheck,
+    # so the window between "confirmed ours" and the atomic os.replace is as
+    # small as possible -- a single stat+read immediately below, not the
+    # whole preceding validate-and-build sequence. This does not fully
+    # eliminate a concurrent operator write landing in that exact instant (no
+    # cross-platform advisory lock is in play, and an operator's editor
+    # wouldn't respect one either), but it shrinks the exposure from "the
+    # entire refresh" down to two syscalls.
+    fd, temporary = tempfile.mkstemp(
+        dir=str(target.parent),
+        prefix=f".{target.name}.",
+        suffix=".tmp",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if _owned_and_stale() is not True:
+            return False
+        os.replace(temporary, target)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+    return True
 
 
 def _materialize_active_pivots(
@@ -1168,7 +1387,11 @@ def _materialize_active_pivots(
         # over an installed copy without weakening cross-plugin collision safety.
         source, root, template = owners[0]
         try:
-            data = _managed_manifest_data(
+            # Validation only -- this proves the template is a well-formed
+            # manifest before we publish a pointer to it; the fully-resolved
+            # result is discarded, since only the small pointer is persisted
+            # (see _managed_pointer_data).
+            _managed_manifest_data(
                 template,
                 source=source,
                 root=root,
@@ -1177,42 +1400,20 @@ def _materialize_active_pivots(
             )
         except ManifestError:
             continue
+        data = _managed_pointer_data(source=source, root=root, template_name=name)
         content = json.dumps(
             data,
             indent=2,
             ensure_ascii=True,
             sort_keys=True,
         ) + "\n"
-        template_fingerprint = hashlib.sha256(
-            content.encode("utf-8")
-        ).hexdigest()[:12]
-        base_target = destination / name
-        target = base_target
+        target = destination / name
         try:
-            if (
-                base_target.exists()
-                and base_target.read_text(encoding="utf-8") == content
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if _publish_managed_pointer(
+                target, content, source=source, template_name=name
             ):
-                continue
-        except OSError:
-            pass
-        if base_target.exists():
-            target = destination / (
-                f"{base_target.stem}.{template_fingerprint}{base_target.suffix}"
-            )
-
-        if target.exists():
-            try:
-                if target.read_text(encoding="utf-8") == content:
-                    continue
-            except OSError:
-                pass
-            continue
-
-        try:
-            if not _exclusive_create_text(target, content):
-                continue
-            changed.append(target.name)
+                changed.append(target.name)
         except OSError:
             continue
     return changed
@@ -1347,12 +1548,25 @@ def _classify_managed(
     data: dict[str, object],
     *,
     activation: ActivationReport,
+    legacy: bool = False,
 ) -> EntryDecision[PivotContribution]:
+    """Classify a managed-plugin (pointer) entry.
+
+    ``legacy=True`` handles a superseded schema-v2 fully-baked entry through
+    the exact same activation/root/template identity verification as the
+    current pointer shape below -- it only relaxes the strict pointer
+    key-set check (a v2 payload still carries its old baked ``list``/
+    ``actions``/etc. alongside the attribution fields) and marks the result
+    advisory instead of plainly active, so a stale or tampered v2 entry is
+    deactivated exactly like a current one whenever the plugin is disabled or
+    its root no longer matches -- it is never a bypass of those checks.
+    """
     source = data.get("plugin")
     raw_root = data.get("plugin_root")
     template_name = data.get("template")
     if (
-        not isinstance(source, str)
+        (not legacy and set(data) != _MANAGED_POINTER_KEYS)
+        or not isinstance(source, str)
         or not _PLUGIN_SOURCE_RE.fullmatch(source)
         or not isinstance(raw_root, str)
         or not raw_root.strip()
@@ -1366,8 +1580,9 @@ def _classify_managed(
                 "invalid-entry",
                 entry_class="managed-plugin",
                 detail=(
-                    "managed schema requires plugin name@marketplace, plugin_root, "
-                    "and template"
+                    "managed pointer requires exactly schema_version, plugin, "
+                    "plugin_root, and template (schema_version="
+                    f"{MANAGED_SCHEMA_VERSION})"
                 ),
             )
         )
@@ -1436,7 +1651,7 @@ def _classify_managed(
 
     template_path = canonical_root / "pivots" / template_name
     try:
-        template = _read_json(template_path)
+        template = _read_verified_template(canonical_root, template_name)
         if not isinstance(template, dict):
             raise ManifestError("plugin pivot template must be a JSON object")
         expected = _managed_manifest_data(
@@ -1490,17 +1705,9 @@ def _classify_managed(
                 detail=str(exc),
             )
         )
-    if data != expected:
-        return EntryDecision.inactive(
-            _finding(
-                entry,
-                "identity-mismatch",
-                target=template_path,
-                entry_class="managed-plugin",
-                owner=source,
-                detail="runtime manifest differs from the current plugin template",
-            )
-        )
+    # No baked-content comparison: `data` is a pointer, `expected` is always
+    # freshly re-resolved from the identity-verified template above -- there
+    # is nothing on disk that can drift out of sync with it.
     try:
         contribution = _parse_contribution(
             expected,
@@ -1534,7 +1741,39 @@ def _classify_managed(
             )
             for finding in activation.decisions[source].findings
         )
+        if legacy:
+            advisories = (
+                _finding(
+                    entry,
+                    "legacy-unattributed",
+                    status="active-with-advisory",
+                    entry_class="managed-plugin",
+                    owner=source,
+                    detail=(
+                        "superseded schema-v2 (fully-baked) manifest remains "
+                        "active for compatibility; the materializer will not "
+                        "republish at this schema version again"
+                    ),
+                ),
+                *advisories,
+            )
         return EntryDecision.advisory(contribution, *advisories)
+    if legacy:
+        return EntryDecision.advisory(
+            contribution,
+            _finding(
+                entry,
+                "legacy-unattributed",
+                status="active-with-advisory",
+                entry_class="managed-plugin",
+                owner=source,
+                detail=(
+                    "superseded schema-v2 (fully-baked) manifest remains "
+                    "active for compatibility; the materializer will not "
+                    "republish at this schema version again"
+                ),
+            ),
+        )
     return EntryDecision.active(contribution)
 
 
@@ -1806,6 +2045,18 @@ def scan_pivot_registry(
         if schema == MANAGED_SCHEMA_VERSION:
             entry_classes[str(entry)] = "managed-plugin"
             return _classify_managed(entry, data, activation=activation)
+        if schema == 2:
+            # Superseded fully-baked managed shape (pre-pointer redesign).
+            # Routed through the SAME activation/root/template identity
+            # verification as a current pointer (unlike an unattributed
+            # manifest, which skips that check entirely) -- a disabled
+            # plugin or a stale/tampered root still deactivates it. Only the
+            # strict pointer key-set check is relaxed (v2 still carries its
+            # old baked content alongside the attribution fields), and the
+            # result is always advisory. The materializer never republishes
+            # at this schema version again.
+            entry_classes[str(entry)] = "unknown-legacy"
+            return _classify_managed(entry, data, activation=activation, legacy=True)
         if schema == 1:
             source = _KNOWN_LEGACY_PIVOTS.get(entry.name)
             if source:
@@ -1985,11 +2236,12 @@ def discover_pivots(base: str | os.PathLike[str] | None = None) -> list[Register
     """Return active pivots, with parser-only explicit-dir support."""
     candidates: list[RegisteredPivot] = []
     for path, data in _compat_manifest_documents(pivots_dir(base)):
-        if "list" not in data:
+        resolved = _resolve_compat_document(path, data)
+        if resolved is None or "list" not in resolved:
             continue
         try:
             candidates.append(
-                parse_manifest(data, name=path.stem, source_path=str(path))
+                parse_manifest(resolved, name=path.stem, source_path=str(path))
             )
         except ManifestError:
             continue
