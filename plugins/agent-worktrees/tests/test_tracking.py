@@ -979,6 +979,49 @@ class TestSessionRegistration:
         loaded = load_record(tmp_tracking_dir / "end-wt.yaml")
         assert loaded.sessions[0].ended_at is not None
 
+    def test_register_session_adds_live_session_claim(
+        self, tmp_tracking_dir: Path, monkeypatch_config,
+    ):
+        """register_session journals a live ``session`` ResourceClaim (Phase 8)."""
+        self._new_record(tmp_tracking_dir, "claim-wt")
+
+        register_session("claim-wt", "session-claim-1")
+
+        loaded = load_record(tmp_tracking_dir / "claim-wt.yaml")
+        claims = [c for c in loaded.resources if c.kind == "session"]
+        assert len(claims) == 1
+        assert claims[0].ref == "test/test-repo/claim-wt#session-claim-1"
+        assert claims[0].state == "active"
+        assert claims[0].is_live
+
+    def test_register_session_claim_is_idempotent(
+        self, tmp_tracking_dir: Path, monkeypatch_config,
+    ):
+        """Re-registering the same session does not duplicate its claim."""
+        self._new_record(tmp_tracking_dir, "claim-dup-wt")
+
+        register_session("claim-dup-wt", "session-claim-2")
+        register_session("claim-dup-wt", "session-claim-2")
+
+        loaded = load_record(tmp_tracking_dir / "claim-dup-wt.yaml")
+        claims = [c for c in loaded.resources if c.kind == "session"]
+        assert len(claims) == 1
+
+    def test_deregister_session_releases_its_claim(
+        self, tmp_tracking_dir: Path, monkeypatch_config,
+    ):
+        """A clean sessionEnd releases (not just settles) the session's claim."""
+        self._new_record(tmp_tracking_dir, "release-wt")
+        register_session("release-wt", "session-claim-3")
+
+        deregister_session("release-wt", "session-claim-3")
+
+        loaded = load_record(tmp_tracking_dir / "release-wt.yaml")
+        claims = [c for c in loaded.resources if c.kind == "session"]
+        assert len(claims) == 1
+        assert claims[0].state == "released"
+        assert not claims[0].is_live
+
     def test_register_nonexistent_worktree(self, tmp_tracking_dir: Path, monkeypatch_config):
         """Registering against a missing worktree is a no-op."""
         register_session("nonexistent", "some-session")
@@ -1978,6 +2021,27 @@ class TestCascadeAndOrphans:
         ])
         self._save(tmp_tracking_dir, parent)
         assert release_all_resources(parent) == []
+
+    def test_release_all_resources_excludes_session_claims(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        """A live ``session`` claim (Phase 8) survives the generic cascade.
+
+        It has its own lifecycle (settled on finalize, released only by
+        ``deregister_session``); the generic release-everything cascade must
+        not release it out from under a still-running session.
+        """
+        parent = self._rec("wt-session-cascade", resources=[
+            ResourceClaim(kind="worktree", ref="test/other/wt-child", state="active"),
+            ResourceClaim(kind="session", ref="test/p/wt-session-cascade#s1", state="active"),
+        ])
+        self._save(tmp_tracking_dir, parent)
+        released = release_all_resources(parent)
+        assert [c.ref for c in released] == ["test/other/wt-child"]
+        reloaded = load_record_by_id("wt-session-cascade")
+        session_claim = next(c for c in reloaded.resources if c.kind == "session")
+        assert session_claim.state == "active"
+        assert session_claim.is_live
 
     def test_find_orphaned_children_finalized_and_absent_parents(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
