@@ -195,12 +195,24 @@ def _classify_managed(
     data: dict[str, object],
     *,
     activation: ActivationReport,
+    legacy: bool = False,
 ) -> EntryDecision[PivotContribution]:
+    """Classify a managed-plugin (pointer) entry.
+
+    ``legacy=True`` handles a superseded schema-v2 fully-baked entry through
+    the exact same activation/root/template identity verification as the
+    current pointer shape below -- it only relaxes the strict pointer
+    key-set check (a v2 payload still carries its old baked ``list``/
+    ``actions``/etc. alongside the attribution fields) and marks the result
+    advisory instead of plainly active, so a stale or tampered v2 entry is
+    deactivated exactly like a current one whenever the plugin is disabled or
+    its root no longer matches -- it is never a bypass of those checks.
+    """
     source = data.get("plugin")
     raw_root = data.get("plugin_root")
     template_name = data.get("template")
     if (
-        set(data) != _MANAGED_POINTER_KEYS
+        (not legacy and set(data) != _MANAGED_POINTER_KEYS)
         or not isinstance(source, str)
         or not _PLUGIN_SOURCE_RE.fullmatch(source)
         or not isinstance(raw_root, str)
@@ -376,7 +388,39 @@ def _classify_managed(
             )
             for finding in activation.decisions[source].findings
         )
+        if legacy:
+            advisories = (
+                _finding(
+                    entry,
+                    "legacy-unattributed",
+                    status="active-with-advisory",
+                    entry_class="managed-plugin",
+                    owner=source,
+                    detail=(
+                        "superseded schema-v2 (fully-baked) manifest remains "
+                        "active for compatibility; the materializer will not "
+                        "republish at this schema version again"
+                    ),
+                ),
+                *advisories,
+            )
         return EntryDecision.advisory(contribution, *advisories)
+    if legacy:
+        return EntryDecision.advisory(
+            contribution,
+            _finding(
+                entry,
+                "legacy-unattributed",
+                status="active-with-advisory",
+                entry_class="managed-plugin",
+                owner=source,
+                detail=(
+                    "superseded schema-v2 (fully-baked) manifest remains "
+                    "active for compatibility; the materializer will not "
+                    "republish at this schema version again"
+                ),
+            ),
+        )
     return EntryDecision.active(contribution)
 
 
@@ -648,17 +692,16 @@ def scan_pivot_registry(
             return _classify_managed(entry, data, activation=activation)
         if schema == 2:
             # Superseded fully-baked managed shape (pre-pointer redesign).
-            # Route through the same unattributed/advisory path as a v1
-            # legacy manifest so a pre-existing on-disk file keeps
-            # contributing (and is prunable) while it decays -- the
-            # materializer never republishes at this schema version again.
+            # Routed through the SAME activation/root/template identity
+            # verification as a current pointer (unlike an unattributed
+            # manifest, which skips that check entirely) -- a disabled
+            # plugin or a stale/tampered root still deactivates it. Only the
+            # strict pointer key-set check is relaxed (v2 still carries its
+            # old baked content alongside the attribution fields), and the
+            # result is always advisory. The materializer never republishes
+            # at this schema version again.
             entry_classes[str(entry)] = "unknown-legacy"
-            return _classify_unattributed(
-                entry,
-                data,
-                entry_class="unknown-legacy",
-                advisory=True,
-            )
+            return _classify_managed(entry, data, activation=activation, legacy=True)
         if schema == 1:
             source = _KNOWN_LEGACY_PIVOTS.get(entry.name)
             if source:

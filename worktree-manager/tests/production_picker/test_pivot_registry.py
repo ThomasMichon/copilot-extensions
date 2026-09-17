@@ -632,6 +632,82 @@ def test_unattributed_action_target_is_validated(tmp_path):
     assert report.findings[0].reason == "missing-target"
 
 
+def test_superseded_v2_manifest_resolves_from_live_template(tmp_path):
+    """A pre-existing on-disk file from before the pointer redesign (full
+    baked content, schema_version 2) keeps working -- advisory, prunable,
+    and resolved fresh from the live template (not its own stale baked
+    label) -- rather than breaking outright; the materializer never
+    republishes at the old schema version."""
+    source = "sample@example-marketplace"
+    root = tmp_path / "plugin"
+    command = _command(root)
+    _template(root)
+    registry = tmp_path / "pivots"
+    registry.mkdir()
+    legacy = registry / "sample.json"
+    legacy.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "plugin": source,
+                "plugin_root": str(root.resolve()),
+                "template": "sample.json",
+                "label": "Legacy",
+                "list": [str(command.resolve()), "list"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = pivots.scan_pivot_registry(
+        registry,
+        materialize=False,
+        activation_report=_active_report(source, root),
+    )
+
+    assert [pivot.label for pivot in report.pivots] == ["Sample"]
+    assert report.entry_classes[str(legacy)] == "unknown-legacy"
+    assert any(
+        finding.reason == "legacy-unattributed" for finding in report.findings
+    )
+
+
+def test_superseded_v2_manifest_deactivates_with_its_plugin(tmp_path):
+    """Unlike an unattributed manifest, a v2 legacy entry is NOT a bypass of
+    activation/root identity verification: a disabled plugin (or a root that
+    no longer matches) deactivates it exactly like a current pointer."""
+    source = "sample@example-marketplace"
+    root = tmp_path / "plugin"
+    _command(root)
+    _template(root)
+    registry = tmp_path / "pivots"
+    registry.mkdir()
+    legacy = registry / "sample.json"
+    legacy.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "plugin": source,
+                "plugin_root": str(root.resolve()),
+                "template": "sample.json",
+                "label": "Legacy",
+                "list": ["stale-command"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    disabled = pivots.scan_pivot_registry(
+        registry,
+        materialize=False,
+        activation_report=ActivationReport(ScanAuthority.COMPLETE, {}),
+    )
+
+    assert disabled.active_entries == {}
+    assert disabled.findings[0].entry == str(legacy)
+    assert disabled.findings[0].reason == "not-enabled"
+
+
 def test_known_legacy_is_activation_gated_and_advisory(tmp_path):
     source = "agent-bridge@copilot-extensions"
     root = tmp_path / "agent-bridge"

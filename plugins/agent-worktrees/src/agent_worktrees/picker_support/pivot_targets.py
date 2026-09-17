@@ -18,6 +18,7 @@ from plugin_activation import ActivationReport, ActivePlugin
 from .pivot_actions import ManifestError
 from .pivot_manifest import (
     _FILE_ATTRIBUTE_REPARSE_POINT,
+    _MIGRATABLE_SCHEMA_VERSIONS,
     MANAGED_SCHEMA_VERSION,
 )
 
@@ -236,16 +237,21 @@ def _owned_pointer_identity(existing: object) -> tuple[str, str] | None:
     """``(plugin, template)`` if ``existing`` self-declares as our own pointer.
 
     An operator-authored file never carries a ``schema_version`` (see the
-    "operator" entry class); any file that does is unambiguously something a
-    plugin materializer previously wrote for itself -- whether the current
-    pointer shape or a superseded one -- so it is safe for this same
-    materializer to refresh in place. This is the only thing that licenses
-    overwriting an existing file: refreshing our own prior artifact, never an
-    operator's or a different plugin's.
+    "operator" entry class); any file that does, **and whose schema_version
+    is one this materializer actually knows how to migrate**
+    (:data:`_MIGRATABLE_SCHEMA_VERSIONS` -- the current pointer shape plus the
+    one superseded baked shape), is unambiguously something a plugin
+    materializer previously wrote for itself, so it is safe for this same
+    materializer to refresh in place. A schema version outside that set --
+    e.g. one a *newer* agent-worktrees introduced that this build doesn't
+    understand yet -- is deliberately left untouched rather than silently
+    downgraded. This is the only thing that licenses overwriting an existing
+    file: refreshing our own prior, recognized artifact, never an operator's,
+    a different plugin's, or an unrecognized future one.
     """
     if (
         not isinstance(existing, dict)
-        or not isinstance(existing.get("schema_version"), int)
+        or existing.get("schema_version") not in _MIGRATABLE_SCHEMA_VERSIONS
         or not isinstance(existing.get("plugin"), str)
         or not isinstance(existing.get("template"), str)
     ):
@@ -271,18 +277,32 @@ def _publish_managed_pointer(
     """
     if _exclusive_create_text(target, content):
         return True
-    try:
-        existing_raw = target.read_text(encoding="utf-8")
-    except OSError:
+
+    def _owned_and_stale() -> bool | None:
+        """``None`` => already correct (no-op); ``True`` => ours, safe to
+        refresh; ``False`` => not ours, or unreadable -- never touch it."""
+        try:
+            existing_raw = target.read_text(encoding="utf-8")
+        except OSError:
+            return False
+        if existing_raw == content:
+            return None
+        try:
+            existing = json.loads(existing_raw)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return False
+        return _owned_pointer_identity(existing) == (source, template_name)
+
+    if _owned_and_stale() is not True:
         return False
-    if existing_raw == content:
-        return False
-    try:
-        existing = json.loads(existing_raw)
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        return False
-    if _owned_pointer_identity(existing) != (source, template_name):
-        return False
+    # Prepare the replacement payload *before* the final ownership recheck,
+    # so the window between "confirmed ours" and the atomic os.replace is as
+    # small as possible -- a single stat+read immediately below, not the
+    # whole preceding validate-and-build sequence. This does not fully
+    # eliminate a concurrent operator write landing in that exact instant (no
+    # cross-platform advisory lock is in play, and an operator's editor
+    # wouldn't respect one either), but it shrinks the exposure from "the
+    # entire refresh" down to two syscalls.
     fd, temporary = tempfile.mkstemp(
         dir=str(target.parent),
         prefix=f".{target.name}.",
@@ -293,6 +313,8 @@ def _publish_managed_pointer(
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
+        if _owned_and_stale() is not True:
+            return False
         os.replace(temporary, target)
     finally:
         try:

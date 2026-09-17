@@ -86,6 +86,13 @@ MANAGED_SCHEMA_VERSION = 3
 _MANAGED_POINTER_KEYS = frozenset(
     {"schema_version", "plugin", "plugin_root", "template"}
 )
+#: Schema versions this materializer may safely overwrite when refreshing a
+#: prior artifact: the current pointer shape, plus the one superseded shape
+#: (v2, the fully-baked manifest) still migrated read-only in ``classify``
+#: below. Deliberately NOT "any int" -- a hypothetical future schema (written
+#: by a newer agent-worktrees) must never be silently downgraded by an older
+#: materializer that doesn't understand it yet.
+_MIGRATABLE_SCHEMA_VERSIONS = frozenset({2, MANAGED_SCHEMA_VERSION})
 _PLUGIN_SOURCE_RE = re.compile(r"^[^@/\\\s]+@[^@/\\\s]+$")
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 _KNOWN_LEGACY_PIVOTS = {
@@ -844,26 +851,37 @@ def _resolve_compat_document(
     ``discover_config_sections``) never did activation/identity verification
     -- that is precisely their "parser-only, explicit-dir" contract -- so
     resolving our own pointer format here to the template it names adds no
-    new trust boundary. Commands are deliberately left unrewritten (unlike
-    the identity-verified scan path in ``_classify_managed``): compat callers
-    historically pass synthetic command names that were never meant to
-    resolve on disk. A non-pointer document (an operator manifest, or a
+    new trust boundary **beyond** what a malformed pointer could otherwise
+    smuggle in: the same shape/path checks ``_classify_managed`` applies
+    (absolute root, bare-basename ``.json`` template name -- which also
+    rejects ``..``/absolute-path traversal) are enforced here too before ever
+    touching the filesystem. Commands are deliberately left unrewritten
+    (unlike the identity-verified scan path in ``_classify_managed``): compat
+    callers historically pass synthetic command names that were never meant
+    to resolve on disk. A non-pointer document (an operator manifest, or a
     superseded fully-baked one) passes through unchanged.
     """
+    if not isinstance(data, dict) or set(data) != _MANAGED_POINTER_KEYS:
+        return data if isinstance(data, dict) else None
+    raw_root = data.get("plugin_root")
+    template_name = data.get("template")
     if (
-        isinstance(data, dict)
-        and set(data) == _MANAGED_POINTER_KEYS
-        and isinstance(data.get("schema_version"), int)
-        and isinstance(data.get("plugin_root"), str)
-        and isinstance(data.get("template"), str)
+        not isinstance(data.get("schema_version"), int)
+        or not isinstance(raw_root, str)
+        or not raw_root.strip()
+        or not isinstance(template_name, str)
+        or Path(template_name).name != template_name
+        or not template_name.endswith(".json")
     ):
-        try:
-            root = Path(cast(str, data["plugin_root"])).expanduser()
-            template = _read_json(root / "pivots" / cast(str, data["template"]))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-            return None
-        return template if isinstance(template, dict) else None
-    return data
+        return None
+    root = Path(raw_root).expanduser()
+    if not root.is_absolute():
+        return None
+    try:
+        template = _read_json(root / "pivots" / template_name)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return template if isinstance(template, dict) else None
 
 
 def discover_worktree_actions(
@@ -1207,16 +1225,21 @@ def _owned_pointer_identity(existing: object) -> tuple[str, str] | None:
     """``(plugin, template)`` if ``existing`` self-declares as our own pointer.
 
     An operator-authored file never carries a ``schema_version`` (see the
-    "operator" entry class); any file that does is unambiguously something a
-    plugin materializer previously wrote for itself -- whether the current
-    pointer shape or a superseded one -- so it is safe for this same
-    materializer to refresh in place. This is the only thing that licenses
-    overwriting an existing file: refreshing our own prior artifact, never an
-    operator's or a different plugin's.
+    "operator" entry class); any file that does, **and whose schema_version
+    is one this materializer actually knows how to migrate**
+    (:data:`_MIGRATABLE_SCHEMA_VERSIONS` -- the current pointer shape plus the
+    one superseded baked shape), is unambiguously something a plugin
+    materializer previously wrote for itself, so it is safe for this same
+    materializer to refresh in place. A schema version outside that set --
+    e.g. one a *newer* agent-worktrees introduced that this build doesn't
+    understand yet -- is deliberately left untouched rather than silently
+    downgraded. This is the only thing that licenses overwriting an existing
+    file: refreshing our own prior, recognized artifact, never an operator's,
+    a different plugin's, or an unrecognized future one.
     """
     if (
         not isinstance(existing, dict)
-        or not isinstance(existing.get("schema_version"), int)
+        or existing.get("schema_version") not in _MIGRATABLE_SCHEMA_VERSIONS
         or not isinstance(existing.get("plugin"), str)
         or not isinstance(existing.get("template"), str)
     ):
@@ -1242,18 +1265,32 @@ def _publish_managed_pointer(
     """
     if _exclusive_create_text(target, content):
         return True
-    try:
-        existing_raw = target.read_text(encoding="utf-8")
-    except OSError:
+
+    def _owned_and_stale() -> bool | None:
+        """``None`` => already correct (no-op); ``True`` => ours, safe to
+        refresh; ``False`` => not ours, or unreadable -- never touch it."""
+        try:
+            existing_raw = target.read_text(encoding="utf-8")
+        except OSError:
+            return False
+        if existing_raw == content:
+            return None
+        try:
+            existing = json.loads(existing_raw)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return False
+        return _owned_pointer_identity(existing) == (source, template_name)
+
+    if _owned_and_stale() is not True:
         return False
-    if existing_raw == content:
-        return False
-    try:
-        existing = json.loads(existing_raw)
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        return False
-    if _owned_pointer_identity(existing) != (source, template_name):
-        return False
+    # Prepare the replacement payload *before* the final ownership recheck,
+    # so the window between "confirmed ours" and the atomic os.replace is as
+    # small as possible -- a single stat+read immediately below, not the
+    # whole preceding validate-and-build sequence. This does not fully
+    # eliminate a concurrent operator write landing in that exact instant (no
+    # cross-platform advisory lock is in play, and an operator's editor
+    # wouldn't respect one either), but it shrinks the exposure from "the
+    # entire refresh" down to two syscalls.
     fd, temporary = tempfile.mkstemp(
         dir=str(target.parent),
         prefix=f".{target.name}.",
@@ -1264,6 +1301,8 @@ def _publish_managed_pointer(
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
+        if _owned_and_stale() is not True:
+            return False
         os.replace(temporary, target)
     finally:
         try:
@@ -1480,12 +1519,24 @@ def _classify_managed(
     data: dict[str, object],
     *,
     activation: ActivationReport,
+    legacy: bool = False,
 ) -> EntryDecision[PivotContribution]:
+    """Classify a managed-plugin (pointer) entry.
+
+    ``legacy=True`` handles a superseded schema-v2 fully-baked entry through
+    the exact same activation/root/template identity verification as the
+    current pointer shape below -- it only relaxes the strict pointer
+    key-set check (a v2 payload still carries its old baked ``list``/
+    ``actions``/etc. alongside the attribution fields) and marks the result
+    advisory instead of plainly active, so a stale or tampered v2 entry is
+    deactivated exactly like a current one whenever the plugin is disabled or
+    its root no longer matches -- it is never a bypass of those checks.
+    """
     source = data.get("plugin")
     raw_root = data.get("plugin_root")
     template_name = data.get("template")
     if (
-        set(data) != _MANAGED_POINTER_KEYS
+        (not legacy and set(data) != _MANAGED_POINTER_KEYS)
         or not isinstance(source, str)
         or not _PLUGIN_SOURCE_RE.fullmatch(source)
         or not isinstance(raw_root, str)
@@ -1661,7 +1712,39 @@ def _classify_managed(
             )
             for finding in activation.decisions[source].findings
         )
+        if legacy:
+            advisories = (
+                _finding(
+                    entry,
+                    "legacy-unattributed",
+                    status="active-with-advisory",
+                    entry_class="managed-plugin",
+                    owner=source,
+                    detail=(
+                        "superseded schema-v2 (fully-baked) manifest remains "
+                        "active for compatibility; the materializer will not "
+                        "republish at this schema version again"
+                    ),
+                ),
+                *advisories,
+            )
         return EntryDecision.advisory(contribution, *advisories)
+    if legacy:
+        return EntryDecision.advisory(
+            contribution,
+            _finding(
+                entry,
+                "legacy-unattributed",
+                status="active-with-advisory",
+                entry_class="managed-plugin",
+                owner=source,
+                detail=(
+                    "superseded schema-v2 (fully-baked) manifest remains "
+                    "active for compatibility; the materializer will not "
+                    "republish at this schema version again"
+                ),
+            ),
+        )
     return EntryDecision.active(contribution)
 
 
@@ -1935,17 +2018,16 @@ def scan_pivot_registry(
             return _classify_managed(entry, data, activation=activation)
         if schema == 2:
             # Superseded fully-baked managed shape (pre-pointer redesign).
-            # Route through the same unattributed/advisory path as a v1
-            # legacy manifest so a pre-existing on-disk file keeps
-            # contributing (and is prunable) while it decays -- the
-            # materializer never republishes at this schema version again.
+            # Routed through the SAME activation/root/template identity
+            # verification as a current pointer (unlike an unattributed
+            # manifest, which skips that check entirely) -- a disabled
+            # plugin or a stale/tampered root still deactivates it. Only the
+            # strict pointer key-set check is relaxed (v2 still carries its
+            # old baked content alongside the attribution fields), and the
+            # result is always advisory. The materializer never republishes
+            # at this schema version again.
             entry_classes[str(entry)] = "unknown-legacy"
-            return _classify_unattributed(
-                entry,
-                data,
-                entry_class="unknown-legacy",
-                advisory=True,
-            )
+            return _classify_managed(entry, data, activation=activation, legacy=True)
         if schema == 1:
             source = _KNOWN_LEGACY_PIVOTS.get(entry.name)
             if source:

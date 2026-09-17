@@ -44,7 +44,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Any, cast
+from typing import Any
 
 from dropin_registry import (
     Finding,
@@ -89,6 +89,13 @@ MANAGED_SCHEMA_VERSION = 3
 _MANAGED_POINTER_KEYS = frozenset(
     {"schema_version", "plugin", "plugin_root", "template"}
 )
+#: Schema versions this materializer may safely overwrite when refreshing a
+#: prior artifact: the current pointer shape, plus the one superseded shape
+#: (v2, the fully-baked manifest) still migrated read-only in
+#: ``pivot_registry_scan.py``. Deliberately NOT "any int" -- a hypothetical
+#: future schema (written by a newer agent-worktrees) must never be silently
+#: downgraded by an older materializer that doesn't understand it yet.
+_MIGRATABLE_SCHEMA_VERSIONS = frozenset({2, MANAGED_SCHEMA_VERSION})
 _PLUGIN_SOURCE_RE = re.compile(r"^[^@/\\\s]+@[^@/\\\s]+$")
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 _KNOWN_LEGACY_PIVOTS = {
@@ -764,26 +771,37 @@ def _resolve_compat_document(
     ``discover_config_sections``) never did activation/identity verification
     -- that is precisely their "parser-only, explicit-dir" contract -- so
     resolving our own pointer format here to the template it names adds no
-    new trust boundary. Commands are deliberately left unrewritten (unlike
-    the identity-verified scan path in ``pivot_registry_scan.py``): compat
-    callers historically pass synthetic command names that were never meant
-    to resolve on disk. A non-pointer document (an operator manifest, or a
-    superseded fully-baked one) passes through unchanged.
+    new trust boundary **beyond** what a malformed pointer could otherwise
+    smuggle in: the same shape/path checks ``_classify_managed`` applies
+    (absolute root, bare-basename ``.json`` template name -- which also
+    rejects ``..``/absolute-path traversal) are enforced here too before ever
+    touching the filesystem. Commands are deliberately left unrewritten
+    (unlike the identity-verified scan path in ``pivot_registry_scan.py``):
+    compat callers historically pass synthetic command names that were never
+    meant to resolve on disk. A non-pointer document (an operator manifest,
+    or a superseded fully-baked one) passes through unchanged.
     """
+    if not isinstance(data, dict) or set(data) != _MANAGED_POINTER_KEYS:
+        return data if isinstance(data, dict) else None
+    raw_root = data.get("plugin_root")
+    template_name = data.get("template")
     if (
-        isinstance(data, dict)
-        and set(data) == _MANAGED_POINTER_KEYS
-        and isinstance(data.get("schema_version"), int)
-        and isinstance(data.get("plugin_root"), str)
-        and isinstance(data.get("template"), str)
+        not isinstance(data.get("schema_version"), int)
+        or not isinstance(raw_root, str)
+        or not raw_root.strip()
+        or not isinstance(template_name, str)
+        or Path(template_name).name != template_name
+        or not template_name.endswith(".json")
     ):
-        try:
-            root = Path(cast(str, data["plugin_root"])).expanduser()
-            template = _read_json(root / "pivots" / cast(str, data["template"]))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-            return None
-        return template if isinstance(template, dict) else None
-    return data
+        return None
+    root = Path(raw_root).expanduser()
+    if not root.is_absolute():
+        return None
+    try:
+        template = _read_json(root / "pivots" / template_name)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return template if isinstance(template, dict) else None
 
 
 def discover_worktree_actions(

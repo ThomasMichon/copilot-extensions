@@ -1051,14 +1051,19 @@ setuptools entry-points do not cross venvs; a **filesystem manifest registry**
 does.
 
 ```
-~/.agent-worktrees/pivots/<name>.json     # one manifest per contributed pivot
+<plugin_root>/pivots/<name>.json          # the contributing plugin's own template
     { "label": "Tasks", "after": "Worktrees",
       "list": ["agent-dispatch", "inbox", "--machine", "{machine}"],
       "entry":   { "id": "id", "title": "title",
                    "worktree": "target_worktree", "badges": ["labels"] },
       "actions": [ { "label": "Abandon", "run": ["agent-dispatch", "abandon",
                      "{task_id}", "--permit"] }, ... ] }
+
+~/.agent-worktrees/pivots/<name>.json     # the materialized shared-registry pointer
+    { "schema_version": 3, "plugin": "agent-dispatch@copilot-extensions",
+      "plugin_root": "<plugin_root>", "template": "<name>.json" }
 ```
+
 
 - **Discovery and reconciliation** (`picker_tui/pivots.py`): one classifier
   scans the directory at startup (and on `r`-refresh), validates every external
