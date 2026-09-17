@@ -368,14 +368,14 @@ the Phase 0 runbook, picked up as capacity allows.
   changed area, or treat CI's full-matrix run as the real gate. This applies
   to every future Phase 2/3/4 split, not just this one.
 
-### 2026-09-17 — Trunk unblock (sixth+seventh live occurrence)
+### 2026-09-17 — Trunk unblock (eighth+ninth live occurrence)
 - Discovered via an unrelated PR's CI failure: `main` had drifted past the
   guard again, this time in two files at once —
   `plugins/agent-worktrees/src/agent_worktrees/picker_support/pivot_registry_scan.py`
   (1026, over the flat 1000-line cap) and
   `worktree-manager/src/worktree_manager/production_picker/picker_tui/pivots.py`
   (2411, over its 2159-line grandfathered ceiling, the file already flagged
-  unclaimed in the pecking-order table above). A seventh and eighth live
+  unclaimed in the pecking-order table above). An eighth and ninth live
   instance of the same regression class.
 - Fixed both as a trunk-unblock split rather than a baseline widen, since
   `pivots.py` was already backlogged and `pivot_registry_scan.py` had no
