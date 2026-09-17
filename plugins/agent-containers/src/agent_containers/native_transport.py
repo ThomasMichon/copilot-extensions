@@ -98,7 +98,9 @@ async def _run(args, prepared, identity):
             data = sys.stdin.buffer.read(1048577) if args.stdin else None
             if data is not None and len(data) > 1048576:
                 raise ValueError("remote command stdin exceeds the bounded input")
-            channel = await manager.open_stdio_channel(args.name, "bash -lc " + shlex.quote(command_text))
+            channel = await manager.open_stdio_channel(
+                args.name, cli.build_remote_command(command_text, prepared["remote_env"]),
+            )
             try:
                 out, err = await asyncio.wait_for(channel.communicate(input=data), args.timeout)
                 sys.stdout.buffer.write(out)
