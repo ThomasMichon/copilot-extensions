@@ -814,15 +814,14 @@ def test_worktree_json_projects_legacy_backend_as_execution_leg(tmp_path):
         state="active",
         binding_revision=2,
     )
-
+    payload = cli._worktree_to_dict(record)
     payload = cli._worktree_to_dict(record)
 
-    assert payload["session_backend"] == record.session_backend.to_dict()
-    assert payload["session_ahp_live"] is True
     assert payload["execution_leg"] == (
         tracking.derive_execution_leg(record).to_dict()
     )
     assert payload["execution_leg_live"] is True
+    assert payload["last_session_id"] == record.session_backend.session_id
 
 
 def test_execution_leg_get_rejects_opaque_legacy_backend(

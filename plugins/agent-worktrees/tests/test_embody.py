@@ -140,7 +140,6 @@ def _ns(**kw):
 def _stub_config(monkeypatch):
     class _Cfg:
         repos = {}
-        session_backend = m.cfg.SessionBackendConfig()
         default_repo = type(
             "Repo",
             (),

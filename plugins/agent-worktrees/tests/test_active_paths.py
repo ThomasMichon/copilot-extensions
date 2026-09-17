@@ -89,14 +89,11 @@ def test_active_paths_union_lock_and_mux():
 
 def test_active_paths_include_hosted_session_bindings():
     rec = _rec("aaaa", path="/tmp/a")
-    rec.session_backend = tracking.SessionBackendBinding(
-        kind="ahp",
-        endpoint_url="ws://127.0.0.1:8765",
-        session_id="11111111-1111-1111-1111-111111111111",
-        protocol_version="0.7.0",
-        auth_account="octocat",
-        created_at="2026-09-03T00:00:00+00:00",
-        last_seen_at="2026-09-03T00:00:00+00:00",
+    rec.execution_leg = tracking.ExecutionLegBinding(
+        provider="ahp",
+        state="active",
+        binding_revision=1,
+        blob={"session_id": "11111111-1111-1111-1111-111111111111"},
     )
 
     with patch("agent_worktrees.sessions._list_mux_sessions", return_value={}):

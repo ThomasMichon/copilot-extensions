@@ -42,20 +42,17 @@ and provides the `agent-worktrees` CLI and per-project binstubs.
 
 ## Same-Machine AHP Sessions
 
-Interactive worktree sessions can optionally be hosted by one same-machine
-`copilotd` over Agent Host Protocol (AHP). Agent-worktrees remains authoritative
-for repository and worktree lifecycle; the host owns the durable Copilot
-session. A mux pane is then only an attachable client, so closing it does not
-destroy the hosted transcript.
+Same-machine Agent Host Protocol (AHP) session ownership now lives in the
+standalone **Worktree Manager**, not in agent-worktrees. Agent-worktrees keeps
+only the provider-neutral `execution-leg` record and the finalize/cleanup
+barriers that refuse a live or unknown externally owned session.
 
-The backend is machine-local and off by default. Configure an explicit loopback
-WebSocket endpoint and GitHub account under `session_backend`, then use the
-normal picker/create/resume flow. The launcher creates or verifies one exact
-AHP session for the worktree and starts Copilot hard-bound to that session.
-Finalization refuses while the binding is active or unknown; explicitly run
-`agent-worktrees session-backend dispose` after the hosted session is no longer
-needed. See the
-[Configuration Reference](docs/config-reference.md#same-machine-ahp-session-backend--session_backend)
+The Worktree Manager Picker is the only path that can establish a **new** AHP
+session. A bare/direct `agent-worktrees` launch can still resume an **existing**
+persisted AHP execution leg and hard-bind Copilot to that session, but if no
+active AHP leg already exists it falls back to an ordinary direct/mux launch
+and warns that new AHP sessions must be created through Worktree Manager.
+See the [Configuration Reference](docs/config-reference.md#same-machine-ahp-sessions)
 and [CLI Reference](docs/cli-reference.md#session-lifecycle).
 
 ## Balanced Profile Assignment

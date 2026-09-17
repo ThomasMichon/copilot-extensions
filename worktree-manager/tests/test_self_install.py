@@ -226,6 +226,20 @@ def test_relocated_launchers_resolve_pane_wrappers_from_their_own_bin():
     assert '$RuntimeDir = $env:AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT' in ps1
 
 
+def test_relocated_launchers_resume_existing_ahp_legs_without_ensuring_new_ones():
+    root = Path(__file__).resolve().parents[1] / "bin"
+    sh = (root / "launch-session.sh").read_text(encoding="utf-8")
+    ps1 = (root / "launch-session.ps1").read_text(encoding="utf-8")
+    assert "execution-leg get" in sh
+    assert "'execution-leg', 'get'" in ps1
+    assert "session-backend" not in sh
+    assert "session-backend" not in ps1
+    assert 'AGENT_WORKTREES_AHP_AUTH_TOKEN="$GH_TOKEN"' not in sh
+    assert "$env:AGENT_WORKTREES_AHP_AUTH_TOKEN = $token.Trim()" not in ps1
+    assert "launching via the Worktree Manager Picker" in sh
+    assert "launching via the Worktree Manager Picker" in ps1
+
+
 def test_relocated_launcher_ships_the_mux_status_bar_scripts_it_needs():
     """``launch-session.ps1`` dot-sources ``session-options.ps1`` and
     ``psmux-path.ps1`` (and ``session-options.ps1`` in turn resolves

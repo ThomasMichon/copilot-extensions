@@ -18,6 +18,8 @@ class FakeSocket:
         self.responses: list[str] = []
         self.sessions: list[dict[str, object]] = []
         self.sent: list[dict[str, object]] = []
+        self.create_timeouts = 0
+        self.page_size = 0
 
     def send(self, raw: str) -> None:
         request = json.loads(raw)
@@ -28,8 +30,27 @@ class FakeSocket:
         elif method == "authenticate":
             result = {}
         elif method == "listSessions":
-            result = {"items": list(self.sessions)}
+            cursor = int(request["params"].get("cursor", "0"))
+            if self.page_size:
+                items = self.sessions[cursor:cursor + self.page_size]
+                next_offset = cursor + len(items)
+                result = {"items": list(items)}
+                if next_offset < len(self.sessions):
+                    result["nextCursor"] = str(next_offset)
+            else:
+                result = {"items": list(self.sessions)}
         elif method == "createSession":
+            if self.create_timeouts:
+                self.create_timeouts -= 1
+                self.responses.append(json.dumps({
+                    "jsonrpc": "2.0",
+                    "id": request["id"],
+                    "error": {
+                        "code": -32603,
+                        "message": ahp_provider.SESSION_OWNER_TIMEOUT_MESSAGE,
+                    },
+                }))
+                return
             params = request["params"]
             self.sessions.append({
                 "resource": params["channel"],
@@ -102,6 +123,43 @@ def test_controller_initializes_authenticates_and_targets_exact_workspace(
     assert create["params"]["channel"] == f"ahp-session:/{session_id}"
 
 
+def test_controller_bypasses_proxies_for_loopback(monkeypatch):
+    socket = FakeSocket()
+    captured = {}
+    monkeypatch.setitem(
+        sys.modules,
+        "websocket",
+        SimpleNamespace(
+            create_connection=lambda *_args, **kwargs: captured.update(kwargs) or socket
+        ),
+    )
+
+    with ahp_provider.AhpController(_config(), "secret"):
+        pass
+
+    assert captured["http_proxy_host"] is None
+    assert captured["http_proxy_port"] is None
+    assert captured["http_no_proxy"] == ["localhost", "127.0.0.1", "::1"]
+
+
+def test_controller_retries_owner_startup_timeout(monkeypatch, tmp_path):
+    socket = FakeSocket()
+    socket.create_timeouts = 1
+    monkeypatch.setitem(
+        sys.modules,
+        "websocket",
+        SimpleNamespace(create_connection=lambda *_args, **_kwargs: socket),
+    )
+
+    with ahp_provider.AhpController(_config(), "secret") as controller:
+        session_id = controller.create_session(str(tmp_path))
+
+    creates = [request for request in socket.sent if request["method"] == "createSession"]
+    assert len(creates) == 2
+    assert creates[0]["params"]["channel"] != creates[1]["params"]["channel"]
+    assert creates[1]["params"]["channel"] == f"ahp-session:/{session_id}"
+
+
 def test_controller_rejects_session_bound_to_other_path(monkeypatch, tmp_path):
     socket = FakeSocket()
     socket.sessions.append({
@@ -117,6 +175,85 @@ def test_controller_rejects_session_bound_to_other_path(monkeypatch, tmp_path):
     with ahp_provider.AhpController(_config(), "secret") as controller:
         with pytest.raises(ahp_provider.AhpProviderError, match="different"):
             controller.require_session("session-1", str(tmp_path / "expected"))
+
+
+def test_summary_working_directory_accepts_legacy_scalar():
+    assert ahp_provider._summary_working_directory({
+        "workingDirectory": "file:///repo",
+    }) == "file:///repo"
+
+
+def test_list_sessions_follows_pagination(monkeypatch, tmp_path):
+    socket = FakeSocket()
+    socket.page_size = 1
+    expected = "33333333-3333-3333-3333-333333333333"
+    socket.sessions = [
+        {
+            "resource": f"ahp-session:/{index}{index}",
+            "workingDirectories": [(tmp_path / str(index)).resolve().as_uri()],
+        }
+        for index in ("11", "22")
+    ] + [{
+        "resource": f"ahp-session:/{expected}",
+        "workingDirectories": [tmp_path.resolve().as_uri()],
+    }]
+    monkeypatch.setitem(
+        sys.modules,
+        "websocket",
+        SimpleNamespace(create_connection=lambda *_args, **_kwargs: socket),
+    )
+
+    with ahp_provider.AhpController(_config(), "secret") as controller:
+        controller.require_session(expected, str(tmp_path))
+
+    list_requests = [request for request in socket.sent if request["method"] == "listSessions"]
+    assert [request["params"].get("cursor") for request in list_requests] == [
+        None,
+        "1",
+        "2",
+    ]
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "ws://example.com:8765",
+        "wss://127.0.0.1:8765",
+        "ws://127.0.0.1",
+        "ws://user@127.0.0.1:8765",
+    ],
+)
+def test_loopback_endpoint_rejects_unsafe_values(endpoint: str):
+    with pytest.raises(ahp_provider.AhpProviderError):
+        ahp_provider._loopback_endpoint(endpoint)
+
+
+def test_protocol_skew_fails_closed(monkeypatch):
+    socket = FakeSocket()
+    original_send = socket.send
+
+    def send(raw: str) -> None:
+        request = json.loads(raw)
+        if request["method"] == "initialize":
+            socket.sent.append(request)
+            socket.responses.append(json.dumps({
+                "jsonrpc": "2.0",
+                "id": request["id"],
+                "result": {"protocolVersion": "0.8.0"},
+            }))
+        else:
+            original_send(raw)
+
+    socket.send = send  # type: ignore[method-assign]
+    monkeypatch.setitem(
+        sys.modules,
+        "websocket",
+        SimpleNamespace(create_connection=lambda *_args, **_kwargs: socket),
+    )
+
+    with pytest.raises(ahp_provider.AhpProviderError, match="unsupported protocol"):
+        with ahp_provider.AhpController(_config(), "secret"):
+            pass
 
 
 def test_ensure_session_uses_only_public_engine_boundary(monkeypatch, tmp_path):
@@ -955,4 +1092,3 @@ def test_create_session_contributes_and_serves_repo_plugins(monkeypatch, tmp_pat
     assert any(uri.endswith("SKILL.md") for uri in read_uris)
     assert any(uri.endswith("plugin.json") for uri in read_uris)
     assert session_id
-
