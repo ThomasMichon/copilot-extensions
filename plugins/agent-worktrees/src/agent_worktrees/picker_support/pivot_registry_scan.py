@@ -22,18 +22,20 @@ from plugin_activation import ActivationReport, ActivePlugin
 
 from .pivot_actions import ManifestError, parse_config_sections, parse_worktree_actions
 from .pivot_manifest import (
-    REGISTRY_NAME,
-    MANAGED_SCHEMA_VERSION,
     _KNOWN_LEGACY_PIVOTS,
-    _PLUGIN_SOURCE_RE,
     _LAST_KNOWN,
+    _MANAGED_POINTER_KEYS,
+    _PLUGIN_SOURCE_RE,
     _WARNING_TRACKER,
+    MANAGED_SCHEMA_VERSION,
+    REGISTRY_NAME,
     PivotContribution,
     PivotRegistryReport,
     RegisteredPivot,
     _compat_manifest_documents,
     _pivot_is_visible,
     _resolve_activation,
+    _resolve_compat_document,
     _resolve_state_root_path,
     parse_manifest,
     pivots_dir,
@@ -44,6 +46,7 @@ from .pivot_targets import (
     _managed_manifest_data,
     _materialize_active_pivots,
     _read_json,
+    _read_verified_template,
     _rewrite_manifest_commands,
 )
 
@@ -193,12 +196,25 @@ def _classify_managed(
     data: dict[str, object],
     *,
     activation: ActivationReport,
+    legacy: bool = False,
 ) -> EntryDecision[PivotContribution]:
+    """Classify a managed-plugin (pointer) entry.
+
+    ``legacy=True`` handles a superseded schema-v2 fully-baked entry through
+    the exact same activation/root/template identity verification as the
+    current pointer shape below -- it only relaxes the strict pointer
+    key-set check (a v2 payload still carries its old baked ``list``/
+    ``actions``/etc. alongside the attribution fields) and marks the result
+    advisory instead of plainly active, so a stale or tampered v2 entry is
+    deactivated exactly like a current one whenever the plugin is disabled or
+    its root no longer matches -- it is never a bypass of those checks.
+    """
     source = data.get("plugin")
     raw_root = data.get("plugin_root")
     template_name = data.get("template")
     if (
-        not isinstance(source, str)
+        (not legacy and set(data) != _MANAGED_POINTER_KEYS)
+        or not isinstance(source, str)
         or not _PLUGIN_SOURCE_RE.fullmatch(source)
         or not isinstance(raw_root, str)
         or not raw_root.strip()
@@ -212,8 +228,9 @@ def _classify_managed(
                 "invalid-entry",
                 entry_class="managed-plugin",
                 detail=(
-                    "managed schema requires plugin name@marketplace, plugin_root, "
-                    "and template"
+                    "managed pointer requires exactly schema_version, plugin, "
+                    "plugin_root, and template (schema_version="
+                    f"{MANAGED_SCHEMA_VERSION})"
                 ),
             )
         )
@@ -282,7 +299,7 @@ def _classify_managed(
 
     template_path = canonical_root / "pivots" / template_name
     try:
-        template = _read_json(template_path)
+        template = _read_verified_template(canonical_root, template_name)
         if not isinstance(template, dict):
             raise ManifestError("plugin pivot template must be a JSON object")
         expected = _managed_manifest_data(
@@ -336,17 +353,9 @@ def _classify_managed(
                 detail=str(exc),
             )
         )
-    if data != expected:
-        return EntryDecision.inactive(
-            _finding(
-                entry,
-                "identity-mismatch",
-                target=template_path,
-                entry_class="managed-plugin",
-                owner=source,
-                detail="runtime manifest differs from the current plugin template",
-            )
-        )
+    # No baked-content comparison: `data` is a pointer, `expected` is always
+    # freshly re-resolved from the identity-verified template above -- there
+    # is nothing on disk that can drift out of sync with it.
     try:
         contribution = _parse_contribution(
             expected,
@@ -380,7 +389,39 @@ def _classify_managed(
             )
             for finding in activation.decisions[source].findings
         )
+        if legacy:
+            advisories = (
+                _finding(
+                    entry,
+                    "legacy-unattributed",
+                    status="active-with-advisory",
+                    entry_class="managed-plugin",
+                    owner=source,
+                    detail=(
+                        "superseded schema-v2 (fully-baked) manifest remains "
+                        "active for compatibility; the materializer will not "
+                        "republish at this schema version again"
+                    ),
+                ),
+                *advisories,
+            )
         return EntryDecision.advisory(contribution, *advisories)
+    if legacy:
+        return EntryDecision.advisory(
+            contribution,
+            _finding(
+                entry,
+                "legacy-unattributed",
+                status="active-with-advisory",
+                entry_class="managed-plugin",
+                owner=source,
+                detail=(
+                    "superseded schema-v2 (fully-baked) manifest remains "
+                    "active for compatibility; the materializer will not "
+                    "republish at this schema version again"
+                ),
+            ),
+        )
     return EntryDecision.active(contribution)
 
 
@@ -650,6 +691,18 @@ def scan_pivot_registry(
         if schema == MANAGED_SCHEMA_VERSION:
             entry_classes[str(entry)] = "managed-plugin"
             return _classify_managed(entry, data, activation=activation)
+        if schema == 2:
+            # Superseded fully-baked managed shape (pre-pointer redesign).
+            # Routed through the SAME activation/root/template identity
+            # verification as a current pointer (unlike an unattributed
+            # manifest, which skips that check entirely) -- a disabled
+            # plugin or a stale/tampered root still deactivates it. Only the
+            # strict pointer key-set check is relaxed (v2 still carries its
+            # old baked content alongside the attribution fields), and the
+            # result is always advisory. The materializer never republishes
+            # at this schema version again.
+            entry_classes[str(entry)] = "unknown-legacy"
+            return _classify_managed(entry, data, activation=activation, legacy=True)
         if schema == 1:
             source = _KNOWN_LEGACY_PIVOTS.get(entry.name)
             if source:
@@ -927,11 +980,12 @@ def discover_pivots(base: str | os.PathLike[str] | None = None) -> list[Register
     """Return active pivots, with parser-only explicit-dir support."""
     candidates: list[RegisteredPivot] = []
     for path, data in _compat_manifest_documents(pivots_dir(base)):
-        if "list" not in data:
+        resolved = _resolve_compat_document(path, data)
+        if resolved is None or "list" not in resolved:
             continue
         try:
             candidates.append(
-                parse_manifest(data, name=path.stem, source_path=str(path))
+                parse_manifest(resolved, name=path.stem, source_path=str(path))
             )
         except ManifestError:
             continue

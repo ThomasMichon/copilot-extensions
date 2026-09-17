@@ -86,7 +86,7 @@ def _active_reports(*items: tuple[str, Path]) -> ActivationReport:
 def test_active_plugin_materializes_attributed_absolute_command(tmp_path):
     source = "sample@example-marketplace"
     root = tmp_path / "plugin"
-    command = _command(root)
+    _command(root)
     _template(root)
     registry = tmp_path / "pivots"
 
@@ -99,11 +99,16 @@ def test_active_plugin_materializes_attributed_absolute_command(tmp_path):
     assert [pivot.label for pivot in report.pivots] == ["Sample"]
     assert report.contributions[0].entry_class == "managed-plugin"
     payload = json.loads(entry.read_text(encoding="utf-8"))
-    assert payload["schema_version"] == pivots.MANAGED_SCHEMA_VERSION
-    assert payload["plugin"] == source
-    assert Path(payload["plugin_root"]) == root.resolve()
-    assert payload["template"] == "sample.json"
-    assert Path(payload["list"][0]) == command.resolve()
+    # The persisted file is a small attributed pointer -- no baked `list`/
+    # `actions`; commands are resolved fresh from the live template on every
+    # scan (see report.pivots above, which already reflects the resolved
+    # absolute command).
+    assert payload == {
+        "schema_version": pivots.MANAGED_SCHEMA_VERSION,
+        "plugin": source,
+        "plugin_root": str(root.resolve()),
+        "template": "sample.json",
+    }
 
 
 def test_active_plugin_materializes_all_distinct_live_roots(tmp_path):
@@ -150,7 +155,7 @@ def test_same_named_pivot_prefers_first_live_root(tmp_path, equivalent):
     installed_name = "sample" if equivalent else "installed"
     local_name = "sample" if equivalent else "local"
     _command(installed, installed_name)
-    local_command = _command(local, local_name)
+    _command(local, local_name)
     _template(
         installed,
         filename="shared.json",
@@ -189,7 +194,7 @@ def test_same_named_pivot_prefers_first_live_root(tmp_path, equivalent):
     ]
     payload = json.loads((registry / "shared.json").read_text(encoding="utf-8"))
     assert Path(payload["plugin_root"]) == local.resolve()
-    assert Path(payload["list"][0]) == local_command.resolve()
+    assert payload["template"] == "shared.json"
 
 
 def test_same_named_pivot_from_different_plugins_is_rejected(tmp_path):
@@ -252,7 +257,11 @@ def test_materializer_refreshes_append_only_without_overwriting(tmp_path):
     assert first.active_entries
     assert not first.findings
     assert not (registry / "pivot-receipts.json").exists()
+    entry = registry / "sample.json"
+    before = entry.read_text(encoding="utf-8")
 
+    # An ordinary template content edit (no root/version change) resolves
+    # fresh at read time -- the pointer itself needs no rewrite at all.
     template.write_text(
         json.dumps(
             {
@@ -265,35 +274,43 @@ def test_materializer_refreshes_append_only_without_overwriting(tmp_path):
     )
     updated = pivots.scan_pivot_registry(registry, activation_report=activation)
     assert [pivot.label for pivot in updated.pivots] == ["Updated"]
+    assert not updated.findings
+    assert sorted(p.name for p in registry.glob("*.json")) == ["sample.json"]
+    assert entry.read_text(encoding="utf-8") == before
 
+    # A stray file that self-declares as our own artifact for this exact
+    # plugin+template (matching schema_version/plugin/template), even if it
+    # also still carries stale extra keys from before the pointer redesign,
+    # is recognized as ours and normalized to the lean pointer in place --
+    # never left stale, never forked into a duplicate.
     unreceipted = tmp_path / "unreceipted"
     unreceipted.mkdir()
-    operator = unreceipted / "sample.json"
-    operator.write_text(
+    stray = unreceipted / "sample.json"
+    stray.write_text(
         json.dumps(
             {
                 "schema_version": pivots.MANAGED_SCHEMA_VERSION,
                 "plugin": source,
                 "plugin_root": str(root.resolve()),
                 "template": "sample.json",
-                "label": "Operator",
+                "label": "Stale",
                 "list": [str(_command(tmp_path / "operator"))],
             }
         ),
         encoding="utf-8",
     )
-    before = operator.read_text(encoding="utf-8")
     report = pivots.scan_pivot_registry(
         unreceipted,
         activation_report=activation,
     )
-    assert operator.read_text(encoding="utf-8") == before
     assert [pivot.label for pivot in report.pivots] == ["Updated"]
-    assert any(
-        finding.entry == str(operator)
-        and finding.reason == "identity-mismatch"
-        for finding in report.findings
-    )
+    assert not report.findings
+    assert json.loads(stray.read_text(encoding="utf-8")) == {
+        "schema_version": pivots.MANAGED_SCHEMA_VERSION,
+        "plugin": source,
+        "plugin_root": str(root.resolve()),
+        "template": "sample.json",
+    }
 
 
 def test_operator_identity_wins_over_append_only_managed_sibling(tmp_path):
@@ -318,12 +335,10 @@ def test_operator_identity_wins_over_append_only_managed_sibling(tmp_path):
     assert len(report.contributions) == 1
     assert report.contributions[0].entry == operator
     assert report.contributions[0].entry_class == "operator"
-    managed_duplicate = next(
-        finding
-        for finding in report.findings
-        if finding.reason == "duplicate"
-    )
-    assert managed_duplicate.entry != str(operator)
+    # The operator's file owns the canonical "sample.json" slot outright --
+    # the materializer refuses to publish anywhere else, so there is no
+    # forked duplicate file (and no "duplicate" finding) at all.
+    assert sorted(p.name for p in registry.glob("*.json")) == ["sample.json"]
 
 
 def test_absent_entry_publication_race_never_overwrites_operator(
@@ -421,7 +436,46 @@ def test_missing_command_and_root_mismatch_are_inactive(tmp_path):
     assert command.exists()
 
 
-def test_managed_command_tamper_is_identity_mismatch(tmp_path):
+def test_symlinked_template_is_target_unusable(tmp_path):
+    """The scan path re-reads the template fresh on every scan (it is the
+    live source of the contribution, not just a materialization-time input),
+    so it must be just as hard to redirect via a symlinked template file as
+    materialization's own candidate scan already requires."""
+    source = "sample@example-marketplace"
+    root = tmp_path / "plugin"
+    _command(root)
+    _template(root)
+    registry = tmp_path / "pivots"
+    activation = _active_report(source, root)
+    pivots.scan_pivot_registry(registry, activation_report=activation)
+
+    outside = tmp_path / "outside" / "evil.json"
+    outside.parent.mkdir(parents=True, exist_ok=True)
+    outside.write_text(
+        json.dumps({"schema_version": 1, "label": "Evil", "list": ["sample"]}),
+        encoding="utf-8",
+    )
+    template_path = root / "pivots" / "sample.json"
+    template_path.unlink()
+    try:
+        template_path.symlink_to(outside)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+
+    tampered = pivots.scan_pivot_registry(
+        registry, materialize=False, activation_report=activation
+    )
+
+    assert tampered.active_entries == {}
+    assert tampered.findings[0].reason == "target-unusable"
+
+
+def test_tampered_pointer_shape_is_invalid_entry(tmp_path):
+    """Under the pointer redesign there is no baked ``list`` command left on
+    disk to tamper with -- commands are always resolved fresh from the
+    identity-verified template. Adding stray keys to the persisted pointer
+    (the only thing an on-disk tamper *can* touch) is instead rejected by the
+    strict pointer key-set check."""
     source = "sample@example-marketplace"
     root = tmp_path / "plugin"
     _command(root)
@@ -434,7 +488,7 @@ def test_managed_command_tamper_is_identity_mismatch(tmp_path):
     assert report.active_entries
     entry = registry / "sample.json"
     payload = json.loads(entry.read_text(encoding="utf-8"))
-    payload["list"][0] = str(_command(tmp_path / "other", "other"))
+    payload["list"] = [str(_command(tmp_path / "other", "other"))]
     entry.write_text(json.dumps(payload), encoding="utf-8")
 
     tampered = pivots.scan_pivot_registry(
@@ -443,7 +497,36 @@ def test_managed_command_tamper_is_identity_mismatch(tmp_path):
         activation_report=_active_report(source, root),
     )
     assert tampered.active_entries == {}
-    assert tampered.findings[0].reason == "identity-mismatch"
+    assert tampered.findings[0].reason == "invalid-entry"
+
+
+def test_tampered_pointer_template_name_is_missing_target(tmp_path):
+    """Tampering the pointer's ``template`` to name a file that does not
+    exist under the identity-verified ``plugin_root`` is caught as
+    missing-target -- it can never be redirected to unintended content
+    because the template is always re-read from the plugin's own root."""
+    source = "sample@example-marketplace"
+    root = tmp_path / "plugin"
+    _command(root)
+    _template(root)
+    registry = tmp_path / "pivots"
+    report = pivots.scan_pivot_registry(
+        registry,
+        activation_report=_active_report(source, root),
+    )
+    assert report.active_entries
+    entry = registry / "sample.json"
+    payload = json.loads(entry.read_text(encoding="utf-8"))
+    payload["template"] = "does-not-exist.json"
+    entry.write_text(json.dumps(payload), encoding="utf-8")
+
+    tampered = pivots.scan_pivot_registry(
+        registry,
+        materialize=False,
+        activation_report=_active_report(source, root),
+    )
+    assert tampered.active_entries == {}
+    assert tampered.findings[0].reason == "missing-target"
 
 
 def test_managed_relative_command_cannot_escape_plugin_root(tmp_path):
@@ -581,6 +664,82 @@ def test_unattributed_action_target_is_validated(tmp_path):
 
     assert report.active_entries == {}
     assert report.findings[0].reason == "missing-target"
+
+
+def test_superseded_v2_manifest_resolves_from_live_template(tmp_path):
+    """A pre-existing on-disk file from before the pointer redesign (full
+    baked content, schema_version 2) keeps working -- advisory, prunable,
+    and resolved fresh from the live template (not its own stale baked
+    label) -- rather than breaking outright; the materializer never
+    republishes at the old schema version."""
+    source = "sample@example-marketplace"
+    root = tmp_path / "plugin"
+    command = _command(root)
+    _template(root)
+    registry = tmp_path / "pivots"
+    registry.mkdir()
+    legacy = registry / "sample.json"
+    legacy.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "plugin": source,
+                "plugin_root": str(root.resolve()),
+                "template": "sample.json",
+                "label": "Legacy",
+                "list": [str(command.resolve()), "list"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = pivots.scan_pivot_registry(
+        registry,
+        materialize=False,
+        activation_report=_active_report(source, root),
+    )
+
+    assert [pivot.label for pivot in report.pivots] == ["Sample"]
+    assert report.entry_classes[str(legacy)] == "unknown-legacy"
+    assert any(
+        finding.reason == "legacy-unattributed" for finding in report.findings
+    )
+
+
+def test_superseded_v2_manifest_deactivates_with_its_plugin(tmp_path):
+    """Unlike an unattributed manifest, a v2 legacy entry is NOT a bypass of
+    activation/root identity verification: a disabled plugin (or a root that
+    no longer matches) deactivates it exactly like a current pointer."""
+    source = "sample@example-marketplace"
+    root = tmp_path / "plugin"
+    _command(root)
+    _template(root)
+    registry = tmp_path / "pivots"
+    registry.mkdir()
+    legacy = registry / "sample.json"
+    legacy.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "plugin": source,
+                "plugin_root": str(root.resolve()),
+                "template": "sample.json",
+                "label": "Legacy",
+                "list": ["stale-command"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    disabled = pivots.scan_pivot_registry(
+        registry,
+        materialize=False,
+        activation_report=ActivationReport(ScanAuthority.COMPLETE, {}),
+    )
+
+    assert disabled.active_entries == {}
+    assert disabled.findings[0].entry == str(legacy)
+    assert disabled.findings[0].reason == "not-enabled"
 
 
 def test_known_legacy_is_activation_gated_and_advisory(tmp_path):
