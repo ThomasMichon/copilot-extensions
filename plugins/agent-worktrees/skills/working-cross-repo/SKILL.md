@@ -205,13 +205,32 @@ A repo's local path **varies by machine**. Always resolve it with
    - elsewhere -> delegate via agent-bridge / agent-codespaces.
 4. Land changes through the **target repo's** own contribution flow (its branch
    naming, PR/merge policy, version-bump rules) -- not this repo's.
-   - **Check the target repo's PR flow before you drive one:**
-     `<agent-worktrees catalog argv[0]> get pr-profile` reports `direct` (no PR),
-     `pr-human-merge` (PR-gated, a **human** approves + merges -- `pr-merge`
-     does not apply), or `pr-agent-merge` (author signals consent with
-     `pr-merge` and the gate merges). Do **not** assume the flow your home repo
-     uses. When a `pr-*` verb reports it does not apply to the target, follow
-     its pointer (and the repo's `CONTRIBUTING`) rather than hand-merging.
+   - **Check the target repo's PR flow before you drive one -- every time,
+     never from memory.** `<agent-worktrees catalog argv[0]> get pr-profile`
+     reports `direct` (no PR), `pr-human-merge` (PR-gated, a **human**
+     approves + merges -- `pr-merge` does not apply), `pr-agent-merge`
+     (author signals consent with `pr-merge` and the gate merges), or
+     `pr-self-merge` (PR-gated, the submitter merges directly with
+     `pr-merge <#> --now` once required checks/reviews allow it). The same
+     facts also surface automatically in the target worktree's bounded
+     session-start context (a `PR:` line: profile + enabled/required/
+     merge_actor) and as an extra `Note:` line on every `pr-*` verb's
+     reminder text when the target repo sets `pr.notes` -- read both, they
+     exist precisely so you don't have to guess or reuse your home repo's
+     protocol. Do **not** assume the flow your home repo uses, and do
+     **not** infer a target's flow from a different repo you worked in
+     earlier in the same session. When a `pr-*` verb reports it does not
+     apply to the target, follow its pointer (and the repo's
+     `CONTRIBUTING`) rather than hand-merging.
+   - **Drive the PR through to merge, regardless of whose repo it is** --
+     the same default-conduct rule as your home repo (see
+     `pr-workflow.md`'s *Default conduct*), applied to the *target's*
+     profile: self-merge means you merge once eligible, human-merge means
+     you wait for and don't skip the reviewer, agent-merge means you signal
+     consent once approved. A PR left open because you weren't sure which
+     protocol applied is the single most common way cross-repo work goes
+     stuck -- resolve the uncertainty by re-running `get pr-profile` and
+     checking `pr-status`, not by leaving it for later.
 
 ## Anti-patterns (don't)
 
@@ -223,3 +242,7 @@ A repo's local path **varies by machine**. Always resolve it with
 - Hardcoding a checkout path instead of `repos find`.
 - Applying *this* repo's conventions (branch prefix, merge style) to the target
   repo -- follow the target's.
+- Opening a PR on a target repo and leaving it stuck open because the
+  protocol was unclear or assumed rather than checked (`get pr-profile` +
+  the session `PR:` line + any `pr.notes` exist to remove exactly this
+  ambiguity -- use them before acting, not after a PR is already stalled).
