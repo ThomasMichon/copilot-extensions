@@ -211,13 +211,15 @@ class TestProvisionCommand:
     def test_embedded_payload_roundtrips(self) -> None:
         cmd = build_provision_command()
         # Extract chunked gzip+base64 blobs and confirm they decode to the
-        # original asset text. There are four: the relay client, the wrapper,
-        # stale-npm-token scrub, and the #18 profile.d snippet.
+        # original asset text. There are five: the relay client, the
+        # wrapper, stale-npm-token scrub, the Rush bootstrap seed script,
+        # and the #18 profile.d snippet.
         decoded = set(_decoded_chunked_payloads(cmd))
-        assert len(decoded) == 4
+        assert len(decoded) == 5
         assert asset_text("ado-auth-helper-relay") in decoded
         assert asset_text("ado-auth-helper-wrapper") in decoded
         assert any(".npmrc" in d and "_authtoken" in d for d in decoded)
+        assert any("install-run-rush.js" in d for d in decoded)
         # One blob is the login-shell git hardening export.
         assert any("GIT_TERMINAL_PROMPT=0" in d for d in decoded)
 
@@ -228,6 +230,80 @@ class TestProvisionCommand:
         assert len(cmd) < 30_000
         assert max(len(line) for line in cmd.splitlines()) < 8_000
         assert max(len(c) for c in re.findall(r"printf %s '([^']+)'", cmd)) < 8_000
+
+
+class TestRushBootstrapSeed:
+    """#440: public Rush engine bootstrap must not depend on a private-feed
+    token, via a transient project-local .npmrc registry override."""
+
+    def test_command_is_backgrounded_and_best_effort(self) -> None:
+        cmd = build_provision_command()
+        assert "nohup python3" in cmd
+        assert ".agent-codespaces-rush-seed.py" in cmd
+        assert "& disown" in cmd
+        # The whole subshell swallows failures so a bad/missing python3
+        # never blocks connect, matching the npm-scrub step's pattern.
+        assert cmd.count(") || true") >= 2
+
+    def test_seed_script_only_targets_rush_workspaces(self) -> None:
+        text = _extract_rush_seed_script(build_provision_command())
+        assert "rush.json" in text
+        assert "install-run-rush.js" in text
+        assert "glob.glob" in text and "/workspaces/*" in text
+
+    def test_seed_script_never_persists_npmrc_override(self) -> None:
+        text = _extract_rush_seed_script(build_provision_command())
+        # Registers a transient override, then always restores/removes it.
+        assert "registry.npmjs.org" in text
+        assert "@microsoft:registry" in text
+        assert "finally" in text
+        assert 'os.remove(npmrc)' in text
+        assert "os.replace(backup, npmrc)" in text
+
+    @pytest.mark.skipif(
+        os.name == "nt" or shutil.which("python3") is None,
+        reason="requires a native python3",
+    )
+    def test_seed_script_backs_up_and_restores_existing_npmrc(
+        self, tmp_path
+    ) -> None:
+        """The script must never leave a workspace's real .npmrc clobbered,
+        even though the ``node`` bootstrap it wraps is unavailable here."""
+        ws = tmp_path / "workspaces" / "example"
+        (ws / "common" / "scripts").mkdir(parents=True)
+        (ws / "rush.json").write_text("{}", encoding="utf-8")
+        (ws / "common" / "scripts" / "install-run-rush.js").write_text(
+            "// stub\n", encoding="utf-8"
+        )
+        original = "registry=https://pkgs.dev.azure.com/example/\n"
+        (ws / ".npmrc").write_text(original, encoding="utf-8")
+
+        text = _extract_rush_seed_script(build_provision_command())
+        patched = text.replace(
+            'glob.glob("/workspaces/*")',
+            f'glob.glob({str(tmp_path / "workspaces" / "*")!r})',
+        )
+        subprocess.run(["python3", "-c", patched], check=True, timeout=30)
+
+        assert (ws / ".npmrc").read_text(encoding="utf-8") == original
+        assert not (ws / ".npmrc.agent-codespaces-bak").exists()
+
+    @pytest.mark.skipif(
+        os.name == "nt" or shutil.which("python3") is None,
+        reason="requires a native python3",
+    )
+    def test_seed_script_skips_non_rush_workspace(self, tmp_path) -> None:
+        ws = tmp_path / "workspaces" / "plain"
+        ws.mkdir(parents=True)
+
+        text = _extract_rush_seed_script(build_provision_command())
+        patched = text.replace(
+            'glob.glob("/workspaces/*")',
+            f'glob.glob({str(tmp_path / "workspaces" / "*")!r})',
+        )
+        subprocess.run(["python3", "-c", patched], check=True, timeout=30)
+
+        assert not (ws / ".npmrc").exists()
 
 
 class TestAuthErrorPolicyCommand:
@@ -262,3 +338,13 @@ def _decoded_chunked_payloads(cmd: str) -> list[str]:
         raw = base64.b64decode("".join(chunks))
         payloads.append(gzip.decompress(raw).decode("utf-8"))
     return payloads
+
+
+def _extract_rush_seed_script(cmd: str) -> str:
+    """Pull the Rush-bootstrap-seed payload (the one mentioning rush.json)
+    out of a built provision command, decoded back to plain Python text."""
+    for text in _decoded_chunked_payloads(cmd):
+        if "rush.json" in text:
+            return text
+    raise AssertionError("Rush bootstrap seed payload not found in command")
+
