@@ -1070,15 +1070,27 @@ does.
 - **Attributed materialization** (`ensure_pivots`, #2180): before runtime
   discovery, agent-worktrees resolves plugins that are currently enabled
   globally or in an adopted project, verifies one current root, and reads each
-  root's shipped `pivots/*.json` template. It publishes a schema-v2 runtime
-  manifest containing `plugin`, `plugin_root`, and `template`, with command
-  targets resolved to canonical absolute paths. Cached installed payloads alone
-  are never authority. Publication is append-only and exclusive-create: an
-  existing file is never replaced, and a changed template gets a deterministic
-  fingerprinted sibling. Routine discovery never deletes registry files.
+  root's shipped `pivots/*.json` template. It publishes a schema-v3 **pointer**
+  runtime manifest containing only `schema_version`, `plugin`, `plugin_root`,
+  and `template` -- deliberately no baked `list`/`actions` content. Every scan
+  re-reads the template fresh from the identity-verified `plugin_root` and
+  re-resolves its commands to canonical absolute paths, so an ordinary
+  template-content or plugin-version-directory change needs no on-disk
+  rewrite of the pointer at all in the common case, and there is exactly
+  **one** file per plugin+template, never a fingerprint-suffixed duplicate.
+  Cached installed payloads alone are never authority. Publication is
+  exclusive-create when the slot is empty, or an atomic in-place refresh when
+  the existing file already self-identifies (via its own `schema_version`
+  and `plugin`/`template`) as our own prior artifact; an operator-authored
+  file, or one belonging to a different plugin/template, is never touched.
+  Routine discovery never deletes registry files. (Schema-v2, the superseded
+  fully-baked-manifest shape that this replaced, is still recognized
+  read-only as a migrating advisory entry so pre-existing on-disk files decay
+  gracefully instead of breaking outright.)
 - **Compatibility and diagnostics.** Known schema-v1 suite manifests remain
   active only while their contributing plugin is enabled and identity-verified,
-  with a `legacy-unattributed` advisory. Unknown schema-v1 manifests retain
+  with a `legacy-unattributed` advisory; schema-v2 (superseded fully-baked)
+  manifests are treated the same way. Unknown schema-v1 manifests retain
   compatibility as report-only unknown legacy entries; unversioned manifests
   are operator-owned. Operational warnings are capped and fingerprint-
   deduplicated. `agent-worktrees doctor [--json]` reports the same classifier's

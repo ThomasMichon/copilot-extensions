@@ -22,18 +22,20 @@ from plugin_activation import ActivationReport, ActivePlugin
 
 from .pivot_actions import ManifestError, parse_config_sections, parse_worktree_actions
 from .pivot_manifest import (
-    REGISTRY_NAME,
-    MANAGED_SCHEMA_VERSION,
     _KNOWN_LEGACY_PIVOTS,
-    _PLUGIN_SOURCE_RE,
     _LAST_KNOWN,
+    _MANAGED_POINTER_KEYS,
+    _PLUGIN_SOURCE_RE,
     _WARNING_TRACKER,
+    MANAGED_SCHEMA_VERSION,
+    REGISTRY_NAME,
     PivotContribution,
     PivotRegistryReport,
     RegisteredPivot,
     _compat_manifest_documents,
     _pivot_is_visible,
     _resolve_activation,
+    _resolve_compat_document,
     _resolve_state_root_path,
     parse_manifest,
     pivots_dir,
@@ -198,7 +200,8 @@ def _classify_managed(
     raw_root = data.get("plugin_root")
     template_name = data.get("template")
     if (
-        not isinstance(source, str)
+        set(data) != _MANAGED_POINTER_KEYS
+        or not isinstance(source, str)
         or not _PLUGIN_SOURCE_RE.fullmatch(source)
         or not isinstance(raw_root, str)
         or not raw_root.strip()
@@ -212,8 +215,9 @@ def _classify_managed(
                 "invalid-entry",
                 entry_class="managed-plugin",
                 detail=(
-                    "managed schema requires plugin name@marketplace, plugin_root, "
-                    "and template"
+                    "managed pointer requires exactly schema_version, plugin, "
+                    "plugin_root, and template (schema_version="
+                    f"{MANAGED_SCHEMA_VERSION})"
                 ),
             )
         )
@@ -336,17 +340,9 @@ def _classify_managed(
                 detail=str(exc),
             )
         )
-    if data != expected:
-        return EntryDecision.inactive(
-            _finding(
-                entry,
-                "identity-mismatch",
-                target=template_path,
-                entry_class="managed-plugin",
-                owner=source,
-                detail="runtime manifest differs from the current plugin template",
-            )
-        )
+    # No baked-content comparison: `data` is a pointer, `expected` is always
+    # freshly re-resolved from the identity-verified template above -- there
+    # is nothing on disk that can drift out of sync with it.
     try:
         contribution = _parse_contribution(
             expected,
@@ -650,6 +646,19 @@ def scan_pivot_registry(
         if schema == MANAGED_SCHEMA_VERSION:
             entry_classes[str(entry)] = "managed-plugin"
             return _classify_managed(entry, data, activation=activation)
+        if schema == 2:
+            # Superseded fully-baked managed shape (pre-pointer redesign).
+            # Route through the same unattributed/advisory path as a v1
+            # legacy manifest so a pre-existing on-disk file keeps
+            # contributing (and is prunable) while it decays -- the
+            # materializer never republishes at this schema version again.
+            entry_classes[str(entry)] = "unknown-legacy"
+            return _classify_unattributed(
+                entry,
+                data,
+                entry_class="unknown-legacy",
+                advisory=True,
+            )
         if schema == 1:
             source = _KNOWN_LEGACY_PIVOTS.get(entry.name)
             if source:
@@ -927,11 +936,12 @@ def discover_pivots(base: str | os.PathLike[str] | None = None) -> list[Register
     """Return active pivots, with parser-only explicit-dir support."""
     candidates: list[RegisteredPivot] = []
     for path, data in _compat_manifest_documents(pivots_dir(base)):
-        if "list" not in data:
+        resolved = _resolve_compat_document(path, data)
+        if resolved is None or "list" not in resolved:
             continue
         try:
             candidates.append(
-                parse_manifest(data, name=path.stem, source_path=str(path))
+                parse_manifest(resolved, name=path.stem, source_path=str(path))
             )
         except ManifestError:
             continue

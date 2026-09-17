@@ -8,13 +8,23 @@ entry-points do **not** cross venvs; a filesystem manifest registry does.
 
 The contract:
 
-* A contributing plugin's installer drops a JSON manifest into the shared
-  runtime root at ``~/.agent-worktrees/pivots/<name>.json`` (overridable for
-  tests via ``AGENT_WORKTREES_PIVOTS_DIR``).
-* The manifest declares a display ``label``, a position hint (``after``), a
-  ``list`` command (an argv template that prints a JSON array of entries to
-  stdout), a field mapping so the generic renderer can pull id/title/worktree/
-  badges out of each entry, and an ``actions`` set (each an argv template).
+* A contributing plugin declares its pivot in a template at
+  ``<plugin_root>/pivots/<name>.json`` -- a display ``label``, a position hint
+  (``after``), a ``list`` command (an argv template that prints a JSON array
+  of entries to stdout), a field mapping so the generic renderer can pull
+  id/title/worktree/badges out of each entry, and an ``actions`` set (each an
+  argv template).
+* ``ensure_pivots``/``scan_pivot_registry`` materialize one **attributed
+  pointer** per active (plugin, template) pair into the shared runtime root
+  at ``~/.agent-worktrees/pivots/<name>.json`` (overridable for tests via
+  ``AGENT_WORKTREES_PIVOTS_DIR``) -- ``{schema_version, plugin, plugin_root,
+  template}``, mirroring ``config_dropins.py``'s managed pointer. The pointer
+  never carries baked content (no ``list``/``actions``): every scan re-reads
+  the template fresh out of the identity-verified ``plugin_root`` and
+  re-resolves its commands to absolute paths, so an ordinary plugin content
+  or version-directory update needs no on-disk rewrite of the pointer at all,
+  and there is exactly **one** file per plugin+template -- never a
+  fingerprint-suffixed duplicate.
 * The picker scans that directory at startup and renders a generic pivot per
   manifest -- no engine code per new pivot. Data flows only through the
   contributing plugin's CLI on ``PATH`` (never a cross-venv import), so the
@@ -34,7 +44,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, cast
 
 from dropin_registry import (
     Finding,
@@ -64,7 +74,21 @@ PIVOTS_DIR_ENV = "AGENT_WORKTREES_PIVOTS_DIR"
 PLUGINS_ROOT_ENV = "AGENT_WORKTREES_PLUGINS_DIR"
 
 REGISTRY_NAME = "pivots"
-MANAGED_SCHEMA_VERSION = 2
+#: v3 is the attributed-**pointer** shape ({schema_version, plugin,
+#: plugin_root, template} only -- no baked content). v2 was the superseded
+#: fully-baked-manifest shape (absolute commands written into the shared
+#: runtime file itself, re-diffed byte-for-byte on every scan); it is still
+#: recognized read-only as a migrating "unknown-legacy" entry (see
+#: ``classify`` in ``pivot_registry_scan.py``) so pre-existing v2 files decay
+#: gracefully instead of breaking outright.
+MANAGED_SCHEMA_VERSION = 3
+#: Exact key set for a valid v3 managed pointer (mirrors
+#: ``config_dropins.py``'s ``_POINTER_KEYS``, with ``template`` -- a bare
+#: filename resolved under ``plugin_root/pivots/`` -- standing in for that
+#: registry's absolute ``target``).
+_MANAGED_POINTER_KEYS = frozenset(
+    {"schema_version", "plugin", "plugin_root", "template"}
+)
 _PLUGIN_SOURCE_RE = re.compile(r"^[^@/\\\s]+@[^@/\\\s]+$")
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 _KNOWN_LEGACY_PIVOTS = {
@@ -731,6 +755,37 @@ def _compat_manifest_documents(
     return documents
 
 
+def _resolve_compat_document(
+    path: Path, data: Mapping[str, object]
+) -> Mapping[str, object] | None:
+    """See through our own managed pointer for the parser-only compat family.
+
+    These readers (``discover_pivots``/``discover_worktree_actions``/
+    ``discover_config_sections``) never did activation/identity verification
+    -- that is precisely their "parser-only, explicit-dir" contract -- so
+    resolving our own pointer format here to the template it names adds no
+    new trust boundary. Commands are deliberately left unrewritten (unlike
+    the identity-verified scan path in ``pivot_registry_scan.py``): compat
+    callers historically pass synthetic command names that were never meant
+    to resolve on disk. A non-pointer document (an operator manifest, or a
+    superseded fully-baked one) passes through unchanged.
+    """
+    if (
+        isinstance(data, dict)
+        and set(data) == _MANAGED_POINTER_KEYS
+        and isinstance(data.get("schema_version"), int)
+        and isinstance(data.get("plugin_root"), str)
+        and isinstance(data.get("template"), str)
+    ):
+        try:
+            root = Path(cast(str, data["plugin_root"])).expanduser()
+            template = _read_json(root / "pivots" / cast(str, data["template"]))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return None
+        return template if isinstance(template, dict) else None
+    return data
+
+
 def discover_worktree_actions(
     base: str | os.PathLike[str] | None = None,
 ) -> list[WorktreeAction]:
@@ -741,8 +796,11 @@ def discover_worktree_actions(
     """
     out: list[WorktreeAction] = []
     for path, data in _compat_manifest_documents(pivots_dir(base)):
+        resolved = _resolve_compat_document(path, data)
+        if resolved is None:
+            continue
         try:
-            out.extend(parse_worktree_actions(data, name=path.stem))
+            out.extend(parse_worktree_actions(resolved, name=path.stem))
         except ManifestError:
             continue
     return out
@@ -754,8 +812,11 @@ def discover_config_sections(
     """Return active config sections, with parser-only explicit-dir support."""
     out: list[ConfigSection] = []
     for path, data in _compat_manifest_documents(pivots_dir(base)):
+        resolved = _resolve_compat_document(path, data)
+        if resolved is None:
+            continue
         try:
-            out.extend(parse_config_sections(data, name=path.stem))
+            out.extend(parse_config_sections(resolved, name=path.stem))
         except ManifestError:
             continue
     return out
