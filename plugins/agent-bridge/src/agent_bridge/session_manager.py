@@ -261,7 +261,7 @@ def _failed_acp_handshake_command() -> str:
 # ``agent-codespaces claim`` exits with this code on a live claim conflict
 # (a different, still-alive worktree already controls the CodeSpace). Kept in
 # sync with ``agent_codespaces.__main__._BUSY_EXIT``.
-from .execution_admission import _CODESPACE_BUSY_EXIT, _CODESPACE_COORDINATION_EXIT
+from .execution_admission import _CODESPACE_BUSY_EXIT, _CODESPACE_COORDINATION_EXIT  # noqa: F401 -- compatibility re-export
 
 
 class CodespaceClaimConflictError(Exception):

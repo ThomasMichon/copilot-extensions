@@ -2,8 +2,6 @@
 from __future__ import annotations
 import argparse
 from dataclasses import asdict
-from .ssh_transport import build_remote_command, cleanup_remote_envs, container_environment, prepare_ssh_config, write_remote_env
-from .resolver import host_gh_token
 
 def _prepare_session_host(args: argparse.Namespace) -> dict:
     """Prepare endpoint + auth inputs; agent-bridge owns the Host lifecycle."""

@@ -59,9 +59,9 @@ from .config import (
     validate_config,
 )
 from .connect import (
-    ConnectStage,
-    ConnectTracker,
-    breadcrumb_prelude,
+    ConnectStage as ConnectStage,
+    ConnectTracker as ConnectTracker,
+    breadcrumb_prelude as breadcrumb_prelude,
 )
 from .lifecycle import (
     cleanup_stale,

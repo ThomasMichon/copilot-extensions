@@ -50,7 +50,7 @@ from .ssh_transport import (
     build_remote_command,
     build_ssh_command,
     cleanup_remote_env,
-    cleanup_remote_envs,
+    cleanup_remote_envs as cleanup_remote_envs,
     container_environment,
     prepare_ssh_config,
     write_remote_env,

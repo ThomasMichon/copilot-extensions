@@ -13,7 +13,7 @@ start/reload the service reads each source live and merges in memory.
 
 from __future__ import annotations
 
-from .local_git_identity import cwd_repo_root, _git_origin_remote  # noqa: F401 -- compatibility re-export
+from .local_git_identity import cwd_repo_root, _git_origin_remote, _GIT_PROBE_TIMEOUT  # noqa: F401 -- compatibility re-export
 
 import hashlib
 import json
@@ -29,7 +29,6 @@ from typing import Any, cast
 from urllib.parse import urlsplit, urlunsplit
 
 import yaml
-from agent_procutil import no_window_kwargs
 from dropin_registry import (
     EntryDecision,
     EntryStatus,
@@ -47,7 +46,6 @@ from plugin_activation import (
 )
 
 log = logging.getLogger("agent-codespaces")
-_GIT_PROBE_TIMEOUT = 10.0
 
 
 def _home() -> Path:

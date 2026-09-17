@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .session_activity import _count_active_sessions  # noqa: F401 -- compatibility re-export
+from .session_activity import _count_active_sessions, _ACTIVE_STATUSES  # noqa: F401 -- compatibility re-export
 
 import asyncio
 import contextlib
@@ -39,11 +39,6 @@ from .transport import shutdown_ssh
 
 log = logging.getLogger("agent-bridge")
 _GOVERNANCE_BACKOFF_SECONDS = 10.0
-
-# Session statuses that mean "a host is actively using this daemon". When none
-# of these are present, the idle-shutdown monitor (if armed) counts down.
-_ACTIVE_STATUSES = {"created", "starting", "running", "idle"}
-
 
 async def _run_in_daemon_thread(fn, *args):
     """Await blocking readiness work without letting it pin process shutdown."""
