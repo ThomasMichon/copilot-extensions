@@ -1327,20 +1327,16 @@ def _cmd_update(rest: list[str]) -> int:
     else:
         print(f"    ○ self-update {su.action}: {su.reason} — continuing")
 
-    # 2. Orchestrate via the engine, bypassing the seam; a threaded --project
-    #    resolves to its checkout as cwd (not forwarded as a flag) so cwd-based
-    #    discovery works outside an adopted repo.
+    # 2. Orchestrate via the engine, bypassing the seam. A threaded --project is
+    #    forwarded through run_engine_passthrough's own project param (placed
+    #    before the verb), not appended to args, so the engine can resolve it
+    #    even when this Manager itself runs outside any adopted repo.
     project, forwarded = _extract_project(rest)
-    proj = next((p for p in build_projects() if p.name == project), None) if project else None
-    engine_cwd = proj.repo.path if proj and proj.repo else None
-    if project and not engine_cwd:
-        print(f"  ○ no checkout for project {project!r} -- continuing without cwd context")
     print()
     print("  Updating harness plugins + runtimes via agent-worktrees …")
     print()
     try:
-        return ec.run_engine_passthrough(
-            None, ["update", "--no-manager", *forwarded], cwd=engine_cwd)
+        return ec.run_engine_passthrough(project, ["update", "--no-manager", *forwarded])
     except ec.EngineError as e:
         print(f"  ✗ {e}")
         if getattr(e, "install_hint", False):
