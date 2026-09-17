@@ -298,7 +298,7 @@ def run_json(project: str | None, args: list[str], *,
 
 
 def run_engine_passthrough(project: str | None, args: list[str], *,
-                           timeout: int | None = None) -> int:
+                           timeout: int | None = None, cwd: str | Path | None = None) -> int:
     """Run an engine verb with **inherited stdio**, returning its exit code.
 
     Unlike :func:`run_json` (which captures + parses), this streams the engine's
@@ -306,7 +306,8 @@ def run_engine_passthrough(project: str | None, args: list[str], *,
     verbs the Manager *orchestrates* rather than reads, notably
     ``agent-worktrees update --no-manager`` (the seam bypass the Manager re-enters
     through). Raises :class:`EngineError` with ``install_hint`` when the engine
-    binstub is absent.
+    binstub is absent. ``cwd``, when given, runs the engine from that directory
+    (e.g. a resolved project checkout) so its cwd-based project discovery works.
     """
     base = engine_base_command()
     if base is None:
@@ -318,8 +319,7 @@ def run_engine_passthrough(project: str | None, args: list[str], *,
     cmd += args
     try:
         return subprocess.run(
-            cmd, timeout=timeout, check=False,
-            env=_engine_environment(),
+            cmd, timeout=timeout, check=False, env=_engine_environment(), cwd=cwd,
         ).returncode
     except subprocess.TimeoutExpired as e:
         raise EngineError(f"{ENGINE_BIN} {' '.join(args)} timed out") from e
