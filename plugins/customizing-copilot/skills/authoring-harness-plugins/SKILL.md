@@ -92,6 +92,14 @@ status). Substance in the plugin; keep the narrative thin.
    concise `sessionStart` context kernel from the plugin. Leave repository
    identity, local invariants, and minimal safety/publication fail-safes in the
    target repository's lean `AGENTS.md`; keep detailed procedures in skills.
+   The dividing line between the two surfaces is not "static vs. dynamic" by
+   itself -- it's audience and resolvability: `AGENTS.md` is the universal
+   visitor contract, correct for any agent regardless of home base, while
+   `.github/instructions/*.instructions.md` is where a harness resolves facts
+   that are only correct *this session* (a resolved config value, current
+   branch-protection state, a live topology fact). See
+   [`docs/patterns/agents-md-vs-instructions-split.md`](../../../../docs/patterns/agents-md-vs-instructions-split.md)
+   for the full heuristic and a worked precedent.
    Hard-gate the hook by resolved cwd/config applicability, treat source as
    allow-by-default with documented exclusions, preserve bounded
    operator-versus-repo precedence, provide Bash/PowerShell parity, and fail open. Some

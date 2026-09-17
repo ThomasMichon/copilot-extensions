@@ -231,3 +231,6 @@ review mechanism is needed -- only a documented content convention.
 
 - Vision: `visions/harness-guidance/README.md`
 - [github/copilot-cli#3589](https://github.com/github/copilot-cli/issues/3589)
+- [`agents-md-vs-instructions-split.md`](agents-md-vs-instructions-split.md)
+  -- which content belongs in this mechanism's dynamic half versus a repo's
+  root `AGENTS.md` visitor contract.
