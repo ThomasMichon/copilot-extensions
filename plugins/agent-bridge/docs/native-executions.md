@@ -55,6 +55,14 @@ New provider-qualified launches require the preparation result's pinned
 ```
 
 Preparation owns verifying that the selected command belongs to that installation.
+Before allocating a venue or preparing a new launch, require the running
+controller's `native capabilities --json` response to advertise
+`capabilities.remoteCommand` with `schema: "copilot-extensions.remote-command"`,
+`version: 1`, and `receiptHash: "sha256"`. The remote native-host capabilities
+command advertises the same descriptor support. The legacy control capability
+name, terminal capabilities, and installed CLI help do not establish that an
+older running controller supports pinned remote commands. This additive
+preflight capability does not change compatibility for existing saved records.
 The descriptor is snapshotted in durable controller state and reused for
 capabilities, service/readiness, launch, observation, messaging, and retirement.
 Every invocation checks the same receipt bytes before executing the absolute argv;

@@ -3,6 +3,9 @@
 
 def capabilities() -> dict:
     return {
+        "remoteCommand": {
+            "schema": "copilot-extensions.remote-command", "version": 1, "receiptHash": "sha256",
+        },
         "terminal": {
             "protocol": "native.v1", "writer": "exclusive", "observers": True,
             "takeover": "explicit", "replayBytes": 1048576,

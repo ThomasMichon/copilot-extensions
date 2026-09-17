@@ -11,6 +11,34 @@ from agent_bridge.native_store import NativeError
 
 
 @pytest.mark.guard
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider_available", [False, True])
+async def test_remote_command_capability_is_explicit_before_allocation(tmp_path, capsys, provider_available):
+    import httpx
+    from fastapi import FastAPI
+    from types import SimpleNamespace
+    from agent_bridge.native_runtime import command
+    from agent_bridge.routes import native
+
+    app = FastAPI()
+    root = tmp_path / "native-state"
+    app.state.native_manager = NativeManager(
+        root, lambda namespace="codespace": ["/provider", namespace] if provider_available else None,
+    )
+    app.include_router(native.router)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://fixture") as client:
+        response = await client.get("/api/v1/native-executions/capabilities")
+    assert response.status_code == 200
+    value = response.json()
+    expected = {"schema": "copilot-extensions.remote-command", "version": 1, "receiptHash": "sha256"}
+    assert value["capabilities"].get("remoteCommand") == expected
+    assert value["providerAvailable"] is provider_available
+    assert not root.exists(), "capability preflight must not allocate native ownership"
+    assert command(SimpleNamespace(native_host_action="capabilities")) == 0
+    assert json.loads(capsys.readouterr().out)["capabilities"]["remoteCommand"] == expected
+
+
+@pytest.mark.guard
 def test_native_public_capabilities_and_venue_receipt_match_captured_contract():
     from agent_bridge.native_capabilities import capabilities
     from agent_bridge.native_store import receipt
