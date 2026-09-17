@@ -17,7 +17,12 @@ from dropin_registry import (
 )
 from plugin_activation import ActivationReport, ActivePlugin, ActivePluginRoot
 
-from worktree_manager.production_picker.picker_tui import pivots
+from worktree_manager.production_picker.picker_tui import (
+    pivot_manifest,
+    pivot_registry_materialization,
+    pivot_registry_scan,
+    pivots,
+)
 
 
 def _command(root: Path, name: str = "sample") -> Path:
@@ -104,7 +109,7 @@ def test_active_plugin_materializes_attributed_absolute_command(tmp_path):
     # scan (see report.pivots above, which already reflects the resolved
     # absolute command).
     assert payload == {
-        "schema_version": pivots.MANAGED_SCHEMA_VERSION,
+        "schema_version": pivot_manifest.MANAGED_SCHEMA_VERSION,
         "plugin": source,
         "plugin_root": str(root.resolve()),
         "template": "sample.json",
@@ -289,7 +294,7 @@ def test_materializer_refreshes_append_only_without_overwriting(tmp_path):
     stray.write_text(
         json.dumps(
             {
-                "schema_version": pivots.MANAGED_SCHEMA_VERSION,
+                "schema_version": pivot_manifest.MANAGED_SCHEMA_VERSION,
                 "plugin": source,
                 "plugin_root": str(root.resolve()),
                 "template": "sample.json",
@@ -306,7 +311,7 @@ def test_materializer_refreshes_append_only_without_overwriting(tmp_path):
     assert [pivot.label for pivot in report.pivots] == ["Updated"]
     assert not report.findings
     assert json.loads(stray.read_text(encoding="utf-8")) == {
-        "schema_version": pivots.MANAGED_SCHEMA_VERSION,
+        "schema_version": pivot_manifest.MANAGED_SCHEMA_VERSION,
         "plugin": source,
         "plugin_root": str(root.resolve()),
         "template": "sample.json",
@@ -365,7 +370,7 @@ def test_absent_entry_publication_race_never_overwrites_operator(
             )
         return original_link(source_path, destination_path)
 
-    monkeypatch.setattr(pivots.os, "link", race_link)
+    monkeypatch.setattr(pivot_registry_materialization.os, "link", race_link)
     report = pivots.scan_pivot_registry(
         registry,
         activation_report=_active_report(source, root),
@@ -953,7 +958,7 @@ def test_warning_cap_dedup_and_exhaustive_json(tmp_path, monkeypatch, caplog):
         activation_report=ActivationReport(ScanAuthority.COMPLETE, {}),
     )
     monkeypatch.setattr(
-        pivots,
+        pivot_registry_scan,
         "_WARNING_TRACKER",
         WarningTracker(limit=1, repeat_after_seconds=3600),
     )

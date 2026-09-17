@@ -95,7 +95,7 @@ def test_transplanted_picker_sources_match_production_copy():
     for relative in relative_paths:
         assert (transplanted / relative).read_bytes() == (source / relative).read_bytes()
     assert "WORKTREE_MANAGER_PICKER_NO_PIVOT_MATERIALIZE" in (
-        transplanted / "picker_tui" / "pivots.py"
+        transplanted / "picker_tui" / "pivot_registry_scan.py"
     ).read_text(encoding="utf-8")
 
 

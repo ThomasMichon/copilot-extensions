@@ -6,7 +6,11 @@ import json
 from pathlib import Path
 
 import pytest
-from worktree_manager.production_picker.picker_tui import pivots
+from worktree_manager.production_picker.picker_tui import (
+    pivot_manifest,
+    pivot_registry_scan,
+    pivots,
+)
 
 #: Repo root (…/copilot-extensions), derived from this test's location:
 #: worktree-manager/tests/production_picker/test_pivots.py -> parents[3].
@@ -31,7 +35,7 @@ def test_preview_mode_suppresses_ambient_pivot_materialization(tmp_path, monkeyp
     calls = []
     monkeypatch.setenv("WORKTREE_MANAGER_PICKER_NO_PIVOT_MATERIALIZE", "1")
     monkeypatch.setattr(
-        pivots,
+        pivot_registry_scan,
         "_materialize_active_pivots",
         lambda *args, **kwargs: calls.append((args, kwargs)),
     )
@@ -113,7 +117,7 @@ def test_state_root_file_visibility_is_lazy_and_configuration_gated(
     )
     calls = []
     monkeypatch.setattr(
-        pivots,
+        pivot_manifest,
         "_resolve_state_root_path",
         lambda: calls.append(True) or state_root,
     )
@@ -134,7 +138,7 @@ def test_state_root_file_visibility_is_lazy_and_configuration_gated(
 def test_ungated_pivots_do_not_resolve_state_root(tmp_path, monkeypatch):
     _write(tmp_path, "always", {"label": "Always", "list": ["always"]})
     monkeypatch.setattr(
-        pivots,
+        pivot_manifest,
         "_resolve_state_root_path",
         lambda: pytest.fail("ungated discovery must not resolve the state root"),
     )
@@ -158,7 +162,7 @@ def test_unbound_state_root_is_resolved_once_for_all_gated_pivots(
         )
     calls = []
     monkeypatch.setattr(
-        pivots,
+        pivot_manifest,
         "_resolve_state_root_path",
         lambda: calls.append(True) or None,
     )
