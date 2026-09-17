@@ -102,8 +102,17 @@ public marker (or, worse, a leaked branch name) ever exposes.
   format (lowercase, hyphen-joined, bounded length, no path separators or
   shell metacharacters) or the result is rejected; a timeout, non-zero exit,
   or format failure is a **fail-closed** error (falls back to the built-in
-  neutral generator), never a silent pass-through of arbitrary hook output
-  into a codename that could itself carry a machine/project/timestamp value.
+  neutral generator). **Format validation is a syntax check, not a content
+  guarantee** — a hook can still emit a *syntactically valid* handle that is
+  semantically identifying (e.g. `machine-20260917`, a real project name).
+  Format checking only protects against malformed output, not against a
+  badly-chosen hook vocabulary. The `codename` mode's public-safety
+  guarantee therefore **only holds unconditionally for the built-in
+  generator**; enabling an external hook on a `source_attribution: codename`
+  repo is an explicit, documented trust decision the hook's *owner* makes —
+  document this plainly (a warning at config-load time when a repo combines
+  a non-default hook with `codename` mode is in scope for this phase), and
+  do not describe hook output as informationless by construction.
 - [ ] Collision-avoid against the local tracking store (retry on collision,
   same spirit as the existing registry-checked mode of comparable
   generators) — no new persistence primitive for the *local* check (Phase 3
@@ -198,6 +207,11 @@ public marker (or, worse, a leaked branch name) ever exposes.
 - [ ] Unit tests: handle generator format (lowercase, hyphen-joined,
   branch-safe), collision retry, external-hook timeout/format-validation/
   fail-closed behavior on malformed or slow hook output.
+- [ ] Config-load test: a repo combining a non-default external generator
+  hook with `source_attribution: codename` surfaces the documented
+  trust-scope warning (format validation ≠ content/informationless
+  guarantee — that guarantee only holds unconditionally for the built-in
+  generator).
 - [ ] Unit tests: `source_attribution: codename` marker contains the
   codename and *no* machine/worktree/session/timestamp substrings, on
   **both** the initial `create-pr` body path and the
@@ -257,3 +271,17 @@ _Pending review._
   note) and every affected Plan phase; expanded the Validation Plan to
   match. No phase count changed, but Phases 1, 2, 3, 4, and 5 all gained
   concrete requirements they previously lacked.
+
+### 2026-09-17 — Review round 2: hook-guarantee scoping fix
+- Follow-up review (2 findings) caught one remaining real gap: syntax
+  format-validation on external generator hook output does not prove the
+  output is *semantically* non-identifying (a hook could emit a
+  syntactically valid but identifying handle, e.g. `machine-20260917`).
+  Scoped Phase 1's public-safety guarantee to hold unconditionally only for
+  the built-in generator, and made using a non-default hook under
+  `source_attribution: codename` an explicit, warned trust decision on the
+  hook owner rather than an implicit guarantee. (The review's second
+  finding — a missing Documentation impact statement — was a timing
+  artifact: the PR body was updated with that statement in the same push
+  cycle the review ran against, just after the review started; the live PR
+  body already carries it.)
