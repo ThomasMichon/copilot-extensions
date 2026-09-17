@@ -64,10 +64,25 @@ if [[ -n "$AHP_TOKEN_FILE" ]]; then
     fi
 fi
 
+# Decode the receipt path independently of whether an initial prompt is being
+# transported: standalone pane-create diagnostics use the same receipt handshake
+# for arbitrary payload commands, not only native ``--interactive`` launches.
+if [[ -n "$INITIAL_PROMPT_RECEIPT_B64" ]]; then
+    if RECEIPT_PATH="$(printf '%s' "$INITIAL_PROMPT_RECEIPT_B64" | base64 --decode 2>/dev/null)"; then
+        :
+    elif RECEIPT_PATH="$(printf '%s' "$INITIAL_PROMPT_RECEIPT_B64" | base64 -D 2>/dev/null)"; then
+        :
+    else
+        echo "[agent-worktrees] invalid initial-prompt receipt path" >&2
+        exit 2
+    fi
+    [[ -n "$RECEIPT_PATH" ]] || exit 2
+fi
+
 # Native interactive handoff seed. UTF-8 base64 keeps every wrapper control
 # argument space-free so psmux never sees a multi-word pane argument. Decode
-# after mux argv handling, append a real Copilot argument, and write the receipt
-# before exec.
+# after mux argv handling, append a real Copilot argument, then write the
+# receipt before exec.
 if [[ -n "$INITIAL_PROMPT_B64" ]]; then
     # Command substitution strips trailing newlines. Append a non-newline
     # sentinel inside the substitution, then remove only that sentinel so the
@@ -88,16 +103,10 @@ if [[ -n "$INITIAL_PROMPT_B64" ]]; then
         echo "[agent-worktrees] invalid initial-prompt transport" >&2
         exit 2
     fi
-    if RECEIPT_PATH="$(printf '%s' "$INITIAL_PROMPT_RECEIPT_B64" | base64 --decode 2>/dev/null)"; then
-        :
-    elif RECEIPT_PATH="$(printf '%s' "$INITIAL_PROMPT_RECEIPT_B64" | base64 -D 2>/dev/null)"; then
-        :
-    else
-        echo "[agent-worktrees] invalid initial-prompt receipt path" >&2
-        exit 2
-    fi
-    [[ -n "$RECEIPT_PATH" ]] || exit 2
     set -- "$@" --interactive "$INITIAL_PROMPT"
+fi
+
+if [[ -n "${RECEIPT_PATH:-}" ]]; then
     RECEIPT_DIR="$(dirname "$RECEIPT_PATH")"
     mkdir -p "$RECEIPT_DIR" || exit 2
     RECEIPT_TMP="$RECEIPT_PATH.$$.tmp"

@@ -153,6 +153,25 @@ if (-not [string]::IsNullOrWhiteSpace($ahpTokenFile)) {
     }
 }
 
+# Decode the receipt path independently of whether an initial prompt is being
+# transported: standalone pane-create diagnostics use the same receipt handshake
+# for arbitrary payload commands, not only native ``--interactive`` launches.
+if (-not [string]::IsNullOrWhiteSpace($initialPromptReceiptB64)) {
+    try {
+        $receiptPath = [Text.Encoding]::UTF8.GetString(
+            [Convert]::FromBase64String($initialPromptReceiptB64)
+        )
+        if ([string]::IsNullOrWhiteSpace($receiptPath)) {
+            throw 'missing initial-prompt receipt path'
+        }
+    } catch {
+        [Console]::Error.WriteLine(
+            "[agent-worktrees] invalid initial-prompt receipt path: $($_.Exception.Message)"
+        )
+        exit 2
+    }
+}
+
 # Native interactive handoff seed. psmux cannot preserve a multi-word pane argv
 # element, so handoff-cutover sends UTF-8 base64 + a receipt token as space-free
 # wrapper control arguments. Decode after psmux has reconstructed this argv,
@@ -163,16 +182,20 @@ if (-not [string]::IsNullOrWhiteSpace($initialPromptB64)) {
         $initialPrompt = [Text.Encoding]::UTF8.GetString(
             [Convert]::FromBase64String($initialPromptB64)
         )
-        $receiptPath = [Text.Encoding]::UTF8.GetString(
-            [Convert]::FromBase64String($initialPromptReceiptB64)
-        )
-        if ([string]::IsNullOrWhiteSpace($receiptPath)) {
-            throw 'missing initial-prompt receipt path'
-        }
         # Use the long form: when the child is a PowerShell script launcher,
         # short -i is consumed by PowerShell's parameter binder and rejected as
         # an ambiguous common-parameter abbreviation before ValueFromRemainingArguments.
         $rest += @('--interactive', $initialPrompt)
+    } catch {
+        [Console]::Error.WriteLine(
+            "[agent-worktrees] invalid initial-prompt transport: $($_.Exception.Message)"
+        )
+        exit 2
+    }
+}
+
+if ($receiptPath) {
+    try {
         $receiptDir = Split-Path -Parent $receiptPath
         New-Item -ItemType Directory -Path $receiptDir -Force -ErrorAction Stop | Out-Null
         $receiptTmp = "$receiptPath.$PID.tmp"
@@ -180,7 +203,7 @@ if (-not [string]::IsNullOrWhiteSpace($initialPromptB64)) {
         Move-Item -LiteralPath $receiptTmp -Destination $receiptPath -Force -ErrorAction Stop
     } catch {
         [Console]::Error.WriteLine(
-            "[agent-worktrees] invalid initial-prompt transport: $($_.Exception.Message)"
+            "[agent-worktrees] could not write pane launch receipt: $($_.Exception.Message)"
         )
         exit 2
     }

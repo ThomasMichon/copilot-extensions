@@ -316,3 +316,16 @@ live mux mutation testing unsafe/impossible before. Only after both
 primitives are hardened and independently validated does `handoff-cutover`
 (spawn + retire modes) and the Picker Stop/Take-over path get rewired to call
 them, collapsing today's two divergent termination ladders into one.
+
+### 6.4 Manual live-validation runbook
+
+Use the isolated harness only against a **throwaway worktree** or a **detached
+session you are not currently attached to**:
+
+- `agent-worktrees pane-create --worktree-id <throwaway> --work-dir <path> -- -- <payload ...>`
+- `agent-worktrees pane-terminate --pane-id <pane>`
+
+Do **not** run these live-mux mutation commands against the attached session
+driving your current work. `handoff-live-cutover`'s Phase 4 investigation
+already showed that mutating the live attached mux from inside itself can bleed
+keystrokes back into the operator's terminal and corrupt the evidence.
