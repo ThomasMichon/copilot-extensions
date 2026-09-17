@@ -1090,15 +1090,9 @@ def _worktree_to_dict(
     head_session = getattr(rec, "resolved_head_session", None)
     if head_session:
         d["last_session_id"] = head_session
-    if rec.session_backend is not None:
-        d["session_backend"] = rec.session_backend.to_dict()
-        d["session_ahp_live"] = rec.session_backend.state in {"active", "unknown"}
-        if not head_session and rec.session_backend.state != "disposed":
-            d["last_session_id"] = rec.session_backend.session_id
-    elif rec.session_backend_opaque:
-        d["session_backend"] = {"opaque": True, "state": "unknown"}
-        d["session_ahp_live"] = True
-    if rec.execution_leg_opaque:
+    if rec.execution_leg_opaque or rec.session_backend_opaque:
+        # Legacy ``session_backend:`` opaque records still surface through the
+        # generic execution-leg envelope so callers never branch on the old key.
         d["execution_leg"] = {"opaque": True, "state": "unknown"}
         d["execution_leg_live"] = True
     else:
@@ -1106,6 +1100,10 @@ def _worktree_to_dict(
         if execution_leg is not None:
             d["execution_leg"] = execution_leg.to_dict()
             d["execution_leg_live"] = execution_leg.state in {"active", "unknown"}
+            if not head_session and execution_leg.state != "disposed":
+                session_id = execution_leg.blob.get("session_id")
+                if isinstance(session_id, str) and session_id:
+                    d["last_session_id"] = session_id
     if rec.completed_at:
         d["completed_at"] = rec.completed_at
     if rec.kind in tracking.MANAGED_KINDS:
@@ -1338,134 +1336,6 @@ def _worktree_to_dict(
     if bridge_live_wts and rec.worktree_id in bridge_live_wts:
         d["session_bridge_live"] = True
     return d
-
-
-def cmd_session_backend(args) -> int:
-    """Create, verify, inspect, or dispose a worktree session backend."""
-    from . import ahp_backend
-
-    config = cfg.load_config()
-    worktree_id = _resolve_worktree_id(args.worktree_id)
-    yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
-    if not yaml_path.exists():
-        return _json_error(f"Worktree not found: {worktree_id}")
-
-    try:
-        with tracking._RecordLock(yaml_path):
-            initial_record = tracking.load_record(yaml_path)
-        if not config.session_backend.is_ahp:
-            if initial_record.session_backend_opaque or (
-                initial_record.session_backend is not None
-                and initial_record.session_backend.state in {"active", "unknown"}
-            ):
-                raise ahp_backend.AhpBackendError(
-                    "worktree has a live or unknown hosted-session binding while "
-                    "session_backend.kind is 'direct'; restore the AHP "
-                    "configuration and dispose the binding before launching "
-                    "directly"
-                )
-            _json_output({"enabled": False, "kind": "direct"})
-            return 0
-        configured_account = ahp_backend.account_for_backend(config)
-        if args.action == "status":
-            record = initial_record
-            if record.session_backend_opaque:
-                raise ahp_backend.AhpBackendError(
-                    "worktree uses a newer unsupported session_backend schema"
-                )
-            binding = record.session_backend
-            if binding is not None:
-                if binding.endpoint_url != config.session_backend.endpoint_url:
-                    raise ahp_backend.AhpBackendError(
-                        "persisted AHP endpoint does not match current configuration"
-                    )
-                if binding.auth_account != configured_account:
-                    raise ahp_backend.AhpBackendError(
-                        "persisted AHP account does not match current configuration"
-                    )
-        else:
-            backend_lock_path = yaml_path.with_suffix(".session-backend.yaml")
-            backend_lock_timeout = (
-                (ahp_backend.SESSION_LIFECYCLE_TIMEOUT_SECONDS * 2)
-                + (config.session_backend.connect_timeout_seconds * 2)
-                + 5
-            )
-            with tracking._RecordLock(
-                backend_lock_path,
-                timeout=backend_lock_timeout,
-                require_sidecar=True,
-            ):
-                record = tracking.load_record(yaml_path)
-                repo = _repo_for_record(config, record) or config.default_repo
-                lifecycle_lock = fin.FinalizeLock(Path(repo.worktree_root) / ".finalize.lock")
-                lifecycle_lock.acquire()
-                try:
-                    if not yaml_path.exists():
-                        raise ahp_backend.AhpBackendError(
-                            f"worktree record disappeared: {worktree_id}"
-                        )
-                    record = tracking.load_record(yaml_path)
-                    if record.session_backend_opaque:
-                        raise ahp_backend.AhpBackendError(
-                            "worktree uses a newer unsupported session_backend schema"
-                        )
-                    if args.action == "ensure" and record.status in {"finalizing", "finalized"}:
-                        raise ahp_backend.AhpBackendError(
-                            "cannot activate a hosted session for a finalizing "
-                            "or finalized worktree"
-                        )
-                    if args.action == "ensure":
-                        binding = ahp_backend.ensure_worktree_session(config, record,)
-                        event_name = "ahp_session_bound"
-                    else:
-                        changed = ahp_backend.dispose_worktree_session(config, record,)
-                        binding = record.session_backend
-                        event_name = "ahp_session_disposed" if changed else ""
-
-                    if binding is not None and (args.action == "ensure" or changed):
-                        with tracking._RecordLock(yaml_path):
-                            latest = tracking.load_record(yaml_path)
-                            latest.session_backend = binding
-                            latest.session_backend_opaque = False
-                            latest.session_backend_raw = None
-                            tracking._save_record_unlocked(latest, yaml_path)
-                            record = latest
-                        activity.log_event(
-                            event_name,
-                            worktree_id=record.worktree_id,
-                            session_id=binding.session_id,
-                            backend="ahp",
-                        )
-                finally:
-                    lifecycle_lock.release()
-    except (ahp_backend.AhpBackendError, OSError, ValueError) as exc:
-        return _json_error(str(exc), exit_code=3)
-
-    if binding is None:
-        _json_output(
-            {
-                "enabled": True,
-                "kind": "ahp",
-                "bound": False,
-                "endpoint_url": config.session_backend.endpoint_url,
-                "auth_account": configured_account,
-            }
-        )
-        return 0
-    _json_output(
-        {
-            "enabled": True,
-            "kind": "ahp",
-            "bound": binding.state == "active",
-            "endpoint_url": binding.endpoint_url,
-            "session_id": binding.session_id,
-            "protocol_version": binding.protocol_version,
-            "auth_account": binding.auth_account,
-            "state": binding.state,
-            "binding_revision": binding.binding_revision,
-        }
-    )
-    return 0
 
 
 def _execution_leg_payload(
@@ -1958,16 +1828,10 @@ def cmd_execution_leg(args) -> int:
 
 
 def _unsupported_hosted_launch(
-    config: cfg.Config,
     record: tracking.WorktreeRecord | None,
     operation: str,
 ) -> str:
-    """Fail-closed message for launch paths not yet wired to AHP."""
-    if config.session_backend.is_ahp:
-        return (
-            f"{operation} does not yet support the AHP session backend; "
-            "use the normal Worktree Manager launcher"
-        )
+    """Fail-closed message for launch paths that do not own hosted sessions."""
     if record is not None and _hosted_session_blocks_cleanup(record):
         return (
             f"{operation} cannot launch directly while the worktree has a "
@@ -2504,7 +2368,7 @@ def _create_worktree_core(
         "post_exit": True,
         "no_mux": no_mux,
         # Authoritative for downstream out-of-process calls (e.g. the
-        # launcher's `session-backend status`), which must scope to the
+        # launcher's `execution-leg get`), which must scope to the
         # project that actually owns this worktree -- not whatever ambient
         # project the launcher itself started with, nor the mutable
         # process-global `cfg.active_project()` (#2338).
@@ -3073,7 +2937,6 @@ def _handoff_cutover_spawn_result(
         work_dir = record.worktree_path
 
     backend_error = _unsupported_hosted_launch(
-        config,
         record,
         "handoff-cutover",
     )
@@ -3775,13 +3638,6 @@ def cmd_embody(args: argparse.Namespace) -> int:
         config = cfg.load_config()
     except Exception as e:
         return _json_error(str(e))
-    if make_new and config.session_backend.is_ahp:
-        return _json_error(
-            "embody --new does not yet support the AHP session backend; "
-            "create and open the worktree through Worktree Manager",
-            exit_code=3,
-        )
-
     # Resolve target worktree id + path (creating a fresh worktree for --new).
     if make_new:
         try:
@@ -3825,7 +3681,6 @@ def cmd_embody(args: argparse.Namespace) -> int:
                 return _json_error(f"Worktree record not found: {wt_id}")
         if record is not None:
             backend_error = _unsupported_hosted_launch(
-                config,
                 record,
                 "embody",
             )
@@ -6188,7 +6043,7 @@ def _resolve_resume(
         "post_exit": True,
         "no_mux": getattr(args, "no_mux", False),
         # Authoritative for downstream out-of-process calls (e.g. the
-        # launcher's `session-backend status`), which must scope to the
+        # launcher's `execution-leg get`), which must scope to the
         # project that actually owns this worktree -- not whatever ambient
         # project the launcher itself started with (#2338).
         "project": config.repo_name,
@@ -22631,14 +22486,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("copilot_args", nargs="*", default=[])
 
     p = sub.add_parser(
-        "session-backend",
-        help="Manage the externally hosted session bound to a worktree",
-    )
-    p.add_argument("action", choices=["ensure", "status", "dispose"])
-    p.add_argument("--worktree-id", required=True)
-    p.add_argument("--json", action="store_true")
-
-    p = sub.add_parser(
         "execution-leg",
         help="Inspect or mutate the provider-neutral execution leg for a worktree",
     )
@@ -26755,7 +26602,6 @@ terminal_conclusion = session_tracking_cli.terminal_conclusion
 
 COMMAND_MAP = {
     "resolve": cmd_resolve,
-    "session-backend": cmd_session_backend,
     "execution-leg": cmd_execution_leg,
     "post-exit": cmd_post_exit,
     "session-lock": cmd_session_lock,

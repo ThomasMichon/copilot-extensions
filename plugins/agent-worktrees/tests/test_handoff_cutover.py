@@ -872,7 +872,7 @@ class TestCmdHandoffCutover:
         monkeypatch.setattr(
             m,
             "_unsupported_hosted_launch",
-            lambda config, record, operation: "",
+            lambda record, operation: "",
         )
 
     def test_parser_accepts_retire_mux_identity(self):
