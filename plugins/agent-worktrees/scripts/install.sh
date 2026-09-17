@@ -1270,7 +1270,6 @@ repos:
     # worktree_root defaults to $worktree_root -- a sibling
     # <anchor>.worktrees dir, matching Copilot CLI's /worktree layout.
     # Uncomment and set an absolute path to override.
-    default_branch: master
     remote: origin
 EOF
     changed "Written config: $config_path"
