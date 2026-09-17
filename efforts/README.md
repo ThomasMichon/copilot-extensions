@@ -49,6 +49,7 @@ that pattern to this repository.
 | [Vendored Installer Engine](active/vendored-installer-engine/README.md) | Draft | See effort |
 | [Pull-Request Capability](active/pull-request-capability/README.md) | Draft | #2691, #2699, #2700 |
 | [Module Componentization Discipline](active/module-componentization-discipline/README.md) | Active | #2805 |
+| [PR Attribution Codenames](active/pr-attribution-codenames/README.md) | Draft | #2838 |
 | [AGENTS.md vs .github/instructions Split](active/agents-md-vs-instructions-split/README.md) | Done; pending archive | #2825 |
 
 ## Local conventions
