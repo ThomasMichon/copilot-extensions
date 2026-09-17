@@ -39,7 +39,8 @@
           "0.4.0-dev475",
           "0.4.0-dev476",
           "0.4.0-dev477",
-          "0.4.0-dev492"
+          "0.4.0-dev492",
+          "0.4.0-dev493"
         ]
       },
       "capability_versions": {
@@ -68,7 +69,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/models.py",
-          "sha256": "5d6b0eae5980a136b65ce4355a7e7ec42ce38a06e0c75c01d47bb0c8400ea8d6",
+          "sha256": "5f0d06b87e9f7433eeb477bbb45d4d1bc4d155c0f32998ee47b91f0f8c49d487",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -80,7 +81,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
-          "sha256": "93186d0a6f5b81a3b4d3d8817ad68ad152604377916b4df8975b391462571e35",
+          "sha256": "47f95f6a94bfe9a54ab1a821799f6b38286b3ff16e04567c9e7d43078f823510",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -98,19 +99,19 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/native_store.py",
-          "sha256": "7b0432b7150ba18d15534e7081b36fbf2be5c329d1ec4581f31e56af4c955aba",
+          "sha256": "066d2c99bc2e9fb4ec2fdf8f8839a96889bc7aeb094c157a49d29ded605447d1",
           "semantic": true,
           "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/native.py",
-          "sha256": "2a6a84a6f55f9dd46036236fe1331f1f6fb6d4c2dbf2eafb57a2b764cdd8bd53",
+          "sha256": "6ccf781a9d0ee98dc416b7b035c9a9f87452948ff0790e184278380594b99984",
           "semantic": true,
           "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/native_manager.py",
-          "sha256": "cd180cb14094046508d795133bf109839d2f805bffefd70c79e03784ac543654",
+          "sha256": "91e796e08bbf9bb837aa14a1511425acfeefaf8f1190a04b408f84656b3c8a53",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -124,7 +125,31 @@
           "path": "plugins/agent-bridge/src/agent_bridge/native_runtime.py",
           "semantic": true,
           "non_semantic_reason": null,
-          "sha256": "cbb10ee26520315d2f53fb175d2f9232812f2652b06a68941f6e2f18e7881e9c"
+          "sha256": "580c264777a7d462797251ab87b0700de3e4e6f13b015c74996820f38c561c40"
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/live_registration_model.py",
+          "sha256": "a538236645dafe87f52037eaebd03402e9002177c84530edb28d9796aac01c74",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/native_capabilities.py",
+          "sha256": "a265131569bf2aa20d521188a26bc138e038561139bf97d2ede25a68c25c9835",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/native_venue.py",
+          "sha256": "67934c47feeff4e5daae245196759b9ec349ac6d69cce35bfc5bc33455203ea9",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "libs/ssh-manager/src/ssh_manager/remote_command.py",
+          "sha256": "2f836ef678b297bad56f24d4e2e1ea5d605ff425efda3f6fbeb0965e76c28a9d",
+          "semantic": true,
+          "non_semantic_reason": null
         }
       ],
       "fixtures": [
@@ -136,7 +161,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-incumbent-error.json",
-          "sha256": "e6f5fbc0fb48784e238618fafe7acf5ff5189df478c9936d69cc89b411c6a27c",
+          "sha256": "47d78310892cc34bd0641ed7b931ffea7a7c89d2d744feb0445468cb02b08079",
           "role": "current native-owned venue refusal before ACP allocation",
           "generation": 15
         },
@@ -160,21 +185,21 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/session-create-request.json",
-          "sha256": "e13287c3a2e124d9fbd066515053f9c39e97efe70aae40a36dbfe93a96ff273a",
+          "sha256": "ab1086943404d4e62d22c1d7489d26dcdb2c6e311c8e6abd080ec966c56fb644",
           "role": "current session-create request with unknown-field tolerance",
           "generation": 15
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/session-create-response.json",
-          "sha256": "54595295adb1da2a1cd86d2302a2f48072a65191708be9077a92286502f579bb",
+          "sha256": "0f8f50ec622bc1135a8b0f6abf2feabfe863c113213c97851c78ac27a7145030",
           "role": "current session-create response",
           "generation": 15
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/representative-error.json",
-          "sha256": "38d49a8762f4732216fbda79ad150438d6a7e101249d5d496fae07325111d92a",
+          "sha256": "0972c88ac5d78612055697cbb075afa0f2041a286dd302c038928766267c9de8",
           "role": "current representative FastAPI error",
-          "generation": 14
+          "generation": 15
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-11/health.json",
@@ -214,25 +239,25 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-receipt.json",
-          "sha256": "a66c3273799090a24711a370a52d865ad568ab6141680d2f96b14128ab6438ff",
+          "sha256": "0872a80c03d88aad39f36c3e0ae7f9303fad6309282c30a8a4f4517439c5af99",
           "role": "current native execution contract",
           "generation": 15
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-routes.json",
-          "sha256": "1f0ce21588553aff08ce6a9a1a530d5a6076e0aa71bd8886f361d93c5eead87d",
+          "sha256": "e62f8b436d64aa2c7df4d81adef08151bdf185451c655e087636dded3b8c15be",
           "role": "current native execution contract",
           "generation": 15
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-registration.json",
-          "sha256": "ff7437b51a6ff7ca8107c5a616d82924a0ac64ce7e5e03fe86983c966f221c0d",
+          "sha256": "c57fbcbb920516f41b1516ed94696d781be33e8fed8fd3d2d96102300f6a0e06",
           "role": "current native execution contract",
           "generation": 15
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-launch.json",
-          "sha256": "b8a9fd38eb55d9b563085e788d7dee63898890348b90692252bde826f7d3365f",
+          "sha256": "38f70bdaae388883aaf8261f9b647d663f34d998a750d1cc0f3c35d9f1630c64",
           "role": "current native execution contract",
           "generation": 15
         },
@@ -304,13 +329,13 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-resource-launch.json",
-          "sha256": "53fd39bacfaa6ec7b1018f7d3ba0aaa94530895c5db7adf313dee22cd6ccf067",
+          "sha256": "91b7a446936f5002b1ba348919e9039a0c8db953931ff5a80ea037ab8fb6b7c2",
           "role": "current optional native host-resource contract",
           "generation": 15
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-resource-controller-capabilities.json",
-          "sha256": "5214c849f77a7d9873a0138479a0f731a49f728928ac61aa8706da273ad75b81",
+          "sha256": "d1ce493f0035419241e19b8ca8e8fa203151dd6f8c461fee9e8ef46be3ee3121",
           "role": "current optional native host-resource contract",
           "generation": 15
         },
@@ -322,8 +347,92 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-resource-runtime-capabilities.json",
-          "sha256": "f40816f3d04b33a2dcc28c381334da747a2042558370bf64139b01afd778fe2c",
+          "sha256": "85cc0e2ad3ed0622823655778e1aa72254899cde5520fe350ba31af1de954935",
           "role": "current optional native host-resource contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev492/native-incumbent-error.json",
+          "sha256": "e6f5fbc0fb48784e238618fafe7acf5ff5189df478c9936d69cc89b411c6a27c",
+          "role": "prior dev492 corpus: current native-owned venue refusal before ACP allocation",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev492/session-create-request.json",
+          "sha256": "e13287c3a2e124d9fbd066515053f9c39e97efe70aae40a36dbfe93a96ff273a",
+          "role": "prior dev492 corpus: current session-create request with unknown-field tolerance",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev492/session-create-response.json",
+          "sha256": "54595295adb1da2a1cd86d2302a2f48072a65191708be9077a92286502f579bb",
+          "role": "prior dev492 corpus: current session-create response",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev492/representative-error.json",
+          "sha256": "38d49a8762f4732216fbda79ad150438d6a7e101249d5d496fae07325111d92a",
+          "role": "prior dev492 corpus: current representative FastAPI error",
+          "generation": 14
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev492/native-receipt.json",
+          "sha256": "a66c3273799090a24711a370a52d865ad568ab6141680d2f96b14128ab6438ff",
+          "role": "prior dev492 corpus: current native execution contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev492/native-routes.json",
+          "sha256": "1f0ce21588553aff08ce6a9a1a530d5a6076e0aa71bd8886f361d93c5eead87d",
+          "role": "prior dev492 corpus: current native execution contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev492/native-registration.json",
+          "sha256": "ff7437b51a6ff7ca8107c5a616d82924a0ac64ce7e5e03fe86983c966f221c0d",
+          "role": "prior dev492 corpus: current native execution contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev492/native-launch.json",
+          "sha256": "b8a9fd38eb55d9b563085e788d7dee63898890348b90692252bde826f7d3365f",
+          "role": "prior dev492 corpus: current native execution contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev492/native-resource-launch.json",
+          "sha256": "53fd39bacfaa6ec7b1018f7d3ba0aaa94530895c5db7adf313dee22cd6ccf067",
+          "role": "prior dev492 corpus: current optional native host-resource contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev492/native-resource-controller-capabilities.json",
+          "sha256": "5214c849f77a7d9873a0138479a0f731a49f728928ac61aa8706da273ad75b81",
+          "role": "prior dev492 corpus: current optional native host-resource contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev492/native-resource-runtime-capabilities.json",
+          "sha256": "f40816f3d04b33a2dcc28c381334da747a2042558370bf64139b01afd778fe2c",
+          "role": "prior dev492 corpus: current optional native host-resource contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-capabilities.json",
+          "sha256": "7be1b80af428eaf39ceea60fb55aba3f4a12b074eda826f8075d9898e6f3a908",
+          "role": "current native-capabilities",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-venues.json",
+          "sha256": "0b7fda3a4202d873ed4d9df1349170ad959bc637bde495a60dbfee8a482b3b84",
+          "role": "current native-venues",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-prepared-command.json",
+          "sha256": "ee1d30c71a62ad330d43a73e73ff7fb784e15208b314e851539f4f82f634da17",
+          "role": "current native-prepared-command",
           "generation": 15
         }
       ],
@@ -663,6 +772,86 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/native_runtime.py",
           "source_git_blob": "afd094c66ecba176c660ca771fc99980985b15f9",
           "capture_method": "Run the committed remote native-host capabilities command and retain platform-independent capability fields; the pre-existing platform support discriminator is not normalized into a support claim."
+        },
+        {
+          "commit": "d4d607f2991908d81596e5df8ab2c8ae90e15d8c",
+          "plugin_version": "0.4.0-dev493",
+          "generation": 15,
+          "source_path": "libs/ssh-manager/src/ssh_manager/remote_command.py",
+          "source_git_blob": "75d5e87d702eb10f7229a47a8a203ab66a19ab43",
+          "capture_method": "Capture committed native request, receipt, capability and framing serializers with neutral synthetic identities. Preserve unchanged wire values after cohesive module extraction, verified by existing wire and native boundary tests. Retain the prior corpus unchanged. Linux PTY and real SSH tests separately verify writer refusal, observation, owned-group retirement, pinned commands, and full reply waits."
+        },
+        {
+          "commit": "d4d607f2991908d81596e5df8ab2c8ae90e15d8c",
+          "plugin_version": "0.4.0-dev493",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/live_registration_model.py",
+          "source_git_blob": "d55965589f1ee6fac271eeb4fd6949ad00507f0d",
+          "capture_method": "Capture committed native request, receipt, capability and framing serializers with neutral synthetic identities. Preserve unchanged wire values after cohesive module extraction, verified by existing wire and native boundary tests. Retain the prior corpus unchanged. Linux PTY and real SSH tests separately verify writer refusal, observation, owned-group retirement, pinned commands, and full reply waits."
+        },
+        {
+          "commit": "d4d607f2991908d81596e5df8ab2c8ae90e15d8c",
+          "plugin_version": "0.4.0-dev493",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
+          "source_git_blob": "5f1a2c8549407757b8394e2c45a17a9896ac2bf8",
+          "capture_method": "Capture committed native request, receipt, capability and framing serializers with neutral synthetic identities. Preserve unchanged wire values after cohesive module extraction, verified by existing wire and native boundary tests. Retain the prior corpus unchanged. Linux PTY and real SSH tests separately verify writer refusal, observation, owned-group retirement, pinned commands, and full reply waits."
+        },
+        {
+          "commit": "d4d607f2991908d81596e5df8ab2c8ae90e15d8c",
+          "plugin_version": "0.4.0-dev493",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_capabilities.py",
+          "source_git_blob": "6c8c4db758d50745e5443710d5c17478ec227c99",
+          "capture_method": "Capture committed native request, receipt, capability and framing serializers with neutral synthetic identities. Preserve unchanged wire values after cohesive module extraction, verified by existing wire and native boundary tests. Retain the prior corpus unchanged. Linux PTY and real SSH tests separately verify writer refusal, observation, owned-group retirement, pinned commands, and full reply waits."
+        },
+        {
+          "commit": "d4d607f2991908d81596e5df8ab2c8ae90e15d8c",
+          "plugin_version": "0.4.0-dev493",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_manager.py",
+          "source_git_blob": "03457018f0cd4dcc180889c8c53017edd6df1a07",
+          "capture_method": "Capture committed native request, receipt, capability and framing serializers with neutral synthetic identities. Preserve unchanged wire values after cohesive module extraction, verified by existing wire and native boundary tests. Retain the prior corpus unchanged. Linux PTY and real SSH tests separately verify writer refusal, observation, owned-group retirement, pinned commands, and full reply waits."
+        },
+        {
+          "commit": "d4d607f2991908d81596e5df8ab2c8ae90e15d8c",
+          "plugin_version": "0.4.0-dev493",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_runtime.py",
+          "source_git_blob": "222ebf919219493294dc22139b22966fef5437fb",
+          "capture_method": "Capture committed native request, receipt, capability and framing serializers with neutral synthetic identities. Preserve unchanged wire values after cohesive module extraction, verified by existing wire and native boundary tests. Retain the prior corpus unchanged. Linux PTY and real SSH tests separately verify writer refusal, observation, owned-group retirement, pinned commands, and full reply waits."
+        },
+        {
+          "commit": "d4d607f2991908d81596e5df8ab2c8ae90e15d8c",
+          "plugin_version": "0.4.0-dev493",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_store.py",
+          "source_git_blob": "dac3b58727dcb593bff0e0d7f44255463636f452",
+          "capture_method": "Capture committed native request, receipt, capability and framing serializers with neutral synthetic identities. Preserve unchanged wire values after cohesive module extraction, verified by existing wire and native boundary tests. Retain the prior corpus unchanged. Linux PTY and real SSH tests separately verify writer refusal, observation, owned-group retirement, pinned commands, and full reply waits."
+        },
+        {
+          "commit": "d4d607f2991908d81596e5df8ab2c8ae90e15d8c",
+          "plugin_version": "0.4.0-dev493",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_venue.py",
+          "source_git_blob": "4e9ffbfb12226d5e189257896f0663ab062bdc21",
+          "capture_method": "Capture committed native request, receipt, capability and framing serializers with neutral synthetic identities. Preserve unchanged wire values after cohesive module extraction, verified by existing wire and native boundary tests. Retain the prior corpus unchanged. Linux PTY and real SSH tests separately verify writer refusal, observation, owned-group retirement, pinned commands, and full reply waits."
+        },
+        {
+          "commit": "d4d607f2991908d81596e5df8ab2c8ae90e15d8c",
+          "plugin_version": "0.4.0-dev493",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/native.py",
+          "source_git_blob": "1b969d17cbb70ac5837f2aff5ef369522e895b97",
+          "capture_method": "Capture committed native request, receipt, capability and framing serializers with neutral synthetic identities. Preserve unchanged wire values after cohesive module extraction, verified by existing wire and native boundary tests. Retain the prior corpus unchanged. Linux PTY and real SSH tests separately verify writer refusal, observation, owned-group retirement, pinned commands, and full reply waits."
+        },
+        {
+          "commit": "d4d607f2991908d81596e5df8ab2c8ae90e15d8c",
+          "plugin_version": "0.4.0-dev493",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "949ad0e2a9b0e04192279e3f8019ba32e7b17007",
+          "capture_method": "Capture committed native request, receipt, capability and framing serializers with neutral synthetic identities. Preserve unchanged wire values after cohesive module extraction, verified by existing wire and native boundary tests. Retain the prior corpus unchanged. Linux PTY and real SSH tests separately verify writer refusal, observation, owned-group retirement, pinned commands, and full reply waits."
         }
       ],
       "support_window": "HTTP generations 1 through 15 remain supported; evidence includes generations 9 through 15.",
@@ -693,7 +882,8 @@
         "runtimes": [
           "0.4.0-dev150",
           "0.4.0-dev425",
-          "0.4.0-dev461"
+          "0.4.0-dev461",
+          "0.4.0-dev493"
         ]
       },
       "capability_versions": {
@@ -705,7 +895,7 @@
       "source_paths": [
         {
           "path": "plugins/agent-bridge/src/agent_bridge/session_host/protocol.py",
-          "sha256": "0d3323db9cf2ec44c3074eca8322d4e3ef2636e2ec82a2604756d8fc1e48c810",
+          "sha256": "b59c434233fc7e3fcd4fb46cde8a5887f609d14179e068b5ea44b24ab6e84075",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -725,7 +915,7 @@
       "fixtures": [
         {
           "path": "plugins/agent-bridge/contract/fixtures/session-host/current/messages.json",
-          "sha256": "e378a0f5c1a94116c65f31b4c95f22294ffd4f413a776fa91630841d729b954b",
+          "sha256": "65d64c5f1941e52300c5b30f0f17933447bcc8f2714af3d26369d98740a34226",
           "role": "current framing and every control/data message shape",
           "generation": 1
         },
@@ -739,6 +929,12 @@
           "path": "plugins/agent-bridge/contract/fixtures/session-host/current/version-mux.json",
           "sha256": "11f70c03f74d344f79ed87d28615aa05929ee738aa6c2cd35ae7b4c536f7745f",
           "role": "current frontend supported Session Host generations",
+          "generation": 1
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/session-host/prior-runtime-dev492/messages.json",
+          "sha256": "e378a0f5c1a94116c65f31b4c95f22294ffd4f413a776fa91630841d729b954b",
+          "role": "prior dev492 corpus: current framing and every control/data message shape",
           "generation": 1
         }
       ],
@@ -774,6 +970,14 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/session_host/protocol.py",
           "source_git_blob": "dde0d3566ce5d0cd92a49d8f6438dd907d533993",
           "capture_method": "Read the immutable Git blob from the published runtime that introduced unknown-message skipping."
+        },
+        {
+          "commit": "d4d607f2991908d81596e5df8ab2c8ae90e15d8c",
+          "plugin_version": "0.4.0-dev493",
+          "generation": 1,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_host/protocol.py",
+          "source_git_blob": "16d63fd212905c36874d417a918b8015658c4b03",
+          "capture_method": "Capture committed native request, receipt, capability and framing serializers with neutral synthetic identities. Preserve unchanged wire values after cohesive module extraction, verified by existing wire and native boundary tests. Retain the prior corpus unchanged. Linux PTY and real SSH tests separately verify writer refusal, observation, owned-group retirement, pinned commands, and full reply waits."
         }
       ],
       "support_window": "Session Host generation 1 is the only published envelope and remains supported by the current frontend mux.",

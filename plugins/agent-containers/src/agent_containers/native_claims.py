@@ -68,7 +68,7 @@ def reserve(name, identity, container_id):
             raise lease.ProviderAdmissionError("container lease belongs to another owner")
         value["active"][name] = {
             "executionId": identity[0], "generation": identity[1], "owner": identity[2],
-            "containerId": container_id, "launchRequested": False,
+            "containerId": container_id, "launchRequested": False, "infrastructureStopped": True,
         }
         _write(value)
 
@@ -91,6 +91,15 @@ def mark_launch(name, identity):
         _write(value)
 
 
+def infrastructure(name, identity, *, stopped):
+    with lease._lease_lock():
+        value = _read()
+        row = assert_access(name, identity)
+        if row:
+            value["active"][name]["infrastructureStopped"] = stopped
+            _write(value)
+
+
 def retire(name, identity, proof=None):
     with lease._lease_lock():
         value = _read()
@@ -98,8 +107,8 @@ def retire(name, identity, proof=None):
         if not row:
             return
         if proof is None:
-            if row["launchRequested"]:
-                raise lease.ProviderAdmissionError("remote retirement proof is required")
+            if row["launchRequested"] or row.get("infrastructureStopped") is not True:
+                raise lease.ProviderAdmissionError("remote retirement or infrastructure cleanup proof is required")
             proof = {"executionId": identity[0], "generation": identity[1], "retired": True, "noLaunch": True}
         if proof.get("retired") is not True:
             raise lease.ProviderAdmissionError("remote retirement is not confirmed")

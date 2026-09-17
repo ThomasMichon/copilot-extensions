@@ -53,6 +53,17 @@ def test_native_claim_loss_is_not_an_empty_container(state):
             pass
 
 
+def test_unlaunched_native_abort_requires_confirmed_infrastructure_cleanup(state):
+    identity = ("execution", "generation", "owner")
+    native_claims.reserve("fixture", identity, "container-id")
+    native_claims.infrastructure("fixture", identity, stopped=False)
+    with pytest.raises(lease.ProviderAdmissionError, match="cleanup proof"):
+        native_claims.retire("fixture", identity)
+    native_claims.infrastructure("fixture", identity, stopped=True)
+    native_claims.retire("fixture", identity)
+    assert native_claims.retirement("fixture", identity)["noLaunch"] is True
+
+
 def test_native_requires_descriptor_without_falling_back_to_acp():
     with pytest.raises(SystemExit):
         main(["native-transport", "fixture", "--owner", "owner", "--execution-id", "execution", "--generation", "generation"])

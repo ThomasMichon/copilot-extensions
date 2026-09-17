@@ -1,11 +1,29 @@
 """Portable provider selection, pinned ownership, and wait-budget contracts."""
 
 from unittest.mock import patch
+import json
+from pathlib import Path
 
 import pytest
 
 from agent_bridge.native_manager import NativeManager, ProviderTransport
 from agent_bridge.native_store import NativeError
+
+
+@pytest.mark.guard
+def test_native_public_capabilities_and_venue_receipt_match_captured_contract():
+    from agent_bridge.native_capabilities import capabilities
+    from agent_bridge.native_store import receipt
+
+    corpus = Path(__file__).parents[1] / "contract" / "fixtures" / "http" / "current"
+    assert capabilities() == json.loads((corpus / "native-capabilities.json").read_text())["capabilities"]
+    request = json.loads((corpus / "native-launch.json").read_text())["request"]
+    expected = json.loads((corpus / "native-receipt.json").read_text())["response"]
+    assert receipt({
+        "id": expected["executionId"], "generation": expected["generation"],
+        "codespace": expected["target"], "owner": expected["owner"], "state": "ready",
+        "data": {"spec": request, "sessionId": "session-example", "represented": True},
+    }) == expected
 
 
 def descriptor():

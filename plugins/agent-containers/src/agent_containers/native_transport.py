@@ -136,6 +136,7 @@ async def _run(args, prepared, identity):
         await manager.disconnect_all()
         if prepared.get("remote_env"):
             await asyncio.to_thread(cli.cleanup_remote_env, args.name, prepared["user"], prepared["remote_env"])
+        args.native_cleanup_complete = True
 
 
 def command(args):
@@ -181,10 +182,16 @@ def command(args):
                 prepared = {"ssh": asdict(cli.prepare_ssh_config(args.name, user)), "reverse_forwards": []}
             else:
                 args.host_relay_port = cli._require_live_relay_port()
+                if identity:
+                    native_claims.infrastructure(args.name, identity, stopped=False)
                 prepared = cli._prepare_session_host(args)
             return asyncio.run(_run(args, prepared, identity))
     except lease.ProviderAdmissionError as exc:
         print(json.dumps({"event": "rejected", "code": "venue_busy", "detail": str(exc)}), flush=True)
         return 75
     finally:
-        lock.release()
+        try:
+            if identity and getattr(args, "native_cleanup_complete", False):
+                native_claims.infrastructure(args.name, identity, stopped=True)
+        finally:
+            lock.release()

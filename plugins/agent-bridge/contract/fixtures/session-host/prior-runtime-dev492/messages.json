@@ -1,11 +1,11 @@
 {
   "captured_from": {
-    "commit": "d4d607f2991908d81596e5df8ab2c8ae90e15d8c",
-    "plugin_version": "0.4.0-dev493",
+    "commit": "e746dc19ca456e7e9e7f52107dd26a1348294df5",
+    "plugin_version": "0.4.0-dev461",
     "protocol_generation": 1,
     "source_path": "plugins/agent-bridge/src/agent_bridge/session_host/protocol.py",
-    "source_git_blob": "16d63fd212905c36874d417a918b8015658c4b03",
-    "source_sha256": "b59c434233fc7e3fcd4fb46cde8a5887f609d14179e068b5ea44b24ab6e84075"
+    "source_git_blob": "a7efa469939cb6a7d52e9a67292443f0def706d6",
+    "source_sha256": "0d3323db9cf2ec44c3074eca8322d4e3ef2636e2ec82a2604756d8fc1e48c810"
   },
   "framing": "u32be body length, one-byte type, opaque payload",
   "messages": {
@@ -78,31 +78,6 @@
       "type_base64": "VA==",
       "payload_base64": "AAAAAAAAEJJub25jZQ==",
       "frame_base64": "AAAADlQAAAAAAAAQkm5vbmNl"
-    },
-    "native_observe": {
-      "type_base64": "Tw==",
-      "payload_base64": "AAAAAAAAAAdub25jZQ==",
-      "frame_base64": "AAAADk8AAAAAAAAAB25vbmNl"
-    },
-    "native_acquire": {
-      "type_base64": "UQ==",
-      "payload_base64": "AAAAAAAAAAdub25jZQ==",
-      "frame_base64": "AAAADlEAAAAAAAAAB25vbmNl"
-    },
-    "native_takeover": {
-      "type_base64": "Vg==",
-      "payload_base64": "AAAAAAAAAAdub25jZQ==",
-      "frame_base64": "AAAADlYAAAAAAAAAB25vbmNl"
-    },
-    "native_writer_busy": {
-      "type_base64": "RQ==",
-      "payload_base64": "d3JpdGVyX2J1c3k=",
-      "frame_base64": "AAAADEV3cml0ZXJfYnVzeQ=="
-    },
-    "native_writer_revoked": {
-      "type_base64": "RQ==",
-      "payload_base64": "d3JpdGVyX3Jldm9rZWQ=",
-      "frame_base64": "AAAAD0V3cml0ZXJfcmV2b2tlZA=="
     }
   }
 }

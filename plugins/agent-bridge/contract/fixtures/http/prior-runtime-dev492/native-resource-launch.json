@@ -1,11 +1,11 @@
 {
   "captured_from": {
-    "commit": "d4d607f2991908d81596e5df8ab2c8ae90e15d8c",
-    "plugin_version": "0.4.0-dev493",
+    "commit": "f2da1c6471abae3127a606f4e7078d09f6a9a184",
+    "plugin_version": "0.4.0-dev477",
     "protocol_generation": 15,
     "source_path": "plugins/agent-bridge/src/agent_bridge/native_manager.py",
-    "source_git_blob": "03457018f0cd4dcc180889c8c53017edd6df1a07",
-    "source_sha256": "91e796e08bbf9bb837aa14a1511425acfeefaf8f1190a04b408f84656b3c8a53"
+    "source_git_blob": "4ca1f98c260f340204468acccb4f5d9412220b7b",
+    "source_sha256": "cd180cb14094046508d795133bf109839d2f805bffefd70c79e03784ac543654"
   },
   "without_resources": {
     "requestId": "request-example",

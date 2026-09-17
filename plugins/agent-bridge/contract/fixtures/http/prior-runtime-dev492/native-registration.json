@@ -1,11 +1,11 @@
 {
   "captured_from": {
-    "commit": "d4d607f2991908d81596e5df8ab2c8ae90e15d8c",
-    "plugin_version": "0.4.0-dev493",
+    "commit": "e746dc19ca456e7e9e7f52107dd26a1348294df5",
+    "plugin_version": "0.4.0-dev461",
     "protocol_generation": 15,
-    "source_path": "plugins/agent-bridge/src/agent_bridge/live_registration_model.py",
-    "source_git_blob": "d55965589f1ee6fac271eeb4fd6949ad00507f0d",
-    "source_sha256": "a538236645dafe87f52037eaebd03402e9002177c84530edb28d9796aac01c74"
+    "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
+    "source_git_blob": "39c37dfbf4376294afb3d5670433b5a840f32077",
+    "source_sha256": "5d6b0eae5980a136b65ce4355a7e7ec42ce38a06e0c75c01d47bb0c8400ea8d6"
   },
   "request": {
     "session_id": "session-example",

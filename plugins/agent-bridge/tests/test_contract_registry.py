@@ -247,6 +247,14 @@ def _message_frames(protocol) -> dict[str, dict[str, str]]:
             "native_resize": (protocol.MsgType.RESIZE, protocol.pack_resize(24, 80)),
             "native_retire": (protocol.MsgType.TERMINATE, protocol.pack_attach(4242, b"nonce")),
         })
+    if hasattr(protocol.MsgType, "OBSERVE"):
+        messages.update({
+            "native_observe": (protocol.MsgType.OBSERVE, protocol.pack_attach(7, b"nonce")),
+            "native_acquire": (protocol.MsgType.ACQUIRE, protocol.pack_attach(7, b"nonce")),
+            "native_takeover": (protocol.MsgType.TAKEOVER, protocol.pack_attach(7, b"nonce")),
+            "native_writer_busy": (protocol.MsgType.ERROR, b"writer_busy"),
+            "native_writer_revoked": (protocol.MsgType.ERROR, b"writer_revoked"),
+        })
     result = {}
     for name, (message_type, payload) in messages.items():
         type_bytes = message_type.value if message_type is not None else b"Z"
@@ -267,6 +275,10 @@ def _message_frames(protocol) -> dict[str, dict[str, str]]:
     ("relative", "historical_commit"),
     [
         ("fixtures/session-host/current/messages.json", None),
+        (
+            "fixtures/session-host/prior-runtime-dev492/messages.json",
+            "e746dc19ca456e7e9e7f52107dd26a1348294df5",
+        ),
         (
             "fixtures/session-host/prior-runtime-dev150/messages.json",
             "4ed08dcdd0e72377b95a67d6bd22aec819bf7fec",
@@ -304,6 +316,7 @@ def test_session_host_version_mux_fixture_matches_production() -> None:
     [
         "fixtures/session-host/current/messages.json",
         "fixtures/session-host/prior-runtime-dev150/messages.json",
+        "fixtures/session-host/prior-runtime-dev492/messages.json",
     ],
 )
 async def test_session_host_fixture_frames_decode(relative: str) -> None:
@@ -316,6 +329,10 @@ async def test_session_host_fixture_frames_decode(relative: str) -> None:
         if name == "unknown":
             assert message_type is None
         else:
-            member = {"native_start": "START", "native_resize": "RESIZE", "native_retire": "TERMINATE"}.get(name, name.upper())
+            member = {
+                "native_start": "START", "native_resize": "RESIZE", "native_retire": "TERMINATE",
+                "native_observe": "OBSERVE", "native_acquire": "ACQUIRE", "native_takeover": "TAKEOVER",
+                "native_writer_busy": "ERROR", "native_writer_revoked": "ERROR",
+            }.get(name, name.upper())
             assert message_type is host_protocol.MsgType[member]
         assert payload == base64.b64decode(encoded_message["payload_base64"])

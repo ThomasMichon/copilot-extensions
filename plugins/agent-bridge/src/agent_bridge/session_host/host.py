@@ -233,7 +233,9 @@ class SessionHost:
                 if data is None:
                     if seq > self._max_seq:
                         return  # nothing more buffered yet
-                    front.next_seq = seq + 1  # trimmed below ack; skip
+                    front.next_seq = (
+                        max(seq + 1, next(iter(self._frames))) if self._terminal and self._frames else seq + 1
+                    )
                     continue
                 try:
                     await proto.write_message(

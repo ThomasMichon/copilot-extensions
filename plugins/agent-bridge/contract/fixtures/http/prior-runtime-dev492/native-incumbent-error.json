@@ -1,11 +1,11 @@
 {
   "captured_from": {
-    "commit": "d4d607f2991908d81596e5df8ab2c8ae90e15d8c",
-    "plugin_version": "0.4.0-dev493",
+    "commit": "b3c5edc8f6c983a0dc4e3994a80e50036c2bba2e",
+    "plugin_version": "0.4.0-dev492",
     "protocol_generation": 15,
     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
-    "source_git_blob": "949ad0e2a9b0e04192279e3f8019ba32e7b17007",
-    "source_sha256": "47f95f6a94bfe9a54ab1a821799f6b38286b3ff16e04567c9e7d43078f823510"
+    "source_git_blob": "688254c1372c27994ff503bb69d79780e30fcf62",
+    "source_sha256": "93186d0a6f5b81a3b4d3d8817ad68ad152604377916b4df8975b391462571e35"
   },
   "response": {
     "status_code": 409,

@@ -1,15 +1,44 @@
 {
-  "captured_from": {
-    "commit": "f2da1c6471abae3127a606f4e7078d09f6a9a184",
-    "plugin_version": "0.4.0-dev477",
-    "protocol_generation": 15,
-    "source_path": "plugins/agent-bridge/src/agent_bridge/native_runtime.py",
-    "source_git_blob": "afd094c66ecba176c660ca771fc99980985b15f9",
-    "source_sha256": "cbb10ee26520315d2f53fb175d2f9232812f2652b06a68941f6e2f18e7881e9c"
-  },
   "capability_fields": {
     "capability": "codespace-native-host-v1",
     "version": 1,
+    "capabilities": {
+      "terminal": {
+        "protocol": "native.v1",
+        "writer": "exclusive",
+        "observers": true,
+        "takeover": "explicit",
+        "replayBytes": 1048576,
+        "nonretryableCloseCodes": {
+          "4409": "writer_busy",
+          "4410": "writer_revoked",
+          "4403": "read_only"
+        }
+      },
+      "observation": {
+        "kind": "represented-result-snapshot",
+        "cursor": "position",
+        "retention": "hosting-bridge-process",
+        "gaps": "snapshot-coverage",
+        "requiresRepresentation": true
+      },
+      "control": {
+        "promptAdmission": true,
+        "promptIdempotency": true,
+        "retireExecution": true,
+        "typedInterrupt": false,
+        "permissionResponses": false,
+        "hiddenReasoning": false
+      }
+    },
     "hostResources": "native-host-resources-v1"
+  },
+  "captured_from": {
+    "commit": "d4d607f2991908d81596e5df8ab2c8ae90e15d8c",
+    "plugin_version": "0.4.0-dev493",
+    "protocol_generation": 15,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/native_runtime.py",
+    "source_git_blob": "222ebf919219493294dc22139b22966fef5437fb",
+    "source_sha256": "580c264777a7d462797251ab87b0700de3e4e6f13b015c74996820f38c561c40"
   }
 }
