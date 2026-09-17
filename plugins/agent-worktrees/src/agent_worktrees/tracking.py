@@ -374,10 +374,17 @@ def _pr_is_terminal(pr: PRRecord) -> bool:
 # obligation (e.g. an agent-dispatch task suspended mid-flight, expecting to
 # resume in this exact worktree later) -- deliberately left unresolved by the
 # sweep (see sweep.py's per-kind handling: no branch = permanently ``spare``),
-# since only the owning task system can know when it is genuinely done; the
-# rest are placeholders the ledger view already understands so later phases
-# can journal them without a schema change.
-ResourceKind = Literal["worktree", "codespace", "container", "ssh", "workdir", "pr", "task"]
+# since only the owning task system can know when it is genuinely done;
+# ``session`` is a live Copilot session occupying this worktree (its ``ref``
+# is a qualified ``<machine>/<project>/<worktree_id>#<session_id>`` claim ref,
+# reusing the existing session-suffix grammar rather than a second
+# ``sessions:`` list) -- see Phase 8 of
+# ``efforts/active/worktree-finality-and-obligations/README.md``; the rest are
+# placeholders the ledger view already understands so later phases can
+# journal them without a schema change.
+ResourceKind = Literal[
+    "worktree", "codespace", "container", "ssh", "workdir", "pr", "task", "session"
+]
 
 # Claim disposition (resource-obligation-settlement): "active" while unsettled
 # work still rides on the resource, "at-rest" once that work is safe (merged /
@@ -4136,6 +4143,34 @@ def settle_resource_claim(
     return match
 
 
+def release_resource_claim(
+    record: WorktreeRecord,
+    ref: str,
+    *,
+    save: bool = True,
+    path: Path | None = None,
+) -> ResourceClaim | None:
+    """Release one outbound claim by ``ref`` outright (Phase 8 session lifecycle).
+
+    Mirrors :func:`settle_resource_claim` but writes
+    ``obligations.RELEASED`` instead of ``AT_REST`` -- an explicit hand-back,
+    not merely "safe but still held". A clean process exit (``sessionEnd``)
+    releases its own ``session`` claim outright rather than only settling it,
+    since the process is genuinely gone, not just done-but-lingering. Returns
+    the released claim, or ``None`` when no claim matches the ref (a no-op,
+    degrade-safe) or the claim is reserved by an in-flight handoff bundle.
+    """
+    match = next((c for c in record.resources if c.ref == ref), None)
+    if match is None:
+        return None
+    if claim_handoff_reservation(record, match):
+        return None
+    match.state = obligations.RELEASED
+    if save:
+        save_record(record, path)
+    return match
+
+
 # ── Follow-up ledger CRUD (worktree-finality-and-obligations, Phase 3) ──────
 
 def effective_open_follow_up_count(record: WorktreeRecord) -> int:
@@ -4314,8 +4349,18 @@ def release_all_resources(
     child records are untouched (they keep their own ``owner_ref``; the
     claimant-liveness gate now sees the parent as terminal -> gone). Idempotent:
     returns the claims it flipped this call (empty when none were live).
+
+    Excludes ``kind == "session"`` claims (Phase 8,
+    worktree-finality-and-obligations): a live Copilot session claim has its
+    own lifecycle (settled to ``at-rest`` on finalize, released outright only
+    by its own ``deregister_session``/``sessionEnd``) -- this generic cascade
+    must not release it out from under a still-running process, nor silently
+    forgive a genuinely-other live session that `_advise_other_live_sessions`
+    just warned about.
     """
-    released = [c for c in record.resources if c.is_live]
+    released = [
+        c for c in record.resources if c.is_live and c.kind != "session"
+    ]
     for c in released:
         c.state = "released"
     if released and save:
@@ -4912,6 +4957,27 @@ def register_session(
         event_at = started_at or _now_iso()
         observed_at = recorded_at or _now_iso()
         _ensure_head_ledger(record)
+        # Phase 8 (worktree-finality-and-obligations): claim this session as a
+        # live outbound resource, in the same locked transaction as the
+        # SessionEntry create/update below. ``add_resource_claim`` dedups by
+        # ``ref`` and already reopens a finalized owner for any new live claim
+        # (`_claim_reopens_owner`), so this is a pure application of existing
+        # machinery -- not a new mechanism. ``save=False``: the pending
+        # SessionEntry mutation below shares this same ``save_record`` call.
+        self_session_ref = format_claim_ref(
+            record.machine, record.repo, record.worktree_id, session=session_id,
+        )
+        add_resource_claim(
+            record,
+            ResourceClaim(
+                kind="session",
+                ref=self_session_ref,
+                created_at=event_at,
+                state=obligations.ACTIVE,
+                note="live Copilot session",
+            ),
+            save=False,
+        )
 
         def _link_if_fresh() -> SessionHandoff | None:
             """Link, reporting a fresh transfer only (idempotent re-links -> None)."""
@@ -5195,6 +5261,16 @@ def deregister_session(
                 )
                 if changed:
                     _next_lifecycle_revision(record, session_id)
+                    # Phase 8 (worktree-finality-and-obligations): a clean
+                    # process exit releases (not just settles) this session's
+                    # own outbound claim -- matching the Plan's "clean process
+                    # exit" requirement. Best-effort: a missing/reserved claim
+                    # is a no-op, never blocks the session from ending.
+                    self_session_ref = format_claim_ref(
+                        record.machine, record.repo, record.worktree_id,
+                        session=session_id,
+                    )
+                    release_resource_claim(record, self_session_ref, save=False)
                     save_record(record)
                     if not _record_has_open_session(record):
                         stop_fsmonitor_daemon(record.worktree_path)

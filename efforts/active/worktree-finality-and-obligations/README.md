@@ -466,7 +466,7 @@ below for the carved implementation plan.
   extending this plan before implementation when necessary.
 - [ ] Keep fixtures synthetic and independent of any adopting worktree registry.
 
-### Phase 8 - Session-claim lifecycle (proposed 2026-09-14; designed 2026-09-16; NOT YET BUILT)
+### Phase 8 - Session-claim lifecycle (proposed 2026-09-14; designed 2026-09-16; build started 2026-09-17)
 
 Operator idea (see the dated Request above): a worktree should hold a claim on
 every Copilot session that opens inside it, not just track `sessions:` as
@@ -507,14 +507,15 @@ hooks reference. Both assumptions the 2026-09-14 entry flagged as unconfirmed
 are now confirmed (see bullets 9-10 below); nothing in this design is still
 open pending host verification.
 
-Plan (not started; reviewed/buildable, replaces the prior proposal-only list):
-- [ ] Add `"session"` to `ResourceKind`/`ResourceClaim.kind`'s vocabulary
+Plan (in progress -- first sub-slice built 2026-09-17, PR #2824;
+reviewed/buildable, replaces the prior proposal-only list):
+- [x] Add `"session"` to `ResourceKind`/`ResourceClaim.kind`'s vocabulary
   (`tracking.py:380-382`, `:499-508`) -- outbound, not a second `sessions:`
   list. `ref` reuses the existing qualified-ref grammar via
   `format_claim_ref(machine, project, worktree_id, session=session_id)`
   (`tracking.py:432-471`), i.e. `<machine>/<project>/<worktree_id>#<session_id>`,
   so `parse_claim_ref` (`tracking.py:473-497`) needs no change.
-- [ ] `cmd_register_session`/`tracking.register_session`
+- [x] `cmd_register_session`/`tracking.register_session`
   (`__main__.py:24830`, `tracking.py:4823`): in the same locked-record
   transaction that creates/updates the `SessionEntry`, call
   `tracking.add_resource_claim(record, ResourceClaim(kind="session",
@@ -526,7 +527,7 @@ Plan (not started; reviewed/buildable, replaces the prior proposal-only list):
   Phase 1 held-claims fix the 2026-09-14 entry's "[x] Reopen" checkbox
   already validated) -- this is a pure application of existing machinery,
   not a new mechanism.
-- [ ] Add `release_resource_claim(record, ref, *, save=True)` to
+- [x] Add `release_resource_claim(record, ref, *, save=True)` to
   `tracking.py`, mirroring `settle_resource_claim` (`tracking.py:4057-4083`)
   but writing `state = obligations.RELEASED`. Call it from
   `cmd_deregister_session`/`tracking.deregister_session`
@@ -535,7 +536,7 @@ Plan (not started; reviewed/buildable, replaces the prior proposal-only list):
   just settles) the claim outright -- matching the Plan's "clean process
   exit" requirement and `ResourceClaim.state`'s existing
   active/at-rest/released vocabulary (`tracking.py:510-536`).
-- [ ] Settle-on-finalize: in `validate_and_finalize` (`finalize.py:1334`),
+- [x] Settle-on-finalize: in `validate_and_finalize` (`finalize.py:1334`),
   resolve the invoking session id the same way `cmd_register_session` does
   (`_activate_session_binding`/payload-CWD resolution, `__main__.py:24873-
   24894`) and call `tracking.settle_resource_claim(record,
@@ -543,7 +544,7 @@ Plan (not started; reviewed/buildable, replaces the prior proposal-only list):
   `_assert_obligations_settled` runs (`finalize.py:1421-1429`) -- so the
   invoking session's own claim is settled by finalize itself, never left
   for the operator to settle by hand, and never blocks the hard gate.
-- [ ] `_assert_obligations_settled` (`finalize.py:1136-1233`): exclude
+- [x] `_assert_obligations_settled` (`finalize.py:1136-1233`): exclude
   `kind == "session"` claims from the hard-blocking `unsettled` computation
   at `finalize.py:1183` (`unsettled = [c for c in record.resources if
   c.is_unsettled and c.kind != "session"]`). Session claims never
@@ -552,7 +553,7 @@ Plan (not started; reviewed/buildable, replaces the prior proposal-only list):
   text below, not the handoff-note paraphrase that suggested a hard block
   with an `--abandon` escape, which this design deliberately does not
   follow.
-- [ ] Add an advisory-only `_advise_other_live_sessions(record,
+- [x] Add an advisory-only `_advise_other_live_sessions(record,
   current_session_ref)` in `finalize.py`, called from
   `validate_and_finalize` right after the settle-current-session step
   above. It finds every OTHER live (`ResourceClaim.is_live`,
@@ -1920,4 +1921,98 @@ The approved design is the faceted model in [design.md](design.md):
   both are plausible integration points for the same behavior, choosing
   between them is an implementation decision for whoever builds this
   slice, not a documentation gap to resolve now.
+
+### 2026-09-17 - Phase 8 build started: session claim + register/deregister wiring
+
+- First implementation sub-slice of Phase 8 (design was merged doc-only in
+  PR #2790; this is the first build session). Landed in a fresh worktree,
+  following Phase 9's own validated one-slice-per-worktree pattern.
+- Added `"session"` to `ResourceKind` (`tracking.py`), exactly as designed:
+  `ref` reuses the existing qualified `format_claim_ref(...,
+  session=session_id)` grammar, no `parse_claim_ref` change needed.
+- Wired `tracking.register_session` to journal a live `kind="session"`
+  claim for the registering session in the same locked transaction as the
+  `SessionEntry` create/update, reusing `add_resource_claim`'s existing
+  dedup-by-ref and finalized-reopen behavior unchanged.
+- Added `tracking.release_resource_claim` (mirrors `settle_resource_claim`
+  but writes `RELEASED`) and wired `tracking.deregister_session` to release
+  the ending session's own claim right after `_end_session_activation`, so
+  a clean process exit releases (not just settles) the claim.
+- Added 3 targeted tests (`test_tracking.py`): claim created on register,
+  idempotent re-register does not duplicate the claim, claim released
+  (not merely settled) on deregister. Full targeted run: 225 passed
+  (`test_tracking.py` + `test_register_session.py`). `ruff check` on the
+  touched file shows only the same 2 pre-existing E402/RUF100 findings
+  present on `main` before this change (confirmed via `git stash` diff) --
+  no new lint issues introduced. The full repo suite exceeds the bounded
+  test-supervisor's 10-minute window (times out around 47% on this
+  machine) even on `main`, so validation is scoped to the targeted files
+  per this effort's own established practice.
+- PR #2824's own automated review caught a real regression this slice
+  would otherwise have shipped: journaling an `active` `session` claim
+  with no matching gate exclusion yet would have hard-blocked
+  `_assert_obligations_settled` for **every** worktree with a live
+  session -- not a deferrable follow-up, since it broke `finalize` itself.
+  Folded the fix into this same slice rather than shipping it broken:
+  excluded `kind == "session"` from the gate's `unsettled` computation,
+  settled the invoking session's own claim to `at-rest` in
+  `validate_and_finalize` before the gate runs, and added the
+  advisory-only `_advise_other_live_sessions` (warns, never blocks) for
+  any OTHER live session claim. Also bumped `agent-worktrees`'s
+  `module-size-baseline.json` ceiling (a deliberate, reviewed widening --
+  the design explicitly grows this file, splitting it is out of scope for
+  this slice), the marketplace catalog's own top-level `metadata.version`
+  (missed on the first pass -- `agent-worktrees` is `plugins[0]`, which
+  needs both fields per CONTRIBUTING.md), and populated `created_at` on
+  the new session claim. Added 5 more targeted tests
+  (`test_finalize_gate.py`) covering the exclusion, that it doesn't mask
+  an unrelated unsettled claim, and the advisory pass's three cases (warns
+  on another live session, silent when none, tolerates no record) -- 18
+  passed in that file; 261 passed across the finalize/claim-handoff/
+  tracking/register-session files together.
+- A THIRD review round found the first finalize-path fix was still
+  incomplete on three fronts, all folded in before merge: (1) the
+  settle-current-session call mutated/saved the stale in-memory `record`
+  loaded before the finalize flow's own locked work, so an interleaving
+  `register_session`/`deregister_session` (each its own locked
+  read-modify-write) could be silently overwritten -- fixed by reloading
+  + settling inside a fresh `_RecordLock` transaction. (2) The success-path
+  `release_all_resources` cascade released every live claim including
+  `session`, which would tear down a still-running OTHER session's claim
+  -- fixed by excluding `kind == "session"` from that cascade (and from
+  `_rehome_abandoned_obligations`'s abandon-rehome selection, for the
+  same reason). (3) A second, later "freeze" recheck immediately before
+  marking the worktree `finalizing` still computed `unsettled` from every
+  claim with no session exclusion, so it silently re-introduced the exact
+  hard block the first fix removed -- fixed with the same `kind !=
+  "session"` exclusion. Added 1 more targeted test
+  (`test_release_all_resources_excludes_session_claims`); widened the
+  `tracking.py`/`finalize.py` baseline ceilings again to match. 273
+  passed across the same five test files.
+- A FOURTH review round caught one more real race: the settle-current-
+  session step used `settle_resource_claim` unconditionally, so a
+  `sessionEnd` that released the claim moments before a retried/late
+  finalize call for the SAME session id would get resurrected back to
+  `at-rest` (held) -- a genuinely torn-down claim coming back to life.
+  Fixed by checking the freshly-reloaded claim's own state first and
+  skipping the settle when it is already `released`. Extracted the whole
+  settle step into a small, directly testable
+  `_settle_current_session_claim(yaml_path, record, session_id)` helper
+  (previously inlined) and added 4 regression tests for it (settles an
+  active claim, never resurrects a released one, no-op with no session id,
+  no-op with no record) -- 277 passed across the same five test files.
+  This round also raised a separate, real but explicitly out-of-scope gap:
+  `_post_exit_gate`'s backstop call to `validate_and_finalize` runs in the
+  *launcher's* environment, which never carries the exited child's own
+  session id, so a crashed (not cleanly-exited) child's session claim is
+  left `active` with no settlement path here. Documented as a deliberate
+  scoping decision (a code comment on `validate_and_finalize`) rather than
+  threading session-id plumbing through the launcher in this slice: the
+  claim never blocks finalize (the exclusion already covers it) and its
+  actual reclaim is precisely the still-deferred sweep `claim_gone`/
+  `claim_safe` session-branch Plan bullet's job.
+- Remaining Phase 8 bullets (handoff-cutover settle, the sweep
+  `claim_gone`/`claim_safe` session branch, the `userPromptSubmit` reopen
+  hook) are unstarted -- left for the next slice(s), each its own small
+  worktree per the same pattern.
 
