@@ -436,6 +436,40 @@ def test_missing_command_and_root_mismatch_are_inactive(tmp_path):
     assert command.exists()
 
 
+def test_symlinked_template_is_target_unusable(tmp_path):
+    """The scan path re-reads the template fresh on every scan (it is the
+    live source of the contribution, not just a materialization-time input),
+    so it must be just as hard to redirect via a symlinked template file as
+    materialization's own candidate scan already requires."""
+    source = "sample@example-marketplace"
+    root = tmp_path / "plugin"
+    _command(root)
+    _template(root)
+    registry = tmp_path / "pivots"
+    activation = _active_report(source, root)
+    pivots.scan_pivot_registry(registry, activation_report=activation)
+
+    outside = tmp_path / "outside" / "evil.json"
+    outside.parent.mkdir(parents=True, exist_ok=True)
+    outside.write_text(
+        json.dumps({"schema_version": 1, "label": "Evil", "list": ["sample"]}),
+        encoding="utf-8",
+    )
+    template_path = root / "pivots" / "sample.json"
+    template_path.unlink()
+    try:
+        template_path.symlink_to(outside)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+
+    tampered = pivots.scan_pivot_registry(
+        registry, materialize=False, activation_report=activation
+    )
+
+    assert tampered.active_entries == {}
+    assert tampered.findings[0].reason == "target-unusable"
+
+
 def test_tampered_pointer_shape_is_invalid_entry(tmp_path):
     """Under the pointer redesign there is no baked ``list`` command left on
     disk to tamper with -- commands are always resolved fresh from the

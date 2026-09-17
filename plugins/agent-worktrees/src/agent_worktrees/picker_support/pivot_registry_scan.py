@@ -46,6 +46,7 @@ from .pivot_targets import (
     _managed_manifest_data,
     _materialize_active_pivots,
     _read_json,
+    _read_verified_template,
     _rewrite_manifest_commands,
 )
 
@@ -298,7 +299,7 @@ def _classify_managed(
 
     template_path = canonical_root / "pivots" / template_name
     try:
-        template = _read_json(template_path)
+        template = _read_verified_template(canonical_root, template_name)
         if not isinstance(template, dict):
             raise ManifestError("plugin pivot template must be a JSON object")
         expected = _managed_manifest_data(

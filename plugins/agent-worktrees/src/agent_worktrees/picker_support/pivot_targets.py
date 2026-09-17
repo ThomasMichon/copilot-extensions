@@ -208,6 +208,35 @@ def _read_json(path: Path) -> object:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _read_verified_template(canonical_root: Path, template_name: str) -> object:
+    """Read ``canonical_root/pivots/<template_name>``, applying the same
+    regular-file/non-reparse/containment checks the materializer's own
+    candidate scan uses.
+
+    A managed pointer's ``template`` is re-read from the identity-verified
+    plugin root on **every** scan -- it is the live source of the
+    contribution, not just a materialization-time input -- so it must be
+    just as hard to redirect via a symlinked file or a redirected ``pivots``
+    directory as materialization already requires. Raises
+    :class:`TargetUnusableError` for a non-regular/reparse target or one that
+    resolves outside ``canonical_root``; ``FileNotFoundError`` /
+    ``UnicodeDecodeError`` / ``json.JSONDecodeError`` propagate unchanged for
+    the caller's existing handling.
+    """
+    template_path = canonical_root / "pivots" / template_name
+    info = template_path.lstat()
+    if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode) or _is_reparse(info):
+        raise TargetUnusableError("pivot template must be a regular non-reparse file")
+    canonical_template = template_path.resolve(strict=True)
+    try:
+        canonical_template.relative_to(canonical_root)
+    except ValueError as exc:
+        raise TargetUnusableError(
+            "pivot template escapes the identity-verified plugin root"
+        ) from exc
+    return _read_json(canonical_template)
+
+
 def _exclusive_create_text(target: Path, content: str) -> bool:
     """Atomically publish ``content`` only when ``target`` is still absent."""
     target.parent.mkdir(parents=True, exist_ok=True)
