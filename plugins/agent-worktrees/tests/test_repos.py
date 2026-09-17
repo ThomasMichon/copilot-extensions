@@ -8,13 +8,14 @@ from unittest.mock import patch
 
 import pytest
 
-from agent_worktrees import repos
+from agent_worktrees import installer, repos
 
 
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch) -> Path:
     """Redirect ~ so the registry reads/writes under a tmp dir."""
     monkeypatch.setattr(repos.Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path))
     return tmp_path
 
 
@@ -31,6 +32,30 @@ def _init_repo(path: Path, branch: str = "main") -> None:
     (path / "README.md").write_text("hi\n")
     _git(path, "add", "-A")
     _git(path, "commit", "-m", "init")
+
+
+def test_migration_uses_adoptions_from_agent_home(home: Path, monkeypatch):
+    legacy_source = home / ".git-repos"
+    legacy_source.write_text(
+        "srcroot: /example\nrepos:\n  selected: {}\n  host-only: {}\n",
+        encoding="utf-8",
+    )
+    host_projects = home / ".agent-worktrees" / "projects.yaml"
+    host_projects.parent.mkdir(parents=True)
+    host_projects.write_text("projects:\n  host-only: {}\n", encoding="utf-8")
+    before = host_projects.read_bytes()
+    isolated_home = home / "sandbox"
+    monkeypatch.setenv("AGENT_HOME", str(isolated_home))
+    installer.write_projects_registry({"projects": {"selected": {}}})
+
+    assert repos.migrate_git_repos(plat="linux") == (2, 0)
+
+    registry = repos.read_registry()
+    assert registry.repos["selected"].repo_class == "worktree"
+    assert registry.repos["host-only"].repo_class == "singleton"
+    assert (isolated_home / ".agent-worktrees" / "repos.yaml").is_file()
+    assert not (home / ".agent-worktrees" / "repos.yaml").exists()
+    assert host_projects.read_bytes() == before
 
 
 # ---------------------------------------------------------------------------

@@ -119,6 +119,7 @@ def _register_repo(name: str, remote: str) -> None:
 
 def test_legacy_paths_remain_exact_and_ignore_runtime_root(monkeypatch, tmp_path):
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.delenv("AGENT_HOME", raising=False)
     monkeypatch.setenv("AGENT_RT_ROOT", str(tmp_path / "spoofed-runtime"))
 
     expected = Path.home() / ".agent-worktrees"
@@ -129,6 +130,8 @@ def test_legacy_paths_remain_exact_and_ignore_runtime_root(monkeypatch, tmp_path
 
 
 def test_explicit_context_selects_all_three_registry_files(monkeypatch, tmp_path):
+    isolated_home = tmp_path / "sandbox"
+    monkeypatch.setenv("AGENT_HOME", str(isolated_home))
     payload = _payload(tmp_path, "payload")
     context, plugin_root = _stamp(
         tmp_path / "durable",
@@ -151,6 +154,40 @@ def test_explicit_context_selects_all_three_registry_files(monkeypatch, tmp_path
     resolved_context = registry_paths.installation_context()
     assert owner["marketplace_id"] == resolved_context["marketplaceId"]
     assert owner["install_receipt"] == resolved_context["installReceipt"]
+    _register_repo("example", "https://github.com/example/repo.git")
+    assert (plugin_root / "repos.yaml").is_file()
+    assert not (isolated_home / ".agent-worktrees" / "repos.yaml").exists()
+    installer.write_projects_registry({"projects": {"example": {}}})
+    assert repos._adopted_project_names() == {"example"}
+
+
+def test_binstub_arbitration_is_shared_across_validated_cells(monkeypatch, tmp_path):
+    isolated_home = tmp_path / "sandbox"
+    monkeypatch.setenv("AGENT_HOME", str(isolated_home))
+    ledger = isolated_home / ".agent-worktrees" / "binstub-receipts"
+    first_receipt = None
+    for label in ("first", "second"):
+        payload = _payload(tmp_path, label)
+        context, plugin_root = _stamp(
+            tmp_path / "durable",
+            payload,
+            marketplace=label,
+            repository=f"Example-Org/{label}-Marketplace",
+        )
+        _select(monkeypatch, context, payload)
+        _register_repo("example", "https://github.com/example/repo.git")
+        assert installer.local_bin() == isolated_home / ".local" / "bin"
+        with installer._binstub_lock("__registries__"):
+            assert (ledger / ".__registries__.lock").is_file()
+            assert not (plugin_root / "binstub-receipts").exists()
+        if first_receipt is None:
+            installer._deploy_project_binstub("example")
+            first_receipt = (ledger / "example.json").read_bytes()
+        else:
+            with pytest.raises(installer.BinstubOwnershipError, match="ownership transfer"):
+                installer._deploy_project_binstub("example")
+            assert (ledger / "example.json").read_bytes() == first_receipt
+    assert not (Path.home() / ".agent-worktrees" / "binstub-receipts").exists()
 
 
 def test_two_cells_do_not_share_registry_writes(monkeypatch, tmp_path):
@@ -195,6 +232,8 @@ def test_two_cells_do_not_share_registry_writes(monkeypatch, tmp_path):
 
 
 def test_invalid_context_refuses_legacy_fallback(monkeypatch, tmp_path):
+    isolated_home = tmp_path / "sandbox"
+    monkeypatch.setenv("AGENT_HOME", str(isolated_home))
     payload = _payload(tmp_path, "payload")
     invalid = tmp_path / "invalid" / "install.json"
     invalid.parent.mkdir()
@@ -207,6 +246,9 @@ def test_invalid_context_refuses_legacy_fallback(monkeypatch, tmp_path):
 
     with pytest.raises(ValueError):
         installer.read_projects_registry()
+    with pytest.raises(ValueError):
+        repos.write_registry(repos.ReposRegistry())
+    assert not (isolated_home / ".agent-worktrees" / "repos.yaml").exists()
 
 
 def test_missing_registry_helper_has_bounded_validation_error(
