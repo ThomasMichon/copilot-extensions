@@ -73,7 +73,7 @@ async def test_native_ownership_blocks_acp_before_session_allocation():
         raise NativeError("native_incumbent", "native execution still owns the target")
 
     manager.native_guard = reject
-    target = SimpleNamespace(codespace={"name": "example-space"}, spawn_command=None)
+    target = SimpleNamespace(codespace={"name": "example-space"}, container=None, spawn_command=None)
     with pytest.raises(NativeError, match="still owns"):
         await manager.start_session(target)
     assert manager._sessions == {}

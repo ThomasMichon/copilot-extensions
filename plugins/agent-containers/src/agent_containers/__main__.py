@@ -18,6 +18,8 @@ Subcommands:
 
 from __future__ import annotations
 
+from .session_preparation import _prepare_session_host  # noqa: F401 -- compatibility re-export
+
 import argparse
 import json
 import logging
@@ -265,6 +267,8 @@ def main(argv: list[str] | None = None) -> int:
         "gated_actions/token_store) for agent-bridge to apply.",
     )
 
+    from .native_transport import add_arguments as add_native_arguments
+    add_native_arguments(sub)
     args = parser.parse_args(argv)
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
@@ -276,6 +280,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
+        if args.command in {"native-transport", "native-abort", "native-retirement", "remote-exec"}:
+            from .native_transport import command as native_command
+            return native_command(args)
         if args.command == "fleet":
             return _cmd_fleet(args)
         if args.command == "up":
@@ -431,69 +438,7 @@ def _trusted_session_host_context(name: str):
 
 
 def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
-    """Prepare endpoint + auth inputs; agent-bridge owns the Host lifecycle."""
-    from ._invoke import payload_command_argv
-    from .container_shims import (
-        deploy as deploy_shims,
-    )
-    from .container_shims import (
-        git_credential_environment,
-    )
-    from .relay_provider import token_for
-
-    config, fleet, user, workspace = _trusted_session_host_context(args.name)
-    ssh_config = prepare_ssh_config(args.name, user)
-    cleanup_remote_envs(args.name, user)
-    launch_env = container_environment(args.name, user)
-
-    forward, relay_enabled = config.credentials_for(fleet)
-    if forward:
-        github_token = host_gh_token()
-        if not github_token:
-            raise RuntimeError(
-                "forward_gh_token is enabled but `gh auth token` returned nothing"
-            )
-        launch_env["GH_TOKEN"] = github_token
-
-    reverse_forwards: list[str] = []
-    if relay_enabled:
-        if not args.host_relay_port or not 1 <= args.host_relay_port <= 65535:
-            raise RuntimeError(
-                "credential relay is enabled but no valid --host-relay-port "
-                "was supplied"
-            )
-        if not _relay_healthy(args.host_relay_port):
-            raise RuntimeError(
-                f"credential relay on 127.0.0.1:{args.host_relay_port} "
-                "did not answer the identity probe"
-            )
-        deploy_shims(args.name, ado=True)
-        launch_env["LC_GIT_CREDENTIAL_RELAY_HOST"] = "127.0.0.1"
-        launch_env["LC_GIT_CREDENTIAL_RELAY"] = str(config.relay_port)
-        launch_env["LC_GIT_CREDENTIAL_RELAY_TOKEN"] = token_for(args.name)
-        launch_env.update(git_credential_environment())
-        reverse_forwards.append(
-            f"{config.relay_port}:127.0.0.1:{args.host_relay_port}"
-        )
-
-    remote_env = write_remote_env(args.name, user, launch_env)
-    acp_command = config.acp_command_for(fleet)
-    remote_command = build_remote_command(
-        acp_command,
-        remote_env,
-    )
-    print(json.dumps({
-        "name": args.name,
-        "workspace_folder": workspace,
-        "security_profile": fleet.security_profile,
-        "user": user,
-        "ssh": asdict(ssh_config),
-        "acp_command": acp_command,
-        "remote_command": remote_command,
-        "remote_env": remote_env,
-        "reverse_forwards": reverse_forwards,
-        "state_command": [*payload_command_argv(), "session-host-state", args.name],
-    }))
+    print(json.dumps(_prepare_session_host(args)))
     return 0
 
 
@@ -959,6 +904,9 @@ def _cmd_exec(args: argparse.Namespace) -> int:
     ``CREATE_NO_WINDOW`` on Windows.
     """
     target = resolve_live_exec_target(args.name, config=load_config())
+    from . import native_claims, lease
+    with lease._lease_lock():
+        native_claims.assert_access(args.name)
 
     if target.actual_profile == RESTRICTED_PROFILE:
         from .lease import ProviderAdmissionError, session_admission

@@ -88,7 +88,10 @@ class SessionHost:
         self._child_exit: int | None = None
         self._on_child_exit = on_child_exit
         self._terminal = terminal
+        from .terminal_fronts import TerminalFronts
+        self._terminal_fronts = TerminalFronts(self) if terminal else None
         self._terminal_bytes = 0
+        self._terminal_eof = False
         self._on_child_start = on_child_start
         self._exit_task: asyncio.Task | None = None
         self._connections: set[asyncio.StreamWriter] = set()
@@ -189,6 +192,7 @@ class SessionHost:
                 while self._terminal_bytes > 1024 * 1024 and self._frames:
                     oldest = next(iter(self._frames))
                     self._terminal_bytes -= len(self._frames.pop(oldest))
+                self._terminal_fronts.changed()
             # Observe (never gate) the agent->client frame for turn state.
             self._observe_frame(line, to_child=False)
             front = self._front
@@ -200,6 +204,9 @@ class SessionHost:
         except ProcessLookupError:
             self._child_exit = -1
         self._child_done.set()
+        self._terminal_eof = True
+        if self._terminal_fronts:
+            self._terminal_fronts.changed()
         if self._on_child_exit is not None:
             try:
                 self._on_child_exit(self._child_exit)
@@ -253,6 +260,7 @@ class SessionHost:
         first = await proto.read_message(reader)
         if first is None or first[0] not in (
             proto.MsgType.ATTACH, proto.MsgType.PROBE, proto.MsgType.START, proto.MsgType.TERMINATE,
+            proto.MsgType.OBSERVE, proto.MsgType.TAKEOVER, proto.MsgType.ACQUIRE,
         ):
             writer.close()
             return
@@ -297,6 +305,11 @@ class SessionHost:
                 )
             finally:
                 writer.close()
+            return
+        if self._terminal:
+            await self._terminal_fronts.serve(reader, writer, first[0], last_acked, hello)
+            return
+        if first[0] != proto.MsgType.ATTACH:
             return
         # Displace any stale front (its process almost always already gone).
         old = self._front
@@ -440,7 +453,7 @@ class SessionHost:
     async def _terminate_child(self) -> None:
         """Explicit, sanctioned reap (goal 1's only allowed termination path)."""
         rc = self._child.returncode
-        if rc is not None:
+        if rc is not None and not self._terminal:
             return
         proc = self._child
         # Tree-kill, not just the copilot pid: copilot spawns MCP-bridge
@@ -597,6 +610,7 @@ class SessionHost:
                 if self._on_child_exit is not None:
                     self._on_child_exit(self._child_exit)
                 self._child_done.set()
+                self._terminal_fronts.changed()
 
             self._exit_task = asyncio.create_task(observe_exit())
         async def accept(reader, writer):

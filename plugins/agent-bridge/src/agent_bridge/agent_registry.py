@@ -372,7 +372,10 @@ _NS_NOT_FOUND_EXIT = 3
 _NS_BAD_STATE_EXIT = 4
 
 
-class CliNamespaceResolver(NamespaceResolver):
+from .provider_identity import ProviderIdentity
+
+
+class CliNamespaceResolver(ProviderIdentity, NamespaceResolver):
     """Drive a namespace provider over a **process boundary** (#892 Inc 3).
 
     Implements the :class:`NamespaceResolver` interface by shelling out to the
@@ -413,15 +416,6 @@ class CliNamespaceResolver(NamespaceResolver):
     def invalidate_list_cache(self) -> None:
         """Drop the cached ``list()`` result so the next call re-queries live."""
         self._list_cache = None
-
-    @property
-    def prefix(self) -> str:
-        return self._prefix
-
-    @property
-    def management_command(self) -> list[str] | None:
-        """The attributable provider invocation, without ambient-name substitution."""
-        return list(self._command) if self._command else None
 
     @property
     def bare_addressable(self) -> bool:

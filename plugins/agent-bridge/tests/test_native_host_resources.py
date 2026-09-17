@@ -343,7 +343,7 @@ async def test_native_status_carries_real_mailbox_request_after_frontend_detach(
     await second.status(execution, generation)
     await asyncio.gather(*list(second.resource_tasks.values()))
     result = mailbox.result(execution, generation, "request")
-    assert result["state"] == "ready" and result["sessionId"] == "session"
+    assert result["state"] == "ready" and result["sessionId"] == "session", result.get("error")
     assert result["executionId"] == execution and result["generation"] == generation
     assert observed["launches"] == 1
     directory = first.root / "host-resources" / execution / generation / "preview"

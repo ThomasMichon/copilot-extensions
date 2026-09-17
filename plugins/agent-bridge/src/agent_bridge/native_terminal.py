@@ -117,7 +117,7 @@ class Output:
 
 async def connection(
     client: BridgeClient, execution_id: str, generation: str, input_source: Input,
-    *, handshake_timeout: float | None = None,
+    *, handshake_timeout: float | None = None, observer: bool = False, takeover: bool = False,
 ) -> int | None:
     from wsproto import ConnectionType, WSConnection
     from wsproto.events import AcceptConnection, BytesMessage, CloseConnection, Ping, RejectConnection, Request, TextMessage
@@ -125,6 +125,7 @@ async def connection(
     output = Output(sys.stdout)
     url = client._base.replace("http://", "ws://", 1).replace("https://", "wss://", 1)
     url += f"/api/v1/native-executions/{quote(execution_id, safe='')}/terminal?generation={quote(generation, safe='')}"
+    url += f"&role={'observer' if observer else 'writer'}&takeover={'true' if takeover else 'false'}"
     host, port, target, tls = _parse_ws_url(url)
     deadline = time.monotonic() + handshake_timeout if handshake_timeout is not None else None
     reader, writer = await asyncio.wait_for(
@@ -163,9 +164,7 @@ async def connection(
             protocol.receive_data(data)
             for event in protocol.events():
                 if isinstance(event, AcceptConnection):
-                    accepted.set()
-                    input_source.connected = True
-                    input_source.has_attached = True
+                    pass  # ownership is acknowledged by the authenticated host
                 elif isinstance(event, RejectConnection):
                     raise NativeError("not_ready", "Native terminal is not available; execution is retained", 503)
                 elif isinstance(event, BytesMessage):
@@ -186,13 +185,24 @@ async def connection(
                         text = []
                         if value.get("type") == "exit":
                             return int(value["exitCode"])
+                        if value.get("type") == "attached":
+                            accepted.set()
+                            input_source.connected = True
+                            input_source.has_attached = True
                 elif isinstance(event, Ping):
                     await send(event.response())
                 elif isinstance(event, CloseConnection):
+                    if event.code in {4409, 4410, 4403}:
+                        raise NativeError(
+                            {4409: "writer_busy", 4410: "writer_revoked", 4403: "read_only"}[event.code],
+                            "Terminal ownership refused; use an observer or explicitly request takeover",
+                        )
                     return None
         return None
 
-    tasks = [asyncio.create_task(inbound()), asyncio.create_task(outbound()), asyncio.create_task(resize())]
+    tasks = [asyncio.create_task(inbound())]
+    if not observer:
+        tasks += [asyncio.create_task(outbound()), asyncio.create_task(resize())]
     detach = asyncio.create_task(input_source.detached.wait())
     handshake = asyncio.create_task(accepted.wait())
     try:
@@ -252,7 +262,7 @@ async def _until_detach(operation, input_source: Input, timeout: float):
 
 async def attach(
     execution_id: str, generation: str, *, reconnect_timeout: float = 120,
-    preparation_timeout: float = 1800,
+    preparation_timeout: float = 1800, observer: bool = False, takeover: bool = False,
 ) -> int:
     from .__main__ import _get_client
 
@@ -309,8 +319,20 @@ async def attach(
                 if status["state"] in {"ready", "unrepresented"} or (
                     status["state"] == "starting" and status.get("phase") == "registration"
                 ):
+                    capabilities = await _until_detach(
+                        asyncio.to_thread(client.native_capabilities), input_source, budget,
+                    )
+                    if capabilities is _DETACHED:
+                        return 0
+                    terminal = capabilities.get("capabilities", {}).get("terminal", {})
+                    if terminal.get("writer") != "exclusive" or terminal.get("observers") is not True:
+                        raise NativeError(
+                            "terminal_capability_unavailable",
+                            "Controller lacks explicit terminal ownership; update it before attaching", 426,
+                        )
                     result = await connection(
-                        client, execution_id, generation, input_source, handshake_timeout=budget,
+                        client, execution_id, generation, input_source, handshake_timeout=remaining(),
+                        observer=observer, takeover=takeover and not input_source.has_attached,
                     )
                     if result is not None:
                         return result

@@ -125,6 +125,7 @@ async def test_connection_acks_partial_codepoint_and_finalizes_its_tail(
                 for event in wire.events():
                     if isinstance(event, Request):
                         writer.write(wire.send(AcceptConnection(subprotocol="native.v1")))
+                        writer.write(wire.send(TextMessage(data=json.dumps({"type": "attached", "role": "writer"}))))
                         writer.write(wire.send(BytesMessage(
                             data=struct.pack(">Q", 1) + b"\x1b[31m\xe2\x94",
                         )))

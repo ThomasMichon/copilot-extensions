@@ -25,6 +25,12 @@ class Hello:
     min_seq: int = 0
 
 
+class TerminalOwnershipError(ConnectionError):
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
+
+
 class SessionHostClient:
     def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         self._reader = reader
@@ -49,7 +55,10 @@ class SessionHostClient:
     def child_exit_code(self) -> int:
         return self._child_exit
 
-    async def attach(self, last_acked: int = 0, *, nonce: bytes = b"") -> Hello:
+    async def attach(
+        self, last_acked: int = 0, *, nonce: bytes = b"", observer: bool = False,
+        takeover: bool = False, terminal: bool = False,
+    ) -> Hello:
         """Send the reattach handshake; return the host's HELLO.
 
         ``last_acked`` is the last frame ``seq`` this frontend durably recorded.
@@ -59,9 +68,16 @@ class SessionHostClient:
         process cannot drive the child by dialing the port); an unsecured host
         ignores it.
         """
-        await proto.write_message(self._writer, proto.MsgType.ATTACH,
+        if observer and takeover:
+            raise ValueError("an observer cannot take writer ownership")
+        kind = proto.MsgType.OBSERVE if observer else proto.MsgType.TAKEOVER if takeover else proto.MsgType.ATTACH
+        if terminal and not observer and not takeover:
+            kind = proto.MsgType.ACQUIRE
+        await proto.write_message(self._writer, kind,
                                   proto.pack_attach(last_acked, nonce))
         msg = await proto.read_message(self._reader)
+        if msg is not None and msg[0] == proto.MsgType.ERROR:
+            raise TerminalOwnershipError(msg[1].decode("ascii"))
         if msg is None or msg[0] != proto.MsgType.HELLO:
             raise ConnectionError("session host did not send HELLO")
         payload = msg[1]
@@ -112,6 +128,8 @@ class SessionHostClient:
             if msg is None:
                 return
             mtype, payload = msg
+            if mtype == proto.MsgType.ERROR:
+                raise TerminalOwnershipError(payload.decode("ascii"))
             if mtype == proto.MsgType.FRAME:
                 yield proto.unpack_frame(payload)
             elif mtype == proto.MsgType.LIVENESS:

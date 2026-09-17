@@ -853,6 +853,8 @@ def deploy_hold(
         expires_at=now + max_lifetime,
     )
     with _lease_lock():
+        from .native_claims import assert_access
+        assert_access(container)
         holds = _read_live_records(
             _DEPLOY_HOLDS_FILE,
             DeployHold,
@@ -900,6 +902,7 @@ def session_admission(
     container: str,
     *,
     expected_assignment: dict | None = None,
+    native_identity: tuple[str, str, str] | None = None,
 ) -> Iterator[SessionAdmission]:
     """Admit one provider launch only when no destructive hold is present."""
     token = uuid.uuid4().hex
@@ -914,6 +917,8 @@ def session_admission(
         heartbeat_at=time.time(),
     )
     with _lease_lock():
+        from .native_claims import assert_access
+        assert_access(container, native_identity)
         if expected_assignment is not None:
             leases = _prune(_read_leases(), DEFAULT_TTL)
             lease = leases.get(container)

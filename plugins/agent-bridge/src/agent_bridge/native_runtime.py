@@ -114,6 +114,8 @@ class NativeRuntime:
             raise NativeError("unsupported_venue", "Native execution hosting requires Linux process identity", 400)
         execution_id = identifier(request["executionId"])
         generation = identifier(request["generation"])
+        from .native_venue import key as venue_key, venue
+        namespace, name = venue(request)
         command, cwd = request["command"], request["cwd"]
         if not isinstance(command, str) or not command.strip() or "\0" in command or len(command.encode()) > 262144:
             raise NativeError("invalid_command", "Expected a bounded nonblank command", 400)
@@ -131,7 +133,7 @@ class NativeRuntime:
             launch_spec["hostResources"] = validate_public(resources)
         expected_hash = signature(launch_spec)
         row, created = self.store.reserve(
-            execution_id, generation, execution_id, request["codespace"], request["owner"],
+            execution_id, generation, execution_id, venue_key(request), request["owner"],
             expected_hash, {"sessionId": None, "represented": False, "hostNonce": secrets.token_hex(32),
                             **({"resourceDefinitions": resources} if resources is not None else {})},
             strict_identity=True,
@@ -161,7 +163,7 @@ class NativeRuntime:
                 "AGENT_BRIDGE_NATIVE_GENERATION": generation,
                 "AGENT_BRIDGE_NATIVE_RESOURCES": "",
                 "TERM": "xterm-256color",
-                "AGENT_BRIDGE_HOST_VENUE": f"codespace:{request['codespace']}",
+                "AGENT_BRIDGE_HOST_VENUE": f"{namespace}:{name}",
             }
             from .config import config_dir
 
@@ -288,12 +290,13 @@ class NativeRuntime:
         try:
             row = self.store.get(execution_id, generation)
         except NativeError as exc:
-            if exc.code != "not_found" or not ownership or not ownership.get("owner") or not ownership.get("codespace"):
+            if exc.code != "not_found" or not ownership or not ownership.get("owner"):
                 raise
+            from .native_venue import key as venue_key
             if self._state_path(execution_id).exists():
                 raise NativeError("retirement_unconfirmed", "Unindexed native authority is present")
             row, created = self.store.tombstone(
-                execution_id, generation, ownership["codespace"], ownership["owner"],
+                execution_id, generation, venue_key(ownership), ownership["owner"],
             )
             if created:
                 return self.status(execution_id, generation)
@@ -339,13 +342,18 @@ class NativeRuntime:
                 kind=params.get("kind", "prompt"), reply_to=params.get("replyTo"),
                 wait=bool(params.get("wait")), wait_timeout=float(params.get("waitTimeout", 120)),
             )
-        return client.get_live_result_snapshot(session_id)
+        options = {}
+        if params.get("position") is not None:
+            options["position"] = params["position"]
+        return client.get_live_result_snapshot(session_id, **options)
 
 
 def command(args) -> int:
     """Internal remote management boundary, invoked through provider transport."""
     if args.native_host_action == "capabilities":
+        from .native_capabilities import capabilities
         print(json.dumps({"capability": CAPABILITY, "version": 1,
+                          "capabilities": capabilities(),
                           "hostResources": "native-host-resources-v1",
                           "supported": sys.platform.startswith("linux") and bool(launcher._boot_id())}))
         return 0

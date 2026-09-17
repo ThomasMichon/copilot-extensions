@@ -5,9 +5,36 @@ from __future__ import annotations
 import asyncio
 import os
 import signal
+import subprocess
 import sys
 
 from .osutil import child_preexec
+
+
+class _OwnedProcess:
+    """Observe exit without reaping the PID that anchors our process group."""
+
+    def __init__(self, process: subprocess.Popen) -> None:
+        self.process = process
+        self.pid = process.pid
+        self._returncode = None
+
+    @property
+    def returncode(self):
+        if self._returncode is None:
+            result = os.waitid(os.P_PID, self.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+            if result is not None:
+                self._returncode = result.si_status if result.si_code == os.CLD_EXITED else -result.si_status
+        return self._returncode
+
+    async def wait(self):
+        while self.returncode is None:
+            await asyncio.sleep(.02)
+        return self.returncode
+
+    def reap(self):
+        if self.returncode is not None:
+            self.process.wait()
 
 
 class _PtyWriter:
@@ -55,6 +82,9 @@ class PtyChild:
         self.stdin = writer
         self.transport = transport
         self.gate = gate
+        self._group_settled = False
+        from pathlib import Path
+        self._leader_ticks = Path(f"/proc/{self.pid}/stat").read_text().rpartition(")")[2].split()[19]
 
     def start(self) -> None:
         if self.gate is not None:
@@ -88,18 +118,32 @@ class PtyChild:
                 pass
 
     def kill(self) -> None:
-        if self.returncode is None:
-            try:
-                os.killpg(self.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+        if self._group_settled:
+            return
+        from pathlib import Path
+
+        # Only the living host retains this authority. Never reacquire it from
+        # a saved PGID, or signal a replacement process using the leader's PID.
+        try:
+            ticks = Path(f"/proc/{self.pid}/stat").read_text().rpartition(")")[2].split()[19]
+        except FileNotFoundError:
+            self._group_settled = True
+            return
+        if ticks != self._leader_ticks:
+            raise RuntimeError("terminal process-group identity changed")
+        try:
+            os.killpg(self.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            self._group_settled = True
 
     def close(self) -> None:
+        self._group_settled = True
         self.transport.close()
         self.stdin.close()
         if self.gate is not None:
             os.close(self.gate)
             self.gate = None
+        self.process.reap()
 
 
 async def spawn_terminal(
@@ -134,10 +178,10 @@ async def spawn_terminal(
                 "os.execvpe(sys.argv[2],sys.argv[2:],os.environ)\n"
             )
             spawn_argv = [sys.executable, "-c", program, str(gate_read), *argv]
-        process = await asyncio.create_subprocess_exec(
-            *spawn_argv, stdin=slave, stdout=slave, stderr=slave, cwd=cwd, env=env,
+        process = _OwnedProcess(subprocess.Popen(
+            spawn_argv, stdin=slave, stdout=slave, stderr=slave, cwd=cwd, env=env,
             start_new_session=True, preexec_fn=prepare, pass_fds=inherited,
-        )
+        ))
         reader = asyncio.StreamReader(limit=128 * 1024)
         transport, _ = await asyncio.get_running_loop().connect_read_pipe(
             lambda: asyncio.StreamReaderProtocol(reader),
@@ -154,6 +198,7 @@ async def spawn_terminal(
             except ProcessLookupError:
                 pass
             await process.wait()
+            process.reap()
         if gate_write is not None:
             os.close(gate_write)
         raise

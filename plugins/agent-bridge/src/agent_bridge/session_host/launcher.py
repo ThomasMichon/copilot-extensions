@@ -277,7 +277,7 @@ async def run_host(
     apply_host_survival()
     nonce = nonce or os.environ.get(_NONCE_ENV, "")
     venue = os.environ.get("AGENT_BRIDGE_HOST_VENUE", "")
-    if (venue == "codespace" or venue.startswith("codespace:")) and not terminal and state_file is not None:
+    if (venue in {"codespace", "container"} or venue.startswith(("codespace:", "container:"))) and not terminal and state_file is not None:
         from .execution_guard import admit_and_publish
 
         admit_and_publish(Path(state_file), {

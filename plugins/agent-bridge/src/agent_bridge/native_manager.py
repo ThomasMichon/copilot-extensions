@@ -15,6 +15,7 @@ from pathlib import Path, PurePosixPath
 from .native_store import NativeError, NativeStore, identifier, receipt, signature
 from .session_host.client import SessionHostClient
 from .session_host.launcher import host_spawn_kwargs
+from .native_venue import key as venue_key, venue, record_venue
 
 CAPABILITY = "codespace-native-control-v1"
 _LIVE = ("starting", "ready", "unrepresented", "unreachable")
@@ -27,11 +28,13 @@ _PROGRESS_STATUSES = frozenset({"started", "reached", "failed"})
 
 def validate_request(request: dict) -> dict:
     allowed = {"requestId", "codespace", "owner", "cwd", "command", "noPluginStaging",
-               "requireRelay", "localForward", "reverseForward", "hostResources"}
+               "requireRelay", "localForward", "reverseForward", "hostResources", "remoteCommand", "target"}
     if set(request) - allowed:
         raise NativeError("invalid_request", "Unknown native launch fields", 400)
-    for key in ("requestId", "codespace"):
-        identifier(request.get(key))
+    identifier(request.get("requestId"))
+    venue(request)
+    if "target" in request and "remoteCommand" not in request:
+        raise NativeError("remote_command_required", "Provider-qualified launches require a pinned remote command", 400)
     owner = request.get("owner")
     cwd = request.get("cwd")
     command = request.get("command")
@@ -46,6 +49,12 @@ def validate_request(request: dict) -> dict:
     if "hostResources" in request:
         from .native_resources import validate_definitions
         validate_definitions(request["hostResources"])
+    if "remoteCommand" in request:
+        from ssh_manager.remote_command import validate_descriptor
+        try:
+            validate_descriptor(request["remoteCommand"])
+        except ValueError as exc:
+            raise NativeError("invalid_remote_command", str(exc), 400) from exc
     for key in ("localForward", "reverseForward"):
         values = request.get(key, [])
         if not isinstance(values, list) or len(values) > 32:
@@ -76,13 +85,16 @@ class ProviderTransport:
 
     async def start(self, *, resume: bool, retirement_only: bool = False) -> None:
         spec = self.row["data"]["spec"]
+        name = record_venue(self.row)[1]
         argv = [
-            *self.prefix, "native-transport", self.row["codespace"],
+            *self.prefix, "native-transport", name,
             "--owner", self.row["owner"], "--execution-id", self.row["id"],
             "--generation", self.row["generation"], "--no-plugin-staging", "--require-relay",
         ]
         if resume:
             argv.append("--resume-infrastructure")
+        if "remoteCommand" in spec:
+            argv += ["--remote-command-json", json.dumps(spec["remoteCommand"])]
         if retirement_only:
             argv.append("--retirement-only")
         else:
@@ -129,7 +141,8 @@ class ProviderTransport:
                     if not self.ready.done():
                         self.ready.set_exception(NativeError("venue_busy", "Another execution owns the CodeSpace"))
                 elif value.get("event") == "ready":
-                    if value.get("capability") != "codespace-native-transport-v1":
+                    namespace = self.row["data"].get("spec", {}).get("target", "codespace:").split(":", 1)[0]
+                    if value.get("capability") != f"{namespace}-native-transport-v1":
                         raise NativeError("provider_unavailable", "Native transport capability does not match", 503)
                     if "hostResources" in self.row["data"]["spec"] and value.get("hostResources") != "native-host-resources-v1":
                         raise NativeError("resource_capability_unavailable", "Native provider lacks host resources", 503)
@@ -141,7 +154,8 @@ class ProviderTransport:
                         if value.get("ok"):
                             future.set_result(value["result"])
                         else:
-                            future.set_exception(NativeError("provider_operation_failed", str(value.get("error")), 503))
+                            code = "reply_transport_timeout" if value.get("errorCode") == "reply_transport_timeout" else "provider_operation_failed"
+                            future.set_exception(NativeError(code, str(value.get("error")), 504 if code == "reply_transport_timeout" else 503))
         except NativeError as exc:
             if not self.ready.done():
                 self.ready.set_exception(exc)
@@ -158,6 +172,13 @@ class ProviderTransport:
             self.pending.clear()
 
     async def request(self, method: str, params: dict | None = None) -> dict:
+        timeout = 180.0
+        if method == "message" and (params or {}).get("wait"):
+            import math
+            wait = float(params.get("waitTimeout", 120))
+            if not math.isfinite(wait) or not 0 < wait <= 300:
+                raise NativeError("invalid_timeout", "Native reply timeout must be in (0,300]", 400)
+            timeout = wait + 60
         request_id = uuid.uuid4().hex
         future = asyncio.get_running_loop().create_future()
         self.pending[request_id] = future
@@ -169,7 +190,12 @@ class ProviderTransport:
             async with self.write_lock:
                 self.process.stdin.write((json.dumps(frame) + "\n").encode())
                 await self.process.stdin.drain()
-            return await asyncio.wait_for(future, 180)
+            return await asyncio.wait_for(future, timeout)
+        except TimeoutError as exc:
+            raise NativeError(
+                "reply_transport_timeout", "Provider reply deadline expired; delivery remains uncertain. "
+                "Inspect the result or reuse the same messageId.", 504,
+            ) from exc
         finally:
             self.pending.pop(request_id, None)
 
@@ -258,6 +284,8 @@ class NativeManager:
         return store.active() if store else []
 
     def assert_acp_allowed(self, codespace: str) -> None:
+        if codespace.startswith("codespace:"):
+            codespace = codespace.removeprefix("codespace:")
         if any(row["codespace"] == codespace for row in self.records()):
             raise NativeError("native_incumbent", "Native execution ownership blocks ACP fallback")
 
@@ -265,21 +293,32 @@ class NativeManager:
         if not self.serving():
             raise NativeError("not_ready", "The owning bridge is not accepting native launches", 503)
         spec = validate_request(request)
-        if self.acp_busy(spec["codespace"]):
+        if self.acp_busy(venue_key(spec)):
             raise NativeError("venue_busy", "An ACP execution already owns the CodeSpace")
-        prefix = self.provider_command()
+        prefix = self._provider(spec)
         if not prefix:
-            raise NativeError("provider_unavailable", "No attributable CodeSpace provider is registered", 503)
+            raise NativeError("provider_unavailable", "No attributable venue provider is registered", 503)
         store = self.store(create=True)
         row, created = store.reserve(
-            uuid.uuid4().hex, uuid.uuid4().hex, spec["requestId"], spec["codespace"],
-            spec["owner"], signature(spec), {"spec": spec, "phase": "preparing", "represented": False},
+            uuid.uuid4().hex, uuid.uuid4().hex, spec["requestId"], venue_key(spec),
+            spec["owner"], signature(spec), {"spec": spec, "phase": "preparing", "represented": False,
+                                            "providerCommand": prefix},
         )
         if row["state"] not in {"stopped", "rejected"} and row["id"] not in self.tasks:
             if not created and row["id"] not in self.transports:
                 row = store.update(row["id"], row["generation"], state="unreachable", represented=False)
             self._schedule(row, launch=created or not row["data"].get("launchRequested"))
         return receipt(row)
+
+    def _provider(self, spec: dict, row: dict | None = None):
+        if row is not None and row["data"].get("providerCommand"):
+            return row["data"]["providerCommand"]
+        namespace, _ = venue(spec)
+        return self.provider_command() if namespace == "codespace" else self.provider_command(namespace)
+
+    def _row_provider(self, row):
+        namespace, name = record_venue(row)
+        return self._provider({"target": f"{namespace}:{name}"}, row)
 
     def _schedule(self, row: dict, *, launch: bool = False) -> None:
         task = asyncio.create_task(self._prepare(row["id"], row["generation"], launch=launch))
@@ -321,7 +360,7 @@ class NativeManager:
             try:
                 if transport is None:
                     transport = self.transport_factory(
-                        self.provider_command(), row,
+                        self._row_provider(row), row,
                         lambda: store.update(
                             execution_id, generation, infrastructureOwned=True,
                             allowed_states=(*_LIVE, "stopping"),
@@ -350,7 +389,7 @@ class NativeManager:
                     result = await transport.request("launch", launch_request)
                 else:
                     result = await transport.request("status")
-                if result.get("host") and not result.get("retired"):
+                if result.get("host") and not result.get("retired") and result.get("state") != "stopping":
                     await self._prove_endpoint(result)
                     if not result.get("activated"):
                         current = store.get(execution_id, generation)
@@ -452,7 +491,7 @@ class NativeManager:
             return await self.status(target.removeprefix("native:"))
         matches = [
             row for row in store.active()
-            if target in {row["id"], row["codespace"], f"codespace:{row['codespace']}", row["data"].get("sessionId")}
+            if target in {row["id"], row["codespace"], ":".join(record_venue(row)), row["data"].get("sessionId")}
         ]
         if len(matches) > 1:
             raise NativeError("ambiguous_target", "Native target is ambiguous")
@@ -506,7 +545,7 @@ class NativeManager:
             from agent_procutil import no_window_kwargs
 
             proc = await asyncio.create_subprocess_exec(
-                *self.provider_command(), "native-abort", row["codespace"],
+                *self._row_provider(row), "native-abort", record_venue(row)[1],
                 "--owner", row["owner"], "--execution-id", execution_id, "--generation", generation,
                 cwd=row["owner"], stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, **no_window_kwargs(),
@@ -540,11 +579,11 @@ class NativeManager:
     async def _retirement_receipt(self, row: dict) -> dict | None:
         from agent_procutil import no_window_kwargs
 
-        prefix = self.provider_command()
+        prefix = self._row_provider(row)
         if not prefix:
             raise NativeError("provider_unavailable", "Native provider is unavailable", 503)
         proc = await asyncio.create_subprocess_exec(
-            *prefix, "native-retirement", row["codespace"], "--owner", row["owner"],
+            *prefix, "native-retirement", record_venue(row)[1], "--owner", row["owner"],
             "--execution-id", row["id"], "--generation", row["generation"], cwd=row["owner"],
             stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             **no_window_kwargs(),
@@ -563,6 +602,10 @@ class NativeManager:
     async def represented(self, execution_id: str, generation: str, operation: str, params: dict) -> dict:
         if not self.serving():
             raise NativeError("not_ready", "Native controller is rebinding", 503)
+        if params.get("position") is not None and (
+            not isinstance(params["position"], str) or len(params["position"]) > 2048
+        ):
+            raise NativeError("invalid_cursor", "Expected a bounded observation position", 400)
         if operation == "message":
             import math
 

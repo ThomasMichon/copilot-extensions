@@ -34,7 +34,10 @@ def rig(monkeypatch):
             **state.status(),
         }
 
-    client = SimpleNamespace(native_status=status)
+    client = SimpleNamespace(
+        native_status=status,
+        native_capabilities=lambda: {"capabilities": {"terminal": {"writer": "exclusive", "observers": True}}},
+    )
 
     def get_client(*, ensure):
         assert ensure is False  # observing/presenting never restarts the owner
@@ -52,7 +55,7 @@ def rig(monkeypatch):
         finally:
             state.restored = True
 
-    async def connect(client, execution_id, generation, source, *, handshake_timeout):
+    async def connect(client, execution_id, generation, source, *, handshake_timeout, observer=False, takeover=False):
         state.connections.append((execution_id, generation, handshake_timeout))
         source.has_attached = True
         return 7
@@ -133,7 +136,7 @@ async def test_initial_handshake_not_ready_uses_preparation_window(rig, monkeypa
     rig.step = 61
     rig.status = lambda: {"state": "unrepresented"}
 
-    async def connect(client, execution_id, generation, source, *, handshake_timeout):
+    async def connect(client, execution_id, generation, source, *, handshake_timeout, observer=False, takeover=False):
         if rig.now < 180:
             raise NativeError("not_ready", "native host preparing", 503)
         source.has_attached = True
@@ -209,7 +212,7 @@ async def test_true_reconnect_exhausts_120_seconds_after_first_attachment(rig, m
     rig.step = 30
     attempted = []
 
-    async def connect(client, execution_id, generation, source, *, handshake_timeout):
+    async def connect(client, execution_id, generation, source, *, handshake_timeout, observer=False, takeover=False):
         attempted.append((execution_id, generation, handshake_timeout))
         if len(attempted) == 1:
             source.has_attached = True
@@ -233,7 +236,7 @@ async def test_recovery_status_cannot_reset_an_existing_reconnect_budget(rig, mo
     rig.status = lambda: {"state": "starting" if rig.source.has_attached else "ready"}
     rig.step = 40
 
-    async def connect(client, execution_id, generation, source, *, handshake_timeout):
+    async def connect(client, execution_id, generation, source, *, handshake_timeout, observer=False, takeover=False):
         source.has_attached = True
         source.last_disconnect = rig.now
         return None
@@ -306,6 +309,43 @@ async def test_invalid_budgets_are_rejected(value):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("code,error", [(4409, "writer_busy"), (4410, "writer_revoked"), (4403, "read_only")])
+async def test_terminal_ownership_close_is_not_a_reconnect_signal(code, error):
+    from wsproto import ConnectionType, WSConnection
+    from wsproto.events import AcceptConnection, CloseConnection, Request
+
+    async def server(reader, writer):
+        wire = WSConnection(ConnectionType.SERVER)
+        try:
+            while data := await reader.read(65536):
+                wire.receive_data(data)
+                for event in wire.events():
+                    if isinstance(event, Request):
+                        writer.write(wire.send(AcceptConnection(subprotocol="native.v1")))
+                        writer.write(wire.send(CloseConnection(code=code, reason=error)))
+                        await writer.drain()
+                        return
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    listener = await asyncio.start_server(server, "127.0.0.1", 0)
+    source = SimpleNamespace(
+        detached=asyncio.Event(), queue=asyncio.Queue(), connected=False,
+        has_attached=False, last_disconnect=0.0,
+    )
+    client = SimpleNamespace(_base=f"http://127.0.0.1:{listener.sockets[0].getsockname()[1]}", _token="fixture")
+    try:
+        with pytest.raises(NativeError) as caught:
+            await terminal.connection(client, "execution", "generation", source, handshake_timeout=2)
+        assert caught.value.code == error
+        assert not source.has_attached
+    finally:
+        listener.close()
+        await listener.wait_closed()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("accept", [False, True])
 async def test_real_connection_bounds_handshake_but_preserves_accepted_terminal(accept):
     from wsproto import ConnectionType, WSConnection
@@ -321,6 +361,7 @@ async def test_real_connection_bounds_handshake_but_preserves_accepted_terminal(
                 for event in wire.events():
                     if isinstance(event, Request) and accept:
                         writer.write(wire.send(AcceptConnection(subprotocol="native.v1")))
+                        writer.write(wire.send(TextMessage(data=json.dumps({"type": "attached", "role": "writer"}))))
                         await writer.drain()
                         await asyncio.sleep(1.1)  # longer than the handshake budget
                         writer.write(wire.send(TextMessage(data=json.dumps({"type": "exit", "exitCode": 19}))))

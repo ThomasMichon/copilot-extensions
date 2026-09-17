@@ -167,14 +167,20 @@ class NativeStore:
 
 
 def receipt(row: dict) -> dict:
+    from .native_venue import record_venue
+
     data = row["data"]
+    namespace, name = record_venue(row)
     return {
         "schema": "copilot-extensions.native-execution", "version": 1,
         "executionId": row["id"], "generation": row["generation"], "mode": "native",
-        "codespace": row["codespace"], "owner": row["owner"], "state": row["state"],
+        "target": f"{namespace}:{name}", "provider": namespace,
+        **({"codespace": name} if namespace == "codespace" else {"container": name}),
+        "owner": row["owner"], "state": row["state"],
         "sessionId": data.get("sessionId"), "represented": bool(data.get("represented")),
         "ready": row["state"] == "ready" and bool(data.get("represented")),
         "exitCode": data.get("exitCode"), "phase": data.get("phase"),
         "error": data.get("error"), "ports": data.get("ports", []),
         "recovery": data.get("recovery"),
+        "remoteCommand": data.get("spec", {}).get("remoteCommand"),
     }

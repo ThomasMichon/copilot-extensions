@@ -36,6 +36,9 @@ class ProtocolError(Exception):
 class MsgType(bytes, enum.Enum):
     # Frontend -> Host
     ATTACH = b"A"      # payload: u64 last_acked_seq (0 == fresh attach)
+    OBSERVE = b"O"     # native read-only attachment; same cursor + nonce payload
+    ACQUIRE = b"Q"     # native exclusive writer; old hosts refuse rather than displace
+    TAKEOVER = b"V"    # native explicit writer takeover; same cursor + nonce
     PROBE = b"P"       # authenticated liveness query; never displaces a frontend
     RESIZE = b"R"      # native terminal only: u16 rows + u16 columns
     START = b"B"       # native host admission gate: expected child pid + nonce
@@ -54,6 +57,7 @@ class MsgType(bytes, enum.Enum):
     HELLO = b"H"       # payload: u64 max_seq + u64 child_pid
     FRAME = b"F"       # payload: u64 seq + raw ACP frame bytes (verbatim)
     LIVENESS = b"L"    # payload: u8 alive(1/0) + u32 exit_code
+    ERROR = b"E"       # native nonretryable ownership/control error, ASCII code
 
 
 def pack_u64(n: int) -> bytes:

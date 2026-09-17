@@ -1,9 +1,10 @@
-# Shared native CodeSpace executions
+# Shared native venue executions
 
 Native Copilot and ACP use the same bridge/provider infrastructure but different
 interaction surfaces. A native execution is not an ACP `SessionManager` row.
-The bridge owns its durable execution record and presentation; the CodeSpace
-provider owns preparation, claims, credential forwarding, and managed ports.
+The bridge owns its durable execution record and presentation; the selected
+CodeSpace or trusted-container provider owns preparation, claims, credential
+forwarding, and managed ports.
 The officially installed remote bridge owns the native PTY execution host and
 the existing native live-session registry.
 
@@ -18,11 +19,15 @@ Use the resolved agent-bridge command:
 
 ```text
 agent-bridge native capabilities --json
-agent-bridge native start --codespace NAME --owner OWNER --cwd /workspaces/example-web --request-id REQUEST --command-file PATH --no-plugin-staging --require-relay --local-forward 4321:4321 --reverse-forward 9000:9001 --json
+agent-bridge native start --target codespace:NAME --owner OWNER --cwd /workspaces/example-web --request-id REQUEST --command-file PATH --remote-command-file PREPARED_COMMAND_JSON --json
+agent-bridge native start --container NAME --owner OWNER --cwd /workspace --request-id REQUEST --command-file PATH --remote-command-file PREPARED_COMMAND_JSON --json
 agent-bridge native attach EXECUTION_ID --expected-generation GENERATION
 agent-bridge native resume EXECUTION_ID --expected-generation GENERATION
 agent-bridge native status EXECUTION_ID --json
 agent-bridge native stop EXECUTION_ID --expected-generation GENERATION --json
+agent-bridge native attach EXECUTION_ID --expected-generation GENERATION --observer
+agent-bridge native attach EXECUTION_ID --expected-generation GENERATION --takeover
+agent-bridge native observe EXECUTION_ID --expected-generation GENERATION --expected-session-id SESSION_ID --position POSITION --json
 ```
 
 `--interactive-command-file` aliases `--command-file`. The file is a trusted,
@@ -34,11 +39,46 @@ The native path retains required relay/repository preparation and suppresses
 provider-controlled plugin payload delivery. Applicable remote plugins,
 including the native bridge extension, use official installation.
 
+New provider-qualified launches require the preparation result's pinned
+`--remote-command-file`:
+
+```json
+{
+  "schema": "copilot-extensions.remote-command",
+  "version": 1,
+  "argv": ["/absolute/selected-payload/bin/agent-bridge"],
+  "receipt": {
+    "path": "/absolute/selected-installation/current-payload.json",
+    "sha256": "<SHA-256 of the exact remote receipt bytes>"
+  }
+}
+```
+
+Preparation owns verifying that the selected command belongs to that installation.
+The descriptor is snapshotted in durable controller state and reused for
+capabilities, service/readiness, launch, observation, messaging, and retirement.
+Every invocation checks the same receipt bytes before executing the absolute argv;
+an absent or changed receipt fails closed, never substituting a PATH command.
+Legacy `--codespace` requests and saved records without a descriptor retain the
+legacy command boundary; they do not acquire attributable-installation guarantees.
+
+The container adapter accepts only a running, discovered, trusted/trusted fleet
+member and pins its Docker incarnation. Its existing configured token bootstrap
+and SSH credential relay remain required; it does not invent a CodeSpace identity,
+project a local checkout, or install host plugins. To prepare official remote
+plugins, run `agent-containers remote-exec NAME --command-file FILE --stdin
+--require-relay --no-plugin-staging --timeout 600`: the command file is UTF-8,
+stdin is forwarded unchanged (up to 1 MiB), and stdout/stderr and exit code are
+preserved. Container session files stay in the container; no host-workspace
+transcript projection is claimed.
+
 HTTP protocol 15 exposes `/api/v1/native-executions`. Receipts use schema
 `copilot-extensions.native-execution`, version 1, with `executionId`, `generation`,
-`mode: native`, `codespace`, `owner`, `state`, `sessionId`, `represented`, `ready`,
+`mode: native`, `target`, `provider`, `owner`, `state`, `sessionId`, `represented`, `ready`,
 `phase`, `exitCode`, `ports`, and `recovery`. No attach nonce or bearer is public.
 `sessionId` is the real CLI registration, not a fabricated ACP identity.
+Receipts retain `codespace` for CodeSpaces, use `container` for containers, and
+include the non-secret `remoteCommand` descriptor when supplied.
 
 Start is idempotent by `requestId`: reusing a key with a different specification
 fails. A receipt can be `starting` while infrastructure is prepared and
@@ -51,6 +91,18 @@ another launch. `Ctrl+]` detaches the presentation without stopping the venue
 process. Transport loss retries the same execution/generation; uncertain input
 is not replayed. The terminal has a bounded replay tail and supports resize.
 The native CLI retains its own permissions and interactive prompts.
+
+Terminal attachments have one explicit writer and independent read-only
+observers. Ordinary second-writer attachment is refused; only `--takeover`
+revokes the previous writer. Busy/revoked/read-only failures use nonretryable
+WebSocket codes 4409/4410/4403, so auto-reconnect cannot seize ownership back.
+The authenticated terminal endpoint accepts `role=observer|writer`,
+`takeover=true|false`, and `after=SEQUENCE`; it emits an identity-bound `attached`
+message and explicit `gap` messages when the 1 MiB replay tail no longer covers a
+cursor. Observer input, resize, and lifecycle control are rejected by the Session
+Host itself. ACP retains its existing single-frontend protocol. New native writer
+requests fail closed against older Session Hosts rather than silently displacing
+their frontend.
 
 Windows console output incrementally decodes UTF-8 across terminal frames and
 writes only complete codepoints. This avoids blocking `_WindowsConsoleIO.flush`
@@ -105,7 +157,7 @@ the other mode, including same-owner fallback. The remote authority catalog is
 also checked and admission/publication serialized before a child starts.
 Uncertain or corrupt authority fails closed.
 
-An ACP create or resume targeting a native-owned CodeSpace returns HTTP **409**
+An ACP create or resume targeting a native-owned venue returns HTTP **409**
 with `detail.code: native_incumbent`. The refusal occurs before ACP session
 allocation or spawning. Session/worktree resume and handoff adapters preserve
 that classification instead of reporting an internal error or trying a fresh
@@ -135,6 +187,20 @@ the native record to that verified live session. Unrepresented/unreachable
 native ownership is an error, never a reason to fall through to ACP. Generation,
 session freshness, and message idempotency are checked before delivery.
 
+`native observe` reuses the existing represented result snapshot, including its
+opaque `position`, process-lifetime retention, and coverage/gap reporting. Omit
+`--position` for an initial snapshot. The result is bound to the execution,
+generation, and real session; any number of readers observe the same agent.
+It is reduced-fidelity structured observation, not parsed terminal output.
+Capabilities declare prompt admission and retirement but no typed interruption,
+hidden reasoning, or permission-response API.
+
+Requested reply waits are finite values in `(0, 300]` seconds. SSH allows the
+requested wait plus 30 seconds, the provider channel plus 60, and the public
+HTTP caller plus 90. An observation-transport timeout is reported separately
+from an ordinary admitted message's reply timeout; it never proves non-delivery.
+Inspect the result or reuse the same message ID rather than submitting a new one.
+
 ## Retirement and recovery
 
 Stop requires the recorded generation. The remote authority pins host/child
@@ -143,7 +209,12 @@ identity cannot kill an unrelated process. The execution reservation is released
 only after retirement proof. Retirement receipts and tombstones make lost
 acknowledgements and repeated cleanup safe.
 
-The provider invokes its existing agent-logger-backed transcript recovery and
+The living Linux host observes leader exit without reaping the PID that anchors
+its original process group. This preserves exact group authority until explicit
+retirement even when background descendants survive the leader. After host loss,
+saved PGIDs never authorize killing an unrelated or uncertain process group.
+
+The CodeSpace provider invokes its existing agent-logger-backed transcript recovery and
 preserves the CodeSpace. A recovery failure is reported explicitly and leaves
 venue files intact; terminal exit is not permission to delete the venue.
 Unconfirmed retirement retains ownership and remains a blocker.
@@ -171,7 +242,6 @@ development/CDP listener therefore cannot strand a paused or disconnected native
 execution. Status reads preserve retirement intent rather than resuming or
 activating it. Retirement still requires the remote host's verified proof; a
 successful transport connection or empty reservation is not a retirement receipt.
-These are internal bridge/provider changes; the public native verbs are unchanged.
 
 The host backend currently requires Linux process identity. Frontend commands
 support Windows and POSIX terminals. No WSL, private helper runtime, ACP
