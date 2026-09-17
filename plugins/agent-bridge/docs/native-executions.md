@@ -32,6 +32,9 @@ agent-bridge native observe EXECUTION_ID --expected-generation GENERATION --expe
 
 `--interactive-command-file` aliases `--command-file`. The file is a trusted,
 nonblank UTF-8 shell program, with optional UTF-8 BOM and LF line endings.
+CRLF line endings are refused with `invalid_command_file` before resource loading
+or controller allocation; save the file with LF endings and retry. The command
+is not rewritten, and standalone literal carriage returns are preserved.
 `OWNER` is an existing worktree directory on the controlling host; `--cwd` is
 an explicit absolute directory on the venue. Forwards are repeatable, strictly
 loopback, decimal `LISTEN:CONNECT` ports; duplicates in one direction are rejected.

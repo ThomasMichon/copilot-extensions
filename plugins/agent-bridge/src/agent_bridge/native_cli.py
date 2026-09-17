@@ -33,6 +33,13 @@ def command(args) -> None:
                 payload = Path(args.command_file).read_bytes().decode("utf-8-sig")
             except (OSError, UnicodeError) as exc:
                 raise NativeError("invalid_command_file", "Native command file could not be read as UTF-8", 400) from exc
+            if "\r\n" in payload:
+                raise NativeError(
+                    "invalid_command_file",
+                    "Native command file contains CRLF line endings; save it as UTF-8 with LF line endings "
+                    "and retry. Command bytes are not rewritten.",
+                    400,
+                )
             request = {
                 "requestId": args.request_id,
                 "owner": args.owner, "cwd": args.cwd, "command": payload,
