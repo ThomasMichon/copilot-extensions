@@ -5,7 +5,8 @@
   and the operator's dotfiles knowledge repo as audit targets)
 - **Branch(es):** independent per-phase worktrees
 - **Created:** 2026-09-17
-- **Status:** In progress
+- **Status:** Done; pending archive -- all acceptance criteria satisfied;
+  `ThomasMichon/copilot-extensions#2825` closed.
 - **Vision:** none yet -- a formalization + audit, not new capability shape.
 - **Umbrella issue:** `ThomasMichon/copilot-extensions#2825`
 - **Sub-issues:** none
@@ -124,9 +125,8 @@ principle write-up) plus an audit pass over:
       content -- no further misplacement found.
 
 ### Phase 5 -- Close out
-- [ ] Update `ThomasMichon/copilot-extensions#2825`'s acceptance criteria
-      checklist as each item is satisfied; close it once all are done or
-      explicitly transferred.
+- [x] Updated `ThomasMichon/copilot-extensions#2825`'s acceptance criteria
+      checklist and closed it -- all items satisfied.
 
 ## Validation Plan
 
@@ -137,8 +137,8 @@ principle write-up) plus an audit pass over:
       full `AGENTS.md`, not just PR-conduct content. (this repo:
       already-correct; odsp-web-harness: already-correct, post-#436;
       dotfiles: corrected direct-to-`main`.)
-- [ ] `ThomasMichon/copilot-extensions#2825`'s acceptance criteria are all
-      checked or explicitly transferred to a named tracked objective.
+- [x] `ThomasMichon/copilot-extensions#2825`'s acceptance criteria are all
+      checked and the issue is closed.
 
 ## Proposal
 
@@ -205,3 +205,9 @@ _Pending._
 - Next: Phase 5 -- update and close `ThomasMichon/copilot-extensions#2825`'s
   acceptance criteria, and land this worktree's Phase 1/2/3 changes via
   copilot-extensions' own PR flow.
+
+### 2026-09-17 -- Phase 5: closed out
+- Landed the Phase 1 (principle doc) + Phase 2/3/4 journal updates via
+  `ThomasMichon/copilot-extensions#2831` (squash-merged, `pr-self-merge`).
+- Closed `ThomasMichon/copilot-extensions#2825` with a summary comment
+  covering all four acceptance criteria. Effort complete.
