@@ -1288,32 +1288,26 @@ def _cmd_source(rest: list[str]) -> int:
     return 0
 
 
-def _strip_project(rest: list[str]) -> list[str]:
-    """Drop a threaded ``--project <name>`` (update is harness-wide, not scoped)."""
+def _extract_project(rest: list[str]) -> tuple[str | None, list[str]]:
+    """Pull a threaded ``--project <name>`` out (returned, not forwarded)."""
     out: list[str] = []
+    project: str | None = None
     i = 0
     while i < len(rest):
-        if rest[i] == "--project":
-            i += 2
+        if rest[i] == "--project" and i + 1 < len(rest):
+            project, i = rest[i + 1], i + 2
             continue
         out.append(rest[i])
         i += 1
-    return out
+    return project, out
 
 
 def _cmd_update(rest: list[str]) -> int:
     """Update the harness — the Worktree Manager AS the plugin updater/aligner.
 
-    Where ``<project> update`` lands after the agent-worktrees seam hands off
-    (its DQ8 fallback runs the in-plugin update directly). Two steps:
-
-    1. **Self-update the Manager** to the latest out-of-band payload (git fetch →
-       versioned slot); best-effort + non-fatal, effective on the next run.
-    2. **Orchestrate the harness update** by driving the engine's own mechanics
-       via ``agent-worktrees update --no-manager`` (the seam bypass, so this does
-       not recurse) — refreshing every plugin payload + runtime, reconciling
-       binstubs, and syncing anchors. The Manager sequences + aligns; the plugin
-       still does the work. Forwarded flags (``--force`` …) are passed through.
+    Two steps: (1) self-update the Manager (best-effort; effective next run);
+    (2) orchestrate via the engine (``agent-worktrees update --no-manager``,
+    the seam bypass) -- refreshing plugin payloads/runtimes, syncing anchors.
     """
     from . import engine_client as ec
     from .self_install import self_update
@@ -1333,14 +1327,20 @@ def _cmd_update(rest: list[str]) -> int:
     else:
         print(f"    ○ self-update {su.action}: {su.reason} — continuing")
 
-    # 2. Orchestrate the harness/plugin update through the engine, bypassing the
-    #    seam (so we do not recurse back into the Manager).
-    forwarded = _strip_project(rest)
+    # 2. Orchestrate via the engine, bypassing the seam; a threaded --project
+    #    resolves to its checkout as cwd (not forwarded as a flag) so cwd-based
+    #    discovery works outside an adopted repo.
+    project, forwarded = _extract_project(rest)
+    proj = next((p for p in build_projects() if p.name == project), None) if project else None
+    engine_cwd = proj.repo.path if proj and proj.repo else None
+    if project and not engine_cwd:
+        print(f"  ○ no checkout for project {project!r} -- continuing without cwd context")
     print()
     print("  Updating harness plugins + runtimes via agent-worktrees …")
     print()
     try:
-        return ec.run_engine_passthrough(None, ["update", "--no-manager", *forwarded])
+        return ec.run_engine_passthrough(
+            None, ["update", "--no-manager", *forwarded], cwd=engine_cwd)
     except ec.EngineError as e:
         print(f"  ✗ {e}")
         if getattr(e, "install_hint", False):
