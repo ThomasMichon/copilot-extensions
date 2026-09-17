@@ -184,7 +184,7 @@ realized in `main`; unchecked items are the remaining delta.
       §`programmatic-parity`.
 
 ### Phase 3b — Relocate Mux + AHP execution mechanics out of agent-worktrees (Planned — #2062)
-- [ ] **Slice 1 (AHP):** move the AHP session backend
+- [x] **Slice 1 (AHP):** move the AHP session backend
       (`agent_worktrees/ahp_backend.py`, the `session_backend`/`is_ahp` config
       schema, and the branches it threads through `__main__.py`,
       `tracking.py`, `finalize.py`, and `config_dropins.py`) out of the
@@ -205,7 +205,7 @@ realized in `main`; unchecked items are the remaining delta.
             Manager-owned AHP provider/config/dependency over the public engine
             subprocess boundary; production Picker default-off AHP controls and
             launch/resume/create cutover for exact engine-created worktrees.
-      - [ ] Steps 5-6: delete the legacy agent-worktrees AHP backend/config path
+      - [x] Steps 5-6: delete the legacy agent-worktrees AHP backend/config path
             and complete the remaining launcher-contract test migration.
 - [ ] **Slice 2 (Mux):** relocate Mux launch/reattach/remux mechanics
       (`launch-session.{sh,ps1,cmd}`, `pane-wrapper.{sh,ps1}`, `cmd_remux`)
@@ -255,19 +255,15 @@ realized in `main`; unchecked items are the remaining delta.
             wired, and bumped `__version__` (`0.1.0-dev36` →
             `0.1.0-dev37`) so already-installed machines actually redeploy
             the corrected payload.
-      - [ ] **Sub-slice 3 (direction set 2026-09-14, not yet designed):**
+      - [ ] **Sub-slice 3 (direction set 2026-09-14; planned 2026-09-17, not yet implemented):**
             split the resident status-monitor's push/observe legs into
             Worktree Manager — agent-worktrees keeps sole ownership of
             accumulating/tracking session status; Worktree Manager takes a
-            **push subscriber** that writes accumulated status into Mux
-            (replacing the daemon's own direct `set-option` calls for
-            Worktree-Manager-managed sessions) and a **Mux subscriber** that
-            observes session create/destroy and writes that observation back
-            to agent-worktrees. See
-            [`phase-3b-mux-relocation.md`](phase-3b-mux-relocation.md#sub-slice-3--split-the-resident-status-monitors-pushobserve-legs-into-worktree-manager-direction-set-2026-09-14-not-yet-designed-in-detail)
-            for the recorded direction; the transport, write-back contract,
-            and interaction with the existing per-session `status-updater`
-            fallback still need an ordered plan before implementation starts.
+            **companion mux daemon** that owns the worktree⇄mux mapping,
+            notifies agent-worktrees when managed worktrees gain/lose live
+            panes, and applies the resident monitor's rendered status back
+            into mux status bars. Reviewed, ordered plan:
+            [`phase-3b-substatus-monitor-relocation.md`](phase-3b-substatus-monitor-relocation.md).
       - [x] **Sub-slice 4 (landed 2026-09-14): same-config marketplace-cell
             resolution + generic installed-binstub invocation.** Cross-cuts
             the `marketplace-scoped-installations` effort's installation-mode
@@ -429,6 +425,38 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-09-17** — Finished Phase 3b Slice 1 Steps 5-6. Deleted
+  agent-worktrees' remaining AHP implementation path
+  (`cmd_session_backend`, `ahp_backend.py`, `SessionBackendConfig`, the
+  `config.d` `session_backend` validation block, and the
+  `websocket-client` dependency) while keeping the reader-side legacy
+  `session_backend:` → `execution_leg` translation shim in `tracking.py`.
+  Closed an inventory gap the design doc had missed: both the in-plugin and
+  relocated Worktree Manager `launch-session.{sh,ps1}` copies still shelled
+  into the legacy `session-backend status`/`ensure` verbs on the **bare/direct**
+  launch path. They now read only `execution-leg get`: an already-persisted
+  AHP leg still resumes exactly as before, but creating a **new** AHP session
+  through the bare path is deliberately gone and now warns to use the
+  Worktree Manager Picker, keeping AHP session establishment fully owned by
+  `worktree_manager.ahp_provider`. Completed the remaining test migration:
+  retargeted the launcher contract and agent-worktrees JSON/live-signal tests
+  to `execution_leg`, removed the obsolete plugin-local AHP backend/command
+  tests, and added missing Worktree Manager provider + relocated-launcher
+  regression coverage. Version bumps: agent-worktrees `1.5.5-dev134`,
+  marketplace metadata `1.7.7-dev120`, Worktree Manager `0.1.0-dev47`.
+  Validation: changed-file targeted tests passed (`agent-worktrees` 103;
+  `worktree-manager` 42); full `worktree-manager` suite passed with the two
+  known hanging production-picker tests excluded (`805 passed, 1 skipped`).
+  Full `agent-worktrees` suite ran to completion and now shows only five
+  unrelated pre-existing failures in this environment —
+  `tests/test_pr_ops.py::TestRefreshHeadObservation::test_concurrent_reassociation_rejects_returned_observation`
+  plus four `tests/test_update_stage.py` indicator tests that pass in
+  isolation but fail after earlier suite pollution — with `4481 passed,
+  47 skipped` otherwise. `ruff check --select F,E9` on both packages,
+  `python tools/check-install-contract.py`,
+  `python tools/check-version-consistency.py`, and
+  `python tools/check-version-bump.py` all passed.
 
 - **2026-08-17** — Effort authored to give the Worktree Manager rework a single
   coherent home in-repo, tying the Manager-build issues (#352 / #355 / #356 /
@@ -852,6 +880,21 @@ claiming discipline alone.
   instead of silently depending on the real test-runner account's home
   directory. Full `worktree-manager` suite after this round: 806 passed (the
   same 6 pre-existing, unrelated environment failures).
+- **2026-09-17** — Authored the ordered plan for Phase 3b Slice 2
+  Sub-slice 3 in
+  [`phase-3b-substatus-monitor-relocation.md`](phase-3b-substatus-monitor-relocation.md),
+  sharpening the earlier 2026-09-14 direction into the operator-mandated
+  **two-daemon** architecture: `agent-worktrees` retains the resident
+  status-monitor as sole status-data authority, `worktree-manager` gains a
+  host-wide companion mux daemon that owns the worktree⇄mux-session/pane
+  mapping, Worktree Manager notifies agent-worktrees about live-pane
+  create/destroy, and agent-worktrees relays rendered status back through
+  Worktree Manager for the actual `set-option` writes. The plan chooses the
+  existing lockfile-rendezvous + loopback JSON IPC pattern (mirroring
+  `hook_ipc.py` / `classify_daemon.py`) over inventing a new transport, and
+  sequences the migration as additive seam → managed-session cutover →
+  retirement of the per-session `status-updater` as a manager-owned path.
+  Docs-only; no implementation started and no Phase 3b Plan checkbox changed.
 - **2026-09-15** — Reconciliation: closed
   [#2532](https://github.com/ThomasMichon/copilot-extensions/pull/2532)
   ("reconcile mux status-bar parity gap + open items") as superseded without

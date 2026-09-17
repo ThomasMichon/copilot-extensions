@@ -15,6 +15,7 @@ import platform
 import shutil
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -871,7 +872,7 @@ class TestCmdHandoffCutover:
         monkeypatch.setattr(
             m,
             "_unsupported_hosted_launch",
-            lambda config, record, operation: "",
+            lambda record, operation: "",
         )
 
     def test_parser_accepts_retire_mux_identity(self):
@@ -2555,3 +2556,218 @@ class TestCmdHandoffsCheck:
         assert out["found"] == len(sessions_chain) - 1
         assert sorted(retired_panes) == ["%0", "%1", "%2"]
         assert all(f["retired"] for f in out["findings"])
+
+
+class TestPendingHandoffRetireAbandonment:
+    """A predecessor whose retire attempts have ALL failed the same
+    unrecoverable way for a sustained period is concluded ("abandoned")
+    rather than retried forever -- regression coverage for a real production
+    incident: a predecessor whose own Copilot process had already exited (so
+    identity could never be proven again) was retried every daemon sweep
+    (~25-40s) for 3+ days straight (3,000+ no-op attempts across several
+    worktrees, only ever contesting a pane a much later, unrelated session
+    had since legitimately reused)."""
+
+    def _record(self, tmp_tracking_dir, worktree_id, *, predecessor, successor):
+        from agent_worktrees import tracking as _tracking
+
+        rec = _tracking.WorktreeRecord(
+            worktree_id=worktree_id, branch=f"worktree/{worktree_id}",
+            worktree_path=f"/tmp/src/{worktree_id}", repo="test-repo",
+            machine="test", platform="wsl", started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00", resume_count=0, title=None,
+            status="active", completed_at=None, sessions=[],
+        )
+        path = tmp_tracking_dir / f"{worktree_id}.yaml"
+        _tracking.save_record(rec, path)
+        _tracking.register_session(worktree_id, predecessor)
+        _tracking.register_session(worktree_id, successor)
+        loaded = _tracking.load_record(path)
+        _tracking.open_handoff(loaded, predecessor, f"task-{worktree_id}")
+        _tracking.associate_handoff_candidate(loaded, f"task-{worktree_id}", successor)
+        return _tracking.load_record(path)
+
+    def _events(self, *, worktree_id, token, spawn=True, retire_events=()):
+        def _read_events(**kw):
+            if kw.get("event") == "handoff_cutover_spawn":
+                return [{
+                    "handoff_token": token, "session_id": "old-sess",
+                    "old_pane": "%9", "expected_mux_session": f"wt-{worktree_id}",
+                    "predecessor_copilot_pid": 77,
+                    "predecessor_copilot_start_time": "old",
+                }] if spawn else []
+            if kw.get("event") == "handoff_predecessor_retire":
+                return list(retire_events)
+            return []
+        return _read_events
+
+    def test_stale_terminal_failures_past_grace_are_abandoned(
+        self, monkeypatch, tmp_tracking_dir, monkeypatch_config,
+    ):
+        record = self._record(
+            tmp_tracking_dir, "wt-abandon-1",
+            predecessor="old-sess", successor="new-sess",
+        )
+        old_ts = "2026-01-01T00:00:00+00:00"  # far past the abandon grace
+        monkeypatch.setattr(activity, "read_events", self._events(
+            worktree_id="wt-abandon-1", token="task-wt-abandon-1",
+            retire_events=[
+                {
+                    "handoff_token": "task-wt-abandon-1", "session_id": "old-sess",
+                    "old_pane": "%9", "method": "process-identity-unavailable",
+                    "outcome": "left-running", "ts": old_ts,
+                },
+                {
+                    "handoff_token": "task-wt-abandon-1", "session_id": "old-sess",
+                    "old_pane": "%9", "method": "process-identity-unavailable",
+                    "outcome": "left-running", "ts": old_ts,
+                },
+            ],
+        ))
+        logged = []
+        monkeypatch.setattr(
+            activity, "log_event",
+            lambda event, **fields: logged.append({"event": event, **fields}),
+        )
+
+        requests = m._pending_handoff_retire_requests(record)
+
+        assert requests == []
+        assert len(logged) == 1
+        assert logged[0]["event"] == "handoff_predecessor_retire"
+        assert logged[0]["outcome"] == "abandoned"
+        assert logged[0]["handoff_token"] == "task-wt-abandon-1"
+        assert logged[0]["reason"] == "monitor-abandoned"
+
+    def test_recent_terminal_failures_within_grace_still_retried(
+        self, monkeypatch, tmp_tracking_dir, monkeypatch_config,
+    ):
+        record = self._record(
+            tmp_tracking_dir, "wt-abandon-2",
+            predecessor="old-sess", successor="new-sess",
+        )
+        recent_ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        monkeypatch.setattr(activity, "read_events", self._events(
+            worktree_id="wt-abandon-2", token="task-wt-abandon-2",
+            retire_events=[{
+                "handoff_token": "task-wt-abandon-2", "session_id": "old-sess",
+                "old_pane": "%9", "method": "process-identity-unavailable",
+                "outcome": "left-running", "ts": recent_ts,
+            }],
+        ))
+        logged = []
+        monkeypatch.setattr(
+            activity, "log_event",
+            lambda event, **fields: logged.append({"event": event, **fields}),
+        )
+
+        requests = m._pending_handoff_retire_requests(record)
+
+        assert len(requests) == 1
+        assert requests[0]["handoff_token"] == "task-wt-abandon-2"
+        assert logged == []  # not yet abandoned -- no premature conclusion
+
+    def test_mixed_failure_methods_are_never_abandoned(
+        self, monkeypatch, tmp_tracking_dir, monkeypatch_config,
+    ):
+        """A token that has ever failed with a NON-terminal-class method
+        (e.g. "left-running" from a transient cause other than the
+        unrecoverable-identity set) must stay retryable forever -- only a
+        uniformly unrecoverable failure history is ever concluded."""
+        record = self._record(
+            tmp_tracking_dir, "wt-abandon-3",
+            predecessor="old-sess", successor="new-sess",
+        )
+        old_ts = "2026-01-01T00:00:00+00:00"
+        monkeypatch.setattr(activity, "read_events", self._events(
+            worktree_id="wt-abandon-3", token="task-wt-abandon-3",
+            retire_events=[
+                {
+                    "handoff_token": "task-wt-abandon-3", "session_id": "old-sess",
+                    "old_pane": "%9", "method": "process-identity-unavailable",
+                    "outcome": "left-running", "ts": old_ts,
+                },
+                {
+                    "handoff_token": "task-wt-abandon-3", "session_id": "old-sess",
+                    "old_pane": "%9", "method": "some-other-transient-method",
+                    "outcome": "left-running", "ts": old_ts,
+                },
+            ],
+        ))
+        logged = []
+        monkeypatch.setattr(
+            activity, "log_event",
+            lambda event, **fields: logged.append({"event": event, **fields}),
+        )
+
+        requests = m._pending_handoff_retire_requests(record)
+
+        assert len(requests) == 1
+        assert logged == []
+
+    def test_already_abandoned_token_is_not_re_logged(
+        self, monkeypatch, tmp_tracking_dir, monkeypatch_config,
+    ):
+        """Idempotency: once an "abandoned" outcome has been logged, later
+        sweeps must neither re-surface the request nor re-log the
+        conclusion -- the abandonment log event is itself what the
+        ``retired`` set picks up, self-limiting without extra state."""
+        record = self._record(
+            tmp_tracking_dir, "wt-abandon-4",
+            predecessor="old-sess", successor="new-sess",
+        )
+        old_ts = "2026-01-01T00:00:00+00:00"
+        monkeypatch.setattr(activity, "read_events", self._events(
+            worktree_id="wt-abandon-4", token="task-wt-abandon-4",
+            retire_events=[
+                {
+                    "handoff_token": "task-wt-abandon-4", "session_id": "old-sess",
+                    "old_pane": "%9", "method": "process-identity-unavailable",
+                    "outcome": "left-running", "ts": old_ts,
+                },
+                {
+                    "handoff_token": "task-wt-abandon-4", "session_id": "old-sess",
+                    "old_pane": "%9", "method": "process-identity-unavailable",
+                    "outcome": "abandoned", "ts": old_ts,
+                },
+            ],
+        ))
+        logged = []
+        monkeypatch.setattr(
+            activity, "log_event",
+            lambda event, **fields: logged.append({"event": event, **fields}),
+        )
+
+        requests = m._pending_handoff_retire_requests(record)
+
+        assert requests == []
+        assert logged == []  # already concluded -- no duplicate log
+
+    def test_successful_retirement_is_never_abandoned(
+        self, monkeypatch, tmp_tracking_dir, monkeypatch_config,
+    ):
+        """A token that has already succeeded ("gone") stays excluded via
+        the pre-existing `retired` path, not the new abandonment path."""
+        record = self._record(
+            tmp_tracking_dir, "wt-abandon-5",
+            predecessor="old-sess", successor="new-sess",
+        )
+        old_ts = "2026-01-01T00:00:00+00:00"
+        monkeypatch.setattr(activity, "read_events", self._events(
+            worktree_id="wt-abandon-5", token="task-wt-abandon-5",
+            retire_events=[{
+                "handoff_token": "task-wt-abandon-5", "session_id": "old-sess",
+                "old_pane": "%9", "method": "graceful",
+                "outcome": "gone", "ts": old_ts,
+            }],
+        ))
+        logged = []
+        monkeypatch.setattr(
+            activity, "log_event",
+            lambda event, **fields: logged.append({"event": event, **fields}),
+        )
+
+        requests = m._pending_handoff_retire_requests(record)
+
+        assert requests == []
+        assert logged == []

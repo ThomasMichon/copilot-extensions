@@ -5,7 +5,7 @@ worktree that was just created/resumed), never the mutable process-global
 
 ``launch-session.ps1``/``.sh`` treat the resolved plan's ``project`` field as
 authoritative for every downstream out-of-process call (notably
-``session-backend status``). Before this fix, ``_create_worktree_core`` filled
+``execution-leg get``). Before this fix, ``_create_worktree_core`` filled
 that field from ``cfg.active_project()`` -- a single, process-wide value that
 can legitimately differ from the project actually being acted on (e.g. an
 automated flow whose launcher started against one project but resolves a

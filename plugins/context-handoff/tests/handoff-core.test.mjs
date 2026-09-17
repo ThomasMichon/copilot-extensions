@@ -18,6 +18,7 @@ import {
   encodeHandoffPayload,
   formatConsumeResult,
   isolatedPythonArgs,
+  logHandoffPromptReceived,
   manualFallbackInstructions,
   normalizeHandoffTitle,
   retryStoredHandoffCutover,
@@ -31,6 +32,7 @@ import {
   readSessionStateHandoff,
   markSessionStateHandoffConsumed,
 } from "../extensions/context-handoff/handoff-core.mjs";
+import { extractRecoveryLocatorFromPrompt } from "../extensions/context-handoff/cutover-seed.mjs";
 
 function withTempHome(fn) {
   const dir = mkdtempSync(join(tmpdir(), "context-handoff-home-"));
@@ -915,6 +917,92 @@ test("triggerHandoff reports when an explicit stored baton cannot be recovered",
   });
   assert.equal(result.ok, false);
   assert.equal(result.reason, "not-found");
+});
+
+// -- Phase 3 item 3: the deterministic "did my launch actually land" signal --
+
+test("logHandoffPromptReceived shells the exact activity-log invocation", () => {
+  const calls = [];
+  const execute = (bin, argv, opts) => {
+    calls.push({ bin, argv, opts });
+    return "";
+  };
+  const result = logHandoffPromptReceived(
+    "C:\\repo", "wt-example", "successor-1", "task:handoff-1", execute,
+  );
+  assert.equal(result.logged, true);
+  assert.equal(calls.length, 1);
+  const { bin, argv } = calls[0];
+  assert.equal(bin, "agent-worktrees");
+  assert.deepEqual(argv, [
+    "activity-log", "context_handoff_prompt_received",
+    "--worktree-id", "wt-example",
+    "--session-id", "successor-1",
+    "--source", "context-handoff",
+    "--field", "locator=task:handoff-1",
+  ]);
+});
+
+test("logHandoffPromptReceived is a no-op without a worktree id or locator", () => {
+  const execute = () => { throw new Error("must not be called"); };
+  assert.deepEqual(
+    logHandoffPromptReceived("C:\\repo", null, "sid", "task:handoff-1", execute),
+    { logged: false },
+  );
+  assert.deepEqual(
+    logHandoffPromptReceived("C:\\repo", "wt-example", "sid", null, execute),
+    { logged: false },
+  );
+});
+
+test("logHandoffPromptReceived degrades to logged:false on a CLI failure", () => {
+  const execute = () => { throw new Error("agent-worktrees not found"); };
+  const result = logHandoffPromptReceived(
+    "C:\\repo", "wt-example", "sid", "task:handoff-1", execute,
+  );
+  assert.equal(result.logged, false);
+  assert.match(result.error, /agent-worktrees not found/);
+});
+
+test("triggerHandoff's real pickupSignals path surfaces prompt-received deterministically", async () => {
+  const execute = (bin, argv) => {
+    if (bin === "agent-worktrees" && argv[0] === "head-session") {
+      return JSON.stringify({ tracked: false });
+    }
+    if (
+      bin === "agent-worktrees"
+      && argv[0] === "activity"
+      && argv.includes("context_handoff_prompt_received")
+    ) {
+      return `${JSON.stringify({ locator: "file:handoff-predecessor-1" })}\n`;
+    }
+    return "";
+  };
+
+  const result = await triggerHandoff({
+    promptText: "stored markdown",
+    sid: "predecessor-1",
+    cwd: "C:\\repo",
+    title: "Parser follow-up",
+    store: () => ({
+      storage: "file",
+      id: "handoff-predecessor-1",
+      path: "C:\\state\\handoff-predecessor-1.json",
+      metadata: { worktree: "wt-example", title: "Parser follow-up" },
+    }),
+    writeSessionState: ({ seed }) => (
+      { ok: true, path: "C:\\state\\handoff-request.json", seed }
+    ),
+    noteHandoff: () => {},
+    logActivity: () => ({ logged: true }),
+    requestBridge: () => ({ attempted: false, accepted: false }),
+    execute,
+    sleepFn: async () => {},
+    waitMs: 0,
+  });
+  assert.equal(result.pickup.pickedUp, true);
+  assert.ok(result.pickup.via.includes("prompt-received"));
+  assert.equal(result.pickup.promptReceived.received, true);
 });
 
 test("utility helpers preserve safe normalization and bounded CLI diagnostics", () => {
