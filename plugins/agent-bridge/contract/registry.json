@@ -38,7 +38,8 @@
           "0.4.0-dev474",
           "0.4.0-dev475",
           "0.4.0-dev476",
-          "0.4.0-dev477"
+          "0.4.0-dev477",
+          "0.4.0-dev492"
         ]
       },
       "capability_versions": {
@@ -128,8 +129,14 @@
       ],
       "fixtures": [
         {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-incumbent-error.json",
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev474/native-incumbent-error.json",
           "sha256": "97b7131bc1b991f0ec2797972caf45f5573aa7d3453ac18afacfa5d332b72a8d",
+          "role": "previous native-owned venue refusal before ACP allocation",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-incumbent-error.json",
+          "sha256": "e6f5fbc0fb48784e238618fafe7acf5ff5189df478c9936d69cc89b411c6a27c",
           "role": "current native-owned venue refusal before ACP allocation",
           "generation": 15
         },
@@ -321,6 +328,14 @@
         }
       ],
       "provenance": [
+        {
+          "commit": "b3c5edc8f6c983a0dc4e3994a80e50036c2bba2e",
+          "plugin_version": "0.4.0-dev492",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "688254c1372c27994ff503bb69d79780e30fcf62",
+          "capture_method": "Re-attest the merged session route through the real ASGI create/resume native-incumbent tests: HTTP 409, unchanged refusal body, and no ACP allocation. Preserve the prior dev474 fixture and main's generation-14 initialization-refusal evidence."
+        },
         {
           "commit": "5f9557edbc40b0d7c65d825608cc89df8607bd28",
           "plugin_version": "0.4.0-dev474",
