@@ -106,6 +106,7 @@ from . import (
     locks,
     obligations,
     output,
+    pane_lifecycle,
     permissions,
     pr_config,
     pr_ops,
@@ -22944,6 +22945,7 @@ def build_parser() -> argparse.ArgumentParser:
         "one (invoked by the auto-update cutover so a deploy never leaves "
         "live sessions' status bars frozen)",
     )
+    pane_lifecycle.register_cli(sub)
     # handoff-cutover (live-cutover handoff: seeded successor window + pane retire)
     p = sub.add_parser(
         "handoff-cutover",
@@ -26622,6 +26624,8 @@ COMMAND_MAP = {
     "status-monitor": cmd_status_monitor,
     "reconcile-sessions": cmd_reconcile_sessions,
     "status-monitor-restart": cmd_status_monitor_restart,
+    "pane-create": pane_lifecycle.cmd_pane_create,
+    "pane-terminate": pane_lifecycle.cmd_pane_terminate,
     "handoff-cutover": cmd_handoff_cutover,
     "handoffs-check": cmd_handoffs_check,
     "embody": cmd_embody,

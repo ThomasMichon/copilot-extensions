@@ -1741,19 +1741,14 @@ def _mux_pane_cmd(
     the spawn is safer than opening an unseeded successor.
     """
     controls: list[str] = []
+    if initial_prompt is not None and not prompt_receipt:
+        raise RuntimeError("initial prompt transport requires a receipt token")
+    if prompt_receipt:
+        receipt_encoded = base64.b64encode(prompt_receipt.encode("utf-8")).decode("ascii")
+        controls += [_INITIAL_PROMPT_RECEIPT_B64_FLAG, receipt_encoded]
     if initial_prompt is not None:
-        if not prompt_receipt:
-            raise RuntimeError(
-                "initial prompt transport requires a receipt token"
-            )
         encoded = base64.b64encode(initial_prompt.encode("utf-8")).decode("ascii")
-        receipt_encoded = base64.b64encode(
-            prompt_receipt.encode("utf-8")
-        ).decode("ascii")
-        controls = [
-            _INITIAL_PROMPT_B64_FLAG, encoded,
-            _INITIAL_PROMPT_RECEIPT_B64_FLAG, receipt_encoded,
-        ]
+        controls = [_INITIAL_PROMPT_B64_FLAG, encoded, *controls]
     wrapper = pane_wrapper
     if wrapper is None:
         name = "pane-wrapper.sh" if is_tmux else "pane-wrapper.ps1"
@@ -1793,9 +1788,9 @@ def _mux_pane_cmd(
             "pwsh.exe", "-NoProfile", "-NoLogo",
             "-EncodedCommand", encoded_command,
         ]
-    if initial_prompt is not None:
+    if controls:
         raise RuntimeError(
-            "pane wrapper is required for native interactive prompt transport"
+            "pane wrapper is required for launch receipt or native interactive prompt transport"
         )
     if not is_tmux:
         # psmux fallback: run verbatim; keep every element single-token.
@@ -1865,6 +1860,8 @@ def build_mux_new_session_argv(
     *,
     mux: str | None = None,
     pane_wrapper: str | None = None,
+    initial_prompt: str | None = None,
+    prompt_receipt: str | None = None,
 ) -> list[str]:
     """Build the argv to create a **detached** ``wt-<id>`` session running ``cmd``.
 
@@ -1890,6 +1887,8 @@ def build_mux_new_session_argv(
         cmd,
         is_tmux=is_tmux,
         pane_wrapper=pane_wrapper,
+        initial_prompt=initial_prompt,
+        prompt_receipt=prompt_receipt,
     )
     return argv
 
@@ -2605,4 +2604,3 @@ def mux_new_window(
         "ok": True, "new_pane": new_pane, "prompt_received": prompt_received,
         "prompt_status": prompt_status, "error": None,
     }
-

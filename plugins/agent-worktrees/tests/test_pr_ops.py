@@ -1155,7 +1155,9 @@ class TestRefreshHeadObservation:
                 return api_base.rstrip("/")
 
             def observe_head(self, repo, number, *, api_base="", token=None):
-                pr_ops.set_pr("wt-z", number=8)
+                current = tracking.load_record(rec.yaml_path)
+                current.active_pr().number = 8
+                tracking.save_record(current)
                 return PullResult(
                     number=number,
                     head_sha="abc",
