@@ -25,6 +25,7 @@ from typing import Protocol
 from agent_procutil import contained_test_mode, detached_kwargs, no_window_kwargs
 from plugin_activation import read_json_object, write_json_object_atomic
 
+from .install_paths import install_dir
 from .managed_runtime import (
     MaterializedRuntime,
     ManagedRuntimeError,
@@ -315,6 +316,14 @@ def _is_reparse(info: os.stat_result) -> bool:
     )
 
 
+def _companion_process_cwd() -> str:
+    """Stable, plugin-independent cwd (not the plugin root, whose held
+    directory handle would block that plugin's own future update)."""
+    cwd = install_dir() / "companion-cwd"
+    cwd.mkdir(parents=True, exist_ok=True)
+    return str(cwd)
+
+
 def _checked_plugin_root(registration: dict) -> Path:
     plugin = registration.get("plugin")
     root_value = plugin.get("root") if isinstance(plugin, Mapping) else None
@@ -553,7 +562,7 @@ def resolve_companion(
         command=(*command, *arguments),
         stop_command=stop_command,
         health_probe=health_probe,
-        cwd=str(root),
+        cwd=_companion_process_cwd(),
         environment=environment,
         startup_timeout=float(spec.get("startup_timeout_seconds", 30.0)),
         stop_timeout=float(spec.get("stop_timeout_seconds", 15.0)),

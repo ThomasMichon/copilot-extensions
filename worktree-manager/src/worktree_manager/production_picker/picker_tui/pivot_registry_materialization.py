@@ -1,4 +1,4 @@
-"""Manifest target resolution and runtime pivot materialization helpers."""
+"""Filesystem and command-resolution helpers for the pivot registry."""
 
 from __future__ import annotations
 
@@ -17,11 +17,11 @@ from plugin_activation import ActivationReport, ActivePlugin
 
 from .pivot_actions import ManifestError
 from .pivot_manifest import (
+    MANAGED_SCHEMA_VERSION,
     _FILE_ATTRIBUTE_REPARSE_POINT,
     _MIGRATABLE_SCHEMA_VERSIONS,
-    MANAGED_SCHEMA_VERSION,
+    _read_json,
 )
-
 
 class TargetUnusableError(ValueError):
     """A manifest command exists but cannot be executed safely."""
@@ -202,10 +202,6 @@ def _managed_pointer_data(
         "plugin_root": str(root),
         "template": template_name,
     }
-
-
-def _read_json(path: Path) -> object:
-    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _read_verified_template(canonical_root: Path, template_name: str) -> object:
@@ -429,4 +425,5 @@ def _materialize_active_pivots(
         except OSError:
             continue
     return changed
+
 

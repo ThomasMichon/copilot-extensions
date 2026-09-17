@@ -54,12 +54,15 @@ def test_update_self_updates_then_orchestrates_bypass(monkeypatch):
     assert calls["passthrough"]["args"] == ["update", "--no-manager"]
 
 
-def test_update_forwards_flags_and_strips_project(monkeypatch):
+def test_update_forwards_project_and_flags(monkeypatch):
     rc, calls, out = _run_update(
         ["--force", "--project", "dotfiles", "--skip-modules", "agent-bridge"],
         monkeypatch)
     assert rc == 0
-    # --project is stripped (harness-wide); other flags forwarded after the bypass.
+    # --project is forwarded through run_engine_passthrough's own project param
+    # (placed before the verb), not appended as a flag after it; other flags
+    # forwarded after the bypass.
+    assert calls["passthrough"]["project"] == "dotfiles"
     assert calls["passthrough"]["args"] == [
         "update", "--no-manager", "--force", "--skip-modules", "agent-bridge"]
 
@@ -87,9 +90,16 @@ def test_update_engine_absent_hints_setup(monkeypatch):
     assert "worktree-manager setup" in buf.getvalue()
 
 
-def test_strip_project_removes_pair():
-    assert wm._strip_project(["--force", "--project", "x", "--skip-modules"]) == \
-        ["--force", "--skip-modules"]
+def test_extract_project_pulls_pair_and_leaves_rest():
+    project, rest = wm._extract_project(["--force", "--project", "x", "--skip-modules"])
+    assert project == "x"
+    assert rest == ["--force", "--skip-modules"]
+
+
+def test_extract_project_none_when_absent():
+    project, rest = wm._extract_project(["--force", "--skip-modules"])
+    assert project is None
+    assert rest == ["--force", "--skip-modules"]
 
 
 # ── run_engine_passthrough ────────────────────────────────────────────────────

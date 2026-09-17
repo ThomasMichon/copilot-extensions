@@ -6,7 +6,11 @@ import json
 from pathlib import Path
 
 import pytest
-from worktree_manager.production_picker.picker_tui import pivots
+from worktree_manager.production_picker.picker_tui import (
+    pivot_manifest,
+    pivot_registry_scan,
+    pivots,
+)
 
 #: Repo root (…/copilot-extensions), derived from this test's location:
 #: worktree-manager/tests/production_picker/test_pivots.py -> parents[3].
@@ -31,7 +35,7 @@ def test_preview_mode_suppresses_ambient_pivot_materialization(tmp_path, monkeyp
     calls = []
     monkeypatch.setenv("WORKTREE_MANAGER_PICKER_NO_PIVOT_MATERIALIZE", "1")
     monkeypatch.setattr(
-        pivots,
+        pivot_registry_scan,
         "_materialize_active_pivots",
         lambda *args, **kwargs: calls.append((args, kwargs)),
     )
@@ -113,7 +117,7 @@ def test_state_root_file_visibility_is_lazy_and_configuration_gated(
     )
     calls = []
     monkeypatch.setattr(
-        pivots,
+        pivot_manifest,
         "_resolve_state_root_path",
         lambda: calls.append(True) or state_root,
     )
@@ -134,7 +138,7 @@ def test_state_root_file_visibility_is_lazy_and_configuration_gated(
 def test_ungated_pivots_do_not_resolve_state_root(tmp_path, monkeypatch):
     _write(tmp_path, "always", {"label": "Always", "list": ["always"]})
     monkeypatch.setattr(
-        pivots,
+        pivot_manifest,
         "_resolve_state_root_path",
         lambda: pytest.fail("ungated discovery must not resolve the state root"),
     )
@@ -158,7 +162,7 @@ def test_unbound_state_root_is_resolved_once_for_all_gated_pivots(
         )
     calls = []
     monkeypatch.setattr(
-        pivots,
+        pivot_manifest,
         "_resolve_state_root_path",
         lambda: calls.append(True) or None,
     )
@@ -328,11 +332,17 @@ def test_ensure_pivots_restores_missing_manifest(tmp_path):
 
 
 def test_ensure_pivots_does_not_clobber_existing(tmp_path):
+    """A locally-present manifest at the plugin's canonical pointer name (one
+    an operator wrote, or a newer contributor install left behind) owns that
+    slot outright: the materializer never publishes the plugin's own pointer
+    anywhere else, so the plugin's contribution is not restored while that
+    name is taken -- exactly like an operator override winning a naming
+    collision in the identity-verified scan path."""
     src_root = tmp_path / "installed-plugins"
     dest = tmp_path / "pivots"
     dest.mkdir()
-    # A locally-present manifest (e.g. one a newer contributor install wrote).
-    (dest / "agent-dispatch.json").write_text(
+    local = dest / "agent-dispatch.json"
+    local.write_text(
         json.dumps({"label": "Local", "list": ["x"]}), encoding="utf-8"
     )
     _plugin_manifest(
@@ -342,15 +352,9 @@ def test_ensure_pivots_does_not_clobber_existing(tmp_path):
 
     restored = pivots.ensure_pivots(base=dest, plugins_root=src_root)
 
-    assert len(restored) == 1
-    assert restored[0].startswith("agent-dispatch.")
-    assert json.loads(
-        (dest / "agent-dispatch.json").read_text(encoding="utf-8")
-    )["label"] == "Local"  # untouched
-    assert {p.label for p in pivots.discover_pivots(dest)} == {
-        "Local",
-        "Source",
-    }
+    assert restored == []
+    assert json.loads(local.read_text(encoding="utf-8"))["label"] == "Local"
+    assert {p.label for p in pivots.discover_pivots(dest)} == {"Local"}
 
 
 def test_ensure_pivots_missing_source_root_is_noop(tmp_path):

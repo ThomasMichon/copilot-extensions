@@ -2170,7 +2170,6 @@ repos:
     # worktree_root defaults to $worktreeRoot -- a sibling
     # <anchor>.worktrees dir, matching Copilot CLI's /worktree layout.
     # Uncomment and set an absolute path to override.
-    default_branch: master
     remote: origin
 
 # terminal_profiles -- this machine's terminal-profile column (the Picker's
@@ -2283,7 +2282,8 @@ function Ensure-PsmuxSshSafe {
             '$out = (& $cmd.Source --help 2>&1 | Select-Object -First 1) | Out-String; ' +
             '$pattern = "(?<![0-9.])" + [regex]::Escape($env:AW_PSMUX_EXPECTED_VERSION) + "(?![0-9.])"; ' +
             'if ($out -notmatch $pattern) { exit 1 }'
-        & pwsh.exe -NoLogo -NoProfile -NonInteractive -Command $verify
+        $encodedVerify = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($verify))
+        & pwsh.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand $encodedVerify
         if ($LASTEXITCODE -ne 0) {
             throw "psmux PATH repair failed NoProfile/SSH-style verification for version $($selected.Version)"
         }

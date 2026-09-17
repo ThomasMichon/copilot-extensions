@@ -51,6 +51,8 @@ Events are intentionally high-level:
                             (running inside it, or a live session was detected)
   worktree_reaped           cleanup removed a worktree's dir/branch/session
   handoff_cutover_claim     monitor atomically claimed a pending handoff token
+  pane_create_started       programmatic pane/session creation intent was
+                            recorded before the mux subprocess was invoked
   handoff_successor_spawn_started
                             successor pane spawn is starting -- emitted before
                             success/failure is known, so a killed spawn still

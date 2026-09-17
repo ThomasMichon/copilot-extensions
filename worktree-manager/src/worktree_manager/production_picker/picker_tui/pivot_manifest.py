@@ -1,44 +1,8 @@
-"""Cross-plugin pivot registry for the Textual picker.
-
-A pivot is a top-level view in the picker (Worktrees, Maintenance, Profiles).
-This module lets *another* plugin -- installed in its own separate venv --
-contribute an extra pivot without agent-worktrees importing its Python. Because
-each plugin installs standalone (its own ``scripts/init.sh``), setuptools
-entry-points do **not** cross venvs; a filesystem manifest registry does.
-
-The contract:
-
-* A contributing plugin declares its pivot in a template at
-  ``<plugin_root>/pivots/<name>.json`` -- a display ``label``, a position hint
-  (``after``), a ``list`` command (an argv template that prints a JSON array
-  of entries to stdout), a field mapping so the generic renderer can pull
-  id/title/worktree/badges out of each entry, and an ``actions`` set (each an
-  argv template).
-* ``ensure_pivots``/``scan_pivot_registry`` materialize one **attributed
-  pointer** per active (plugin, template) pair into the shared runtime root
-  at ``~/.agent-worktrees/pivots/<name>.json`` (overridable for tests via
-  ``AGENT_WORKTREES_PIVOTS_DIR``) -- ``{schema_version, plugin, plugin_root,
-  template}``, mirroring ``config_dropins.py``'s managed pointer. The pointer
-  never carries baked content (no ``list``/``actions``): every scan re-reads
-  the template fresh out of the identity-verified ``plugin_root`` and
-  re-resolves its commands to absolute paths, so an ordinary plugin content
-  or version-directory update needs no on-disk rewrite of the pointer at all,
-  and there is exactly **one** file per plugin+template -- never a
-  fingerprint-suffixed duplicate.
-* The picker scans that directory at startup and renders a generic pivot per
-  manifest -- no engine code per new pivot. Data flows only through the
-  contributing plugin's CLI on ``PATH`` (never a cross-venv import), so the
-  seam stays generic for future pivots (Bridges, Containers, ...).
-
-Everything here is declarative and defensive: a missing directory, a malformed
-manifest, or a CLI that never runs must never break the picker -- a bad or
-absent pivot simply doesn't appear.
-"""
+"""Manifest models and parser helpers for cross-plugin picker pivots."""
 
 from __future__ import annotations
 
 import json
-import logging
 import os
 import re
 from collections.abc import Mapping, Sequence
@@ -46,15 +10,8 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from dropin_registry import (
-    Finding,
-    ScanAuthority,
-    ScanSnapshot,
-    WarningTracker,
-)
-from plugin_activation import ActivationReport, resolve_active_plugins
+from dropin_registry import Finding, ScanAuthority, ScanSnapshot
 
-from .. import registry_paths
 from .pivot_actions import (
     ConfigSection,
     ManifestError,
@@ -79,22 +36,22 @@ REGISTRY_NAME = "pivots"
 #: fully-baked-manifest shape (absolute commands written into the shared
 #: runtime file itself, re-diffed byte-for-byte on every scan); it is still
 #: recognized read-only as a migrating "unknown-legacy" entry (see
-#: ``classify`` in ``pivot_registry_scan.py``) so pre-existing v2 files decay
-#: gracefully instead of breaking outright.
+#: ``classify`` below) so pre-existing v2 files decay gracefully instead of
+#: breaking outright.
 MANAGED_SCHEMA_VERSION = 3
 #: Exact key set for a valid v3 managed pointer (mirrors
-#: ``config_dropins.py``'s ``_POINTER_KEYS``, with ``template`` -- a bare
-#: filename resolved under ``plugin_root/pivots/`` -- standing in for that
-#: registry's absolute ``target``).
+#: ``agent_worktrees.config_dropins``'s ``_POINTER_KEYS``, with ``template``
+#: -- a bare filename resolved under ``plugin_root/pivots/`` -- standing in
+#: for that registry's absolute ``target``).
 _MANAGED_POINTER_KEYS = frozenset(
     {"schema_version", "plugin", "plugin_root", "template"}
 )
 #: Schema versions this materializer may safely overwrite when refreshing a
 #: prior artifact: the current pointer shape, plus the one superseded shape
-#: (v2, the fully-baked manifest) still migrated read-only in
-#: ``pivot_registry_scan.py``. Deliberately NOT "any int" -- a hypothetical
-#: future schema (written by a newer agent-worktrees) must never be silently
-#: downgraded by an older materializer that doesn't understand it yet.
+#: (v2, the fully-baked manifest) still migrated read-only in ``classify``
+#: below. Deliberately NOT "any int" -- a hypothetical future schema (written
+#: by a newer agent-worktrees) must never be silently downgraded by an older
+#: materializer that doesn't understand it yet.
 _MIGRATABLE_SCHEMA_VERSIONS = frozenset({2, MANAGED_SCHEMA_VERSION})
 _PLUGIN_SOURCE_RE = re.compile(r"^[^@/\\\s]+@[^@/\\\s]+$")
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
@@ -104,20 +61,6 @@ _KNOWN_LEGACY_PIVOTS = {
     "agent-containers.json": "agent-containers@copilot-extensions",
     "agent-dispatch.json": "agent-dispatch@copilot-extensions",
 }
-
-log = logging.getLogger("agent-worktrees")
-
-
-def _resolve_activation() -> ActivationReport:
-    """Resolve legacy activation or stand down after validating cell context."""
-    if os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip():
-        registry_paths.registry_root()
-        return ActivationReport(
-            authority=ScanAuthority.COMPLETE,
-            decisions={},
-        )
-    return resolve_active_plugins()
-
 
 @dataclass(frozen=True)
 class PivotAction:
@@ -168,8 +111,6 @@ class PivotAction:
     #: ``{"title_from", "status_from", "link_from", "body_from"}`` (each a dotted
     #: path string). Mutually exclusive with ``internal``/``form``.
     card: Mapping[str, object] | None = None
-
-
 @dataclass(frozen=True)
 class Column:
     """One declarative column in a registered pivot's table view (D1).
@@ -368,12 +309,6 @@ class PivotRegistryReport:
             "entries": entries,
             "findings": [finding.to_dict() for finding in self.findings],
         }
-
-
-_LAST_KNOWN: dict[str, dict[str, PivotContribution]] = {}
-_WARNING_TRACKER = WarningTracker()
-
-
 def _opt_path(value: object, *, where: str) -> str | None:
     """Validate an optional dotted-path field (A5 form/card ``*_from``).
 
@@ -631,12 +566,13 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
 
 def _resolve_state_root_path() -> Path | None:
     try:
-        from agent_worktrees import config as config_module
-        from agent_worktrees.state_root import resolve_state_root
+        from .._engine_runtime import engine_module
 
-        resolved = resolve_state_root(config_module.load_config())
+        config_module = engine_module("config")
+        state_root_module = engine_module("state_root")
+        resolved = state_root_module.resolve_state_root(config_module.load_config())
         return Path(resolved.path).resolve() if resolved.path else None
-    except (KeyError, OSError, RuntimeError, ValueError):
+    except (ImportError, KeyError, OSError, RuntimeError, ValueError):
         return None
 
 
@@ -776,10 +712,10 @@ def _resolve_compat_document(
     (absolute root, bare-basename ``.json`` template name -- which also
     rejects ``..``/absolute-path traversal) are enforced here too before ever
     touching the filesystem. Commands are deliberately left unrewritten
-    (unlike the identity-verified scan path in ``pivot_registry_scan.py``):
-    compat callers historically pass synthetic command names that were never
-    meant to resolve on disk. A non-pointer document (an operator manifest,
-    or a superseded fully-baked one) passes through unchanged.
+    (unlike the identity-verified scan path in ``_classify_managed``): compat
+    callers historically pass synthetic command names that were never meant
+    to resolve on disk. A non-pointer document (an operator manifest, or a
+    superseded fully-baked one) passes through unchanged.
     """
     if not isinstance(data, dict) or set(data) != _MANAGED_POINTER_KEYS:
         return data if isinstance(data, dict) else None
@@ -870,4 +806,56 @@ def installed_plugins_dir(base: str | os.PathLike[str] | None = None) -> Path:
     from .. import config
 
     return config._home() / ".copilot" / "installed-plugins"
+
+
+
+def discover_pivots(base: str | os.PathLike[str] | None = None) -> list[RegisteredPivot]:
+    """Return active pivots, with parser-only explicit-dir support."""
+    candidates: list[RegisteredPivot] = []
+    for path, data in _compat_manifest_documents(pivots_dir(base)):
+        resolved = _resolve_compat_document(path, data)
+        if resolved is None or "list" not in resolved:
+            continue
+        try:
+            candidates.append(
+                parse_manifest(resolved, name=path.stem, source_path=str(path))
+            )
+        except ManifestError:
+            continue
+    state_root = (
+        _resolve_state_root_path()
+        if any(pivot.visible_when_state_root_file for pivot in candidates)
+        else None
+    )
+    return [
+        pivot
+        for pivot in candidates
+        if _pivot_is_visible(pivot, state_root=state_root)
+    ]
+
+
+def order_pivots(builtins: Sequence[str], registered: Sequence[RegisteredPivot]) -> list[dict]:
+    """Weave registered pivots into the builtin order via their ``after`` hint.
+
+    Returns a list of pivot descriptors (dicts) in final display order. Each is
+    ``{"label", "kind", "pivot"}``; builtins carry ``pivot=None`` and a kind of
+    their lowercased label, registered pivots carry ``kind="registered"`` and
+    their :class:`RegisteredPivot`. A registered pivot whose ``after`` matches
+    no builtin is appended at the end (still shown, never dropped).
+    """
+    descriptors: list[dict] = [
+        {"label": b, "kind": b.strip().lower(), "pivot": None} for b in builtins
+    ]
+    for reg in registered:
+        entry = {"label": reg.label, "kind": "registered", "pivot": reg}
+        idx = next(
+            (i for i, d in enumerate(descriptors) if d["label"].lower() == reg.after.lower()),
+            None,
+        )
+        if idx is None:
+            descriptors.append(entry)
+        else:
+            descriptors.insert(idx + 1, entry)
+    return descriptors
+
 

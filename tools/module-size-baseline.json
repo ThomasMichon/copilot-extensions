@@ -39,7 +39,7 @@
   "plugins/agent-dispatch/src/agent_dispatch/__main__.py": 4691,
   "plugins/agent-dispatch/src/agent_dispatch/_installation_context.py": 9169,
   "plugins/agent-dispatch/src/agent_dispatch/client.py": 1038,
-  "plugins/agent-dispatch/src/agent_dispatch/companion.py": 1412,
+  "plugins/agent-dispatch/src/agent_dispatch/companion.py": 1421,
   "plugins/agent-dispatch/src/agent_dispatch/coordinator.py": 2509,
   "plugins/agent-dispatch/src/agent_dispatch/managed_runtime.py": 1436,
   "plugins/agent-dispatch/src/agent_dispatch/queue.py": 3982,
@@ -99,6 +99,5 @@
   "worktree-manager/src/worktree_manager/__main__.py": 1432,
   "worktree-manager/src/worktree_manager/_installation_context.py": 9169,
   "worktree-manager/src/worktree_manager/production_picker/picker_tui/data_ssh.py": 2078,
-  "worktree-manager/src/worktree_manager/production_picker/picker_tui/engine.py": 8695,
-  "worktree-manager/src/worktree_manager/production_picker/picker_tui/pivots.py": 2159
+  "worktree-manager/src/worktree_manager/production_picker/picker_tui/engine.py": 8695
 }
