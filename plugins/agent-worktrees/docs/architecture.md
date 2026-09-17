@@ -744,6 +744,14 @@ containers, bridge sessions) so finalizing never orphans unfinished work. (Effor
   cross-machine visibility — populated by the resource plugin at settle/release
   (agent-codespaces at clean disconnect → `at-rest`) and read back by the reclaim
   sweep.
+- **`session` claims are advisory, not gating (Phase 8, session-claim
+  lifecycle).** `register_session`/`deregister_session` journal a `kind ==
+  "session"` claim for the worktree's own live Copilot session, but this kind
+  is explicitly excluded from the hard-blocking `unsettled` computation in
+  `_assert_obligations_settled` — a live session never blocks finalize.
+  `validate_and_finalize` settles the invoking session's own claim to
+  `at-rest` before the gate runs, and `_advise_other_live_sessions` warns
+  (never blocks) about any OTHER live session claim in the same worktree.
 - **The gate is cheap + local + enforcing by default.** It reads only the owner's
   own `record.resources` for `is_unsettled` claims — O(claims), no traversal — and
   runs **before any destructive step**. `obligations.gate_mode()`

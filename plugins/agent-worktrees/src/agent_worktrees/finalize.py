@@ -36,6 +36,7 @@ deferred concern handled by cleanup once the worktree is idle.
 
 from __future__ import annotations
 
+import os
 import shutil
 import time
 from pathlib import Path
@@ -1133,6 +1134,85 @@ def _settle_parent_obligation(
         return
 
 
+def _settle_current_session_claim(
+    yaml_path: Path,
+    record: tracking.WorktreeRecord | None,
+    current_session_id: str | None,
+) -> tuple[tracking.WorktreeRecord | None, str | None]:
+    """Settle the invoking session's own claim to ``at-rest``, lock-safe.
+
+    Reloads + settles inside a fresh ``_RecordLock`` transaction (rather than
+    mutating a stale pre-lock snapshot) so an interleaving
+    ``register_session``/``deregister_session`` -- each its own locked
+    read-modify-write -- can never be overwritten by this settlement. Never
+    resurrects an already-``released`` claim: a ``sessionEnd`` can race ahead
+    of a retried/late finalize for the SAME session id, and settling
+    unconditionally would flip a genuinely-torn-down claim back to
+    ``at-rest`` (held).
+
+    Returns ``(record, current_session_ref)`` -- ``record`` is the freshly
+    reloaded record when settlement ran, else the ``record`` passed in
+    unchanged; ``current_session_ref`` is ``None`` when no session id was
+    resolvable (a silent, best-effort no-op, not a failure).
+    """
+    if record is None or not current_session_id:
+        return record, None
+    current_session_ref = tracking.format_claim_ref(
+        record.machine, record.repo, record.worktree_id,
+        session=current_session_id,
+    )
+    try:
+        with tracking._RecordLock(yaml_path, require_sidecar=True):
+            fresh_record = tracking.load_record(yaml_path)
+            existing_claim = next(
+                (c for c in fresh_record.resources
+                 if c.ref == current_session_ref),
+                None,
+            )
+            if existing_claim is None or existing_claim.state != "released":
+                tracking.settle_resource_claim(
+                    fresh_record, current_session_ref,
+                    disposition=obligations.AT_REST,
+                )
+            record = fresh_record
+    except Exception:
+        pass
+    return record, current_session_ref
+
+
+def _advise_other_live_sessions(
+    record: tracking.WorktreeRecord | None,
+    current_session_ref: str | None,
+) -> None:
+    """Warn (never block) about OTHER live ``session`` claims on ``record``.
+
+    Advisory-only pass (Phase 8, worktree-finality-and-obligations): a
+    ``session`` claim never hard-blocks finalize (see the ``kind !=
+    "session"`` exclusion in :func:`_assert_obligations_settled`), but the
+    operator/agent invoking finalize should still be told when some OTHER
+    session is concurrently live in this worktree. Always returns (proceeds);
+    this is "name them and ask", not an interactive block, since most
+    finalize invocations here are non-interactive/agent-driven.
+    """
+    if record is None:
+        return
+    others = [
+        c for c in record.resources
+        if c.kind == "session" and c.is_live and c.ref != current_session_ref
+    ]
+    if not others:
+        return
+    output.warn(
+        f"Worktree {record.worktree_id} has {len(others)} other live Copilot "
+        "session claim(s) besides the one running finalize:"
+    )
+    for c in others:
+        label = f"  · {c.kind}: {c.ref}"
+        if c.note:
+            label += f" ({c.note})"
+        output.warn(label)
+
+
 def _assert_obligations_settled(
     record: tracking.WorktreeRecord | None,
     worktree_id: str,
@@ -1183,7 +1263,14 @@ def _assert_obligations_settled(
             + ", ".join(active_handoffs)
         )
         return False
-    unsettled = [c for c in record.resources if c.is_unsettled]
+    # A "session" claim (Phase 8, worktree-finality-and-obligations) never
+    # hard-blocks finalize -- it gets its own advisory-only pass
+    # (`_advise_other_live_sessions`), not this refusal gate. Finalize itself
+    # settles the invoking session's own claim before this check ever runs
+    # (see `validate_and_finalize`).
+    unsettled = [
+        c for c in record.resources if c.is_unsettled and c.kind != "session"
+    ]
     if not unsettled:
         return True
     pending = [c for c in unsettled if c.ref.startswith("pending-run:")]
@@ -1290,7 +1377,9 @@ def _rehome_abandoned_obligations(
     requested handoff target. A write/readback failure returns False so finalize
     preserves the creator worktree and its claims.
     """
-    abandoned = [c for c in record.resources if c.is_unsettled]
+    abandoned = [
+        c for c in record.resources if c.is_unsettled and c.kind != "session"
+    ]
     if not abandoned:
         return True
     tracking.rehome_abandoned_obligations(
@@ -1418,6 +1507,29 @@ def validate_and_finalize(
     except Exception:
         pass
 
+    # Session-claim lifecycle (Phase 8, worktree-finality-and-obligations):
+    # settle the invoking session's own outbound claim BEFORE the hard
+    # obligation gate runs, so finalize never leaves the operator to settle
+    # it by hand -- and it never blocks the gate either way (see the
+    # `kind != "session"` exclusion in `_assert_obligations_settled`).
+    #
+    # Scoping note: this reads ``COPILOT_AGENT_SESSION_ID`` from the CURRENT
+    # process's own environment, so it settles the invoking (interactive)
+    # session's claim. ``_post_exit_gate``'s backstop call (after the child
+    # Copilot process exits) runs in the *launcher's* environment, which
+    # never carries the exited child's session id -- so if that child's own
+    # `sessionEnd` hook was itself missed (a crash, not a clean exit), this
+    # step is a no-op and the orphaned claim is left `active`. That claim
+    # never blocks finalize (the `kind != "session"` exclusion above) and is
+    # exactly the still-deferred "sweep `claim_gone`/`claim_safe` session
+    # branch" Plan bullet's job to reclaim -- not solved here, to keep this
+    # slice's scope to the register/deregister/finalize wiring itself.
+    current_session_id = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
+    record, current_session_ref = _settle_current_session_claim(
+        yaml_path, record, current_session_id,
+    )
+    _advise_other_live_sessions(record, current_session_ref)
+
     # Obligation gate (resource-obligation-settlement Phase 2). A worktree
     # answers for the outbound resources it still owns before it may finalize.
     # Runs BEFORE any destructive step so a blocking gate refuses cleanly. Read
@@ -1529,7 +1641,10 @@ def validate_and_finalize(
                         "claim-handoff bundles before cleanup; finalize is "
                         "refused: " + ", ".join(active_handoffs))
                     return False
-                unsettled = [c for c in record.resources if c.is_unsettled]
+                unsettled = [
+                    c for c in record.resources
+                    if c.is_unsettled and c.kind != "session"
+                ]
                 pending = [
                     c for c in unsettled if c.ref.startswith("pending-run:")
                 ]
