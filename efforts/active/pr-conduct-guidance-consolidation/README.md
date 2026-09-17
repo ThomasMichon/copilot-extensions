@@ -146,26 +146,58 @@ Full audit (repo/file/what's restated) recorded in this session's transcript
       top `pr:` block comment's restated mechanics.
 - [x] Run `python tools/validate_harness.py`; land via its own PR flow.
 
-### Phase 3 -- dotfiles: trim redundant restatement
-- [ ] `AGENTS.md` §571-584 and `.agent-worktrees/config.yaml` comments: same
-      trim as Phase 2.
-- [ ] Run `python tools/validate-session-context.py` + the plugin test
-      suite; land via its own PR flow.
+### Phase 3 -- dotfiles: re-scoped after operator correction
+- [x] Operator clarified the underlying model: `CONTRIBUTING.md`/`REVIEW.md`
+      -style content describing a repo's **own** contribution process is
+      legitimate and stays (odsp-web-harness's `CONTRIBUTING.md` is exactly
+      that, correctly left alone in Phase 2). The dynamic PR-conduct
+      guidance (session `PR:` line, `pr.notes`, `pr-workflow.md`'s
+      default-conduct rule) exists for **contributing outward** to *other*
+      repos, and the recurring real failure mode is agents getting confused
+      about which repo's protocol applies mid-cross-repo-work and leaving a
+      PR stuck open -- not repos over-documenting their own process.
+- [x] Re-read dotfiles' `AGENTS.md` §571-584 with that lens: it is two
+      paragraphs, not one -- "dotfiles' own flow is PR-primary" (legitimate
+      self-description, keep, same as odsp-web-harness's `CONTRIBUTING.md`)
+      and "Honor every other repo's PR gates" (already correctly points
+      outward at the `working-cross-repo` skill and each
+      `.agent-worktrees/related/<name>.md`). **No trim needed** -- the
+      original audit mis-scoped this phase; there was no actual redundancy
+      to remove here.
+- [x] Redirected the phase's real work to where cross-repo protocol
+      confusion actually gets resolved or missed: the `working-cross-repo`
+      skill itself (now Phase 3b).
 
-### Phase 4 -- copilot-extensions: dogfood the same trim
-- [ ] `AGENTS.md` line ~186 and `.agent-worktrees/config.yaml` comments: same
-      trim, in the repo that now owns the canonical + dynamic guidance.
-- [ ] Land via its own PR flow (same worktree as Phase 1, or a fresh one --
-      decide at execution time based on how large Phase 1 already is).
+### Phase 3b -- agent-worktrees: harden working-cross-repo against protocol confusion
+- [x] `working-cross-repo` `SKILL.md`'s PR-flow-checking step was missing
+      the `pr-self-merge` profile entirely (only listed `direct`/
+      `pr-human-merge`/`pr-agent-merge`) and didn't mention the new dynamic
+      surfaces (session `PR:` line, `pr.notes`) at all.
+- [x] Added the missing profile; pointed at both dynamic surfaces
+      explicitly; added an explicit "drive the target's PR through to
+      merge, using its resolved profile" instruction (the cross-repo
+      analogue of the home-repo default-conduct rule); added an anti-pattern
+      entry for the actual failure mode -- leaving a target-repo PR stuck
+      open because the protocol was assumed rather than checked.
+- [x] Bump versions; land via its own PR flow.
+
+### Phase 4 -- copilot-extensions: dogfood the same corrected lens
+- [ ] Re-check `AGENTS.md` line ~186 with the Phase 3 correction in mind --
+      likely legitimate self-description (this repo's own PR-required
+      `pr-self-merge` profile), not restated generic mechanics. Confirm
+      before touching; do not trim on the original (miscalibrated)
+      assumption.
+- [ ] Land via its own PR flow if any change is actually warranted.
 
 ### Phase 5 -- Validate end-to-end
 - [ ] Fresh session in each of the three repos actually surfaces the
       dynamically-injected PR-conduct guidance (not just the static
       `pr-workflow.md` mechanics) and it names the correct resolved
       `pr-profile` for that repo.
-- [ ] No repo's `AGENTS.md`/`CONTRIBUTING.md`/`REVIEW.md` still independently
-      restates a fact now owned by the dynamic guidance (spot-check via the
-      same grep patterns used in the original audit).
+- [ ] Spot-check that no repo's `AGENTS.md`/`CONTRIBUTING.md`/`REVIEW.md`
+      restates *generic* PR mechanics now owned by the dynamic guidance --
+      but do **not** flag a repo's legitimate self-description of its own
+      contribution process as redundant (Phase 3's correction).
 - [ ] Note whether `dev.tmichon` (ADO, `bypass_policy: true` self-merge) or
       any other coordinated repo needs the same trim -- file a follow-on
       issue if out of this effort's scope rather than silently expanding it.
@@ -259,3 +291,25 @@ _Pending._
 - Remaining: Phase 3 (dotfiles trim), Phase 4 (copilot-extensions dogfood
   trim), Phase 5 (end-to-end validation). Paused here for operator check-in
   after landing three PRs across two repos.
+
+### 2026-09-16 -- Operator correction: Phase 3 re-scoped, real gap found
+- Operator corrected the model before Phase 3 started: `CONTRIBUTING.md`/
+  `REVIEW.md`-style content describing a repo's **own** process is
+  legitimate (odsp-web-harness's, correctly left alone in Phase 2); the
+  dynamic PR-conduct guidance exists for **contributing outward**. The
+  actual recurring failure is agents getting confused about which target
+  repo's protocol applies and leaving a PR stuck open mid-cross-repo-work.
+- Re-read dotfiles' `AGENTS.md` §571-584 with that lens: two paragraphs, not
+  one -- a legitimate self-description (keep) and an already-correct
+  outward pointer to `working-cross-repo`. **No trim needed; the original
+  audit mis-scoped this phase.**
+- Found the real gap in `working-cross-repo` `SKILL.md` itself: its
+  PR-flow-checking step was missing the `pr-self-merge` profile entirely
+  and didn't mention either new dynamic surface (session `PR:` line,
+  `pr.notes`). Fixed both, added an explicit "drive the target's PR through
+  to merge" instruction and an anti-pattern entry naming the actual failure
+  mode (a PR left stuck because the protocol was assumed, not checked).
+- Landed via its own PR (Phase 3b), version bumped again.
+- Next: Phase 4 -- re-check copilot-extensions' own `AGENTS.md` with the
+  same corrected lens before touching it (likely legitimate
+  self-description, same as odsp-web-harness/dotfiles).
