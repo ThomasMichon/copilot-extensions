@@ -11,7 +11,7 @@
   liveness reducers (`sessions.py`, `procs.py`) and to three platform-specific
   launcher scripts, so it is deliberately sequenced after this smaller,
   more self-contained slice proves the pattern.
-- **Status:** In progress — Steps 1-4 implemented; legacy deletion remains.
+- **Status:** Done — Steps 1-6 implemented.
 
 ## Why this slice first
 
@@ -24,10 +24,14 @@ tractable of the two Phase 3b relocations because:
   already carries a forward-compatible "opaque if unrecognized" fallback);
 - its only agent-worktrees-owned coupling is generic locking/finalize-gating
   primitives that already exist and don't need to change shape;
-- it has no platform-specific (Windows/POSIX) launcher-script surface of its
-  own — the mux wrapper around an AHP session already lives in the launcher
-  scripts and is exercised by `tests/test_ahp_launcher_contract.py`, which
-  this slice does not need to touch.
+- it looked, initially, like it had no platform-specific launcher-script
+  surface of its own — but the Step 5/6 landing found a missed coupling:
+  `launch-session.{sh,ps1}` still shelled into the legacy
+  `session-backend status`/`ensure` verbs for the bare/direct launch path.
+  This slice therefore also updates those scripts to resume an existing AHP
+  execution leg through `execution-leg get` and deliberately drops bare-path
+  "ensure" (see scope note below), while leaving the broader Mux relocation
+  itself to Slice 2.
 
 ## Current-state inventory (evidence, `main` as of 2026-09-04)
 
@@ -42,6 +46,14 @@ tractable of the two Phase 3b relocations because:
 | `plugins/agent-worktrees/pyproject.toml` | `websocket-client>=1.8.0` dependency, needed only by `ahp_backend.py`. |
 | `plugins/agent-worktrees/tests/test_ahp_launcher_contract.py` | Tests the **mux launcher's** hard-bind/disable-post-exit behavior when wrapping an AHP session — this is launcher (Mux-slice) territory, not AHP-backend territory; it stays in agent-worktrees for now and is unaffected by this slice as long as the launcher can still read whatever generic record replaces `session_backend`. |
 | `plugins/agent-worktrees/tests/*` | Any other test asserting `session_backend`/`SessionBackendBinding`/`is_ahp` shape needs updating to the new generic shape (see below); exact list to be enumerated at implementation time via `grep -l session_backend plugins/agent-worktrees/tests`. |
+
+> **Inventory correction found while landing Steps 5-6 (2026-09-17):**
+> `plugins/agent-worktrees/bin/launch-session.{sh,ps1,cmd}` and the copied
+> `worktree-manager/bin/launch-session.{sh,ps1,cmd}` were omitted from the
+> original table even though the shell/PowerShell launchers carried their own
+> embedded AHP resume/ensure logic. Step 5 therefore also updates those
+> scripts to read the generic execution leg and removes their legacy
+> `session-backend ensure` call.
 
 ## Target end-state
 
@@ -179,13 +191,13 @@ records exist (tracked as a follow-up, not blocking this slice).
 4. [x] **Cut Worktree Manager's launch/resume/create actions over** to call the
    relocated AHP provider instead of shelling into `agent-worktrees
    session-backend`. Land + version-bump worktree-manager.
-5. [ ] **Remove `cmd_session_backend`, `ahp_backend.py`, `SessionBackendConfig`,
+5. [x] **Remove `cmd_session_backend`, `ahp_backend.py`, `SessionBackendConfig`,
    the `config_dropins.py` validation block, and the `websocket-client`
    dependency from `agent-worktrees`.** Keep only the legacy-record read
    shim from step 1 until the back-compat retirement follow-up. Land +
    version-bump agent-worktrees (this is the actual deletion commit — kept
    last and separate so it's trivially revertable if steps 3-4 surface a gap).
-6. [ ] **Update `test_ahp_launcher_contract.py` and any other `session_backend`-
+6. [x] **Update `test_ahp_launcher_contract.py` and any other `session_backend`-
    asserting test** to the new generic shape/verb names; add worktree-manager
    tests for the relocated provider (reusing the existing AHP contract tests'
    assertions where they test protocol behavior, not location).
@@ -218,6 +230,15 @@ single-writer" merge norm for this public repo.
 
 - **Not the Mux relocation.** `launch-session.{sh,ps1,cmd}` and `cmd_remux`
   stay in `agent-worktrees` until the follow-up slice.
+- **Only one deliberate behavior change beyond pure relocation:** the
+  **bare/direct** `agent-worktrees` launch path no longer establishes a
+  brand-new AHP session on its own. It now resumes an already-persisted AHP
+  execution leg via `execution-leg get`; when no active AHP leg exists, it
+  falls back to the ordinary direct/mux launch and warns that creating a new
+  AHP session requires the Worktree Manager Picker. This narrow change closes
+  the late-found launcher-script coupling above and does **not** affect
+  Worktree Manager's Picker-driven AHP create/resume path, which already owns
+  ensure through `worktree_manager.ahp_provider`.
 - **Not a behavior change.** AHP session creation/verification/disposal logic
   is relocated, not rewritten or improved, in this slice.
 - **Not the `_engine_runtime.py` in-process-import replacement** for anything

@@ -184,7 +184,7 @@ realized in `main`; unchecked items are the remaining delta.
       §`programmatic-parity`.
 
 ### Phase 3b — Relocate Mux + AHP execution mechanics out of agent-worktrees (Planned — #2062)
-- [ ] **Slice 1 (AHP):** move the AHP session backend
+- [x] **Slice 1 (AHP):** move the AHP session backend
       (`agent_worktrees/ahp_backend.py`, the `session_backend`/`is_ahp` config
       schema, and the branches it threads through `__main__.py`,
       `tracking.py`, `finalize.py`, and `config_dropins.py`) out of the
@@ -205,7 +205,7 @@ realized in `main`; unchecked items are the remaining delta.
             Manager-owned AHP provider/config/dependency over the public engine
             subprocess boundary; production Picker default-off AHP controls and
             launch/resume/create cutover for exact engine-created worktrees.
-      - [ ] Steps 5-6: delete the legacy agent-worktrees AHP backend/config path
+      - [x] Steps 5-6: delete the legacy agent-worktrees AHP backend/config path
             and complete the remaining launcher-contract test migration.
 - [ ] **Slice 2 (Mux):** relocate Mux launch/reattach/remux mechanics
       (`launch-session.{sh,ps1,cmd}`, `pane-wrapper.{sh,ps1}`, `cmd_remux`)
@@ -429,6 +429,38 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-09-17** — Finished Phase 3b Slice 1 Steps 5-6. Deleted
+  agent-worktrees' remaining AHP implementation path
+  (`cmd_session_backend`, `ahp_backend.py`, `SessionBackendConfig`, the
+  `config.d` `session_backend` validation block, and the
+  `websocket-client` dependency) while keeping the reader-side legacy
+  `session_backend:` → `execution_leg` translation shim in `tracking.py`.
+  Closed an inventory gap the design doc had missed: both the in-plugin and
+  relocated Worktree Manager `launch-session.{sh,ps1}` copies still shelled
+  into the legacy `session-backend status`/`ensure` verbs on the **bare/direct**
+  launch path. They now read only `execution-leg get`: an already-persisted
+  AHP leg still resumes exactly as before, but creating a **new** AHP session
+  through the bare path is deliberately gone and now warns to use the
+  Worktree Manager Picker, keeping AHP session establishment fully owned by
+  `worktree_manager.ahp_provider`. Completed the remaining test migration:
+  retargeted the launcher contract and agent-worktrees JSON/live-signal tests
+  to `execution_leg`, removed the obsolete plugin-local AHP backend/command
+  tests, and added missing Worktree Manager provider + relocated-launcher
+  regression coverage. Version bumps: agent-worktrees `1.5.5-dev134`,
+  marketplace metadata `1.7.7-dev120`, Worktree Manager `0.1.0-dev47`.
+  Validation: changed-file targeted tests passed (`agent-worktrees` 103;
+  `worktree-manager` 42); full `worktree-manager` suite passed with the two
+  known hanging production-picker tests excluded (`805 passed, 1 skipped`).
+  Full `agent-worktrees` suite ran to completion and now shows only five
+  unrelated pre-existing failures in this environment —
+  `tests/test_pr_ops.py::TestRefreshHeadObservation::test_concurrent_reassociation_rejects_returned_observation`
+  plus four `tests/test_update_stage.py` indicator tests that pass in
+  isolation but fail after earlier suite pollution — with `4481 passed,
+  47 skipped` otherwise. `ruff check --select F,E9` on both packages,
+  `python tools/check-install-contract.py`,
+  `python tools/check-version-consistency.py`, and
+  `python tools/check-version-bump.py` all passed.
 
 - **2026-08-17** — Effort authored to give the Worktree Manager rework a single
   coherent home in-repo, tying the Manager-build issues (#352 / #355 / #356 /

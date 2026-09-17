@@ -23,7 +23,7 @@ Copilot session database remains outside this path.
 | **Highest** | **Machine-local** | legacy `~/.{project}/config.yaml`; namespaced `<cell>/repos/<repository-id>/agent-worktrees/config.yaml` | Per-machine overrides + machine paths (anchor, custom worktree_root). The **adapter** that makes a *foreign* repo compatible. | No |
 | *(conditional)* | **Knowledge overlay** | bound knowledge repo's config | For a **stateless harness** bound to a knowledge repo, portable operator-preference keys only (`copilot_profiles`, `profile_assignment`, `headless`, `auto_fast_forward`). Machine-specifics and the binding never graft. | Yes |
 | **Middle** | **In-repo** | `<anchor>/.copilot-extensions/agent-worktrees/config.yaml` | The repo's **own** committed settings — the base, shared by every machine. Legacy `<anchor>/.agent-worktrees/config.yaml` and `<anchor>/.agent-worktrees.yaml` remain readable. | Yes |
-| **Lowest** | **Global** | `~/.agent-worktrees/config.yaml` | Machine-wide defaults: `srcroot`, `machine`, `platform`, `copilot_profiles`, `session_backend`. | No |
+| **Lowest** | **Global** | `~/.agent-worktrees/config.yaml` | Machine-wide defaults: `srcroot`, `machine`, `platform`, `copilot_profiles`. | No |
 
 **A repo designed for this system needs no machine-local file.** Its anchor
 resolves from the repos registry (`~/.agent-worktrees/repos.yaml`), its settings
@@ -36,9 +36,6 @@ that carries no in-repo config.
   `copilot_profiles`/`profile_assignment`/`headless`/`auto_fast_forward`)
   resolve **machine-local > knowledge overlay (portable prefs
   only) > global > detected/default**.
-- **Machine-host fields** (`session_backend`) resolve **machine-local >
-  global > default**. They are never read from committed in-repo config or a
-  knowledge overlay.
 - **Per-repo settings** merge **in-repo flat settings < machine-local
   `repos.<name>` block**. The global tier carries *only* machine-wide top-level
   settings — never per-repo settings.
@@ -67,10 +64,6 @@ global config.
 repo_name: my-project             # which repos.<name> is the active/default repo
 headless: false                   # CLI-only project (bare binstub lists worktrees)
 auto_fast_forward: true           # FF a stale, clean worktree on resume (override)
-session_backend:                  # optional same-machine hosted sessions
-  kind: ahp
-  endpoint_url: ws://127.0.0.1:8765
-  github_account: octocat
 
 repos:
   my-project:
@@ -133,62 +126,30 @@ repos:
 | `auto_fast_forward` | bool | `true` | On resume, fast-forward a clean worktree that is strictly behind upstream. Only ever a FF — never touches dirty / ahead / diverged worktrees. |
 | `copilot_profiles` | list | `[]` | Selectable Copilot backend profiles (Tab-cycle in the picker). |
 | `profile_assignment` | map | absent/off | Optional balanced assignment policy over existing `copilot_profiles`. Only a user-owned global, knowledge-overlay, or machine-local/per-project block can set `armed: true`. |
-| `session_backend` | map | `{kind: direct}` | Legacy machine-local AHP configuration retained temporarily for the old `session-backend` launcher path. New Picker launches configure AHP in Worktree Manager's user-owned TOML. Not accepted from in-repo config or a knowledge overlay. |
 | `repos` | map | `{}` | Per-repo configuration, keyed by repo name. |
 
-### Legacy same-machine AHP session backend — `session_backend`
+### Same-machine AHP sessions
 
-This block remains readable and operational for the legacy launcher during the
-Phase 3b cutover. New Worktree Manager launches use
-`~/.worktree-manager/config.toml` `[ahp]` and persist provider-neutral
-`execution_leg` records through the public
-`execution-leg get/reserve/set/release/clear` verbs.
-Do not add this block to new configurations.
+Agent-worktrees no longer owns AHP configuration or the create/verify/dispose
+protocol flow. Configure same-machine AHP in Worktree Manager's
+`~/.worktree-manager/config.toml` `[ahp]` block; Worktree Manager owns the
+loopback endpoint, account/token resolution, protocol negotiation, and the
+provider-side lifecycle operations.
 
-```yaml
-session_backend:
-  kind: ahp
-  endpoint_url: ws://127.0.0.1:8765
-  github_account: octocat
-  protocol_versions: ["0.7.0"]
-  auth_resource: https://api.github.com
-  connect_timeout_seconds: 15
-```
+Agent-worktrees keeps only the provider-neutral `execution_leg` record plus the
+generic `execution-leg get/reserve/set/release/clear` verbs and the
+finalize/cleanup barriers that treat `active` or `unknown` external legs as
+live. The legacy on-disk `session_backend:` record still loads through the
+reader-side compatibility shim, but it is no longer part of the supported
+configuration surface.
 
-| Key | Type | Default | Meaning |
-|-----|------|---------|---------|
-| `kind` | string | `direct` | `direct` or `ahp`. The default leaves existing launch behavior unchanged. |
-| `endpoint_url` | string | `""` | Required for `ahp`. Must be `ws://` on `localhost`, `127.0.0.1`, or `::1`, with an explicit port and no credentials, query, or fragment. |
-| `github_account` | string | `""` | GitHub login used to mint a repository-scoped token. When omitted, the registered repository account must resolve it. Ambient-account fallback is not allowed. |
-| `protocol_versions` | list[string] | `["0.7.0"]` | Offered AHP versions. Startup fails closed if the host selects a version outside this list. |
-| `auth_resource` | string | `https://api.github.com` | AHP authentication resource paired with the minted GitHub token. |
-| `connect_timeout_seconds` | number | `15` | Connection and ordinary request timeout, in `(0, 120]`. Session create/dispose use a 30-second minimum lifecycle budget and retry one host-owner startup timeout with a fresh session id. |
+The bare/direct `agent-worktrees` launcher consults `execution-leg get` only to
+resume an already-established AHP session for the worktree. If no active AHP
+execution leg exists, it launches normally and warns that establishing a **new**
+AHP session now requires the Worktree Manager Picker.
 
-The endpoint is intentionally explicit in the first release: agent-worktrees
-does not start, stop, upgrade, or discover `copilotd`. The launcher runs
-`session-backend ensure` after worktree preflight, persists the exact hosted
-session id, and starts Copilot with
-`--experimental --ahp <endpoint> --resume=<session-id>`. Selecting the worktree
-again verifies the same id and exact working directory before attach.
-The launcher mints one account-scoped token per fresh attach and passes that
-same token privately to both the controller and Copilot client. Mux launches
-use a one-shot protected handoff consumed by the pane wrapper, so the token is
-not inherited by the tmux/psmux server, status updater, or resident monitor. It
-is never written to the binding or JSON output.
-
-Exiting the terminal client does **not** dispose the hosted session or trigger
-ordinary post-exit finalization. `session-backend status` reads the persisted
-binding; `ensure` is the host-backed liveness/path check. Finalization refuses
-bindings in `active` or `unknown` state. Run `session-backend dispose` only when
-the hosted transcript may be retired; a successful dispose marks the binding
-terminal and permits normal finalization. Switching configuration back to
-`direct` while a binding is active or unknown fails closed rather than launching
-a duplicate local Copilot process. The initial backend is wired only through the
-normal Worktree Manager launcher; `embody` and `handoff-cutover` fail closed
-instead of starting an unbound direct client.
-
-The provider-neutral path reserves each create/verify/dispose operation under
-the same finalize fence before contacting the host. Concurrent lifecycle
+Provider-owned lifecycle operations reserve the leg under the same
+record/finalize fence before contacting the host. Concurrent lifecycle
 operations fail closed while the reservation is `unknown`; publication requires
 the reservation token. A newly created session is disposed before a failed
 publication is rolled back, so stale or dead bindings are never advertised.
