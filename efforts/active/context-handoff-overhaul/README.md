@@ -326,14 +326,14 @@ Verbatim from the operator:
 > the operator's own machine. See `redesign.md` §6 for the reality audit and
 > three-bin diff. A sub-division of this effort, not a new one, per the
 > operator's explicit direction.
-- [ ] **`pane_create` primitive.** Extract + generalize `mux_new_window()`'s
+- [x] **`pane_create` primitive.** Extract + generalize `mux_new_window()`'s
   receipt-based bootstrap-confirmation shape into a standalone,
   independently-testable primitive: resolve the worktree's mux server, log
   intent via `activity.log_event` *before* acting (not buried in a caller),
   spawn via a pane-bootstrap script that confirms landing before exec'ing
   the real payload (generalized beyond today's `initial_prompt`-only gate),
-  and foreground the pane as part of the same call.
-- [ ] **`pane_terminate` primitive.** Reuse the existing Ctrl-C escalation
+  and foreground the pane as part of the same call. **PR #2842.**
+- [x] **`pane_terminate` primitive.** Reuse the existing Ctrl-C escalation
   ladder shape, but confirm shutdown by reading the pane's live console
   output (`capture-pane`) for Copilot's own exit signature instead of only
   polling session/pane liveness; hard-kill the pane on a bounded (~30s)
@@ -341,17 +341,27 @@ Verbatim from the operator:
   session lock file the old process left behind. Collapses today's two
   divergent termination code paths
   (`graceful_quit_mux_session`+`restart_worktree_copilot` and
-  `mux_retire_pane`) into one.
-- [ ] **Isolated CLI harness for both primitives**, reachable independent of
+  `mux_retire_pane`) into one. **PR #2842.** The console-output
+  shutdown-signature patterns are shipped as **provisional/configurable**
+  (liveness polling remains the authoritative primary signal) — still open:
+  tighten the exact pattern against a real Copilot clean-exit banner
+  captured via the new harness (see next item).
+- [x] **Isolated CLI harness for both primitives**, reachable independent of
   `handoff-cutover`, so each can be driven directly against a live mux
   server — closing the gap that made live mux-mutation testing unsafe from
   inside an attached session (`handoff-live-cutover`'s Phase 4 finding).
-- [ ] Hermetic test coverage for both primitives (subprocess-mocked, matching
+  **PR #2842** (`agent-worktrees pane-create` / `agent-worktrees
+  pane-terminate`). Still open: an actual live-harness run against a
+  disposable/throwaway session to confirm the exit-signature patterns above.
+- [x] Hermetic test coverage for both primitives (subprocess-mocked, matching
   the existing `test_handoff_cutover.py` convention) plus a manual
-  live-validation runbook using the new harness.
+  live-validation runbook using the new harness. **PR #2842**
+  (`test_pane_lifecycle.py`; runbook added to `redesign.md` §6).
 - [ ] Rewire `handoff-cutover` (spawn + retire modes) and the Picker
   Stop/Take-over path to call the two hardened primitives instead of their
-  current bespoke/duplicated logic.
+  current bespoke/duplicated logic. **Deferred to a follow-up slice/PR**,
+  per this effort's established sequencing (land + prove the primitives
+  standalone first).
 
 ## Validation Plan
 
@@ -744,3 +754,31 @@ gate land._
   **Not yet started:** the actual `pane_create`/`pane_terminate`
   implementation, harness, and rewire -- this entry records the redesign
   and plan only; implementation is the next session's work.
+
+### 2026-09-17 — Phase 6 items 1-4 landed (PR #2842)
+
+- Implemented both primitives in a new `pane_lifecycle.py` module (kept out
+  of `sessions.py` to stay under its module-size baseline): `pane_create`
+  (mux-server resolution + pre-spawn `activity.log_event` +
+  receipt-confirmed payload exec, generalized off the `initial_prompt`-only
+  gate + explicit `mux_focus_pane` foreground) and `pane_terminate` (the
+  existing Ctrl-C ladder + a new `capture-pane` shutdown-signature check
+  layered on top of -- not replacing -- authoritative liveness polling,
+  bounded ~30s hard-kill fallback, stale-lock cleanup). Both ship with a
+  standalone CLI harness (`agent-worktrees pane-create` /
+  `agent-worktrees pane-terminate`) independent of `handoff-cutover`, and
+  hermetic subprocess-mocked tests (`test_pane_lifecycle.py`) matching the
+  `test_handoff_cutover.py` convention.
+- Along the way, found and fixed one **pre-existing, unrelated** CI blocker
+  on `main` (`test_pr_ops.py::TestRefreshHeadObservation::
+  test_concurrent_reassociation_rejects_returned_observation`), verified
+  deterministic (3/3) on a clean `origin/main` checkout before fixing it in
+  the same PR, per this effort's established precedent (#2663, #2808).
+- Bumped `agent-worktrees` to `1.5.5-dev139`. **PR #2842 merged.**
+- **Deliberately deferred to a follow-up slice:** item 5, rewiring
+  `cmd_handoff_cutover` (spawn + retire) and the Picker Stop/Take-over path
+  (`restart_worktree_copilot`) onto these two primitives -- per the
+  effort's own sequencing (land + prove primitives standalone first, then
+  a separate, focused rewire PR). Also still open: live-harness capture of
+  Copilot's real clean-exit console text to tighten `pane_terminate`'s
+  currently-provisional signature patterns.
