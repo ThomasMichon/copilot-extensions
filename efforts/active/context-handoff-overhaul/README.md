@@ -320,6 +320,39 @@ Verbatim from the operator:
   Behavior is realized once lifecycle-journal's Phase 3/4 land; file any
   residual gap as a narrowly-scoped follow-up rather than re-designing.
 
+### Phase 6 — Mux pane lifecycle primitives, isolated (Challenge 4)
+> Added 2026-09-17 after live production symptoms (panes spawning over each
+> other or never becoming foreground, stuck/false-positive pickup signals) on
+> the operator's own machine. See `redesign.md` §6 for the reality audit and
+> three-bin diff. A sub-division of this effort, not a new one, per the
+> operator's explicit direction.
+- [ ] **`pane_create` primitive.** Extract + generalize `mux_new_window()`'s
+  receipt-based bootstrap-confirmation shape into a standalone,
+  independently-testable primitive: resolve the worktree's mux server, log
+  intent via `activity.log_event` *before* acting (not buried in a caller),
+  spawn via a pane-bootstrap script that confirms landing before exec'ing
+  the real payload (generalized beyond today's `initial_prompt`-only gate),
+  and foreground the pane as part of the same call.
+- [ ] **`pane_terminate` primitive.** Reuse the existing Ctrl-C escalation
+  ladder shape, but confirm shutdown by reading the pane's live console
+  output (`capture-pane`) for Copilot's own exit signature instead of only
+  polling session/pane liveness; hard-kill the pane on a bounded (~30s)
+  overall budget if the signature never appears; then clean up the stale
+  session lock file the old process left behind. Collapses today's two
+  divergent termination code paths
+  (`graceful_quit_mux_session`+`restart_worktree_copilot` and
+  `mux_retire_pane`) into one.
+- [ ] **Isolated CLI harness for both primitives**, reachable independent of
+  `handoff-cutover`, so each can be driven directly against a live mux
+  server — closing the gap that made live mux-mutation testing unsafe from
+  inside an attached session (`handoff-live-cutover`'s Phase 4 finding).
+- [ ] Hermetic test coverage for both primitives (subprocess-mocked, matching
+  the existing `test_handoff_cutover.py` convention) plus a manual
+  live-validation runbook using the new harness.
+- [ ] Rewire `handoff-cutover` (spawn + retire modes) and the Picker
+  Stop/Take-over path to call the two hardened primitives instead of their
+  current bespoke/duplicated logic.
+
 ## Validation Plan
 
 - [ ] Force-tier: a live session artificially pushed past the force threshold
@@ -351,6 +384,13 @@ Verbatim from the operator:
 - [ ] Clean-room scenario updates: extend `context-handoff-cutover` and
   `context-handoff-eval` to cover the force-tier and the coordinator-fallback
   path.
+- [ ] Mux pane lifecycle primitives: `pane_create` produces a confirmed,
+  foregrounded pane against a live mux server via the new isolated harness
+  (not just hermetic mocks); `pane_terminate` correctly distinguishes a
+  genuine Copilot shutdown signature from a hung pane and falls back to a
+  hard kill + lock-file cleanup within the ~30s budget when it does; both
+  behaviors are exercised standalone, without going through the full
+  handoff-cutover choreography.
 
 ## Proposal
 
@@ -654,3 +694,53 @@ gate land._
   environment failures (confirmed identical before this change).
 - **Phase 3 is now fully closed.** Remaining work: Phase 4 (configurability)
   and Phase 5 (lineage/diagnostics closure).
+
+### 2026-09-17 — Phase 6 opened: mux pane lifecycle primitives, isolated
+
+- **Operator-reported production symptoms**, on their own machine, after
+  Phase 3 landed: mux panes spawning over each other or never becoming
+  foreground; handoffs stuck / never picking up; false-positive pickup
+  signals fed back into the live session.
+- Investigated first via `~/.agent-worktrees/logs/activity.jsonl` (confirmed
+  the logging itself works correctly) and found one concrete, severe cause:
+  the resident status-monitor's predecessor-retire sweep had **no terminal
+  condition** -- a predecessor whose own process had already exited was
+  retried every ~30s forever. Confirmed in production: 3,085 failed retries
+  over 3 days on one worktree (contesting a pane six later, unrelated
+  sessions had since legitimately reused, including the diagnosing session
+  itself), ~3,700 total across 6 worktrees, only 1 ever successful. Killed
+  the stuck daemon as immediate mitigation; shipped the code fix separately
+  as `fix/handoff-predecessor-retire-infinite-loop`, merged as **PR #2826**
+  (5 new tests, one CI flake confirmed via re-run then merged clean).
+- That fix closed one specific bug, but the operator's diagnosis is broader:
+  **repeatedly patching mechanism inside `context-handoff`/
+  `handoff-cutover`'s existing control flow keeps making it more fragile,
+  not less**, because the mux create/foreground/terminate steps were never
+  built as independent, directly-testable primitives -- every fix has to
+  reason about the whole trigger→store→detect→spawn→confirm→retire
+  choreography at once. Per the operator's explicit direction, this is a
+  **sub-division of this effort** (new Challenge 4 / Phase 6), not a new
+  effort -- the same adversarial-redesign-and-reflect flow this effort
+  already uses, applied to a narrower, previously-unexamined slice.
+- Audited reality (`redesign.md` §6): `mux_new_window()` already has almost
+  the right shape (receipt-file bootstrap confirmation, foreground-by-
+  default) but is reachable only through `cmd_handoff_cutover`'s single
+  ~500-line function, with no standalone verb and no primitive-level
+  pre-spawn status recording. Termination has **two independently
+  maintained, subtly different code paths** for the same conceptual
+  primitive (`graceful_quit_mux_session`+`restart_worktree_copilot` for
+  Picker Stop/Take-over vs. `mux_retire_pane` for handoff-cutover retire),
+  neither of which confirms shutdown by reading the pane's actual console
+  output -- both infer completion from liveness polling alone.
+- Decision: extract and generalize two primitives -- `pane_create` (resolve
+  mux server, log intent first, bootstrap-confirm before payload exec,
+  foreground) and `pane_terminate` (Ctrl-C ladder + console-output shutdown-
+  signature confirmation + bounded hard-kill fallback + lock-file cleanup,
+  replacing both existing termination paths) -- each shipped with its own
+  isolated CLI harness so it can be driven directly against a live mux
+  server without the full handoff dance. Only after both are hardened does
+  `handoff-cutover` and the Picker Stop/Take-over path get rewired onto them.
+- Added Phase 6 to this README's Plan and a matching Validation Plan item.
+  **Not yet started:** the actual `pane_create`/`pane_terminate`
+  implementation, harness, and rewire -- this entry records the redesign
+  and plan only; implementation is the next session's work.

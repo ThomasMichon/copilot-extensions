@@ -192,3 +192,127 @@ mandate is explicitly restated," and adversarial-filesystem correctness for
 the durable stores are acknowledged hard problems this effort does not claim
 to fully close — they're bounded, named risks for the Validation Plan to
 probe, not blockers to landing the additive work above.
+
+## 6. Mux pane lifecycle primitives, isolated (Challenge 4 — added 2026-09-17)
+
+**Trigger.** Live production symptoms on the operator's own machine, reported
+after Phase 3 landed: mux panes spawning over each other or not becoming
+foreground, handoffs "never picking up," and false-positive pickup signals
+fed back into the live session. One concrete cause was found and fixed in
+isolation (`fix/handoff-predecessor-retire-infinite-loop`, PR #2826 — the
+resident status-monitor's retire sweep had no terminal condition and retried
+a dead predecessor forever, ~3,700 no-op attempts across 6 worktrees). But
+the operator's diagnosis of the *class* of problem is broader: **repeatedly
+patching mechanism inside `context-handoff`/`handoff-cutover`'s existing
+control flow keeps making it more fragile, not less** — every fix has to
+reason about the whole multi-stage choreography (trigger → store → detect →
+spawn → confirm → retire) at once, because the mux create/foreground/
+terminate steps were never built as independent, directly-testable
+primitives in the first place.
+
+### 6.1 Reality audit
+
+What exists today (`plugins/agent-worktrees/src/agent_worktrees/sessions.py`
++ `__main__.py`'s `cmd_handoff_cutover`):
+
+- **Create.** `mux_new_window()` already does almost the right shape for a
+  "bootstrap script confirms before running the payload" primitive: it opens
+  + selects (foregrounds) a new window, and when an `initial_prompt` is given,
+  the pane-wrapper script writes a receipt file (`"launching"`) that the
+  parent polls for before declaring the successor confirmed — a real
+  bootstrap-confirms-then-execs-payload flow, just built for exactly one
+  caller. It is reachable **only** through `cmd_handoff_cutover`'s spawn mode
+  (a single ~500-line function covering CLI parsing, mux-session resolution,
+  seed encoding, spawn, AND retire in one call surface), has no standalone
+  CLI verb, and the only pre-spawn "recording status of what it's about to
+  do" is a `handoff_successor_spawn_started` log call embedded deep in that
+  function — not part of the primitive itself, so a caller that invokes
+  `mux_new_window()` directly (as any future non-handoff flow would) gets no
+  status trail at all.
+- **Foreground.** Two independent code paths exist for "make this pane the
+  one in front": `mux_new_window()`'s implicit `new-window` (no `-d`) select,
+  and `mux_focus_pane()`'s explicit `select-window` for an already-existing
+  pane. Neither is unified with the create primitive above.
+- **Terminate.** Two independent, subtly different termination code paths for
+  what is conceptually one primitive:
+  - `graceful_quit_mux_session()` (+ `restart_worktree_copilot()`, the Picker
+    Stop / Neuron-Forge Take-over path) — a double/conditional-triple Ctrl-C
+    ladder that polls `has_mux_session()` (the whole session gone), never
+    reads the pane's actual console output for Copilot's own shutdown
+    signature, and falls back to a hard *session* kill.
+  - `mux_retire_pane()` (`sessions_pane_retire.py`, the handoff-cutover retire
+    mode) — Ctrl-C into one specific *pane* (not the whole session, since a
+    session can now hold multiple windows post-cutover), gated on
+    `mux_binding_for_session()` process-identity proof, with its own
+    stale-lock-file handling.
+
+  Both ladders solve "ask Copilot to quit cleanly, then give up gracefully,"
+  but neither reads the pane's live text output to *confirm* the shutdown
+  signature the operator is asking for below — both currently infer
+  completion only from session/pane liveness polling.
+
+### 6.2 Three-bin diff
+
+- **Already correct, reuse as-is:** the receipt-file bootstrap-confirmation
+  idea (`mux_new_window`'s `initial_prompt` receipt), the Ctrl-C-ladder
+  approach to graceful termination, and process-identity verification via
+  `mux_binding_for_session()` before ever touching a pane. None of this needs
+  reinventing — it needs **extracting** into primitives that don't require
+  understanding the whole handoff-cutover choreography to use or test.
+- **Genuine gap (this challenge's work):** no single, directly-invokable
+  "create a pane in worktree X's mux server, log intent first, bootstrap-
+  confirm before the real payload execs, foreground it" primitive exists
+  independent of `cmd_handoff_cutover`. No single "terminate this pane,
+  reading its console output for a real shutdown signature (not just
+  liveness polling), escalate on a timeout, clean up its lock file"
+  primitive exists independent of the two divergent ladders above. Neither
+  primitive has a **dedicated, isolated test/dev harness** that exercises it
+  directly against a live mux server without going through the full
+  trigger→store→detect→spawn→confirm→retire dance — which is exactly why
+  live mux-mutation testing was previously found unsafe to run from inside
+  an attached session (`handoff-live-cutover`'s Phase 4 finding) and has
+  never been properly exercised since.
+- **Vision-ahead (deferred, not this challenge):** a full status-bar/lineage
+  UI over pane lifecycle state belongs to `handoff-cutover-lifecycle-journal`
+  (Phase 5 above), not here — this challenge only needs the two primitives to
+  emit the same `activity.log_event` stage marks that already exist, not a
+  new observability surface.
+
+### 6.3 Decision
+
+Per the operator's explicit direction: this is a **sub-division of this
+effort** (an added Challenge/Phase), not a new effort — the same
+adversarial-redesign-and-reflect flow this effort already uses, applied to a
+narrower, previously-unexamined slice of the same mechanism.
+
+Build exactly two primitives, each independently invokable and independently
+tested, in `sessions.py` (or a sibling module if size warrants a split):
+
+1. **`pane_create(worktree_id, payload_cmd, ...)`** — (a) identify the
+   worktree's current mux server/session (reuse existing resolution), (b)
+   `activity.log_event` the intent *before* acting (a new stage mark, not
+   buried in a caller), (c) invoke the mux `new-window`/`new-session` via a
+   pane-bootstrap script that itself confirms landing (extend the existing
+   receipt-file mechanism so it is not gated behind `initial_prompt` alone)
+   before exec'ing the real payload, (d) foreground the created pane as part
+   of the same call (unify with `mux_focus_pane`'s explicit-select path
+   rather than relying on `new-window`'s implicit default). Returns the pane
+   id + confirmed/failed outcome, exactly like `mux_new_window()` does today
+   — this is substantially an extraction + generalization, not a rewrite.
+2. **`pane_terminate(pane_id, ...)`** — reuse the existing Ctrl-C ladder
+   shape (double, conditional third, same timing knobs), but read the pane's
+   live output (`capture-pane`) between sends for a defined Copilot
+   shutdown/exit signature instead of inferring completion from liveness
+   polling alone; hard-kill the pane (not necessarily the whole session) on
+   a 30-second overall budget; then clean up the stale session-lock file the
+   old process left behind. This **replaces** both
+   `graceful_quit_mux_session`+`restart_worktree_copilot` and
+   `mux_retire_pane` as the one termination primitive both flows call.
+
+Both primitives ship with a dedicated CLI-reachable harness (a diagnostic
+subcommand, not routed through `handoff-cutover`) so they can be driven
+directly against a real mux server in isolation — closing the gap that made
+live mux mutation testing unsafe/impossible before. Only after both
+primitives are hardened and independently validated does `handoff-cutover`
+(spawn + retire modes) and the Picker Stop/Take-over path get rewired to call
+them, collapsing today's two divergent termination ladders into one.
