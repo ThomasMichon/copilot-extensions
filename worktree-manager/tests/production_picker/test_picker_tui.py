@@ -794,8 +794,8 @@ def test_sub_menu_header_shows_full_asset_detail():
             menu = _sub_menu(scr)
             assert menu is not None
             header = menu._header().plain
-            assert "pr: https://example/pulls/9" in header
-            assert "worktree: host/repo/wt-child — child harness worktree" in header
+            assert "pr [active]: https://example/pulls/9" in header
+            assert "worktree [at-rest]: host/repo/wt-child — child harness worktree" in header
             assert "released-remote" not in header
 
     asyncio.run(run())
