@@ -47,9 +47,16 @@ def wordlist_for_repo(config) -> Wordlist:
     """Resolve the :class:`Wordlist` a repo's config declares, falling back
     to the built-in neutral vocabulary. ``config`` is a loaded
     ``agent_worktrees.config.Config``.
+
+    Defensively degrades to the built-in wordlist for any config object
+    missing the expected shape (e.g. a minimal stand-in used by a caller
+    that doesn't otherwise need a real ``Config``) rather than raising --
+    the same fail-soft posture as :func:`load_wordlist_or_default` itself.
     """
-    repo = config.default_repo
-    return load_wordlist_or_default(getattr(repo.codename, "wordlist_path", ""))
+    repo = getattr(config, "default_repo", None)
+    codename_cfg = getattr(repo, "codename", None)
+    path = getattr(codename_cfg, "wordlist_path", "") if codename_cfg is not None else ""
+    return load_wordlist_or_default(path)
 
 
 def existing_codenames(tracking_path: Path) -> set[str]:
@@ -90,14 +97,24 @@ def ensure_codename(
         return record
     with allocation_lock(tracking_path):
         # Re-check under the lock: another process may have backfilled (or
-        # even re-saved with a different codename) this exact record between
-        # our caller's read and this call.
+        # even re-saved with other fields changed) this exact record between
+        # our caller's read and this call. Assign and save the freshly
+        # re-read on-disk copy (`current`), never the caller's possibly-stale
+        # in-memory `record` -- saving `record` here would silently clobber
+        # any concurrent lifecycle/title/status update `current` carries that
+        # `record` doesn't.
         current = tracking.load_record_by_id(record.worktree_id, tracking_path=tracking_path)
-        if current is not None and current.codename:
+        if current is None:
+            # The record vanished (or was never persisted) -- fall back to
+            # assigning on the caller's copy so this never crashes; there is
+            # nothing fresher on disk to prefer.
+            current = record
+        if current.codename:
             record.codename = current.codename
             return record
-        record.codename = assign_new_codename(tracking_path, wordlist)
-        tracking.save_record(record)
+        current.codename = assign_new_codename(tracking_path, wordlist)
+        tracking.save_record(current)
+        record.codename = current.codename
     return record
 
 

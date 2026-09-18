@@ -4049,10 +4049,20 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     requested_machine = getattr(args, "machine", None)
     # pr-attribution-codenames Phase 2: --codename is an alternate selector for
     # --worktree-id -- resolve it once, up front, so every existing worktree_id
-    # branch below works unchanged.
+    # branch below works unchanged. An unmatched codename is a hard selector
+    # error here (not left unset): letting it fall through would either report
+    # a misleading "wrong selector count" in --json mode, or silently drop to
+    # the interactive picker and launch a DIFFERENT worktree than requested.
     codename_arg = getattr(args, "codename", None)
     if codename_arg and not getattr(args, "worktree_id", None):
-        args.worktree_id = resolve_worktree_id_by_codename(codename_arg)
+        resolved_id = resolve_worktree_id_by_codename(codename_arg)
+        if resolved_id is None:
+            message = f"No worktree found with codename '{codename_arg}'"
+            if use_json:
+                return _json_error(message)
+            output.err(message)
+            return 1
+        args.worktree_id = resolved_id
 
     if use_json:
         args.no_mux = True
@@ -5988,6 +5998,18 @@ def _resolve_resume(
         tracking.save_record(fresh)
     record.resume_count = fresh.resume_count
     record.last_resumed_at = fresh.last_resumed_at
+    # pr-attribution-codenames Phase 2 (#2838): an explicit resolve/resume is
+    # exactly the "first touch" the backfill plan describes -- lazily assign a
+    # pre-Phase-2 record's missing codename here. Guarded by `hasattr` (not
+    # just `getattr(..., None)`) so a stubbed `tracking.load_record` (some
+    # tests substitute a bare object with no `codename` attribute at all) is
+    # skipped rather than crashing inside `ensure_codename`'s own attribute
+    # access.
+    if hasattr(fresh, "codename") and not fresh.codename:
+        fresh = codename_tracking.ensure_codename(
+            fresh, cfg.tracking_dir(), codename_tracking.wordlist_for_repo(config)
+        )
+        record.codename = fresh.codename
 
     activity.log_event(
         "worktree_resumed",
@@ -7289,6 +7311,14 @@ def _cmd_status_write(
             session_id=session_id,
             save=False,
         )
+        # pr-attribution-codenames Phase 2 (#2838): an explicit status touch
+        # is exactly the "first touch" the backfill plan describes -- lazily
+        # assign a pre-Phase-2 record's missing codename in the same save.
+        if not record.codename:
+            with codename_tracking.allocation_lock(cfg.tracking_dir()):
+                record.codename = codename_tracking.assign_new_codename(
+                    cfg.tracking_dir(), codename_tracking.wordlist_for_repo(config)
+                )
         tracking.save_record(record)
         # Stage 5 (status_reported): once per session_id (held under the
         # same RecordLock as the write above so two concurrent writers can't

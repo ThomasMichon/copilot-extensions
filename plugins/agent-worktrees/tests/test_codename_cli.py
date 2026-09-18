@@ -130,19 +130,83 @@ class TestCodenameSelectorWiring:
         assert '"wt-b"' in payload
         assert '"wt-a"' not in payload
 
-    def test_cmd_resolve_json_maps_codename_to_worktree_id(
+    def test_cmd_resolve_unmatched_codename_is_a_hard_error(
+        self, tmp_path: Path, monkeypatch, capfd,
+    ) -> None:
+        # Real invocation of the handler: an unmatched --codename must fail
+        # fast with a clear JSON error, never silently fall through to the
+        # misleading "wrong selector count" message or an interactive picker.
+        monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+        args = argparse.Namespace(
+            json=True, base=False, new_worktree=False, auto=False, machine=None,
+            codename="no-such-codename", worktree_id=None, restore=False, no_mux=False,
+        )
+        assert m.cmd_resolve(args) == 1
+        payload = capfd.readouterr().out
+        assert "no-such-codename" in payload
+        assert '"error"' in payload
+
+    def test_cmd_resolve_matched_codename_sets_worktree_id_before_launch_logic(
         self, tmp_path: Path, monkeypatch,
     ) -> None:
-        # cmd_resolve's up-front codename resolution: exercised directly
-        # against args, mirroring what the full `resolve --json --codename`
-        # invocation does before any launch/picker logic runs.
+        # Real invocation of the handler: a matched --codename must set
+        # args.worktree_id and proceed into the normal --json worktree-id
+        # flow (rather than erroring or falling through unmapped). A marker
+        # exception raised from the first call past the codename-resolution
+        # block (cfg.load_config, inside a broad `except Exception` a few
+        # lines later) proves the handler actually reached that flow -- a
+        # SystemExit is not an Exception subclass, so it is not swallowed.
         monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
         tracking.create_new_record(
             "wt-a", "worktree/wt-a", "/tmp/wt-a", "repo", "machine", "wsl",
             tmp_path, codename="rusty-gizmo",
         )
-        args = argparse.Namespace(codename="rusty-gizmo", worktree_id=None)
-        codename_arg = getattr(args, "codename", None)
-        if codename_arg and not getattr(args, "worktree_id", None):
-            args.worktree_id = resolve_worktree_id_by_codename(codename_arg)
+
+        def _boom():
+            raise SystemExit(97)
+
+        monkeypatch.setattr(m.cfg, "load_config", _boom)
+        args = argparse.Namespace(
+            json=True, base=False, new_worktree=False, auto=False, machine=None,
+            codename="rusty-gizmo", worktree_id=None, restore=False, no_mux=False,
+        )
+        try:
+            m.cmd_resolve(args)
+        except SystemExit as exc:
+            assert exc.code == 97
+        else:
+            raise AssertionError("expected cmd_resolve to reach cfg.load_config")
         assert args.worktree_id == "wt-a"
+
+
+class TestLegacyRecordBackfillEndToEnd:
+    """A pre-Phase-2 record (no codename at all) gets one lazily assigned and
+    persisted the first time a production path touches it explicitly --
+    the backfill path the Phase 2 plan describes, exercised through the real
+    `status` write handler rather than `codename_tracking` directly.
+    """
+
+    def test_status_write_backfills_a_legacy_record(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            m.cfg, "load_config",
+            lambda: SimpleNamespace(
+                default_repo=SimpleNamespace(codename=SimpleNamespace(wordlist_path=""))
+            ),
+        )
+        wt_dir = tmp_path / "wt-legacy"
+        wt_dir.mkdir()
+        tracking.create_new_record(
+            "wt-legacy", "worktree/wt-legacy", str(wt_dir), "repo", "machine", "wsl",
+            tmp_path,
+        )
+        rec_before = tracking.load_record_by_id("wt-legacy", tracking_path=tmp_path)
+        assert rec_before.codename is None  # genuinely a pre-Phase-2 record
+
+        args = argparse.Namespace(worktree_id="wt-legacy", summary="touched")
+        assert m._cmd_status_write(args, summary="touched") == 0
+
+        rec_after = tracking.load_record_by_id("wt-legacy", tracking_path=tmp_path)
+        assert rec_after is not None
+        assert rec_after.codename
+        assert rec_after.summary == "touched"

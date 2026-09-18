@@ -39,6 +39,13 @@ class TestWordlistForRepo:
         config = _make_config(str(tmp_path / "nope.yaml"))
         assert wordlist_for_repo(config) is DEFAULT_WORDLIST
 
+    def test_config_missing_expected_shape_falls_back_to_default(self) -> None:
+        # A caller that doesn't otherwise need a real Config (e.g. some
+        # existing tests stub `cfg.load_config` with a bare `object()`) must
+        # not crash a codename-assigning call path that now reads
+        # `config.default_repo.codename.wordlist_path`.
+        assert wordlist_for_repo(object()) is DEFAULT_WORDLIST
+
 
 class TestExistingCodenames:
     def test_empty_tracking_dir(self, tmp_path: Path) -> None:
