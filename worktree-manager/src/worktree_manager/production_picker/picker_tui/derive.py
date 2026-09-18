@@ -246,6 +246,36 @@ def _status_markers(w):
     return compact[len(label):].strip()
 
 
+#: Bug-fix phase (picker-list-interaction-layer effort, aperture-labs#7151):
+#: the raw ``status_markers`` tokens above (``C<N>``/``F<N>``/``U*``/``OC*``)
+#: are a closure-descriptor-internal wire shorthand -- meaningful to whoever
+#: wrote the descriptor, opaque to an operator glancing at the tile's second
+#: line. When the marker string is the ONLY content on that line (no asset
+#: hints, no live pulse), a bare "C1 U* OC*" reads as noise. This map/helper
+#: expands each token into a short human phrase for the picker's RENDER layer
+#: only -- ``status_markers`` itself stays the compact wire format other
+#: tests/consumers read.
+_STATUS_MARKER_TEXT = {
+    "U*": "merge unconfirmed",
+    "OC*": "claims unconfirmed",
+}
+
+
+def describe_status_marker(tok):
+    """Expand one ``status_markers`` token into ``(text, is_warning)``. An
+    unrecognized token (a future marker this helper doesn't know about yet)
+    degrades to itself verbatim, still flagged as a warning if it carries the
+    ``*`` unconfirmed-fact suffix, so a new marker never vanishes silently --
+    it just isn't prettied up yet."""
+    if tok in _STATUS_MARKER_TEXT:
+        return _STATUS_MARKER_TEXT[tok], True
+    if len(tok) > 1 and tok[0] in ("C", "F") and tok[1:].isdigit():
+        n = int(tok[1:])
+        noun = "held claim" if tok[0] == "C" else "follow-up"
+        return f"{n} {noun}{'s' if n != 1 else ''}", False
+    return tok, tok.endswith("*")
+
+
 #: Bounded per-kind short codes for the tile asset-hint line (#6443/upstream
 #: #1979). Falls back to an upper-cased 4-char code for a kind this map
 #: doesn't recognize, so a future ``ResourceKind`` addition degrades safely

@@ -28,7 +28,6 @@ from worktree_manager.production_picker.picker_tui import capture as pcap  # noq
 from worktree_manager.production_picker.picker_tui.engine import (  # noqa: E402
     PickerApp,
     PickerScreen,
-    _describe_status_marker,
 )
 from worktree_manager.production_picker.picker_tui.selection import ListSelection  # noqa: E402
 
@@ -4556,16 +4555,16 @@ def test_describe_status_marker_expands_known_tokens():
     short human phrase for rendering (derive.py's ``status_markers`` string
     itself stays the compact wire format; only the tile's render layer
     prettifies it)."""
-    assert _describe_status_marker("C1") == ("1 held claim", False)
-    assert _describe_status_marker("C3") == ("3 held claims", False)
-    assert _describe_status_marker("F1") == ("1 follow-up", False)
-    assert _describe_status_marker("F2") == ("2 follow-ups", False)
-    assert _describe_status_marker("U*") == ("merge unconfirmed", True)
-    assert _describe_status_marker("OC*") == ("claims unconfirmed", True)
+    assert derive.describe_status_marker("C1") == ("1 held claim", False)
+    assert derive.describe_status_marker("C3") == ("3 held claims", False)
+    assert derive.describe_status_marker("F1") == ("1 follow-up", False)
+    assert derive.describe_status_marker("F2") == ("2 follow-ups", False)
+    assert derive.describe_status_marker("U*") == ("merge unconfirmed", True)
+    assert derive.describe_status_marker("OC*") == ("claims unconfirmed", True)
     # An unrecognized future token degrades to itself, still flagged a
     # warning if it carries the unconfirmed-fact ``*`` suffix.
-    assert _describe_status_marker("NEW*") == ("NEW*", True)
-    assert _describe_status_marker("NEW") == ("NEW", False)
+    assert derive.describe_status_marker("NEW*") == ("NEW*", True)
+    assert derive.describe_status_marker("NEW") == ("NEW", False)
 
 
 def test_native_list_sticky_header(monkeypatch):

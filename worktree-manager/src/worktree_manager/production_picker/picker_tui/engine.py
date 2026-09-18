@@ -359,36 +359,6 @@ def row_text(rec, cols, width, selected, indent=1, pulse=0, mark=None):
     return t
 
 
-#: Bug-fix phase (picker-list-interaction-layer effort): the raw
-#: ``status_markers`` tokens (``C<N>``/``F<N>``/``U*``/``OC*``, see
-#: ``derive._status_markers``/``prune.py``) are a closure-descriptor-internal
-#: shorthand -- meaningful to whoever wrote the descriptor, opaque to an
-#: operator glancing at the tile's second line. When the marker string is the
-#: ONLY content on that line (no asset hints, no live pulse), a bare "C1 U*
-#: OC*" reads as noise. Expand each token into a short human phrase at render
-#: time (``status_markers`` itself stays the compact wire format other
-#: consumers/tests rely on -- only the tile's presentation changes).
-_STATUS_MARKER_TEXT = {
-    "U*": "merge unconfirmed",
-    "OC*": "claims unconfirmed",
-}
-
-
-def _describe_status_marker(tok):
-    """Expand one ``status_markers`` token into ``(text, is_warning)``. An
-    unrecognized token (a future marker this rendering layer doesn't know
-    about yet) degrades to itself verbatim, still flagged as a warning if it
-    carries the ``*`` unconfirmed-fact suffix, so a new marker never vanishes
-    silently -- it just isn't prettied up yet."""
-    if tok in _STATUS_MARKER_TEXT:
-        return _STATUS_MARKER_TEXT[tok], True
-    if len(tok) > 1 and tok[0] in ("C", "F") and tok[1:].isdigit():
-        n = int(tok[1:])
-        noun = "held claim" if tok[0] == "C" else "follow-up"
-        return f"{n} {noun}{'s' if n != 1 else ''}", False
-    return tok, tok.endswith("*")
-
-
 def header_text(cols, width, label_style=C_HEADER, indent=1):
     t = Text(" " * indent)
     for i, (_k, h, w, _a) in enumerate(cols):
@@ -7849,7 +7819,7 @@ class WorktreesView:
                     for j, tok in enumerate(_markers.split()):
                         if j:
                             pline.append(", ", style=C_DIM)
-                        text, is_warn = _describe_status_marker(tok)
+                        text, is_warn = derive.describe_status_marker(tok)
                         pline.append(text, style=C_WARN if is_warn else C_DIM)
                     has_content = True
                 if _assets.get("hints"):
