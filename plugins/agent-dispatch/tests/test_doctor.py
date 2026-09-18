@@ -282,3 +282,149 @@ def test_cli_doctor_repo_unresolved_errors(capsys, monkeypatch):
     monkeypatch.setattr("agent_dispatch.__main__._scope_repo", lambda args: None)
     rc = _cmd_doctor(_args(["doctor"]))
     assert rc == 2
+
+
+# -- reservation-history liveness (Phase 9 / aperture-labs#7133) -----------
+
+
+def _reservation(*, attempt, key, session_handle=None):
+    return {"attempt": attempt, "key": key, "session_handle": session_handle}
+
+
+def test_diagnose_reports_earlier_attempt_live_when_latest_is_gone():
+    task = _task(task_id="t-1", status="started", worktree_id=None, reservation_key=None)
+    reservations = [
+        _reservation(attempt=1, key="k1", session_handle="local-body:sess-old"),
+        _reservation(attempt=2, key="k2", session_handle="local-body:sess-new"),
+    ]
+
+    def local_verdict(sid):
+        return "live" if sid == "sess-old" else "gone"
+
+    d = doctor.diagnose(
+        task,
+        reservations=reservations,
+        local_session_verdict=local_verdict,
+        fleet_session_verdict=lambda host, sid: "unknown",
+    )
+    assert d.verdict == doctor.EARLIER_ATTEMPT_LIVE_VERDICT
+    assert d.live_attempt == 1
+    assert d.live_session_id == "sess-old"
+    assert "sess-old" in d.detail
+
+
+def test_diagnose_no_history_signal_when_latest_attempt_is_live():
+    task = _task(task_id="t-1", status="started", worktree_id=None, reservation_key=None)
+    reservations = [
+        _reservation(attempt=1, key="k1", session_handle="local-body:sess-old"),
+        _reservation(attempt=2, key="k2", session_handle="local-body:sess-new"),
+    ]
+    d = doctor.diagnose(
+        task,
+        reservations=reservations,
+        local_session_verdict=lambda sid: "live",
+        fleet_session_verdict=lambda host, sid: "unknown",
+        resolve=lambda wt: {"status": "active"},
+    )
+    assert d.verdict != doctor.EARLIER_ATTEMPT_LIVE_VERDICT
+
+
+def test_diagnose_no_history_signal_when_every_attempt_is_gone():
+    task = _task(task_id="t-1", status="started", worktree_id=None, reservation_key=None)
+    reservations = [
+        _reservation(attempt=1, key="k1", session_handle="local-body:sess-old"),
+        _reservation(attempt=2, key="k2", session_handle="local-body:sess-new"),
+    ]
+    d = doctor.diagnose(
+        task,
+        reservations=reservations,
+        local_session_verdict=lambda sid: "gone",
+        fleet_session_verdict=lambda host, sid: "unknown",
+    )
+    assert d.verdict != doctor.EARLIER_ATTEMPT_LIVE_VERDICT
+    assert d.verdict == "unknown"  # falls through: no worktree recorded either
+
+
+def test_diagnose_fleet_session_handle_resolved_by_host_and_id():
+    task = _task(task_id="t-1", status="started", worktree_id=None, reservation_key=None)
+    reservations = [
+        _reservation(attempt=1, key="k1", session_handle="fleet-body:borealis:sess-old"),
+        _reservation(attempt=2, key="k2", session_handle="fleet-body:borealis:sess-new"),
+    ]
+    seen = []
+
+    def fleet_verdict(host, sid):
+        seen.append((host, sid))
+        return "live" if sid == "sess-old" else "gone"
+
+    d = doctor.diagnose(
+        task,
+        reservations=reservations,
+        local_session_verdict=lambda sid: "unknown",
+        fleet_session_verdict=fleet_verdict,
+    )
+    assert d.verdict == doctor.EARLIER_ATTEMPT_LIVE_VERDICT
+    assert d.live_session_id == "sess-old"
+    assert ("borealis", "sess-old") in seen
+
+
+def test_diagnose_reservations_omitted_is_unaffected():
+    """Backward compatibility: omitting `reservations` (the default) must not
+    change any existing verdict."""
+    task = _task()
+    d = doctor.diagnose(task, resolve=lambda wt: {"status": "finalized"})
+    assert d.verdict == "orphaned_worktree_gone"
+
+
+def test_cli_doctor_check_live_sessions_fetches_reservations_per_task(
+    capsys, monkeypatch
+):
+    monkeypatch.setattr(doctor, "agent_worktrees_launch_prefix", lambda: None)
+    tasks = [_task(task_id="t-1", status="started", worktree_id=None, reservation_key=None)]
+    fake = _ListClient(tasks)
+    fake.list_reservations_calls = []
+
+    def _list_reservations(*, task_id, limit=1000):
+        fake.list_reservations_calls.append(task_id)
+        return [
+            _reservation(attempt=1, key="k1", session_handle="local-body:sess-old"),
+            _reservation(attempt=2, key="k2", session_handle="local-body:sess-new"),
+        ]
+
+    fake.list_reservations = _list_reservations
+    monkeypatch.setattr("agent_dispatch.__main__._client", lambda args: fake)
+    monkeypatch.setattr("agent_dispatch.__main__._scope_repo", lambda args: "repo")
+    monkeypatch.setattr(
+        doctor,
+        "_default_local_session_verdict",
+        lambda sid: "live" if sid == "sess-old" else "gone",
+    )
+    monkeypatch.setattr(doctor, "_default_fleet_session_verdict", lambda host, sid: "unknown")
+
+    rc = _cmd_doctor(_args(["doctor", "--check-live-sessions"]))
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert fake.list_reservations_calls == ["t-1"]
+    assert out["diagnoses"][0]["verdict"] == doctor.EARLIER_ATTEMPT_LIVE_VERDICT
+    assert out["diagnoses"][0]["live_session_id"] == "sess-old"
+
+
+def test_cli_doctor_task_flag_diagnoses_one_task_via_get(capsys, monkeypatch):
+    task = _task(task_id="t-1", status="started")
+    fake = _ListClient([])
+    fake.get_calls = []
+
+    def _get(task_id):
+        fake.get_calls.append(task_id)
+        return task
+
+    fake.get = _get
+    monkeypatch.setattr("agent_dispatch.__main__._client", lambda args: fake)
+    monkeypatch.setattr(doctor, "resolve_worktree", lambda wt, **k: {"status": "finalized"})
+
+    rc = _cmd_doctor(_args(["doctor", "--task", "t-1"]))
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert fake.get_calls == ["t-1"]
+    assert out["examined"] == 1
+    assert out["diagnoses"][0]["verdict"] == "orphaned_worktree_gone"

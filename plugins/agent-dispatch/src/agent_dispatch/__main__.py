@@ -2045,34 +2045,56 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     """Diagnose held/suspended tasks (Boundary I / #2577): distinguish a
     confirmed-orphaned task -- its expected worktree provably gone -- from
     ordinary in-flight work or merely ambiguous liveness, and (with
-    ``--repair``) unbind + re-queue only the confirmed-orphaned ones. See
-    :mod:`agent_dispatch.doctor` for the full design rationale."""
-    repo = _scope_repo(args)
-    if not repo:
-        print(_REPO_UNRESOLVED, file=sys.stderr)
-        return 2
+    ``--repair``) unbind + re-queue only the confirmed-orphaned ones.
+    ``--task`` narrows to one exact task (any status); ``--check-live-sessions``
+    additionally walks that task's full spawn-reservation history and probes
+    each attempt's actual embody-session liveness (Phase 9 /
+    aperture-labs#7133: a task's ``owner`` always reflects only its *latest*
+    attempt, which can shadow an earlier attempt's still-alive, resumable
+    session). See :mod:`agent_dispatch.doctor` for the full design rationale."""
     from . import doctor
 
     with _client(args) as c:
-        tasks = c.list(
-            repo=repo,
-            status=",".join(doctor.EXAMINED_STATUSES),
-            label=args.label,
-            limit=args.limit,
-        )
-        diagnoses = [
-            doctor.diagnose(
-                t,
-                stale_lease_grace_seconds=args.stale_lease_seconds,
-                # An explicit, call-time module-attribute lookup (not
-                # diagnose's own default parameter, which -- like any Python
-                # default -- binds once at def-time): this is what makes
-                # `monkeypatch.setattr(doctor, "resolve_worktree", ...)`
-                # actually take effect for callers of this CLI wrapper.
-                resolve=doctor.resolve_worktree,
+        if args.task:
+            try:
+                tasks = [c.get(args.task)]
+            except DispatchError as exc:
+                print(f"agent-dispatch: {exc}", file=sys.stderr)
+                return 1
+        else:
+            repo = _scope_repo(args)
+            if not repo:
+                print(_REPO_UNRESOLVED, file=sys.stderr)
+                return 2
+            tasks = c.list(
+                repo=repo,
+                status=",".join(doctor.EXAMINED_STATUSES),
+                label=args.label,
+                limit=args.limit,
             )
-            for t in tasks
-        ]
+        diagnoses = []
+        for t in tasks:
+            reservations = (
+                c.list_reservations(task_id=t.get("id"), limit=1000)
+                if args.check_live_sessions
+                else None
+            )
+            diagnoses.append(
+                doctor.diagnose(
+                    t,
+                    stale_lease_grace_seconds=args.stale_lease_seconds,
+                    # An explicit, call-time module-attribute lookup (not
+                    # diagnose's own default parameter, which -- like any
+                    # Python default -- binds once at def-time): this is what
+                    # makes `monkeypatch.setattr(doctor, "resolve_worktree",
+                    # ...)` actually take effect for callers of this CLI
+                    # wrapper.
+                    resolve=doctor.resolve_worktree,
+                    reservations=reservations,
+                    local_session_verdict=doctor._default_local_session_verdict,
+                    fleet_session_verdict=doctor._default_fleet_session_verdict,
+                )
+            )
         repairs = None
         if args.repair:
             repairs = [
@@ -3682,10 +3704,25 @@ def build_parser() -> argparse.ArgumentParser:
         "only the confirmed-orphaned ones",
     )
     p.add_argument(
+        "--task",
+        help="diagnose exactly this one task id (any status), instead of "
+        "sweeping --repo/--label",
+    )
+    p.add_argument(
         "--repo", help="lane to examine (local name or remote URL); default: calling repo"
     )
     p.add_argument("--label", help="only examine tasks carrying this label")
     p.add_argument("--limit", type=int, default=200)
+    p.add_argument(
+        "--check-live-sessions",
+        action="store_true",
+        help="walk each examined task's full spawn-reservation history and "
+        "probe every attempt's actual embody-session liveness (not just the "
+        "task's current owner/latest reservation) -- reports "
+        "'earlier_attempt_live' when an earlier attempt is confirmed live but "
+        "shadowed by a later dead/unknown one. Slower (one bridge probe per "
+        "recorded attempt); opt-in.",
+    )
     p.add_argument(
         "--stale-lease-seconds",
         type=float,

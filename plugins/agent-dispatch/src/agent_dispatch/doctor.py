@@ -22,6 +22,24 @@ but never auto-repaired. This mirrors the design constraint from #2577's
 discussion: never re-create/re-queue on a guess, only on confirmed
 deletion, and never race a second attempt against one still legitimately
 in flight.
+
+**Reservation-history liveness (Phase 9 /
+``efforts/active/agent-dispatch-embody-supervisor``, aperture-labs#7133):**
+the coordinator only ever attaches a task's *latest* spawn reservation (see
+``coordinator.py``'s ``result["spawn_reservation"] = asdict(latest)``), so
+the checks above -- like an operator reading ``owner``/``owner_session_id``
+by hand -- only ever see the most recent attempt. A live 2026-09-18 incident
+showed the real gap: a *later* attempt can die while an *earlier* attempt's
+session is still alive and fully resumable, and nothing re-checks that
+earlier attempt once a newer reservation shadows it. ``diagnose`` optionally
+accepts that task's full reservation history (``DispatchClient.
+list_reservations(task_id=...)``) and, when given, checks every attempt's
+actual embody-session liveness **by session id** (not the task's ``owner``
+worker_id/lane label -- that distinction is what tripped up the incident's
+own manual diagnosis) before falling through to the worktree/lease checks
+above. Finding a live earlier attempt is the single highest-priority verdict
+this module reports, since it is both the most actionable ("resume that
+session") and the one existing tooling was structurally blind to.
 """
 
 from __future__ import annotations
@@ -34,9 +52,21 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from .procutil import agent_worktrees_launch_prefix, no_window_kwargs
+from .spawn_factories import _parse_fleet_body_handle, _parse_local_body_handle
 
 if TYPE_CHECKING:
     from .client import DispatchClient
+
+#: Tri-state embody-session liveness verdicts (mirror ``tracking.LIVE/GONE/
+#: UNKNOWN``); duplicated here so this module takes no import dependency on
+#: the resolver, matching the rest of the engine's degrade-safe convention.
+SESSION_LIVE = "live"
+SESSION_GONE = "gone"
+SESSION_UNKNOWN = "unknown"
+
+#: The verdict reported when an earlier spawn attempt's session is confirmed
+#: live but shadowed by a later, dead/unknown attempt -- the Phase 9 gap.
+EARLIER_ATTEMPT_LIVE_VERDICT = "earlier_attempt_live"
 
 #: agent-worktrees tracking statuses that mean "this worktree is no longer a
 #: live, resumable checkout" -- confirmed-gone for doctor purposes. A record
@@ -65,11 +95,19 @@ class Diagnosis:
 
     task_id: str
     status: str
-    verdict: str  # "healthy" | "orphaned_worktree_gone" | "stale_lease" | "unknown"
+    # "healthy" | "orphaned_worktree_gone" | "stale_lease" | "unknown" |
+    # "earlier_attempt_live"
+    verdict: str
     detail: str
     worktree_id: str | None = None
     reservation_key: str | None = None
     owner: str | None = None
+    #: Set only for :data:`EARLIER_ATTEMPT_LIVE_VERDICT`: the earlier attempt
+    #: number and its confirmed-live embody session id, the two facts an
+    #: operator needs to actually recover it (``agent-bridge resume
+    #: <live_session_id>``, then reattach a fresh task).
+    live_attempt: int | None = None
+    live_session_id: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -80,7 +118,79 @@ class Diagnosis:
             "worktree_id": self.worktree_id,
             "reservation_key": self.reservation_key,
             "owner": self.owner,
+            "live_attempt": self.live_attempt,
+            "live_session_id": self.live_session_id,
         }
+
+
+def _default_local_session_verdict(session_id: str) -> str:
+    from . import embody
+
+    return embody.local_body_verdict(session_id)
+
+
+def _default_fleet_session_verdict(host: str, session_id: str) -> str:
+    from . import embody
+
+    return embody.fleet_body_verdict(host, session_id)
+
+
+def _reservation_session_liveness(
+    reservations: list[dict[str, Any]],
+    *,
+    local_verdict: Callable[[str], str],
+    fleet_verdict: Callable[[str, str], str],
+) -> Diagnosis | None:
+    """Walk a task's full spawn-reservation history, newest attempt last, and
+    report an :data:`EARLIER_ATTEMPT_LIVE_VERDICT` diagnosis iff the *latest*
+    attempt's session is not confirmed live but an *earlier* attempt's is.
+
+    Returns ``None`` when there is nothing actionable here (no reservations,
+    the latest attempt is itself live, or no attempt has a live session) --
+    the caller falls through to the ordinary worktree/lease checks in that
+    case. Never raises: a liveness probe failure is :data:`SESSION_UNKNOWN`,
+    never treated as death, mirroring the supervisor's own liveness GC.
+    """
+    if not reservations:
+        return None
+    ordered = sorted(reservations, key=lambda r: r.get("attempt") or 0)
+    latest = ordered[-1]
+
+    def _session_verdict(res: dict[str, Any]) -> tuple[str, int | None, str | None]:
+        handle = res.get("session_handle")
+        fleet = _parse_fleet_body_handle(handle)
+        local_sid = _parse_local_body_handle(handle)
+        if fleet is not None:
+            host, sid = fleet
+            return fleet_verdict(host, sid), res.get("attempt"), sid
+        if local_sid is not None:
+            return local_verdict(local_sid), res.get("attempt"), local_sid
+        return SESSION_UNKNOWN, res.get("attempt"), None
+
+    latest_verdict, _, _ = _session_verdict(latest)
+    if latest_verdict == SESSION_LIVE:
+        return None  # the current attempt is itself alive -- nothing shadowed.
+
+    for res in reversed(ordered[:-1]):
+        verdict, attempt, session_id = _session_verdict(res)
+        if verdict == SESSION_LIVE and session_id is not None:
+            return Diagnosis(
+                task_id=str(latest.get("task_id") or ""),
+                status="",  # filled in by the caller, which has the task row
+                verdict=EARLIER_ATTEMPT_LIVE_VERDICT,
+                detail=(
+                    f"attempt {attempt} session {session_id!r} is live and "
+                    f"resumable, but attempt {latest.get('attempt')} (the task's "
+                    "current tracked reservation) is "
+                    f"{'unknown' if latest_verdict == SESSION_UNKNOWN else 'gone'} "
+                    "-- resume the earlier session (`agent-bridge resume "
+                    f"{session_id}`), then reattach a fresh task to it"
+                ),
+                reservation_key=latest.get("key"),
+                live_attempt=attempt,
+                live_session_id=session_id,
+            )
+    return None
 
 
 def resolve_worktree(worktree_id: str, *, timeout: float = 15.0) -> dict | None:
@@ -121,8 +231,21 @@ def diagnose(
     now: float | None = None,
     stale_lease_grace_seconds: float = DEFAULT_STALE_LEASE_GRACE_SECONDS,
     resolve: Callable[[str], dict | None] = resolve_worktree,
+    reservations: list[dict[str, Any]] | None = None,
+    local_session_verdict: Callable[[str], str] = _default_local_session_verdict,
+    fleet_session_verdict: Callable[[str, str], str] = _default_fleet_session_verdict,
 ) -> Diagnosis:
-    """Diagnose one held/suspended task dict (as returned by ``list``/``show``)."""
+    """Diagnose one held/suspended task dict (as returned by ``list``/``show``).
+
+    ``reservations`` is optional and, when given (that task's full
+    ``DispatchClient.list_reservations(task_id=...)`` history, any order),
+    checked **first**: if an earlier attempt's embody session is confirmed
+    live while the task's current (latest) reservation is not, this reports
+    :data:`EARLIER_ATTEMPT_LIVE_VERDICT` immediately -- the Phase 9 gap this
+    module exists to close. Omitting ``reservations`` (the default) leaves
+    every other check and the return shape byte-for-byte unchanged, so
+    existing callers/tests are unaffected.
+    """
     now = time.time() if now is None else now
     task_id = task.get("id", "")
     status = task.get("status", "")
@@ -141,6 +264,27 @@ def diagnose(
             reservation_key=reservation_key,
             owner=owner,
         )
+
+    if reservations:
+        history_diagnosis = _reservation_session_liveness(
+            reservations,
+            local_verdict=local_session_verdict,
+            fleet_verdict=fleet_session_verdict,
+        )
+        if history_diagnosis is not None:
+            # `_reservation_session_liveness` doesn't know this task's status
+            # (it only sees reservations) -- stamp it in from the task row.
+            return Diagnosis(
+                task_id=task_id or history_diagnosis.task_id,
+                status=status,
+                verdict=history_diagnosis.verdict,
+                detail=history_diagnosis.detail,
+                worktree_id=worktree_id,
+                reservation_key=history_diagnosis.reservation_key or reservation_key,
+                owner=owner,
+                live_attempt=history_diagnosis.live_attempt,
+                live_session_id=history_diagnosis.live_session_id,
+            )
 
     if worktree_id:
         wt = resolve(worktree_id)
