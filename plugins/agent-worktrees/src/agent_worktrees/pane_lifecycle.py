@@ -60,6 +60,7 @@ def _wait_for_launch_receipt(
     pane_id: str | None,
     *,
     mux_bin: str,
+    mux_session: str | None = None,
     receipt_timeout: float,
     startup_grace: float,
 ) -> tuple[bool, str | None]:
@@ -87,14 +88,16 @@ def _wait_for_launch_receipt(
                 status = None
             if status != "launching":
                 break
-            if not pane_id or not sessions._mux_pane_alive(pane_id, mux_bin):
+            if not pane_id or not sessions._mux_pane_alive(
+                pane_id, mux_bin, mux_session,
+            ):
                 status = "failed:pane-exited"
                 break
             time.sleep(0.05)
         confirmed = bool(
             status == "launching"
             and pane_id
-            and sessions._mux_pane_alive(pane_id, mux_bin)
+            and sessions._mux_pane_alive(pane_id, mux_bin, mux_session)
         )
         if status == "launching" and not confirmed:
             status = "failed:pane-exited"
@@ -235,13 +238,23 @@ def pane_create(
         receipt_path,
         new_pane,
         mux_bin=mux_bin,
+        mux_session=resolved_session,
         receipt_timeout=prompt_receipt_timeout,
         startup_grace=prompt_startup_grace,
     )
     receipt_path.unlink(missing_ok=True)
     if not prompt_received:
-        process_tree = sessions._mux_pane_process_tree(new_pane, mux=mux)
-        cleanup = sessions._retire_failed_successor(new_pane, process_tree, mux=mux)
+        process_tree = sessions._mux_pane_process_tree(
+            new_pane,
+            mux=mux,
+            session_name=resolved_session,
+        )
+        cleanup = sessions._retire_failed_successor(
+            new_pane,
+            process_tree,
+            mux=mux,
+            mux_session=resolved_session,
+        )
         return {
             "ok": False,
             "new_pane": new_pane,
@@ -279,14 +292,14 @@ def pane_create(
 
 
 def _capture_pane_output(
-    pane_id: str,
+    target: str,
     *,
     mux_bin: str,
 ) -> str:
     """Best-effort capture of the pane's visible output."""
     try:
         result = subprocess.run(
-            [mux_bin, "capture-pane", "-t", pane_id, "-p"],
+            [mux_bin, "capture-pane", "-t", target, "-p"],
             capture_output=True,
             text=True,
             timeout=5,
@@ -348,24 +361,112 @@ def pane_terminate(
     exit_signature_patterns: tuple[str, ...] | list[str] | None = None,
 ) -> dict[str, object]:
     """Gracefully terminate one pane, falling back to kill-pane on timeout."""
-    from . import sessions
+    from . import sessions, sessions_pane_retire
 
     mux_bin = sessions._mux_bin(mux)
     patterns = tuple(exit_signature_patterns or _COPILOT_EXIT_SIGNATURE_PATTERNS)
-    live_session = mux_session or sessions.current_mux_session(pane_id, mux=mux)
+    live_session = str(mux_session).strip() if mux_session else None
+    try:
+        if live_session:
+            pane_target = sessions_pane_retire._mux_qualified_pane_target(
+                pane_id,
+                mux_bin,
+                session_name=live_session,
+            )
+            if not pane_target:
+                actual_session = sessions_pane_retire._resolve_unambiguous_pane_session(
+                    pane_id, mux_bin,
+                )
+                if actual_session and actual_session != live_session:
+                    return {
+                        "ok": False,
+                        "pane": pane_id,
+                        "gone": False,
+                        "method": "pane-session-mismatch",
+                        "session": actual_session,
+                        "expected_session": live_session,
+                        "signature_seen": False,
+                        "signature_pattern": None,
+                        "locks_cleared": [],
+                    }
+                if actual_session is None:
+                    return {
+                        "ok": True,
+                        "pane": pane_id,
+                        "gone": True,
+                        "method": "already-gone",
+                        "session": live_session,
+                        "signature_seen": False,
+                        "signature_pattern": None,
+                        "locks_cleared": [],
+                    }
+                return {
+                    "ok": False,
+                    "pane": pane_id,
+                    "gone": False,
+                    "method": "failed",
+                    "session": live_session,
+                    "signature_seen": False,
+                    "signature_pattern": None,
+                    "locks_cleared": [],
+                }
+        else:
+            live_session = sessions_pane_retire._resolve_unambiguous_pane_session(
+                pane_id, mux_bin,
+            )
+            if not live_session:
+                return {
+                    "ok": True,
+                    "pane": pane_id,
+                    "gone": True,
+                    "method": "already-gone",
+                    "signature_seen": False,
+                    "signature_pattern": None,
+                    "locks_cleared": [],
+                }
+            pane_target = sessions_pane_retire._mux_qualified_pane_target(
+                pane_id,
+                mux_bin,
+                session_name=live_session,
+            )
+            if not pane_target:
+                return {
+                    "ok": False,
+                    "pane": pane_id,
+                    "gone": False,
+                    "method": "failed",
+                    "session": live_session,
+                    "signature_seen": False,
+                    "signature_pattern": None,
+                    "locks_cleared": [],
+                }
+    except sessions_pane_retire.MuxPaneTargetAmbiguityError as exc:
+        return {
+            "ok": False,
+            "pane": pane_id,
+            "gone": False,
+            "method": "ambiguous-pane-id",
+            "session": None,
+            "signature_seen": False,
+            "signature_pattern": None,
+            "locks_cleared": [],
+            "candidate_sessions": list(exc.session_names),
+            "error": str(exc),
+        }
 
-    if not sessions._mux_pane_alive(pane_id, mux_bin):
+    if not sessions._mux_pane_alive(pane_id, mux_bin, live_session):
         return {
             "ok": True,
             "pane": pane_id,
             "gone": True,
             "method": "already-gone",
+            "session": live_session,
             "signature_seen": False,
             "signature_pattern": None,
             "locks_cleared": [],
         }
 
-    guard = sessions._mux_last_window_guard(pane_id, mux_bin)
+    guard = sessions._mux_last_window_guard(pane_id, mux_bin, live_session)
     if guard:
         activity.log_event(
             "handoff_retire_guard",
@@ -388,7 +489,9 @@ def pane_terminate(
             "locks_cleared": [],
         }
 
-    process_tree = sessions._mux_pane_process_tree(pane_id, mux=mux)
+    process_tree = sessions._mux_pane_process_tree(
+        pane_id, mux=mux, session_name=live_session,
+    )
     signature_pattern: str | None = None
 
     def _observe_until(window: float) -> bool:
@@ -396,23 +499,23 @@ def pane_terminate(
 
         deadline = time.monotonic() + max(window, 0.0)
         while time.monotonic() < deadline:
-            if not sessions._mux_pane_alive(pane_id, mux_bin):
+            if not sessions._mux_pane_alive(pane_id, mux_bin, live_session):
                 return True
-            capture = _capture_pane_output(pane_id, mux_bin=mux_bin)
+            capture = _capture_pane_output(pane_target, mux_bin=mux_bin)
             if signature_pattern is None:
                 signature_pattern = _first_matching_exit_signature(capture, patterns)
             time.sleep(poll_interval)
-        if not sessions._mux_pane_alive(pane_id, mux_bin):
+        if not sessions._mux_pane_alive(pane_id, mux_bin, live_session):
             return True
-        capture = _capture_pane_output(pane_id, mux_bin=mux_bin)
+        capture = _capture_pane_output(pane_target, mux_bin=mux_bin)
         if signature_pattern is None:
             signature_pattern = _first_matching_exit_signature(capture, patterns)
-        return not sessions._mux_pane_alive(pane_id, mux_bin)
+        return not sessions._mux_pane_alive(pane_id, mux_bin, live_session)
 
     def _send_ctrl_c() -> bool:
         try:
             result = subprocess.run(
-                [mux_bin, "send-keys", "-t", pane_id, "C-c"],
+                [mux_bin, "send-keys", "-t", pane_target, "C-c"],
                 capture_output=True,
                 timeout=5,
             )
@@ -424,7 +527,7 @@ def pane_terminate(
     escalate_window = min(max(escalate_after, 0.0), graceful_budget)
 
     if not _send_ctrl_c():
-        gone = not sessions._mux_pane_alive(pane_id, mux_bin)
+        gone = not sessions._mux_pane_alive(pane_id, mux_bin, live_session)
         return {
             "ok": gone,
             "pane": pane_id,
@@ -473,7 +576,7 @@ def pane_terminate(
 
     try:
         subprocess.run(
-            [mux_bin, "kill-pane", "-t", pane_id],
+            [mux_bin, "kill-pane", "-t", pane_target],
             capture_output=True,
             timeout=5,
         )
@@ -618,7 +721,10 @@ def register_cli(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> No
     p.add_argument(
         "--mux-session",
         default=None,
-        help="Known mux session containing the pane (diagnostic context only)",
+        help=(
+            "Known mux session containing the pane; used to build an exact "
+            "session-qualified target and avoid ambiguous bare pane ids"
+        ),
     )
     p.add_argument(
         "--overall-budget",
