@@ -14,6 +14,7 @@ import secrets
 import tempfile
 import threading
 from collections.abc import Callable, Iterable
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -964,6 +965,12 @@ class WorktreeRecord:
     # hard-delete instead of re-tombstoning. Emitted only when set, so an
     # unpaired (or not-yet-reaped) record's YAML stays byte-identical.
     reaped_at: str | None = None
+    # pr-attribution-codenames Phase 2 (#2838): the public-safe handle
+    # assigned once per worktree (see ``agent_worktrees.codename``). Absent on
+    # a pre-Phase-2 record until lazily backfilled (``ensure_codename`` in
+    # ``codename_tracking.py``); emitted only when set, so a legacy YAML
+    # stays byte-identical.
+    codename: str | None = None
 
     @property
     def owner_claim_ref(self) -> ClaimRef | None:
@@ -2112,6 +2119,7 @@ def load_record(path: Path) -> WorktreeRecord:
         pair_kind=(data["pair_kind"]
                    if data.get("pair_kind") in ("worktree", "anchor") else None),
         reaped_at=(str(data["reaped_at"]) if data.get("reaped_at") else None),
+        codename=(str(data["codename"]) if data.get("codename") else None),
     )
     record._loaded_from = path
     return record
@@ -2614,6 +2622,10 @@ def _save_record_unlocked(
     # that was tombstoned by retire_record's paired-reap path).
     if record.reaped_at:
         content += f"reaped_at: {_yaml_scalar(record.reaped_at)}\n"
+    # pr-attribution-codenames Phase 2: emitted only when assigned, so a
+    # legacy/pre-Phase-2 worktree's YAML stays byte-identical.
+    if record.codename:
+        content += f"codename: {_yaml_scalar(record.codename)}\n"
     # agent-fabric resource-claims: the forward outbound list. Emitted only when
     # non-empty (the common case owns nothing), keeping legacy YAMLs identical.
     if record.resources:
@@ -2870,7 +2882,7 @@ def find_paired_record(record: WorktreeRecord) -> WorktreeRecord | None:
     return None
 
 
-def retire_record(record: WorktreeRecord, tracking_path: Path) -> None:
+def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
     """Retire a reaped worktree's tracking record: delete it, or tombstone it
     when paired (BOTH-gate follow-up, #957/#220).
 
@@ -2919,9 +2931,51 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> None:
     :func:`default_paired_sibling_final`'s own "unknown -> spare" philosophy.
 
     Fail-safe: if a tombstone write raises for any reason, falls back to a
-    plain unlink -- a reap must never be blocked by this bookkeeping.
+    plain unlink -- a reap must never be blocked *indefinitely* by this
+    bookkeeping (see the return-value contract below for how it avoids being
+    blocked at all).
+
+    **Locking (pr-attribution-codenames Phase 2 follow-up).** Every delete
+    (including the sibling delete, in the both-reaped hard-delete branch) is
+    taken under a REAL cross-process ``_RecordLock`` (``require_sidecar=True``)
+    -- not just the tombstone rewrite, which already went through
+    ``save_record``'s own locking. Two properties this closes:
+
+    * Without any lock at all, a concurrent reader/backfiller (e.g.
+      ``codename_tracking.ensure_codename``, which holds the SAME record's
+      ``_RecordLock`` across its own existence-check + save) could observe
+      the record as present an instant before this function unlinks it out
+      from under that read, or -- worse -- recreate a record this function
+      just deleted.
+    * ``require_sidecar=True`` (rather than the graceful-degradation default)
+      is required for that guarantee to be REAL cross-process, not just
+      same-thread: a degrading lock would let this function proceed and
+      delete even while another process's ``ensure_codename`` still
+      genuinely holds the lock, letting that backfill resurrect the file
+      right after. Instead, a contended lock (this record's, or -- in the
+      both-reaped branch -- the sibling's) makes this call **defer**: return
+      ``False`` without deleting anything, rather than either blocking the
+      caller's reap pass indefinitely or proceeding without real exclusivity.
+      The caller's reap runs on a cadence (`cleanup`/`gc`), so a deferred
+      record is retried on a later pass -- nothing is lost, just delayed.
+    * The two locks needed in the both-reaped hard-delete branch (this
+      record's and its sibling's) are acquired in a **deterministic order**
+      (sorted by absolute path) via one ``ExitStack``, all-or-nothing --
+      never "this record's lock, then the sibling's" unconditionally, which
+      would let two concurrent ``retire_record`` calls on the two halves of
+      the SAME pair each hold one lock while waiting for the other
+      (a genuine cross-call deadlock).
+
+    Returns ``True`` once the record is durably retired (deleted or
+    tombstoned); ``False`` if retirement was deferred because a needed lock
+    could not be acquired promptly. Callers must treat ``False`` as "try
+    again on a later reap pass", not a permanent failure -- nothing about an
+    already-removed worktree checkout depends on this call succeeding
+    immediately.
     """
     path = tracking_path / f"{record.worktree_id}.yaml"
+    sibling_path: Path | None = None
+    hard_delete_sibling = False
     if record.is_paired:
         sibling: WorktreeRecord | None = None
         try:
@@ -2929,23 +2983,40 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> None:
         except Exception:
             sibling = None
         if sibling is not None and sibling.reaped_at:
+            hard_delete_sibling = True
             ref = record.pair_claim_ref
             if ref is not None and ref.is_qualified and ref.project:
-                (cfg.project_dir(ref.project) / "worktrees"
-                 / f"{ref.worktree_id}.yaml").unlink(missing_ok=True)
+                sibling_path = (
+                    cfg.project_dir(ref.project) / "worktrees"
+                    / f"{ref.worktree_id}.yaml"
+                )
+
+    lock_paths = sorted({path, sibling_path} - {None}, key=str)
+    try:
+        with ExitStack() as stack:
+            for lock_path in lock_paths:
+                stack.enter_context(_RecordLock(lock_path, require_sidecar=True))
+
+            if hard_delete_sibling:
+                if sibling_path is not None:
+                    sibling_path.unlink(missing_ok=True)
+                path.unlink(missing_ok=True)
+                return True
+            if record.is_paired:
+                try:
+                    now = _now_iso()
+                    record.status = "finalized"
+                    if record.completed_at is None:
+                        record.completed_at = now
+                    record.reaped_at = now
+                    save_record(record, path=path)
+                    return True
+                except Exception:
+                    pass
             path.unlink(missing_ok=True)
-            return
-        try:
-            now = _now_iso()
-            record.status = "finalized"
-            if record.completed_at is None:
-                record.completed_at = now
-            record.reaped_at = now
-            save_record(record, path=path)
-            return
-        except Exception:
-            pass
-    path.unlink(missing_ok=True)
+            return True
+    except TimeoutError:
+        return False
 
 
 
@@ -3848,6 +3919,7 @@ def create_new_record(
     pair_role: str | None = None,
     pair_ref: str | None = None,
     pair_kind: str | None = None,
+    codename: str | None = None,
 ) -> WorktreeRecord:
     """Create and save a new worktree tracking record."""
     now = _now_iso()
@@ -3893,6 +3965,7 @@ def create_new_record(
         pair_role=pair_role or None,
         pair_ref=pair_ref or None,
         pair_kind=pair_kind or None,
+        codename=codename or None,
     )
     _mark_controller_projection_dirty(
         record,

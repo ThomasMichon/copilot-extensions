@@ -98,6 +98,7 @@ from agent_procutil import (
 from . import (
     activity,
     claim_handoffs,
+    codename_tracking,
     disposition_history,
     effort_focus,
     git_ops,
@@ -1080,6 +1081,8 @@ def _worktree_to_dict(
         "title": rec.title,
         "resume_count": rec.resume_count,
     }
+    if rec.codename:
+        d["codename"] = rec.codename
     # Session ownership is durable record state, not live-scan enrichment.
     # Cache-only Picker rows must therefore carry the registered session count
     # and current head before any events/mux/process scan runs.  The head is the
@@ -1925,30 +1928,53 @@ def _carve_paired_knowledge(
     knowledge_branch = f"worktree/{knowledge_id}"
     knowledge_wt_root = cfg.derive_worktree_root(knowledge_anchor)
     knowledge_wt_path = str(Path(knowledge_wt_root) / knowledge_id)
-
-    Path(knowledge_wt_root).mkdir(parents=True, exist_ok=True)
-    print(f"Creating paired knowledge worktree on branch {knowledge_branch}...", file=sys.stderr,)
-    git_ops.create_worktree(
-        knowledge_anchor,
-        knowledge_wt_path,
-        knowledge_branch,
-        prepared.start_point,
-    )
-
     knowledge_ref = tracking.format_claim_ref(config.machine, knowledge_name, knowledge_id)
-    tracking.create_new_record(
-        worktree_id=knowledge_id,
-        branch=knowledge_branch,
-        worktree_path=knowledge_wt_path,
-        repo=knowledge_name,
-        machine=config.machine,
-        platform_name=plat,
-        tracking_path=cfg.project_dir(knowledge_name) / "worktrees",
-        pair_id=pair_id,
-        pair_role="knowledge",
-        pair_ref=harness_ref,
-        pair_kind="worktree",
-    )
+    knowledge_tracking_path = cfg.project_dir(knowledge_name) / "worktrees"
+
+    # pr-attribution-codenames Phase 2 (#2838): assign the paired knowledge
+    # worktree's own codename (scoped to its own project's tracking
+    # directory and wordlist, not a share of the harness's) BEFORE the git
+    # worktree/branch is created -- an allocation failure (an exhausted
+    # finite configured wordlist) must never leave an orphaned checkout with
+    # no tracking record. Assignment + the eventual record-write share one
+    # allocation lock (see codename_tracking.py) so a concurrent carve can
+    # never pick the same candidate.
+    try:
+        knowledge_config = cfg.load_config(project=knowledge_name)
+        knowledge_wordlist = codename_tracking.wordlist_for_repo(knowledge_config)
+    except Exception:
+        knowledge_wordlist = None
+    with codename_tracking.allocation_lock(knowledge_tracking_path):
+        knowledge_codename = codename_tracking.assign_new_codename(
+            knowledge_tracking_path, knowledge_wordlist
+        )
+
+        Path(knowledge_wt_root).mkdir(parents=True, exist_ok=True)
+        print(
+            f"Creating paired knowledge worktree on branch {knowledge_branch}...",
+            file=sys.stderr,
+        )
+        git_ops.create_worktree(
+            knowledge_anchor,
+            knowledge_wt_path,
+            knowledge_branch,
+            prepared.start_point,
+        )
+
+        tracking.create_new_record(
+            worktree_id=knowledge_id,
+            branch=knowledge_branch,
+            worktree_path=knowledge_wt_path,
+            repo=knowledge_name,
+            machine=config.machine,
+            platform_name=plat,
+            tracking_path=knowledge_tracking_path,
+            pair_id=pair_id,
+            pair_role="knowledge",
+            pair_ref=harness_ref,
+            pair_kind="worktree",
+            codename=knowledge_codename,
+        )
     # Best-effort permissions + trust for the knowledge worktree.
     try:
         permissions.clone_permissions(knowledge_anchor, knowledge_wt_path)
@@ -2218,75 +2244,101 @@ def _create_worktree_core(
         label="repository",
     )
 
-    # Creator ownership is established before the resource exists, and its
-    # ledger lock stays held until the child tracking record is durable. Thus
-    # finalize cannot hand off/clean a not-yet-created child reference.
-    owner_guard = None
-    if owner_ref:
-        owner_path, _owner_id, owner_err = _resolve_owner_ref_record_path(owner_ref, config)
-        if owner_err or owner_path is None or not owner_path.exists():
-            raise RuntimeError(owner_err or f"owner ledger is missing: {owner_ref}")
-        owner_guard = tracking._RecordLock(owner_path, require_sidecar=True)
-        owner_guard.__enter__()
-
-    try:
-        if owner_guard is not None and not _journal_owner_reciprocal_claim(
-            config, worktree_id, owner_ref, owner_locked=True
-        ):
-            raise RuntimeError(f"owner {owner_ref} cannot accept a new worktree obligation")
-        print(f"Creating worktree on branch {branch}...", file=sys.stderr)
-        git_ops.create_worktree(
-            repo.anchor,
-            worktree_path,
-            branch,
-            prepared.start_point,
+    # pr-attribution-codenames Phase 2 (#2838): assign the codename FIRST --
+    # before the owner claim is journaled and before the git worktree/branch
+    # is created. An allocation failure (an exhausted finite configured
+    # wordlist) must never leave the owner ledger with a live obligation
+    # pointing at a worktree that was never created, nor an orphaned
+    # checkout with no tracking record. The whole sequence below (allocate
+    # -> acquire the owner record lock -> journal owner claim -> create the
+    # git worktree -> write the record) is held under one cross-process
+    # allocation lock so two concurrent `create` calls can never observe the
+    # same existing codename set and choose the same candidate.
+    #
+    # Lock order is always this module's `allocation_lock` (outer) then any
+    # per-record lock (inner) -- here, the owner's -- never the reverse.
+    # `codename_tracking.ensure_codename` (the resume/status backfill path)
+    # acquires them in this same order; reversing it here (owner lock, then
+    # allocation lock, as an earlier revision did) is a real cross-process
+    # deadlock hazard against a concurrent backfill of that same owner
+    # worktree's own codename.
+    tracking_path = cfg.tracking_dir()
+    tracking_path.mkdir(parents=True, exist_ok=True)
+    with codename_tracking.allocation_lock(tracking_path):
+        new_codename = codename_tracking.assign_new_codename(
+            tracking_path, codename_tracking.wordlist_for_repo(config)
         )
 
-        # Write tracking YAML
-        tracking_path = cfg.tracking_dir()
-        tracking_path.mkdir(parents=True, exist_ok=True)
-        record = tracking.create_new_record(
-            worktree_id=worktree_id,
-            branch=branch,
-            worktree_path=worktree_path,
-            repo=config.repo_name,
-            machine=config.machine,
-            platform_name=plat,
-            tracking_path=tracking_path,
-            kind=kind,
-            owner=owner,
-            interface=interface,
-            origin=origin,
-            dispatch_attempt=(
-                tracking.DispatchAttempt(
-                    task_id=str(dispatch_attempt["task_id"]),
-                    reservation_key=str(dispatch_attempt["reservation_key"]),
-                    attempt=int(dispatch_attempt["attempt"]),
-                    driver=str(dispatch_attempt["driver"]),
-                    supervisor=str(dispatch_attempt["supervisor"]),
-                    creator_machine=config.machine,
-                )
-                if dispatch_attempt is not None
-                else None
-            ),
-            # #1029: link the new worktree back to the session that spawned it, so a
-            # later resume (esp. a PR/feedback worktree with no sessions of its own)
-            # restores context instead of cold-starting.
-            parent_session=_creation_parent_session(
-                parent_session,
-                inherit_ambient=inherit_parent_session,
-            ),
-            # #2178: for a bridge spawn, record the caller worktree so the Picker can
-            # jump back to it.
-            caller_worktree=caller_worktree or None,
-            # resource-claims: the qualified backward owner link, for a worktree
-            # spun up as another worktree's outbound resource (stamped by `run` /
-            # an explicit --owner-ref). Absent = unclaimed.
-            owner_ref=owner_ref or None,
-        )
-    finally:
-        if owner_guard is not None:
-            owner_guard.__exit__(None, None, None)
+        # Creator ownership is established before the resource exists, and
+        # its ledger lock stays held until the child tracking record is
+        # durable. Thus finalize cannot hand off/clean a not-yet-created
+        # child reference.
+        owner_guard = None
+        if owner_ref:
+            owner_path, _owner_id, owner_err = _resolve_owner_ref_record_path(owner_ref, config)
+            if owner_err or owner_path is None or not owner_path.exists():
+                raise RuntimeError(owner_err or f"owner ledger is missing: {owner_ref}")
+            owner_guard = tracking._RecordLock(owner_path, require_sidecar=True)
+            owner_guard.__enter__()
+
+        try:
+            if owner_guard is not None and not _journal_owner_reciprocal_claim(
+                config, worktree_id, owner_ref, owner_locked=True
+            ):
+                raise RuntimeError(f"owner {owner_ref} cannot accept a new worktree obligation")
+
+            print(f"Creating worktree on branch {branch}...", file=sys.stderr)
+            git_ops.create_worktree(
+                repo.anchor,
+                worktree_path,
+                branch,
+                prepared.start_point,
+            )
+
+            # Write tracking YAML
+            record = tracking.create_new_record(
+                worktree_id=worktree_id,
+                branch=branch,
+                worktree_path=worktree_path,
+                repo=config.repo_name,
+                machine=config.machine,
+                platform_name=plat,
+                tracking_path=tracking_path,
+                kind=kind,
+                owner=owner,
+                interface=interface,
+                origin=origin,
+                codename=new_codename,
+                dispatch_attempt=(
+                    tracking.DispatchAttempt(
+                        task_id=str(dispatch_attempt["task_id"]),
+                        reservation_key=str(dispatch_attempt["reservation_key"]),
+                        attempt=int(dispatch_attempt["attempt"]),
+                        driver=str(dispatch_attempt["driver"]),
+                        supervisor=str(dispatch_attempt["supervisor"]),
+                        creator_machine=config.machine,
+                    )
+                    if dispatch_attempt is not None
+                    else None
+                ),
+                # #1029: link the new worktree back to the session that spawned it, so a
+                # later resume (esp. a PR/feedback worktree with no sessions of its own)
+                # restores context instead of cold-starting.
+                parent_session=_creation_parent_session(
+                    parent_session,
+                    inherit_ambient=inherit_parent_session,
+                ),
+                # #2178: for a bridge spawn, record the caller worktree so the Picker can
+                # jump back to it.
+                caller_worktree=caller_worktree or None,
+                # resource-claims: the qualified backward owner link, for a worktree
+                # spun up as another worktree's outbound resource (stamped by `run` /
+                # an explicit --owner-ref). Absent = unclaimed.
+                owner_ref=owner_ref or None,
+            )
+        finally:
+            if owner_guard is not None:
+                owner_guard.__exit__(None, None, None)
 
     # Clone permissions
     if permissions.clone_permissions(repo.anchor, worktree_path):
@@ -4016,6 +4068,22 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     use_base = getattr(args, "base", False)
     use_new = getattr(args, "new_worktree", False) or getattr(args, "auto", False)
     requested_machine = getattr(args, "machine", None)
+    # pr-attribution-codenames Phase 2: --codename is an alternate selector for
+    # --worktree-id -- resolve it once, up front, so every existing worktree_id
+    # branch below works unchanged. An unmatched codename is a hard selector
+    # error here (not left unset): letting it fall through would either report
+    # a misleading "wrong selector count" in --json mode, or silently drop to
+    # the interactive picker and launch a DIFFERENT worktree than requested.
+    codename_arg = getattr(args, "codename", None)
+    if codename_arg and not getattr(args, "worktree_id", None):
+        resolved_id = resolve_worktree_id_by_codename(codename_arg)
+        if resolved_id is None:
+            message = f"No worktree found with codename '{codename_arg}'"
+            if use_json:
+                return _json_error(message)
+            output.err(message)
+            return 1
+        args.worktree_id = resolved_id
 
     if use_json:
         args.no_mux = True
@@ -5951,6 +6019,18 @@ def _resolve_resume(
         tracking.save_record(fresh)
     record.resume_count = fresh.resume_count
     record.last_resumed_at = fresh.last_resumed_at
+    # pr-attribution-codenames Phase 2 (#2838): an explicit resolve/resume is
+    # exactly the "first touch" the backfill plan describes -- lazily assign a
+    # pre-Phase-2 record's missing codename here. Guarded by `hasattr` (not
+    # just `getattr(..., None)`) so a stubbed `tracking.load_record` (some
+    # tests substitute a bare object with no `codename` attribute at all) is
+    # skipped rather than crashing inside `ensure_codename`'s own attribute
+    # access.
+    if hasattr(fresh, "codename") and not fresh.codename:
+        fresh = codename_tracking.ensure_codename(
+            fresh, cfg.tracking_dir(), codename_tracking.wordlist_for_repo(config)
+        )
+        record.codename = fresh.codename
 
     activity.log_event(
         "worktree_resumed",
@@ -6280,6 +6360,7 @@ from .worktree_identity import (  # noqa: E402 -- re-export position matches ori
     _resolve_worktree_id,
     _worktree_id_from_git,
     _worktree_path_for_id,
+    resolve_worktree_id_by_codename,
 )
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -7222,6 +7303,19 @@ def _cmd_status_write(
     if not yaml_path.exists():
         output.err(f"Tracking file not found at {yaml_path}. Cannot annotate an unknown worktree.")
         return 1
+    # pr-attribution-codenames Phase 2 (#2838): an explicit status touch is
+    # exactly the "first touch" the backfill plan describes -- lazily assign
+    # a pre-Phase-2 record's missing codename. Done as its OWN independent
+    # locked step, strictly before the disposition RMW below, so the
+    # project-wide allocation lock and the per-record lock are never held
+    # nested/simultaneously in either order (a lock-ordering/deadlock hazard
+    # flagged in review: `create` acquires them allocation-lock-then-record-
+    # lock via `create_new_record`'s own `save_record`).
+    peek = tracking.load_record(yaml_path)
+    if not peek.codename:
+        codename_tracking.ensure_codename(
+            peek, cfg.tracking_dir(), codename_tracking.wordlist_for_repo(config)
+        )
     # Foreground verb (#4547): the whole load -> set_disposition -> save is a
     # critical RMW held under the blocking record lock, so a concurrent Picker
     # best-effort sweep skips rather than clobbering the disposition overlay.
@@ -11958,6 +12052,18 @@ def cmd_list(args: argparse.Namespace) -> int:
     """
     records = _list_records_for_args(args)
     worktree_id = getattr(args, "worktree_id", None)
+    codename_arg = getattr(args, "codename", None)
+    if codename_arg and not worktree_id:
+        # `resolve_worktree_id_by_codename` returning None means no worktree
+        # carries that codename -- go straight to an empty result rather
+        # than falling back to the codename string as an ID: `_filter_list_
+        # worktree`'s suffix-match contract could then accidentally match a
+        # DIFFERENT worktree whose id happens to end with that string.
+        resolved_id = resolve_worktree_id_by_codename(codename_arg)
+        if resolved_id is None:
+            records = []
+        else:
+            worktree_id = resolved_id
     if worktree_id:
         try:
             records = _filter_list_worktree(records, worktree_id)
@@ -13686,7 +13792,16 @@ def _reap_worktree(
     failures = 0
 
     if not rec.checkout_managed:
-        tracking.retire_record(rec, tracking_path)
+        if not tracking.retire_record(rec, tracking_path):
+            # pr-attribution-codenames Phase 2 follow-up: a contended
+            # cross-process lock (e.g. a concurrent codename backfill)
+            # defers retirement rather than proceeding unsafely -- this
+            # external record is retried on a later reap pass.
+            warnings.append(
+                f"Tracking record for {rec.worktree_id} is busy (contended "
+                "lock) -- will retire on a later pass."
+            )
+            return 0, warnings
         disposition_history.remove(rec.worktree_id)
         handoff_trace.remove_trace(cfg.active_project(), rec.worktree_id)
         activity.log_event(
@@ -13742,10 +13857,19 @@ def _reap_worktree(
         permissions.merge_permissions(repo.anchor, rec.worktree_path)
         permissions.remove_trusted_folder(rec.worktree_path)
 
-    # Remove tracking YAML (or tombstone it, when paired -- #957/#220)
-    tracking.retire_record(rec, tracking_path)
-    disposition_history.remove(rec.worktree_id)
-    handoff_trace.remove_trace(cfg.active_project(), rec.worktree_id)
+    # Remove tracking YAML (or tombstone it, when paired -- #957/#220). The
+    # worktree checkout/branch are already gone by this point regardless of
+    # whether this succeeds -- a contended lock (pr-attribution-codenames
+    # Phase 2 follow-up) defers retirement to a later reap pass rather than
+    # deleting without real cross-process exclusivity.
+    if tracking.retire_record(rec, tracking_path):
+        disposition_history.remove(rec.worktree_id)
+        handoff_trace.remove_trace(cfg.active_project(), rec.worktree_id)
+    else:
+        warnings.append(
+            f"Tracking record for {rec.worktree_id} is busy (contended lock) "
+            "-- worktree/branch removed; record will retire on a later pass."
+        )
 
     activity.log_event(
         "worktree_reaped",
@@ -22502,10 +22626,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Don't auto-fast-forward a stale clean worktree on resume",
     )
     p.add_argument(
-        "--json", action="store_true", help="Non-interactive JSON mode (requires --worktree-id)"
+        "--json", action="store_true",
+        help="Non-interactive JSON mode (requires --worktree-id or --codename)",
     )
     p.add_argument(
-        "--worktree-id", default=None, help="Worktree ID to resolve (required with --json)"
+        "--worktree-id", default=None,
+        help="Worktree ID to resolve (required with --json, unless --codename is given)",
+    )
+    p.add_argument(
+        "--codename", default=None,
+        help="Codename to resolve (alternative to --worktree-id)",
     )
     p.add_argument(
         "--base", action="store_true", help="Resolve for the anchor repo (no picker, no worktree)"
@@ -23293,6 +23423,11 @@ def build_parser() -> argparse.ArgumentParser:
         "0 disables).",
     )
     p.add_argument("--worktree-id", help="Restrict the listing to one exact or unique-suffix ID")
+    p.add_argument(
+        "--codename", default=None,
+        help="Restrict the listing to the worktree with this codename "
+        "(alternative to --worktree-id)",
+    )
     p.add_argument(
         "--refresh",
         action="store_true",
