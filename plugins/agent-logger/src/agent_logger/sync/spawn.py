@@ -103,7 +103,7 @@ def spawn_detached_sync(cfg, *, prune: bool = False) -> int:
     neutral cwd; it removes its staging dir on exit.
     """
     # A sync already running? Skip staging entirely (rapid session-end dedupe).
-    lock_file = cfg.home / "session-sync.lock"
+    lock_file = cfg.home / cfg.sync_lock_name
     with sync_lock(lock_file, wait=False) as acquired:
         if not acquired:
             return 0
@@ -135,7 +135,7 @@ def spawn_detached_sync(cfg, *, prune: bool = False) -> int:
     env.update(windowless_python_env(python))
 
     try:
-        subprocess.Popen(  # noqa: S603 - fixed argv, detached background sync
+        subprocess.Popen(
             cmd,
             cwd=cwd,
             env=env,

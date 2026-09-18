@@ -311,7 +311,7 @@ def run_compact(
     if not selected:
         return result
 
-    lock_file = cfg.home / "session-sync.lock"
+    lock_file = cfg.home / cfg.sync_lock_name
     with sync_lock(lock_file, timeout=cfg.sync_lock_timeout) as acquired:
         if not acquired:
             print(
