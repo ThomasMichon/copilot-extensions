@@ -8,8 +8,10 @@ visions:
 > the repo that actually owns the mechanism. Original frontmatter referenced
 > that repo's vision `visions/change-pipeline`; updated above to this
 > repo's `visions/session-hosting`, which covers the same intent. Content
-> below is otherwise verbatim, including its checklist state at time of
-> migration. **A trailing `†` marks a reference to that private repo's own
+> below was verbatim at time of migration, and updated on 2026-09-17 to
+> reconcile with Sub D landing directly against the private repo's copy
+> between the migration and this PR's merge (see the aperture-labs migration
+> PR's rebase). **A trailing `†` marks a reference to that private repo's own
 > issue tracker — not resolvable here.**
 
 # handoff-cutover-reload-robustness — Stop the Cutover Successor Hanging on `consume_handoff`
@@ -24,9 +26,15 @@ visions:
   `0.1.0-dev36`, the primary facility dev host), the effective fix, now **covered by unit tests + a
   clean-room scenario** (`context-handoff-cutover`, 11/0 on a fresh box). **Sub A
   closed as not-viable plugin-side** (see Phase 2) — deferred to runtime **Sub C**
-  (#5253† / upstream #13494). Effort essentially complete pending the upstream runtime fix.
+  (#5253† / upstream #13494). **Sub D (env-var-free candidate confirmation)
+  merged 2026-09-16** — copilot-extensions PR
+  [#2757](https://github.com/ThomasMichon/copilot-extensions/pull/2757) (squash-merged,
+  agent-worktrees `1.5.5-dev122`), tracked as #7072†.
+  Effort essentially complete pending the upstream runtime fix + confirming Sub D
+  on the next live Windows cutover.
 - **Umbrella issue:** #5250†
 - **Sub-issues:**
+  #7072† (D — agent-worktrees psmux env-var-free candidate confirmation) ·
   #5251† (A — agent-worktrees bare-resume spawn) ·
   #5252† (B — context-handoff seed hardening) ·
   #5253† (C — CLI runtime orphaned external-tool call)
@@ -152,6 +160,27 @@ to the runtime fix (#5253† / upstream #13494). Findings:
       retryable error on extension-generation teardown, and/or a client-side
       watchdog. (Mitigations A/B keep the race from firing in the meantime.)
 
+### Phase 6 — Sub D: env-var-free candidate confirmation (#7072†) — **shipped & merged**
+- [x] Diagnose the cd0e stacking-panes incident (5 stacked sessions,
+      `pending_handoffs[0].candidate: null`).
+- [x] Add `associate_pane_matched_candidate` (pane/process-ancestry match, no
+      env var) to `sessions_pane_retire.py`; wire it into
+      `_wait_for_handoff_candidate` alongside the existing token self-report.
+- [x] Regression tests + fix a pre-existing unrelated test bug found while
+      validating (`tests/test_handoff_cutover.py`, 84 passed).
+- [x] Open, iterate through Copilot review (race-loser return, TOCTOU
+      revalidation, pane-scoped trust of a stale record-wide candidate,
+      throttled scanning, neutral PR metadata, doc-impact statement), and
+      squash-merge copilot-extensions PR #2757 (agent-worktrees `1.5.5-dev122`).
+      Along the way, fixed two pre-existing, unrelated `main`-branch CI breaks
+      hit mid-flight (a missing skill-table row blocking the shared
+      docs-consistency guard, and a module-size baseline race from a
+      concurrently-merged PR) — confirmed pre-existing via a clean
+      `origin/main` checkout before touching either.
+- [ ] Confirm on the next live Windows/psmux cutover in the field.
+- [x] Deployed on lambda-core (`agent-worktrees update` picks up dev122 on
+      next launch); close #7072† once field-confirmed.
+
 ### Phase 5 — Land + verify
 - [x] Land Sub B in copilot-extensions via `working-cross-repo` (PR #854, deployed).
 - [ ] Confirm Sub B on the next real facility cutover (interactive; can't be driven
@@ -175,6 +204,76 @@ to the runtime fix (#5253† / upstream #13494). Findings:
 - [ ] **No regression on Windows/psmux** (the sibling effort's substrate).
 
 ## Journal
+
+### 2026-09-15 — Sub D: env-var-free candidate confirmation (psmux stacking-panes fix)
+- **Live incident:** worktree `lambda-core-win-20260725-193449-cd0e` accumulated
+  **5 stacked live Copilot sessions** on one pending handoff (opened
+  2026-09-15T22:07:49Z); `agent-worktrees head-session --json` showed
+  `pending_handoffs[0].candidate: null` throughout. Each successor also failed to
+  reliably discover `/consume-handoff`/the context-handoff skill on its first
+  turn, floundered, then a fresh pane spawned on top of it.
+- **Root cause (distinct from Sub A/B/C):** the mux spawn path's
+  `_wait_for_handoff_candidate` waited up to 30s for the successor's own
+  sessionStart hook to self-report `AGENT_WORKTREES_HANDOFF_TOKEN`, propagated
+  into the new pane via `psmux new-window -e KEY=VAL`. **psmux does not reliably
+  propagate `-e` custom env values into the actual Copilot child process's
+  environment on Windows** the way tmux does — so the token was silently never
+  observed, the wait always timed out, the whole spawn was reported failed even
+  though a real live successor pane existed, and the caller spawned *another*
+  successor on top. Operator directive: "let's not expect windows to have *any*
+  relevant environment variables defined; the Manager and Mux system need to
+  walk the Mux list or subscribe to Mux, and use process hierarchies if
+  possible."
+- **Fix (agent-worktrees `1.5.5-dev121`):** added
+  `associate_pane_matched_candidate` — an env-var-free confirmation path that
+  reuses `mux_binding_for_session`'s existing exact-session, no-sweep,
+  process-ancestry machinery (walks the mux's own pane list + the live process
+  tree, never `~/.copilot/session-state` itself, honoring
+  `docs/patterns/session-state-access.md`) to check whether a session already
+  registered on this worktree (ordinary `register-session` on sessionStart,
+  unconditional on any handoff token) is running under the exact pane the
+  cutover just opened. On a match, agent-worktrees associates the candidate
+  itself — the successor never needs to self-report anything. Races alongside,
+  never replaces, the existing token self-report (tmux/Linux unaffected).
+- Moved the new logic into `sessions_pane_retire.py` (not `__main__.py`) after
+  CI's module-size guard caught the grandfathered `__main__.py` baseline being
+  pushed 20 lines over its shrink-only ceiling — `__main__.py` now keeps only a
+  thin backward-compatible shim.
+- Two new regression tests in `tests/test_handoff_cutover.py`; also fixed a
+  pre-existing test bug found while validating (`mux_retire_pane` was
+  monkeypatched on the wrong module after an earlier extraction). Full suite:
+  81 passed.
+- Shipped: copilot-extensions PR
+  [#2757](https://github.com/ThomasMichon/copilot-extensions/pull/2757).
+  Tracked as sub-issue #7072†. The
+  `/consume-handoff` discovery flakiness on a fresh successor's first turn is
+  filed as a follow-up in the same issue — likely the same extension-reload
+  race as Sub C (#5253† / upstream #13492/#13494), not yet independently fixed.
+
+### 2026-09-16 — Sub D squash-merged after review + two unrelated main-branch CI fixes
+- Copilot's automated review caught real issues across four rounds, each
+  fixed and re-pushed: (1) the pane-match path could return a race *loser* as
+  the confirmed candidate when `associate_handoff_candidate` raised because
+  another session already won the token; (2) the pane/process scan ran on
+  every 50ms poll tick (throttled to 1/s); (3) a record-wide `handoff.candidate`
+  was trusted without confirming it belonged to *this* wait's pane (a
+  racing/earlier attempt could set it for a different pane); (4) the same
+  race-loser association needed to revalidate liveness under the lock
+  (TOCTOU). Added tests for the race-loser and stale-different-pane cases.
+- Mid-flight, the branch hit **two pre-existing, unrelated breaks already
+  present on `origin/main` itself** (confirmed via a clean checkout before
+  touching either, per error-response discipline — not assumed): a
+  module-size-baseline race from a concurrently-merged PR (resolved by
+  rebasing once main's own follow-up fix landed), and a missing skill-table
+  row (`hoisting-plugin-agents`) failing the repo-wide `check-docs-consistency`
+  guard for every PR regardless of what it touches (fixed with a one-line
+  doc addition + the plugin's own required version bump). A third,
+  deeper pre-existing failure (`agent-codespaces`' session-start-stack
+  declaration) was investigated and confirmed unrelated + non-blocking (the
+  PR's `mergeable`/`merge_state` were clean throughout; only `not yet approved`
+  gated it) — left untouched as out of scope.
+- Squash-merged via `pr-merge --now` (agent-worktrees `1.5.5-dev122`); worktree
+  finalized.
 
 ### 2026-08-21 — Clean-room + unit tests for the bash-first fix
 - Made the seed's bash-first invariant provable without a live cutover. Extracted
