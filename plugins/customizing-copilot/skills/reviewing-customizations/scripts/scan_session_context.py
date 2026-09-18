@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import os
 import re
 from dataclasses import dataclass
@@ -345,20 +346,42 @@ def _script_has_output_free_contract(script: Path) -> bool:
             return nested.is_file() and _script_has_output_free_contract(nested)
         return False
     if suffix == ".py":
-        code_lines = [
-            line for line in text.splitlines() if line.lstrip() and not line.lstrip().startswith("#")
-        ]
-        if any("print(" in line for line in code_lines):
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
             return False
-        stdout_lines = [line for line in code_lines if "sys.stdout.write(" in line]
-        if not stdout_lines:
+        calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+        for call in calls:
+            if isinstance(call.func, ast.Attribute) and call.func.attr == "print":
+                return False
+            if not isinstance(call.func, ast.Name) or call.func.id != "print":
+                continue
+            streams = [keyword.value for keyword in call.keywords if keyword.arg == "file"]
+            if (
+                len(streams) != 1
+                or ast.unparse(streams[0]) != "sys.stderr"
+                or any(keyword.arg is None for keyword in call.keywords)
+            ):
+                return False
+        stdout_calls = [
+            call for call in calls if ast.unparse(call.func) == "sys.stdout.write"
+        ]
+        if not stdout_calls:
             return True
         if script.name == "hook_client.py":
             return (
                 'if kind == "sessionStart":' in text
                 and 'sys.stdout.write("{}")' in text
             )
-        return [line.strip() for line in stdout_lines] == ['sys.stdout.write("{}")']
+        # Error and success branches may each emit the same empty envelope.
+        # Stderr diagnostics do not participate in model-context composition.
+        return all(
+            len(call.args) == 1
+            and not call.keywords
+            and isinstance(call.args[0], ast.Constant)
+            and call.args[0].value == "{}"
+            for call in stdout_calls
+        )
     return False
 
 

@@ -26,6 +26,14 @@ on demand -- plus the two always-/lifecycle-adjacent surfaces that pair with
 them: **hooks** and **custom instructions**. This supplements knowledge the
 Copilot CLI does not ship natively.
 
+For a new or modified skill, use **`reviewing-customizations`** as the single
+holistic review entry point. It owns the writing rubric, actual-CLI conformance
+check, and optional repository/harness rulebook augmentation. Read an explicitly
+referenced rulebook before drafting; review the final bytes afterward. If the
+host cannot invoke marketplace skills, read its source guidance directly and
+state which runtime checks could not run. Do not add a parallel authoring-review
+skill merely to supply organization-specific rules.
+
 > **Declarative first.** Skills, custom instructions, hooks, sub-agents, and MCP
 > servers are *declarative* surfaces -- prefer them. The CLI also has an
 > *imperative* **Extensions API** (a JS `extension.mjs` calling `joinSession`),

@@ -55,6 +55,25 @@ Run the fast **mechanical scan** first to clear the machine-checkable violations
 then the **design critique** for the judgment calls the scan can't make, and a
 **conformance cross-check** against the authoring skills.
 
+### Skill-specific review and harness rulebooks
+
+For skill creation or edits, including description-only and body-only changes,
+apply [the skill review rubric](references/skill-review.md). This skill owns the
+holistic review; `authoring-skills` supplies format/packaging guidance rather
+than a competing reviewer.
+
+Read any explicitly referenced skill-review rulebook from the target repo's
+instructions or its assigned harness's trusted context. The rubric defines
+reference resolution, absent/missing/ambiguous cases, and a read-only per-skill
+impact preview. No separate rulebook skill or harness-registration dependency
+is needed.
+
+Use [actual CLI conformance](references/skill-runtime-conformance.md) for changed
+skills' final bytes. The mechanical scanner below is a heuristic, not a YAML
+parser or runtime-acceptance oracle. On hosts without marketplace discovery,
+the same source rubric can be read directly; without CLI access, report runtime
+conformance as not checked. Formal evals remain optional for ordinary edits.
+
 ### 0. Mechanical scan (repeatable)
 
 Before any hand review, run the bundled scanner over the repo root — it catches

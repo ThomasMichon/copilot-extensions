@@ -32,6 +32,45 @@ Each skill supplements the base CLI documentation with this repo's authoring
 patterns, and points at authoritative GitHub Copilot CLI and Anthropic Agent
 Skills documentation where relevant.
 
+## One owner for skill review
+
+`reviewing-customizations` owns [holistic skill review](skills/reviewing-customizations/references/skill-review.md)
+and [actual installed-CLI conformance](skills/reviewing-customizations/references/skill-runtime-conformance.md).
+`authoring-skills` composes that review rather than duplicating it.
+A consumer can explicitly reference a non-skill Markdown rulebook from its
+repository or assigned harness instructions. Without one, the generic review
+works unchanged. Rulebooks add editorial guidance, not parser overrides or
+permission to weaken safety rules.
+
+The validator is Python-standard-library-only and requires the installed CLI
+for runtime evidence. It does not install a parser, execute skills, or send a
+model prompt. Formal evals are optional for ordinary edits. Collection impact
+previews are read-only and preserve per-skill behavior and evidence limits.
+
+### Wiring a consumer repo: generic guidance is projected, not hand-copied
+
+A consumer repo that always wants skill edits routed to `authoring-skills`
+and `reviewing-customizations` should not hand-author that routing text
+itself. That guidance is generic -- true for any consumer, not specific to
+one repo -- so it belongs in **this plugin's own**
+[static instruction projection](../../docs/patterns/session-scoped-dynamic-guidance.md)
+(`instruction-projections.json`, synced/scanned like
+[`delegation-guidance`](../delegation-guidance/) or
+[`copilot-extensions-harness`](../copilot-extensions-harness/)'s reviewed
+fallback policy), so every consumer gets the identical, centrally-maintained
+routing text and drift is caught by the same sync/scan gate. A consumer repo
+should only need to add its own repo-specific supplement: an optional
+[skill-review rulebook](skills/reviewing-customizations/references/skill-review.md)
+document plus a short, repo-owned pointer to it. Hand-authoring the generic
+routing paragraph directly in a consumer's `.github/instructions/` -- rather
+than consuming a projection from this plugin -- duplicates content this
+plugin owns and leaves it unenforced against upstream drift.
+
+The shipped `skill-authoring` entry in
+[`instruction-projections.json`](instruction-projections.json) owns that
+generic instruction. Use the existing projection manager to sync it into a
+consumer and scan for drift; no startup hook or runtime service is added.
+
 ## Choosing a surface: declarative first
 
 Copilot CLI exposes two kinds of customization:
