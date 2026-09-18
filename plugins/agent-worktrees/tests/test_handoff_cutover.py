@@ -1073,6 +1073,176 @@ class TestCmdHandoffCutover:
         assert complete[0]["successor_session_id"] == "new-sess"
         assert complete[0]["handoff_token"] == "task-retire-13"
 
+    def test_retire_confirmed_dead_predecessor_clears_zombie_head(
+        self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
+    ):
+        """A bare self-retire (no handoff-token successor -- e.g. a
+        double-Ctrl-C idle-quit with nobody waiting to take over) must not
+        leave the retired session's ``SessionEntry.state`` stuck at
+        ``"active"`` once its Copilot process is positively confirmed dead.
+        A stuck-active predecessor otherwise permanently blocks
+        ``register_session``'s creation-guard from ever promoting a later
+        successor to head (the zombie head-pointer regression)."""
+        from agent_worktrees import tracking as _tracking
+
+        rec = _tracking.WorktreeRecord(
+            worktree_id="wt-retire-4702", branch="worktree/wt-retire-4702",
+            worktree_path="/tmp/src/wt-retire-4702", repo="test-repo",
+            machine="test", platform="wsl", started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00", resume_count=0, title=None,
+            status="active", completed_at=None, sessions=[],
+        )
+        _tracking.save_record(rec, tmp_tracking_dir / "wt-retire-4702.yaml")
+        _tracking.register_session("wt-retire-4702", "old-sess")
+        before = _tracking.load_record(tmp_tracking_dir / "wt-retire-4702.yaml")
+        assert before.resolved_head_session == "old-sess"
+
+        monkeypatch.setattr(
+            sessions, "mux_retire_pane",
+            lambda p, **k: {"ok": True, "pane": p, "gone": True, "method": "graceful"},
+        )
+        monkeypatch.setattr(
+            reclaim, "ensure_session_copilot_reaped",
+            lambda sid, **kwargs: {
+                "checked": True, "identity_verified": True, "found": 1,
+                "reaped": 1, "survivors": 0, "pids": [7],
+            },
+        )
+        monkeypatch.setattr(activity, "log_event", lambda *a, **k: None)
+
+        rc = m.cmd_handoff_cutover(_ns(
+            worktree_id="wt-retire-4702",
+            retire_pane="%9",
+            session_id="old-sess",
+        ))
+
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["ok"] is True
+
+        after = _tracking.load_record(tmp_tracking_dir / "wt-retire-4702.yaml")
+        entry = after.session_entry("old-sess")
+        assert entry.state == "concluded"
+        # The head pointer must clear -- not stay stuck on the dead session --
+        # so a later successor registration is not blocked by the creation-guard.
+        assert after.resolved_head_session is None
+        _tracking.register_session("wt-retire-4702", "new-sess")
+        final = _tracking.load_record(tmp_tracking_dir / "wt-retire-4702.yaml")
+        assert final.resolved_head_session == "new-sess"
+
+    def test_retire_does_not_infer_succession_for_an_unrelated_active_session(
+        self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
+    ):
+        """A session that registered while the predecessor was still head is
+        not necessarily its successor -- it could be an unrelated parallel
+        session. The retire repair must conclude ONLY the confirmed-dead
+        predecessor and clear the head; it must never guess a replacement
+        from list membership, matching ``conclude_session``'s own explicit
+        contract ("another active session is never promoted by list or
+        timestamp order")."""
+        from agent_worktrees import tracking as _tracking
+
+        rec = _tracking.WorktreeRecord(
+            worktree_id="wt-retire-race", branch="worktree/wt-retire-race",
+            worktree_path="/tmp/src/wt-retire-race", repo="test-repo",
+            machine="test", platform="wsl", started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00", resume_count=0, title=None,
+            status="active", completed_at=None, sessions=[],
+        )
+        _tracking.save_record(rec, tmp_tracking_dir / "wt-retire-race.yaml")
+        _tracking.register_session("wt-retire-race", "old-sess")
+        # A second session registers (e.g. an unrelated parallel session)
+        # while old-sess is still head -- the creation-guard correctly
+        # declines to promote it.
+        _tracking.register_session("wt-retire-race", "other-sess")
+        pre = _tracking.load_record(tmp_tracking_dir / "wt-retire-race.yaml")
+        assert pre.resolved_head_session == "old-sess"
+        assert pre.session_entry("other-sess").state == "active"
+
+        monkeypatch.setattr(
+            sessions, "mux_retire_pane",
+            lambda p, **k: {"ok": True, "pane": p, "gone": True, "method": "graceful"},
+        )
+        monkeypatch.setattr(
+            reclaim, "ensure_session_copilot_reaped",
+            lambda sid, **kwargs: {
+                "checked": True, "identity_verified": True, "found": 1,
+                "reaped": 1, "survivors": 0, "pids": [7],
+            },
+        )
+        monkeypatch.setattr(activity, "log_event", lambda *a, **k: None)
+
+        rc = m.cmd_handoff_cutover(_ns(
+            worktree_id="wt-retire-race", retire_pane="%9", session_id="old-sess",
+        ))
+
+        assert rc == 0
+        after = _tracking.load_record(tmp_tracking_dir / "wt-retire-race.yaml")
+        assert after.session_entry("old-sess").state == "concluded"
+        # The head clears -- it is NOT silently handed to other-sess.
+        assert after.resolved_head_session is None
+        assert after.session_entry("other-sess").state == "active"
+
+    def test_retire_with_pending_handoff_token_does_not_preempt_late_acknowledgement(
+        self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
+    ):
+        """A confirmed-dead retire that STILL carries a ``handoff_token``
+        belongs to the ordinary token-mediated handoff, not the bare-retire
+        repair. A resident monitor is allowed to retire the predecessor's
+        pane once a successor has been associated as a *candidate*
+        (``associate_handoff_candidate``) but before that candidate has
+        actually claimed the token via ``register_session(...,
+        handoff_token=...)``/``link_handoff`` -- the predecessor is still
+        legitimately ``"active"`` at that point. Concluding it here would
+        make the later, real acknowledgement fail, since ``link_handoff``
+        refuses an already-concluded predecessor."""
+        from agent_worktrees import tracking as _tracking
+
+        rec = _tracking.WorktreeRecord(
+            worktree_id="wt-retire-late-ack", branch="worktree/wt-retire-late-ack",
+            worktree_path="/tmp/src/wt-retire-late-ack", repo="test-repo",
+            machine="test", platform="wsl", started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00", resume_count=0, title=None,
+            status="active", completed_at=None, sessions=[],
+        )
+        _tracking.save_record(rec, tmp_tracking_dir / "wt-retire-late-ack.yaml")
+        _tracking.register_session("wt-retire-late-ack", "old-sess")
+        _tracking.register_session("wt-retire-late-ack", "new-sess")
+        loaded = _tracking.load_record(tmp_tracking_dir / "wt-retire-late-ack.yaml")
+        _tracking.open_handoff(loaded, "old-sess", "task-late-ack")
+        _tracking.associate_handoff_candidate(loaded, "task-late-ack", "new-sess")
+
+        monkeypatch.setattr(
+            sessions, "mux_retire_pane",
+            lambda p, **k: {"ok": True, "pane": p, "gone": True, "method": "graceful"},
+        )
+        monkeypatch.setattr(
+            reclaim, "ensure_session_copilot_reaped",
+            lambda sid, **kwargs: {
+                "checked": True, "identity_verified": True, "found": 1,
+                "reaped": 1, "survivors": 0, "pids": [7],
+            },
+        )
+        monkeypatch.setattr(activity, "log_event", lambda *a, **k: None)
+
+        rc = m.cmd_handoff_cutover(_ns(
+            worktree_id="wt-retire-late-ack",
+            retire_pane="%9",
+            session_id="old-sess",
+            handoff_token="task-late-ack",
+        ))
+
+        assert rc == 0
+        after = _tracking.load_record(tmp_tracking_dir / "wt-retire-late-ack.yaml")
+        # NOT concluded -- the token is still pending, so the real handoff
+        # must remain linkable.
+        assert after.session_entry("old-sess").state == "active"
+
+        # The late acknowledgement must still succeed.
+        linked = _tracking.link_handoff(after, "task-late-ack", "new-sess")
+        assert linked.state == "linked"
+        assert after.session_entry("old-sess").state == "handed-off"
+
     def test_retire_reaps_old_copilot_before_success(self, monkeypatch, capfd):
         # A hard pane-kill left the pane gone; the OLD Copilot process is then
         # reaped, and only then is success declared.
@@ -1129,6 +1299,83 @@ class TestCmdHandoffCutover:
         assert called["n"] == 0
         out = json.loads(capfd.readouterr().out)
         assert "copilot" not in out
+
+    def test_retire_last_window_skip_does_not_conclude_the_still_running_session(
+        self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
+    ):
+        """``ok: true, gone: false`` (the last-window guard) reports overall
+        success but never actually retired the pane -- the predecessor is
+        still running and must stay ``"active"``, not be marked concluded."""
+        from agent_worktrees import tracking as _tracking
+
+        rec = _tracking.WorktreeRecord(
+            worktree_id="wt-retire-lw", branch="worktree/wt-retire-lw",
+            worktree_path="/tmp/src/wt-retire-lw", repo="test-repo",
+            machine="test", platform="wsl", started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00", resume_count=0, title=None,
+            status="active", completed_at=None, sessions=[],
+        )
+        _tracking.save_record(rec, tmp_tracking_dir / "wt-retire-lw.yaml")
+        _tracking.register_session("wt-retire-lw", "old-sess")
+
+        monkeypatch.setattr(sessions, "mux_retire_pane",
+                            lambda p, **k: {"ok": True, "pane": p, "gone": False,
+                                            "method": "last-window-skip"})
+        monkeypatch.setattr(activity, "log_event", lambda *a, **k: None)
+
+        rc = m.cmd_handoff_cutover(_ns(
+            worktree_id="wt-retire-lw", retire_pane="%9", session_id="old-sess",
+        ))
+
+        assert rc == 0
+        after = _tracking.load_record(tmp_tracking_dir / "wt-retire-lw.yaml")
+        assert after.session_entry("old-sess").state == "active"
+        assert after.resolved_head_session == "old-sess"
+
+    def test_retire_identity_mismatch_skip_does_not_conclude_unrelated_session(
+        self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
+    ):
+        """A reused-pane identity-mismatch skip reports ``gone: true`` for
+        bookkeeping purposes, but the pane was never actually signaled --
+        the named session must not be concluded."""
+        from agent_worktrees import tracking as _tracking
+
+        rec = _tracking.WorktreeRecord(
+            worktree_id="wt-retire-mismatch", branch="worktree/wt-retire-mismatch",
+            worktree_path="/tmp/src/wt-retire-mismatch", repo="test-repo",
+            machine="test", platform="wsl", started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00", resume_count=0, title=None,
+            status="active", completed_at=None, sessions=[],
+        )
+        _tracking.save_record(rec, tmp_tracking_dir / "wt-retire-mismatch.yaml")
+        _tracking.register_session("wt-retire-mismatch", "old-sess")
+
+        monkeypatch.setattr(
+            sessions, "mux_session_for_pane", lambda pane: "new-server-session",
+        )
+        monkeypatch.setattr(
+            sessions, "mux_retire_pane",
+            lambda *a, **k: pytest.fail("must not retire a reused pane"),
+        )
+        monkeypatch.setattr(activity, "log_event", lambda *a, **k: None)
+        monkeypatch.setattr(
+            reclaim, "ensure_session_copilot_reaped",
+            lambda sid: {
+                "checked": True, "found": 1, "reaped": 1,
+                "survivors": 0, "pids": [7],
+            },
+        )
+
+        rc = m.cmd_handoff_cutover(_ns(
+            worktree_id="wt-retire-mismatch",
+            retire_pane="%9",
+            mux_session="original-session",
+            session_id="old-sess",
+        ))
+
+        assert rc == 0
+        after = _tracking.load_record(tmp_tracking_dir / "wt-retire-mismatch.yaml")
+        assert after.session_entry("old-sess").state == "active"
 
     def test_retire_mux_identity_mismatch_skips_unrelated_pane(
         self, monkeypatch, capfd,
