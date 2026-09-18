@@ -350,6 +350,7 @@ def resume_session(
     """
     if host is None:
         return resume_worker(session_id, prompt, wait=wait, timeout=timeout)
+    normalized_host = bridge_remote.normalize_host(host)
     ssh = shutil.which("ssh")
     if ssh is None:
         return False
@@ -359,7 +360,7 @@ def resume_session(
     remote_cmd = " ".join(shlex.quote(arg) for arg in cmd)
     try:
         proc = run_ssh_command(
-            [ssh, "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", host, remote_cmd],
+            [ssh, "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", normalized_host, remote_cmd],
             input=prompt,
             timeout=timeout,
         )

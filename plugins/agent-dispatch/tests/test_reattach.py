@@ -1,4 +1,4 @@
-"""Tests for agent_dispatch.reattach (Phase 9 / aperture-labs#7133)."""
+"""Tests for agent_dispatch.reattach (Phase 9 / copilot-extensions#2884)."""
 
 from __future__ import annotations
 
@@ -24,6 +24,14 @@ def _task(
     dedup_key="dk-1",
     session_handle=None,
     owner=None,
+    requires=None,
+    excludes=None,
+    affinity=None,
+    payload_ref=None,
+    payload_inline=None,
+    source=None,
+    origin_ref=None,
+    evaluator_ref=None,
 ):
     reservation = {"session_handle": session_handle} if session_handle else None
     return {
@@ -39,15 +47,25 @@ def _task(
         "target_machine": None,
         "target_worktree": None,
         "target_repo": None,
+        "requires": requires or [],
+        "excludes": excludes or [],
+        "affinity": affinity or {},
+        "payload_ref": payload_ref,
+        "payload_inline": payload_inline,
+        "source": source,
+        "origin_ref": origin_ref,
+        "evaluator_ref": evaluator_ref,
         "spawn_reservation": reservation,
         "owner": owner,
     }
 
 
 class _FakeClient:
-    def __init__(self, *, get_task=None, create_task=None):
+    def __init__(self, *, get_task=None, create_task=None, progress=None, steers=None):
         self._get_task = get_task
         self._create_task = create_task
+        self._progress = progress or []
+        self._steers = steers or []
         self.start_calls = []
         self.bind_calls = []
         self.create_calls = []
@@ -60,6 +78,12 @@ class _FakeClient:
 
     def get(self, task_id):
         return self._get_task
+
+    def progress_log(self, task_id):
+        return self._progress
+
+    def steer_log(self, task_id):
+        return self._steers
 
     def create(self, title, **kwargs):
         self.create_calls.append((title, kwargs))
@@ -180,7 +204,19 @@ def test_reattach_refuses_when_dedup_race_lost():
 def test_reattach_happy_path_local():
     worker_id = "local-body:sess-1"
     client = _FakeClient(
-        get_task=_task(status="abandoned", title="fix it", dedup_key="dk-9"),
+        get_task=_task(
+            status="abandoned",
+            title="fix it",
+            dedup_key="dk-9",
+            requires=["cap-a"],
+            excludes=["cap-b"],
+            affinity={"machine": "lambda-core"},
+            payload_ref="ref-1",
+            payload_inline="inline-payload",
+            source="issue-loop",
+            origin_ref="issue/1",
+            evaluator_ref="eval/1",
+        ),
         create_task={"id": "t-2", "owner": worker_id},
     )
     resumed = {}
@@ -200,12 +236,62 @@ def test_reattach_happy_path_local():
     assert result.worker_id == worker_id
     assert result.session_id == "sess-1"
     assert result.resumed is True
-    assert client.create_calls[0][1]["dedup_key"] == "dk-9"
-    assert client.create_calls[0][1]["claim_as"] == worker_id
+    create_kwargs = client.create_calls[0][1]
+    assert create_kwargs["dedup_key"] == "dk-9"
+    assert create_kwargs["claim_as"] == worker_id
+    assert create_kwargs["requires"] == ["cap-a"]
+    assert create_kwargs["excludes"] == ["cap-b"]
+    assert create_kwargs["affinity"] == {"machine": "lambda-core"}
+    assert create_kwargs["payload_ref"] == "ref-1"
+    assert create_kwargs["payload_inline"] == "inline-payload"
+    assert create_kwargs["source"] == "issue-loop"
+    assert create_kwargs["origin_ref"] == "issue/1"
+    assert create_kwargs["evaluator_ref"] == "eval/1"
     assert client.start_calls == [("t-2", worker_id)]
     assert client.bind_calls == [("t-2", worker_id, "sess-1")]
     assert resumed["session_id"] == "sess-1"
     assert resumed["host"] is None
+
+
+def test_reattach_folds_prior_progress_and_steer_into_new_prompt():
+    """Neither `task_progress` nor `task_steer` rows transfer through
+    `create()` (they're keyed to the old task_id) -- the new task's own
+    `prompt` must carry them forward instead (#2889 review)."""
+    client = _FakeClient(
+        get_task=_task(status="abandoned", prompt="original prompt"),
+        create_task={"id": "t-2", "owner": "local-body:sess-1"},
+        progress=[{"phase": "impl", "summary": "wired the thing", "detail": "see pr/1"}],
+        steers=[{"fields": {"answer": "yes"}}],
+    )
+    reattach.reattach(client, "t-1", "sess-1", local_session_verdict=lambda sid: "live")
+    new_prompt = client.create_calls[0][1]["prompt"]
+    assert "original prompt" in new_prompt
+    assert "wired the thing" in new_prompt
+    assert "see pr/1" in new_prompt
+    assert "yes" in new_prompt
+
+
+def test_reattach_recovered_context_absent_when_no_history():
+    client = _FakeClient(
+        get_task=_task(status="abandoned", prompt="original prompt"),
+        create_task={"id": "t-2", "owner": "local-body:sess-1"},
+    )
+    reattach.reattach(client, "t-1", "sess-1", local_session_verdict=lambda sid: "live")
+    assert client.create_calls[0][1]["prompt"] == "original prompt"
+
+
+def test_recovered_context_swallows_dispatch_error(monkeypatch):
+    """A best-effort enrichment fetch failure must not block the reattach."""
+    from agent_dispatch.client import DispatchError
+
+    class _Client:
+        def progress_log(self, task_id):
+            raise DispatchError(500, "boom")
+
+        def steer_log(self, task_id):
+            raise DispatchError(500, "boom")
+
+    assert reattach._recovered_context(_Client(), "t-1") == ""
 
 
 def test_reattach_fleet_host_worker_id_and_resume():

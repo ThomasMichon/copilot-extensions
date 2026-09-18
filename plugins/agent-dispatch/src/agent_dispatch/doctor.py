@@ -171,7 +171,7 @@ def session_handle_verdict(
     decoded ``fleet-body:`` handle. An undecodable handle (a worktree-backed
     embody, or none at all) reports :data:`SESSION_UNKNOWN` with no session
     id/host -- never treated as death. Shared by the reservation-history walk
-    below and any other caller (e.g. the CLI's abandon-liveness guard, #7133)
+    below and any other caller (e.g. the CLI's abandon-liveness guard)
     that needs one handle's plain current-attempt liveness verdict.
     """
     fleet = _parse_fleet_body_handle(session_handle)

@@ -1,8 +1,8 @@
-"""Phase 9 reattach primitive (aperture-labs#7133 /
-ThomasMichon/copilot-extensions#2884): formalize the manual ``create`` (same
-``dedup_key``) -> ``claim`` -> ``start`` -> ``agent-bridge resume``/``send``
-sequence used to recover a task whose tracked reservation is dead while an
-earlier attempt's embody session is still alive and fully resumable.
+"""Phase 9 reattach primitive (ThomasMichon/copilot-extensions#2884):
+formalize the manual ``create`` (same ``dedup_key``) -> ``claim`` -> ``start``
+-> ``agent-bridge resume``/``send`` sequence used to recover a task whose
+tracked reservation is dead while an earlier attempt's embody session is
+still alive and fully resumable.
 
 Background: a task's ``dedup_key`` only releases from the create-dedup index
 once the task reaches a **terminal** status (see
@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from . import bridge
+from .client import DispatchError
 from .doctor import (
     SESSION_LIVE,
     _default_fleet_session_verdict,
@@ -66,7 +67,7 @@ def build_reattach_subparser(
         "reattach",
         help="reattach a terminal task's still-live session to a fresh "
         "tracked task -- formalizes create(same dedup_key)+claim+start+"
-        "bind_owner_session+resume (Phase 9 / aperture-labs#7133)",
+        "bind_owner_session+resume (Phase 9 / copilot-extensions#2884)",
     )
     p.add_argument("task_id", help="the terminal task to re-mint")
     p.add_argument("session_id", help="the confirmed-live agent-bridge session to reattach")
@@ -112,6 +113,43 @@ def _handle_for(session_id: str, host: str | None) -> str:
     return f"fleet-body:{host}:{session_id}" if host else f"local-body:{session_id}"
 
 
+def _recovered_context(client: DispatchClient, old_task_id: str) -> str:
+    """Render the source task's progress log + answered steer as inline text.
+
+    Neither transfers through ``create()`` -- ``task_progress``/``task_steer``
+    rows are keyed to the *old* ``task_id``, and ``create`` deliberately mints
+    a brand-new one -- so this is the mechanism that actually carries them
+    forward: folded into the new task's own ``prompt`` (durable, visible via
+    ``show``), rather than only referenced from the resume prompt. Best-effort:
+    a fetch failure (:class:`DispatchError`) drops that section rather than
+    blocking the reattach on enrichment.
+    """
+    sections: list[str] = []
+    try:
+        progress = client.progress_log(old_task_id)
+    except DispatchError:
+        progress = []
+    if progress:
+        lines = [
+            f"- [{entry.get('phase') or '(no phase)'}] {entry.get('summary', '')}"
+            + (f" -- {entry['detail']}" if entry.get("detail") else "")
+            for entry in progress
+        ]
+        sections.append("Prior progress log (from task {}):\n{}".format(
+            old_task_id, "\n".join(lines)
+        ))
+    try:
+        steers = client.steer_log(old_task_id)
+    except DispatchError:
+        steers = []
+    if steers:
+        lines = [f"- {entry.get('fields')}" for entry in steers]
+        sections.append("Prior steer answers (from task {}):\n{}".format(
+            old_task_id, "\n".join(lines)
+        ))
+    return "\n\n".join(sections)
+
+
 def _reattach_prompt(task_id: str, worker_id: str) -> str:
     return (
         f"You have been resumed to reattach to agent-dispatch task {task_id} "
@@ -120,8 +158,8 @@ def _reattach_prompt(task_id: str, worker_id: str) -> str:
         "affected and remain intact. Use the payload-local `agent-dispatch` "
         "CLI (no `--url`) for each command; this task is already claimed and "
         f"started under you. Read it with `agent-dispatch show {task_id}` "
-        "(it carries your prior progress log and any pending steer) and "
-        "continue the work from where you left off."
+        "(its prompt embeds any recovered prior progress log/steer answers) "
+        "and continue the work from where you left off."
     )
 
 
@@ -146,7 +184,11 @@ def reattach(
     there -- see the module docstring), and it actually carries a
     ``dedup_key`` to re-mint against.
 
-    On success: atomic create-and-claim (under the recovery-handle owner),
+    On success: atomic create-and-claim (under the recovery-handle owner,
+    carrying forward the source task's full metadata -- payload, requires/
+    excludes/affinity, source/origin/evaluator refs -- plus its progress log
+    and answered steer folded into the new task's own prompt via
+    :func:`_recovered_context`, since neither transfers automatically),
     ``start``, ``bind_owner_session`` (the exact id doctor's and the abandon
     guard's liveness checks key on) -- then, unless ``resume=False``,
     deliver a resume prompt via agent-bridge so the live session picks its
@@ -187,12 +229,24 @@ def reattach(
             f"task {task_id!r} has no dedup_key -- nothing to safely re-mint "
             "the same logical work under"
         )
+    recovered = _recovered_context(client, task_id)
+    new_prompt = old_task.get("prompt") or ""
+    if recovered:
+        new_prompt = f"{new_prompt}\n\n{recovered}" if new_prompt else recovered
     new_task = client.create(
         old_task.get("title") or "",
         repo=old_task.get("repo"),
-        prompt=old_task.get("prompt") or "",
+        prompt=new_prompt,
         dedup_key=dedup_key,
+        requires=old_task.get("requires") or [],
+        excludes=old_task.get("excludes") or [],
+        affinity=old_task.get("affinity") or {},
         labels=old_task.get("labels") or [],
+        payload_ref=old_task.get("payload_ref"),
+        payload_inline=old_task.get("payload_inline"),
+        source=old_task.get("source"),
+        origin_ref=old_task.get("origin_ref"),
+        evaluator_ref=old_task.get("evaluator_ref"),
         goal=old_task.get("goal"),
         done_criteria=old_task.get("done_criteria"),
         target_machine=old_task.get("target_machine"),
@@ -225,7 +279,7 @@ def guard_abandon_liveness(
     fleet_verdict: Callable[[str, str], str] | None = None,
 ) -> str | None:
     """Return a refusal message iff ``task``'s *current* reservation session
-    is confirmed live (Phase 9's abandon guard, aperture-labs#7133) -- else
+    is confirmed live (Phase 9's abandon guard, #2884) -- else
     ``None`` (safe to abandon).
 
     Checks only the task's current reservation (the same

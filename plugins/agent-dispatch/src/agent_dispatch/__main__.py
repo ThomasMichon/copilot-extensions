@@ -1969,7 +1969,7 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
 
 
 def _cmd_reattach(args: argparse.Namespace) -> int:
-    """Reattach a terminal task's still-live session (Phase 9 / aperture-labs#7133)."""
+    """Reattach a terminal task's still-live session (Phase 9 / copilot-extensions#2884)."""
     from . import reattach as _reattach
 
     with _client(args) as c:

@@ -1044,6 +1044,57 @@ back at the request limit, so the check was skipped rather than risk
 analyzing an incomplete page. Neither verdict is ever auto-repaired -- see
 [ThomasMichon/copilot-extensions#2884](https://github.com/ThomasMichon/copilot-extensions/issues/2884).
 
+### Recovering a shadowed live session (`agent-dispatch reattach`)
+
+`doctor --check-live-sessions` can *find* an `earlier_attempt_live` session
+-- a still-alive, fully resumable embody session that a task's tracked
+reservation no longer points at -- but finding it isn't recovering it.
+`reattach` is that missing act-on-it step: it re-mints the source task's
+work under a fresh task id, claimed by the live session, so it can pick the
+work straight back up.
+
+```bash
+# task-id must be TERMINAL (abandoned/completed/dead_letter) and carry a
+# dedup_key -- see below for why. session-id must be confirmed live right now.
+agent-dispatch reattach <task-id> <session-id>
+
+# the session lives on a fleet pool host, not locally
+agent-dispatch reattach <task-id> <session-id> --host <pool-host>
+
+# claim/start/bind only -- skip delivering the agent-bridge resume prompt
+# (deliver it by hand instead, e.g. after inspecting the new task first)
+agent-dispatch reattach <task-id> <session-id> --no-resume
+```
+
+A task's `dedup_key` only releases from the create-dedup index once the task
+reaches a **terminal** status -- so `reattach` only works against a task
+that's already terminal, typically one just `abandon`ed for exactly this
+reason. It refuses (non-zero exit, no mutation) unless `session-id` is
+itself confirmed live, the source task is terminal, and it carries a
+`dedup_key`. On success it atomically creates-and-claims a fresh task under
+that `dedup_key` (owned by a `local-body:<session>` / `fleet-body:<host>:
+<session>` recovery-handle identity), carrying forward the source task's
+full metadata (payload, capability requires/excludes/affinity, source/
+origin/evaluator refs) plus its progress log and any answered steer folded
+into the new task's own prompt (neither transfers automatically -- they're
+keyed to the *old* task id), starts it, binds the exact session id for
+liveness tracking, and delivers a resume prompt via agent-bridge so the live
+session picks the new task straight back up.
+
+### Guarding against discarding a live session (`abandon --override-live`)
+
+`abandon` now refuses (non-zero exit) when the task's *current* reservation
+session is confirmed live -- abandoning it would discard the only tracking
+link to a still-good session, with no path back (`abandoned` is terminal).
+Pass `--override-live` to abandon it anyway once you've confirmed that's
+really what you want (e.g. you've already captured the session id
+separately and plan to `reattach` once the abandon completes). An unknown or
+confirmed-gone session never blocks -- only a *confirmed*-live one does.
+
+```bash
+agent-dispatch abandon <task-id> --permit --override-live
+```
+
 ## Steer a blocked worker (`agent-dispatch card` / `steer`)
 
 *Hibernate-the-wait* handles a wait on a **machine** condition; **steering**
