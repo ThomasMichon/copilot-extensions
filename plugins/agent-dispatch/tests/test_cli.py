@@ -1972,6 +1972,9 @@ def test_abandon_duplicate_of_implies_permit_and_records_ref(monkeypatch):
     seen = {}
 
     class _C:
+        def get(self, task_id):
+            return {"id": task_id, "spawn_reservation": None}
+
         def abandon(self, task_id, *, worker_id=None, permitted=False, reason=None):
             seen.update(task_id=task_id, worker_id=worker_id, permitted=permitted, reason=reason)
             return {"id": task_id, "status": "abandoned"}
