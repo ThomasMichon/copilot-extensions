@@ -349,7 +349,10 @@ def resume_session(
     which host the recovered session actually lives on.
     """
     if host is None:
-        return resume_worker(session_id, prompt, wait=wait, timeout=timeout)
+        try:
+            return resume_worker(session_id, prompt, wait=wait, timeout=timeout)
+        except (subprocess.SubprocessError, OSError):
+            return False
     normalized_host = bridge_remote.normalize_host(host)
     ssh = shutil.which("ssh")
     if ssh is None:

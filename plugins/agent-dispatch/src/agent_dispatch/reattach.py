@@ -11,9 +11,12 @@ once the task reaches a **terminal** status (see
 an *already*-terminal task, typically one just abandoned for exactly this
 reason (see :func:`guard_abandon_liveness` and ``agent-dispatch abandon
 --override-live``). :func:`reattach` re-mints the same logical work under the
-same ``dedup_key``, atomically claims it under the live session's recovery-
-handle identity (``local-body:<session>`` / ``fleet-body:<host>:<session>``,
-the same convention :mod:`agent_dispatch.spawn_factories` decodes), starts it,
+same ``dedup_key`` (create -> reserve_spawn -> record_spawn -> claim -> start,
+so the new task carries a real ``spawn_reservation`` and not just a bare
+``owner`` string -- the thing doctor's and the abandon guard's liveness
+checks actually read), claims it under the live session's recovery-handle
+identity (``local-body:<session>`` / ``fleet-body:<host>:<session>``, the
+same convention :mod:`agent_dispatch.spawn_factories` decodes), starts it,
 binds the exact session id for liveness tracking
 (``DispatchClient.bind_owner_session``), and -- unless disabled -- delivers a
 resume prompt so the live session picks its new task straight back up. This
@@ -157,9 +160,15 @@ def _reattach_prompt(task_id: str, worker_id: str) -> str:
         "tracked reservation died -- your own session and its work were never "
         "affected and remain intact. Use the payload-local `agent-dispatch` "
         "CLI (no `--url`) for each command; this task is already claimed and "
-        f"started under you. Read it with `agent-dispatch show {task_id}` "
-        "(its prompt embeds any recovered prior progress log/steer answers) "
-        "and continue the work from where you left off."
+        f"started under {worker_id} (a synthetic recovery-handle owner, not "
+        "your CWD's machine/worktree identity, so you MUST pass "
+        f"`--worker-id {worker_id}` explicitly on every owner-gated command -- "
+        f"`agent-dispatch progress {task_id} {worker_id} --summary ...`, "
+        f"`agent-dispatch complete {task_id} {worker_id} --result-ref ...`, "
+        "etc. -- an omitted owner resolves from CWD identity instead and will "
+        f"fail). Read it with `agent-dispatch show {task_id}` (its prompt "
+        "embeds any recovered prior progress log/steer answers) and continue "
+        "the work from where you left off."
     )
 
 
@@ -181,21 +190,35 @@ def reattach(
     confirmed live right now (never reattach into a dead/unknown session --
     the whole point is recovering a session that is genuinely still there),
     the source task is genuinely terminal (a ``dedup_key`` only re-mints
-    there -- see the module docstring), and it actually carries a
-    ``dedup_key`` to re-mint against.
+    there -- see the module docstring), it actually carries a ``dedup_key``
+    to re-mint against, and it is **not** producer-managed (a
+    ``producer_fence`` can't be safely replayed here -- see below).
 
-    On success: atomic create-and-claim (under the recovery-handle owner,
-    carrying forward the source task's full metadata -- payload, requires/
-    excludes/affinity, source/origin/evaluator refs -- plus its progress log
-    and answered steer folded into the new task's own prompt via
+    On success: create the new task **unclaimed** (carrying forward the
+    source task's full metadata -- payload, requires/excludes/affinity,
+    exclusive_key, source/origin/evaluator refs -- plus its progress log and
+    answered steer folded into the new task's own prompt via
     :func:`_recovered_context`, since neither transfers automatically),
-    ``start``, ``bind_owner_session`` (the exact id doctor's and the abandon
-    guard's liveness checks key on) -- then, unless ``resume=False``,
-    deliver a resume prompt via agent-bridge so the live session picks its
-    new task straight back up. ``resumed`` reports whether that delivery
-    itself succeeded; a ``False`` here does not undo the reattach -- the new
-    task is claimed and started either way, and an operator can always
-    deliver the prompt by hand (``agent-bridge resume <session_id>``).
+    ``reserve_spawn`` + ``record_spawn`` (so the new task carries a real
+    ``spawn_reservation`` with the recovery-handle as its ``session_handle``
+    -- the thing doctor's and the abandon guard's liveness checks actually
+    read; a bare ``owner`` string alone is not liveness-tracked), then
+    ``claim`` (task-id-directed, under the recovery-handle owner), ``start``,
+    and ``bind_owner_session`` (the exact session id those same checks key
+    on) -- then, unless ``resume=False``, deliver a resume prompt via
+    agent-bridge so the live session picks its new task straight back up.
+    ``resumed`` reports whether that delivery itself succeeded; a ``False``
+    here does not undo the reattach -- the new task is claimed and started
+    either way, and an operator can always deliver the prompt by hand
+    (``agent-bridge resume <session_id>``).
+
+    **Why not producer-managed tasks:** a generation-managed producer (or a
+    managed required label) fences creation with a ``producer_fence`` tied to
+    a specific producer generation and request id; replaying that fence
+    verbatim would silently reuse the old request id, and omitting it would
+    make ``create`` reject the reattach outright. Neither is safe to do
+    implicitly, so a producer-managed source task is rejected up front,
+    before any mutation.
 
     The three probe/delivery callables default to ``None`` and are resolved
     to their module-attribute defaults *inside* the function body -- an
@@ -229,6 +252,13 @@ def reattach(
             f"task {task_id!r} has no dedup_key -- nothing to safely re-mint "
             "the same logical work under"
         )
+    if old_task.get("producer_fence"):
+        raise ReattachError(
+            f"task {task_id!r} is producer-managed (carries a producer_fence) -- "
+            "reattach cannot safely replay that fence (it would reuse the old "
+            "request id) or safely omit it (create would reject the reattach); "
+            "recover it through its owning producer instead"
+        )
     recovered = _recovered_context(client, task_id)
     new_prompt = old_task.get("prompt") or ""
     if recovered:
@@ -244,6 +274,7 @@ def reattach(
         labels=old_task.get("labels") or [],
         payload_ref=old_task.get("payload_ref"),
         payload_inline=old_task.get("payload_inline"),
+        exclusive_key=old_task.get("exclusive_key"),
         source=old_task.get("source"),
         origin_ref=old_task.get("origin_ref"),
         evaluator_ref=old_task.get("evaluator_ref"),
@@ -252,14 +283,41 @@ def reattach(
         target_machine=old_task.get("target_machine"),
         target_worktree=old_task.get("target_worktree"),
         target_repo=old_task.get("target_repo"),
-        claim_as=worker_id,
     )
-    if new_task.get("owner") != worker_id:
-        raise ReattachError(
-            f"lost the dedup race for {dedup_key!r}: task {new_task.get('id')!r} "
-            f"is already claimed by {new_task.get('owner')!r}"
-        )
     new_task_id = new_task["id"]
+    if new_task.get("status") != Status.QUEUED or new_task.get("owner") is not None:
+        raise ReattachError(
+            f"lost the dedup race for {dedup_key!r}: task {new_task_id!r} is "
+            f"already {new_task.get('status')!r} (owner "
+            f"{new_task.get('owner')!r})"
+        )
+    reservation = client.reserve_spawn(new_task_id, reserved_by=worker_id)
+    if not reservation.get("reserved"):
+        raise ReattachError(
+            f"could not reserve a spawn for freshly re-minted task {new_task_id!r} "
+            "-- an active reservation already exists (unexpected for a brand-new "
+            "task; investigate before retrying)"
+        )
+    reservation_key = reservation["reservation"]["key"]
+    client.record_spawn(reservation_key, session_handle=worker_id)
+    claimed = client.claim(
+        worker_id=worker_id,
+        capabilities=old_task.get("requires") or [],
+        repo=old_task.get("repo"),
+        machine=old_task.get("target_machine"),
+        worktree=old_task.get("target_worktree"),
+        task_id=new_task_id,
+    )
+    if claimed is None:
+        client.fail_spawn(
+            reservation_key, detail="reattach: claim failed after spawn reservation"
+        )
+        raise ReattachError(
+            f"reserved a spawn for task {new_task_id!r} but could not claim it "
+            "(gate mismatch on requires/target after carrying the source task's "
+            "metadata forward) -- the reservation was failed so a future attempt "
+            "can retry"
+        )
     client.start(new_task_id, worker_id)
     client.bind_owner_session(new_task_id, worker_id, session_id)
     resumed = False

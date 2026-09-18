@@ -1070,16 +1070,22 @@ A task's `dedup_key` only releases from the create-dedup index once the task
 reaches a **terminal** status -- so `reattach` only works against a task
 that's already terminal, typically one just `abandon`ed for exactly this
 reason. It refuses (non-zero exit, no mutation) unless `session-id` is
-itself confirmed live, the source task is terminal, and it carries a
-`dedup_key`. On success it atomically creates-and-claims a fresh task under
-that `dedup_key` (owned by a `local-body:<session>` / `fleet-body:<host>:
-<session>` recovery-handle identity), carrying forward the source task's
-full metadata (payload, capability requires/excludes/affinity, source/
-origin/evaluator refs) plus its progress log and any answered steer folded
-into the new task's own prompt (neither transfers automatically -- they're
-keyed to the *old* task id), starts it, binds the exact session id for
-liveness tracking, and delivers a resume prompt via agent-bridge so the live
-session picks the new task straight back up.
+itself confirmed live, the source task is terminal, it carries a
+`dedup_key`, and it is **not** producer-managed (a `producer_fence` can't be
+safely replayed -- recover it through its owning producer instead). On
+success it re-mints a fresh task under that `dedup_key`, carrying forward
+the source task's full metadata (payload, capability requires/excludes/
+affinity, `exclusive_key`, source/origin/evaluator refs) plus its progress
+log and any answered steer folded into the new task's own prompt (neither
+transfers automatically -- they're keyed to the *old* task id); reserves and
+records a real spawn reservation (so the new task is genuinely liveness-
+tracked, not just owned by a bare string) whose `session_handle` is the
+`local-body:<session>` / `fleet-body:<host>:<session>` recovery-handle
+identity; claims, starts, and binds the exact session id for liveness
+tracking; and delivers a resume prompt via agent-bridge so the live session
+picks the new task straight back up -- explicitly told to pass that
+recovery-handle worker id on every owner-gated command going forward, since
+it won't resolve from the resumed session's own CWD identity.
 
 ### Guarding against discarding a live session (`abandon --override-live`)
 

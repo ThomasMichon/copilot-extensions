@@ -32,6 +32,8 @@ def _task(
     source=None,
     origin_ref=None,
     evaluator_ref=None,
+    exclusive_key=None,
+    producer_fence=None,
 ):
     reservation = {"session_handle": session_handle} if session_handle else None
     return {
@@ -55,20 +57,50 @@ def _task(
         "source": source,
         "origin_ref": origin_ref,
         "evaluator_ref": evaluator_ref,
+        "exclusive_key": exclusive_key,
+        "producer_fence": producer_fence,
         "spawn_reservation": reservation,
         "owner": owner,
     }
 
 
 class _FakeClient:
-    def __init__(self, *, get_task=None, create_task=None, progress=None, steers=None):
+    """A fake ``DispatchClient`` covering the full create -> reserve_spawn ->
+    record_spawn -> claim -> start -> bind_owner_session sequence."""
+
+    def __init__(
+        self,
+        *,
+        get_task=None,
+        create_task=None,
+        progress=None,
+        steers=None,
+        reserve_result=None,
+        claim_result=...,
+    ):
         self._get_task = get_task
-        self._create_task = create_task
+        # A freshly created, unclaimed task by default -- the shape `create()`
+        # returns when it does NOT collide with an existing dedup_key.
+        self._create_task = create_task or {
+            "id": "t-2", "status": "queued", "owner": None,
+        }
         self._progress = progress or []
         self._steers = steers or []
+        self._reserve_result = reserve_result or {
+            "reserved": True, "reservation": {"key": "resv-1"},
+        }
+        # A claimed task by default; pass claim_result=None explicitly to
+        # simulate a failed claim (the sentinel default distinguishes "no
+        # override" from an explicit None result).
+        self._claim_result_set = claim_result is not ...
+        self._claim_result = None if claim_result is ... else claim_result
         self.start_calls = []
         self.bind_calls = []
         self.create_calls = []
+        self.reserve_calls = []
+        self.record_spawn_calls = []
+        self.claim_calls = []
+        self.fail_spawn_calls = []
 
     def __enter__(self):
         return self
@@ -88,6 +120,28 @@ class _FakeClient:
     def create(self, title, **kwargs):
         self.create_calls.append((title, kwargs))
         return self._create_task
+
+    def reserve_spawn(self, task_id, *, reserved_by=None):
+        self.reserve_calls.append((task_id, reserved_by))
+        return self._reserve_result
+
+    def record_spawn(self, key, *, session_handle=None, worktree=None):
+        self.record_spawn_calls.append((key, session_handle, worktree))
+        return {"key": key, "state": "spawned"}
+
+    def claim(self, *, worker_id=None, capabilities=(), repo=None, machine=None,
+              worktree=None, task_id=None, **_kwargs):
+        self.claim_calls.append(
+            {"worker_id": worker_id, "capabilities": list(capabilities), "repo": repo,
+             "machine": machine, "worktree": worktree, "task_id": task_id}
+        )
+        if self._claim_result_set:
+            return self._claim_result
+        return {"id": task_id, "status": "claimed", "owner": worker_id}
+
+    def fail_spawn(self, key, *, detail=None, **_kwargs):
+        self.fail_spawn_calls.append((key, detail))
+        return {"state": "failed"}
 
     def start(self, task_id, worker_id):
         self.start_calls.append((task_id, worker_id))
@@ -193,12 +247,52 @@ def test_reattach_refuses_when_no_dedup_key():
 def test_reattach_refuses_when_dedup_race_lost():
     client = _FakeClient(
         get_task=_task(status="abandoned"),
-        create_task={"id": "t-2", "owner": "someone-else"},
+        create_task={"id": "t-2", "status": "claimed", "owner": "someone-else"},
     )
     with pytest.raises(reattach.ReattachError, match="lost the dedup race"):
         reattach.reattach(
             client, "t-1", "sess-1", local_session_verdict=lambda sid: "live",
         )
+    # never reaches reserve_spawn once the race is lost
+    assert client.reserve_calls == []
+
+
+def test_reattach_refuses_when_producer_managed():
+    client = _FakeClient(
+        get_task=_task(status="abandoned", producer_fence={"producer_id": "p1"}),
+    )
+    with pytest.raises(reattach.ReattachError, match="producer-managed"):
+        reattach.reattach(
+            client, "t-1", "sess-1", local_session_verdict=lambda sid: "live",
+        )
+    assert client.create_calls == []
+
+
+def test_reattach_refuses_when_reservation_not_reserved():
+    client = _FakeClient(
+        get_task=_task(status="abandoned"),
+        reserve_result={"reserved": False, "reservation": {"key": "resv-1"}},
+    )
+    with pytest.raises(reattach.ReattachError, match="could not reserve"):
+        reattach.reattach(
+            client, "t-1", "sess-1", local_session_verdict=lambda sid: "live",
+        )
+    assert client.record_spawn_calls == []
+
+
+def test_reattach_fails_spawn_and_refuses_when_claim_fails():
+    client = _FakeClient(
+        get_task=_task(status="abandoned"),
+        claim_result=None,
+    )
+    with pytest.raises(reattach.ReattachError, match="could not claim"):
+        reattach.reattach(
+            client, "t-1", "sess-1", local_session_verdict=lambda sid: "live",
+        )
+    assert client.fail_spawn_calls == [
+        ("resv-1", "reattach: claim failed after spawn reservation")
+    ]
+    assert client.start_calls == []
 
 
 def test_reattach_happy_path_local():
@@ -216,8 +310,9 @@ def test_reattach_happy_path_local():
             source="issue-loop",
             origin_ref="issue/1",
             evaluator_ref="eval/1",
+            exclusive_key="ex-1",
         ),
-        create_task={"id": "t-2", "owner": worker_id},
+        create_task={"id": "t-2", "status": "queued", "owner": None},
     )
     resumed = {}
 
@@ -238,15 +333,24 @@ def test_reattach_happy_path_local():
     assert result.resumed is True
     create_kwargs = client.create_calls[0][1]
     assert create_kwargs["dedup_key"] == "dk-9"
-    assert create_kwargs["claim_as"] == worker_id
+    assert "claim_as" not in create_kwargs  # created unclaimed -- claimed via reserve+claim
     assert create_kwargs["requires"] == ["cap-a"]
     assert create_kwargs["excludes"] == ["cap-b"]
     assert create_kwargs["affinity"] == {"machine": "lambda-core"}
     assert create_kwargs["payload_ref"] == "ref-1"
     assert create_kwargs["payload_inline"] == "inline-payload"
+    assert create_kwargs["exclusive_key"] == "ex-1"
     assert create_kwargs["source"] == "issue-loop"
     assert create_kwargs["origin_ref"] == "issue/1"
     assert create_kwargs["evaluator_ref"] == "eval/1"
+    assert client.reserve_calls == [("t-2", worker_id)]
+    assert client.record_spawn_calls == [("resv-1", worker_id, None)]
+    assert client.claim_calls == [
+        {
+            "worker_id": worker_id, "capabilities": ["cap-a"], "repo": "repo",
+            "machine": None, "worktree": None, "task_id": "t-2",
+        }
+    ]
     assert client.start_calls == [("t-2", worker_id)]
     assert client.bind_calls == [("t-2", worker_id, "sess-1")]
     assert resumed["session_id"] == "sess-1"
@@ -259,7 +363,7 @@ def test_reattach_folds_prior_progress_and_steer_into_new_prompt():
     `prompt` must carry them forward instead (#2889 review)."""
     client = _FakeClient(
         get_task=_task(status="abandoned", prompt="original prompt"),
-        create_task={"id": "t-2", "owner": "local-body:sess-1"},
+        create_task={"id": "t-2", "status": "queued", "owner": None},
         progress=[{"phase": "impl", "summary": "wired the thing", "detail": "see pr/1"}],
         steers=[{"fields": {"answer": "yes"}}],
     )
@@ -274,7 +378,7 @@ def test_reattach_folds_prior_progress_and_steer_into_new_prompt():
 def test_reattach_recovered_context_absent_when_no_history():
     client = _FakeClient(
         get_task=_task(status="abandoned", prompt="original prompt"),
-        create_task={"id": "t-2", "owner": "local-body:sess-1"},
+        create_task={"id": "t-2", "status": "queued", "owner": None},
     )
     reattach.reattach(client, "t-1", "sess-1", local_session_verdict=lambda sid: "live")
     assert client.create_calls[0][1]["prompt"] == "original prompt"
@@ -298,7 +402,7 @@ def test_reattach_fleet_host_worker_id_and_resume():
     worker_id = "fleet-body:pool-a:sess-1"
     client = _FakeClient(
         get_task=_task(status="dead_letter"),
-        create_task={"id": "t-2", "owner": worker_id},
+        create_task={"id": "t-2", "status": "queued", "owner": None},
     )
     resumed = {}
 
@@ -321,7 +425,7 @@ def test_reattach_fleet_host_worker_id_and_resume():
 def test_reattach_no_resume_skips_delivery():
     client = _FakeClient(
         get_task=_task(status="abandoned"),
-        create_task={"id": "t-2", "owner": "local-body:sess-1"},
+        create_task={"id": "t-2", "status": "queued", "owner": None},
     )
     called = []
 
@@ -344,7 +448,7 @@ def test_cli_reattach_success(monkeypatch, capsys):
     worker_id = "local-body:sess-1"
     client = _FakeClient(
         get_task=_task(status="abandoned"),
-        create_task={"id": "t-2", "owner": worker_id},
+        create_task={"id": "t-2", "status": "queued", "owner": None},
     )
     monkeypatch.setattr("agent_dispatch.__main__._client", lambda args: client)
     monkeypatch.setattr(reattach, "_default_local_session_verdict", lambda sid: "live")
