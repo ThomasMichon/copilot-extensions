@@ -1939,19 +1939,36 @@ def _carve_paired_knowledge(
     )
 
     knowledge_ref = tracking.format_claim_ref(config.machine, knowledge_name, knowledge_id)
-    tracking.create_new_record(
-        worktree_id=knowledge_id,
-        branch=knowledge_branch,
-        worktree_path=knowledge_wt_path,
-        repo=knowledge_name,
-        machine=config.machine,
-        platform_name=plat,
-        tracking_path=cfg.project_dir(knowledge_name) / "worktrees",
-        pair_id=pair_id,
-        pair_role="knowledge",
-        pair_ref=harness_ref,
-        pair_kind="worktree",
-    )
+    knowledge_tracking_path = cfg.project_dir(knowledge_name) / "worktrees"
+    # pr-attribution-codenames Phase 2 (#2838): the paired knowledge worktree
+    # is a real, independently-lookup-able worktree record in its OWN
+    # project's tracking directory -- it needs its own codename (scoped to
+    # that project's wordlist), not a share of the harness's. Assignment +
+    # record-write share one allocation lock (see codename_tracking.py) so a
+    # concurrent carve can never pick the same candidate.
+    try:
+        knowledge_config = cfg.load_config(project=knowledge_name)
+        knowledge_wordlist = codename_tracking.wordlist_for_repo(knowledge_config)
+    except Exception:
+        knowledge_wordlist = None
+    with codename_tracking.allocation_lock(knowledge_tracking_path):
+        knowledge_codename = codename_tracking.assign_new_codename(
+            knowledge_tracking_path, knowledge_wordlist
+        )
+        tracking.create_new_record(
+            worktree_id=knowledge_id,
+            branch=knowledge_branch,
+            worktree_path=knowledge_wt_path,
+            repo=knowledge_name,
+            machine=config.machine,
+            platform_name=plat,
+            tracking_path=knowledge_tracking_path,
+            pair_id=pair_id,
+            pair_role="knowledge",
+            pair_ref=harness_ref,
+            pair_kind="worktree",
+            codename=knowledge_codename,
+        )
     # Best-effort permissions + trust for the knowledge worktree.
     try:
         permissions.clone_permissions(knowledge_anchor, knowledge_wt_path)
@@ -2250,50 +2267,54 @@ def _create_worktree_core(
         tracking_path.mkdir(parents=True, exist_ok=True)
         # pr-attribution-codenames Phase 2 (#2838): assign one codename per
         # worktree at create time, from the repo's declared wordlist (or the
-        # built-in neutral one).
-        new_codename = codename_tracking.assign_new_codename(
-            tracking_path, codename_tracking.wordlist_for_repo(config)
-        )
-        record = tracking.create_new_record(
-            worktree_id=worktree_id,
-            branch=branch,
-            worktree_path=worktree_path,
-            repo=config.repo_name,
-            machine=config.machine,
-            platform_name=plat,
-            tracking_path=tracking_path,
-            kind=kind,
-            owner=owner,
-            interface=interface,
-            origin=origin,
-            codename=new_codename,
-            dispatch_attempt=(
-                tracking.DispatchAttempt(
-                    task_id=str(dispatch_attempt["task_id"]),
-                    reservation_key=str(dispatch_attempt["reservation_key"]),
-                    attempt=int(dispatch_attempt["attempt"]),
-                    driver=str(dispatch_attempt["driver"]),
-                    supervisor=str(dispatch_attempt["supervisor"]),
-                    creator_machine=config.machine,
+        # built-in neutral one). The read (existing codenames) -> pick ->
+        # record-write sequence is held under one cross-process lock so two
+        # concurrent `create` calls can never observe the same existing set
+        # and choose the same candidate.
+        with codename_tracking.allocation_lock(tracking_path):
+            new_codename = codename_tracking.assign_new_codename(
+                tracking_path, codename_tracking.wordlist_for_repo(config)
+            )
+            record = tracking.create_new_record(
+                worktree_id=worktree_id,
+                branch=branch,
+                worktree_path=worktree_path,
+                repo=config.repo_name,
+                machine=config.machine,
+                platform_name=plat,
+                tracking_path=tracking_path,
+                kind=kind,
+                owner=owner,
+                interface=interface,
+                origin=origin,
+                codename=new_codename,
+                dispatch_attempt=(
+                    tracking.DispatchAttempt(
+                        task_id=str(dispatch_attempt["task_id"]),
+                        reservation_key=str(dispatch_attempt["reservation_key"]),
+                        attempt=int(dispatch_attempt["attempt"]),
+                        driver=str(dispatch_attempt["driver"]),
+                        supervisor=str(dispatch_attempt["supervisor"]),
+                        creator_machine=config.machine,
+                    )
+                    if dispatch_attempt is not None
+                    else None
+                ),
+                # #1029: link the new worktree back to the session that spawned it, so a
+                # later resume (esp. a PR/feedback worktree with no sessions of its own)
+                # restores context instead of cold-starting.
+                parent_session=_creation_parent_session(
+                    parent_session,
+                    inherit_ambient=inherit_parent_session,
+                ),
+                # #2178: for a bridge spawn, record the caller worktree so the Picker can
+                # jump back to it.
+                    caller_worktree=caller_worktree or None,
+                    # resource-claims: the qualified backward owner link, for a worktree
+                    # spun up as another worktree's outbound resource (stamped by `run` /
+                    # an explicit --owner-ref). Absent = unclaimed.
+                    owner_ref=owner_ref or None,
                 )
-                if dispatch_attempt is not None
-                else None
-            ),
-            # #1029: link the new worktree back to the session that spawned it, so a
-            # later resume (esp. a PR/feedback worktree with no sessions of its own)
-            # restores context instead of cold-starting.
-            parent_session=_creation_parent_session(
-                parent_session,
-                inherit_ambient=inherit_parent_session,
-            ),
-            # #2178: for a bridge spawn, record the caller worktree so the Picker can
-            # jump back to it.
-            caller_worktree=caller_worktree or None,
-            # resource-claims: the qualified backward owner link, for a worktree
-            # spun up as another worktree's outbound resource (stamped by `run` /
-            # an explicit --owner-ref). Absent = unclaimed.
-            owner_ref=owner_ref or None,
-        )
     finally:
         if owner_guard is not None:
             owner_guard.__exit__(None, None, None)
