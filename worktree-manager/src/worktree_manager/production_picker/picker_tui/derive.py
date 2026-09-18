@@ -246,8 +246,7 @@ def _status_markers(w):
     return compact[len(label):].strip()
 
 
-#: Bug-fix phase (picker-list-interaction-layer effort, aperture-labs#7151):
-#: the raw ``status_markers`` tokens above (``C<N>``/``F<N>``/``U*``/``OC*``)
+#: The raw ``status_markers`` tokens above (``C<N>``/``F<N>``/``U*``/``OC*``)
 #: are a closure-descriptor-internal wire shorthand -- meaningful to whoever
 #: wrote the descriptor, opaque to an operator glancing at the tile's second
 #: line. When the marker string is the ONLY content on that line (no asset
