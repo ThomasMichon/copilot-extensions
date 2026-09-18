@@ -1498,7 +1498,27 @@ def test_expand_repository_issue_loop_stamps_repo_root_as_emitter_cwd(tmp_path):
     source, _pool = expand_repository_issue_loop(
         _config(worker_identity="custom"), repo_root=tmp_path
     )
-    assert source.spec["cwd"] == str(tmp_path)
+    assert source.spec["cwd"] == str(tmp_path.resolve())
+
+
+def test_expand_repository_issue_loop_normalizes_relative_repo_root(tmp_path, monkeypatch):
+    """Regression guard: a relative ``repo_root`` must be stamped onto the
+    emitter spec as an absolute path. Left relative, registrar_discovery's
+    own path-resolution step would re-interpret it relative to the registrar
+    directory (not this repo's root), and an out-of-process daemon has no
+    reliable relative base of its own either."""
+    identities_dir = tmp_path / ".copilot-extensions" / "agent-dispatch" / "identities"
+    identities_dir.mkdir(parents=True)
+    (identities_dir / "custom.identity.md").write_text(
+        "---\nname: custom\ndescription: A custom identity.\n---\n\n"
+        "Follow the custom rules.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path.parent)
+    source, _pool = expand_repository_issue_loop(
+        _config(worker_identity="custom"), repo_root=tmp_path.name
+    )
+    assert source.spec["cwd"] == str(tmp_path.resolve())
 
 
 def test_worker_identity_and_worker_guidance_are_mutually_exclusive():

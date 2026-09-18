@@ -432,7 +432,12 @@ def expand_repository_issue_loop(
         "repository_issue_loop": dict(data),
     }
     if repo_root is not None:
-        spec["cwd"] = str(Path(repo_root))
+        # Resolve to an absolute path: a relative repo_root stamped verbatim
+        # would be re-resolved by registrar_discovery's
+        # _resolve_declaration_paths as relative to the registrar directory
+        # (not this repo's own root), and a later daemon has no reliable
+        # relative base of its own either.
+        spec["cwd"] = str(Path(repo_root).resolve())
     common = {
         "owner": config["owner"],
         "description": config["description"],

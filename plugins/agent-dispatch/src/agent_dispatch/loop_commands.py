@@ -86,7 +86,11 @@ def _repository_issue_loop_declarations(
     from .registrar_discovery import load_pointers, read_declaration_file_set
 
     path = Path(args.declaration).expanduser().resolve()
-    declarations = read_declaration_file_set(path)
+    repo_root = dispatch_repo_config.repo_root_from_surface_path(path, "registrar")
+    if repo_root is not None:
+        # See the identical guard + rationale in _reviewer_loop_declarations.
+        _reject_worktree_checkout_as_repo_root(repo_root)
+    declarations = read_declaration_file_set(path, repo_root=repo_root)
     if len(declarations) != 2 or {declaration.kind for declaration in declarations} != {
         "emitter",
         "supervised-lane",
@@ -99,10 +103,6 @@ def _repository_issue_loop_declarations(
     declared_owners = {declaration.owner for declaration in declarations}
     if owner is None and len(declared_owners) == 1:
         owner = next(iter(declared_owners))
-    repo_root = dispatch_repo_config.repo_root_from_surface_path(path, "registrar")
-    if repo_root is not None:
-        # See the identical guard + rationale in _reviewer_loop_declarations.
-        _reject_worktree_checkout_as_repo_root(repo_root)
     selected_dir = (
         dispatch_repo_config.selected_repo_surface_dir(repo_root, "registrar").resolve()
         if repo_root is not None
@@ -533,6 +533,7 @@ def _cmd_repository_issue_loop(args: argparse.Namespace) -> int:
                         source["spec"]["repository_issue_loop"]["forge"]["producer_login"]
                     ),
                     dry_run=True,
+                    cwd=source["spec"].get("cwd"),
                 )
             )
     except (DispatchError, OSError, ValueError) as exc:

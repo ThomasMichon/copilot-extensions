@@ -213,6 +213,20 @@ def test_validate_spec_threads_cwd_into_repository_issue_loop_validation(monkeyp
     assert observed["cwd"] == "/repo/root"
 
 
+def test_validate_spec_rejects_malformed_cwd_before_repository_issue_loop_validation():
+    """Regression guard: a malformed non-string ``cwd`` must surface as the
+    ordinary ``EmitterError`` contract, not an unhandled ``TypeError`` from
+    ``Path(cwd)`` inside ``repository_issue_loops.validate_config`` -- the
+    'cwd' type check must run before that call, not only after it."""
+    spec = _spec(
+        command=None,
+        repository_issue_loop={"kind": "repository-issue-loop"},
+        cwd=123,
+    )
+    with pytest.raises(emitter.EmitterError, match="'cwd' must be a non-empty string"):
+        emitter.validate_spec(spec)
+
+
 def test_run_tick_accepts_empty_json_task_list_as_noop():
     client = FakeClient()
 
