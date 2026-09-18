@@ -256,6 +256,50 @@ def test_asset_hints_render_at_wide_and_narrow_widths(monkeypatch, tmp_path):
         assert "WT" in text
 
 
+def _bare_markers_source():
+    """A fleet with a ``status_markers`` closure descriptor and NO asset hints
+    or live pulse -- the case the operator flagged as an "indecipherable bare
+    marker" second line (bug-fix phase, picker-list-interaction-layer effort):
+    a raw ``C1 U* OC*`` token string with nothing else to give it context."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("anomalous-potato", "Win")
+    raws = [
+        {"id": "anomalous-potato-win-20260627-eeee", "title": "Bare marker row",
+         "status": "active", "started_at": "2026-06-27T17:00:00",
+         "turn_count": 3, "state": "completed",
+         "closure": {
+             "version": 2, "label": "MERGED", "style": "merged-blocked",
+             "compact": "MERGED C1 U* OC*",
+             "claims": {"held": 1}, "follow_ups": {"open": 0},
+             "closure": {"final": False}, "action": {"disposition": "blocked"},
+         }},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+    return src
+
+
+def test_bare_status_markers_render_as_readable_text(monkeypatch, tmp_path):
+    """The raw closure-descriptor tokens (``C1``/``U*``/``OC*``) are a wire
+    shorthand, not operator-facing copy -- when they're the ONLY thing on the
+    tile's second line, they must expand into a short human phrase rather than
+    render as a bare, undocumented token string."""
+    _isolate_pivots(monkeypatch, tmp_path)
+    text = pcap.capture(_bare_markers_source(), live=False)["text"]
+    assert "1 held claim" in text
+    assert "merge unconfirmed" in text
+    assert "claims unconfirmed" in text
+    # The raw wire tokens themselves never leak into the rendered grid.
+    assert "C1" not in text
+    assert "OC*" not in text
+    assert "U*" not in text
+
+
 def test_capture_is_deterministic(monkeypatch, tmp_path):
     _isolate_pivots(monkeypatch, tmp_path)
     first = pcap.capture(_fixture_source(), live=False)["text"]
