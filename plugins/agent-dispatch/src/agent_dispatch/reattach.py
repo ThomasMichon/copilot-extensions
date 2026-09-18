@@ -242,12 +242,12 @@ def reattach(
     abandon guard leaves the source task's reservation active; supervisor
     reconciliation may treat that terminal task's still-active reservation
     as cleanup work and end its body before an operator gets to reattach.
-    This function's own liveness check re-verifies ``session_id`` immediately
-    before acting, so it never reattaches into a session that has actually
-    died in that window -- but the window itself (a real live session ended
-    by reconciliation before a *pending* reattach) is a known gap in the
-    broader abandon/reconciliation lifecycle, not something this function
-    alone can close; reattach promptly after an override-live abandon.
+    The liveness check is ordered as late as reasonably possible (after the
+    cheap validation reads, immediately before the exclusive_key retirement
+    and ``create``/``reserve_spawn``/``claim`` sequence) to minimize -- there
+    is no server-side atomic fence available to eliminate -- the window
+    between "confirmed live" and "actually bound"; reattach promptly after
+    an override-live abandon.
 
     The three probe/delivery callables default to ``None`` and are resolved
     to their module-attribute defaults *inside* the function body -- an
@@ -261,14 +261,11 @@ def reattach(
     resume_fn = resume_fn or bridge.resume_session
     worker_id = _handle_for(session_id, host)
     normalized_host = bridge_remote.normalize_host(host) if host is not None else None
-    verdict, _, _ = session_handle_verdict(
-        worker_id, local_verdict=local_session_verdict, fleet_verdict=fleet_session_verdict
-    )
-    if verdict != SESSION_LIVE:
-        raise ReattachError(
-            f"session {session_id!r} is not confirmed live ({verdict}); "
-            "refusing to reattach a task into a dead/unknown session"
-        )
+    # Validation-only reads first (no dependency on session_id's liveness),
+    # so the liveness check below sits as close as possible to the mutating
+    # sequence it gates -- minimizing (never eliminating; there is no
+    # server-side atomic fence for this) the window between "confirmed live"
+    # and "actually bound".
     old_task = client.get(task_id)
     if old_task.get("status") not in Status.TERMINAL:
         raise ReattachError(
@@ -289,6 +286,18 @@ def reattach(
             "request id) or safely omit it (create would reject the reattach); "
             "recover it through its owning producer instead"
         )
+    recovered = _recovered_context(client, task_id)
+    new_prompt = old_task.get("prompt") or ""
+    if recovered:
+        new_prompt = f"{new_prompt}\n\n{recovered}" if new_prompt else recovered
+    verdict, _, _ = session_handle_verdict(
+        worker_id, local_verdict=local_session_verdict, fleet_verdict=fleet_session_verdict
+    )
+    if verdict != SESSION_LIVE:
+        raise ReattachError(
+            f"session {session_id!r} is not confirmed live ({verdict}); "
+            "refusing to reattach a task into a dead/unknown session"
+        )
     exclusive_key = old_task.get("exclusive_key")
     if exclusive_key:
         # `reserve_spawn` fences an `exclusive_key` across EVERY task sharing
@@ -306,10 +315,6 @@ def reattach(
                     f"{exclusive_key!r} (superseded by a fresh reattach)"
                 ),
             )
-    recovered = _recovered_context(client, task_id)
-    new_prompt = old_task.get("prompt") or ""
-    if recovered:
-        new_prompt = f"{new_prompt}\n\n{recovered}" if new_prompt else recovered
     new_task = client.create(
         old_task.get("title") or "",
         repo=old_task.get("repo"),

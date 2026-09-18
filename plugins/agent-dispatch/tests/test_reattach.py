@@ -228,6 +228,24 @@ def test_reattach_refuses_when_session_not_live():
         )
 
 
+def test_reattach_checks_validation_before_liveness_no_mutation_either_way():
+    """The liveness probe is ordered right before the mutating sequence, not
+    at entry -- but a non-terminal/no-dedup_key/producer-managed task is
+    still rejected before ever probing liveness at all, since those checks
+    are cheap and need no session I/O (#2889 review: liveness ordering)."""
+    probed = []
+
+    def _verdict(sid):
+        probed.append(sid)
+        return "gone"
+
+    client = _FakeClient(get_task=_task(status="started"))
+    with pytest.raises(reattach.ReattachError, match="not terminal"):
+        reattach.reattach(client, "t-1", "sess-1", local_session_verdict=_verdict)
+    assert probed == []  # never reached the liveness probe
+    assert client.create_calls == []
+
+
 def test_reattach_refuses_when_task_not_terminal():
     client = _FakeClient(get_task=_task(status="started"))
     with pytest.raises(reattach.ReattachError, match="not terminal"):
@@ -255,6 +273,19 @@ def test_reattach_refuses_when_dedup_race_lost():
         )
     # never reaches reserve_spawn once the race is lost
     assert client.reserve_calls == []
+
+
+def test_reattach_not_live_never_retires_exclusive_key_or_creates():
+    """A dead/unknown session must abort before ANY mutation -- including
+    the exclusive_key retirement, which runs right after the liveness check
+    (#2889 review: liveness ordering)."""
+    task = _task(status="abandoned", exclusive_key="ex-1", session_handle="local-body:x")
+    task["spawn_reservation"]["key"] = "old-resv-key"
+    client = _FakeClient(get_task=task)
+    with pytest.raises(reattach.ReattachError, match="not confirmed live"):
+        reattach.reattach(client, "t-1", "sess-1", local_session_verdict=lambda sid: "gone")
+    assert client.fail_spawn_calls == []
+    assert client.create_calls == []
 
 
 def test_reattach_refuses_when_producer_managed():

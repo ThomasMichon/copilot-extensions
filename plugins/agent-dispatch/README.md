@@ -1097,10 +1097,10 @@ CWD identity.
 **Known limitation:** `abandon --override-live` (see below) leaves the
 source task's own reservation active; supervisor reconciliation may treat a
 terminal task's still-active reservation as cleanup and end its body before
-an operator reattaches. `reattach` re-verifies liveness immediately before
-acting, so it never reattaches into a session that has actually died in that
-window -- but reattach promptly after an override-live abandon to minimize
-the race.
+an operator reattaches. `reattach` orders its liveness check as late as
+reasonably possible (right before the mutating create/reserve/claim
+sequence) to minimize -- no server-side atomic fence eliminates it entirely
+-- that window; reattach promptly after an override-live abandon.
 
 ### Guarding against discarding a live session (`abandon --override-live`)
 
