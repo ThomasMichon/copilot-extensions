@@ -1025,7 +1025,7 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
             while IFS= read -r line; do
                 # Strip 'export ' prefix → KEY=VALUE
                 local_kv="${line#export }"
-                if [[ "$_BACKEND_ENABLED" == "1" ]]; then
+                if [[ "$_AHP_RESUME_AVAILABLE" == "1" ]]; then
                     case "$local_kv" in
                         GH_TOKEN=*|GITHUB_TOKEN=*|AGENT_WORKTREES_AHP_AUTH_TOKEN=*)
                             continue
@@ -1035,7 +1035,7 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
                 TMUX_ENV_FLAGS+=(-e "$local_kv")
             done <<< "$ENV_EXPORTS"
         fi
-        if [[ "$_BACKEND_ENABLED" == "1" ]]; then
+        if [[ "$_AHP_RESUME_AVAILABLE" == "1" ]]; then
             TMUX_ENV_FLAGS+=(
                 -e "COPILOT_CLI_ENABLED_FEATURE_FLAGS=$COPILOT_CLI_ENABLED_FEATURE_FLAGS"
             )
@@ -1048,7 +1048,7 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
         SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
         PANE_WRAPPER="$SCRIPT_DIR/pane-wrapper.sh"
         AHP_TOKEN_FILE=""
-        if [[ "$_BACKEND_ENABLED" == "1" ]]; then
+        if [[ "$_AHP_RESUME_AVAILABLE" == "1" ]]; then
             if [[ ! -r "$PANE_WRAPPER" ]]; then
                 setup_log ERROR "AHP tmux launch requires the pane wrapper at $PANE_WRAPPER"
                 echo "ERROR: AHP tmux launch requires the agent-worktrees pane wrapper." >&2
@@ -1085,7 +1085,7 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
             PANE_CMD=("${CLEAN_ENV[@]}" "${CMD_ARRAY[@]}")
         fi
         TMUX_COMMAND=(tmux)
-        if [[ "$_BACKEND_ENABLED" == "1" ]]; then
+        if [[ "$_AHP_RESUME_AVAILABLE" == "1" ]]; then
             TMUX_COMMAND=(
                 env -u GH_TOKEN -u GITHUB_TOKEN
                 -u AGENT_WORKTREES_AHP_AUTH_TOKEN
@@ -1198,7 +1198,7 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
     echo ""
 
     set +e
-    if [[ "$_BACKEND_ENABLED" == "1" ]]; then
+    if [[ "$_AHP_RESUME_AVAILABLE" == "1" ]]; then
         GH_TOKEN="$GH_TOKEN" \
         COPILOT_CLI_ENABLED_FEATURE_FLAGS="$COPILOT_CLI_ENABLED_FEATURE_FLAGS" \
             env -u GITHUB_TOKEN -u AGENT_WORKTREES_AHP_AUTH_TOKEN \
