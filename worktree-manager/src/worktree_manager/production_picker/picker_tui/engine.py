@@ -781,6 +781,23 @@ class _PickerNativeData(OptionList):
             data = scr._build_data_vrows(W, sel=self._SENTINEL_SEL)
         except Exception:
             data = []
+        # Preserve scroll position across a same-pivot rebuild (#6443 follow-up
+        # bug report). `OptionList.clear_options()` unconditionally resets
+        # `scroll_y` to 0, so EVERY full rebuild -- including the routine ones
+        # driven by nothing but the cosmetic live-pulse tick (`pulse` is part of
+        # `_signature()`) or a row-count change -- jumped the list back to the
+        # top, discarding the operator's scroll position. Only a genuine
+        # pivot/tab/machine switch (the first three signature fields: kind,
+        # htab, machine_idx) is a real navigation and should still reset scroll,
+        # matching the existing "machine switch clears + resets selection"
+        # behavior (dev165).
+        old_sig = self._sig
+        new_sig = self._signature()
+        preserve_scroll = (
+            old_sig is not None and len(old_sig) > 2 and len(new_sig) > 2
+            and old_sig[:3] == new_sig[:3]
+        )
+        old_scroll_y = int(getattr(self.scroll_offset, "y", 0) or 0)
         self._syncing = True
         try:
             self.clear_options()
@@ -814,9 +831,14 @@ class _PickerNativeData(OptionList):
                         self._l_rows[rid] = (idx, rec, stop[1])
             if opts:
                 self.add_options(opts)
+            if preserve_scroll and old_scroll_y:
+                # Clamped by the reactive's own validator against the freshly
+                # rebuilt virtual_size; a shrunk list simply lands at its new
+                # bottom instead of raising or overscrolling.
+                self.scroll_y = old_scroll_y
         finally:
             self._syncing = False
-        self._sig = self._signature()
+        self._sig = new_sig
         self._sync_from_sel()
         self._update_sticky()
 
