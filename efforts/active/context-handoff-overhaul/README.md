@@ -306,10 +306,10 @@ Verbatim from the operator:
   (a live tmux pass) remains open there, unchanged.
 
 ### Phase 4 — Configurability (Goal 4)
-- [ ] Add a `mode` config key (`auto` / `manual-only` / `off`) to
+- [x] Add a `mode` config key (`auto` / `manual-only` / `off`) to
   `config.mjs` / `.context-handoff/config.yaml`.
-- [ ] Support absolute-token thresholds as an alternative to percentages.
-- [ ] Add a user-level config layer beneath the existing repo-level layer.
+- [x] Support absolute-token thresholds as an alternative to percentages.
+- [x] Add a user-level config layer beneath the existing repo-level layer.
 
 ### Phase 5 — Lineage/diagnostics closure (Goals 6, 7)
 - [ ] Coordinate with (not duplicate) `handoff-cutover-lifecycle-journal`'s
@@ -392,6 +392,16 @@ Verbatim from the operator:
   coordinator itself is unreachable).
 - [ ] Configurability: `mode=off` and `mode=manual-only` are honored end to
   end; an absolute-token threshold config overrides the percentage default.
+  (Unit-level coverage landed: `mode.test.mjs` covers the pure gating policy,
+  `config.test.mjs` covers mode parsing plus user-level/repo-level merge
+  precedence, `thresholds.test.mjs` covers absolute-token and mixed
+  percent/token pressure math + deferred mixed-order validation, and
+  `cli-parity.test.mjs` proves the payload-local manual fallback refuses
+  `mode: off`. Still open: a real live-session proof that the SDK-wired
+  `session.usage_info` handler suppresses nudges/force-tier behavior in
+  `manual-only`/`off` -- no local harness exercises a real
+  `@github/copilot-sdk` session connection, so that end-to-end piece still
+  needs a real session or clean-room scenario before checking this off.)
 - [ ] Lineage: `agent-worktrees handoff-trace` (once landed) reconstructs a
   full chain for a multi-hop handoff after every process in the chain has
   exited, on both a live worktree and one already reaped.
@@ -758,6 +768,50 @@ gate land._
   signature confirmation + bounded hard-kill fallback + lock-file cleanup,
   replacing both existing termination paths) -- each shipped with its own
   isolated CLI harness so it can be driven directly against a live mux
+  server without going through the full handoff choreography.
+
+### 2026-09-17 — Phase 4 (configurability)
+
+- Implemented all three Phase 4 items on a fresh `origin/main` branch:
+  `config.mjs` now parses a top-level `mode:` (`auto` / `manual-only` /
+  `off`), accepts per-tier `_tokens` as an alternative to `_percent`, and
+  loads a lower-priority user-global config from
+  `~/.context-handoff/config.yaml` before merging any repo-local
+  `.context-handoff/config.yaml` keys over it.
+- **Judgment call — `mode: off`:** treated as a repo-level opt-out of the
+  *mechanism itself*, not merely the automatic monitor. The extension now
+  suppresses every `session.usage_info` pressure response outside `auto`,
+  and when `mode: off` it additionally refuses all extension-provided manual
+  entry points (`generate_handoff_prompt`, `save_handoff_prompt`,
+  `consume_handoff`, `trigger_handoff`, `/handoff-continue`,
+  `/consume-handoff`, `/resume-handoff`) plus the payload-local CLI's
+  mutating/consuming handoff verbs. Reasoning: a repo owner asking for
+  "off" should get a true disable, not a loophole where the mechanism still
+  works if someone knows the internal tool names. Read-only diagnostics
+  (`facts`, `check-heads`) remain available from the CLI.
+- **Judgment call — mixed percent/absolute thresholds:** allowed *per tier*
+  (the more permissive design the redesign text allowed), not all-or-
+  nothing. Validation remains strict for what is knowable at load time
+  (exactly one unit per tier, integer/range checks, same-unit ordering), and
+  a mixed config's cross-unit ordering is re-validated at
+  `contextPressure()` time once a real token limit exists. Reasoning: a
+  config such as `soft_tokens` + `hard_percent` is genuinely useful, but its
+  effective ordering sometimes depends on the session's live token window, so
+  rejecting every mixed config up front would give up that flexibility for no
+  safety gain.
+- **Judgment call — user-level path and precedence:** chose
+  `~/.context-handoff/config.yaml`, mirroring the repo-local
+  `.context-handoff/config.yaml` shape, because this plugin is payload-only
+  and does not own an installed runtime root. Merge precedence is per key:
+  defaults < user-level < repo-level, including per-tier threshold-unit
+  replacement (`hard_tokens` in the repo cleanly replaces a user-level
+  `hard_percent` rather than coexisting with it). Reasoning: key-level merge
+  preserves a repo's ability to override just `mode` or one threshold tier
+  without discarding otherwise-useful personal defaults.
+- Added unit coverage: `mode.test.mjs`, expanded `config.test.mjs`,
+  `thresholds.test.mjs`, and `cli-parity.test.mjs`. Updated docs:
+  `plugins/context-handoff/README.md` and `docs/configuration.md`. Bumped
+  `context-handoff` to `0.1.1-dev25`.
   server without the full handoff dance. Only after both are hardened does
   `handoff-cutover` and the Picker Stop/Take-over path get rewired onto them.
 - Added Phase 6 to this README's Plan and a matching Validation Plan item.
