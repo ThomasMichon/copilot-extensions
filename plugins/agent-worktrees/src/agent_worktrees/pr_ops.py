@@ -165,15 +165,6 @@ def _worktree_suffix(worktree_id: str) -> str:
     return git_ops.worktree_suffix(worktree_id)
 
 
-def _safe_worktree_label(worktree_id: str) -> str:
-    """A fallback title/label for an untitled worktree that never leaks the
-    raw ``worktree_id`` -- which embeds the authoring machine name and
-    creation timestamp -- into a PR title, branch name, or commit message
-    that can reach a public repo. Uses only the worktree's short suffix.
-    """
-    return f"Worktree {_worktree_suffix(worktree_id)} changes"
-
-
 def _sanitize_head_ref(name: str) -> str:
     """Collapse a formatted head-name template into a tidy, valid git ref.
 
@@ -535,10 +526,21 @@ def create_pr(
         except Exception:
             record = None
 
-    if title and record:
-        record.title = title.replace("\n", " ").strip()
+    # Gate the write on the *normalized* value -- a whitespace-only `title`
+    # is truthy and must not overwrite an existing, genuinely curated
+    # persisted title with `None`.
+    _normalized_input_title = tracking.normalize_title(title)
+    if _normalized_input_title and record:
+        record.title = _normalized_input_title
 
-    eff_title = title or (record.title if record else None)
+    # Normalize both candidates before deciding whether a title is already
+    # usable -- an un-normalized whitespace-only `title` or a stale
+    # whitespace-only persisted `record.title` (e.g. from a pre-existing
+    # record set by an older version) is truthy but not meaningful, and must
+    # not skip the commit-subject derivation below.
+    eff_title = _normalized_input_title or tracking.normalize_title(
+        record.title if record else None
+    )
     if not eff_title:
         # No explicit --title and no persisted worktree title. Derive a
         # meaningful default from the worktree's own newest commit subject
@@ -553,13 +555,32 @@ def create_pr(
             # when the record has no curated title of its own (true here by
             # construction), so an operator/PR title is never clobbered.
             if record and not (record.title and record.title != "null"):
-                record.title = derived
-    # Last resort: never fall back to the raw worktree_id. It embeds the
-    # authoring machine name and creation timestamp, and this title feeds the
-    # PR title, the PR branch-name slug, AND the squash commit message below
-    # -- any of which can land on a public repo. `_safe_worktree_label` keeps
-    # only the worktree's short suffix.
-    eff_title = eff_title or _safe_worktree_label(worktree_id)
+                record.title = tracking.normalize_title(derived)
+    # Last resort: never fall back to the raw worktree_id (it embeds the
+    # authoring machine name and creation timestamp) or any other synthetic
+    # placeholder. If even the commit-subject derivation above came up empty,
+    # this worktree genuinely has no meaningful title anywhere -- require the
+    # caller to supply one explicitly rather than inventing one. Normalize
+    # first (whitespace-only -> None) WITHOUT truncating -- `eff_title`
+    # publishes as the PR title and the branch-name slug, so it must not be
+    # silently shortened to the Picker's short-display limit.
+    eff_title = tracking.normalize_title(eff_title)
+    # Keep the persisted record in lockstep with the normalized value -- a
+    # caller-supplied title containing carriage returns/tabs/other control
+    # characters must not survive un-normalized in either the tracking YAML
+    # or (via squash_msg below, which reads record.title first) the squash
+    # commit message.
+    if record and eff_title:
+        record.title = eff_title
+    if not eff_title:
+        return {**base, "error": (
+            "No usable title could be determined for this PR: --title was "
+            "either omitted or contained only whitespace, no title is "
+            "persisted on the worktree, and no meaningful title could be "
+            "derived from the worktree's own commit history (e.g. an empty "
+            "commit subject). Re-run with an explicit, non-blank --title "
+            "describing the change."
+        )}
 
     # Resolve the active PR and whether it is still live (can receive pushes).
     # A *terminal* active PR (merged/closed) must NOT have its branch reused --
@@ -795,9 +816,12 @@ def create_pr(
             record.prs.append(target_pr)
         tracking.save_record(record)
 
-    # `eff_title` is never the raw worktree_id (see the fallback above), so no
-    # separate machine-name guard is needed here.
-    squash_msg = (record.title if record and record.title else None) or eff_title
+    # Use `eff_title` directly rather than re-reading `record.title` -- the
+    # two are kept in lockstep above, but reading `eff_title` here can't
+    # diverge even if that invariant ever changes. It is never the raw
+    # worktree_id (see the fallback above), so no separate machine-name
+    # guard is needed either.
+    squash_msg = eff_title
 
     # 1. Rebase the worktree commits onto the upstream default branch FIRST,
     #    with the individual commits intact -- BEFORE squashing. This lets
