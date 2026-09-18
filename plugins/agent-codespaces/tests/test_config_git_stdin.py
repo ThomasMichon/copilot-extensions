@@ -11,7 +11,7 @@ import pytest
 from agent_procutil import no_window_kwargs, windowless_daemon_kwargs
 from ssh_manager.process import terminate_ssh_process_tree
 
-from agent_codespaces import config
+from agent_codespaces import config, local_git_identity
 
 
 @pytest.mark.parametrize("probe", ["root", "origin"])
@@ -23,7 +23,7 @@ def test_git_probe_has_null_stdin_and_bounded_wait(tmp_path, monkeypatch, probe)
         calls.append((argv, kwargs))
         return subprocess.CompletedProcess(argv, 0, output, "")
 
-    monkeypatch.setattr(config.subprocess, "run", run)
+    monkeypatch.setattr(local_git_identity.subprocess, "run", run)
     if probe == "root":
         assert config.cwd_repo_root() == tmp_path.resolve()
     else:
@@ -41,7 +41,7 @@ def test_git_probe_timeout_is_not_missing_configuration(tmp_path, monkeypatch, p
     def timeout(argv, **kwargs):
         raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
 
-    monkeypatch.setattr(config.subprocess, "run", timeout)
+    monkeypatch.setattr(local_git_identity.subprocess, "run", timeout)
     with pytest.raises(RuntimeError, match="Local Git .* discovery timed out"):
         if probe == "root":
             config.cwd_repo_root()
@@ -51,7 +51,7 @@ def test_git_probe_timeout_is_not_missing_configuration(tmp_path, monkeypatch, p
 
 @pytest.mark.parametrize("probe", ["root", "origin"])
 def test_non_repository_and_missing_origin_remain_absent(tmp_path, monkeypatch, probe):
-    monkeypatch.setattr(config.subprocess, "run", lambda argv, **k: subprocess.CompletedProcess(argv, 1, "", ""))
+    monkeypatch.setattr(local_git_identity.subprocess, "run", lambda argv, **k: subprocess.CompletedProcess(argv, 1, "", ""))
     assert (config.cwd_repo_root() if probe == "root" else config._git_origin_remote(tmp_path)) is None
 
 
