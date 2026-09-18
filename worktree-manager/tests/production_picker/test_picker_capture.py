@@ -167,6 +167,47 @@ def test_awaiting_operator_renders_marker_and_pulse(monkeypatch, tmp_path):
         "the ⏳ pulse glyph is not painted with the awaiting amber accent")
 
 
+def _assets_source():
+    """A fleet with one worktree carrying held claims of several kinds (#6443/
+    upstream #1979 Phase 6) -- exercises the tile's bounded asset-hint line
+    across a wide and a narrow capture width."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("anomalous-potato", "Win")
+    raws = [
+        {"id": "anomalous-potato-win-20260627-dddd", "title": "Ships things",
+         "status": "active", "started_at": "2026-06-27T17:00:00",
+         "turn_count": 2, "state": "wip",
+         "resources": [
+             {"kind": "pr", "ref": "https://example/pulls/42",
+              "state": "active"},
+             {"kind": "worktree", "ref": "host/repo/wt-child",
+              "state": "at-rest"},
+         ]},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+    return src
+
+
+def test_asset_hints_render_at_wide_and_narrow_widths(monkeypatch, tmp_path):
+    """#6443/upstream #1979 Phase 6: the tile's bounded per-kind asset-hint
+    line is legible in the deterministic character grid at both a wide and a
+    narrow capture width -- neither width crashes the renderer nor drops the
+    hint tokens (a narrow width may clip the live-pulse intent text, but the
+    hints themselves stay visible since they are bounded, not free text)."""
+    _isolate_pivots(monkeypatch, tmp_path)
+    wide = pcap.capture(_assets_source(), live=False, size=(118, 24))["text"]
+    narrow = pcap.capture(_assets_source(), live=False, size=(60, 24))["text"]
+    for text in (wide, narrow):
+        assert "PR" in text
+        assert "WT" in text
+
+
 def test_capture_is_deterministic(monkeypatch, tmp_path):
     _isolate_pivots(monkeypatch, tmp_path)
     first = pcap.capture(_fixture_source(), live=False)["text"]
