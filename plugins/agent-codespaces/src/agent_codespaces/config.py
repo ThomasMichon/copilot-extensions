@@ -21,7 +21,6 @@ import logging
 import os
 import re
 import stat
-import subprocess
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
