@@ -4682,6 +4682,74 @@ def test_native_list_sticky_no_reflow_flicker(monkeypatch):
     asyncio.run(run())
 
 
+def test_native_list_scroll_survives_same_pivot_rebuild(monkeypatch):
+    """Scroll-reset-on-repaint (context-handoff bug #4): a same-pivot data
+    rebuild -- e.g. the cosmetic live-pulse tick (`pulse` is part of
+    ``_PickerNativeData._signature()``) -- must NOT jump the scrolled list back
+    to the top. ``OptionList.clear_options()`` unconditionally zeroes
+    ``scroll_y``, so every full ``_rebuild()`` used to discard the operator's
+    scroll position even when nothing about the visible pivot/tab/machine
+    changed."""
+    import datetime
+    import types
+
+    from worktree_manager.production_picker.picker_tui import derive
+
+    def _multi_section_src():
+        derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+        local = ("anomalous-potato", "Win")
+        raws = []
+        for i in range(30):
+            if i % 3 == 0:
+                started, status = "2026-06-27T17:00:00", "active"
+            elif i % 3 == 1:
+                started, status = "2026-06-20T17:00:00", "idle"
+            else:
+                started, status = "2026-05-01T17:00:00", "done"
+            raws.append({"id": f"anomalous-potato-win-2026062{i % 9}-r{i:02d}",
+                         "title": f"Row {i}", "status": status,
+                         "started_at": started, "turn_count": i,
+                         "state": "active" if i % 2 else "wip"})
+        s = types.SimpleNamespace()
+        s.LOCAL = local
+        s.LOCAL_LABEL = "lc"
+        s.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+        s.bucket = derive.bucket
+        s.for_machine = derive.for_machine
+        s.load = lambda: [derive.norm(w, *local) for w in raws]
+        return s
+
+    async def run():
+        app = PickerApp(_multi_section_src(), live=False)
+        async with app.run_test(size=(118, 16)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            scr.sel = ("L", 0)
+            scr.refresh()
+            await pilot.pause()
+            nl = scr.query_one("#nf-body-data")
+            nl.focus()
+            await pilot.pause()
+
+            for _ in range(15):
+                await pilot.press("down")
+                await pilot.pause()
+            y_before = int(getattr(nl.scroll_offset, "y", 0) or 0)
+            assert y_before > 0   # actually scrolled -- the repro precondition
+
+            # Same pivot/tab/machine, only the cosmetic pulse flips (mirrors the
+            # real ~0.5-2.5s live tick, #2019 `_tick`) -- must be a no-op full
+            # rebuild that preserves the scroll offset.
+            scr.pulse = 1 - scr.pulse
+            nl.refresh_data()
+            await pilot.pause()
+            assert int(getattr(nl.scroll_offset, "y", 0) or 0) == y_before
+
+    asyncio.run(run())
+
+
 def test_native_list_no_rowwrap_and_incremental_repaint(monkeypatch):
     """#171 (proper fix): holding up/down must not wrap worktree rows, and each
     nav step must repaint only the changed rows (O(1)), not rebuild the list.
