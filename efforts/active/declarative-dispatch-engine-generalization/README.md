@@ -99,6 +99,9 @@ and the parent agent-dispatch vision:
   against the merged `origin/main` declaration resolves `worker_guidance`
   from the packaged identity, byte-for-byte identical to
   `worker_identities.load_worker_identity("odsp-web-harness-backlog").rules`.
+  > **2026-09-17 correction:** the packaged path this bullet describes no
+  > longer exists -- see the dated journal entry below. The live declaration
+  > now resolves the same identity from a repo-local override instead.
 - [ ] Assess whether a named identity's structural boundaries (permitted
   tools/mutations) can enforce the reviewer vision's never-supersede rule
   more robustly than prose alone -- closing the Phase-6 open question in
@@ -652,5 +655,28 @@ other phases actually land in.
   racing to claim the same `context-handoff` task; only one won via the
   exactly-once claim. No data corruption, but the duplicate spawn itself is
   a harness bug worth a follow-up fix.
+
+### 2026-09-17 - Correction: the packaged identity referenced by earlier legs is gone
+
+The prior entries above (2026-09-08 legs) recorded the identity this effort
+wired up (`worker_identity: odsp-web-harness-backlog`) as **packaged** --
+resolved from this repo's own built-in identities tier. That is no longer
+accurate: `ThomasMichon/copilot-extensions#2851` (fixed in
+`ThomasMichon/copilot-extensions#2854`) found that identity should never have
+shipped as a package built-in -- its content (a repo name, skill paths,
+labels, commands) was all specific to the adopting repository that first
+authored it, which is adopter-private content, not generic package content.
+
+#2854 removes that identity file from this package's built-in tier and
+replaces it with a generic default identity. The live registrar declaration
+this effort wired up above keeps working unchanged, because the adopting
+repository independently added the removed content as its own repo-local
+override -- tier 1 of the worker-identity resolution order, which the live
+declaration always preferred over the built-in tier when run with that
+repo's checkout as `cwd`. Any reader relying on the 2026-09-08 entries'
+description of the packaged path should treat this entry as the current
+state instead.
+
+
 
 

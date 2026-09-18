@@ -43,6 +43,10 @@ def validate_spec(spec: dict[str, Any]) -> None:
         or any(not isinstance(part, str) or not part for part in command)
     ):
         raise EmitterError("'command' must be a non-empty list of non-empty strings")
+    for key in ("cwd", "lease_scope", "holder_session"):
+        value = spec.get(key)
+        if value is not None and (not isinstance(value, str) or not value):
+            raise EmitterError(f"'{key}' must be a non-empty string")
     if builtin is not None:
         if command is not None:
             raise EmitterError(
@@ -53,7 +57,7 @@ def validate_spec(spec: dict[str, Any]) -> None:
         from ..repository_issue_loops import validate_config
 
         try:
-            validate_config(builtin)
+            validate_config(builtin, cwd=spec.get("cwd"))
         except ValueError as exc:
             raise EmitterError(str(exc)) from exc
     try:
@@ -62,10 +66,6 @@ def validate_spec(spec: dict[str, Any]) -> None:
         raise EmitterError("'interval_seconds' must be a number > 0") from exc
     if interval <= 0:
         raise EmitterError("'interval_seconds' must be > 0")
-    for key in ("cwd", "lease_scope", "holder_session"):
-        value = spec.get(key)
-        if value is not None and (not isinstance(value, str) or not value):
-            raise EmitterError(f"'{key}' must be a non-empty string")
     timeout = spec.get("timeout_seconds")
     if timeout is not None:
         try:
@@ -261,6 +261,7 @@ def run_tick(
                 client,
                 spec["repository_issue_loop"],
                 clock=clock,
+                cwd=spec.get("cwd"),
             )
             return {
                 "held": True,
