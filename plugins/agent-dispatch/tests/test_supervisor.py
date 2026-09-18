@@ -1112,6 +1112,35 @@ def test_active_reservations_fails_closed_on_transport_error(q, client, monkeypa
     assert q.get(queued.id).status == Status.QUEUED
 
 
+def test_failed_spawn_counts_fails_closed_on_transport_error(q, client, monkeypatch):
+    """Dead-letter/retry gating must not treat "unknown" as "zero failures".
+
+    `_failed_spawn_counts` feeds `_is_dead_lettered` (via `max_attempts`).
+    Swallowing a transient transport error into `{}` there would make every
+    task look like it has zero failed attempts, letting one that has
+    already exhausted `max_attempts` keep retrying past its bound during an
+    outage. It must instead fail closed: block *new* spawns entirely this
+    cycle (existing active work is unaffected) rather than guess either way.
+    """
+    queued = q.create("work")
+
+    def refused(*_args, **_kwargs):
+        raise httpx.ConnectError(
+            "[WinError 10061] No connection could be made because the target "
+            "machine actively refused it"
+        )
+
+    monkeypatch.setattr(client, "list_reservations", refused)
+    spawn = _ok_spawn()
+    sup = Supervisor(client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5)
+
+    assert sup._failed_spawn_counts() is None
+
+    assert sup.poll_once() == []
+    assert spawn.calls == []
+    assert q.get(queued.id).status == Status.QUEUED
+
+
 def test_release_requested_legacy_missing_worktree_recovers_from_held_conclusion(
     q, client, tmp_path
 ):

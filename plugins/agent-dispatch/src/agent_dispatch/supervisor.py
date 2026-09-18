@@ -3187,10 +3187,21 @@ class Supervisor:
             self._evaluated = keep
         return emitted
 
-    def _failed_spawn_counts(self) -> dict[str, int]:
-        """Count FAILED spawn reservations per task id (the dead-letter signal)."""
+    def _failed_spawn_counts(self) -> dict[str, int] | None:
+        """Count FAILED spawn reservations per task id (the dead-letter signal).
+
+        Returns ``None`` (not ``{}``) when the coordinator can't be reached,
+        so ``poll_once`` can fail closed -- block new spawns this cycle --
+        instead of assuming zero failures for every task, which could let one
+        that has already exhausted ``max_attempts`` keep retrying past its
+        bound during an outage.
+        """
+        try:
+            reservations = self._pool_reservations(state=SpawnState.FAILED, strict=True)
+        except _ReservationsUnavailable:
+            return None
         counts: dict[str, int] = {}
-        for res in self._pool_reservations(state=SpawnState.FAILED):
+        for res in reservations:
             counts[res["task_id"]] = counts.get(res["task_id"], 0) + 1
         return counts
 
@@ -3268,8 +3279,17 @@ class Supervisor:
             self.nudge_stalled(now=now)
         failed_counts = self._failed_spawn_counts()
         eligible = list(self._eligible(now))
-        dead_lettered = self._log_dead_lettered(eligible, failed_counts)
-        active = len(self._active_reservations())
+        if failed_counts is None:
+            log.warning(
+                "could not determine failed-spawn counts this cycle; "
+                "blocking new spawns rather than risking a retry past "
+                "max_attempts (existing active work is unaffected)"
+            )
+            dead_lettered: set[str] = set()
+            active = self.max_concurrent
+        else:
+            dead_lettered = self._log_dead_lettered(eligible, failed_counts)
+            active = len(self._active_reservations())
         spawned: list[str] = []
         for task in eligible:
             if task["id"] in dead_lettered:
