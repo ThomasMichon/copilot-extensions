@@ -18,6 +18,7 @@ def test_builtin_identity_resolves():
     assert identity.rules
 
 
+@pytest.mark.guard
 def test_no_repo_specific_builtin_identity_shipped():
     """Regression guard for the odsp-web-harness-backlog contamination.
 
