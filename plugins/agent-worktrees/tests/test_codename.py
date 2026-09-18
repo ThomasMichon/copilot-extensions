@@ -256,7 +256,7 @@ class TestGenerateViaHook:
             marker.unlink()
         try:
             grandchild_code = (
-                "import time; time.sleep(5); "
+                "import time; time.sleep(0.3); "
                 f"open({marker.as_posix()!r}, 'w').close()"
             )
             # Base64-encode the grandchild source before embedding it in
@@ -290,6 +290,10 @@ class TestGenerateViaHook:
             assert result == "quiet-gizmo"
             # Give a leaked (not-actually-killed) grandchild time to have
             # written the marker if group-sweep-on-success were missing.
+            # Comfortably longer than the grandchild's own 0.3s delay --
+            # the earlier version of this test slept for less time than
+            # the grandchild's delay and could not have caught the leak
+            # this test exists to catch; see the effort README's Journal.
             time.sleep(1.0)
             assert not marker.exists(), (
                 "a descendant backgrounded by a successful hook kept "

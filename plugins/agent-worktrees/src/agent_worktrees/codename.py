@@ -167,17 +167,26 @@ def _kill_process_group(process: subprocess.Popen) -> None:
     process.
 
     On POSIX, ``killpg`` reaches the whole session started via
-    ``start_new_session=True``. On Windows, ``CTRL_BREAK_EVENT`` only
-    reaches processes that installed a console control handler --
-    typically just the immediate shell under ``shell=True``, not a
-    pipeline's later stages or a background child -- so it is not a
-    reliable tree-termination mechanism; ``taskkill /T /F`` (this repo's
-    existing Windows tree-kill tool, e.g. in ``install.ps1``) recurses the
-    whole descendant tree instead.
+    ``start_new_session=True``. Uses ``process.pid`` directly as the
+    process group id rather than looking it up via ``os.getpgid(pid)`` --
+    ``start_new_session=True`` makes the child its own session **and**
+    process group leader, so its pgid *is* its pid by construction; there
+    is nothing to look up. This matters because ``os.getpgid(pid)`` fails
+    once the process has already been reaped (e.g. by a preceding
+    successful ``process.wait()``), which would otherwise make cleanup a
+    silent no-op on exactly the "hook exited cleanly but backgrounded a
+    descendant" path this function exists to cover. On Windows,
+    ``CTRL_BREAK_EVENT`` only reaches processes that installed a console
+    control handler -- typically just the immediate shell under
+    ``shell=True``, not a pipeline's later stages or a background child --
+    so it is not a reliable tree-termination mechanism; ``taskkill /T /F``
+    (this repo's existing Windows tree-kill tool, e.g. in ``install.ps1``)
+    recurses the whole descendant tree by PID instead, which remains valid
+    to call regardless of the process's already-reaped state.
     """
     if os.name == "posix":
         try:
-            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            os.killpg(process.pid, signal.SIGKILL)
         except (OSError, ProcessLookupError):
             try:
                 process.kill()
