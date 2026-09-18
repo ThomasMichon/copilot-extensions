@@ -406,8 +406,10 @@ Verbatim from the operator:
   behaviors are exercised standalone, without going through the full
   handoff-cutover choreography. **Update after Phase 6 item 5:** the
   production callers are now rewired and covered hermetically (`handoff-cutover`
-  spawn/retire + `restart_worktree_copilot`) with the full `agent-worktrees`
-  plugin suite green, but this checklist item stays open until the separate
+  spawn/retire + `restart_worktree_copilot`); the full `agent-worktrees`
+  suite has one known pre-existing, unrelated failure block
+  (`test_doctor.py`, confirmed reproducing on clean `origin/main`) but no
+  regression from this rewire. This checklist item stays open until the separate
   isolated live-mux harness proof above is recorded.
 
 ## Proposal
@@ -816,8 +818,11 @@ gate land._
 - Validation for this slice: new/updated hermetic coverage in
   `test_handoff_cutover.py`, `test_restart_copilot.py`,
   `test_mux_live_cache.py`, and `test_profile_assignment.py`; targeted
-  rewired-callers regression green; full `python tools/run-plugin-tests.py
-  agent-worktrees --timeout 600 --plugin-timeout 3600` green; module-size
-  and version-bump guards green. The separate isolated live-mux harness
+  rewired-callers regression green; module-size and version-bump guards
+  green. Full `python tools/run-plugin-tests.py agent-worktrees --timeout
+  600 --plugin-timeout 3600` surfaces 10 pre-existing, unrelated failures in
+  `test_doctor.py` — verified to reproduce identically on a clean
+  `origin/main` checkout, so not attributed to this change; left untouched
+  as out of scope for this PR. The separate isolated live-mux harness
   proof for `pane_create`/`pane_terminate` remains open exactly as noted in
   the Validation Plan above.
