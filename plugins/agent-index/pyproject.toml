@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-index"
-version = "0.1.0-dev179"
+version = "0.1.0-dev180"
 description = "Portable indexing and semantic-search engine for a harness repo and its immediate ecosystem."
 readme = "README.md"
 license = "MIT"
@@ -30,6 +30,9 @@ dependencies = [
     # Structured adoption config (.agent-index/config.yaml: role, indexer
     # designation, routing). Small, pure-Python.
     "pyyaml>=6.0",
+    # Shared providers.d scan/classify primitive (external content-domain
+    # providers); vendored per plugin, byte-identical src across copies.
+    "agent-dropin-registry",
 ]
 
 [tool.uv.sources]
@@ -37,6 +40,7 @@ dependencies = [
 # (module ``zdd``), extracted from agent-bridge so other services reuse them.
 agent-zdd = { path = "libs/zdd" }
 agent-procutil = { path = "libs/agent-procutil" }
+agent-dropin-registry = { path = "libs/dropin-registry" }
 
 [project.optional-dependencies]
 store = [
