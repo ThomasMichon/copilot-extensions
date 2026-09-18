@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import shlex
 import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from agent_procutil import no_window_kwargs
+from ssh_manager.config_sources import SSHConfig
+from ssh_manager.manager import ConnectionInfo, ConnectionManager
 
 from agent_codespaces import __main__ as cli
 from agent_codespaces import connection_owner as owner
@@ -181,8 +185,56 @@ async def test_remote_probe_result_is_fail_closed(outcome):
         )
     assert await readiness.remote_relay_ready(manager, "example-space", 9857) is (outcome == "success")
     manager.exec_command.assert_awaited_once_with(
-        "example-space", readiness.remote_ping_command(9857), timeout=5.0,
+        "example-space", readiness.remote_ping_command(9857), timeout=30.0,
     )
+
+
+@pytest.mark.asyncio
+async def test_remote_relay_probe_allows_ssh_startup_overhead(tmp_path, monkeypatch):
+    requests = []
+    children = []
+
+    async def serve(reader, writer):
+        try:
+            requests.append(await reader.readuntil(b"\n\n"))
+            writer.write(b"pong\n\n")
+            await writer.drain()
+        finally:
+            writer.close()
+            with contextlib.suppress(ConnectionResetError):
+                await writer.wait_closed()
+
+    async def delayed_ssh(*args, config, **kwargs):
+        words = shlex.split(args[-1])
+        assert words[:2] == ["python3", "-c"]
+        # Model transport startup before the unchanged remote socket deadline begins.
+        program = "import time; time.sleep(5.25)\n" + words[2]
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-c", program, *words[3:], **kwargs, **no_window_kwargs(),
+        )
+        children.append(proc)
+        return proc
+
+    server = await asyncio.start_server(serve, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    manager = ConnectionManager()
+    info = ConnectionInfo(
+        host="example-space", config=SSHConfig(host_alias="example-space"),
+        socket_path=tmp_path / "unused", master_process=None, platform=manager.platform,
+    )
+    manager._connections["example-space"] = info
+    monkeypatch.setattr("ssh_manager.manager.create_ssh_subprocess", delayed_ssh)
+    try:
+        assert await readiness.remote_relay_ready(manager, "example-space", port)
+        assert requests == [b"ping\n\n"]
+        assert info.child_processes == []
+    finally:
+        for proc in children:
+            if proc.returncode is None:
+                proc.kill()
+            await proc.wait()
+        server.close()
+        await server.wait_closed()
 
 
 @pytest.mark.asyncio
@@ -216,7 +268,16 @@ async def test_real_protocol_probes_reject_non_relay_and_stalled_listeners():
         assert await proc.wait() == 1
         response[0] = b""
         assert not await asyncio.to_thread(readiness.relay_ping, port, .05)
-        assert requests == [b"ping\n\n"] * 5
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, *remote_words[1:], stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            assert await asyncio.wait_for(proc.wait(), 5) != 0
+        finally:
+            if proc.returncode is None:
+                proc.kill()
+            await proc.communicate()
+        assert requests == [b"ping\n\n"] * 6
     finally:
         server.close()
         await server.wait_closed()

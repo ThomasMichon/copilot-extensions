@@ -53,7 +53,9 @@ async def remote_relay_ready(
 ) -> bool:
     """Require a bounded round trip through the CodeSpace's reverse forward."""
     try:
-        result = await manager.exec_command(name, remote_ping_command(port), timeout=5.0)
+        # Direct SSH/ProxyCommand startup is part of this budget, not the remote
+        # socket exchange, which retains its separate two-second deadline.
+        result = await manager.exec_command(name, remote_ping_command(port), timeout=30.0)
         if getattr(result, "timed_out", False) or result.exit_code == 255:
             return fail_open
         return result.exit_code == 0

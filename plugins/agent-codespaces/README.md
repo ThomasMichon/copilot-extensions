@@ -311,7 +311,10 @@ exec bash -il
   Protocol probes request no credentials and use no auth-cache fallback: they
   establish service/tunnel readiness, not authorization for every remote host
   or resource. Existing auth verification and configured credential policy still
-  apply. A later outage retains existing relay supervision/reconnection; this
+  apply. The remote socket exchange has a two-second deadline inside a separate
+  30-second SSH command budget, which includes direct SSH/ProxyCommand startup.
+  A successful transport alone never substitutes for the protocol response.
+  A later outage retains existing relay supervision/reconnection; this
   flag does not kill a terminal for a transient post-launch loss.
 - Relay supervision and any connection-owner hold remain active throughout the
   interactive child. Owned claims and relay tenants are heartbeated every 30
