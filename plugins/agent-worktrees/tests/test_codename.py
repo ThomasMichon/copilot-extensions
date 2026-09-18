@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import random
+import subprocess
 import sys
 import tempfile
 import time
@@ -191,6 +192,34 @@ class TestGenerateViaHook:
         finally:
             if marker.exists():
                 marker.unlink()
+
+    def test_timeout_reaps_the_process_no_zombie_left_behind(
+        self, monkeypatch
+    ) -> None:
+        """After a timeout, the Popen object itself must already be waited
+        on (``poll()`` returns an exit status, not ``None``) -- regression
+        guard for accumulating zombie/leaked child processes across many
+        hook timeouts in a long-lived agent process."""
+        import agent_worktrees.codename as codename_mod
+
+        captured: list[subprocess.Popen] = []
+        real_popen = subprocess.Popen
+
+        def _capture(*args: object, **kwargs: object) -> subprocess.Popen:
+            process = real_popen(*args, **kwargs)  # type: ignore[arg-type]
+            captured.append(process)
+            return process
+
+        monkeypatch.setattr(codename_mod.subprocess, "Popen", _capture)
+        result = codename_mod.generate_via_hook(
+            _py("import time; time.sleep(5)"), timeout=0.2
+        )
+        assert result is None
+        assert captured, "expected the hook subprocess to have been created"
+        assert captured[0].poll() is not None, (
+            "hook process was killed but never reaped -- would accumulate "
+            "as a zombie across repeated timeouts"
+        )
 
     def test_nonexistent_command_fails_closed(self) -> None:
         assert generate_via_hook("this-command-does-not-exist-anywhere") is None

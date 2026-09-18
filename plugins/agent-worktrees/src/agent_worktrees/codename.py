@@ -145,17 +145,44 @@ def _process_group_kwargs() -> dict:
 
 
 def _kill_process_group(process: subprocess.Popen) -> None:
-    """Best-effort kill of ``process`` and its whole process group/session."""
-    try:
-        if os.name == "posix":
+    """Best-effort kill of ``process`` and its whole process group/session,
+    then **reap** it (``wait()``) so a repeatedly-timing-out hook can't
+    accumulate zombie/leaked child processes in this long-lived agent
+    process.
+
+    On POSIX, ``killpg`` reaches the whole session started via
+    ``start_new_session=True``. On Windows, ``CTRL_BREAK_EVENT`` only
+    reaches processes that installed a console control handler --
+    typically just the immediate shell under ``shell=True``, not a
+    pipeline's later stages or a background child -- so it is not a
+    reliable tree-termination mechanism; ``taskkill /T /F`` (this repo's
+    existing Windows tree-kill tool, e.g. in ``install.ps1``) recurses the
+    whole descendant tree instead.
+    """
+    if os.name == "posix":
+        try:
             os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-        else:
-            process.send_signal(signal.CTRL_BREAK_EVENT)
-    except (OSError, ProcessLookupError):
-        pass
+        except (OSError, ProcessLookupError):
+            try:
+                process.kill()
+            except OSError:
+                pass
+    else:
+        try:
+            subprocess.run(
+                ["taskkill", "/T", "/F", "/PID", str(process.pid)],
+                capture_output=True,
+                timeout=5,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            try:
+                process.kill()
+            except OSError:
+                pass
     try:
-        process.kill()
-    except OSError:
+        process.wait(timeout=5)
+    except (subprocess.TimeoutExpired, OSError):
         pass
 
 
