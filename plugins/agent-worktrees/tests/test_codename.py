@@ -104,21 +104,39 @@ class TestHandleValidation:
         assert is_valid_handle("gizmo123")
 
 
-class TestWordlistTwoWordChoices:
-    def test_default_is_full_cross_product(self) -> None:
+class TestWordlistPickTwoWords:
+    def test_default_picks_from_full_space(self) -> None:
         wl = Wordlist(nouns=("cube", "sphere"), adjectives=("red", "blue"))
-        choices = wl.two_word_choices()
-        assert len(choices) == 4
-        assert ("red", "cube") in choices
-        assert ("blue", "sphere") in choices
+        rng = random.Random(1)
+        for _ in range(20):
+            adjective, noun = wl.pick_two_words(rng)
+            assert adjective in wl.adjectives
+            assert noun in wl.nouns
 
-    def test_explicit_pairs_override_cross_product(self) -> None:
+    def test_explicit_pairs_restrict_to_declared_combinations(self) -> None:
         wl = Wordlist(
             nouns=("cube", "sphere"),
             adjectives=("red", "blue"),
             pairs=(("red", "cube"),),
         )
-        assert wl.two_word_choices() == (("red", "cube"),)
+        rng = random.Random(1)
+        for _ in range(20):
+            assert wl.pick_two_words(rng) == ("red", "cube")
+
+    def test_does_not_materialize_a_cross_product(self) -> None:
+        """Regression guard: pick_two_words must not build the full
+        adjective x noun tuple internally -- a large but structurally
+        valid wordlist file (no size cap) could otherwise allocate an
+        unbounded amount of memory on every call."""
+        huge_adjectives = tuple(f"adj{i}" for i in range(2000))
+        huge_nouns = tuple(f"noun{i}" for i in range(2000))
+        wl = Wordlist(nouns=huge_nouns, adjectives=huge_adjectives)
+        rng = random.Random(1)
+        # 4,000,000 possible combinations -- would be slow/memory-heavy to
+        # materialize repeatedly; this must return quickly regardless.
+        adjective, noun = wl.pick_two_words(rng)
+        assert adjective in huge_adjectives
+        assert noun in huge_nouns
 
 
 class TestLoadWordlist:
@@ -131,8 +149,7 @@ class TestLoadWordlist:
         path = self._write(tmp_path, "words.yaml", "nouns: [cube, sphere]\n")
         wl = load_wordlist(path)
         assert wl.nouns == ("cube", "sphere")
-        # No adjectives declared -- falls back to the built-in adjectives
-        # for cross-product purposes.
+        # No adjectives declared -- falls back to the built-in adjectives.
         assert wl.adjectives == CODENAME_ADJECTIVES
 
     def test_loads_valid_yaml_with_adjectives(self, tmp_path: Path) -> None:
@@ -144,7 +161,6 @@ class TestLoadWordlist:
         wl = load_wordlist(path)
         assert wl.nouns == ("cube", "sphere")
         assert wl.adjectives == ("red", "blue")
-        assert len(wl.two_word_choices()) == 4
 
     def test_loads_valid_yaml_with_explicit_pairs(self, tmp_path: Path) -> None:
         path = self._write(
@@ -153,7 +169,7 @@ class TestLoadWordlist:
             "nouns: [cube]\npairs:\n  - [red, cube]\n  - [blue, cube]\n",
         )
         wl = load_wordlist(path)
-        assert wl.two_word_choices() == (("red", "cube"), ("blue", "cube"))
+        assert wl.pairs == (("red", "cube"), ("blue", "cube"))
 
     def test_loads_valid_json(self, tmp_path: Path) -> None:
         path = self._write(

@@ -107,17 +107,22 @@ class Wordlist:
     adjectives: tuple[str, ...] = CODENAME_ADJECTIVES
     pairs: tuple[tuple[str, str], ...] = ()
 
-    def two_word_choices(self) -> tuple[tuple[str, str], ...]:
-        """The (adjective, noun) combinations available for a 2-word
-        handle: ``pairs`` verbatim if declared, otherwise every
-        adjective crossed with every noun."""
+    def pick_two_words(self, rng: random.Random) -> tuple[str, str]:
+        """Pick one (adjective, noun) combination: from ``pairs`` if
+        declared, otherwise an adjective and a noun chosen independently.
+
+        Deliberately does **not** materialize the full adjective×noun
+        cross-product (an earlier version did, via a
+        ``two_word_choices()`` method) -- a large but structurally valid
+        wordlist file has no size cap, so eagerly building and repeatedly
+        re-sampling that whole tuple on every ``assign_codename`` retry
+        could allocate an unbounded amount of memory and slow worktree
+        creation. Independent selection is O(1) regardless of vocabulary
+        size.
+        """
         if self.pairs:
-            return self.pairs
-        return tuple(
-            (adjective, noun)
-            for adjective in self.adjectives
-            for noun in self.nouns
-        )
+            return rng.choice(self.pairs)
+        return rng.choice(self.adjectives), rng.choice(self.nouns)
 
 
 #: The built-in, organization-neutral wordlist -- used whenever a repo
@@ -252,15 +257,15 @@ def generate_handle(
     """Generate one handle from ``wordlist`` (the built-in neutral
     vocabulary by default).
 
-    ``words`` is 1 (a lone noun) or 2 (adjective-noun, from
-    ``wordlist.two_word_choices()``); any other value is treated as 2.
+    ``words`` is 1 (a lone noun) or 2 (adjective-noun, via
+    ``wordlist.pick_two_words()``); any other value is treated as 2.
     Uses ``rng`` if given (for deterministic tests), otherwise the
     module-level random source.
     """
     r = rng or random
     if words == 1:
         return r.choice(wordlist.nouns)
-    adjective, noun = r.choice(wordlist.two_word_choices())
+    adjective, noun = wordlist.pick_two_words(r)
     return f"{adjective}-{noun}"
 
 
