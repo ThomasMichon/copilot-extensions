@@ -22,6 +22,7 @@ from typing import Any
 import yaml
 
 from . import config_migrations, project_state, registry_paths
+from .codename_config import CodenameConfig, parse_codename
 
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _PROJECT_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$")
@@ -402,6 +403,10 @@ class RepoConfig:
     service_paths: list[str] = field(default_factory=list)
     post_install_hook: dict[str, list[str]] = field(default_factory=dict)
     pr: PRConfig = field(default_factory=PRConfig)
+    codename: CodenameConfig = field(default_factory=CodenameConfig)
+    """Per-repo codename-generation settings (built-in neutral generator by
+    default; an adopter may configure a declarative wordlist file -- see
+    ``codename_config.py`` / ``codename.py``)."""
     base_repo: bool = False
     """When true, this repo is driven in **base-repo (no-worktree)** mode: the
     anchor checkout is used directly and no worktree is ever created. Used to
@@ -1532,6 +1537,7 @@ def _build_repo_config(
         service_paths=service_paths,
         post_install_hook=post_install_hook,
         pr=_parse_pr(data.get("pr")),
+        codename=parse_codename(data.get("codename")),
         base_repo=bool(data.get("base_repo", False)),
         stateless=bool(data.get("stateless", False)),
         requires_external_state_root=bool(
