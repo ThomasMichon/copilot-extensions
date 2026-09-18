@@ -73,6 +73,11 @@ MAX_HANDLE_LENGTH = 64
 #: A hard ceiling on any single word from a wordlist file.
 MAX_WORD_LENGTH = 24
 
+#: A hard ceiling on a wordlist file's size in bytes, checked before
+#: reading. Generous for even a large curated vocabulary, small enough to
+#: bound memory use for a misconfigured/oversized file.
+MAX_WORDLIST_FILE_BYTES = 1_000_000
+
 
 def is_valid_handle(value: str) -> bool:
     """Whether ``value`` is a well-formed handle: lowercase, hyphen-joined,
@@ -151,16 +156,31 @@ def load_wordlist(path: str | Path) -> Wordlist:
           - [humming, sprocket]            # given and non-empty
 
     Raises :class:`WordlistError` for anything that doesn't parse into
-    exactly that shape: a missing file, invalid UTF-8, malformed JSON/YAML,
-    an unrecognized top-level field (a typo like ``adjectivs`` is rejected,
-    not silently ignored), a missing or empty ``nouns``, a non-list value
-    for any key (including an explicit ``null``, distinguished from the
-    key being absent entirely), a non-string item, an item that isn't a
-    lowercase-alnum word (see :data:`MAX_WORD_LENGTH`), or a ``pairs``
-    entry that isn't a 2-item list/tuple.
+    exactly that shape: a missing file, a path that isn't a regular file
+    (a directory, FIFO, socket, or device -- rejected before any read is
+    attempted, since a FIFO in particular could block indefinitely), a
+    file over :data:`MAX_WORDLIST_FILE_BYTES`, invalid UTF-8, malformed
+    JSON/YAML, an unrecognized top-level field (a typo like ``adjectivs``
+    is rejected, not silently ignored), a missing or empty ``nouns``, a
+    non-list value for any key (including an explicit ``null``,
+    distinguished from the key being absent entirely), a non-string item,
+    an item that isn't a lowercase-alnum word (see :data:`MAX_WORD_LENGTH`),
+    or a ``pairs`` entry that isn't a 2-item list/tuple.
     """
     file_path = Path(path)
     try:
+        if not file_path.exists():
+            raise WordlistError(f"wordlist file {file_path} does not exist")
+        if not file_path.is_file():
+            # Rejects directories, FIFOs, sockets, and devices -- a FIFO in
+            # particular could block a plain read() indefinitely.
+            raise WordlistError(f"{file_path} is not a regular file")
+        size = file_path.stat().st_size
+        if size > MAX_WORDLIST_FILE_BYTES:
+            raise WordlistError(
+                f"{file_path} is {size} bytes, over the "
+                f"{MAX_WORDLIST_FILE_BYTES}-byte wordlist size limit"
+            )
         text = file_path.read_text(encoding="utf-8")
     except OSError as exc:
         raise WordlistError(f"cannot read wordlist file {file_path}: {exc}") from exc

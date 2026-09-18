@@ -14,6 +14,7 @@ from agent_worktrees.codename import (
     DEFAULT_WORDLIST,
     MAX_HANDLE_LENGTH,
     MAX_WORD_LENGTH,
+    MAX_WORDLIST_FILE_BYTES,
     Wordlist,
     WordlistError,
     assign_codename,
@@ -184,6 +185,21 @@ class TestLoadWordlist:
     def test_missing_file_raises(self, tmp_path: Path) -> None:
         with pytest.raises(WordlistError):
             load_wordlist(tmp_path / "does-not-exist.yaml")
+
+    def test_directory_path_raises(self, tmp_path: Path) -> None:
+        directory = tmp_path / "not-a-file"
+        directory.mkdir()
+        with pytest.raises(WordlistError):
+            load_wordlist(directory)
+
+    def test_oversized_file_raises(self, tmp_path: Path) -> None:
+        path = tmp_path / "words.yaml"
+        # Cheap way to produce a file over the size bound without writing
+        # a real megabyte of content: pad with a long comment line.
+        oversized_content = "nouns: [cube]\n# " + ("x" * (MAX_WORDLIST_FILE_BYTES + 1))
+        path.write_text(oversized_content, encoding="utf-8")
+        with pytest.raises(WordlistError):
+            load_wordlist(path)
 
     def test_invalid_utf8_file_raises(self, tmp_path: Path) -> None:
         path = tmp_path / "words.yaml"
