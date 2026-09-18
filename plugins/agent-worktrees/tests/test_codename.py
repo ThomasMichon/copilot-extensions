@@ -167,6 +167,12 @@ class TestGenerateViaHook:
         # Uppercase and a space -- syntactically invalid, fails closed.
         assert generate_via_hook(_py("print('Not A Handle')")) is None
 
+    def test_invalid_utf8_output_fails_closed(self) -> None:
+        # Bytes that are not valid UTF-8 must hit the explicit
+        # UnicodeError catch, not raise out of generate_via_hook.
+        invalid_utf8_bytes = "import sys; sys.stdout.buffer.write(bytes([0xff, 0xfe, 0x80]))"
+        assert generate_via_hook(_py(invalid_utf8_bytes)) is None
+
     def test_nonzero_exit_fails_closed(self) -> None:
         assert generate_via_hook(_py("import sys; sys.exit(1)")) is None
 
