@@ -2583,7 +2583,6 @@ class TestCmdHandoffsCheck:
         monkeypatch.setattr(m, "_monitor_retire_handoff_predecessor", _must_not_execute)
 
         rc = m.cmd_handoffs_check(_ns(worktree_id="wt-check-1", json=True))
-
         assert rc == 0
         out = json.loads(capfd.readouterr().out)
         assert out["checked"] == 1
@@ -2819,6 +2818,49 @@ class TestCmdHandoffsCheck:
         out = json.loads(capfd.readouterr().out)
         assert out["found"] == 0
         assert out["findings"] == []
+
+
+def test_retire_stamps_predecessor_session_state_with_successor_id(monkeypatch):
+    predecessor_state = sessions._session_state_dir() / "old-sess"
+    predecessor_state.mkdir(parents=True, exist_ok=True)
+    (predecessor_state / "handoff-request.json").write_text(
+        json.dumps({"handoffId": "task-123", "sessionId": "old-sess"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(m, "_resolve_worktree_id", lambda raw: raw)
+    monkeypatch.setattr(
+        m.pane_lifecycle,
+        "pane_terminate",
+        lambda *a, **k: {"ok": True, "gone": True, "method": "test-retire"},
+    )
+    monkeypatch.setattr(
+        reclaim,
+        "ensure_session_copilot_reaped",
+        lambda *a, **k: {"checked": False, "identity_verified": True},
+    )
+
+    rc, result = m._handoff_cutover_retire_result(
+        _ns(
+            worktree_id="wt-retire",
+            session_id="old-sess",
+            retire_pane="%9",
+            handoff_token="task-123",
+            successor_session_id="new-sess",
+            successor_verified=True,
+        )
+    )
+
+    assert rc == 0
+    assert result["ok"] is True
+    stamped = json.loads(
+        (predecessor_state / "handoff-request.json").read_text(encoding="utf-8")
+    )
+    assert stamped["successor_session_id"] == "new-sess"
+    event = activity.read_events(
+        worktree_id="wt-retire", event="handoff_predecessor_retire"
+    )[0]
+    assert event["predecessor_session_id"] == "old-sess"
+    assert event["successor_session_id"] == "new-sess"
 
     def test_execute_retires_every_stale_predecessor_in_one_pass(
         self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,

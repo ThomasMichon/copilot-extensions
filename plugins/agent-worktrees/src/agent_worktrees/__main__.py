@@ -3603,6 +3603,7 @@ def _handoff_cutover_retire_result(
         session_id=session_id,
         source="python",
         handoff_token=getattr(args, "handoff_token", None),
+        successor_session_id=getattr(args, "successor_session_id", None),
         old_pane=retire_pane,
         successor_verified=bool(getattr(args, "successor_verified", False)),
         reason=getattr(args, "retire_reason", None),
@@ -3618,6 +3619,14 @@ def _handoff_cutover_retire_result(
         copilot_reaped=reap.get("reaped", 0),
         copilot_survivors=reap.get("survivors", 0),
     )
+    if getattr(args, "handoff_token", None):
+        from . import handoff_diagnostics
+
+        handoff_diagnostics.stamp_session_state_handoff(
+            session_id,
+            handoff_token=getattr(args, "handoff_token", None),
+            successor_session_id=getattr(args, "successor_session_id", None),
+        )
     _maybe_emit_stage_13(
         wt_id, getattr(args, "handoff_token", None),
         launch_id=getattr(args, "launch_id", None) or os.environ.get("WORKTREE_LAUNCH_ID"))
@@ -9966,6 +9975,7 @@ def _monitor_retire_handoff_predecessor(
             retire_pane=request.get("retire_pane"),
             successor_verified=True,
             retire_reason=request.get("retire_reason"),
+            successor_session_id=request.get("successor_session_id"),
             expected_copilot_pid=request.get("predecessor_pid"),
             expected_copilot_start_time=request.get("predecessor_start_time"),
             seed=None,
@@ -23120,6 +23130,23 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--json", action="store_true", help="JSON output mode (stdout is JSON only; always on)"
     )
+    p = sub.add_parser(
+        "handoff-trace",
+        help="Render the ordered 13-stage handoff trace for one worktree/session "
+        "(defaults to the most recent attempt unless --token is given)",
+    )
+    p.add_argument("trace_target", help="Worktree id or session id to inspect")
+    p.add_argument(
+        "--project",
+        default=None,
+        help="Owning project when running from a neutral cwd or when the id is ambiguous",
+    )
+    p.add_argument(
+        "--token",
+        default=None,
+        help="Specific handoff token to render (default: most recent attempt for the selector)",
+    )
+    p.add_argument("--json", action="store_true", help="JSON output")
     # handoffs-check (on-demand diagnostic: is a confirmed cutover's predecessor
     # pane still alive and un-retired? optionally finish retiring it now)
     p = sub.add_parser(
@@ -24824,10 +24851,13 @@ def _emit_handoff_claim_stages(
     """
     if linked_handoff is None:
         return
+    from . import handoff_diagnostics
+
     activity.log_event(
         "handoff_successor_claimed", worktree_id=wt_id, session_id=session_id,
         handoff_token=linked_handoff.token,
-        predecessor_session_id=linked_handoff.predecessor, launch_id=launch_id)
+        predecessor_session_id=linked_handoff.predecessor,
+        successor_session_id=session_id, launch_id=launch_id)
     already_retired = any(
         str(e.get("handoff_token") or "").strip() == linked_handoff.token
         and e.get("outcome") == "gone"
@@ -24838,6 +24868,11 @@ def _emit_handoff_claim_stages(
             "handoff_pickup_confirmed_predecessor_closing", worktree_id=wt_id,
             session_id=linked_handoff.predecessor, successor_session_id=session_id,
             handoff_token=linked_handoff.token, launch_id=launch_id)
+    handoff_diagnostics.stamp_session_state_handoff(
+        linked_handoff.predecessor,
+        handoff_token=linked_handoff.token,
+        successor_session_id=session_id,
+    )
     _maybe_emit_stage_13(wt_id, linked_handoff.token, launch_id=launch_id)
 
 
@@ -24957,6 +24992,7 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         None if resident_environment else os.environ.get(_SESSION_HANDOFF_TOKEN)
     ) or None
     candidate_associated = False
+    candidate_predecessor = None
     linked_handoff = None
     try:
         linked_handoff = tracking.register_session(
@@ -24973,6 +25009,13 @@ def cmd_register_session(args: argparse.Namespace) -> int:
             yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
             with tracking._RecordLock(yaml_path):
                 candidate_record = tracking.load_record(yaml_path)
+                candidate_handoff = next(
+                    (item for item in candidate_record.handoffs if item.token == candidate_token),
+                    None,
+                )
+                candidate_predecessor = (
+                    candidate_handoff.predecessor if candidate_handoff is not None else None
+                )
                 tracking.associate_handoff_candidate(
                     candidate_record, candidate_token, session_id,
                     associated_at=event_at, save=False,
@@ -25001,11 +25044,19 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         "session_started", worktree_id=wt_id, session_id=session_id,
         launch_id=launch_id)
     if candidate_associated:
+        from . import handoff_diagnostics
+
+        handoff_diagnostics.stamp_session_state_handoff(
+            session_id,
+            handoff_token=candidate_token,
+            predecessor_session_id=candidate_predecessor,
+        )
         # Emitted after stage-4's session_started so the trace never
         # appears to move backwards.
         activity.log_event(
             "handoff_successor_session_start_bound", worktree_id=wt_id,
             session_id=session_id, handoff_token=candidate_token,
+            predecessor_session_id=candidate_predecessor,
             launch_id=launch_id)
     _emit_handoff_claim_stages(wt_id, session_id, linked_handoff, launch_id=launch_id)
     # Re-seed the status-bar updater for this session's mux (best-effort, no-op
@@ -26077,6 +26128,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                     "worktree_id": o.worktree_id,
                     "session_id": o.session_id,
                     "age_h": round(o.age_h, 1),
+                    "last_stage": o.last_stage,
+                    "last_stage_name": o.last_stage_name,
                     "reactivated": o.reactivated,
                 }
                 for o in orphaned
@@ -26241,9 +26294,15 @@ def _render_doctor_report(
             mark = (
                 "fixed" if o.get("reactivated") else ("re-activate" if applied else "needs --fix")
             )
+            stalled = ""
+            if o.get("last_stage"):
+                stalled = (
+                    f"; last observed stage {o['last_stage']} "
+                    f"({o.get('last_stage_name') or '?'})"
+                )
             print(
                 f"      - {o['worktree_id']}  <- {o['session_id'][:8]} "
-                f"(idle {o['age_h']}h) [{mark}]"
+                f"(idle {o['age_h']}h{stalled}) [{mark}]"
             )
     else:
         print(f"  {chk} No orphaned handoffs")
@@ -26643,7 +26702,7 @@ def cmd_session_lock(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
-from . import pr_cli, session_tracking_cli
+from . import handoff_diagnostics, pr_cli, session_tracking_cli
 
 _infer_active_repo_slug = pr_cli._infer_active_repo_slug
 _pr_watch_usage = pr_cli._pr_watch_usage
@@ -26676,6 +26735,12 @@ cmd_session_transcript = session_tracking_cli.cmd_session_transcript
 cmd_recent_messages = session_tracking_cli.cmd_recent_messages
 terminal_conclusion = session_tracking_cli.terminal_conclusion
 
+
+def cmd_handoff_trace(args):
+    return handoff_diagnostics.cmd_handoff_trace(
+        args, json_output=_json_output, json_error=_json_error
+    )
+
 COMMAND_MAP = {
     "resolve": cmd_resolve,
     "execution-leg": cmd_execution_leg,
@@ -26701,6 +26766,7 @@ COMMAND_MAP = {
     "pane-create": pane_lifecycle.cmd_pane_create,
     "pane-terminate": pane_lifecycle.cmd_pane_terminate,
     "handoff-cutover": cmd_handoff_cutover,
+    "handoff-trace": cmd_handoff_trace,
     "handoffs-check": cmd_handoffs_check,
     "embody": cmd_embody,
     "list": cmd_list,
@@ -27140,6 +27206,7 @@ _NO_PROJECT_COMMANDS = {
     "status-monitor-restart",
     "restart",
     "register-session",
+    "handoff-trace",
     "session-lifecycle",
     "deregister-session",
     "session-binding",

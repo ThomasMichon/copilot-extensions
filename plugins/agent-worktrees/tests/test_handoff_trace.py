@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import argparse
+import json
 import threading
 from pathlib import Path
 
 import pytest
 
+from agent_worktrees import __main__ as m
+from agent_worktrees import activity
 from agent_worktrees import handoff_trace
+from agent_worktrees import tracking
 
 
 @pytest.fixture
@@ -221,3 +226,100 @@ def test_concurrent_appends_across_real_processes_produce_no_corruption(
     assert len(events) == n_procs * n_per_proc
     seen = {(e["proc"], e["i"]) for e in events}
     assert len(seen) == n_procs * n_per_proc
+
+
+def _trace_record(tmp_tracking_dir: Path, wt_id: str = "wt-trace") -> None:
+    record = tracking.WorktreeRecord(
+        worktree_id=wt_id,
+        branch=f"worktree/{wt_id}",
+        worktree_path=f"/tmp/src/{wt_id}",
+        repo="test-project",
+        machine="test",
+        platform="wsl",
+        started_at="2026-06-01T10:00:00",
+        last_resumed_at="2026-06-01T10:00:00",
+        resume_count=0,
+        title=None,
+        status="active",
+        completed_at=None,
+        sessions=[],
+    )
+    tracking.save_record(record, tmp_tracking_dir / f"{wt_id}.yaml")
+
+
+def _trace_args(**kwargs):
+    base = dict(trace_target="wt-trace", project=None, token=None, json=False)
+    base.update(kwargs)
+    return argparse.Namespace(**base)
+
+
+def test_cmd_handoff_trace_marks_missing_later_stages(
+    tmp_tracking_dir: Path, monkeypatch_config, capfd
+):
+    _trace_record(tmp_tracking_dir)
+    tracking.register_session("wt-trace", "old-sess")
+    record = tracking.load_record(tmp_tracking_dir / "wt-trace.yaml")
+    tracking.open_handoff(record, "old-sess", "task-1")
+    activity.log_event("worktree_created", worktree_id="wt-trace")
+    activity.log_event("mux_attached", worktree_id="wt-trace", launch_id="launch-1")
+    activity.log_event("copilot_invoked", worktree_id="wt-trace", launch_id="launch-1")
+    activity.log_event(
+        "session_started",
+        worktree_id="wt-trace",
+        session_id="old-sess",
+        launch_id="launch-1",
+    )
+    activity.log_event("status_reported", worktree_id="wt-trace", session_id="old-sess")
+    activity.log_event(
+        "handoff_requested",
+        worktree_id="wt-trace",
+        session_id="old-sess",
+        handoff_id="task-1",
+    )
+    activity.log_event(
+        "handoff_cutover_claim",
+        worktree_id="wt-trace",
+        session_id="old-sess",
+        handoff_token="task-1",
+        outcome="acquired",
+    )
+
+    rc = m.cmd_handoff_trace(_trace_args())
+
+    assert rc == 0
+    out = capfd.readouterr().out
+    assert "stage  7: handoff_host_acknowledged: observed via" in out
+    assert "stage  8: handoff_successor_spawn_started: never observed" in out
+    assert "stage 13: handoff_complete: never observed" in out
+
+
+def test_cmd_handoff_trace_resolves_session_id_across_projects_without_active_project(
+    tmp_tracking_dir: Path, monkeypatch, monkeypatch_config, capfd
+):
+    from agent_worktrees import config as cfg
+    from agent_worktrees import handoff_diagnostics
+
+    _trace_record(tmp_tracking_dir, wt_id="wt-cross")
+    tracking.register_session("wt-cross", "sess-1")
+    record = tracking.load_record(tmp_tracking_dir / "wt-cross.yaml")
+    tracking.open_handoff(record, "sess-1", "task-cross")
+    activity.log_event(
+        "handoff_requested",
+        worktree_id="wt-cross",
+        session_id="sess-1",
+        handoff_id="task-cross",
+    )
+    monkeypatch.setattr(handoff_diagnostics, "_all_tracking_dirs", lambda: [tmp_tracking_dir])
+    monkeypatch.setattr(
+        handoff_diagnostics, "_project_for_tracking_file", lambda path: "test-project"
+    )
+    cfg.set_active_project(None)
+
+    rc = m.cmd_handoff_trace(_trace_args(trace_target="sess-1", json=True))
+
+    assert rc == 0
+    payload = json.loads(capfd.readouterr().out)
+    assert payload["project"] == "test-project"
+    assert payload["worktree_id"] == "wt-cross"
+    assert payload["selector_kind"] == "session"
+    assert payload["handoff_token"] == "task-cross"
