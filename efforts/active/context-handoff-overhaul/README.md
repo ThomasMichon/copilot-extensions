@@ -436,7 +436,7 @@ Verbatim from the operator:
   suite has one known pre-existing, unrelated failure block
   (`test_doctor.py`, confirmed reproducing on clean `origin/main`) but no
   regression from this rewire.
-  **Live-mux validation completed 2026-09-18** on tmichon-book2
+  **Live-mux validation completed 2026-09-18** on a private facility host
   (Windows/psmux) using disposable `--system` worktrees and the isolated
   CLI harness (never the attached session, per the redesign's own runbook):
   found and fixed two real safety/reliability bugs surfaced only by live
@@ -938,7 +938,7 @@ gate land._
 ### 2026-09-18 — Live-mux validation of Phase 6's isolated harness (2 bugs found + fixed)
 
 - Ran the isolated `pane-create`/`pane-terminate` CLI harness against real
-  disposable `--system` worktrees/mux sessions on tmichon-book2
+  disposable `--system` worktrees/mux sessions on a private facility host
   (Windows/psmux), per the effort's own manual-validation runbook (never
   the attached session) — the one Validation Plan item this Phase's landed
   work hadn't yet proven.
