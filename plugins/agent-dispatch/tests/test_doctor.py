@@ -515,3 +515,41 @@ def test_diagnose_many_untruncated_page_still_diagnoses_normally(monkeypatch):
 
     payload = doctor.diagnose_many(_Client(), [task], check_live_sessions=True)
     assert payload["diagnoses"][0]["verdict"] != doctor.RESERVATION_HISTORY_TRUNCATED_VERDICT
+
+
+def test_diagnose_many_never_repairs_a_terminal_task_diagnosed_via_dash_task(monkeypatch):
+    """`--task` fetches a task of any status (unlike the repo/label sweep,
+    which is pre-filtered to EXAMINED_STATUSES); a terminal task must never
+    reach `repair()` even if its old worktree happens to resolve as gone."""
+    monkeypatch.setattr(doctor, "resolve_worktree", lambda wt, **k: {"status": "finalized"})
+    terminal_task = _task(task_id="t-1", status="completed")
+
+    class _Client:
+        def fail_spawn(self, *a, **k):
+            raise AssertionError("must not repair a terminal task")
+
+        def yield_task(self, *a, **k):
+            raise AssertionError("must not repair a terminal task")
+
+        def release(self, *a, **k):
+            raise AssertionError("must not repair a terminal task")
+
+    payload = doctor.diagnose_many(_Client(), [terminal_task], repair_orphaned=True)
+    assert payload["diagnoses"][0]["verdict"] == "orphaned_worktree_gone"
+    assert payload["repaired"] == []
+
+
+def test_diagnose_many_still_repairs_an_examined_status_task(monkeypatch):
+    monkeypatch.setattr(doctor, "resolve_worktree", lambda wt, **k: {"status": "finalized"})
+    task = _task(task_id="t-1", status="started")
+
+    class _Client:
+        def fail_spawn(self, key, **k):
+            return {"state": "failed"}
+
+        def yield_task(self, task_id, worker_id, **k):
+            return {"status": "queued"}
+
+    payload = doctor.diagnose_many(_Client(), [task], repair_orphaned=True)
+    assert len(payload["repaired"]) == 1
+    assert payload["repaired"][0]["task"]["status"] == "queued"

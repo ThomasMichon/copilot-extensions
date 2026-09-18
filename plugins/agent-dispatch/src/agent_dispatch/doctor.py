@@ -449,6 +449,15 @@ def diagnose_many(
         payload["repaired"] = [
             repair(d, client, reason=f"agent-dispatch doctor: {d.detail}")
             for d in diagnoses
-            if d.verdict == REPAIRABLE_VERDICT
+            # `--task` intentionally fetches a task of *any* status (unlike
+            # the repo/label sweep, which is pre-filtered to
+            # EXAMINED_STATUSES). A terminal task (completed/abandoned/
+            # dead_letter) whose old worktree happens to resolve as gone
+            # would otherwise still get `orphaned_worktree_gone` and be
+            # handed to `repair()`, which calls `fail_spawn` then
+            # `yield_task`/`release` -- an invalid transition on an already-
+            # finished task. Restrict auto-repair to the statuses this
+            # diagnostic is actually designed to examine.
+            if d.verdict == REPAIRABLE_VERDICT and d.status in EXAMINED_STATUSES
         ]
     return payload
