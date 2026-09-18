@@ -719,11 +719,25 @@ _ensure_runtime() {
     # surface must not abort the whole install: fall back to a base install so
     # the coordinator CLI still deploys; only `agent-dispatch mcp` stays dark
     # until the toolchain is present.
+    # --reinstall-package/--refresh-package (uv only): this installs from a
+    # local PATH source (not a registry), and uv's local-path build cache is
+    # keyed by source path, not source content. A version string that was
+    # ever built before -- at this exact path, or (per observed evidence) a
+    # different one -- can silently serve a stale cached wheel instead of
+    # rebuilding from what's actually on disk right now. This is the
+    # confirmed root cause behind ThomasMichon/copilot-extensions#2863: a
+    # deployed 0.1.2-dev111 venv was missing
+    # `procutil.agent_worktrees_environment`, even though every verified copy
+    # of the real dev111 *source* (git HEAD and the staged marketplace
+    # snapshot both) has always defined it. Force a fresh build/install every
+    # time so a stale cache entry can never silently ship again.
     _pip_install() {  # $1 = package spec
         if [[ "$have_uv" -eq 1 ]]; then
-            uv pip install --python "$VENV_PYTHON" "$1"
+            uv pip install --reinstall-package agent-dispatch --refresh-package agent-dispatch \
+                --python "$VENV_PYTHON" "$1"
         else
-            "$VENV_PYTHON" -m pip install "$1"
+            "$VENV_PYTHON" -m pip install --force-reinstall --no-deps "$1" \
+                && "$VENV_PYTHON" -m pip install "$1"
         fi
     }
     if _pip_install "${PLUGIN_DIR}[mcp]" >/dev/null 2>&1; then
@@ -755,9 +769,16 @@ _ensure_runtime() {
     # systemd units, binstub) resolves through `.venv` (the link). No-op in legacy
     # mode. Remember the previous active version as the gc keep target.
     local prev_version=""
+    # `embody` is only ever imported lazily, inside spawn_factories.
+    # make_headless_spawn -- so a bare `import agent_dispatch` never touches
+    # it, and a slot that is broken ONLY at that import (as in #2863) would
+    # otherwise sail through this gate and only fail on the first real
+    # spawn attempt, invisibly to `agent-dispatch health`/`daemon-status`.
+    # Import it explicitly here so that class of defect is caught before a
+    # slot is ever activated.
     if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
         prev_version="$(_versioned_current)"
-        if ! "$VENV_PYTHON" -c 'import agent_dispatch' 2>/dev/null; then
+        if ! "$VENV_PYTHON" -c 'import agent_dispatch, agent_dispatch.embody' 2>/dev/null; then
             _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
             exit 1
         fi
@@ -767,7 +788,7 @@ _ensure_runtime() {
 
     _write_manifest
 
-    if "$LINK_PYTHON" -c 'import agent_dispatch' 2>/dev/null; then
+    if "$LINK_PYTHON" -c 'import agent_dispatch, agent_dispatch.embody' 2>/dev/null; then
         _ok 'Verification: module imports successfully'
     else
         _fail 'Verification: module import failed'

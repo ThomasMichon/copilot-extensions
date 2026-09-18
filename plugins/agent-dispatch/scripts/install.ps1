@@ -932,11 +932,25 @@ function Install-Runtime {
         exit 1
     }
 
+    # -ReinstallPackage/-RefreshPackage (uv only): this installs from a local
+    # PATH source (not a registry), and uv's local-path build cache is keyed
+    # by source path, not source content. A version string that was ever
+    # built before -- at this exact path, or (per observed evidence) a
+    # different one -- can silently serve a stale cached wheel instead of
+    # rebuilding from what's actually on disk right now. This is the
+    # confirmed root cause behind ThomasMichon/copilot-extensions#2863: a
+    # deployed 0.1.2-dev111 venv was missing
+    # `procutil.agent_worktrees_environment`, even though every verified copy
+    # of the real dev111 *source* (git HEAD and the staged marketplace
+    # snapshot both) has always defined it. Force a fresh build/install every
+    # time so a stale cache entry can never silently ship again.
     $installPkg = {
         param([string]$Spec)
         if (Get-Command uv -ErrorAction SilentlyContinue) {
-            $out = & uv pip install --python $VenvPython $Spec 2>&1 | Out-String
+            $out = & uv pip install --reinstall-package agent-dispatch --refresh-package agent-dispatch `
+                --python $VenvPython $Spec 2>&1 | Out-String
         } else {
+            & $VenvPython -m pip install --force-reinstall --no-deps $Spec 2>&1 | Out-Null
             $out = & $VenvPython -m pip install $Spec 2>&1 | Out-String
         }
         [pscustomobject]@{ Code = $LASTEXITCODE; Output = $out }
@@ -984,11 +998,18 @@ function Install-Runtime {
     # mode. Remember the previously-active version as the gc keep target (a
     # not-yet-cycled daemon may still run it).
     $prevVersion = ''
+    # `embody` is only ever imported lazily, inside spawn_factories.
+    # make_headless_spawn -- so a bare `import agent_dispatch` never touches
+    # it, and a slot that is broken ONLY at that import (as in #2863) would
+    # otherwise sail through this gate and only fail on the first real spawn
+    # attempt, invisibly to `agent-dispatch health`/`daemon-status`. Import it
+    # explicitly here so that class of defect is caught before a slot is ever
+    # activated.
     if ($VersionedRuntime) {
         $prevVersion = Get-VersionedCurrent
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
-        & $VenvPython -c 'import agent_dispatch' 2>$null
+        & $VenvPython -c 'import agent_dispatch, agent_dispatch.embody' 2>$null
         $slotOk = ($LASTEXITCODE -eq 0)
         $ErrorActionPreference = $prevEAP
         if (-not $slotOk) {
@@ -1006,7 +1027,7 @@ function Install-Runtime {
     $ErrorActionPreference = 'Continue'
     $importOk = $false
     for ($i = 0; $i -lt 3; $i++) {
-        & $LinkPython -c 'import agent_dispatch' 2>$null
+        & $LinkPython -c 'import agent_dispatch, agent_dispatch.embody' 2>$null
         if ($LASTEXITCODE -eq 0) { $importOk = $true; break }
         Start-Sleep -Seconds 1
     }
