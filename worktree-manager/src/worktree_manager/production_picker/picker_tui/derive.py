@@ -272,7 +272,7 @@ def _asset_hints(w):
     guard for the key's absence).
     """
     raw = w.get("resources")
-    counts: dict[str, int] = {}
+    kind_counts: dict[str, int] = {}
     details = []
     if isinstance(raw, list):
         for claim in raw:
@@ -282,15 +282,26 @@ def _asset_hints(w):
             if state not in _HELD_CLAIM_STATES:
                 continue
             kind = str(claim.get("kind") or "").strip() or "resource"
-            code = _ASSET_CODES.get(kind, kind.upper()[:4] or "RES")
-            counts[code] = counts.get(code, 0) + 1
+            kind_counts[kind] = kind_counts.get(kind, 0) + 1
             details.append({
                 "kind": kind,
                 "ref": str(claim.get("ref") or "").strip(),
                 "note": str(claim.get("note") or "").strip(),
                 "state": state or "active",
             })
-    hints = [code if n == 1 else f"{code}×{n}" for code, n in counts.items()]
+    # Count by the raw ``kind`` first (above), then resolve a display code
+    # only now -- never the reverse. Counting straight into the code would
+    # silently merge two DISTINCT kinds whose fallback 4-char codes happen to
+    # collide (e.g. "workspace" and "workflow" both -> "WORK"), understating
+    # the real per-kind breakdown the operator is reading. Aggregating by
+    # code here is still an explicit, intentional step -- multiple raw kinds
+    # sharing one code are summed into that code's token, but never silently
+    # dropped or conflated during counting itself.
+    code_counts: dict[str, int] = {}
+    for kind, n in kind_counts.items():
+        code = _ASSET_CODES.get(kind, kind.upper()[:4] or "RES")
+        code_counts[code] = code_counts.get(code, 0) + n
+    hints = [code if n == 1 else f"{code}×{n}" for code, n in code_counts.items()]
     return {
         "hints": hints[:4],
         "overflow": max(0, len(hints) - 4),

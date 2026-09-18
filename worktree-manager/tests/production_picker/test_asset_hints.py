@@ -77,6 +77,20 @@ def test_unrecognized_kind_degrades_to_an_upper_code_not_dropped():
     assert row["asset_hints"]["hints"] == ["FUTU"]
 
 
+def test_distinct_kinds_are_counted_separately_before_code_collision():
+    """Regression: two DISTINCT unrecognized kinds whose fallback 4-char codes
+    collide (both truncate to 'WORK') must still be counted as 2 real claims
+    -- and each kind's own detail entry preserved -- even though the display
+    hint necessarily merges them into one code token."""
+    row = derive.norm(_raw(resources=[
+        {"kind": "workspace", "ref": "a", "state": "active"},
+        {"kind": "workflow", "ref": "b", "state": "active"},
+    ]), "host", "windows")
+    assert row["asset_hints"]["hints"] == ["WORK×2"]
+    kinds = sorted(d["kind"] for d in row["asset_hints"]["details"])
+    assert kinds == ["workflow", "workspace"]
+
+
 def test_malformed_resource_entries_are_skipped_not_fatal():
     row = derive.norm(_raw(resources=[
         "not-a-dict",
