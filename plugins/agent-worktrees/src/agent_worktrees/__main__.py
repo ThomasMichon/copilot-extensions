@@ -22599,10 +22599,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Don't auto-fast-forward a stale clean worktree on resume",
     )
     p.add_argument(
-        "--json", action="store_true", help="Non-interactive JSON mode (requires --worktree-id)"
+        "--json", action="store_true",
+        help="Non-interactive JSON mode (requires --worktree-id or --codename)",
     )
     p.add_argument(
-        "--worktree-id", default=None, help="Worktree ID to resolve (required with --json)"
+        "--worktree-id", default=None,
+        help="Worktree ID to resolve (required with --json, unless --codename is given)",
     )
     p.add_argument(
         "--codename", default=None,

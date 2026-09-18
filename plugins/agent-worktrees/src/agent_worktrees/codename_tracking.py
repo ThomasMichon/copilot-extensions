@@ -30,16 +30,30 @@ def allocation_lock(tracking_path: Path) -> tracking._RecordLock:
     both halves, two concurrent creators can scan the same existing set and
     pick the same candidate, after which a later ``find_record_by_codename``
     lookup is ambiguous. Callers hold this ``with`` block across the whole
-    scan+pick+persist window -- not just the scan.
+    scan+pick+persist window -- not just the scan. The `create` paths
+    additionally hold it across the actual ``git_ops.create_worktree`` call
+    (needed to prevent an allocation failure from ever leaving an orphaned
+    checkout -- see the Phase 2 create-path history), so this needs a much
+    longer timeout than a plain in-memory RMW: a real ``git worktree add``
+    can legitimately take longer than a couple of seconds (network fetch,
+    a large repo, a slow disk).
 
     Backed by ``tracking._RecordLock`` (already the tracking store's own
     cross-process RMW primitive) against a sentinel lock path -- ``@codenames``
     is not a real worktree id, so it never collides with one (worktree ids are
     always ``<machine>-<platform>-<timestamp>-<suffix>[-k]``, ``sys-*``, or the
-    reserved ``@anchor`` -- none of which is ``@codenames``).
+    reserved ``@anchor`` -- none of which is ``@codenames``). ``require_sidecar``
+    means a real failure to acquire the lock in time raises ``TimeoutError``
+    (visible to the caller) rather than silently proceeding without
+    exclusivity, which would defeat the whole point of this lock.
     """
+    #: Generous relative to _RecordLock's 2s default -- covers a concurrent
+    #: `create`'s git worktree/branch creation, not just an in-memory RMW.
+    _ALLOCATION_LOCK_TIMEOUT = 30.0
     return tracking._RecordLock(
-        tracking_path / "@codenames.lock", require_sidecar=True,
+        tracking_path / "@codenames.lock",
+        timeout=_ALLOCATION_LOCK_TIMEOUT,
+        require_sidecar=True,
     )
 
 
@@ -105,10 +119,12 @@ def ensure_codename(
         # `record` doesn't.
         current = tracking.load_record_by_id(record.worktree_id, tracking_path=tracking_path)
         if current is None:
-            # The record vanished (or was never persisted) -- fall back to
-            # assigning on the caller's copy so this never crashes; there is
-            # nothing fresher on disk to prefer.
-            current = record
+            # The record is genuinely gone -- e.g. reaped by `retire_record`
+            # between the caller's read and this call. Falling back to
+            # saving the caller's stale in-memory `record` would resurrect a
+            # deleted worktree's tracking file; return the caller's copy
+            # as-is (still codename-less) without persisting anything.
+            return record
         if current.codename:
             record.codename = current.codename
             return record

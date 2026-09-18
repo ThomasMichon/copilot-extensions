@@ -100,6 +100,20 @@ class TestEnsureCodename:
         assert reloaded is not None
         assert reloaded.codename == result.codename
 
+    def test_does_not_resurrect_a_reaped_record(self, tmp_path: Path) -> None:
+        # If the record vanished (e.g. reaped by retire_record) between the
+        # caller's read and this call, ensure_codename must not write a new
+        # tracking file back into existence for it.
+        rec = create_new_record(
+            "wt-gone", "worktree/wt-gone", "/tmp/wt-gone", "repo", "machine", "wsl", tmp_path,
+        )
+        (tmp_path / "wt-gone.yaml").unlink()
+
+        result = ensure_codename(rec, tmp_path)
+
+        assert result.codename is None  # returned as-is, still codename-less
+        assert not (tmp_path / "wt-gone.yaml").exists()  # never resurrected
+
 
 class TestFindRecordByCodename:
     def test_empty_codename_returns_none(self, tmp_path: Path) -> None:
