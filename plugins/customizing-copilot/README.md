@@ -66,6 +66,11 @@ routing paragraph directly in a consumer's `.github/instructions/` -- rather
 than consuming a projection from this plugin -- duplicates content this
 plugin owns and leaves it unenforced against upstream drift.
 
+The shipped `skill-authoring` entry in
+[`instruction-projections.json`](instruction-projections.json) owns that
+generic instruction. Use the existing projection manager to sync it into a
+consumer and scan for drift; no startup hook or runtime service is added.
+
 ## Choosing a surface: declarative first
 
 Copilot CLI exposes two kinds of customization:

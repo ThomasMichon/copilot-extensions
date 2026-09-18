@@ -29,6 +29,19 @@
     {
       "applyTo": "**",
       "customizationKind": "instructions",
+      "destination": ".github/instructions/customizing-copilot/skill-authoring.instructions.md",
+      "plugin": "customizing-copilot@copilot-extensions",
+      "pluginVersion": "0.1.0-dev77",
+      "renderedBytes": 1538,
+      "renderedSha256": "286985f31bfab17266c148d5019973f08ebd72aca637144c6cefeb04f80932af",
+      "sourceId": "skill-authoring",
+      "template": "instructions/skill-authoring.instructions.md",
+      "templateBytes": 990,
+      "templateSha256": "3ef8fbbf095ee52ac3059d0071c8755c005f41fc075402ef87c0ebdc66ac8b54"
+    },
+    {
+      "applyTo": "**",
+      "customizationKind": "instructions",
       "destination": ".github/instructions/efforts/completion-gate.instructions.md",
       "plugin": "efforts@copilot-extensions",
       "pluginVersion": "0.1.0-dev18",
