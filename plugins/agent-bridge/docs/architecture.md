@@ -482,6 +482,10 @@ restart does not inherently close the child's pipes.
   marker remains, even without an in-memory launch handle or host record.
   Shutdown also retries unconfirmed orphan remote reaps; missing retry authority
   fails shutdown explicitly rather than acknowledging incomplete cleanup.
+  Partial-launch rollback requires local socket, stream, client, and channel
+  teardown as well as process termination to succeed before confirming cleanup.
+  Independent cleanup steps still run after a failure; completed local handles
+  are cleared while failed handles and durable authority remain available for retry.
   Remote cleanup also checks an in-process HostIndex publication revision,
   protecting equal-value replacement records from an older reap. Descriptor
   removal must persist before pending handles or container ownership are

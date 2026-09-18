@@ -464,3 +464,62 @@ async def test_completed_host_persistence_failure_remains_rollbackable(
     assert manager._host_index.get(session.session_id) is None
     restarted = SessionManager(tmp_db, session_host_state_dir=state_dir)
     assert restarted._host_index.get(session.session_id) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["terminate", "streams", "socket", "client", "spawned", "forward"])
+async def test_partial_rollback_retains_failed_channel_until_retry(tmp_db, tmp_path, monkeypatch, phase):
+    from agent_bridge.session_host_ownership import _remember, abort_pending_host_launch
+
+    manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path / "hosts"))
+    session = Session(
+        "example-session", "example-agent",
+        SpawnTarget(type="command", container={"name": "example-container"}),
+    )
+    tmp_db.create_session(
+        session.session_id, session.name, None, ".", "command", "starting",
+        time.time(), target_json=session.target.to_json(),
+    )
+    manager._sessions[session.session_id] = session
+    forward = SimpleNamespace(cancel=AsyncMock())
+    spawned = SpawnedHost(
+        local_port=51000, host_pid=123, child_pid=456, boundary="container",
+        protocol_version=PROTOCOL_VERSION, nonce="example-nonce",
+        state_file="/example/host.json",
+        endpoint={"kind": "container", "container": "example-container"},
+        forward=forward,
+    )
+    spawner = SimpleNamespace(abort_spawned=AsyncMock(return_value=True))
+    pending = _remember(manager, session.session_id, spawner, spawned)
+    sock = SimpleNamespace(terminate=AsyncMock(), close=AsyncMock())
+    streams = SimpleNamespace(aclose=AsyncMock())
+    client = SimpleNamespace(shutdown=AsyncMock())
+    pending.sock, pending.streams, pending.client = sock, streams, client
+    close_spawned = AsyncMock()
+    monkeypatch.setattr(spawned, "aclose", close_spawned)
+    lock = Mock()
+    manager._container_locks["example-container"] = (lock, session.session_id)
+    manager._container_lock_sessions[session.session_id] = "example-container"
+    stages = {
+        "terminate": sock.terminate, "streams": streams.aclose,
+        "socket": sock.close, "client": client.shutdown,
+        "spawned": close_spawned, "forward": forward.cancel,
+    }
+    stages[phase].side_effect = OSError("local cleanup failed")
+    with pytest.raises(RemoteSpawnCleanupPendingError, match="cleanup is inconclusive"):
+        await abort_pending_host_launch(manager, session.session_id)
+    for operation in stages.values():
+        operation.assert_awaited_once()
+    spawner.abort_spawned.assert_awaited_once()
+    assert manager._host_index.get(session.session_id) == pending.record
+    assert manager._pending_host_launches[session.session_id] is pending
+    assert session.target.container["launch_pending_session_id"] == session.session_id
+    lock.release.assert_not_called()
+    stages[phase].side_effect = None
+    await abort_pending_host_launch(manager, session.session_id)
+    assert manager._host_index.get(session.session_id) is None
+    assert manager._pending_host_launches == {}
+    assert "launch_pending_session_id" not in session.target.container
+    lock.release.assert_called_once()
+    if phase == "terminate":
+        sock.terminate.assert_awaited_once()

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import time
 from collections.abc import Awaitable
@@ -201,11 +200,6 @@ async def abort_pending_host_launch(manager: SessionManager, session_id: str) ->
     pending = manager._pending_host_launches.get(session_id)
     if pending is None:
         return
-    if pending.client is not None:
-        try:
-            await pending.client.shutdown()
-        except Exception:
-            log.warning("Partial host client shutdown failed for %s", session_id, exc_info=True)
     confirmed = await manager._rollback_failed_host_launch(
         pending.spawner, pending.spawned, pending.sock, pending.streams, session_id, None,
     )
@@ -222,15 +216,30 @@ async def rollback_host_launch(
     sock: Any, streams: Any, session_id: str, result: dict | None,
 ) -> bool:
     """Abort a known launch and retain its record if termination is inconclusive."""
+    pending = manager._pending_host_launches.get(session_id)
+    local_cleanup_ok = True
+
+    async def close(label: str, operation: Awaitable[Any]) -> bool:
+        nonlocal local_cleanup_ok
+        try:
+            await operation
+            return True
+        except Exception:
+            local_cleanup_ok = False
+            log.warning("Partial host %s failed for %s; cleanup retained", label, session_id, exc_info=True)
+            return False
+
     if sock is not None:
-        with contextlib.suppress(Exception):
-            await sock.terminate()
+        await close("terminate", sock.terminate())
     if streams is not None:
-        with contextlib.suppress(Exception):
-            await streams.aclose()
+        if await close("stream close", streams.aclose()) and pending is not None and pending.streams is streams:
+            pending.streams = None
     if sock is not None:
-        with contextlib.suppress(Exception):
-            await sock.close()
+        if await close("socket close", sock.close()) and pending is not None and pending.sock is sock:
+            pending.sock = None
+    if pending is not None and pending.client is not None:
+        if await close("client shutdown", pending.client.shutdown()):
+            pending.client = None
     remote = getattr(spawned, "boundary", "local") != "local"
     confirmed = False
     if remote:
@@ -242,14 +251,11 @@ async def rollback_host_launch(
                 log.warning("Host abort failed for %s; authority retained", session_id, exc_info=True)
     else:
         if getattr(spawned, "proc", None) is not None:
-            await asyncio.to_thread(manager._terminate_local_host_processes, spawned)
+            await close("local termination", asyncio.to_thread(manager._terminate_local_host_processes, spawned))
         confirmed = not manager._rec_host_alive(spawned) and not manager._rec_child_alive(spawned)
-    try:
-        await spawned.aclose()
-        await manager._drop_forward(session_id, strict=True, preserve_ownership=True)
-    except Exception:
-        log.warning("Host launch channel cleanup failed for %s", session_id, exc_info=True)
-        confirmed = False
+    await close("spawned channel close", spawned.aclose())
+    await close("forward cleanup", manager._drop_forward(session_id, strict=True, preserve_ownership=True))
+    confirmed = confirmed and local_cleanup_ok
     if confirmed:
         pending = manager._pending_host_launches.get(session_id)
         if pending is not None:
