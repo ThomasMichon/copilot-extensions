@@ -41,7 +41,8 @@
           "0.4.0-dev477",
           "0.4.0-dev492",
           "0.4.0-dev493",
-          "0.4.0-dev495"
+          "0.4.0-dev495",
+          "0.4.0-dev497"
         ]
       },
       "capability_versions": {
@@ -112,7 +113,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/native_manager.py",
-          "sha256": "91e796e08bbf9bb837aa14a1511425acfeefaf8f1190a04b408f84656b3c8a53",
+          "sha256": "8d10eae2201b5ea67f1d0c22ac229b90dec5cdac33b4c64bf500ab25fbcb2f71",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -258,7 +259,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-launch.json",
-          "sha256": "38f70bdaae388883aaf8261f9b647d663f34d998a750d1cc0f3c35d9f1630c64",
+          "sha256": "a39965d6f6c586d1c41039dacb69b0225c2e392613ee70d965eb5e586d848928",
           "role": "current native execution contract",
           "generation": 15
         },
@@ -330,7 +331,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-resource-launch.json",
-          "sha256": "91b7a446936f5002b1ba348919e9039a0c8db953931ff5a80ea037ab8fb6b7c2",
+          "sha256": "558b441fe97ab028a8401db9619601a424a7221f98b1a0d5fc7ecffe30b45bd2",
           "role": "current optional native host-resource contract",
           "generation": 15
         },
@@ -452,6 +453,18 @@
           "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev494/native-capabilities.json",
           "sha256": "7be1b80af428eaf39ceea60fb55aba3f4a12b074eda826f8075d9898e6f3a908",
           "role": "prior dev494 corpus: current native-capabilities",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev496/native-launch.json",
+          "sha256": "38f70bdaae388883aaf8261f9b647d663f34d998a750d1cc0f3c35d9f1630c64",
+          "role": "prior dev496 corpus: current native execution contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev496/native-resource-launch.json",
+          "sha256": "91b7a446936f5002b1ba348919e9039a0c8db953931ff5a80ea037ab8fb6b7c2",
+          "role": "prior dev496 corpus: current optional native host-resource contract",
           "generation": 15
         }
       ],
@@ -895,6 +908,14 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/native_capabilities.py",
           "source_git_blob": "d2c552da285c30d1519319c5fceb42b1077cd7bf",
           "capture_method": "Invoke committed native capability serializers, the controller capability route, and the remote native-host capability command with synthetic provider availability. Capture explicit descriptor schema/version/SHA-256 support; omit only the remote platform-specific supported discriminator. Preserve the prior capability corpus without alteration."
+        },
+        {
+          "commit": "b078e59288f3fcb63115ff5e46824195b76b201d",
+          "plugin_version": "0.4.0-dev497",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_manager.py",
+          "source_git_blob": "812bcaead779b7f37a2ea158e235ba603823bdf5",
+          "capture_method": "Invoke committed validate_request for every current launch vector, using an existing local owner and Python executable; normalize only those values to the fixture's original public placeholders. Verify that request wire values are unchanged by the Python 3.10 asyncio.TimeoutError catch correction. Preserve the prior fixture corpus without alteration."
         }
       ],
       "support_window": "HTTP generations 1 through 15 remain supported; evidence includes generations 9 through 15.",
