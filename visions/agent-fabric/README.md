@@ -691,19 +691,6 @@ opt-in, pressure changes nothing and the session behaves exactly as before.
   throwaway. Placed on the ground layer by the *derive-don't-duplicate /
   single-owning-layer* rule (the delegation layer coordinates over, not copies,
   it).
-- **2026-09-18** — Extended §Features/`legible-live-state` and
-  §Behaviors/`disposition-is-asserted-pulse-is-derived`: the asserted
-  **disposition** is now the *reduction* of a bounded collection of
-  individually-addressable **obligations** (stable identity, concise text,
-  open/settled/transferred state, timestamps, provenance, optional typed
-  reference), rather than a single opaque boolean. Mined from operator
-  friction: a worktree can carry several independent unsettled concerns (an
-  un-pushed change, an open PR, a pending deployment, a held external claim),
-  and a binary assertion could not identify which, settle one while retaining
-  another, or connect the disposition to the claim/issue/PR it concerns. The
-  asserted-vs-derived separation and the ground layer's ownership are
-  unchanged — only the *shape* of the asserted side deepens from a flag to a
-  bounded collection whose reduction still answers the coarse question.
 - **2026-07-21** — Added §Features/`address-any-project` and
   §Behaviors/`project-addressed-not-cwd-bound`: a project is a first-class,
   **CWD-independent** address across *every* layer, and the per-project `<repo>`
@@ -807,3 +794,16 @@ opt-in, pressure changes nothing and the session behaves exactly as before.
   prompt delivery, and retirement for CLI/mux, ACP, SDK, App, and third-party
   rigs. Handoff now spans those authorities through durable requests and
   verified takeover rather than treating one ground-layer launcher as universal.
+- **2026-09-18** — Extended §Features/`legible-live-state` and
+  §Behaviors/`disposition-is-asserted-pulse-is-derived`: the asserted
+  **disposition** is now the *reduction* of a bounded collection of
+  individually-addressable **obligations** (stable identity, concise text,
+  open/settled/transferred state, timestamps, provenance, optional typed
+  reference), rather than a single opaque boolean. Mined from operator
+  friction: a worktree can carry several independent unsettled concerns (an
+  un-pushed change, an open PR, a pending deployment, a held external claim),
+  and a binary assertion could not identify which, settle one while retaining
+  another, or connect the disposition to the claim/issue/PR it concerns. The
+  asserted-vs-derived separation and the ground layer's ownership are
+  unchanged — only the *shape* of the asserted side deepens from a flag to a
+  bounded collection whose reduction still answers the coarse question.
