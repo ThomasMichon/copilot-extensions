@@ -24,8 +24,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
       - name: Install tooling
-        run: python -m pip install --upgrade pip pytest pyyaml
+        run: uv pip install --system --upgrade pip pytest pyyaml
       - name: Version consistency
         run: python tools/check-version-consistency.py
       - name: Module size (hard cap + shrink-only baseline)
