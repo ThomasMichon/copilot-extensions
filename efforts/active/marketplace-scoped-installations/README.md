@@ -375,6 +375,106 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-15 — Fix reviewed compaction-safety findings
+
+- Advisory review of #2697 caught two real defects in the Logger conversion:
+  (1) `do_compact_hub`/`run_sync`'s hub-compaction path treats
+  `tracked_worktree_paths() is None` as "confirmed nothing to protect", so an
+  owner/peer/probe FAILURE under explicit context (not genuine peer absence)
+  could silently disable the tracked-worktree protection and archive a live
+  hub session; (2) a malformed peer response row was silently skipped rather
+  than rejected, so a schema mismatch could yield a false "nothing tracked"
+  empty set.
+- Fixed by distinguishing genuine absence (returns `None`, unchanged) from
+  failure (now raises `_peer_launch.ContextRefused`) in
+  `tracked_worktree_paths()`. Added two purpose-built resolvers:
+  `_resolve_tracked_paths_or_none` (used by `select_compactable`, which
+  already has a safe per-session on-disk fallback, so folding a failure into
+  `None` there is fine) and `resolve_hub_tracked_paths` (used by both hub
+  call sites, which have no such fallback for foreign-machine hub sessions,
+  so a failure now fails the whole compaction pass closed instead of
+  proceeding unprotected). `_paths_from_list_response` now rejects the whole
+  response on any malformed row instead of silently omitting it.
+- Added dedicated `plugins/agent-logger/tests/test_worktrees_peer.py` (22
+  cases) covering explicit-context resolution, the absence/failure split,
+  malformed-row rejection, and the two resolvers, plus an engine-level test
+  proving both hub call sites fail closed on an unresolved lookup. Corrected
+  the shared dispatch regression's now-invalid absence/failure assertions to
+  match.
+- Re-verified: agent-logger 302 passed (Windows) / 302 (POSIX, same
+  selection); shared dispatch procutil 61 passed/5 skipped (Windows), 60/6
+  (POSIX); module-size, docs, install-contract, and headless-launch guards
+  passed. A handful of unrelated pre-existing environment-flaky tests
+  (ARM64 PowerShell package installs on Windows; WSL-to-Windows-PowerShell
+  path bridging) were confirmed to fail identically on an unmodified
+  checkout and are out of this slice's scope.
+- A further review round caught two more real issues: a whitespace-only peer
+  path passed validation and normalized to an accepted empty-string entry
+  (fixed: reject on `p.strip()`); and `resolve_hub_tracked_paths` treated
+  genuine peer *absence* as a resolved empty set for hub sessions, which may
+  belong to a foreign machine this process cannot verify -- "no peer in this
+  cell" is no more informative than a failure there. Both absence and failure
+  now report `unresolved=True` uniformly for the hub path, while
+  `select_compactable`'s local on-disk fallback keeps folding both into its
+  existing safe degrade. Also caught: origin/main moved twice more during
+  review with unrelated module-size-baseline regressions
+  (`worktree-manager/__main__.py`, `agent-worktrees/__main__.py`) blocking
+  every PR's required guard; widened both grandfathered ceilings to their
+  true, already-merged size as separate atomic commits.
+- A separate finding (Logger's own systemd/Task-generated scheduled
+  compaction service invokes the venv's console-script entry point directly,
+  bypassing the payload-local `runtime-gate.sh` dispatcher, so a
+  namespaced/scoped installation's background job never receives explicit
+  context) is Logger's own Phase-4 service-identity conversion, not a
+  follow-on to this caller conversion -- filed as
+  [#2701](https://github.com/ThomasMichon/copilot-extensions/issues/2701)
+  rather than expanding this PR's scope.
+- A further finding, empirically verified: `agent-worktrees list --json`
+  requires a resolved single project (from CWD or `--project`) and exits
+  non-zero from a neutral working directory -- the typical shape of a
+  scheduled/background compaction run. This is a pre-existing limitation
+  shared identically by the legacy ambient-`PATH` caller and the new
+  same-cell caller (neither is machine-wide capable today), not something
+  the peer-launch conversion introduced. Its practical consequence became
+  more visible because the fail-closed hub-compaction fix now means hub
+  compaction with the default `require_untracked_worktree=true` will
+  typically skip rather than run in that deployment shape, until
+  `agent-worktrees` gains a machine-wide listing capability or the caller
+  resolves project scope explicitly. Filed as
+  [#2706](https://github.com/ThomasMichon/copilot-extensions/issues/2706);
+  fixing it requires either a new `agent-worktrees` capability or a
+  considered design decision, not a caller-side isolation change.
+
+### 2026-09-14 — Logger as a fourth same-cell peer-launch consumer
+
+- Continued Phase 6 caller conversions. Added `agent-logger` to the shared
+  `libs/peer-launch` boundary's `OWNERS` set (joining dispatch, CodeSpaces, and
+  Containers) and its environment-scrub prefixes; re-synced all four packaged
+  vendors and bumped all four plugins' versions together (a canonical
+  peer-launch change reaches every consumer's payload).
+- Converted `agent-logger`'s `tracked_worktree_paths()` (used by session
+  compaction to decide whether a session's worktree is still tracked before
+  archiving it) to resolve only the validated same-cell Agent Worktrees peer
+  under an explicit installation context, never an ambient `PATH` command.
+- This caller has the **opposite** safety direction from Containers' config
+  lookup: its documented `None` result already triggers the *safer* fallback
+  (an on-disk existence check that errs toward keeping, not archiving, a
+  session), so owner-validation failure, a missing/foreign/malformed peer, or
+  a probe error all deliberately degrade to `None` rather than raising --
+  raising here would crash a compaction pass over an installation-governance
+  blip. Recorded this reasoning inline so it is not mistaken for the
+  Containers-style "must-refuse" contract.
+- Native Windows and POSIX selections: agent-logger 26 passed; the expanded
+  shared real-process peer selection (now covering four owners across two
+  resolvers) 61 passed/5 skipped on Windows and 60/6 on POSIX; CodeSpaces
+  adapter 30 passed; Containers config/relay 103 passed -- all on both
+  platforms. Shared packaging passed 7 (one new test for the fourth vendor).
+  Lint, sync, version-consistency, docs-consistency, install-contract, and
+  headless-launch guards passed.
+- Only the converted caller's tested legacy PATH branch received an isolation
+  allowance; the remaining report-only inventory is unchanged by this slice.
+  No persistent installation was activated or deployed.
+
 ### 2026-09-14 — Worktree Manager as a standalone-payload installation-context consumer
 
 - Cross-referenced from the `worktree-manager-control-plane` effort. Worktree
