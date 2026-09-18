@@ -744,8 +744,9 @@ with no matching emitter, hand-authors a task by **propose + queue**) and the
 and its evaluator advances the work across events. The service tier is how
 *recurring* or *at-scale* work is automated; it is never a precondition for running
 a single loop. The minimum viable deployment is a **coordinator plus a worker
-body**, so the reviewer, conflict-resolution, and goal-driven templates are equally
-available to a full automated deployment and to a bare host that has none of it.
+body**, so the reviewer, conflict-resolution, goal-driven, and
+repository-issue-loop templates are equally available to a full automated
+deployment and to a bare host that has none of it.
 
 ### supervise-registers-and-returns
 Registering supervised work **adds the registration and completes**, emitting the
