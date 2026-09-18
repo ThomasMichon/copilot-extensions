@@ -180,7 +180,8 @@ def test_repo_config_overrides_log_layout_only(tmp_path: Path, monkeypatch) -> N
 @pytest.mark.parametrize(
     ("body", "message"),
     [
-        ("schema_version: 2\nlog: {}\n", "schema_version must be 1"),
+        ("schema_version: 0\nlog: {}\n", "schema_version must be >= 1"),
+        ("schema_version: nope\nlog: {}\n", "schema_version must be an integer"),
         ("schema_version: 1\nlog:\n  root: ../logs\n", "must not escape"),
         (
             'schema_version: 1\nlog:\n  path_template: "{repository}/{title}.md"\n',
@@ -218,6 +219,34 @@ def test_repo_config_validation_errors(
 
     with pytest.raises(RepositoryConfigError, match=message):
         load_config(home=tmp_path / "home")
+
+
+def test_repo_config_forward_compatible_future_schema(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A repo config from a NEWER schema than this build supports is read
+    tolerantly: unknown top-level and unknown log fields are ignored (rolling
+    updates), while known log fields are still honored."""
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / ".agent-logger.yaml").write_text(
+        "\n".join(
+            [
+                "schema_version: 99",
+                "future_top_block:",
+                "  anything: 1",
+                "log:",
+                "  note_marker: 'NOTE:'",
+                "  future_log_field: whatever",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(repo)
+
+    cfg = load_config(home=tmp_path / "home")
+    assert cfg.repo_config_path == repo / ".agent-logger.yaml"
+    assert cfg.note_marker == "NOTE:"  # known field honored despite unknowns
 
 
 def test_non_logging_config_ignores_invalid_repo_file(
