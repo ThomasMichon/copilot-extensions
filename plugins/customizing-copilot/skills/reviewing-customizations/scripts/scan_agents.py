@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from scan_plugin_sources import PluginSource
+from scan_plugin_sources import PluginSource, _plugin_declares_agents, _plugin_manifest_path
 from scan_skills import (
     get_field,
     get_field_block,
@@ -139,6 +139,7 @@ def scan_agents(
     agent_files: dict[Path, PluginSource | None] = {}
     owned_plugin_agents: set[tuple[str, str]] = set()
     checked_mcp_plugins: set[Path] = set()
+    checked_agent_manifest_plugins: set[Path] = set()
     for af in repo_owned_agent_files(root, owned_agent_roots):
         agent_files[af.resolve()] = None
     for af in root.glob("plugins/*/agents/*.agent.md"):
@@ -183,6 +184,24 @@ def scan_agents(
         def add(check: str, message: str) -> None:
             report.add(severity, check, path, message + suffix)
 
+        plugin_root = plugin_root_for_agent(root, af, source)
+        if plugin_root is not None:
+            plugin_key = plugin_root.resolve()
+            if plugin_key not in checked_agent_manifest_plugins:
+                checked_agent_manifest_plugins.add(plugin_key)
+                if not _plugin_declares_agents(plugin_root):
+                    add(
+                        "agent-manifest-declaration",
+                        "plugin ships agents/*.agent.md but its manifest "
+                        f"({_plugin_manifest_path(plugin_root)}) does not "
+                        'declare a truthy top-level `agents` field (e.g. '
+                        '`"agents": "agents/"`) -- the runtime currently '
+                        "falls back to `plugin_root/agents` when this is "
+                        "absent, but declare it explicitly anyway: it matches "
+                        "every shipped example and is more robust than "
+                        "relying on an implicit default",
+                    )
+
         text = af.read_text(encoding="utf-8", errors="replace")
         frontmatter_body = split_frontmatter(text)
         if frontmatter_body is None:
@@ -199,7 +218,6 @@ def scan_agents(
             else af.name.removesuffix(".agent.md")
         )
         has_mcp = bool(re.search(r"(?im)^\s*mcp-servers\s*:", frontmatter))
-        plugin_root = plugin_root_for_agent(root, af, source)
         if has_mcp and plugin_root is not None:
             plugin_key = plugin_root.resolve()
             if plugin_key not in checked_mcp_plugins:
