@@ -345,3 +345,60 @@ def repair(diagnosis: Diagnosis, client: DispatchClient, *, reason: str) -> dict
     except Exception as exc:
         actions["task"] = {"error": str(exc)}
     return actions
+
+
+def diagnose_many(
+    client: DispatchClient,
+    tasks: list[dict[str, Any]],
+    *,
+    check_live_sessions: bool = False,
+    stale_lease_seconds: float = DEFAULT_STALE_LEASE_GRACE_SECONDS,
+    repair_orphaned: bool = False,
+) -> dict[str, Any]:
+    """Diagnose (and optionally repair) a batch of tasks -- the shared body
+    behind the ``agent-dispatch doctor`` CLI command, extracted so the CLI
+    wrapper itself stays a thin arg-resolution shim (see
+    ``__main__._cmd_doctor``).
+
+    ``check_live_sessions`` opts into fetching each task's full
+    ``list_reservations(task_id=...)`` history and probing per-attempt
+    session liveness (see :func:`_reservation_session_liveness`) -- one
+    extra HTTP call plus one-or-more bridge probes per task, so it stays
+    opt-in rather than the doctor sweep's default behavior.
+
+    Returns the JSON-serializable payload the CLI emits directly:
+    ``examined`` / ``diagnoses`` (+ ``repaired`` when ``repair_orphaned``).
+    """
+    diagnoses = []
+    for t in tasks:
+        reservations = (
+            client.list_reservations(task_id=t.get("id"), limit=1000)
+            if check_live_sessions
+            else None
+        )
+        diagnoses.append(
+            diagnose(
+                t,
+                stale_lease_grace_seconds=stale_lease_seconds,
+                # An explicit, call-time module-attribute lookup (not
+                # diagnose's own default parameter, which -- like any Python
+                # default -- binds once at def-time): this is what makes
+                # `monkeypatch.setattr(doctor, "resolve_worktree", ...)`
+                # actually take effect for callers of this function.
+                resolve=resolve_worktree,
+                reservations=reservations,
+                local_session_verdict=_default_local_session_verdict,
+                fleet_session_verdict=_default_fleet_session_verdict,
+            )
+        )
+    payload: dict[str, Any] = {
+        "examined": len(diagnoses),
+        "diagnoses": [d.as_dict() for d in diagnoses],
+    }
+    if repair_orphaned:
+        payload["repaired"] = [
+            repair(d, client, reason=f"agent-dispatch doctor: {d.detail}")
+            for d in diagnoses
+            if d.verdict == REPAIRABLE_VERDICT
+        ]
+    return payload

@@ -2042,16 +2042,10 @@ def _cmd_list(args: argparse.Namespace) -> int:
 
 
 def _cmd_doctor(args: argparse.Namespace) -> int:
-    """Diagnose held/suspended tasks (Boundary I / #2577): distinguish a
-    confirmed-orphaned task -- its expected worktree provably gone -- from
-    ordinary in-flight work or merely ambiguous liveness, and (with
-    ``--repair``) unbind + re-queue only the confirmed-orphaned ones.
-    ``--task`` narrows to one exact task (any status); ``--check-live-sessions``
-    additionally walks that task's full spawn-reservation history and probes
-    each attempt's actual embody-session liveness (Phase 9 /
-    aperture-labs#7133: a task's ``owner`` always reflects only its *latest*
-    attempt, which can shadow an earlier attempt's still-alive, resumable
-    session). See :mod:`agent_dispatch.doctor` for the full design rationale."""
+    """Diagnose held/suspended tasks (Boundary I / #2577; Phase 9 session-
+    liveness / aperture-labs#7133). ``--task`` narrows to one exact task;
+    ``--check-live-sessions`` walks its full reservation history for a
+    shadowed-but-live earlier attempt. See :mod:`agent_dispatch.doctor`."""
     from . import doctor
 
     with _client(args) as c:
@@ -2072,42 +2066,13 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
                 label=args.label,
                 limit=args.limit,
             )
-        diagnoses = []
-        for t in tasks:
-            reservations = (
-                c.list_reservations(task_id=t.get("id"), limit=1000)
-                if args.check_live_sessions
-                else None
-            )
-            diagnoses.append(
-                doctor.diagnose(
-                    t,
-                    stale_lease_grace_seconds=args.stale_lease_seconds,
-                    # An explicit, call-time module-attribute lookup (not
-                    # diagnose's own default parameter, which -- like any
-                    # Python default -- binds once at def-time): this is what
-                    # makes `monkeypatch.setattr(doctor, "resolve_worktree",
-                    # ...)` actually take effect for callers of this CLI
-                    # wrapper.
-                    resolve=doctor.resolve_worktree,
-                    reservations=reservations,
-                    local_session_verdict=doctor._default_local_session_verdict,
-                    fleet_session_verdict=doctor._default_fleet_session_verdict,
-                )
-            )
-        repairs = None
-        if args.repair:
-            repairs = [
-                doctor.repair(d, c, reason=f"agent-dispatch doctor: {d.detail}")
-                for d in diagnoses
-                if d.verdict == doctor.REPAIRABLE_VERDICT
-            ]
-    payload = {
-        "examined": len(diagnoses),
-        "diagnoses": [d.as_dict() for d in diagnoses],
-    }
-    if repairs is not None:
-        payload["repaired"] = repairs
+        payload = doctor.diagnose_many(
+            c,
+            tasks,
+            check_live_sessions=args.check_live_sessions,
+            stale_lease_seconds=args.stale_lease_seconds,
+            repair_orphaned=args.repair,
+        )
     return _emit(payload)
 
 
@@ -3716,12 +3681,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--check-live-sessions",
         action="store_true",
-        help="walk each examined task's full spawn-reservation history and "
-        "probe every attempt's actual embody-session liveness (not just the "
-        "task's current owner/latest reservation) -- reports "
-        "'earlier_attempt_live' when an earlier attempt is confirmed live but "
-        "shadowed by a later dead/unknown one. Slower (one bridge probe per "
-        "recorded attempt); opt-in.",
+        help="walk each task's full reservation history and probe every "
+        "attempt's embody-session liveness by session id -- reports "
+        "'earlier_attempt_live' when an earlier attempt is live but shadowed "
+        "by a later dead/unknown one. Opt-in (probes the bridge per attempt).",
     )
     p.add_argument(
         "--stale-lease-seconds",
