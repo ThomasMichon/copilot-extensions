@@ -4,6 +4,7 @@ import asyncio
 from http.client import IncompleteRead
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+from pathlib import Path
 import shlex
 import socket
 import threading
@@ -21,6 +22,12 @@ from agent_bridge.native_runtime import NativeRuntime
 from agent_bridge.native_store import NativeError
 from agent_bridge.routes.native import router
 from ssh_manager.native_channel import serve
+
+
+def assert_captured_receipt(value, case):
+    path = Path(__file__).parents[1] / "contract/fixtures/http/current/native-registry-status.json"
+    expected = json.loads(path.read_text())["cases"][case]["public_receipt"]
+    assert {**value, "owner": "/fixture-owner"} == expected
 
 
 @pytest.fixture
@@ -188,6 +195,8 @@ async def test_native_registration_states_remain_distinct_from_lookup_failure(na
     assert value["ready"] is (mode == "fresh") and value["represented"] is (mode == "fresh")
     assert value["state"] == ("ready" if mode == "fresh" else "starting" if mode == "late" else "unrepresented")
     assert value["sessionId"] == (None if mode == "late" else "session-example")
+    if mode in {"fresh", "absent", "stale"}:
+        assert_captured_receipt(value, "recovered" if mode == "fresh" else mode)
     assert len(registry["requests"]) == (0 if mode == "late" else 1)
     with pytest.raises(NativeError, match="blocks ACP"):
         manager.assert_acp_allowed("example-venue")
@@ -207,6 +216,7 @@ async def test_native_lookup_failure_is_sanitized_and_clears_after_recovery(nati
         with pytest.raises(error_type):
             registry["client"].get_live_session("session-example")
         failed = (await client.get(url)).json()
+        assert_captured_receipt(failed, "lookup_failure")
         assert failed["error"] == "registration_lookup_failed"
         assert failed["state"] == "unrepresented" and not failed["ready"] and not failed["represented"]
         assert (failed["executionId"], failed["generation"], failed["sessionId"]) == (*identity, "session-example")
@@ -226,6 +236,7 @@ async def test_native_lookup_failure_is_sanitized_and_clears_after_recovery(nati
         recovered = (await client.get(url)).json()
         assert recovered["ready"] and recovered["represented"] and recovered["error"] is None
         assert recovered["sessionId"] == "session-example"
+        assert_captured_receipt(recovered, "recovered")
 
 
 def test_unexpected_registry_fault_is_not_swallowed(native_status):

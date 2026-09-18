@@ -43,7 +43,8 @@
           "0.4.0-dev493",
           "0.4.0-dev495",
           "0.4.0-dev497",
-          "0.4.0-dev498"
+          "0.4.0-dev498",
+          "0.4.0-dev499"
         ]
       },
       "capability_versions": {
@@ -128,7 +129,7 @@
           "path": "plugins/agent-bridge/src/agent_bridge/native_runtime.py",
           "semantic": true,
           "non_semantic_reason": null,
-          "sha256": "580c264777a7d462797251ab87b0700de3e4e6f13b015c74996820f38c561c40"
+          "sha256": "33db650d0cab95347462f8c312b0ebe26788face60c531d1dcf8586f5d3b68a1"
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/live_registration_model.py",
@@ -478,6 +479,12 @@
           "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev497/native-resource-launch.json",
           "sha256": "558b441fe97ab028a8401db9619601a424a7221f98b1a0d5fc7ecffe30b45bd2",
           "role": "prior dev497 corpus: current optional native host-resource contract",
+          "generation": 15
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-registry-status.json",
+          "sha256": "21997e6b36c95c45ee6abef17782959cf59f7f688a8a067026a438de2164ca1c",
+          "role": "current native registry lookup failure, absence, staleness, and recovery status",
           "generation": 15
         }
       ],
@@ -937,6 +944,14 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/native_manager.py",
           "source_git_blob": "c457ec9a5970b599bc2572bac41bfbfe2e089390",
           "capture_method": "Invoke committed validate_request for every current launch vector, using an existing local owner and Python executable; normalize only those values to the fixture's original public placeholders. Verify that request wire values are unchanged by durable retirement-proof preservation and bounded owned-transport cleanup. Preserve the prior fixture corpus without alteration."
+        },
+        {
+          "commit": "60c234d3766f1a634c434b76b564a60af99d3c55",
+          "plugin_version": "0.4.0-dev499",
+          "generation": 15,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_runtime.py",
+          "source_git_blob": "3204598158fe0f0e800985be6251bb43384df81e",
+          "capture_method": "Invoke committed NativeRuntime.status against a loopback HTTP registry through the real BridgeClient. Route each result through the real shared native channel and NativeManager's ASGI status endpoint. Capture the runtime status projection and public receipt for HTTP failure, absence, staleness and recovery. Use synthetic process/session identity and controlled process liveness; normalize only the local owner directory. No existing fixture is changed and no live incident cause is inferred."
         }
       ],
       "support_window": "HTTP generations 1 through 15 remain supported; evidence includes generations 9 through 15.",
