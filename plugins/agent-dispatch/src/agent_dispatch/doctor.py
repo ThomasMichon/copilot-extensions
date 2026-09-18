@@ -23,23 +23,21 @@ discussion: never re-create/re-queue on a guess, only on confirmed
 deletion, and never race a second attempt against one still legitimately
 in flight.
 
-**Reservation-history liveness (Phase 9 /
-``efforts/active/agent-dispatch-embody-supervisor``, aperture-labs#7133):**
-the coordinator only ever attaches a task's *latest* spawn reservation (see
+**Reservation-history liveness (ThomasMichon/copilot-extensions#2884):** the
+coordinator only ever attaches a task's *latest* spawn reservation (see
 ``coordinator.py``'s ``result["spawn_reservation"] = asdict(latest)``), so
 the checks above -- like an operator reading ``owner``/``owner_session_id``
-by hand -- only ever see the most recent attempt. A live 2026-09-18 incident
-showed the real gap: a *later* attempt can die while an *earlier* attempt's
-session is still alive and fully resumable, and nothing re-checks that
-earlier attempt once a newer reservation shadows it. ``diagnose`` optionally
-accepts that task's full reservation history (``DispatchClient.
-list_reservations(task_id=...)``) and, when given, checks every attempt's
-actual embody-session liveness **by session id** (not the task's ``owner``
-worker_id/lane label -- that distinction is what tripped up the incident's
-own manual diagnosis) before falling through to the worktree/lease checks
-above. Finding a live earlier attempt is the single highest-priority verdict
-this module reports, since it is both the most actionable ("resume that
-session") and the one existing tooling was structurally blind to.
+by hand -- only ever see the most recent attempt. A *later* attempt can die
+while an *earlier* attempt's session is still alive and fully resumable, and
+nothing re-checks that earlier attempt once a newer reservation shadows it.
+``diagnose`` optionally accepts that task's full reservation history
+(``DispatchClient.list_reservations(task_id=...)``) and, when given, checks
+every attempt's actual embody-session liveness **by session id** (not the
+task's ``owner`` worker_id/lane label, which reflects only the latest
+attempt) before falling through to the worktree/lease checks above. Finding
+a live earlier attempt is the single highest-priority verdict this module
+reports, since it is both the most actionable ("resume that session") and
+the one existing tooling was structurally blind to.
 """
 
 from __future__ import annotations
@@ -65,8 +63,25 @@ SESSION_GONE = "gone"
 SESSION_UNKNOWN = "unknown"
 
 #: The verdict reported when an earlier spawn attempt's session is confirmed
-#: live but shadowed by a later, dead/unknown attempt -- the Phase 9 gap.
+#: live but shadowed by a later, dead/unknown attempt (see #2884).
 EARLIER_ATTEMPT_LIVE_VERDICT = "earlier_attempt_live"
+
+#: The verdict reported when a task's reservation-history fetch itself may be
+#: incomplete (returned exactly :data:`_RESERVATION_HISTORY_LIMIT` rows --
+#: the list API has no cursor, so this is the signal that more history could
+#: exist beyond the page). Reported instead of guessing from a partial page,
+#: since a truncated read could hide the very live earlier attempt this
+#: check exists to find.
+RESERVATION_HISTORY_TRUNCATED_VERDICT = "reservation_history_truncated"
+
+#: Requested page size for a task's full spawn-reservation history. The
+#: ``list_reservations`` API has no cursor/offset, only ``limit`` -- so this
+#: is not true pagination, just a page large enough that no real task (bounded
+#: by the engine's own max-attempts dead-lettering, ordinarily single digits)
+#: could plausibly exceed it. If a task somehow *does* return exactly this
+#: many rows, :data:`RESERVATION_HISTORY_TRUNCATED_VERDICT` is reported rather
+#: than silently analyzing a possibly-incomplete page.
+_RESERVATION_HISTORY_LIMIT = 100_000
 
 #: agent-worktrees tracking statuses that mean "this worktree is no longer a
 #: live, resumable checkout" -- confirmed-gone for doctor purposes. A record
@@ -103,14 +118,16 @@ class Diagnosis:
     reservation_key: str | None = None
     owner: str | None = None
     #: Set only for :data:`EARLIER_ATTEMPT_LIVE_VERDICT`: the earlier attempt
-    #: number and its confirmed-live embody session id, the two facts an
-    #: operator needs to actually recover it (``agent-bridge resume
-    #: <live_session_id>``, then reattach a fresh task).
+    #: number, its confirmed-live embody session id, and (for a fleet body
+    #: only) the pool host it's live on -- the facts an operator needs to
+    #: actually recover it (``agent-bridge resume <live_session_id>``, run on
+    #: ``live_host`` when set, then reattach a fresh task).
     live_attempt: int | None = None
     live_session_id: str | None = None
+    live_host: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "task_id": self.task_id,
             "status": self.status,
             "verdict": self.verdict,
@@ -118,9 +135,16 @@ class Diagnosis:
             "worktree_id": self.worktree_id,
             "reservation_key": self.reservation_key,
             "owner": self.owner,
-            "live_attempt": self.live_attempt,
-            "live_session_id": self.live_session_id,
         }
+        # Only present when this diagnosis actually carries live-attempt data
+        # (verdict == EARLIER_ATTEMPT_LIVE_VERDICT) -- every other verdict's
+        # JSON shape is unchanged from before reservation-history liveness
+        # existed, preserving exact-consumer compatibility.
+        if self.live_attempt is not None:
+            out["live_attempt"] = self.live_attempt
+            out["live_session_id"] = self.live_session_id
+            out["live_host"] = self.live_host
+        return out
 
 
 def _default_local_session_verdict(session_id: str) -> str:
@@ -156,39 +180,44 @@ def _reservation_session_liveness(
     ordered = sorted(reservations, key=lambda r: r.get("attempt") or 0)
     latest = ordered[-1]
 
-    def _session_verdict(res: dict[str, Any]) -> tuple[str, int | None, str | None]:
+    def _session_verdict(
+        res: dict[str, Any],
+    ) -> tuple[str, int | None, str | None, str | None]:
         handle = res.get("session_handle")
         fleet = _parse_fleet_body_handle(handle)
         local_sid = _parse_local_body_handle(handle)
         if fleet is not None:
             host, sid = fleet
-            return fleet_verdict(host, sid), res.get("attempt"), sid
+            return fleet_verdict(host, sid), res.get("attempt"), sid, host
         if local_sid is not None:
-            return local_verdict(local_sid), res.get("attempt"), local_sid
-        return SESSION_UNKNOWN, res.get("attempt"), None
+            return local_verdict(local_sid), res.get("attempt"), local_sid, None
+        return SESSION_UNKNOWN, res.get("attempt"), None, None
 
-    latest_verdict, _, _ = _session_verdict(latest)
+    latest_verdict, _, _, _ = _session_verdict(latest)
     if latest_verdict == SESSION_LIVE:
         return None  # the current attempt is itself alive -- nothing shadowed.
 
     for res in reversed(ordered[:-1]):
-        verdict, attempt, session_id = _session_verdict(res)
+        verdict, attempt, session_id, host = _session_verdict(res)
         if verdict == SESSION_LIVE and session_id is not None:
+            where = f" on host {host!r}" if host else ""
             return Diagnosis(
                 task_id=str(latest.get("task_id") or ""),
                 status="",  # filled in by the caller, which has the task row
                 verdict=EARLIER_ATTEMPT_LIVE_VERDICT,
                 detail=(
                     f"attempt {attempt} session {session_id!r} is live and "
-                    f"resumable, but attempt {latest.get('attempt')} (the task's "
-                    "current tracked reservation) is "
+                    f"resumable{where}, but attempt {latest.get('attempt')} "
+                    "(the task's current tracked reservation) is "
                     f"{'unknown' if latest_verdict == SESSION_UNKNOWN else 'gone'} "
-                    "-- resume the earlier session (`agent-bridge resume "
-                    f"{session_id}`), then reattach a fresh task to it"
+                    f"-- resume the earlier session (`agent-bridge resume "
+                    f"{session_id}`{f' on {host}' if host else ''}), then "
+                    "reattach a fresh task to it"
                 ),
                 reservation_key=latest.get("key"),
                 live_attempt=attempt,
                 live_session_id=session_id,
+                live_host=host,
             )
     return None
 
@@ -241,10 +270,10 @@ def diagnose(
     ``DispatchClient.list_reservations(task_id=...)`` history, any order),
     checked **first**: if an earlier attempt's embody session is confirmed
     live while the task's current (latest) reservation is not, this reports
-    :data:`EARLIER_ATTEMPT_LIVE_VERDICT` immediately -- the Phase 9 gap this
-    module exists to close. Omitting ``reservations`` (the default) leaves
-    every other check and the return shape byte-for-byte unchanged, so
-    existing callers/tests are unaffected.
+    :data:`EARLIER_ATTEMPT_LIVE_VERDICT` immediately -- the reservation-
+    history gap this module exists to close (see #2884). Omitting
+    ``reservations`` (the default) leaves every other check and the return
+    shape byte-for-byte unchanged, so existing callers/tests are unaffected.
     """
     now = time.time() if now is None else now
     task_id = task.get("id", "")
@@ -284,6 +313,7 @@ def diagnose(
                 owner=owner,
                 live_attempt=history_diagnosis.live_attempt,
                 live_session_id=history_diagnosis.live_session_id,
+                live_host=history_diagnosis.live_host,
             )
 
     if worktree_id:
@@ -371,11 +401,31 @@ def diagnose_many(
     """
     diagnoses = []
     for t in tasks:
-        reservations = (
-            client.list_reservations(task_id=t.get("id"), limit=1000)
-            if check_live_sessions
-            else None
-        )
+        reservations = None
+        truncated = False
+        if check_live_sessions:
+            reservations = client.list_reservations(
+                task_id=t.get("id"), limit=_RESERVATION_HISTORY_LIMIT
+            )
+            truncated = len(reservations) >= _RESERVATION_HISTORY_LIMIT
+        if truncated:
+            diagnoses.append(
+                Diagnosis(
+                    task_id=str(t.get("id") or ""),
+                    status=str(t.get("status") or ""),
+                    verdict=RESERVATION_HISTORY_TRUNCATED_VERDICT,
+                    detail=(
+                        f"this task's reservation history returned "
+                        f"{_RESERVATION_HISTORY_LIMIT} rows (the page limit) -- "
+                        "it may be incomplete, so the earlier-attempt-liveness "
+                        "check was skipped rather than risk missing a live "
+                        "session; investigate this task's attempt count "
+                        "directly"
+                    ),
+                    owner=t.get("owner"),
+                )
+            )
+            continue
         diagnoses.append(
             diagnose(
                 t,

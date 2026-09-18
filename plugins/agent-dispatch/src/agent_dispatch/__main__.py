@@ -2042,8 +2042,8 @@ def _cmd_list(args: argparse.Namespace) -> int:
 
 
 def _cmd_doctor(args: argparse.Namespace) -> int:
-    """Diagnose held/suspended tasks (Boundary I / #2577; Phase 9 session-
-    liveness / aperture-labs#7133). ``--task`` narrows to one exact task;
+    """Diagnose held/suspended tasks (Boundary I / #2577; #2884 session-
+    liveness / #2884). ``--task`` narrows to one exact task;
     ``--check-live-sessions`` walks its full reservation history for a
     shadowed-but-live earlier attempt. See :mod:`agent_dispatch.doctor`."""
     from . import doctor
