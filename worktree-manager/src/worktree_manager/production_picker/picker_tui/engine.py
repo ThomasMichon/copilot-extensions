@@ -718,24 +718,21 @@ class _PickerStickyHeader(Widget):
 
 
 class _PickerNativeData(OptionList):
-    """NF5-5 (#88): swappable *native* data body -- the pivot's data rows as real
-    ``OptionList`` options (native focus, cursor, up/down, click, scroll, a11y)
-    instead of painted text lines driven by the manual ``sel`` cursor.
+    """NF5-5 (#88): swappable *native* data body -- the pivot's data rows as
+    real ``OptionList`` options (native focus, cursor, up/down, click, scroll,
+    a11y) instead of painted text lines driven by the manual ``sel`` cursor.
 
     Bridged to the engine ``sel`` model both ways so the rest of the picker
     (chrome, activation, tests) is unchanged: native cursor moves mirror into
-    ``sel`` (``OptionHighlighted``), and external ``sel`` changes mirror onto the
-    native highlight. Non-selectable rows (column header, section headers,
-    live-pulse sublines) become *disabled* options -- the native cursor skips
-    them, exactly as the manual ``stops`` list did. Options are rebuilt only when
-    the data signature changes, so plain cursor navigation stays smooth/native.
+    ``sel``, and external ``sel`` changes mirror onto the native highlight.
+    Header/live-pulse rows are *disabled* options, like the manual ``stops``
+    list; options rebuild only when the data signature changes.
     """
 
     can_focus = True
     _SENTINEL_SEL = ("__native__", -1)
-    #: Keys OptionList owns natively (its own BINDINGS handle these); everything
-    #: else routes through the manual model so Tab/pivot/machine behave as
-    #: elsewhere.
+    #: Keys OptionList owns natively; everything else routes through the manual
+    #: model so Tab/pivot/machine behave as elsewhere.
     _NATIVE_KEYS = frozenset({"up", "down", "home", "end", "pageup", "pagedown",
                               "enter"})
 
@@ -775,12 +772,15 @@ class _PickerNativeData(OptionList):
     def _rebuild(self):
         scr = self._screen
         W = scr.size.width or 100
-        # Data-only build (the native widget renders no chrome); resilient to an
-        # early mount before the screen's setup() has populated records.
+        # Data-only build (chrome renders separately); resilient to an early mount.
         try:
             data = scr._build_data_vrows(W, sel=self._SENTINEL_SEL)
         except Exception:
             data = []
+        # `clear_options()` zeroes scroll_y; restore across a same-pivot rebuild.
+        new_sig = self._signature()
+        preserve_scroll = self._sig is not None and self._sig[:3] == new_sig[:3]
+        old_scroll_y = int(getattr(self.scroll_offset, "y", 0) or 0)
         self._syncing = True
         try:
             self.clear_options()
@@ -804,9 +804,7 @@ class _PickerNativeData(OptionList):
                 self._stops.append(stop)
                 self._sections.append(cur_label)
                 self._kinds.append(kind)
-                # Map worktree rows by their collision-safe selection key so a
-                # selection-only change repaints just those rows in place
-                # instead of a full rebuild (#171).
+                # Row key for the #171 selection-only repaint (skip a full rebuild).
                 rec = getattr(vr, "data", None)
                 if stop is not None and stop[0] == "L" and rec is not None:
                     rid = scr._row_key(rec)
@@ -814,9 +812,11 @@ class _PickerNativeData(OptionList):
                         self._l_rows[rid] = (idx, rec, stop[1])
             if opts:
                 self.add_options(opts)
+            if preserve_scroll and old_scroll_y:
+                self.scroll_y = old_scroll_y   # clamped by the reactive's own validator
         finally:
             self._syncing = False
-        self._sig = self._signature()
+        self._sig = new_sig
         self._sync_from_sel()
         self._update_sticky()
 

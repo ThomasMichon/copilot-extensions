@@ -167,6 +167,54 @@ def test_awaiting_operator_renders_marker_and_pulse(monkeypatch, tmp_path):
         "the ⏳ pulse glyph is not painted with the awaiting amber accent")
 
 
+def test_pulse_level_never_drops_an_existing_intent():
+    """context-handoff bug #2 (ephemeral "current task" line): an unparseable
+    or missing ``live_intent_at``, with no graded ``live_rest``, used to make
+    ``_pulse_level`` return ``None`` -- silently dropping the live-intent TEXT
+    from the tile even though it was present, contradicting the documented
+    #228 "never expires, only greys" contract. Grading now degrades to
+    ``'stale'`` (unknown freshness reads as aged/grey), never to absent."""
+    # No live_intent_at at all.
+    assert derive._pulse_level({"live_intent": "still working"}) == "stale"
+    # An unparseable timestamp.
+    assert derive._pulse_level(
+        {"live_intent": "still working", "live_intent_at": "not-a-date"}
+    ) == "stale"
+    # No intent text at all -- the ONLY case the line is legitimately absent.
+    assert derive._pulse_level({"live_intent": ""}) is None
+    assert derive._pulse_level({}) is None
+
+
+def _untimed_intent_source():
+    """A worktree with a live intent but no parseable timestamp/rest -- the
+    #2 repro: the intent text exists but its freshness can't be graded."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("anomalous-potato", "Win")
+    raws = [
+        {"id": "anomalous-potato-win-20260627-eeee", "title": "In progress",
+         "status": "active", "started_at": "2026-06-27T17:00:00",
+         "turn_count": 1, "state": "active",
+         "live_intent": "reconciling the untimed pulse"},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+    return src
+
+
+def test_untimed_intent_still_renders_the_pulse_line(monkeypatch, tmp_path):
+    """End-to-end capture proof for the fix above: the tile's second line
+    still shows the intent text even when its timestamp/rest can't grade
+    freshness (previously the whole pulse sub-line vanished)."""
+    _isolate_pivots(monkeypatch, tmp_path)
+    text = pcap.capture(_untimed_intent_source(), live=False)["text"]
+    assert "reconciling the untimed pulse" in text
+
+
 def _assets_source():
     """A fleet with one worktree carrying held claims of several kinds (#6443/
     upstream #1979 Phase 6) -- exercises the tile's bounded asset-hint line

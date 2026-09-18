@@ -38,9 +38,13 @@ def _pulse_level(w):
     'awaiting' -- the session is parked on a human (``live_rest`` ==
                   ``awaiting-operator``): the standout "this needs me" cue.
     'fresh'    -- a recent intent from an active turn (bright-dim live line).
-    'stale'    -- the intent has aged, or its session is idle/at-rest (greyed).
-    None       -- no intent text to show, OR (absent any graded ``live_rest``)
-                  an unparseable/missing timestamp leaves freshness unknown.
+    'stale'    -- the intent has aged, its session is idle/at-rest, or its
+                  freshness can no longer be graded (greyed either way).
+    None       -- no intent TEXT to show. This is the only case the line is
+                  absent -- see copilot-extensions#228 and its Picker-side
+                  follow-up (context-handoff bug #2): an intent that exists
+                  must never silently disappear merely because its freshness
+                  is unknown.
 
     copilot-extensions#228: the line does NOT expire on AGE -- a worktree that
     ever reported an intent keeps showing its last one (greyed) whenever the
@@ -48,8 +52,12 @@ def _pulse_level(w):
     pick fresh vs. stale, never None-on-age. The crisp ``live_rest``
     (busy/idle/awaiting-operator) is preferred for the colour and, when present,
     always yields a level; the intent's own age + idle flag are the coarse
-    fallback when no graded rest is present (and only there can a bad timestamp
-    still drop the line).
+    fallback when no graded rest is present. An unparseable/missing timestamp
+    (and no graded rest) used to drop the line entirely even though the intent
+    TEXT existed -- the operator-visible "ephemeral current task line" bug.
+    Grading is now degrade-to-'stale' (unknown freshness reads the same as
+    aged), never degrade-to-absent, so the text keeps showing per the class's
+    own contract above.
 
     The pulse is a *derived* signal (assistant.intent + the rest register); it is
     never conflated with the agent-asserted ``follow_up`` disposition.
@@ -66,13 +74,14 @@ def _pulse_level(w):
         return "stale"
     dt = _parse_pulse_ts(w.get("live_intent_at"))
     if dt is None:
-        return None
+        return "stale"
     age = (NOW - dt).total_seconds()
     if age < 0:
         age = 0
     if w.get("live_intent_idle") or age > _PULSE_FRESH_SECS:
         return "stale"
     return "fresh"
+
 
 
 def _parse_pulse_ts(ts):
