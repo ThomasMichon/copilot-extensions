@@ -27,9 +27,14 @@ owns that hook's vocabulary.
 
 from __future__ import annotations
 
+import math
+import os
 import random
 import re
+import signal
 import subprocess
+import threading
+import time
 from collections.abc import Iterable
 
 # Deliberately generic and whimsical -- small mechanical/workshop objects and
@@ -50,12 +55,20 @@ CODENAME_ADJECTIVES: tuple[str, ...] = (
 )
 
 #: Branch/filename-safe handle: one or more lowercase-alnum segments joined
-#: by single hyphens, no leading/trailing hyphen, no double hyphen.
-HANDLE_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+#: by single hyphens, no leading/trailing hyphen, no double hyphen. ``\Z``
+#: (not ``$``) so a trailing newline can never sneak a match past the end of
+#: the intended value -- ``$`` matches immediately before a final ``\n`` too.
+HANDLE_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*\Z")
 
 #: A hard ceiling on any handle (built-in or hook-sourced) -- long enough for
 #: a 3-word handle plus a suffix, short enough to never strain a branch name.
 MAX_HANDLE_LENGTH = 64
+
+#: Read at most this many bytes of a hook's stdout before giving up on it --
+#: a broken/adversarial hook must never let this process buffer unbounded
+#: output while validating a handle that can only ever be
+#: :data:`MAX_HANDLE_LENGTH` bytes long anyway.
+_MAX_HOOK_STDOUT_BYTES = MAX_HANDLE_LENGTH + 16
 
 DEFAULT_HOOK_TIMEOUT_SECONDS = 5.0
 
@@ -65,9 +78,9 @@ def is_valid_handle(value: str) -> bool:
     alnum segments only, within :data:`MAX_HANDLE_LENGTH`.
 
     This is a **syntax** check. It rejects malformed output (wrong case,
-    spaces, path separators, shell metacharacters, empty/oversized strings)
-    but cannot prove the value is semantically non-identifying -- see the
-    module docstring.
+    spaces, path separators, shell metacharacters, a trailing newline,
+    empty/oversized strings) but cannot prove the value is semantically
+    non-identifying -- see the module docstring.
     """
     if not value or len(value) > MAX_HANDLE_LENGTH:
         return False
@@ -89,38 +102,135 @@ def generate_handle(*, words: int = 2, rng: random.Random | None = None) -> str:
     return f"{adjective}-{noun}"
 
 
+def is_valid_hook_timeout(timeout: object) -> bool:
+    """Whether ``timeout`` is a finite, positive, non-boolean number.
+
+    Rejects ``NaN``/``inf``/``-inf`` (which raise inside
+    :meth:`subprocess.Popen.wait`/``communicate`` instead of failing
+    closed), non-positive values, and ``bool`` (a ``bool`` is an ``int``
+    subclass in Python, so ``isinstance(True, (int, float))`` is true --
+    checked explicitly to reject it before it silently becomes ``1``).
+    """
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+        return False
+    return math.isfinite(timeout) and timeout > 0
+
+
+def _process_group_kwargs() -> dict:
+    """Popen kwargs that put the hook in its own process group/session, so a
+    timeout can kill the whole subtree (a pipeline's later stages, a
+    background child) -- not just the immediate shell. Mirrors the pattern
+    already used for this plugin's other bounded hook subprocesses (see
+    ``_start_project_session_hook``/``_finish_project_session_hook`` in
+    ``__main__.py``)."""
+    if os.name == "posix":
+        return {"start_new_session": True}
+    return {
+        "creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+    }
+
+
+def _kill_process_group(process: subprocess.Popen) -> None:
+    """Best-effort kill of ``process`` and its whole process group/session."""
+    try:
+        if os.name == "posix":
+            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        else:
+            process.send_signal(signal.CTRL_BREAK_EVENT)
+    except (OSError, ProcessLookupError):
+        pass
+    try:
+        process.kill()
+    except OSError:
+        pass
+
+
+def _read_bounded_stdout(
+    process: subprocess.Popen, *, deadline: float
+) -> tuple[bytes, bool]:
+    """Read at most :data:`_MAX_HOOK_STDOUT_BYTES` from ``process.stdout`` in
+    a daemon thread, joined against ``deadline`` (a :func:`time.monotonic`
+    timestamp) so a hook that never writes and never exits cannot block this
+    process past its timeout.
+
+    Returns ``(data, timed_out)``. ``data`` is empty when ``timed_out`` is
+    true or the read otherwise failed.
+    """
+    box: dict[str, bytes] = {}
+
+    def _reader() -> None:
+        try:
+            assert process.stdout is not None
+            box["data"] = process.stdout.read(_MAX_HOOK_STDOUT_BYTES)
+        except OSError:
+            box["data"] = b""
+
+    reader = threading.Thread(target=_reader, daemon=True)
+    reader.start()
+    remaining = max(0.0, deadline - time.monotonic())
+    reader.join(remaining)
+    if reader.is_alive():
+        return b"", True
+    return box.get("data", b""), False
+
+
 def generate_via_hook(
     command: str,
     *,
     timeout: float = DEFAULT_HOOK_TIMEOUT_SECONDS,
 ) -> str | None:
     """Run an adopter-configured external generator hook and return its
-    handle, or ``None`` on any failure (timeout, non-zero exit, malformed
-    output) -- **fail-closed**: the caller must fall back to
-    :func:`generate_handle`, never propagate an invalid value.
+    handle, or ``None`` on any failure (invalid timeout, spawn failure,
+    timeout, non-zero exit, malformed/non-UTF-8/oversized output) --
+    **fail-closed**: the caller must fall back to :func:`generate_handle`,
+    never propagate an invalid value.
 
     ``command`` is executed via the shell (so an adopter can compose a
-    pipeline); its stdout is stripped and validated with
-    :func:`is_valid_handle` before being accepted. This proves the output is
-    branch-safe; it does NOT prove the output is non-identifying -- see the
-    module docstring's trust-scope note.
+    pipeline), in its own process group/session so a timeout can kill the
+    whole subtree, not just the immediate shell. At most
+    :data:`_MAX_HOOK_STDOUT_BYTES` of stdout is read regardless of how much
+    the hook tries to write (bounded memory); stderr is discarded entirely.
+    The result is stripped and validated with :func:`is_valid_handle` before
+    being accepted. This proves the output is branch-safe; it does NOT
+    prove the output is non-identifying -- see the module docstring's
+    trust-scope note.
     """
-    if not command:
+    if not command or not is_valid_hook_timeout(timeout):
         return None
+    deadline = time.monotonic() + timeout
     try:
-        result = subprocess.run(
+        process = subprocess.Popen(
             command,
             shell=True,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            **_process_group_kwargs(),
         )
-    except (subprocess.TimeoutExpired, OSError):
+    except OSError:
         return None
-    if result.returncode != 0:
+    try:
+        raw, timed_out = _read_bounded_stdout(process, deadline=deadline)
+        if timed_out:
+            _kill_process_group(process)
+            return None
+        remaining = max(0.0, deadline - time.monotonic())
+        try:
+            process.wait(timeout=remaining)
+        except subprocess.TimeoutExpired:
+            _kill_process_group(process)
+            return None
+    finally:
+        if process.stdout is not None:
+            try:
+                process.stdout.close()
+            except OSError:
+                pass
+    if process.returncode != 0:
         return None
-    candidate = result.stdout.strip()
+    try:
+        candidate = raw.decode("utf-8", errors="strict").strip()
+    except UnicodeError:
+        return None
     if not is_valid_handle(candidate):
         return None
     return candidate

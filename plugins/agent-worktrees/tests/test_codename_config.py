@@ -34,6 +34,18 @@ class TestParseCodename:
         cfg = parse_codename({"hook_timeout_seconds": "not-a-number"})
         assert cfg.hook_timeout_seconds == DEFAULT_HOOK_TIMEOUT_SECONDS
 
+    def test_non_finite_timeout_falls_back_to_default(self) -> None:
+        # float("nan")/float("inf") parse without raising but would crash
+        # subprocess timeout handling downstream -- must be rejected here.
+        for bad in ("nan", "inf", "-inf"):
+            cfg = parse_codename({"hook_timeout_seconds": bad})
+            assert cfg.hook_timeout_seconds == DEFAULT_HOOK_TIMEOUT_SECONDS
+
+    def test_non_positive_timeout_falls_back_to_default(self) -> None:
+        for bad in (0, -1, -0.5):
+            cfg = parse_codename({"hook_timeout_seconds": bad})
+            assert cfg.hook_timeout_seconds == DEFAULT_HOOK_TIMEOUT_SECONDS
+
     def test_integer_timeout_is_coerced_to_float(self) -> None:
         cfg = parse_codename({"hook_timeout_seconds": 3})
         assert cfg.hook_timeout_seconds == 3.0

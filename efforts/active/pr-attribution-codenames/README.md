@@ -319,3 +319,42 @@ _Pending review._
   about. The trust-scope documentation itself (hook output is
   syntax-validated, not content-guaranteed) landed now regardless, in the
   module and config docstrings.
+
+### 2026-09-18 — Phase 1 PR review round: hook hardening
+- Automated review on the implementation PR (7 findings: 2 high / 4 medium /
+  1 low) caught real gaps in `generate_via_hook`'s original
+  `subprocess.run(shell=True, ...)` implementation:
+  - `HANDLE_RE`'s trailing `$` matches immediately before a final newline,
+    so a handle with a stray `\n` passed validation. Fixed to `\Z`.
+  - `shell=True` + a bare `timeout=` only kills the immediate shell on
+    timeout, not descendants a pipeline/background command spawns —
+    exactly the kind of leak the timeout exists to prevent. Fixed by
+    launching the hook in its own process group/session (mirroring this
+    plugin's existing bounded-hook pattern in
+    `_start_project_session_hook`/`_finish_project_session_hook`) and
+    killing the whole group on timeout.
+  - A non-finite (`nan`/`inf`) or non-positive `timeout` reached
+    `subprocess`'s internals and raised instead of failing closed. Added
+    `is_valid_hook_timeout()`, checked both in `generate_via_hook` itself
+    and in `parse_codename` (defense in depth at the config-parse layer
+    too).
+  - `text=True` could raise `UnicodeDecodeError` on non-UTF-8 hook output
+    instead of returning `None`. Fixed with an explicit decode + `except
+    UnicodeError`.
+  - `capture_output=True` buffered unlimited stdout/stderr before the
+    64-character check — a hook emitting a large stream could transiently
+    consume unbounded memory. Fixed: stderr is discarded entirely
+    (`DEVNULL`), and stdout is read via a daemon thread joined against the
+    same deadline, capped at `MAX_HANDLE_LENGTH + 16` bytes regardless of
+    how much the hook tries to write.
+  - The hook tests invoked POSIX-only `printf`/`false`/`sleep` through
+    `shell=True`, which would fail under Windows' `cmd.exe` (this repo's
+    CI runs a Windows job). Replaced with a `sys.executable -c "..."`
+    helper for deterministic cross-platform commands.
+  - The PR description's stated version numbers (`dev144`/`dev128`) had
+    drifted from the actual committed values (`dev145`/`dev129`) after a
+    concurrent-bump rebase mid-review; corrected in the updated
+    description.
+  - Added regression tests for every fix above (trailing newline, timeout
+    reaching the actual process group, non-finite/non-positive timeout,
+    oversized hook output). 44 tests total (up from 38); all green.

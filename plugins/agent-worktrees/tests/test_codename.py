@@ -3,7 +3,12 @@
 
 from __future__ import annotations
 
+import os
 import random
+import sys
+import tempfile
+import time
+from pathlib import Path
 
 from agent_worktrees.codename import (
     CODENAME_ADJECTIVES,
@@ -85,10 +90,23 @@ class TestHandleValidation:
     def test_rejects_oversized(self) -> None:
         assert not is_valid_handle("a" * (MAX_HANDLE_LENGTH + 1))
 
+    def test_rejects_trailing_newline(self) -> None:
+        # `$` (unlike `\Z`) matches immediately before a final newline --
+        # regression guard for that class of bug.
+        assert not is_valid_handle("quiet-gizmo\n")
+
     def test_accepts_well_formed(self) -> None:
         assert is_valid_handle("quiet-gizmo")
         assert is_valid_handle("gizmo")
         assert is_valid_handle("gizmo123")
+
+
+def _py(code: str) -> str:
+    """Build a cross-platform shell command that runs ``code`` via the
+    current Python interpreter -- avoids depending on POSIX-only shell
+    builtins (`printf`/`false`/`sleep`), which aren't available under
+    Windows' default `cmd.exe` shell that ``shell=True`` uses there."""
+    return f'"{sys.executable}" -c "{code}"'
 
 
 class TestGenerateViaHook:
@@ -96,23 +114,66 @@ class TestGenerateViaHook:
         assert generate_via_hook("") is None
 
     def test_valid_output_is_accepted(self) -> None:
-        assert generate_via_hook("printf 'quiet-gizmo'") == "quiet-gizmo"
+        assert generate_via_hook(_py("print('quiet-gizmo')")) == "quiet-gizmo"
 
     def test_strips_trailing_newline(self) -> None:
-        assert generate_via_hook("echo quiet-gizmo") == "quiet-gizmo"
+        # print() always appends a newline -- the accepted value must have
+        # it stripped, not merely tolerate it (is_valid_handle rejects it).
+        assert generate_via_hook(_py("print('quiet-gizmo')")) == "quiet-gizmo"
 
     def test_malformed_output_is_rejected(self) -> None:
         # Uppercase and a space -- syntactically invalid, fails closed.
-        assert generate_via_hook("printf 'Not A Handle'") is None
+        assert generate_via_hook(_py("print('Not A Handle')")) is None
 
     def test_nonzero_exit_fails_closed(self) -> None:
-        assert generate_via_hook("false") is None
+        assert generate_via_hook(_py("import sys; sys.exit(1)")) is None
 
     def test_timeout_fails_closed(self) -> None:
-        assert generate_via_hook("sleep 5", timeout=0.05) is None
+        assert (
+            generate_via_hook(_py("import time; time.sleep(5)"), timeout=0.2)
+            is None
+        )
+
+    def test_timeout_kills_the_whole_process_group(self) -> None:
+        """A timed-out hook's descendants must not keep running/writing
+        after generate_via_hook returns -- regression guard for the
+        process-group isolation fix (a bare shell=True timeout only kills
+        the immediate shell, not children it spawned)."""
+        marker = Path(tempfile.gettempdir()) / f"codename-hook-marker-{os.getpid()}"
+        if marker.exists():
+            marker.unlink()
+        try:
+            # ``.as_posix()`` avoids backslash-escaping headaches when this
+            # path is embedded, quoted, in the outer shell command below.
+            child_code = (
+                "import time; time.sleep(5); "
+                f"open({marker.as_posix()!r}, 'w').close()"
+            )
+            result = generate_via_hook(_py(child_code), timeout=0.2)
+            assert result is None
+            # Give a leaked (not-actually-killed) child time to have written
+            # the marker if process-group isolation were broken.
+            time.sleep(0.5)
+            assert not marker.exists(), (
+                "hook's child process kept running past the timeout -- "
+                "process-group kill did not reach it"
+            )
+        finally:
+            if marker.exists():
+                marker.unlink()
 
     def test_nonexistent_command_fails_closed(self) -> None:
         assert generate_via_hook("this-command-does-not-exist-anywhere") is None
+
+    def test_invalid_timeout_fails_closed_without_raising(self) -> None:
+        for bad_timeout in (float("nan"), float("inf"), -1.0, 0.0, True):
+            assert generate_via_hook(_py("print('quiet-gizmo')"), timeout=bad_timeout) is None
+
+    def test_oversized_output_is_rejected_not_buffered_unbounded(self) -> None:
+        # A hook that emits far more than a handle could ever need must be
+        # rejected (too long once validated), and must not be read in full.
+        huge = _py("print('x' * 1_000_000)")
+        assert generate_via_hook(huge) is None
 
     def test_semantically_identifying_but_syntactically_valid_output_still_passes(
         self,
@@ -121,7 +182,10 @@ class TestGenerateViaHook:
         docstring's trust-scope note) -- a hook printing a well-formed but
         identifying handle is accepted here. The public-safety guarantee
         for this path depends on the hook owner, not this function."""
-        assert generate_via_hook("printf 'machine-20260917'") == "machine-20260917"
+        assert (
+            generate_via_hook(_py("print('machine-20260917')"))
+            == "machine-20260917"
+        )
 
 
 class TestAssignCodename:
@@ -152,13 +216,17 @@ class TestAssignCodename:
 
     def test_hook_success_short_circuits_builtin(self) -> None:
         handle = assign_codename(
-            [], hook_command="printf 'from-the-hook'", rng=random.Random(1)
+            [],
+            hook_command=_py("print('from-the-hook')"),
+            rng=random.Random(1),
         )
         assert handle == "from-the-hook"
 
     def test_hook_failure_falls_back_to_builtin(self) -> None:
         handle = assign_codename(
-            [], hook_command="false", rng=random.Random(1)
+            [],
+            hook_command=_py("import sys; sys.exit(1)"),
+            rng=random.Random(1),
         )
         assert is_valid_handle(handle)
         assert handle != ""
@@ -169,7 +237,7 @@ class TestAssignCodename:
         # returning a taken value.
         handle = assign_codename(
             {"from-the-hook"},
-            hook_command="printf 'from-the-hook'",
+            hook_command=_py("print('from-the-hook')"),
             rng=random.Random(3),
         )
         assert handle != "from-the-hook"
