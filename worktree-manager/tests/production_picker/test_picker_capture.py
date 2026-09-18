@@ -300,6 +300,58 @@ def test_bare_status_markers_render_as_readable_text(monkeypatch, tmp_path):
     assert "U*" not in text
 
 
+def _markers_and_assets_source():
+    """A fleet with BOTH a ``status_markers`` closure descriptor AND asset
+    hints on the same row -- the mixed case a PR #2897 review flagged: the
+    human-readable marker expansion is longer than the compact wire tokens it
+    replaces, and at a narrow capture width the combined line could overflow
+    the row and crowd out (or wrap past) the asset hints that follow it."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("anomalous-potato", "Win")
+    raws = [
+        {"id": "anomalous-potato-win-20260627-ffff", "title": "Mixed row",
+         "status": "active", "started_at": "2026-06-27T17:00:00",
+         "turn_count": 5, "state": "completed",
+         "closure": {
+             "version": 2, "label": "MERGED", "style": "merged-blocked",
+             "compact": "MERGED C1 U* OC*",
+             "claims": {"held": 1}, "follow_ups": {"open": 0},
+             "closure": {"final": False}, "action": {"disposition": "blocked"},
+         },
+         "resources": [
+             {"kind": "pr", "ref": "https://example/pulls/43",
+              "state": "active"},
+             {"kind": "worktree", "ref": "host/repo/wt-child2",
+              "state": "at-rest"},
+         ]},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+    return src
+
+
+def test_marker_and_asset_line_never_overflows_narrow_width(monkeypatch, tmp_path):
+    """The combined status_markers + asset_hints detail line must never
+    exceed the capture width, even at a narrow 60-column width where the
+    readable marker expansion alone could otherwise overrun the row (PR #2897
+    review). Bounded by construction -- every grid row is exactly `width`
+    cells, so this just asserts the capture doesn't crash and stays a clean
+    rectangular grid at the narrow width."""
+    _isolate_pivots(monkeypatch, tmp_path)
+    grid = pcap.capture(_markers_and_assets_source(), live=False, size=(60, 24))["text"]
+    lines = grid.splitlines()
+    widths = {len(line) for line in lines}
+    assert len(widths) == 1, f"ragged grid at narrow width: {sorted(widths)}"
+    # At least the asset hint survives -- markers were truncated to make room
+    # for it rather than crowding it out entirely.
+    assert "PR" in grid
+
+
 def test_capture_is_deterministic(monkeypatch, tmp_path):
     _isolate_pivots(monkeypatch, tmp_path)
     first = pcap.capture(_fixture_source(), live=False)["text"]

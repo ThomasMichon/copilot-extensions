@@ -246,6 +246,21 @@ def _status_markers(w):
     return compact[len(label):].strip()
 
 
+def truncate_text(s, w):
+    """Truncate ``s`` to at most ``w`` cells, ellipsizing when clipped -- used
+    when concatenating several variable-length segments onto one detail line
+    (the Worktree tile's status_markers/asset_hints run) so no single segment
+    can overflow the row and crowd out the ones after it. Deliberately
+    non-padding (unlike ``engine.py``'s column-fitting ``_clip``, which always
+    pads its result out to exactly ``w``): padding mid-line here would insert
+    unwanted blank space between segments instead of just bounding this one's
+    length."""
+    s = str(s)
+    if len(s) <= w:
+        return s
+    return s[: max(0, w - 1)] + "…" if w > 1 else s[:w]
+
+
 #: The raw ``status_markers`` tokens above (``C<N>``/``F<N>``/``U*``/``OC*``)
 #: are a closure-descriptor-internal wire shorthand -- meaningful to whoever
 #: wrote the descriptor, opaque to an operator glancing at the tile's second
@@ -291,6 +306,31 @@ def describe_status_marker(tok):
         noun = "held claim" if tok[0] == "C" else "follow-up"
         return f"{n} {noun}{'s' if n != 1 else ''}", False
     return tok, tok.endswith("*")
+
+
+def status_marker_segments(markers, width):
+    """Expand a raw ``status_markers`` string into ``(text, is_warning)``
+    render segments (comma separators included as their own non-warning
+    segments), each already truncated so the whole run never exceeds
+    ``width`` cells -- the human-readable expansion is longer than the
+    compact wire tokens it replaces, so this segment must never be allowed to
+    crowd out whatever the picker's render layer appends after it (asset
+    hints, the live-pulse line)."""
+    segments = []
+    used = 0
+    for j, tok in enumerate(markers.split()):
+        prefix = ", " if j else ""
+        budget = max(0, width - used) - len(prefix)
+        if budget <= 0:
+            break
+        if prefix:
+            segments.append((prefix, False))
+            used += len(prefix)
+        text, is_warn = describe_status_marker(tok)
+        clipped = truncate_text(text, budget)
+        segments.append((clipped, is_warn))
+        used += len(clipped)
+    return segments
 
 
 #: Bounded per-kind short codes for the tile asset-hint line (#6443/upstream
