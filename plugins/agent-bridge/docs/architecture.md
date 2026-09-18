@@ -494,6 +494,10 @@ restart does not inherently close the child's pipes.
   Shutdown retries that client ownership, and remote end closes channels
   strictly before reaping. Late reap callbacks remove only their own task set,
   never a replacement set created by newer cleanup.
+  Failed resume/start cleanup also requests strict ACP shutdown, retains a
+  failed client, and contains manager-owned forward/relay channels even after
+  host launch commitment. Claims are released only after all cleanup succeeds
+  and no retained host ownership remains.
   Remote cleanup also checks an in-process HostIndex publication revision,
   protecting equal-value replacement records from an older reap. Descriptor
   removal must persist before pending handles or container ownership are

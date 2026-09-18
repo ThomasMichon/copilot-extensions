@@ -359,9 +359,9 @@
         },
         {
           "path": "plugins/agent-bridge/tests/test_session_host.py",
-          "sha256": "10a49ed282f9a6963a3712b7583ea6ec446a9179a5ce0ca8e2501325f02570bd",
+          "sha256": "cf732f2d1fc124848b4d1063a354e79b96ca151a3e0dbff7a1d12df06bd0e073",
           "semantic": false,
-          "non_semantic_reason": "This test suite consumes the protocol but does not produce its wire shape; async lifecycle sweep and strict cleanup expectations do not alter wire framing or fixtures."
+          "non_semantic_reason": "This test suite consumes the protocol but does not produce its wire shape; async lifecycle sweep and strict cleanup expectations/mocks do not alter wire framing or fixtures."
         }
       ],
       "fixtures": [

@@ -238,7 +238,7 @@ async def rollback_host_launch(
         if await close("socket close", sock.close()) and pending is not None and pending.sock is sock:
             pending.sock = None
     if pending is not None and pending.client is not None:
-        if await close("client shutdown", pending.client.shutdown()):
+        if await close("client shutdown", pending.client.shutdown(strict=True)):
             pending.client = None
     remote = getattr(spawned, "boundary", "local") != "local"
     confirmed = False

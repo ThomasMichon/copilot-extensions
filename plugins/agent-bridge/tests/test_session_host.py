@@ -1275,7 +1275,7 @@ async def test_reattach_cancellation_closes_partial_transport(
         async def start_streams(self, *_args, **_kwargs):
             await asyncio.sleep(60)
 
-        async def shutdown(self):
+        async def shutdown(self, *, strict=False):
             closed["client"] = True
 
     sock = FakeSock()

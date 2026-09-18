@@ -1689,3 +1689,45 @@ async def test_shutdown_retries_strict_acp_client_ownership(owned_context, monke
     assert ctx.session.client is None
     assert ctx.session.status == SessionStatus.STOPPED
     assert ctx.session.restart_status == "idle"
+
+
+@pytest.mark.parametrize("failure", [None, "client", "relay", "forward"])
+async def test_committed_host_resume_cleanup_retains_failed_owners(
+    owned_context, monkeypatch, failure,
+):
+    from agent_bridge.session_ownership import cleanup_resume_attempt
+
+    ctx = owned_context
+    record = _remote_record(ctx)
+    client = SimpleNamespace(shutdown=AsyncMock())
+    relay = SimpleNamespace(stop=AsyncMock())
+    forward = SimpleNamespace(cancel=AsyncMock())
+    ctx.session.client = client
+    ctx.manager._relays[record.session_id] = [relay]
+    ctx.manager._forwards[record.session_id] = forward
+    release = Mock()
+    remote = AsyncMock(side_effect=AssertionError("committed host must remain resumable"))
+    monkeypatch.setattr(ctx.manager, "_release_container_lock", release)
+    monkeypatch.setattr(ctx.manager, "_remote_reap", remote)
+    operations = {"client": client.shutdown, "relay": relay.stop, "forward": forward.cancel}
+    if failure is not None:
+        operations[failure].side_effect = OSError("cleanup failed")
+        with pytest.raises(OSError, match="cleanup failed"):
+            await cleanup_resume_attempt(ctx.manager, ctx.session, client)
+        assert ctx.session.status == SessionStatus.FAILED
+        assert (ctx.session.client is client) is (failure == "client")
+        assert (record.session_id in ctx.manager._relays) is (failure == "relay")
+        assert (record.session_id in ctx.manager._forwards) is (failure == "forward")
+        assert ctx.manager._host_index.get(record.session_id) == record
+        release.assert_not_called()
+        operations[failure].side_effect = None
+        await cleanup_resume_attempt(ctx.manager, ctx.session, ctx.session.client)
+    else:
+        await cleanup_resume_attempt(ctx.manager, ctx.session, client)
+        client.shutdown.assert_awaited_once_with(strict=True)
+    assert ctx.session.client is None
+    assert ctx.manager._forwards == {}
+    assert ctx.manager._relays == {}
+    assert ctx.manager._host_index.get(record.session_id) == record
+    release.assert_not_called()
+    remote.assert_not_awaited()

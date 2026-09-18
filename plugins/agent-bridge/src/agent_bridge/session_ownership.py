@@ -77,28 +77,32 @@ async def spawn_owned(
 async def cleanup_resume_attempt(
     manager: SessionManager, session: Session, client: AcpClient | None,
 ) -> None:
-    """Close an unsuccessful client and reclaim its retained local process."""
-    from .session_host_ownership import abort_pending_host_launch
+    """Contain failed attempt resources without discarding cleanup retry handles."""
+    from .session_host_ownership import abort_pending_host_launch, has_host_ownership
 
     if client is None:
         client = session.client
-    if client is not None:
-        try:
-            await client.shutdown()
-        except Exception:
-            log.warning(
-                "Resume client shutdown failed for %s; checking process ownership",
-                session.session_id, exc_info=True,
-            )
     try:
-        await cleanup_owned_process(session)
-        await abort_pending_host_launch(manager, session.session_id)
+        try:
+            if client is not None:
+                session.client = client
+                await client.shutdown(strict=True)
+                session.client = None
+        finally:
+            try:
+                await cleanup_owned_process(session)
+                await abort_pending_host_launch(manager, session.session_id)
+            finally:
+                await manager._drop_forward(
+                    session.session_id, strict=True, preserve_ownership=True,
+                )
         await release_unowned_launch_claim(manager, session)
+        if not has_host_ownership(manager, session.session_id):
+            manager._release_container_lock(session.session_id)
     except Exception:
         manager._mark_session_failed(session, trigger="resume_cleanup_failed")
-        log.error("Resume process cleanup failed for %s", session.session_id, exc_info=True)
+        log.error("Resume ownership cleanup failed for %s", session.session_id, exc_info=True)
         raise
-    session.client = None
 
 
 async def release_unowned_launch_claim(manager: SessionManager, session: Session) -> None:
@@ -128,14 +132,8 @@ async def settle_cancelled_resume(
     *, trigger: str = "resume_cancelled",
 ) -> None:
     """Complete cancellation cleanup before publishing a resumable stopped row."""
-    from .session_host_ownership import has_host_ownership
-
     try:
         await cleanup_resume_attempt(manager, session, client)
-        await manager._drop_forward(
-            session.session_id, strict=True,
-            preserve_ownership=has_host_ownership(manager, session.session_id),
-        )
     except Exception:
         manager._mark_session_failed(session, trigger="resume_cleanup_failed")
         raise
