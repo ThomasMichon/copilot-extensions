@@ -12,6 +12,7 @@ import json
 import time
 from dataclasses import asdict
 
+import httpx
 import pytest
 
 from agent_dispatch import bridge, tracking
@@ -1035,6 +1036,109 @@ def test_cold_resume_missing_worktree_release_failure_backs_off(
     assert sup.release_resumed_cold_tasks(now=1300) == 0
     assert attempts == [blocked.id, blocked.id]
     assert q.get(blocked.id).status == Status.SUSPENDED
+
+
+def test_pool_reservations_transient_transport_error_does_not_abort_cycle(
+    q, client, monkeypatch
+):
+    """A connection blip listing reservations must not propagate.
+
+    Regression test for copilot-extensions#2857: `_pool_reservations` (and
+    every `release_resumed_cold_tasks`-style caller built on it) used to let
+    a raw `httpx.TransportError` escape uncaught, which aborted the entire
+    per-cycle sweep -- not just this one sub-check -- whenever the
+    coordinator was briefly unreachable (e.g. during a version-restart
+    race). It must instead be treated like "nothing to report this cycle."
+    """
+    blocked = q.create("needs operator", labels=["review"])
+    reservation, _ = q.reserve_spawn(blocked.id)
+    q.record_spawn(reservation.key, session_handle="local-body:blocked-session")
+    q.claim_one("headless-owner", task_id=blocked.id)
+    q.start(blocked.id, "headless-owner")
+    q.suspend(blocked.id, "headless-owner", reason="turn ended")
+    q.record_cold(reservation.key)
+    q.submit_steer(blocked.id, fields={"decision": "continue"}, sender="operator")
+
+    def refused(*_args, **_kwargs):
+        raise httpx.ConnectError(
+            "[WinError 10061] No connection could be made because the target "
+            "machine actively refused it"
+        )
+
+    monkeypatch.setattr(client, "list_reservations", refused)
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        labels=["review"],
+    )
+
+    assert sup._pool_reservations(state=SpawnState.COLD, resume_requested=True) == []
+    # The whole cycle must not raise either -- this is the actual bug shape:
+    # release_resumed_cold_tasks previously let the ConnectError propagate.
+    assert sup.release_resumed_cold_tasks() == 0
+    assert q.get(blocked.id).status == Status.SUSPENDED
+
+
+def test_active_reservations_fails_closed_on_transport_error(q, client, monkeypatch):
+    """Capacity gating must not treat "unknown" as "zero active".
+
+    `_active_reservations` feeds directly into the active >= max_concurrent
+    capacity gate in `poll_once`. Swallowing a transient transport error into
+    an empty list there (as the generic `_pool_reservations` resilience does
+    for every other, non-capacity-critical caller) would make the supervisor
+    believe it has full spare capacity during an outage and over-spawn past
+    max_concurrent. It must instead fail closed: report capacity as fully
+    consumed so this cycle spawns nothing, and let the next interval retry
+    once the coordinator is reachable again.
+    """
+    queued = q.create("work")
+
+    def refused(*_args, **_kwargs):
+        raise httpx.ConnectError(
+            "[WinError 10061] No connection could be made because the target "
+            "machine actively refused it"
+        )
+
+    monkeypatch.setattr(client, "list_reservations", refused)
+    spawn = _ok_spawn()
+    sup = Supervisor(client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5)
+
+    active = sup._active_reservations()
+    assert len(active) == sup.max_concurrent
+
+    assert sup.poll_once() == []
+    assert spawn.calls == []
+    assert q.get(queued.id).status == Status.QUEUED
+
+
+def test_failed_spawn_counts_fails_closed_on_transport_error(q, client, monkeypatch):
+    """Dead-letter/retry gating must not treat "unknown" as "zero failures".
+
+    `_failed_spawn_counts` feeds `_is_dead_lettered` (via `max_attempts`).
+    Swallowing a transient transport error into `{}` there would make every
+    task look like it has zero failed attempts, letting one that has
+    already exhausted `max_attempts` keep retrying past its bound during an
+    outage. It must instead fail closed: block *new* spawns entirely this
+    cycle (existing active work is unaffected) rather than guess either way.
+    """
+    queued = q.create("work")
+
+    def refused(*_args, **_kwargs):
+        raise httpx.ConnectError(
+            "[WinError 10061] No connection could be made because the target "
+            "machine actively refused it"
+        )
+
+    monkeypatch.setattr(client, "list_reservations", refused)
+    spawn = _ok_spawn()
+    sup = Supervisor(client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5)
+
+    assert sup._failed_spawn_counts() is None
+
+    assert sup.poll_once() == []
+    assert spawn.calls == []
+    assert q.get(queued.id).status == Status.QUEUED
 
 
 def test_release_requested_legacy_missing_worktree_recovers_from_held_conclusion(
