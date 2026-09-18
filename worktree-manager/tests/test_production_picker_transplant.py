@@ -398,6 +398,27 @@ def test_manager_acts_on_production_picker_resume_decision(monkeypatch):
     assert requests[0].no_mux is True
 
 
+def test_manager_acts_on_production_picker_refresh_decision(monkeypatch):
+    """The "Update available" gesture (`action: refresh`) must thread the
+    resolved project through to `_cmd_update`, mirroring every other decision
+    branch here -- otherwise `agent-worktrees update` runs with no `--project`
+    and can't resolve context outside an adopted repo/worktree."""
+    monkeypatch.setattr(
+        runner,
+        "run",
+        lambda project: {"action": "refresh"},
+    )
+    calls = []
+    monkeypatch.setattr(
+        entrypoint,
+        "_cmd_update",
+        lambda rest: calls.append(rest) or 0,
+    )
+
+    assert entrypoint._run_production_picker("demo") == 0
+    assert calls == [["--project", "demo"]]
+
+
 def test_manager_restores_local_session_then_uses_common_launch_gate(monkeypatch):
     monkeypatch.setattr(
         runner,

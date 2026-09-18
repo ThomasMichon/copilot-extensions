@@ -776,7 +776,7 @@ def _run_production_picker(project: str) -> int:
             ),
         ))
     if action == "refresh":
-        return _cmd_update([])
+        return _cmd_update(["--project", project])
     print(f"error: Picker returned an unsupported decision: {action!r}")
     return 1
 
