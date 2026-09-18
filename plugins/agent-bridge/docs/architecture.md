@@ -503,6 +503,10 @@ restart does not inherently close the child's pipes.
   before acknowledging STOPPED, so a successfully stopped session leaves no
   in-memory launch obligation for shutdown to revive later. Committed hosts
   retain their existing stop/resume behavior.
+  Pending remote-reap ownership fences channel installation and the resume
+  fallback after reattachment, including legacy records. Teardown captures its
+  forward before awaiting relay shutdown and removes channel-map entries only
+  when they still name that owner, preserving replacement channels.
   Remote cleanup also checks an in-process HostIndex publication revision,
   protecting equal-value replacement records from an older reap. Descriptor
   removal must persist before pending handles or container ownership are

@@ -2607,6 +2607,11 @@ class SessionManager:
         normal front detach/reattach leaves an existing relay alone; a daemon
         restart (no in-memory relay) re-supervises it from the descriptor.
         """
+        if self._remote_reap_pending(rec.session_id):
+            raise RemoteHostRecoveryPendingError(
+                f"Remote Session Host cleanup is pending for {rec.session_id}; "
+                "refusing replacement channel installation"
+            )
         boundary = getattr(rec, "boundary", "local")
         endpoint = getattr(rec, "endpoint", None) or {}
         if boundary == "local" or not endpoint:
@@ -2768,12 +2773,22 @@ class SessionManager:
         relays = self._relays.get(session_id, [])
         for relay in list(relays):
             if strict:
-                await relay.stop()
+                try:
+                    await relay.stop()
+                except Exception:
+                    current = self._relays.setdefault(session_id, [])
+                    if current is not relays:
+                        current.extend(
+                            item for item in relays
+                            if not any(item is existing for existing in current)
+                        )
+                    raise
             else:
                 with contextlib.suppress(Exception):
                     await relay.stop()
             relays.remove(relay)
-        self._relays.pop(session_id, None)
+        if self._relays.get(session_id) is relays:
+            self._relays.pop(session_id, None)
 
     async def interrupt_relays_for_parity(
         self,
@@ -3187,17 +3202,18 @@ class SessionManager:
         preserve_ownership: bool = False,
     ) -> None:
         """Cancel and forget a session's remote-boundary forwards (if any)."""
+        fwd = self._forwards.get(session_id)
         try:
             await self._stop_relays(session_id, strict=strict)
         finally:
-            fwd = self._forwards.get(session_id)
             if fwd is not None:
                 if strict:
                     await fwd.cancel()
                 else:
                     with contextlib.suppress(Exception):
                         await fwd.cancel()
-            self._forwards.pop(session_id, None)
+            if self._forwards.get(session_id) is fwd:
+                self._forwards.pop(session_id, None)
         if not preserve_ownership:
             self._release_container_lock(session_id)
 
@@ -3505,6 +3521,11 @@ class SessionManager:
             refresh_relays=relay_required,
             require_relay_ready=relay_required,
         )
+        if self._remote_reap_pending(session.session_id):
+            raise RemoteHostRecoveryPendingError(
+                f"Remote Session Host cleanup is pending for {session.session_id}; "
+                "refusing replacement spawn after reattach"
+            )
         if (
             not attached
             and (local or authority_v2)

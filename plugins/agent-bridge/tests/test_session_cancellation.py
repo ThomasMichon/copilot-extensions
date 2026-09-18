@@ -1731,3 +1731,91 @@ async def test_committed_host_resume_cleanup_retains_failed_owners(
     assert ctx.manager._host_index.get(record.session_id) == record
     release.assert_not_called()
     remote.assert_not_awaited()
+
+
+@pytest.mark.parametrize("gate", ["_draining", "_shutting_down"])
+async def test_queued_prompt_rechecks_gate_after_admission_wait(owned_context, gate):
+    from agent_bridge.session_manager import DaemonDrainingError
+
+    ctx = owned_context
+    async with ctx.session._turn_start_lock:
+        submit = asyncio.create_task(ctx.manager.submit_prompt(ctx.session.session_id, "queued caller"))
+        await asyncio.sleep(0)
+        assert not submit.done()
+        setattr(ctx.manager, gate, True)
+    with pytest.raises(DaemonDrainingError):
+        await asyncio.wait_for(submit, 2)
+    assert ctx.db.get_turns(ctx.session.session_id) == []
+    assert ctx.processes == []
+
+
+async def test_newly_scheduled_reap_fences_legacy_resume_replacement(owned_context, monkeypatch):
+    from agent_bridge.session_manager import RemoteHostRecoveryPendingError
+
+    ctx = owned_context
+    record = _remote_record(ctx)
+    record.extra = {}
+    ctx.manager._host_index.register(record)
+    ctx.session.status = SessionStatus.STOPPED
+    release = asyncio.Event()
+    tasks = []
+    forward = SimpleNamespace(refresh=AsyncMock(), cancel=AsyncMock())
+    ctx.manager._forwards[record.session_id] = forward
+
+    async def reap(*_args):
+        await release.wait()
+        return True
+
+    async def attach(*_args, **_kwargs):
+        ctx.manager._schedule_remote_reap(record, "child exit during reattach")
+        tasks.extend(ctx.manager._remote_reaps_by_session[record.session_id])
+        return False
+
+    monkeypatch.setattr(ctx.manager, "_remote_reap", reap)
+    monkeypatch.setattr(ctx.manager, "_reattach_one", attach)
+    monkeypatch.setattr(
+        ctx.manager, "_try_reattach_live_host",
+        SessionManager._try_reattach_live_host.__get__(ctx.manager),
+    )
+    try:
+        with pytest.raises(RemoteHostRecoveryPendingError, match="replacement spawn"):
+            await ctx.manager.resume_session(record.session_id, drain=False)
+        ctx.manager._resume_via_new_remote_host.assert_not_awaited()
+        with pytest.raises(RemoteHostRecoveryPendingError, match="replacement channel"):
+            await ctx.manager._ensure_forward(record)
+        forward.refresh.assert_not_awaited()
+        assert ctx.processes == []
+    finally:
+        release.set()
+        await asyncio.gather(*tasks)
+
+
+async def test_remote_reap_does_not_close_replacement_channels(owned_context, monkeypatch):
+    from dataclasses import replace
+    from agent_bridge.session_teardown import reap_remote_record
+
+    ctx = owned_context
+    record = _remote_record(ctx)
+    replacement = replace(record, nonce="new-authority")
+    old_forward = SimpleNamespace(cancel=AsyncMock())
+    new_forward = SimpleNamespace(cancel=AsyncMock())
+    new_relay = SimpleNamespace(stop=AsyncMock())
+    new_relays = [new_relay]
+
+    async def close_old_relay():
+        ctx.manager._host_index.register(replacement)
+        ctx.manager._forwards[record.session_id] = new_forward
+        ctx.manager._relays[record.session_id] = new_relays
+
+    old_relay = SimpleNamespace(stop=AsyncMock(side_effect=close_old_relay))
+    ctx.manager._forwards[record.session_id] = old_forward
+    ctx.manager._relays[record.session_id] = [old_relay]
+    monkeypatch.setattr(ctx.manager, "_remote_reap", AsyncMock(return_value=True))
+    assert await reap_remote_record(ctx.manager, record)
+    old_relay.stop.assert_awaited_once()
+    old_forward.cancel.assert_awaited_once()
+    new_relay.stop.assert_not_awaited()
+    new_forward.cancel.assert_not_awaited()
+    assert ctx.manager._host_index.get(record.session_id) is replacement
+    assert ctx.manager._forwards[record.session_id] is new_forward
+    assert ctx.manager._relays[record.session_id] is new_relays
