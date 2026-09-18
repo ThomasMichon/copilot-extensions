@@ -156,15 +156,8 @@ def _strings(data: Mapping[str, Any], key: str) -> tuple[str, ...]:
 
 
 def validate_config(data: Mapping[str, Any], *, cwd: str | Path | None = None) -> dict[str, Any]:
-    """Validate and normalize one complete adopter-owned declaration.
-
-    ``cwd`` is the repository root the declaration was read from (when known)
-    -- threaded through to a named ``worker_identity``'s resolution so a
-    repo-local identity override (``.copilot-extensions/agent-dispatch/
-    identities/<name>.identity.md``) resolves relative to *that* repo rather
-    than the calling process's own working directory, which is not
-    necessarily inside the declaring repo (e.g. a supervisor daemon tick).
-    """
+    """Validate/normalize a declaration. ``cwd`` (declaring repo root, if
+    known) threads a named ``worker_identity`` to its repo-local override."""
     if not isinstance(data, Mapping):
         raise RegistrarError("repository-issue-loop: expected a mapping")
     extra = sorted(set(data) - _KNOWN_KEYS)
@@ -415,15 +408,9 @@ def validate_config(data: Mapping[str, Any], *, cwd: str | Path | None = None) -
 def expand_repository_issue_loop(
     data: Mapping[str, Any], *, repo_root: str | Path | None = None
 ) -> tuple[ProfileDeclaration, ...]:
-    """Expand the high-level loop into one emitter and one worker lane.
-
-    ``repo_root``, when known, is the repository this declaration was read
-    from. It resolves a named ``worker_identity`` at expansion time and is
-    also stamped onto the materialized emitter spec (as ``cwd``) so a later,
-    out-of-process re-validation (a supervisor daemon's tick, which does not
-    run with this repo as its own working directory) resolves the same
-    repo-local identity override rather than the daemon's own cwd.
-    """
+    """Expand into one emitter + one worker lane. ``repo_root`` resolves
+    ``worker_identity`` here and is stamped as the emitter spec's ``cwd`` so
+    a later daemon tick's re-validation resolves the same override."""
     config = validate_config(data, cwd=repo_root)
     spec: dict[str, Any] = {
         "id": f"{config['name']}-source",
@@ -432,11 +419,7 @@ def expand_repository_issue_loop(
         "repository_issue_loop": dict(data),
     }
     if repo_root is not None:
-        # Resolve to an absolute path: a relative repo_root stamped verbatim
-        # would be re-resolved by registrar_discovery's
-        # _resolve_declaration_paths as relative to the registrar directory
-        # (not this repo's own root), and a later daemon has no reliable
-        # relative base of its own either.
+        # Absolute: a relative path would resolve wrong (registrar dir, not repo root).
         spec["cwd"] = str(Path(repo_root).resolve())
     common = {
         "owner": config["owner"],
@@ -1355,13 +1338,8 @@ def run_tick(
     cwd: str | Path | None = None,
 ) -> dict[str, Any]:
     """Run one issue-source occurrence with visible reserve/create/reconcile.
-
-    ``cwd``, when known, is the declaring repository's root -- threaded
-    through re-validation so a named ``worker_identity`` resolves its
-    repo-local override relative to that repo rather than this call's own
-    working directory (this runs inside the supervisor daemon's process,
-    which is not the declaring repo's checkout).
-    """
+    ``cwd`` (declaring repo root, if known) re-threads ``worker_identity``
+    to its repo-local override rather than the daemon process's own cwd."""
     config = validate_config(config, cwd=cwd)
     provider = provider or _forge_provider_for(config)
     now = clock()
