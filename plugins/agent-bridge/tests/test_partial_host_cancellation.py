@@ -205,9 +205,13 @@ async def test_durable_container_marker_blocks_resume_without_host_index(
         await manager.resume_session(session_id)
     with pytest.raises(RemoteSpawnCleanupPendingError, match="cleanup is pending"):
         await manager.resync_session(session_id)
+    with pytest.raises(RemoteSpawnCleanupPendingError, match="cleanup is pending"):
+        await manager.stop_session(session_id, reap_host=True)
     attach.assert_not_awaited()
     assert manager._host_index.get(session_id) is None
     assert manager.get_session(session_id).target.container["launch_pending_session_id"] == session_id
+    assert manager.get_session(session_id).status == SessionStatus.FAILED
+    assert tmp_db.get_session(session_id)["status"] == "failed"
 
 
 @pytest.mark.asyncio

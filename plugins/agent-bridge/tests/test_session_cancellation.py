@@ -1216,6 +1216,58 @@ async def test_shutdown_retries_retained_failed_remote_reap(owned_context, monke
     assert ctx.manager._host_index.get(record.session_id) is None
 
 
+@pytest.mark.parametrize("failed_attempts", [1, 2])
+async def test_shutdown_retries_orphan_remote_reap(owned_context, monkeypatch, failed_attempts):
+    from agent_bridge.session_teardown import detach_for_restart
+
+    ctx = owned_context
+    record = _remote_record(ctx)
+    ctx.manager._sessions.pop(record.session_id)
+    entered, release = asyncio.Event(), asyncio.Event()
+    calls = 0
+
+    async def reap(*_args):
+        nonlocal calls
+        calls += 1
+        if calls <= failed_attempts:
+            return False
+        entered.set()
+        await release.wait()
+        return True
+
+    monkeypatch.setattr(ctx.manager, "_remote_reap", reap)
+    monkeypatch.setattr("agent_bridge.session_teardown._SHUTDOWN_CLEANUP_RETRY_SECONDS", 0.01)
+    ctx.manager._schedule_remote_reap(record, "orphan authority")
+    shutdown = asyncio.create_task(detach_for_restart(ctx.manager))
+    await asyncio.wait_for(entered.wait(), 2)
+    assert not shutdown.done()
+    assert ctx.manager._host_index.get(record.session_id) == record
+    assert ctx.manager._remote_reap_pending(record.session_id)
+    release.set()
+    await asyncio.wait_for(shutdown, 2)
+    assert calls == failed_attempts + 1
+    assert ctx.manager._host_index.get(record.session_id) is None
+    assert not ctx.manager._remote_reap_pending(record.session_id)
+
+
+async def test_shutdown_fails_for_unconfirmed_orphan_without_record(owned_context, monkeypatch):
+    from agent_bridge.session_manager import RemoteHostRecoveryPendingError
+    from agent_bridge.session_teardown import detach_for_restart
+
+    ctx = owned_context
+    record = _remote_record(ctx)
+    ctx.manager._sessions.pop(record.session_id)
+    monkeypatch.setattr(ctx.manager, "_remote_reap", AsyncMock(return_value=False))
+    ctx.manager._schedule_remote_reap(record, "orphan authority")
+    task = next(iter(ctx.manager._remote_reaps_by_session[record.session_id]))
+    assert await task is False
+    await asyncio.sleep(0)
+    ctx.manager._host_index.remove(record.session_id)
+    with pytest.raises(RemoteHostRecoveryPendingError, match="no authority record"):
+        await detach_for_restart(ctx.manager)
+    assert ctx.manager._remote_reap_pending(record.session_id)
+
+
 @pytest.mark.parametrize("failure_stage", ["marker", "index"])
 async def test_dead_authority_metadata_failure_retains_container_lock(
     owned_context, monkeypatch, failure_stage,

@@ -478,6 +478,10 @@ restart does not inherently close the child's pipes.
   An inconclusive scheduled remote reap likewise retains existing restart
   provenance in FAILED, without granting recovery until cleanup is retried
   successfully; an operator stop with no provenance stays dormant.
+  Explicit reaping refuses to acknowledge STOPPED while a durable partial-launch
+  marker remains, even without an in-memory launch handle or host record.
+  Shutdown also retries unconfirmed orphan remote reaps; missing retry authority
+  fails shutdown explicitly rather than acknowledging incomplete cleanup.
   Remote cleanup also checks an in-process HostIndex publication revision,
   protecting equal-value replacement records from an older reap. Descriptor
   removal must persist before pending handles or container ownership are

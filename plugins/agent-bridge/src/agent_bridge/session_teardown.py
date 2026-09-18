@@ -90,7 +90,39 @@ async def _detach_for_restart_owned(manager: SessionManager) -> None:
             )
             await asyncio.sleep(_SHUTDOWN_CLEANUP_RETRY_SECONDS)
     if manager._remote_reap_tasks:
-        await finish_owned(asyncio.gather(*list(manager._remote_reap_tasks)))
+        await finish_owned(asyncio.gather(
+            *list(manager._remote_reap_tasks), return_exceptions=True,
+        ))
+    await retry_orphan_reaps(manager)
+
+
+async def retry_orphan_reaps(manager: SessionManager) -> None:
+    """Keep orphan cleanup ownership until termination and metadata removal succeed."""
+    import copy
+
+    from .session_manager import RemoteHostRecoveryPendingError, asyncio, log
+
+    while orphan_ids := [
+        sid for sid in manager._remote_reaps_by_session
+        if sid not in manager._sessions and manager._remote_reap_pending(sid)
+    ]:
+        for session_id in orphan_ids:
+            await join_remote_reaps(manager, session_id, retry_failed=True)
+            if not manager._remote_reap_pending(session_id):
+                continue
+            record = manager._host_index.get(session_id) if manager._host_index is not None else None
+            if record is None:
+                raise RemoteHostRecoveryPendingError(
+                    f"Orphan reap for {session_id} has no authority record; cleanup remains unconfirmed"
+                )
+            try:
+                if await reap_remote_record(manager, copy.deepcopy(record)):
+                    continue
+                log.error("Orphan remote reap remains unconfirmed for %s; shutdown pending", session_id)
+            except Exception:
+                log.error("Orphan remote reap retry failed for %s; shutdown pending", session_id, exc_info=True)
+        if any(manager._remote_reap_pending(sid) for sid in orphan_ids):
+            await asyncio.sleep(_SHUTDOWN_CLEANUP_RETRY_SECONDS)
 
 
 async def reap_remote_record(
@@ -246,8 +278,9 @@ async def complete_stop(
                 f"Pending remote reap is inconclusive for {session_id}; ownership retained"
             )
     if reap_host:
-        from .session_host_ownership import has_host_ownership
+        from .session_host_ownership import has_host_ownership, require_no_pending_host_launch
 
+        require_no_pending_host_launch(manager, session_id)
         if not has_host_ownership(manager, session_id):
             manager._release_container_lock(session_id)
     session.status = SessionStatus.STOPPED
