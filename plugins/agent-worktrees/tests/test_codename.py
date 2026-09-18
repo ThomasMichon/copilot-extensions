@@ -169,6 +169,12 @@ class TestLoadWordlist:
         with pytest.raises(WordlistError):
             load_wordlist(tmp_path / "does-not-exist.yaml")
 
+    def test_invalid_utf8_file_raises(self, tmp_path: Path) -> None:
+        path = tmp_path / "words.yaml"
+        path.write_bytes(b"nouns: [\xff\xfe]\n")
+        with pytest.raises(WordlistError):
+            load_wordlist(path)
+
     def test_malformed_yaml_raises(self, tmp_path: Path) -> None:
         path = self._write(tmp_path, "words.yaml", "nouns: [unterminated\n")
         with pytest.raises(WordlistError):
@@ -255,6 +261,12 @@ class TestLoadWordlistOrDefault:
     def test_malformed_file_falls_back_to_default(self, tmp_path: Path) -> None:
         path = tmp_path / "words.yaml"
         path.write_text("nouns: []\n", encoding="utf-8")
+        wl = load_wordlist_or_default(str(path))
+        assert wl is DEFAULT_WORDLIST
+
+    def test_invalid_utf8_file_falls_back_to_default(self, tmp_path: Path) -> None:
+        path = tmp_path / "words.yaml"
+        path.write_bytes(b"nouns: [\xff\xfe]\n")
         wl = load_wordlist_or_default(str(path))
         assert wl is DEFAULT_WORDLIST
 

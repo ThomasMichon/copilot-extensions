@@ -156,6 +156,8 @@ def load_wordlist(path: str | Path) -> Wordlist:
         text = file_path.read_text(encoding="utf-8")
     except OSError as exc:
         raise WordlistError(f"cannot read wordlist file {file_path}: {exc}") from exc
+    except UnicodeDecodeError as exc:
+        raise WordlistError(f"wordlist file {file_path} is not valid UTF-8: {exc}") from exc
     try:
         if file_path.suffix.lower() == ".json":
             data = json.loads(text)
