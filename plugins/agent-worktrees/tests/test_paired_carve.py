@@ -138,6 +138,10 @@ class TestCarvePairedKnowledge:
         assert krec.repo == "citadel-knowledge"
         assert krec.pair_role == "knowledge"
         assert krec.pair_kind == "worktree"
+        # pr-attribution-codenames Phase 2 (#2838): the paired knowledge
+        # worktree is a real, independently-lookup-able record and must get
+        # its own codename, scoped to its own project's tracking directory.
+        assert krec.codename
         assert krec.pair_id == "20260806-ab"
         assert krec.pair_ref == "test/citadel-harness/test-win-20260806-ab"
         assert not (tmp_path / "test-win-20260806-ab-k.yaml").exists()

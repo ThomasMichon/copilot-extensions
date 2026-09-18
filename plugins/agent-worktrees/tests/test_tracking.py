@@ -316,6 +316,21 @@ class TestSaveLoadRoundTrip:
         assert "caller_worktree" not in path2.read_text()
         assert load_record(path2).caller_worktree is None
 
+    def test_codename_round_trip(self, tmp_path: Path):
+        # pr-attribution-codenames Phase 2 (#2838): the assigned codename
+        # survives save/load and is omitted (byte-identical legacy YAML)
+        # when unset.
+        rec = self._make_record(codename="rusty-gizmo")
+        path = tmp_path / "wt.yaml"
+        save_record(rec, path)
+        assert "codename: rusty-gizmo" in path.read_text()
+        assert load_record(path).codename == "rusty-gizmo"
+        rec2 = self._make_record()
+        path2 = tmp_path / "wt2.yaml"
+        save_record(rec2, path2)
+        assert "codename" not in path2.read_text()
+        assert load_record(path2).codename is None
+
     def test_owner_ref_round_trip(self, tmp_path: Path):
         # resource-claims: the backward owner link survives save/load, is
         # omitted when unset, and parses into a qualified ClaimRef.
@@ -1921,6 +1936,59 @@ class TestRetireRecord:
         # confirmed reap tombstone (reaped_at set), so both records are safe
         # to hard-delete -- no tombstones linger forever.
         retire_record(harness, harness_dir)
+        assert not (harness_dir / "wt-harness.yaml").exists()
+        assert not (knowledge_dir / "wt-k.yaml").exists()
+
+    def test_concurrent_both_reaped_hard_delete_does_not_deadlock(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # pr-attribution-codenames Phase 2 follow-up: the both-reaped
+        # hard-delete branch needs BOTH this record's and its sibling's
+        # locks. Acquiring "self first, then sibling" unconditionally would
+        # let two concurrent retire_record calls -- one on each half of the
+        # SAME pair -- each hold one lock while waiting for the other
+        # (a genuine cross-call deadlock). Locks must be acquired in a
+        # deterministic order regardless of which side initiates.
+        import threading
+
+        harness_dir = tmp_path / ".citadel-harness" / "worktrees"
+        knowledge_dir = tmp_path / ".citadel-knowledge" / "worktrees"
+        monkeypatch.setattr(
+            "agent_worktrees.config.project_dir",
+            lambda name=None: tmp_path / f".{name}",
+        )
+
+        now = "2026-06-01T12:00:00"
+        harness = self._rec(
+            "wt-harness", pair_id="p1", pair_role="harness",
+            pair_ref="test/citadel-knowledge/wt-k", pair_kind="worktree",
+            status="finalized", completed_at=now, reaped_at=now,
+        )
+        knowledge = self._rec(
+            "wt-k", pair_id="p1", pair_role="knowledge",
+            pair_ref="test/citadel-harness/wt-harness", pair_kind="worktree",
+            status="finalized", completed_at=now, reaped_at=now,
+        )
+        save_record(harness, harness_dir / "wt-harness.yaml")
+        save_record(knowledge, knowledge_dir / "wt-k.yaml")
+
+        results: dict[str, bool] = {}
+
+        def _retire_harness() -> None:
+            results["harness"] = retire_record(harness, harness_dir)
+
+        def _retire_knowledge() -> None:
+            results["knowledge"] = retire_record(knowledge, knowledge_dir)
+
+        t1 = threading.Thread(target=_retire_harness)
+        t2 = threading.Thread(target=_retire_knowledge)
+        t1.start()
+        t2.start()
+        t1.join(timeout=10)
+        t2.join(timeout=10)
+
+        assert not t1.is_alive(), "retire_record deadlocked (harness side)"
+        assert not t2.is_alive(), "retire_record deadlocked (knowledge side)"
         assert not (harness_dir / "wt-harness.yaml").exists()
         assert not (knowledge_dir / "wt-k.yaml").exists()
 
