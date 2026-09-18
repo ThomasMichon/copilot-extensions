@@ -159,6 +159,31 @@ def _default_fleet_session_verdict(host: str, session_id: str) -> str:
     return embody.fleet_body_verdict(host, session_id)
 
 
+def session_handle_verdict(
+    session_handle: str | None,
+    *,
+    local_verdict: Callable[[str], str] = _default_local_session_verdict,
+    fleet_verdict: Callable[[str, str], str] = _default_fleet_session_verdict,
+) -> tuple[str, str | None, str | None]:
+    """Decode one reservation ``session_handle`` and probe its liveness.
+
+    Returns ``(verdict, session_id, host)``: ``host`` is set only for a
+    decoded ``fleet-body:`` handle. An undecodable handle (a worktree-backed
+    embody, or none at all) reports :data:`SESSION_UNKNOWN` with no session
+    id/host -- never treated as death. Shared by the reservation-history walk
+    below and any other caller (e.g. the CLI's abandon-liveness guard)
+    that needs one handle's plain current-attempt liveness verdict.
+    """
+    fleet = _parse_fleet_body_handle(session_handle)
+    if fleet is not None:
+        host, sid = fleet
+        return fleet_verdict(host, sid), sid, host
+    local_sid = _parse_local_body_handle(session_handle)
+    if local_sid is not None:
+        return local_verdict(local_sid), local_sid, None
+    return SESSION_UNKNOWN, None, None
+
+
 def _reservation_session_liveness(
     reservations: list[dict[str, Any]],
     *,
@@ -183,15 +208,10 @@ def _reservation_session_liveness(
     def _session_verdict(
         res: dict[str, Any],
     ) -> tuple[str, int | None, str | None, str | None]:
-        handle = res.get("session_handle")
-        fleet = _parse_fleet_body_handle(handle)
-        local_sid = _parse_local_body_handle(handle)
-        if fleet is not None:
-            host, sid = fleet
-            return fleet_verdict(host, sid), res.get("attempt"), sid, host
-        if local_sid is not None:
-            return local_verdict(local_sid), res.get("attempt"), local_sid, None
-        return SESSION_UNKNOWN, res.get("attempt"), None, None
+        verdict, sid, host = session_handle_verdict(
+            res.get("session_handle"), local_verdict=local_verdict, fleet_verdict=fleet_verdict
+        )
+        return verdict, res.get("attempt"), sid, host
 
     latest_verdict, _, _, _ = _session_verdict(latest)
     if latest_verdict == SESSION_LIVE:

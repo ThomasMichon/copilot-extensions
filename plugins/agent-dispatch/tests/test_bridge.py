@@ -360,6 +360,52 @@ def test_resume_worker_sends_to_existing_session(monkeypatch):
     assert calls["input"] == "continue"
 
 
+def test_resume_session_local_delegates_to_resume_worker(monkeypatch):
+    """``host=None`` delegates straight to :func:`resume_worker`."""
+    seen = {}
+
+    def fake_resume_worker(session_id, prompt, *, wait=False, timeout=20.0):
+        seen.update(session_id=session_id, prompt=prompt, wait=wait, timeout=timeout)
+        return True
+
+    monkeypatch.setattr(bridge, "resume_worker", fake_resume_worker)
+    assert bridge.resume_session("session-1", "continue") is True
+    assert seen == {
+        "session_id": "session-1", "prompt": "continue", "wait": False, "timeout": 20.0,
+    }
+
+
+def test_resume_session_fleet_normalizes_host_and_runs_over_ssh(monkeypatch):
+    """A fleet ``host`` is normalized (case/whitespace) before it reaches the
+    SSH argv -- an un-normalized alias could pass the fleet liveness gate
+    (which normalizes) yet fail delivery here if it didn't (#2889 review)."""
+    calls = {}
+
+    def fake_which(name):
+        return "/usr/bin/ssh" if name == "ssh" else None
+
+    def fake_run_ssh_command(argv, *, input=None, timeout=None):
+        calls["argv"] = argv
+        calls["input"] = input
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(bridge.shutil, "which", fake_which)
+    monkeypatch.setattr(bridge, "run_ssh_command", fake_run_ssh_command)
+
+    assert bridge.resume_session("session-1", "continue", host=" Pool-A ") is True
+    assert calls["argv"][:5] == [
+        "/usr/bin/ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=3",
+    ]
+    assert calls["argv"][5] == "pool-a"  # normalized: stripped + lowercased
+    assert "agent-bridge send session-1 --prompt-file - --no-wait" in calls["argv"][6]
+    assert calls["input"] == "continue"
+
+
+def test_resume_session_fleet_no_ssh_binary_fails_closed(monkeypatch):
+    monkeypatch.setattr(bridge.shutil, "which", lambda name: None)
+    assert bridge.resume_session("session-1", "continue", host="pool-a") is False
+
+
 # -- steer-owner resume ------------------------------------------------------
 
 

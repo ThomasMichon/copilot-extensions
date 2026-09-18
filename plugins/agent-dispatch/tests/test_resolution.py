@@ -175,6 +175,9 @@ class _FakeClient:
     def __exit__(self, *exc):
         return False
 
+    def get(self, task_id):
+        return {"id": task_id, "spawn_reservation": None}
+
     def abandon(self, task_id, **kwargs):
         self._sink.update(task_id=task_id, **kwargs)
         return {"id": task_id, "status": "abandoned"}
