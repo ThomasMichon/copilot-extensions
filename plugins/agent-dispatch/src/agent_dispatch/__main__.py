@@ -1957,35 +1957,30 @@ def _read_result(args: argparse.Namespace) -> object | None:
 
 
 def _cmd_abandon(args: argparse.Namespace) -> int:
-    permitted = args.permit
-    reason = args.reason
-    duplicate_of = getattr(args, "duplicate_of", None)
-    if duplicate_of:
-        # A duplicate is self-justifying: retiring it is permitted, and the
-        # dedup reference is folded into the reason so it lands in the audit
-        # trail (never a silent drop).
-        permitted = True
-        dedup_note = f"duplicate of {duplicate_of}"
-        reason = f"{reason}; {dedup_note}" if reason else dedup_note
-    with _client(args) as c:
-        result = c.abandon(
-            args.task_id, worker_id=args.worker_id, permitted=permitted, reason=reason
-        )
-    if getattr(args, "resolve", False):
-        # Surface the drive-the-worktree-to-resolution plan alongside the abandon
-        # so the required unwind is an explicit, actionable expectation -- never a
-        # silent one. It is NOT auto-run: the destructive unwind stays worker-
-        # driven (`agent-dispatch resolve --execute`), on the worker's OWN tree.
-        from .resolution import plan_resolution
+    from . import reattach as _reattach
 
-        plan = plan_resolution(
-            "abandoned",
-            base=getattr(args, "base", None),
-            source_ref=duplicate_of,
-            reason=reason,
-        )
-        result = {"abandon": result, "resolution": plan.to_dict()}
+    with _client(args) as c:
+        try:
+            result = _reattach.cli_abandon(c, args)
+        except _reattach.AbandonRefused as exc:
+            print(f"agent-dispatch abandon: {exc}", file=sys.stderr)
+            return 2
     return _emit(result)
+
+
+def _cmd_reattach(args: argparse.Namespace) -> int:
+    """Reattach a terminal task's still-live session (Phase 9 / aperture-labs#7133)."""
+    from . import reattach as _reattach
+
+    with _client(args) as c:
+        try:
+            result = _reattach.reattach(
+                c, args.task_id, args.session_id, host=args.host, resume=not args.no_resume
+            )
+        except _reattach.ReattachError as exc:
+            print(f"agent-dispatch reattach: {exc}", file=sys.stderr)
+            return 1
+    return _emit(result.as_dict())
 
 
 def _browse_peer(args: argparse.Namespace, subcommand: str, *, repo: str | None = None) -> int:
@@ -3481,7 +3476,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="with --resolve, the base branch the worktree unwinds onto "
         "(default: the branch's tracked upstream)",
     )
+    from . import reattach as _reattach
+    _reattach.add_abandon_override_live_argument(p)
     p.set_defaults(func=_cmd_abandon)
+
+    p = _reattach.build_reattach_subparser(sub)
+    p.set_defaults(func=_cmd_reattach)
 
     p = sub.add_parser("heartbeat", help="extend the lease on a held task")
     p.add_argument("task_id")

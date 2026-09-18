@@ -328,6 +328,46 @@ def resume_worker(
     return completed.returncode == 0
 
 
+def resume_session(
+    session_id: str,
+    prompt: str,
+    *,
+    host: str | None = None,
+    wait: bool = False,
+    timeout: float | None = 20.0,
+) -> bool:
+    """Resume a stopped ACP session by exact session id, local or fleet-hosted.
+
+    ``host`` is the pool host a fleet body's session lives on (parsed from a
+    ``fleet-body:<host>:<session>`` reservation handle -- see
+    :mod:`agent_dispatch.spawn_factories`); omit it for a local body, which
+    delegates straight to :func:`resume_worker`. A fleet resume mirrors that
+    same ``agent-bridge send`` shape over SSH -- the same mesh
+    :func:`redrive_embodied_worker` uses -- rather than adding a second bridge
+    transport. Used by :mod:`agent_dispatch.reattach` to deliver the resume
+    prompt once a reattached task is claimed/started/bound, regardless of
+    which host the recovered session actually lives on.
+    """
+    if host is None:
+        return resume_worker(session_id, prompt, wait=wait, timeout=timeout)
+    ssh = shutil.which("ssh")
+    if ssh is None:
+        return False
+    cmd = ["agent-bridge", "send", session_id, "--prompt-file", "-"]
+    if not wait:
+        cmd.append("--no-wait")
+    remote_cmd = " ".join(shlex.quote(arg) for arg in cmd)
+    try:
+        proc = run_ssh_command(
+            [ssh, "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", host, remote_cmd],
+            input=prompt,
+            timeout=timeout,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return False
+    return proc.returncode == 0
+
+
 def send_nudge(
     worktree: str,
     message: str,
