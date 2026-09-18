@@ -456,12 +456,18 @@ Verbatim from the operator:
   end-to-end against a real two-window disposable session (predecessor pane
   in window 0, successor pane in window 1, mirroring live cutover): the
   predecessor terminated cleanly (`gone: true`), the successor and the
-  operator's own attached session were confirmed untouched. One additional,
-  lower-severity finding
+  operator's own attached session were confirmed untouched. A third finding
   ([#2896](https://github.com/ThomasMichon/copilot-extensions/issues/2896):
-  `mux_focus_pane`'s bare-pane-id targeting makes `pane_create`'s foreground
-  step unreliable, though it fails closed rather than focusing the wrong
-  pane) remains open as a follow-up, not blocking this item.
+  `mux_focus_pane`'s bare pane/window id targeting made `pane_create`'s
+  foreground step unreliable) was fixed in
+  [#2902](https://github.com/ThomasMichon/copilot-extensions/pull/2902),
+  per the operator's direction to treat it as necessary hardening given
+  real-world scale (dozens of parallel worktrees, each driving multiple
+  handoffs). A final end-to-end re-run after all three fixes confirmed
+  `pane_create` now succeeds fully (`ok: true`, `foregrounded: true`) for
+  both the predecessor and successor pane, with `pane_terminate` cleanly
+  retiring the predecessor and leaving the successor and the operator's own
+  session untouched.
 
 ## Proposal
 
@@ -989,4 +995,32 @@ gate land._
   primitives are now proven against a real mux server, not just hermetic
   mocks, and the two bugs the live test surfaced were exactly the kind of
   thing this validation step exists to catch.
+
+### 2026-09-18 — Third bug (#2896) fixed per operator direction: necessary hardening at scale
+
+- The operator's guidance: fix #2896 too, not leave it open — "in practice
+  we hit every bug in the book running dozens of parallel worktrees which
+  each drive multiple handoffs." At that scale, a foreground step that
+  fails closed instead of working is still a real reliability cost, not a
+  tolerable edge case.
+- Live-verified the exact scope of the gap first: **window ids (`@N`), not
+  just pane ids (`%N`), also collide across psmux sessions** (confirmed
+  with two disposable sessions, both independently allocating `@1` as their
+  first window) — so the fix needed to session-qualify both the pane
+  lookup and the `select-window` target, not just the former.
+- Fixed `mux_focus_pane` to resolve through the already-fixed,
+  all-windows-aware `_mux_qualified_pane_target` helper, then target
+  `select-window` with a `<session>:<window_index>` string instead of a
+  bare window id. Removed the now-fully-dead `_mux_pane_session_name`
+  import and `_mux_target_window_id` helper (no remaining callers).
+  Widened `sessions.py`'s module-size baseline by 2 lines (2608 → 2610) for
+  the fix's net size, per this effort's established precise-widen
+  precedent. **PR #2902.**
+- **Final end-to-end re-verification** against a fresh disposable
+  two-window session: both `pane_create` calls now return `ok: true` /
+  `foregrounded: true` / `error: null` (previously always failed the
+  foreground step); `pane_terminate` cleanly retired the predecessor
+  (`gone: true`) while the successor pane and the operator's own attached
+  session remained untouched. All three live-discovered bugs (#2886,
+  #2892, #2896) are now fixed and re-verified live.
 
