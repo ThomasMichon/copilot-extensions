@@ -90,6 +90,24 @@ def test_pr_required_body_sections_rejects_non_string_shape():
     assert error == "repos.sample.pr.required_body_sections must be a list"
 
 
+def test_codename_wordlist_path_must_be_string():
+    error = dropins._validate_codename(
+        {"wordlist_path": 7},
+        location="repos.sample.codename",
+    )
+
+    assert error == "repos.sample.codename.wordlist_path must be a string"
+
+
+def test_codename_accepts_well_formed_block():
+    error = dropins._validate_codename(
+        {"wordlist_path": "config/codenames.yaml"},
+        location="repos.sample.codename",
+    )
+
+    assert error is None
+
+
 def test_managed_pointer_requires_current_project_scope_and_root(tmp_path):
     source = "sample@example-marketplace"
     root = tmp_path / "plugin"

@@ -309,6 +309,18 @@ def _validate_repo_fragment(repo: object, *, location: str) -> str | None:
         error = _validate_pr(repo["pr"], location=f"{location}.pr")
         if error:
             return error
+    if "codename" in repo:
+        error = _validate_codename(repo["codename"], location=f"{location}.codename")
+        if error:
+            return error
+    return None
+
+
+def _validate_codename(raw: object, *, location: str) -> str | None:
+    if not isinstance(raw, dict):
+        return f"{location} must be a mapping"
+    if "wordlist_path" in raw and not isinstance(raw["wordlist_path"], str):
+        return f"{location}.wordlist_path must be a string"
     return None
 
 
