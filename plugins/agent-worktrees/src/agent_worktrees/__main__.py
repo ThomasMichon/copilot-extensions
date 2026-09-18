@@ -2256,25 +2256,28 @@ def _create_worktree_core(
         owner_guard.__enter__()
 
     try:
-        if owner_guard is not None and not _journal_owner_reciprocal_claim(
-            config, worktree_id, owner_ref, owner_locked=True
-        ):
-            raise RuntimeError(f"owner {owner_ref} cannot accept a new worktree obligation")
-
-        # pr-attribution-codenames Phase 2 (#2838): assign one codename per
-        # worktree, from the repo's declared wordlist (or the built-in
-        # neutral one) -- BEFORE the git worktree/branch is created, so an
-        # allocation failure (an exhausted finite configured wordlist) never
-        # leaves an orphaned checkout with no tracking record. The read
-        # (existing codenames) -> pick -> record-write sequence is held
-        # under one cross-process lock so two concurrent `create` calls can
-        # never observe the same existing set and choose the same candidate.
+        # pr-attribution-codenames Phase 2 (#2838): assign the codename
+        # FIRST -- before the owner claim is journaled and before the git
+        # worktree/branch is created. An allocation failure (an exhausted
+        # finite configured wordlist) must never leave the owner ledger with
+        # a live obligation pointing at a worktree that was never created,
+        # nor an orphaned checkout with no tracking record. The whole
+        # sequence below (allocate -> journal owner claim -> create the git
+        # worktree -> write the record) is held under one cross-process lock
+        # so two concurrent `create` calls can never observe the same
+        # existing codename set and choose the same candidate.
         tracking_path = cfg.tracking_dir()
         tracking_path.mkdir(parents=True, exist_ok=True)
         with codename_tracking.allocation_lock(tracking_path):
             new_codename = codename_tracking.assign_new_codename(
                 tracking_path, codename_tracking.wordlist_for_repo(config)
             )
+
+            if owner_guard is not None and not _journal_owner_reciprocal_claim(
+                config, worktree_id, owner_ref, owner_locked=True
+            ):
+                raise RuntimeError(f"owner {owner_ref} cannot accept a new worktree obligation")
+
             print(f"Creating worktree on branch {branch}...", file=sys.stderr)
             git_ops.create_worktree(
                 repo.anchor,
@@ -12042,7 +12045,16 @@ def cmd_list(args: argparse.Namespace) -> int:
     worktree_id = getattr(args, "worktree_id", None)
     codename_arg = getattr(args, "codename", None)
     if codename_arg and not worktree_id:
-        worktree_id = resolve_worktree_id_by_codename(codename_arg) or codename_arg
+        # `resolve_worktree_id_by_codename` returning None means no worktree
+        # carries that codename -- go straight to an empty result rather
+        # than falling back to the codename string as an ID: `_filter_list_
+        # worktree`'s suffix-match contract could then accidentally match a
+        # DIFFERENT worktree whose id happens to end with that string.
+        resolved_id = resolve_worktree_id_by_codename(codename_arg)
+        if resolved_id is None:
+            records = []
+        else:
+            worktree_id = resolved_id
     if worktree_id:
         try:
             records = _filter_list_worktree(records, worktree_id)

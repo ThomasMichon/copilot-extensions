@@ -130,6 +130,31 @@ class TestCodenameSelectorWiring:
         assert '"wt-b"' in payload
         assert '"wt-a"' not in payload
 
+    def test_cmd_list_unmatched_codename_is_empty_not_a_suffix_match(
+        self, tmp_path: Path, monkeypatch, capfd,
+    ) -> None:
+        # An unresolved codename must never fall back to ID-suffix matching:
+        # a configured codename could otherwise coincidentally match the
+        # tail of an unrelated worktree id and return the WRONG record.
+        monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+        tracking.create_new_record(
+            "wt-humming-widget", "worktree/wt-humming-widget",
+            str(tmp_path / "wt-humming-widget"), "repo", "machine", "wsl",
+            tmp_path, codename="rusty-gizmo",
+        )
+        records = tracking.list_records(tmp_path)
+        monkeypatch.setattr(m, "_list_records_for_args", lambda args: records)
+        monkeypatch.setattr(m.profile_assignment, "maintain", lambda: None)
+
+        args = argparse.Namespace(
+            worktree_id=None, codename="humming-widget", refresh=False,
+            glance=False, stream=False, json=True, cache_only=False,
+        )
+        assert m.cmd_list(args) == 0
+        payload = capfd.readouterr().out
+        assert '"wt-humming-widget"' not in payload
+        assert '"worktrees": []' in payload
+
     def test_cmd_resolve_unmatched_codename_is_a_hard_error(
         self, tmp_path: Path, monkeypatch, capfd,
     ) -> None:
