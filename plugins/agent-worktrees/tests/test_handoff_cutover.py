@@ -385,7 +385,7 @@ class TestMuxNewWindow:
             sessions, "build_mux_new_window_argv", _build,
         )
         monkeypatch.setattr(subprocess, "run", lambda *a, **k: R())
-        monkeypatch.setattr(sessions, "_mux_pane_alive", lambda *a: True)
+        monkeypatch.setattr(sessions, "_mux_pane_alive", lambda *a, **k: True)
 
         out = sessions.mux_new_window(
             "id", "/w", ["copilot"], None,
@@ -491,7 +491,11 @@ class TestMuxRetirePane:
         # `sessions._mux_pane_alive` alone silently no-ops here (#2660-class
         # regression: discovered while working Phase 3 of
         # context-handoff-overhaul, unrelated to this fix).
-        monkeypatch.setattr(sessions_pane_retire, "_mux_pane_alive", lambda p, b: False)
+        monkeypatch.setattr(
+            sessions_pane_retire,
+            "_mux_pane_alive",
+            lambda p, b, session_name=None: False,
+        )
         out = sessions.mux_retire_pane("%3", mux="tmux")
         assert out == {"ok": True, "pane": "%3", "gone": True,
                        "method": "already-gone"}
@@ -499,8 +503,11 @@ class TestMuxRetirePane:
     def test_graceful_quit(self, monkeypatch):
         # alive once (initial check), then gone after the double Ctrl-C
         states = iter([True, False])
-        monkeypatch.setattr(sessions_pane_retire, "_mux_pane_alive",
-                            lambda p, b: next(states))
+        monkeypatch.setattr(
+            sessions_pane_retire,
+            "_mux_pane_alive",
+            lambda p, b, session_name=None: next(states),
+        )
         import subprocess
         monkeypatch.setattr(subprocess, "run",
                             lambda *a, **k: type("R", (), {"returncode": 0, "stdout": ""})())
@@ -511,7 +518,11 @@ class TestMuxRetirePane:
 
     def test_hard_kill_fallback(self, monkeypatch):
         # never gone via graceful; kill-pane also fails to remove it
-        monkeypatch.setattr(sessions_pane_retire, "_mux_pane_alive", lambda p, b: True)
+        monkeypatch.setattr(
+            sessions_pane_retire,
+            "_mux_pane_alive",
+            lambda p, b, session_name=None: True,
+        )
         import subprocess
         monkeypatch.setattr(subprocess, "run",
                             lambda *a, **k: type("R", (), {"returncode": 0, "stdout": ""})())
@@ -524,7 +535,9 @@ class TestMuxRetirePane:
     def test_hard_kill_waits_for_mux_to_drop_pane(self, monkeypatch):
         states = iter([True, True, True, True, False])
         monkeypatch.setattr(
-            sessions_pane_retire, "_mux_pane_alive", lambda p, b: next(states),
+            sessions_pane_retire,
+            "_mux_pane_alive",
+            lambda p, b, session_name=None: next(states),
         )
         import subprocess
         monkeypatch.setattr(
@@ -540,9 +553,19 @@ class TestMuxRetirePane:
 
     def test_last_window_guard_skips_retire(self, monkeypatch):
         calls: list[list[str]] = []
-        monkeypatch.setattr(sessions_pane_retire, "_mux_pane_alive", lambda p, b: True)
-        monkeypatch.setattr(sessions_pane_retire, "_mux_last_window_guard",
-                            lambda p, b: {"session": "wt-demo", "window_count": 1})
+        monkeypatch.setattr(
+            sessions_pane_retire,
+            "_mux_pane_alive",
+            lambda p, b, session_name=None: True,
+        )
+        monkeypatch.setattr(
+            sessions_pane_retire,
+            "_mux_last_window_guard",
+            lambda p, b, session_name=None: {
+                "session": "wt-demo",
+                "window_count": 1,
+            },
+        )
         monkeypatch.setattr(activity, "log_event", lambda *a, **k: None)
         import subprocess
 
@@ -563,8 +586,11 @@ class TestMuxRetirePane:
 
         # alive for: initial check + escalate poll (still up), then gone.
         states = iter([True, True, False])
-        monkeypatch.setattr(sessions_pane_retire, "_mux_pane_alive",
-                            lambda p, b: next(states))
+        monkeypatch.setattr(
+            sessions_pane_retire,
+            "_mux_pane_alive",
+            lambda p, b, session_name=None: next(states),
+        )
         import subprocess
 
         def _fake_run(*a, **k):
@@ -1729,7 +1755,11 @@ class TestCmdHandoffCutover:
             } if sid == "successor-1" else None,
         )
         monkeypatch.setattr(sessions, "_mux_bin", lambda mux=None: "tmux")
-        monkeypatch.setattr(sessions, "_mux_pane_alive", lambda pane, mux_bin: pane == "%22")
+        monkeypatch.setattr(
+            sessions,
+            "_mux_pane_alive",
+            lambda pane, mux_bin, session_name=None: pane == "%22",
+        )
         focused = {}
         monkeypatch.setattr(
             sessions,
@@ -2861,6 +2891,38 @@ def test_retire_stamps_predecessor_session_state_with_successor_id(monkeypatch):
     )[0]
     assert event["predecessor_session_id"] == "old-sess"
     assert event["successor_session_id"] == "new-sess"
+
+def test_retire_result_passes_expected_mux_session_to_pane_terminate(monkeypatch):
+    observed: dict[str, object] = {}
+
+    monkeypatch.setattr(m, "_resolve_worktree_id", lambda raw: raw)
+    monkeypatch.setattr(m, "_conclude_retired_predecessor", lambda *args, **kwargs: None)
+    monkeypatch.setattr(m, "_maybe_emit_stage_13", lambda *args, **kwargs: None)
+    monkeypatch.setattr(sessions, "mux_session_for_pane", lambda pane: "wt-retire")
+    monkeypatch.setattr(
+        m.pane_lifecycle,
+        "pane_terminate",
+        lambda pane, **kwargs: observed.update(pane=pane, **kwargs)
+        or {"ok": True, "gone": True, "method": "graceful"},
+    )
+    monkeypatch.setattr(
+        reclaim,
+        "ensure_session_copilot_reaped",
+        lambda *args, **kwargs: {"checked": False, "identity_verified": True},
+    )
+
+    rc, result = m._handoff_cutover_retire_result(
+        _ns(
+            worktree_id="wt-retire",
+            retire_pane="%9",
+            session_id="old-sess",
+            mux_session="wt-retire",
+        )
+    )
+
+    assert rc == 0
+    assert result["ok"] is True
+    assert observed == {"pane": "%9", "mux_session": "wt-retire"}
 
     def test_execute_retires_every_stale_predecessor_in_one_pass(
         self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,

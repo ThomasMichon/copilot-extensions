@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from agent_worktrees import pane_lifecycle, sessions
+from agent_worktrees import pane_lifecycle, sessions, sessions_pane_retire
 
 
 class _RunResult:
@@ -32,7 +32,9 @@ def test_pane_create_logs_before_spawn_and_foregrounds(monkeypatch, tmp_path: Pa
         lambda token: receipt,
     )
     monkeypatch.setattr(sessions, "_mux_bin", lambda mux=None: "tmux")
-    monkeypatch.setattr(sessions, "_mux_pane_alive", lambda pane, mux_bin: True)
+    monkeypatch.setattr(
+        sessions, "_mux_pane_alive", lambda pane, mux_bin, session_name=None: True
+    )
     monkeypatch.setattr(
         sessions,
         "mux_focus_pane",
@@ -87,7 +89,9 @@ def test_pane_create_uses_new_session_when_no_worktree_mux_exists(
         lambda token: receipt,
     )
     monkeypatch.setattr(sessions, "_mux_bin", lambda mux=None: "tmux")
-    monkeypatch.setattr(sessions, "_mux_pane_alive", lambda pane, mux_bin: True)
+    monkeypatch.setattr(
+        sessions, "_mux_pane_alive", lambda pane, mux_bin, session_name=None: True
+    )
     monkeypatch.setattr(sessions, "mux_focus_pane", lambda *args, **kwargs: True)
 
     def _run(argv, **kwargs):
@@ -166,9 +170,14 @@ def test_pane_terminate_graceful_via_liveness_only(monkeypatch):
 
     monkeypatch.setattr(sessions, "_mux_bin", lambda mux=None: "tmux")
     monkeypatch.setattr(
+        sessions_pane_retire,
+        "_mux_qualified_pane_target",
+        lambda pane_id, mux_bin, session_name=None: "wt-demo:0.0",
+    )
+    monkeypatch.setattr(
         sessions,
         "_mux_pane_alive",
-        lambda pane_id, mux_bin: state["send_count"] < 2,
+        lambda pane_id, mux_bin, session_name=None: state["send_count"] < 2,
     )
     monkeypatch.setattr(sessions, "_mux_last_window_guard", lambda *args, **kwargs: None)
     monkeypatch.setattr(sessions, "_mux_pane_process_tree", lambda *args, **kwargs: {10, 11})
@@ -182,6 +191,7 @@ def test_pane_terminate_graceful_via_liveness_only(monkeypatch):
     result = pane_lifecycle.pane_terminate(
         "%3",
         mux="tmux",
+        mux_session="wt-demo",
         overall_budget=2.0,
         hard_kill_settle=0.1,
     )
@@ -203,7 +213,16 @@ def test_pane_terminate_reports_signature_confirmed_graceful_exit(monkeypatch):
         return next(monotonic_values)
 
     monkeypatch.setattr(sessions, "_mux_bin", lambda mux=None: "tmux")
-    monkeypatch.setattr(sessions, "_mux_pane_alive", _alive)
+    monkeypatch.setattr(
+        sessions_pane_retire,
+        "_mux_qualified_pane_target",
+        lambda pane_id, mux_bin, session_name=None: "wt-demo:0.0",
+    )
+    monkeypatch.setattr(
+        sessions,
+        "_mux_pane_alive",
+        lambda pane_id, mux_bin, session_name=None: _alive(pane_id, mux_bin),
+    )
     monkeypatch.setattr(sessions, "_mux_last_window_guard", lambda *args, **kwargs: None)
     monkeypatch.setattr(sessions, "_mux_pane_process_tree", lambda *args, **kwargs: {10})
     monkeypatch.setattr(
@@ -219,6 +238,7 @@ def test_pane_terminate_reports_signature_confirmed_graceful_exit(monkeypatch):
     result = pane_lifecycle.pane_terminate(
         "%4",
         mux="tmux",
+        mux_session="wt-demo",
         overall_budget=2.0,
         escalate_after=0.3,
         hard_kill_settle=0.1,
@@ -243,7 +263,16 @@ def test_pane_terminate_escalates_to_hard_kill_and_cleans_locks(monkeypatch):
         return _RunResult()
 
     monkeypatch.setattr(sessions, "_mux_bin", lambda mux=None: "tmux")
-    monkeypatch.setattr(sessions, "_mux_pane_alive", _alive)
+    monkeypatch.setattr(
+        sessions_pane_retire,
+        "_mux_qualified_pane_target",
+        lambda pane_id, mux_bin, session_name=None: "wt-demo:0.0",
+    )
+    monkeypatch.setattr(
+        sessions,
+        "_mux_pane_alive",
+        lambda pane_id, mux_bin, session_name=None: _alive(pane_id, mux_bin),
+    )
     monkeypatch.setattr(sessions, "_mux_last_window_guard", lambda *args, **kwargs: None)
     monkeypatch.setattr(sessions, "_mux_pane_process_tree", lambda *args, **kwargs: {33, 44})
     monkeypatch.setattr(
@@ -258,6 +287,7 @@ def test_pane_terminate_escalates_to_hard_kill_and_cleans_locks(monkeypatch):
     result = pane_lifecycle.pane_terminate(
         "%5",
         mux="tmux",
+        mux_session="wt-demo",
         overall_budget=0.6,
         poll_interval=0.0,
         ctrl_c_gap=0.0,
@@ -271,15 +301,161 @@ def test_pane_terminate_escalates_to_hard_kill_and_cleans_locks(monkeypatch):
     assert state["killed"] is True
 
 
+def test_pane_terminate_uses_session_qualified_targets_when_mux_session_known(monkeypatch):
+    state = {"killed": False, "targets": [], "list_targets": []}
+    monotonic_values = iter([0.0, 0.0, 0.1, 0.2, 0.4, 0.5, 0.8, 1.0, 1.1, 1.2])
+
+    def _run(argv, **kwargs):
+        command = argv[1]
+        if command == "list-panes":
+            target = argv[argv.index("-t") + 1]
+            state["list_targets"].append(target)
+            if state["killed"]:
+                return _RunResult(stdout="")
+            assert target == "wt-demo"
+            return _RunResult(stdout="wt-demo\t0.0\t%5\n")
+        if command in {"send-keys", "capture-pane", "kill-pane"}:
+            state["targets"].append((command, argv[argv.index("-t") + 1]))
+            if command == "kill-pane":
+                state["killed"] = True
+        return _RunResult()
+
+    monkeypatch.setattr(sessions, "_mux_bin", lambda mux=None: "psmux")
+    monkeypatch.setattr(sessions, "_mux_last_window_guard", lambda *args, **kwargs: None)
+    monkeypatch.setattr(sessions, "_mux_pane_process_tree", lambda *args, **kwargs: {33})
+    monkeypatch.setattr(
+        pane_lifecycle,
+        "_cleanup_pane_lock_residue",
+        lambda pane_id, pane_session, process_tree: [],
+    )
+    monkeypatch.setattr(pane_lifecycle.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(pane_lifecycle.time, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr("subprocess.run", _run)
+
+    result = pane_lifecycle.pane_terminate(
+        "%5",
+        mux="psmux",
+        mux_session="wt-demo",
+        overall_budget=0.6,
+        poll_interval=0.0,
+        ctrl_c_gap=0.0,
+        escalate_after=0.1,
+        hard_kill_settle=0.1,
+    )
+
+    assert result["ok"] is True
+    assert result["method"] == "hard"
+    assert all(target == "wt-demo:0.0" for _command, target in state["targets"])
+    assert [command for command, _target in state["targets"]].count("send-keys") == 3
+    assert [command for command, _target in state["targets"]].count("kill-pane") == 1
+    assert [command for command, _target in state["targets"]].count("capture-pane") >= 3
+    assert state["list_targets"]
+    assert all(target == "wt-demo" for target in state["list_targets"])
+
+
+def test_pane_terminate_resolves_unambiguous_session_before_signaling(monkeypatch):
+    state = {"killed": False, "send_target": None, "global_scans": 0}
+    monotonic_values = iter([0.0, 0.0, 0.1, 0.2, 0.4, 0.5, 0.8, 1.0, 1.1, 1.2])
+
+    def _run(argv, **kwargs):
+        command = argv[1]
+        if command == "list-panes":
+            fmt = argv[-1]
+            if "-a" in argv:
+                state["global_scans"] += 1
+                if state["killed"]:
+                    return _RunResult(stdout="")
+                assert fmt == "#{session_name}\t#{window_index}.#{pane_index}\t#{pane_id}"
+                return _RunResult(stdout="wt-one\t0.0\t%7\n")
+            target = argv[argv.index("-t") + 1]
+            if state["killed"]:
+                return _RunResult(stdout="")
+            assert target == "wt-one"
+            return _RunResult(stdout="wt-one\t0.0\t%7\n")
+        if command == "send-keys":
+            state["send_target"] = argv[argv.index("-t") + 1]
+        if command == "kill-pane":
+            state["killed"] = True
+        return _RunResult()
+
+    monkeypatch.setattr(sessions, "_mux_bin", lambda mux=None: "psmux")
+    monkeypatch.setattr(sessions, "_mux_last_window_guard", lambda *args, **kwargs: None)
+    monkeypatch.setattr(sessions, "_mux_pane_process_tree", lambda *args, **kwargs: {44})
+    monkeypatch.setattr(
+        pane_lifecycle,
+        "_cleanup_pane_lock_residue",
+        lambda pane_id, pane_session, process_tree: [],
+    )
+    monkeypatch.setattr(pane_lifecycle.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(pane_lifecycle.time, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr("subprocess.run", _run)
+
+    result = pane_lifecycle.pane_terminate(
+        "%7",
+        mux="psmux",
+        overall_budget=0.6,
+        poll_interval=0.0,
+        ctrl_c_gap=0.0,
+        escalate_after=0.1,
+        hard_kill_settle=0.1,
+    )
+
+    assert result["ok"] is True
+    assert result["session"] == "wt-one"
+    assert result["method"] == "hard"
+    assert state["global_scans"] >= 1
+    assert state["send_target"] == "wt-one:0.0"
+
+
+def test_pane_terminate_refuses_ambiguous_bare_pane_id(monkeypatch):
+    calls: list[list[str]] = []
+
+    def _run(argv, **kwargs):
+        calls.append(list(argv))
+        if argv[1] == "list-panes" and "-a" in argv:
+            return _RunResult(stdout="wt-a\t0.0\t%1\nwt-b\t0.0\t%1\n")
+        return _RunResult()
+
+    monkeypatch.setattr(sessions, "_mux_bin", lambda mux=None: "psmux")
+    monkeypatch.setattr("subprocess.run", _run)
+
+    result = pane_lifecycle.pane_terminate("%1", mux="psmux")
+
+    assert result == {
+        "ok": False,
+        "pane": "%1",
+        "gone": False,
+        "method": "ambiguous-pane-id",
+        "session": None,
+        "signature_seen": False,
+        "signature_pattern": None,
+        "locks_cleared": [],
+        "candidate_sessions": ["wt-a", "wt-b"],
+        "error": "pane id %1 is ambiguous across mux sessions: wt-a, wt-b",
+    }
+    assert len(calls) == 1
+    assert calls[0][:3] == ["psmux", "list-panes", "-a"]
+
+
 def test_pane_terminate_skips_last_window_and_logs_guard(monkeypatch):
     logged: list[str] = []
 
     monkeypatch.setattr(sessions, "_mux_bin", lambda mux=None: "tmux")
-    monkeypatch.setattr(sessions, "_mux_pane_alive", lambda pane_id, mux_bin: True)
+    monkeypatch.setattr(
+        sessions_pane_retire,
+        "_mux_qualified_pane_target",
+        lambda pane_id, mux_bin, session_name=None: "wt-guard:0.0",
+    )
+    monkeypatch.setattr(
+        sessions, "_mux_pane_alive", lambda pane_id, mux_bin, session_name=None: True
+    )
     monkeypatch.setattr(
         sessions,
         "_mux_last_window_guard",
-        lambda pane_id, mux_bin: {"session": "wt-guard", "window_count": 1},
+        lambda pane_id, mux_bin, session_name=None: {
+            "session": "wt-guard",
+            "window_count": 1,
+        },
     )
     monkeypatch.setattr(
         pane_lifecycle.activity,
@@ -287,7 +463,7 @@ def test_pane_terminate_skips_last_window_and_logs_guard(monkeypatch):
         lambda event, **kwargs: logged.append(event),
     )
 
-    result = pane_lifecycle.pane_terminate("%6", mux="tmux")
+    result = pane_lifecycle.pane_terminate("%6", mux="tmux", mux_session="wt-guard")
 
     assert result["ok"] is True
     assert result["gone"] is False

@@ -1,14 +1,26 @@
-"""Mechanical extraction from ``sessions.py`` for pane-retirement helpers.
+"""Pane-retirement helpers split out of ``sessions.py``.
 
-This module exists only to keep ``agent_worktrees.sessions`` under its
-grandfathered module-size baseline. The functions below were moved verbatim, with
-no behavior change, from ``sessions.py``.
+This module exists primarily to keep ``agent_worktrees.sessions`` under its
+grandfathered module-size baseline. It now also owns the pane-target resolution
+helpers shared by the pane lifecycle primitives.
 """
 
 from __future__ import annotations
 
 import os
 import platform
+
+
+class MuxPaneTargetAmbiguityError(RuntimeError):
+    """Bare pane id matched multiple mux sessions, so targeting is unsafe."""
+
+    def __init__(self, pane_id: str, session_names: list[str]) -> None:
+        self.pane_id = pane_id
+        self.session_names = tuple(session_names)
+        listed = ", ".join(self.session_names)
+        super().__init__(
+            f"pane id {pane_id} is ambiguous across mux sessions: {listed}"
+        )
 
 
 def _mux_bin(mux: str | None = None) -> str:
@@ -18,17 +30,118 @@ def _mux_bin(mux: str | None = None) -> str:
     return "psmux" if platform.system() == "Windows" else "tmux"
 
 
-def _mux_pane_pid(pane_id: str | None, *, mux: str | None = None) -> int | None:
+def _list_matching_pane_targets(
+    pane_id: str,
+    mux_bin: str,
+    *,
+    session_name: str | None = None,
+) -> list[tuple[str, str]]:
+    """Return ``(session_name, window.pane)`` matches for one pane id.
+
+    When ``session_name`` is known, scope the lookup to that exact session and
+    resolve the specific ``window.pane`` address needed to build an unambiguous
+    ``session:window.pane`` target. When it is unknown, scan across sessions so
+    callers can detect an ambiguous bare ``%N`` on psmux instead of guessing.
+    """
+    import subprocess
+
+    from . import sessions
+
+    argv = [mux_bin, "list-panes"]
+    if session_name:
+        argv += ["-t", sessions._mux_named_session_target(session_name, mux_bin)]
+    else:
+        argv.append("-a")
+    argv += ["-F", "#{session_name}\t#{window_index}.#{pane_index}\t#{pane_id}"]
+    try:
+        result = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    if result.returncode != 0:
+        return []
+    matches: list[tuple[str, str]] = []
+    for line in getattr(result, "stdout", "").splitlines():
+        parts = line.split("\t")
+        if len(parts) != 3:
+            continue
+        found_session, window_pane, found_pane_id = parts
+        if found_pane_id != pane_id or not found_session or not window_pane:
+            continue
+        if session_name and found_session != session_name:
+            continue
+        matches.append((found_session, window_pane))
+    return matches
+
+
+def _resolve_unambiguous_pane_session(pane_id: str, mux_bin: str) -> str | None:
+    """Return the sole session owning ``pane_id`` or raise on ambiguity."""
+    session_names = sorted(
+        {session_name for session_name, _window_pane in _list_matching_pane_targets(
+            pane_id, mux_bin,
+        )}
+    )
+    if not session_names:
+        return None
+    if len(session_names) > 1:
+        raise MuxPaneTargetAmbiguityError(pane_id, session_names)
+    return session_names[0]
+
+
+def _mux_qualified_pane_target(
+    pane_id: str | None,
+    mux_bin: str,
+    *,
+    session_name: str | None = None,
+) -> str | None:
+    """Resolve ``pane_id`` to an exact ``session:window.pane`` target."""
+    if not pane_id:
+        return None
+    from . import sessions
+
+    resolved_session = session_name or _resolve_unambiguous_pane_session(pane_id, mux_bin)
+    if not resolved_session:
+        return None
+    window_panes = sorted(
+        {window_pane for _session, window_pane in _list_matching_pane_targets(
+            pane_id, mux_bin, session_name=resolved_session,
+        )}
+    )
+    if len(window_panes) != 1:
+        return None
+    return (
+        f"{sessions._mux_named_session_target(resolved_session, mux_bin)}:"
+        f"{window_panes[0]}"
+    )
+
+
+def _mux_pane_pid(
+    pane_id: str | None,
+    *,
+    mux: str | None = None,
+    session_name: str | None = None,
+) -> int | None:
     """Return the root pid of one mux pane, or ``None`` when unavailable."""
     if not pane_id:
         return None
     import subprocess
 
     mux_bin = _mux_bin(mux)
+    target = (
+        _mux_qualified_pane_target(pane_id, mux_bin, session_name=session_name)
+        if session_name
+        else pane_id
+    )
+    if not target:
+        return None
     try:
         r = subprocess.run(
             [
-                mux_bin, "display-message", "-p", "-t", pane_id,
+                mux_bin, "display-message", "-p", "-t", target,
                 "#{pane_pid}",
             ],
             capture_output=True,
@@ -44,10 +157,13 @@ def _mux_pane_pid(pane_id: str | None, *, mux: str | None = None) -> int | None:
 
 
 def _mux_pane_process_tree(
-    pane_id: str | None, *, mux: str | None = None,
+    pane_id: str | None,
+    *,
+    mux: str | None = None,
+    session_name: str | None = None,
 ) -> set[int]:
     """Snapshot the exact process tree rooted at ``pane_id`` before teardown."""
-    pane_pid = _mux_pane_pid(pane_id, mux=mux)
+    pane_pid = _mux_pane_pid(pane_id, mux=mux, session_name=session_name)
     if not pane_pid:
         return set()
     try:
@@ -64,13 +180,14 @@ def _retire_failed_successor(
     process_tree: set[int],
     *,
     mux: str | None = None,
+    mux_session: str | None = None,
 ) -> dict:
     """Retire a failed successor pane and terminate its exact surviving tree."""
     import signal
     import time
 
     retire = (
-        mux_retire_pane(pane_id, mux=mux)
+        mux_retire_pane(pane_id, mux=mux, mux_session=mux_session)
         if pane_id else {"ok": True, "gone": True, "method": "no-pane"}
     )
     terminated: list[int] = []
@@ -117,20 +234,21 @@ def _retire_failed_successor(
     }
 
 
-def _mux_pane_alive(pane_id: str, mux_bin: str) -> bool:
-    """Whether ``pane_id`` still exists in any session/window."""
-    import subprocess
-
+def _mux_pane_alive(
+    pane_id: str,
+    mux_bin: str,
+    session_name: str | None = None,
+) -> bool:
+    """Whether ``pane_id`` still exists, refusing ambiguous bare psmux hits."""
     try:
-        r = subprocess.run(
-            [mux_bin, "list-panes", "-a", "-F", "#{pane_id}"],
-            capture_output=True, text=True, timeout=5,
-        )
-        if r.returncode != 0:
-            return False
-        return pane_id in r.stdout.split()
-    except (OSError, subprocess.TimeoutExpired):
+        resolved_session = session_name or _resolve_unambiguous_pane_session(pane_id, mux_bin)
+    except MuxPaneTargetAmbiguityError:
         return False
+    if not resolved_session:
+        return False
+    return bool(
+        _list_matching_pane_targets(pane_id, mux_bin, session_name=resolved_session)
+    )
 
 
 def wait_for_handoff_candidate(
@@ -318,14 +436,18 @@ def _mux_session_window_count(session_name: str, mux_bin: str) -> int | None:
         return None
 
 
-def _mux_last_window_guard(pane_id: str, mux_bin: str) -> dict | None:
+def _mux_last_window_guard(
+    pane_id: str,
+    mux_bin: str,
+    session_name: str | None = None,
+) -> dict | None:
     """Return guard context when retiring ``pane_id`` would close a wt session."""
-    session_name = _mux_pane_session_name(pane_id, mux_bin)
-    if not session_name or not session_name.startswith("wt-"):
+    pane_session = session_name or _mux_pane_session_name(pane_id, mux_bin)
+    if not pane_session or not pane_session.startswith("wt-"):
         return None
-    window_count = _mux_session_window_count(session_name, mux_bin)
+    window_count = _mux_session_window_count(pane_session, mux_bin)
     if window_count == 1:
-        return {"session": session_name, "window_count": window_count}
+        return {"session": pane_session, "window_count": window_count}
     return None
 
 
@@ -333,6 +455,7 @@ def mux_retire_pane(
     pane_id: str,
     *,
     mux: str | None = None,
+    mux_session: str | None = None,
     settle_timeout: float = 6.0,
     poll_interval: float = 0.3,
     ctrl_c_gap: float = 0.6,
@@ -363,11 +486,24 @@ def mux_retire_pane(
     import time
 
     mux_bin = _mux_bin(mux)
+    target = (
+        _mux_qualified_pane_target(pane_id, mux_bin, session_name=mux_session)
+        if mux_session
+        else None
+    )
+    if mux_session and not target:
+        return {
+            "ok": False,
+            "pane": pane_id,
+            "gone": False,
+            "method": "failed",
+            "session": mux_session,
+        }
 
     def _send(keys: str) -> bool:
         try:
             r = subprocess.run(
-                [mux_bin, "send-keys", "-t", pane_id, keys],
+                [mux_bin, "send-keys", "-t", target or pane_id, keys],
                 capture_output=True, timeout=5,
             )
             return r.returncode == 0
@@ -377,15 +513,15 @@ def mux_retire_pane(
     def _gone_within(window: float) -> bool:
         deadline = time.monotonic() + window
         while time.monotonic() < deadline:
-            if not _mux_pane_alive(pane_id, mux_bin):
+            if not _mux_pane_alive(pane_id, mux_bin, mux_session):
                 return True
             time.sleep(poll_interval)
-        return not _mux_pane_alive(pane_id, mux_bin)
+        return not _mux_pane_alive(pane_id, mux_bin, mux_session)
 
-    if not _mux_pane_alive(pane_id, mux_bin):
+    if not _mux_pane_alive(pane_id, mux_bin, mux_session):
         return {"ok": True, "pane": pane_id, "gone": True, "method": "already-gone"}
 
-    guard = _mux_last_window_guard(pane_id, mux_bin)
+    guard = _mux_last_window_guard(pane_id, mux_bin, mux_session)
     if guard:
         try:
             from . import activity
@@ -424,7 +560,7 @@ def mux_retire_pane(
     # Graceful quit did not land -- hard-kill the pane.
     try:
         subprocess.run(
-            [mux_bin, "kill-pane", "-t", pane_id],
+            [mux_bin, "kill-pane", "-t", target or pane_id],
             capture_output=True, timeout=5,
         )
     except (OSError, subprocess.TimeoutExpired):
