@@ -139,21 +139,28 @@ kill, no encoding-from-a-subprocess concern, no zombie/leak risk.
   `Wordlist`; Phase 2 wires it to the actual tracking-store read.
 
 ### Phase 2 — Per-worktree codename assignment + local lookup
-- [ ] Assign one codename per worktree at `create` time; store it on the
-  worktree's local tracking record next to `id`.
-- [ ] **Backfill path:** a worktree record created before this feature (or
-  before a repo opts into `source_attribution: codename`) has no codename.
-  Add a lazy-assignment path — the first operation that needs one (`create-pr`
-  under `codename` mode, or an explicit `resolve`/`status` touch) allocates
-  and persists it then, rather than requiring a bulk migration or leaving
-  `create-pr` with nothing to emit. Test the upgrade case explicitly: an
-  old-format record, `source_attribution: codename` newly enabled, first
-  `create-pr` call.
-- [ ] `list`/`resolve` accept `--codename <name>` as an alternate selector
-  alongside the existing `--worktree-id`.
-- [ ] `status`/picker surfaces the codename so an author can correlate a
+- [x] Assign one codename per worktree at `create` time; store it on the
+  worktree's local tracking record next to `id`. Landed as
+  `WorktreeRecord.codename` (`tracking.py`) plus
+  `agent_worktrees.codename_tracking.assign_new_codename`/`allocation_lock`,
+  wired into `_create_worktree_core` (and the paired-knowledge `-k` carve)
+  before any git/owner-claim side effect, under a cross-process lock held
+  across the whole assign -> create -> write sequence.
+- [x] **Backfill path:** landed as `codename_tracking.ensure_codename`,
+  wired into the `_resolve_resume` and `_cmd_status_write` first-touch
+  paths (an explicit resume or status touch backfills a legacy record's
+  missing codename), rather than `create-pr`'s not-yet-built `codename`
+  mode (that's Phase 4). Covered by an end-to-end legacy-record test plus
+  a genuine multi-threaded concurrency test against `retire_record`.
+- [x] `list`/`resolve` accept `--codename <name>` as an alternate selector
+  alongside the existing `--worktree-id`. Landed via
+  `worktree_identity.resolve_worktree_id_by_codename`; an unmatched
+  codename is a hard error in `resolve` and an empty result in `list`
+  (never falls back to ID-suffix matching).
+- [x] `status`/picker surfaces the codename so an author can correlate a
   public PR's codename back to a visible worktree without extra lookup
-  steps.
+  steps. Landed via `_worktree_to_dict`, feeding both `status --json` and
+  `list --json`.
 
 ### Phase 3 — Cross-machine reverse lookup
 - [ ] Define a **typed codename registry** — lookup, atomic reservation, and
@@ -396,3 +403,32 @@ _Pending review._
   via isolation). Resume with `/consume-handoff` or by reading this entry;
   the PR itself carries the complete round-by-round history in its review
   thread if more detail is needed.
+
+### 2026-09-18 — PR #2868 merged (Phase 2 done)
+- The `retire_record` locking gap noted above was fixed: `retire_record`
+  now takes a real cross-process lock (`require_sidecar=True`) around every
+  delete, including a deterministic (sorted) lock order for the
+  both-reaped paired hard-delete branch (closing a genuine cross-call
+  deadlock the fix itself could otherwise introduce), and returns `bool`
+  (defers retirement to a later reap pass on lock contention rather than
+  either blocking a reap indefinitely or deleting without real exclusivity).
+  Both call sites in `__main__.py` updated to gate follow-up bookkeeping on
+  the actual outcome.
+- Two further review rounds (8 total) each caught one more real issue: a
+  raw worktree/machine identifier that had leaked into this file's own
+  prior journal entry (redacted -- corrected above), and the deadlock/
+  TOCTOU gaps in the `retire_record` fix itself just described.
+- After round 8's fixes, round 9's rendered comment list re-surfaced 11
+  prior findings as "Open" -- a GraphQL `reviewThreads(isResolved)` check
+  showed all but 4 were `isOutdated: true` (stale carryover, matching the
+  documented reviewer-thread-carryover gotcha), and the remaining 4
+  (`isOutdated: false, isResolved: false`) were verified against the
+  actual current code/PR-description state and were already fixed in
+  substance -- the threads just hadn't been marked resolved. No further
+  code changes were needed.
+- Merged via `pr-merge 2868 --now` (this repo's `pr-self-merge` profile:
+  the live verdict read `COMMENTED`/"not yet approved" even after checks
+  passed, which is expected here, not a blocker).
+- **Phase 2 is done.** Phases 3-5 (cross-machine reverse lookup,
+  `source_attribution: codename` mode, closing the branch-name-leak class)
+  remain -- see the Plan section above for the next slice.
