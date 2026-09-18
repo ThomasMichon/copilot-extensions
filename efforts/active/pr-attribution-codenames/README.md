@@ -336,3 +336,64 @@ _Pending review._
   `config_dropins` exactly as the hook version was. 52 tests (down from the
   hook version's 65 — no subprocess tests needed), and markedly faster
   (~3s vs ~8s, no process spawning).
+
+### 2026-09-18 — Phase 2 implemented, PR #2868 in review (7 rounds so far)
+- Implemented Phase 2 in a fresh worktree
+  (`lambda-core-wsl-20260918-014030-49c4`): `WorktreeRecord.codename` field
+  + YAML round-trip (`tracking.py`); new `agent_worktrees.codename_tracking`
+  module (kept separate -- `tracking.py`/`__main__.py` are at/near their
+  module-size-baseline ceiling) with `existing_codenames`/
+  `assign_new_codename` (local collision avoidance), `allocation_lock` (a
+  cross-process lock over one project's tracking dir, 30s timeout to
+  tolerate git I/O held under it), `ensure_codename` (lazy backfill), and
+  `find_record_by_codename` (reverse lookup); `create` assigns a codename
+  (both the primary path and the paired-knowledge `-k` carve, using each
+  project's own wordlist config); `list`/`resolve` accept `--codename` as an
+  alternate selector; `_worktree_to_dict` surfaces it in JSON (feeding
+  `status`/`list`/the Picker); `ensure_codename` wired into the resume and
+  status-write first-touch paths per the plan's backfill design.
+- Opened as PR #2868. Through **7 automated review rounds so far**, every
+  one catching a genuine issue (not a single trivial nit): the marketplace
+  catalog's top-level `metadata.version` bump was missed initially; the
+  paired knowledge worktree wasn't getting its own codename; a real
+  concurrent-allocation race (scan-then-write with no shared lock spanning
+  both); an `ensure_codename` bug that saved the caller's stale in-memory
+  record instead of the freshly re-read on-disk one (clobbering concurrent
+  field changes); an unmatched `--codename` in `resolve` silently falling
+  through to the picker instead of erroring; codename allocation running
+  AFTER git worktree creation (so an exhausted finite wordlist could orphan
+  a checkout) and AFTER the owner-claim journal write (so it could leave a
+  dangling owner obligation); a genuine cross-process lock-ordering deadlock
+  hazard between `create` (owner-lock-then-allocation-lock) and
+  `ensure_codename` (allocation-lock-then-record-lock); an unmatched
+  `--codename` in `list` falling back to ID-suffix matching (risking a wrong
+  match); and PR-description/baseline-value mismatches as the diff grew
+  across rounds (module-size ceiling stated as 28495 when the actual
+  recorded value was higher; version numbers stated as intermediate values
+  rather than the final ones).
+- **Still open at handoff time (round 7's finding, unaddressed):**
+  `retire_record` (tracking.py, ~line 2930-2960) deletes a tracking YAML via
+  a plain `path.unlink(missing_ok=True)` in two places (the sibling-both-
+  reaped hard-delete branch, and the final fallback) **without** taking
+  `_RecordLock` at all. `ensure_codename`'s per-record lock is therefore not
+  a complete guarantee against resurrecting a reaped record:
+  `retire_record` can still unlink the file between `ensure_codename`'s
+  existence check and its `save_record` call, because retirement doesn't
+  participate in the same lock protocol. Fixing this means making
+  `retire_record`'s unlinks (including the paired-sibling unlink) acquire
+  `_RecordLock` too -- but that function's own docstring establishes an
+  explicit fail-safe philosophy ("a reap must never be blocked by this
+  bookkeeping"; the tombstone-write path already falls back to a plain
+  unlink on any exception), so the lock acquisition needs to preserve
+  that property (never let this new lock permanently block a reap) rather
+  than just wrapping the existing unlinks blindly. `retire_record` is a
+  widely-used, carefully specified shared function (paired-worktree
+  tombstoning, siblings, `find_paired_record` semantics) -- treat this as
+  its own careful, focused fix, not a rushed patch under a different task's
+  time pressure.
+- PR #2868 is otherwise clean (checks green, mergeable, `pr-self-merge`
+  profile) and full-suite-green (4606 passed; 5 pre-existing unrelated
+  failures in `test_handoff_cutover.py`/`test_update_stage.py`, confirmed
+  via isolation). Resume with `/consume-handoff` or by reading this entry;
+  the PR itself carries the complete round-by-round history in its review
+  thread if more detail is needed.
