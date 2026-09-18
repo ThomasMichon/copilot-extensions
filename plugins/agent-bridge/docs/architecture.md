@@ -520,7 +520,10 @@ restart does not inherently close the child's pipes.
   channel or metadata errors, including the legacy remote fallback path.
   The manager remains the public facade; `session_resume.py`,
   `session_teardown.py`, and `session_ownership.py` own the bounded lifecycle
-  implementations. Additive session migrations live in `db_migrations.py`.
+  implementations. Additive session migrations live in `db_migrations.py`,
+  called by `db_schema.py`. The database facade remains `db.py`; restart schema
+  definitions and status writes live in `db_core.py` and `db_sessions.py`,
+  while atomic handoff queue transfers live in `db_prompts.py`.
   `session_host_ownership.py` owns the pre-client Session Host handoff.
   These extractions preserve factory injection seams and avoid widening the
   repository's shrink-only module-size baseline.
