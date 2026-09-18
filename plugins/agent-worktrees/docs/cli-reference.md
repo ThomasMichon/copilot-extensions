@@ -580,9 +580,20 @@ rolling retention. Writes take a cross-process advisory lock
 hook client, the resident status monitor, and context-handoff's Node process
 can append concurrently without corrupting the file. See
 `docs/patterns/lifecycle-activity-logging.md` § Tier C for the full contract.
-A dedicated `agent-worktrees handoff-trace` read command is planned (Phase 3,
-not yet shipped) -- for now, read the JSONL file directly or via
-`handoff_trace.read_trace(project, worktree_id)`.
+Read it with:
+
+```bash
+agent-worktrees handoff-trace <worktree-id|session-id>
+agent-worktrees handoff-trace <id> --token <handoff-token>
+agent-worktrees handoff-trace <id> --project <name> --json
+```
+
+The renderer resolves the owning project, defaults to the **most recent**
+handoff attempt for that selector when `--token` is omitted, reads the durable
+store with an `activity.jsonl` fallback, and prints the ordered 13 stages with
+gaps called out explicitly (`stage 9: never observed`). When the predecessor's
+or successor's session-state `handoff-request.json` still exists, the JSON
+output also surfaces its lineage fields.
 
 ---
 

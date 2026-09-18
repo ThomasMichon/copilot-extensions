@@ -1979,7 +1979,13 @@ function Invoke-Install {
     } else {
         throw 'Cannot locate config-migrate library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
     }
-    $bridgeResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, "$PluginDir", '--quiet')
+    # --refresh-package agent-procutil: agent-procutil has no dedicated
+    # install call of its own (resolved transitively while installing
+    # agent-bridge here), so it never gets an explicit cache-bust anywhere
+    # else. uv's local-path build cache is keyed by source path, not source
+    # content -- see the matching install.sh comment / #2863 for the
+    # confirmed incident this class of gap caused.
+    $bridgeResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, "$PluginDir", '--reinstall-package', 'agent-bridge', '--refresh-package', 'agent-bridge', '--reinstall-package', 'agent-procutil', '--refresh-package', 'agent-procutil', '--reinstall-package', 'agent-plugin-resolve', '--refresh-package', 'agent-plugin-resolve', '--reinstall-package', 'agent-dropin-registry', '--refresh-package', 'agent-dropin-registry', '--reinstall-package', 'agent-plugin-activation', '--refresh-package', 'agent-plugin-activation', '--quiet')
     $bridgeOut = $bridgeResult.Output
     $installResult = $bridgeResult.ExitCode
     $ErrorActionPreference = $prevEAP
@@ -2676,7 +2682,9 @@ function Invoke-Update {
         } else {
             throw 'Cannot locate config-migrate library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
         }
-        $bridgeResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--reinstall-package', 'agent-bridge', "$PluginDir", '--quiet')
+        # --refresh-package agent-procutil: see the matching comment in the
+        # initial-install path above.
+        $bridgeResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--reinstall-package', 'agent-bridge', '--refresh-package', 'agent-bridge', '--reinstall-package', 'agent-procutil', '--refresh-package', 'agent-procutil', '--reinstall-package', 'agent-plugin-resolve', '--refresh-package', 'agent-plugin-resolve', '--reinstall-package', 'agent-dropin-registry', '--refresh-package', 'agent-dropin-registry', '--reinstall-package', 'agent-plugin-activation', '--refresh-package', 'agent-plugin-activation', "$PluginDir", '--quiet')
         $bridgeOut = $bridgeResult.Output
         $updateResult = $bridgeResult.ExitCode
         $ErrorActionPreference = $prevEAP

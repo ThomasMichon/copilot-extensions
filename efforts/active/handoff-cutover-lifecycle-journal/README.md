@@ -418,18 +418,32 @@ renumbering from the "acknowledges handoff" step onward.)
 > user-facing docs (Phase 5) until that follow-on lands.
 
 ### Phase 3 — Cross-linking (the "linked list") + durable persistence
-- [ ] When the successor's `session_start_bound` (stage 9) fires, stamp its
+- [x] When the successor's `session_start_bound` (stage 9) fires, stamp its
       own session-state handoff record with `predecessor_session_id`, **and
       backfill stages 1-8** (which necessarily happened before the
       successor's session-state directory existed) into the successor's
       trace file at that moment, sourced from the durable per-worktree store
       below — not from the predecessor's directory, which may already be
       gone by the time anyone reads the successor's copy.
-- [ ] When the predecessor retires (stage 11/12), stamp its own session-state
+      **Landed with an explicit scope trim:** `cmd_register_session` now
+      stamps `predecessor_session_id` onto an existing successor-side
+      `handoff-request.json` when that record exists and emits Stage 9 with
+      the same linkage field. The archival backfill source is the durable
+      per-worktree store the new `handoff-trace` renderer reads directly.
+      Because no checked-in per-session `handoff-trace.jsonl` mechanism
+      existed, this slice intentionally did **not** invent a new dual-file
+      trace writer from scratch; see the still-deferred item below.
+- [x] When the predecessor retires (stage 11/12), stamp its own session-state
       record with `successor_session_id` (it may not have known this at
       trigger time), and append any later stage-9-through-13 events it can
       still observe before it exits.
-- [ ] `~/.agent-worktrees/logs/activity.jsonl` is a **rolling log with a
+      **Landed with additive redundancy:** the successor-claim path stamps
+      `successor_session_id` onto the predecessor's `handoff-request.json`
+      as soon as the head transfers, and the retire path stamps the same
+      field again when the predecessor actually exits. Stage-11 retire
+      events now carry `successor_session_id` too, so the durable trace and
+      the surviving session-state request agree.
+- [x] `~/.agent-worktrees/logs/activity.jsonl` is a **rolling log with a
       retention window shorter than "at any time"** (days, not indefinite),
       and Stage 1 happens before either session-state directory exists — so
       neither `activity.jsonl` alone nor the two session-state files alone
@@ -469,10 +483,10 @@ renumbering from the "acknowledges handoff" step onward.)
       `remove_trace()` reap hook wired into all three tracking-record
       removal paths, and a subprocess-based (real separate OS processes, not
       just threads) concurrent-append race test proving the lock actually
-      serializes independent processes on this machine's OS. **Left open:**
-      a real run of that same test on a Windows CI runner (the code path is
-      OS-selecting via `_append_lock`, but it has not yet been *observed*
-      passing on Windows), and the `handoff-trace` CLI itself.
+      serializes independent processes on this machine's OS. The remaining
+      gap here is validation-only: a real run of that same test on a Windows
+      CI runner (the code path is OS-selecting via `_append_lock`, but it
+      has not yet been *observed* passing on Windows).
 - [ ] Write/append the full per-stage trace into **both**:
       `~/.copilot/session-state/<predecessor-sid>/handoff-trace.jsonl` and
       `~/.copilot/session-state/<successor-sid>/handoff-trace.jsonl` — each
@@ -480,7 +494,12 @@ renumbering from the "acknowledges handoff" step onward.)
       the other side's session id, so either session-state folder alone lets
       you walk the chain for as long as that session-state folder itself is
       retained.
-- [ ] Add a `agent-worktrees handoff-trace <worktree-id|session-id>
+      **Deliberately deferred:** this slice reuses the already-real
+      `handoff-request.json` session-state record for linkage fields and
+      treats the durable per-worktree trace as the archival source of truth.
+      No prior per-session `handoff-trace.jsonl` writer existed, so a new
+      mirrored dual-write mechanism was left out of scope for this PR.
+- [x] Add a `agent-worktrees handoff-trace <worktree-id|session-id>
       [--project <name>] [--token <handoff-token>]` CLI command. Tracking
       lookup is **project-scoped**, and neither a bare worktree id nor a
       session id identifies the active project when the command runs from a
@@ -497,6 +516,11 @@ renumbering from the "acknowledges handoff" step onward.)
       enough to still be in the rolling log) and renders the ordered
       13-stage sequence for the selected worktree/token, with gaps visibly
       marked ("stage 8 logged, stage 9 never observed").
+      **Landed:** `agent-worktrees handoff-trace` now resolves either a
+      worktree id or session id (including a neutral-CWD all-project
+      resolver), defaults to the most recent attempt when `--token` is
+      omitted, reads the durable trace with an `activity.jsonl` fallback,
+      and supports both human and `--json` output.
 
 ### Phase 4 — Fix the reported failure class (superseded — remediated live, see Journal)
 
@@ -538,9 +562,11 @@ renumbering from the "acknowledges handoff" step onward.)
       `handoffs-check`), confirmed both fixes against this worktree's real
       predecessors and facility-wide: `agent-worktrees handoffs-check --all`
       went from 2 real stranded handoffs to 0 after `--execute`.
-- [ ] Feed `health.find_orphaned_handoffs()` from the new trace so it can name
-      the exact stage where an orphaned handoff stalled. **Still open** —
-      not addressed by this leg's remediation, left as a genuine follow-on.
+- [x] Feed `health.find_orphaned_handoffs()` from the new trace so it can name
+      the exact stage where an orphaned handoff stalled.
+      **Landed:** `OrphanedHandoff` now carries `last_stage` /
+      `last_stage_name`, populated from the durable per-worktree trace, and
+      `doctor` surfaces that context in both JSON and human output.
 - [x] **New item, found and fixed live this session:** a graceful retire can
       release `inuse.<pid>.lock` before the OS process actually exits,
       making `ensure_session_copilot_reaped()`'s lock-gated scan report
@@ -555,10 +581,9 @@ renumbering from the "acknowledges handoff" step onward.)
       lifecycle: the 13-stage trace") and the context-handoff README's new
       § "Handoff-lifecycle observability". Both document the stage table,
       the two durable stores, and the diagnostic tools that exist **today**
-      (`agent-worktrees handoffs-check`, `agent-bridge handoff-check`) —
-      the dedicated `handoff-trace` render command itself is still open
-      Phase 3 follow-on work and is called out as such rather than
-      documented as if it already existed.
+      (`agent-worktrees handoffs-check`, `agent-worktrees handoff-trace`,
+      `agent-bridge handoff-check`). The per-session `handoff-trace.jsonl`
+      mirror remains deferred and is called out honestly as such.
 - [x] Updated the `context-handoff` skill (new "Diagnosing a stuck cutover"
       subsection under Resume flow) and the `worktree` skill (new
       "Diagnosing a stranded handoff predecessor pane" subsection under
@@ -573,9 +598,14 @@ renumbering from the "acknowledges handoff" step onward.)
       asserting each of the 13 events fires with the right fields on a
       successful cutover, scoped to the mux/CLI resident-monitor path (see
       Phase 2's deferred-follow-on note for agent-bridge coverage).
-- [ ] A test that intentionally kills the spawn step and asserts
+      **Status:** hermetic coverage now exists for the new linkage stamps,
+      the `handoff-trace` renderer, and stalled-stage health naming; a
+      single end-to-end happy-path proof of all 13 stages in one cutover is
+      still separate work.
+- [x] A test that intentionally kills the spawn step and asserts
       `handoff-trace` shows stages 1-7 present and 8+ absent (proves the tool
       surfaces partial traces usefully, not just full ones).
+      **Covered hermetically:** `test_cmd_handoff_trace_marks_missing_later_stages`.
 - [ ] A concurrent-writer race test against the durable per-worktree trace
       store (Phase 3): multiple simulated emitters (Python + a stand-in for
       the Node context-handoff process) appending in parallel produce no
@@ -586,8 +616,12 @@ renumbering from the "acknowledges handoff" step onward.)
       disposable worktree, run `agent-worktrees handoff-trace`, confirm a
       complete 13-stage trace exists in both the predecessor's and successor's
       `~/.copilot/session-state/<sid>/handoff-trace.jsonl`.
-- [ ] `find_orphaned_handoffs()` correctly names the stalled stage against a
+      **Still open, and narrower now:** the new CLI and durable trace exist,
+      but this PR intentionally did not add the separate per-session
+      `handoff-trace.jsonl` dual-write mechanism.
+- [x] `find_orphaned_handoffs()` correctly names the stalled stage against a
       forced-partial-failure fixture.
+      **Covered hermetically:** `test_detects_dark_stale_unlinked_handoff`.
 
 ## Proposal
 
@@ -758,6 +792,30 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   per-worktree/per-project trace store with the per-platform atomic-append
   contract, successor backfill, `handoff-trace` CLI) and Phase 5 (docs) follow.
   Phase 4 stays deferred per the operator's explicit scope decision.
+
+### 2026-09-17 — Lineage diagnostics closure
+- Closed the remaining Phase 3/4 diagnostics work in the owning effort rather
+  than duplicating it in `context-handoff-overhaul`, matching that effort's
+  explicit "coordinate with, don't duplicate" instruction.
+- Shipped `agent-worktrees handoff-trace <worktree-id|session-id>
+  [--project <name>] [--token <handoff-token>] [--json]`: it resolves an
+  owning project even from a neutral CWD, defaults to the most recent attempt
+  when `--token` is omitted, reads the durable per-worktree trace with an
+  `activity.jsonl` fallback, and renders the ordered 13 stages with visible
+  gaps.
+- Added lineage stamping on the existing session-state `handoff-request.json`
+  records: Stage 9 stamps `predecessor_session_id` on a successor-side record
+  when one exists, and the successor-claim / predecessor-retire paths stamp
+  `successor_session_id` on the predecessor-side record. Stage-9/11 trace
+  events now carry the same linkage fields.
+- Explicit scoping decision for this slice: no groundwork existed for a
+  per-session `handoff-trace.jsonl` mirror, so this PR did **not** invent a
+  new dual-file trace writer. The durable per-worktree trace remains the
+  archival source of truth; the session-state `handoff-request.json` record is
+  the additive linked-list surface.
+- Fed `health.find_orphaned_handoffs()` from the durable trace so
+  `OrphanedHandoff` and `doctor` can name the last observed stage
+  (`last_stage` / `last_stage_name`) for a stalled cutover.
 - **Phase 1 fully closed.** Landed the two remaining checklist items in a
   fresh worktree: `_handoff_cutover_spawn_result` now emits
   `handoff_successor_spawn_started` immediately before

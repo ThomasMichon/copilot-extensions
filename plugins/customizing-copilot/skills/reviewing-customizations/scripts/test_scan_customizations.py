@@ -722,6 +722,124 @@ def test_controlled_plugin_agents_get_frontmatter_and_recursion_checks(
     assert any(f.check == "anti-recursion" for f in report.findings)
 
 
+def test_controlled_plugin_without_agents_manifest_declaration_is_blocking(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    plugin = repo / ".ai" / "cap"
+    agents = plugin / "agents"
+    agents.mkdir(parents=True)
+    (agents / "worker.agent.md").write_text(
+        "---\ndescription: Worker.\ntools: ['*']\n---\n\n# Worker\n",
+        encoding="utf-8",
+    )
+    # No plugin.json / .claude-plugin/plugin.json at all -- the manifest is
+    # simply absent, which must still surface the finding (not merely a
+    # falsy `agents` value).
+    source = scan.PluginSource(
+        skills_root=plugin / "skills",
+        origin="repo-plugins/cap",
+        controlled=True,
+    )
+
+    report = scan.run(repo, [source])
+
+    finding = next(
+        f for f in report.findings if f.check == "agent-manifest-declaration"
+    )
+    assert finding.severity == scan.BLOCKING
+    assert finding.path == str((agents / "worker.agent.md").resolve())
+    assert "agents/*.agent.md" in finding.message
+    assert '"agents": "agents/"' in finding.message
+
+
+def test_external_plugin_without_agents_manifest_declaration_is_warning(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    plugin = tmp_path / "installed" / "mkt" / "external"
+    agents = plugin / "agents"
+    agents.mkdir(parents=True)
+    (agents / "worker.agent.md").write_text(
+        "---\ndescription: Worker.\ntools: ['*']\n---\n\n# Worker\n",
+        encoding="utf-8",
+    )
+    source = scan.PluginSource(
+        skills_root=plugin / "skills",
+        origin="mkt/external",
+        controlled=False,
+        source="https://github.com/example/external",
+        version="4.5.6",
+    )
+
+    report = scan.run(repo, [source])
+
+    finding = next(
+        f for f in report.findings if f.check == "agent-manifest-declaration"
+    )
+    assert finding.severity == scan.WARNING
+    assert finding.path == "<plugin:mkt/external@4.5.6>/agents/worker.agent.md"
+    assert "cannot edit its installed payload" in finding.message
+
+
+def test_plugin_with_truthy_agents_manifest_declaration_passes(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    plugin = repo / ".ai" / "cap"
+    agents = plugin / "agents"
+    agents.mkdir(parents=True)
+    (agents / "worker.agent.md").write_text(
+        "---\ndescription: Worker.\ntools: ['*']\n---\n\n# Worker\n",
+        encoding="utf-8",
+    )
+    (plugin / "plugin.json").write_text(
+        json.dumps({"name": "cap", "agents": "agents/"}),
+        encoding="utf-8",
+    )
+    source = scan.PluginSource(
+        skills_root=plugin / "skills",
+        origin="repo-plugins/cap",
+        controlled=True,
+    )
+
+    report = scan.run(repo, [source])
+
+    assert not any(
+        f.check == "agent-manifest-declaration" for f in report.findings
+    )
+
+
+def test_agent_manifest_declaration_check_covers_frontmatter_less_agents(
+    tmp_path: Path,
+):
+    """Regression: the manifest-declaration check must fire even for a plugin
+    whose only agent file has no YAML frontmatter -- that file's per-file
+    loop `continue`s immediately after the (separate) frontmatter check, so
+    the manifest check must run before that early exit, not after it."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    plugin = repo / ".ai" / "cap"
+    agents = plugin / "agents"
+    agents.mkdir(parents=True)
+    (agents / "missing.agent.md").write_text(
+        "# Missing frontmatter\n", encoding="utf-8"
+    )
+    source = scan.PluginSource(
+        skills_root=plugin / "skills",
+        origin="repo-plugins/cap",
+        controlled=True,
+    )
+
+    report = scan.run(repo, [source])
+
+    assert any(f.check == "agent-frontmatter" for f in report.findings)
+    assert any(
+        f.check == "agent-manifest-declaration" for f in report.findings
+    )
+
+
 def test_task_capable_project_agent_requires_self_guard(tmp_path: Path):
     repo = tmp_path / "repo"
     agents = repo / ".github" / "agents"

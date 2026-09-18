@@ -82,7 +82,10 @@ missing directories, and symlink escapes are rejected. The same roots join
 It reports (BLOCKING vs WARNING) on: **skill frontmatter** (`name` +
 `description`), **name/folder match**, **trigger collisions** across skills,
 **anti-recursion** (a Task-capable agent without an agent-specific
-anti-self-delegation line), **MCP readiness** (an MCP-owning agent without a
+anti-self-delegation line), **agent manifest declaration** (a plugin shipping
+`agents/*.agent.md` whose manifest does not declare a truthy top-level
+`agents` field -- explicit is more robust than the runtime's implicit
+`plugin_root/agents` default), **MCP readiness** (an MCP-owning agent without a
 `## MCP Readiness` section), **agent-mcp fallback** (an agent-mcp-backed agent
 without an equivalent materialized CLI fallback), **MCP plugin recovery** (a
 plugin-packaged MCP agent without a discoverable troubleshooting skill, or

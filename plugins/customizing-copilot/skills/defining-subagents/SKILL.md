@@ -68,6 +68,15 @@ Plugin agents cannot override personal or project agents.
 > see `authoring-skills` § *Two ways to add an in-repo skill or agent*). See
 > `installing-plugins` → *the `.ai` local marketplace* for the required
 > marketplace declaration.
+>
+> **Always declare the `agents` field explicitly, even though the runtime
+> currently falls back to `plugin_root/agents` when it is absent.** Explicit
+> is more robust than implicit here: it matches every shipped example
+> (`copilot-extensions-harness`, etc.), survives a future change to the
+> default-path fallback, and gives a human/reviewer an unambiguous manifest to
+> read. The **`reviewing-customizations`** scan hard-flags a plugin with agent
+> files on disk and no such manifest declaration (BLOCKING for a
+> controlled/in-repo plugin) — do not defeat that check by omitting the field.
 
 ## Agent file format
 

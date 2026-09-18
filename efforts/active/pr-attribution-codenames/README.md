@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions (agent-worktrees plugin)
 - **Branch(es):** `pr/<slug>` per phase
 - **Created:** 2026-09-17
-- **Status:** Draft <!-- Draft | Active | Blocked | Done -->
+- **Status:** Active <!-- Draft | Active | Blocked | Done -->
 - **Vision:** vision-extending — extends the existing `source_attribution`
   marker capability (today boolean: on/off) with a third, public-safe mode.
 - **Umbrella issue:** [#2838](https://github.com/ThomasMichon/copilot-extensions/issues/2838)
@@ -78,46 +78,65 @@ the author: a random, themed codename with no encoded machine, date, or
 sequence data — assigned once per worktree and carried as the *only* thing a
 public marker (or, worse, a leaked branch name) ever exposes.
 
+**Design pivot: declarative wordlist file, not an executable hook.** The
+first implementation attempt let an adopter configure an external *shell
+command* hook to supply a themed vocabulary. That single design choice
+required ten review rounds of subprocess-safety hardening (process-tree
+cleanup on timeout, cross-platform kill semantics, bounded-memory reads,
+truncation detection, timeout-value validation, encoding failures, a
+reap-after-kill race) — none of it related to codenames at all, just the
+generic cost of "run an adopter-supplied command with a timeout." The
+operator's own steer settled it: this is **purely declarative data** —
+words and, optionally, the permitted combinations between them — so Phase 1
+now reads a JSON/YAML file instead of running anything. That removes the
+entire subprocess-safety surface by construction: no timeout, no process to
+kill, no encoding-from-a-subprocess concern, no zombie/leak risk.
+
 ## Request
 
 > Design a codename system for worktrees so PR attribution can be posted
 > publicly without exposing which machine or worktree actually produced the
 > change, while still letting the author look a codename back up to resume
 > the right context.
+>
+> (Follow-up direction, after the hook-based Phase 1 draft hit repeated
+> subprocess-safety findings: "Can we make it purely declarative? No need to
+> call out to a hook, just need a ref to a yaml or json full of words and
+> permitted relationships.")
 
 ## Plan
 
 ### Phase 1 — Neutral codename generation (agent-worktrees-owned)
-- [ ] Add a small, dependency-free "handle" generator to `agent-worktrees`
+- [x] Add a small, dependency-free "handle" generator to `agent-worktrees`
   itself: 1–2 word, lowercase, hyphen-joined, branch/filename-safe, backed
   by a **generic, organization-neutral** word list (no product theming —
   this plugin is general-purpose; themed vocabularies are an adopter-side
-  concern, not a plugin default).
-- [ ] Support an optional **external generator hook**: a config value naming
-  a shell command that prints one handle to stdout. When set, `create` shells
-  out to it instead of the built-in generator. This lets a private control
-  repo plug in its own themed generator without that vocabulary ever living
-  in this public plugin. **Bound and validated, not trusted blindly:** the
-  hook runs under a short timeout; its stdout must match the exact handle
-  format (lowercase, hyphen-joined, bounded length, no path separators or
-  shell metacharacters) or the result is rejected; a timeout, non-zero exit,
-  or format failure is a **fail-closed** error (falls back to the built-in
-  neutral generator). **Format validation is a syntax check, not a content
-  guarantee** — a hook can still emit a *syntactically valid* handle that is
-  semantically identifying (e.g. `machine-20260917`, a real project name).
-  Format checking only protects against malformed output, not against a
-  badly-chosen hook vocabulary. The `codename` mode's public-safety
-  guarantee therefore **only holds unconditionally for the built-in
-  generator**; enabling an external hook on a `source_attribution: codename`
-  repo is an explicit, documented trust decision the hook's *owner* makes —
-  document this plainly (a warning at config-load time when a repo combines
-  a non-default hook with `codename` mode is in scope for this phase), and
-  do not describe hook output as informationless by construction.
-- [ ] Collision-avoid against the local tracking store (retry on collision,
+  concern, not a plugin default). Landed in `agent_worktrees.codename`
+  (mechanical/workshop-themed word list, `generate_handle`,
+  `is_valid_handle`).
+- [x] Support an optional **declarative wordlist file**: a config value
+  (`codename.wordlist_path`) naming a JSON or YAML file the adopter
+  maintains. This lets a private control repo plug in its own themed
+  vocabulary (nouns, optionally adjectives, optionally an explicit list of
+  *permitted* adjective-noun pairings to avoid unwanted combinations)
+  without that vocabulary ever living in this public plugin — with **no
+  executable-hook surface at all**. Landed in
+  `agent_worktrees.codename.load_wordlist`/`load_wordlist_or_default`
+  (strict structural validation: required non-empty `nouns`, optional
+  `adjectives`, optional `pairs` overriding the full cross-product; every
+  word individually validated lowercase-alnum, bounded length, no hyphens
+  of its own) and `agent_worktrees.codename_config.CodenameConfig`/
+  `parse_codename`, wired into `RepoConfig`/`config_dropins` alongside the
+  existing `pr:` block. A missing/malformed file fails soft to the
+  built-in wordlist (`load_wordlist_or_default`) rather than blocking
+  worktree creation over a data-file typo.
+- [x] Collision-avoid against the local tracking store (retry on collision,
   same spirit as the existing registry-checked mode of comparable
   generators) — no new persistence primitive for the *local* check (Phase 3
   covers cross-machine uniqueness, which this local check cannot guarantee
-  alone).
+  alone). Landed as `agent_worktrees.codename.assign_codename(existing,
+  ...)`, generic over any iterable of already-used handles and an optional
+  `Wordlist`; Phase 2 wires it to the actual tracking-store read.
 
 ### Phase 2 — Per-worktree codename assignment + local lookup
 - [ ] Assign one codename per worktree at `create` time; store it on the
@@ -204,14 +223,12 @@ public marker (or, worse, a leaked branch name) ever exposes.
 
 ## Validation Plan
 
-- [ ] Unit tests: handle generator format (lowercase, hyphen-joined,
-  branch-safe), collision retry, external-hook timeout/format-validation/
-  fail-closed behavior on malformed or slow hook output.
-- [ ] Config-load test: a repo combining a non-default external generator
-  hook with `source_attribution: codename` surfaces the documented
-  trust-scope warning (format validation ≠ content/informationless
-  guarantee — that guarantee only holds unconditionally for the built-in
-  generator).
+- [x] Unit tests: handle generator format (lowercase, hyphen-joined,
+  branch-safe), collision retry, wordlist-file loading (valid YAML/JSON,
+  missing file, malformed data, missing/empty/non-list/non-string/
+  malformed-word `nouns`, explicit `pairs` overriding the cross-product,
+  fail-soft fallback to the built-in wordlist on any load error). 52 tests
+  landed in `test_codename.py`/`test_codename_config.py`.
 - [ ] Unit tests: `source_attribution: codename` marker contains the
   codename and *no* machine/worktree/session/timestamp substrings, on
   **both** the initial `create-pr` body path and the
@@ -285,3 +302,37 @@ _Pending review._
   artifact: the PR body was updated with that statement in the same push
   cycle the review ran against, just after the review started; the live PR
   body already carries it.)
+
+### 2026-09-18 — Design pivot: dropped the hook, went purely declarative
+- The hook-based Phase 1 implementation went through **ten** review rounds,
+  each closing a genuine subprocess-safety bug: process-group isolation on
+  timeout, bounded-memory reads, truncation-then-strip validation, a
+  Windows headless-launch guard violation, timeout-value validation
+  (non-finite/oversized/boolean), a non-string `hook_command` becoming a
+  real shell command via `str(None) == "None"`, a Windows-specific
+  `taskkill` console-window leak, missing test coverage (non-UTF-8 output,
+  the actual `load_config` wiring), and — twice — the process-group cleanup
+  itself: first not sweeping a backgrounded descendant when the hook shell
+  exited successfully rather than timing out, then a subtler bug in *that*
+  very fix (`os.getpgid(pid)` fails once the process is already reaped, so
+  the "fix" silently no-op'd on exactly the case it targeted).
+- None of those ten findings were about codenames — every one was the
+  generic cost of "run an adopter-supplied shell command with a timeout."
+  Raised to the operator mid-review; the answer was direct: make it purely
+  declarative. **Reset the branch to `main`** (discarding all ten
+  hook-hardening commits — they were fixing a mechanism this pivot
+  removes entirely, not preserving anything worth rebasing forward) and
+  reimplemented Phase 1 around a JSON/YAML **wordlist file** instead of an
+  executable hook: `codename.wordlist_path` names a file declaring `nouns`
+  (required), optional `adjectives`, and an optional explicit `pairs` list
+  for an adopter who wants to declare *permitted relationships* rather than
+  a full cross-product. No subprocess, no timeout, no process to kill, no
+  encoding-from-a-subprocess concern — the entire ten-round problem class
+  is structurally impossible now, not just hardened against.
+- Landed in one clean commit: `agent_worktrees.codename`
+  (`Wordlist`/`load_wordlist`/`load_wordlist_or_default`/`generate_handle`/
+  `assign_codename`) and `agent_worktrees.codename_config`
+  (`CodenameConfig`/`parse_codename`), wired into `RepoConfig`/
+  `config_dropins` exactly as the hook version was. 52 tests (down from the
+  hook version's 65 — no subprocess tests needed), and markedly faster
+  (~3s vs ~8s, no process spawning).

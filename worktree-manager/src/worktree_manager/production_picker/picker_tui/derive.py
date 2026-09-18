@@ -237,6 +237,90 @@ def _status_markers(w):
     return compact[len(label):].strip()
 
 
+#: Bounded per-kind short codes for the tile asset-hint line (#6443/upstream
+#: #1979). Falls back to an upper-cased 4-char code for a kind this map
+#: doesn't recognize, so a future ``ResourceKind`` addition degrades safely
+#: instead of vanishing from the tile.
+_ASSET_CODES = {
+    "pr": "PR",
+    "worktree": "WT",
+    "codespace": "CS",
+    "container": "CTR",
+    "ssh": "SSH",
+    "workdir": "DIR",
+}
+
+#: Held-claim dispositions: a claim not yet released/abandoned still rides on
+#: the worktree, so it belongs in the tile's asset summary. An empty state is
+#: the legacy default and normalizes to "active" (held). Mirrors the
+#: ``resources`` ledger's own held-vs-released disposition convention
+#: (``active``/``at-rest`` = held; ``released``/``abandoned`` = not held).
+_HELD_CLAIM_STATES = ("", "active", "at-rest")
+
+
+def _asset_hints(w):
+    """Bounded type/count breakdown of the worktree's HELD outbound claims
+    (the ``resources`` ledger -- #6443/upstream #1979 Phase 6), e.g.
+    ``["PR", "WT×2"]`` -- distinct from ``status_markers``'s bare ``C<N>``
+    held-claims COUNT: this groups the same held claims by ``kind`` so a
+    cross-repo PR reads differently from a child worktree or a Codespace at a
+    glance. Bounded to 4 hint tokens (with an ``overflow`` count) so a
+    worktree carrying many claim kinds can never blow out the tile's width.
+    Also returns the full per-claim detail (kind/ref/note/state) for a
+    width-constrained consumer (the action menu) to render in full. Returns
+    ``{"hints": [...], "overflow": int, "details": [...]}`` -- empty lists
+    when the worktree holds no claims (never omitted, so a caller need not
+    guard for the key's absence).
+    """
+    raw = w.get("resources")
+    kind_counts: dict[str, int] = {}
+    details = []
+    if isinstance(raw, list):
+        for claim in raw:
+            if not isinstance(claim, dict):
+                continue
+            state = str(claim.get("state") or "").strip()
+            if state not in _HELD_CLAIM_STATES:
+                continue
+            kind = str(claim.get("kind") or "").strip() or "resource"
+            kind_counts[kind] = kind_counts.get(kind, 0) + 1
+            details.append({
+                "kind": kind,
+                "ref": str(claim.get("ref") or "").strip(),
+                "note": str(claim.get("note") or "").strip(),
+                "state": state or "active",
+            })
+    # Count by the raw ``kind`` first (above), then resolve a display code
+    # only now -- never the reverse. Counting straight into the code would
+    # silently merge two DISTINCT kinds whose fallback 4-char codes happen to
+    # collide (e.g. "workspace" and "workflow" both -> "WORK"), understating
+    # the real per-kind breakdown the operator is reading. Aggregating by
+    # code here is still an explicit, intentional step -- multiple raw kinds
+    # sharing one code are summed into that code's token, but never silently
+    # dropped or conflated during counting itself.
+    code_counts: dict[str, int] = {}
+    for kind, n in kind_counts.items():
+        code = _ASSET_CODES.get(kind, kind.upper()[:4] or "RES")
+        code_counts[code] = code_counts.get(code, 0) + n
+    # Deterministic hint order (never insertion/dict order, which tracks
+    # arbitrary ``resources`` list order and would make the tile line and any
+    # snapshot/TUI test brittle): the curated ``_ASSET_CODES`` kinds first, in
+    # their declared (most-common-first) order, then any remaining
+    # unrecognized-kind fallback codes, alphabetically.
+    ordered_codes = [
+        c for c in _ASSET_CODES.values() if c in code_counts
+    ] + sorted(c for c in code_counts if c not in _ASSET_CODES.values())
+    hints = [
+        code if code_counts[code] == 1 else f"{code}×{code_counts[code]}"
+        for code in ordered_codes
+    ]
+    return {
+        "hints": hints[:4],
+        "overflow": max(0, len(hints) - 4),
+        "details": details,
+    }
+
+
 def _sess(w):
     if w.get("mux_attached"):
         return f"●{w.get('mux_clients', 1)}"
@@ -507,6 +591,7 @@ def norm(
         "state": _state(w),
         "state_style": _state_style(w),
         "status_markers": _status_markers(w),
+        "asset_hints": _asset_hints(w),
         "relation": reciprocal.short_label(reciprocal_relation),
         "reciprocal_relation": reciprocal_relation,
         "age": _age(

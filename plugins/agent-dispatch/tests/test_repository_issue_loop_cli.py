@@ -92,6 +92,26 @@ def test_setup_refuses_worktree_checkout_path(tmp_path, monkeypatch):
         assert json.loads(pointers_file.read_text(encoding="utf-8")) == []
 
 
+def test_inspect_stamps_declaring_repo_root_as_emitter_cwd(
+    tmp_path, monkeypatch, capsys
+):
+    """Regression guard: the direct CLI declaration-read path (inspect,
+    side-load, disable/enable) must resolve the repo root *before* reading
+    the declaration, so the materialized emitter spec's 'cwd' -- and
+    therefore a repo-local worker_identity override -- is available even for
+    interactive use, not only for registrar-discovery reads."""
+    repo_root = tmp_path / "repo"
+    declaration = repo_root / ".agent-dispatch" / "registrar" / "issues.json"
+    overrides = tmp_path / "overrides.json"
+    _write_loop(declaration)
+    monkeypatch.setenv("AGENT_DISPATCH_OVERRIDES", str(overrides))
+
+    assert main(["repository-issue-loop", "inspect", str(declaration)]) == 0
+    inspected = json.loads(capsys.readouterr().out)
+    source = next(u for u in inspected["units"] if u["kind"] == "emitter")
+    assert source["spec"]["cwd"] == str(repo_root.resolve())
+
+
 def test_inspect_disable_and_enable_cover_both_units(
     tmp_path, monkeypatch, capsys
 ):
