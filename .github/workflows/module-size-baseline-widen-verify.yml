@@ -1,0 +1,35 @@
+# Lightweight, purpose-built CI for the module-size-baseline-widen
+# automation's own generated PR. `ci.yml`'s `workflow_dispatch` trigger
+# deliberately runs its full ~11-minute per-plugin matrix (see ci.yml's
+# `full` job and its own comments) -- appropriate for an on-demand full
+# validation, but far more than a purely mechanical, JSON-only baseline diff
+# needs. This workflow instead runs just the guards that diff can actually
+# violate.
+name: Module size baseline widen verify
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify generated baseline PR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Install tooling
+        run: uv pip install --system --upgrade pip pytest pyyaml
+      - name: Version consistency
+        run: python tools/check-version-consistency.py
+      - name: Module size (hard cap + shrink-only baseline)
+        run: python tools/check-module-size.py
+      - name: Module size guard tests
+        run: python -m pytest -q tools/test_check_module_size.py

@@ -1,0 +1,107 @@
+# Post-merge, main-only widen-safe companion to the `checks` job's
+# module-size guard. See tools/check-module-size.py's module docstring for
+# the full rationale and the hard rule this exists to preserve: --allow-widen
+# only ever runs here, against main after the fact, and only ever lands its
+# own change through a normal reviewable PR -- never inside a PR branch's own
+# CI run against its own diff.
+name: Module size baseline widen
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: module-size-baseline-widen
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  widen:
+    name: widen grown ceilings (main only)
+    runs-on: ubuntu-latest
+    # `workflow_dispatch` can be launched against an arbitrary ref -- guard
+    # explicitly so a manual dispatch can never run --allow-widen against a
+    # PR branch's own (unreviewed) growth. `push` is already scoped to main
+    # by the trigger above; this is belt-and-suspenders for both triggers.
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Widen-safe baseline refresh
+        # Widens a grown file's ceiling up to its current size, AND still
+        # applies the ordinary shrink-only behaviour (tightening or removing
+        # an entry for a file that shrank) in the same pass -- never lowers
+        # below a file's current size, never touches an unrelated entry.
+        # Purely mechanical, so the opened PR needs no design judgment to
+        # review, just a confirmation the numbers match `git show`.
+        run: python tools/check-module-size.py --refresh-baseline --allow-widen
+      - name: Fail if a genuinely new offender remains
+        # --allow-widen deliberately never grandfathers a file that was
+        # never baselined before (see check-module-size.py's module
+        # docstring) -- that's a real, new hard-cap violation, not baseline
+        # noise. Run the ordinary check right after the refresh so this job
+        # fails loudly on `main` instead of silently reporting the baseline
+        # "up to date" while a real violation still exists uncaught.
+        run: python tools/check-module-size.py
+      - name: Open a PR if the baseline changed
+        id: widen-pr
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "tools: widen-safe module-size baseline refresh (automated)"
+          title: "tools: widen-safe module-size baseline refresh (automated)"
+          body: |
+            Automated, mechanical-only refresh of `tools/module-size-baseline.json`
+            against current `main`: raises the ceiling for any file that grew past
+            its previous grandfathered size, to its current size; tightens or
+            removes the entry for any file that shrank (the ordinary shrink-only
+            behaviour, unchanged) -- never lowers a ceiling below a file's current
+            size, never touches a file that's unchanged.
+
+            Exists so unrelated PRs stop needing a manual baseline-widening
+            drive-by just because a *different*, already-merged PR grew a
+            shared module. Safe to merge once CI is green; the numbers are
+            fully mechanical (see `tools/check-module-size.py`'s
+            `refresh_baseline(..., allow_widen=True)`).
+
+            ## Documentation impact
+            None -- this is a purely mechanical, JSON-data-only baseline
+            adjustment with no behavioral or documented-contract change.
+          branch: automation/module-size-baseline-widen
+          delete-branch: true
+      - name: Explicitly dispatch the lightweight verify workflow
+        # A GITHUB_TOKEN-authored PR does not trigger `on: push`/
+        # `on: pull_request` workflows (a deliberate GitHub Actions
+        # anti-recursion rule), so this branch would otherwise carry no CI
+        # at all. Dispatch the purpose-built, fast
+        # `module-size-baseline-widen-verify.yml` instead of `ci.yml` --
+        # `ci.yml`'s own `workflow_dispatch` trigger deliberately runs its
+        # full ~11-minute per-plugin matrix, far more than this mechanical,
+        # JSON-only diff needs. Dispatch AGAINST the generated branch itself
+        # (not `main`) -- only then does the run, and its check, attach to
+        # that branch/PR; dispatching with `--ref main` would run and
+        # report against `main` instead, leaving the generated PR with no
+        # status at all.
+        if: steps.widen-pr.outputs.pull-request-operation == 'created' || steps.widen-pr.outputs.pull-request-operation == 'updated'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          gh workflow run module-size-baseline-widen-verify.yml
+          --ref "${{ steps.widen-pr.outputs.pull-request-branch }}"
+      - name: Report outcome
+        run: |
+          if [ "${{ steps.widen-pr.outputs.pull-request-number }}" != "" ]; then
+            echo "Opened/updated PR #${{ steps.widen-pr.outputs.pull-request-number }}"
+          else
+            echo "Baseline already up to date -- no PR needed."
+          fi

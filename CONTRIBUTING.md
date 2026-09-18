@@ -568,9 +568,15 @@ binstub in `~/.local/bin/`.
   size as a temporary ceiling — the guard still fails if a baselined file
   grows even one line further, or if any non-baselined file newly crosses the
   cap. Shrinking a file is always fine and never itself a failure. Widening a
-  baselined ceiling is a **manual, reviewed edit** to the JSON, never
-  something a refresh does silently — `--refresh-baseline` only lowers or
-  removes entries, it never raises one. Test files (`tests/`, `test_*.py`,
+  baselined ceiling in the ordinary case is a **manual, reviewed edit** to
+  the JSON, never something a plain refresh does silently — bare
+  `--refresh-baseline` only lowers or removes entries, it never raises one.
+  The one exception is the opt-in `--refresh-baseline --allow-widen` flag,
+  restricted by convention to a scheduled/post-merge run against `main`
+  (`.github/workflows/module-size-baseline-widen.yml`), which additionally
+  ratchets a grown file's ceiling up to its current size and opens its own
+  small, reviewable PR — never something a PR branch's own CI run applies to
+  its own diff. Test files (`tests/`, `test_*.py`,
   `conftest.py`) are exempt — `TESTING.md` already directs splitting those by
   behavioral contract, not arbitrary line count, a different rule for a
   different failure mode.
