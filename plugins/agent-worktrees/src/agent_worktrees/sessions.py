@@ -2535,6 +2535,7 @@ def mux_new_window(
     )
     prompt_received = initial_prompt is None
     prompt_status = None
+    resolved_session_name = session_name or mux_session_name(worktree_id)
     if receipt_path:
         deadline = time.monotonic() + prompt_receipt_timeout
         while time.monotonic() < deadline:
@@ -2557,14 +2558,16 @@ def mux_new_window(
                     prompt_status = None
                 if prompt_status != "launching":
                     break
-                if not new_pane or not _mux_pane_alive(new_pane, mux_bin):
+                if not new_pane or not _mux_pane_alive(
+                    new_pane, mux_bin, resolved_session_name,
+                ):
                     prompt_status = "failed:pane-exited"
                     break
                 time.sleep(0.05)
             prompt_received = bool(
                 prompt_status == "launching"
                 and new_pane
-                and _mux_pane_alive(new_pane, mux_bin)
+                and _mux_pane_alive(new_pane, mux_bin, resolved_session_name)
             )
             if prompt_status == "launching" and not prompt_received:
                 prompt_status = "failed:pane-exited"
@@ -2573,8 +2576,12 @@ def mux_new_window(
             # Snapshot at the failure boundary, not immediately after new-window:
             # the wrapper starts Copilot after writing its provisional receipt,
             # so only the late tree is guaranteed to include the real child.
-            process_tree = _mux_pane_process_tree(new_pane, mux=mux)
-            cleanup = _retire_failed_successor(new_pane, process_tree, mux=mux)
+            process_tree = _mux_pane_process_tree(
+                new_pane, mux=mux, session_name=resolved_session_name,
+            )
+            cleanup = _retire_failed_successor(
+                new_pane, process_tree, mux=mux, mux_session=resolved_session_name,
+            )
             return {
                 "ok": False,
                 "new_pane": new_pane,

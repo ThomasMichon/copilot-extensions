@@ -372,6 +372,13 @@ Verbatim from the operator:
   legacy whole-session hard kill only when the pane primitive cannot
   positively finish the stop, including the intentional `last-window-skip`
   guard mismatch on this caller).
+- [x] **Post-landing live-validation fix.** A real Windows/psmux test-drive
+  found that bare pane ids like `%1` are session-local there, not
+  server-global, so a `-t %N` could silently hit the wrong live session.
+  Issue #2886 tracks the finding; PR #2890 tightens the pane lifecycle
+  primitives and their callers to build session-qualified
+  `session:window.pane` targets when the owning session is known and to fail
+  closed on ambiguous bare-id fallback instead of guessing.
 
 ## Validation Plan
 
