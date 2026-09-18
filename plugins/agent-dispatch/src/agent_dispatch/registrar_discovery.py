@@ -291,8 +291,14 @@ def read_declaration_file_set(
     path: str | Path,
     *,
     allow_plugin_companion: bool = False,
+    repo_root: str | Path | None = None,
 ) -> tuple[ProfileDeclaration, ...]:
-    """Read one document and expand it into one or more runtime declarations."""
+    """Read one document and expand it into one or more runtime declarations.
+
+    ``repo_root``, when known, is the repository this declaration file
+    belongs to -- threaded through a repository-issue-loop's expansion so its
+    named ``worker_identity`` resolves relative to that repo.
+    """
     p = Path(path).expanduser()
     if p.suffix not in _DECL_SUFFIXES:
         raise RegistrarError(
@@ -315,7 +321,7 @@ def read_declaration_file_set(
     elif data.get("kind") == "repository-issue-loop":
         from .repository_issue_loops import expand_repository_issue_loop
 
-        declarations = expand_repository_issue_loop(data)
+        declarations = expand_repository_issue_loop(data, repo_root=repo_root)
     else:
         declarations = (
             load_declaration(
@@ -329,11 +335,14 @@ def read_declaration_file_set(
 
 
 def read_declaration_file(
-    path: str | Path, *, allow_plugin_companion: bool = False
+    path: str | Path,
+    *,
+    allow_plugin_companion: bool = False,
+    repo_root: str | Path | None = None,
 ) -> ProfileDeclaration:
     """Read a document that represents exactly one runtime declaration."""
     declarations = read_declaration_file_set(
-        path, allow_plugin_companion=allow_plugin_companion
+        path, allow_plugin_companion=allow_plugin_companion, repo_root=repo_root
     )
     if len(declarations) != 1:
         raise RegistrarError(
@@ -389,17 +398,24 @@ def _iter_declaration_files(location: Path) -> list[Path]:
     return accepted
 
 
-def read_location(location: str | Path, *, owner: str | None = None) -> list[ProfileDeclaration]:
+def read_location(
+    location: str | Path,
+    *,
+    owner: str | None = None,
+    repo_root: str | Path | None = None,
+) -> list[ProfileDeclaration]:
     """Read every declaration document directly under ``location``.
 
     Each declaration is stamped with ``owner`` provenance (when it does not carry its
     own). Missing/empty directories yield an empty list -- a pointer to a not-yet-synced
-    repo is simply quiet, not an error.
+    repo is simply quiet, not an error. ``repo_root``, when known, is the repository
+    these declarations belong to -- threaded through so a repository-issue-loop's
+    named ``worker_identity`` resolves a repo-local override relative to that repo.
     """
     loc = Path(location).expanduser()
     out: list[ProfileDeclaration] = []
     for f in _iter_declaration_files(loc):
-        for decl in read_declaration_file_set(f):
+        for decl in read_declaration_file_set(f, repo_root=repo_root):
             out.append(decl.with_owner(owner) if owner else decl)
     return out
 
@@ -416,7 +432,7 @@ def read_repo_location_layers(
     merged: dict[str, ProfileDeclaration] = {}
     for location in repo_config.layered_repo_surface_dirs(repo_root, "registrar"):
         layer: dict[str, ProfileDeclaration] = {}
-        for declaration in read_location(location, owner=owner):
+        for declaration in read_location(location, owner=owner, repo_root=repo_root):
             if declaration.name in layer:
                 raise RegistrarError(
                     f"duplicate profile name {declaration.name!r}: declared more than once "

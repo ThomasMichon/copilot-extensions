@@ -14,6 +14,7 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Protocol
 
 from .issue_loop_markers import _marker, _parse_marker
@@ -154,8 +155,16 @@ def _strings(data: Mapping[str, Any], key: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(value))
 
 
-def validate_config(data: Mapping[str, Any]) -> dict[str, Any]:
-    """Validate and normalize one complete adopter-owned declaration."""
+def validate_config(data: Mapping[str, Any], *, cwd: str | Path | None = None) -> dict[str, Any]:
+    """Validate and normalize one complete adopter-owned declaration.
+
+    ``cwd`` is the repository root the declaration was read from (when known)
+    -- threaded through to a named ``worker_identity``'s resolution so a
+    repo-local identity override (``.copilot-extensions/agent-dispatch/
+    identities/<name>.identity.md``) resolves relative to *that* repo rather
+    than the calling process's own working directory, which is not
+    necessarily inside the declaring repo (e.g. a supervisor daemon tick).
+    """
     if not isinstance(data, Mapping):
         raise RegistrarError("repository-issue-loop: expected a mapping")
     extra = sorted(set(data) - _KNOWN_KEYS)
@@ -330,7 +339,7 @@ def validate_config(data: Mapping[str, Any]) -> dict[str, Any]:
         )
     identity_name = ""
     if worker_identity:
-        identity = load_worker_identity(worker_identity)
+        identity = load_worker_identity(worker_identity, cwd=Path(cwd) if cwd else None)
         guidance = identity.rules
         identity_name = identity.name
     if not isinstance(allow_self_config, bool):
@@ -404,10 +413,26 @@ def validate_config(data: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def expand_repository_issue_loop(
-    data: Mapping[str, Any],
+    data: Mapping[str, Any], *, repo_root: str | Path | None = None
 ) -> tuple[ProfileDeclaration, ...]:
-    """Expand the high-level loop into one emitter and one worker lane."""
-    config = validate_config(data)
+    """Expand the high-level loop into one emitter and one worker lane.
+
+    ``repo_root``, when known, is the repository this declaration was read
+    from. It resolves a named ``worker_identity`` at expansion time and is
+    also stamped onto the materialized emitter spec (as ``cwd``) so a later,
+    out-of-process re-validation (a supervisor daemon's tick, which does not
+    run with this repo as its own working directory) resolves the same
+    repo-local identity override rather than the daemon's own cwd.
+    """
+    config = validate_config(data, cwd=repo_root)
+    spec: dict[str, Any] = {
+        "id": f"{config['name']}-source",
+        "interval_seconds": config["tick_interval_seconds"],
+        "lease_scope": f"repository-issue-loop:{config['name']}",
+        "repository_issue_loop": dict(data),
+    }
+    if repo_root is not None:
+        spec["cwd"] = str(Path(repo_root))
     common = {
         "owner": config["owner"],
         "description": config["description"],
@@ -416,12 +441,7 @@ def expand_repository_issue_loop(
         {
             "name": f"{config['name']}-source",
             "kind": "emitter",
-            "spec": {
-                "id": f"{config['name']}-source",
-                "interval_seconds": config["tick_interval_seconds"],
-                "lease_scope": f"repository-issue-loop:{config['name']}",
-                "repository_issue_loop": dict(data),
-            },
+            "spec": spec,
             "filters": config["filters"],
             **common,
         }
@@ -1327,9 +1347,17 @@ def run_tick(
     provider: ForgeProvider | None = None,
     clock: Callable[[], float] = time.time,
     dry_run: bool = False,
+    cwd: str | Path | None = None,
 ) -> dict[str, Any]:
-    """Run one issue-source occurrence with visible reserve/create/reconcile."""
-    config = validate_config(config)
+    """Run one issue-source occurrence with visible reserve/create/reconcile.
+
+    ``cwd``, when known, is the declaring repository's root -- threaded
+    through re-validation so a named ``worker_identity`` resolves its
+    repo-local override relative to that repo rather than this call's own
+    working directory (this runs inside the supervisor daemon's process,
+    which is not the declaring repo's checkout).
+    """
+    config = validate_config(config, cwd=cwd)
     provider = provider or _forge_provider_for(config)
     now = clock()
     discovered = plan(client, config, provider=provider, now=now)

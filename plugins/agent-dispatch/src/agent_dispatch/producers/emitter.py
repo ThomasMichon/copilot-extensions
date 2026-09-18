@@ -53,7 +53,7 @@ def validate_spec(spec: dict[str, Any]) -> None:
         from ..repository_issue_loops import validate_config
 
         try:
-            validate_config(builtin)
+            validate_config(builtin, cwd=spec.get("cwd"))
         except ValueError as exc:
             raise EmitterError(str(exc)) from exc
     try:
@@ -261,6 +261,7 @@ def run_tick(
                 client,
                 spec["repository_issue_loop"],
                 clock=clock,
+                cwd=spec.get("cwd"),
             )
             return {
                 "held": True,

@@ -159,7 +159,7 @@ def test_run_tick_uses_configured_task_source():
 def test_run_tick_dispatches_builtin_repository_issue_loop(monkeypatch):
     client = FakeClient()
     config = {"kind": "repository-issue-loop"}
-    spec = _spec(command=None, repository_issue_loop=config)
+    spec = _spec(command=None, repository_issue_loop=config, cwd="/repo/root")
     observed = {}
 
     monkeypatch.setattr(emitter, "validate_spec", lambda _spec: None)
@@ -183,8 +183,34 @@ def test_run_tick_dispatches_builtin_repository_issue_loop(monkeypatch):
 
     assert observed["client"] is client
     assert observed["config"] is config
+    assert observed["kwargs"]["cwd"] == "/repo/root"
     assert result["created"] == [{"id": "task-1"}]
     assert result["duration_seconds"] == 2.0
+
+
+def test_validate_spec_threads_cwd_into_repository_issue_loop_validation(monkeypatch):
+    """Regression guard: a repository-issue-loop emitter's own ``cwd`` (the
+    declaring repo's root, stamped at expansion time) must reach
+    ``repository_issue_loops.validate_config`` at tick-validation time too --
+    this is what lets a supervisor daemon process (whose own cwd is not the
+    declaring repo) resolve that repo's repo-local worker-identity override."""
+    observed = {}
+
+    def fake_validate_config(_config, *, cwd=None):
+        observed["cwd"] = cwd
+        return {}
+
+    monkeypatch.setattr(
+        "agent_dispatch.repository_issue_loops.validate_config",
+        fake_validate_config,
+    )
+    spec = _spec(
+        command=None,
+        repository_issue_loop={"kind": "repository-issue-loop"},
+        cwd="/repo/root",
+    )
+    emitter.validate_spec(spec)
+    assert observed["cwd"] == "/repo/root"
 
 
 def test_run_tick_accepts_empty_json_task_list_as_noop():

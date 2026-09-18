@@ -1467,6 +1467,40 @@ def test_worker_identity_resolves_rules_into_worker_guidance():
     assert "supersede" in config["worker_guidance"]
 
 
+def test_worker_identity_resolves_repo_local_override_via_cwd(tmp_path):
+    """Regression guard: a declaring repo's own identity resolves when the
+    caller's own cwd is NOT that repo (e.g. a supervisor daemon tick),
+    provided the repo root is threaded through as ``cwd``."""
+    identities_dir = tmp_path / ".copilot-extensions" / "agent-dispatch" / "identities"
+    identities_dir.mkdir(parents=True)
+    (identities_dir / "custom.identity.md").write_text(
+        "---\nname: custom\ndescription: A custom identity.\n---\n\n"
+        "Follow the custom rules.\n",
+        encoding="utf-8",
+    )
+    config = validate_config(_config(worker_identity="custom"), cwd=tmp_path)
+    assert config["worker_guidance"] == "Follow the custom rules."
+
+
+def test_expand_repository_issue_loop_stamps_repo_root_as_emitter_cwd(tmp_path):
+    """Regression guard for the same issue at the declaration-expansion
+    boundary: the materialized emitter spec must carry the declaring repo's
+    root as its ``cwd`` so a later out-of-process re-validation (the
+    supervisor daemon's own tick, in producers/emitter.py) resolves the same
+    repo-local identity rather than the daemon's own working directory."""
+    identities_dir = tmp_path / ".copilot-extensions" / "agent-dispatch" / "identities"
+    identities_dir.mkdir(parents=True)
+    (identities_dir / "custom.identity.md").write_text(
+        "---\nname: custom\ndescription: A custom identity.\n---\n\n"
+        "Follow the custom rules.\n",
+        encoding="utf-8",
+    )
+    source, _pool = expand_repository_issue_loop(
+        _config(worker_identity="custom"), repo_root=tmp_path
+    )
+    assert source.spec["cwd"] == str(tmp_path)
+
+
 def test_worker_identity_and_worker_guidance_are_mutually_exclusive():
     with pytest.raises(RegistrarError, match="mutually exclusive"):
         validate_config(
