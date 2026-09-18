@@ -301,7 +301,18 @@ def _asset_hints(w):
     for kind, n in kind_counts.items():
         code = _ASSET_CODES.get(kind, kind.upper()[:4] or "RES")
         code_counts[code] = code_counts.get(code, 0) + n
-    hints = [code if n == 1 else f"{code}×{n}" for code, n in code_counts.items()]
+    # Deterministic hint order (never insertion/dict order, which tracks
+    # arbitrary ``resources`` list order and would make the tile line and any
+    # snapshot/TUI test brittle): the curated ``_ASSET_CODES`` kinds first, in
+    # their declared (most-common-first) order, then any remaining
+    # unrecognized-kind fallback codes, alphabetically.
+    ordered_codes = [
+        c for c in _ASSET_CODES.values() if c in code_counts
+    ] + sorted(c for c in code_counts if c not in _ASSET_CODES.values())
+    hints = [
+        code if code_counts[code] == 1 else f"{code}×{code_counts[code]}"
+        for code in ordered_codes
+    ]
     return {
         "hints": hints[:4],
         "overflow": max(0, len(hints) - 4),
