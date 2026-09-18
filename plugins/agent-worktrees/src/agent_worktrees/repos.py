@@ -137,7 +137,7 @@ def _current_platform() -> str:
 
 def _repos_yaml_path() -> Path:
     """Path to the repos registry file."""
-    return registry_paths.registry_path("repos.yaml", legacy_root=Path.home() / ".agent-worktrees")
+    return registry_paths.registry_path("repos.yaml")
 
 
 # ---------------------------------------------------------------------------
@@ -728,11 +728,9 @@ def _git_repos_path() -> Path:
 def _adopted_project_names() -> set[str]:
     """Names of repos adopted as agent-worktrees projects (projects.yaml).
 
-    Used by migration to classify adopted projects as ``worktree``.
+    Used by migration classification and cross-project tracking lookup.
     """
-    projects_path = registry_paths.registry_path(
-        "projects.yaml", legacy_root=Path.home() / ".agent-worktrees"
-    )
+    projects_path = registry_paths.registry_path("projects.yaml")
     if not projects_path.exists():
         return set()
     try:

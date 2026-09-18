@@ -36,6 +36,15 @@ command with:
 agent-worktrees reconcile-binstubs --transfer <project>
 ```
 
+For isolated Python registry and project-launcher operations, `AGENT_HOME`
+relocates the legacy registries, `.local/bin` launchers, and
+`.agent-worktrees/binstub-receipts` ledger together without changing `HOME` or
+`USERPROFILE` for Git/SSH credentials. A validated installation context still
+selects its own registry root; cells sharing one harness home still arbitrate
+the same launchers and ownership ledger. This does not isolate the native
+installers or Windows Terminal profile refresh performed by `register`; use
+`register-project-entry` for registry and project-launcher publication only.
+
 The plugin installs via the Copilot CLI marketplace. The runtime installs
 via init/install scripts (or first-use provisioning from the global binstub)
 and provides the `agent-worktrees` CLI and per-project binstubs.
