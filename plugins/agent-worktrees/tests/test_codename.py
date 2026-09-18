@@ -217,6 +217,33 @@ class TestLoadWordlist:
         with pytest.raises(WordlistError):
             load_wordlist(path)
 
+    def test_deeply_nested_json_raises_wordlist_error_not_recursion_error(
+        self, tmp_path: Path
+    ) -> None:
+        # A deeply nested structure can blow Python's recursion limit
+        # while parsing, before this loader's own structural validation
+        # ever runs -- must become WordlistError, not an unwrapped
+        # RecursionError, so load_wordlist_or_default's fail-soft
+        # fallback still applies.
+        depth = 200_000
+        nested = "[" * depth + "]" * depth
+        path = self._write(tmp_path, "words.json", nested)
+        with pytest.raises(WordlistError):
+            load_wordlist(path)
+
+    def test_huge_json_number_raises_wordlist_error_not_value_error(
+        self, tmp_path: Path
+    ) -> None:
+        # CPython's int/float conversion caps how many digits it will
+        # convert and raises a plain ValueError beyond that -- must also
+        # become WordlistError, not escape unwrapped.
+        huge_number = "9" * 500_000
+        path = self._write(
+            tmp_path, "words.json", f'{{"nouns": [{huge_number}]}}'
+        )
+        with pytest.raises(WordlistError):
+            load_wordlist(path)
+
     def test_non_mapping_top_level_raises(self, tmp_path: Path) -> None:
         path = self._write(tmp_path, "words.yaml", "- just\n- a\n- list\n")
         with pytest.raises(WordlistError):
@@ -352,6 +379,15 @@ class TestLoadWordlistOrDefault:
     ) -> None:
         path = tmp_path / "words.yaml"
         path.write_text("nouns: [cube]\n1: oops\n", encoding="utf-8")
+        wl = load_wordlist_or_default(str(path))
+        assert wl is DEFAULT_WORDLIST
+
+    def test_deeply_nested_json_falls_back_to_default(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "words.json"
+        depth = 200_000
+        path.write_text("[" * depth + "]" * depth, encoding="utf-8")
         wl = load_wordlist_or_default(str(path))
         assert wl is DEFAULT_WORDLIST
 

@@ -191,7 +191,20 @@ def load_wordlist(path: str | Path) -> Wordlist:
             data = json.loads(text)
         else:
             data = yaml.safe_load(text)
-    except (json.JSONDecodeError, yaml.YAMLError) as exc:
+    except (
+        json.JSONDecodeError,
+        yaml.YAMLError,
+        ValueError,
+        RecursionError,
+    ) as exc:
+        # Beyond a plain syntax error (JSONDecodeError/YAMLError), a
+        # deeply nested JSON/YAML structure can blow Python's recursion
+        # limit (RecursionError) and a very long numeric literal can
+        # raise ValueError during int/float conversion -- both while
+        # *parsing*, before this function's own structural validation
+        # ever runs. All of them must become WordlistError so
+        # load_wordlist_or_default's fail-soft contract actually holds
+        # for every malformed file, not just the common syntax-error case.
         raise WordlistError(f"cannot parse wordlist file {file_path}: {exc}") from exc
     if not isinstance(data, dict):
         raise WordlistError(f"{file_path}: top level must be a mapping")
