@@ -312,13 +312,19 @@ Verbatim from the operator:
 - [x] Add a user-level config layer beneath the existing repo-level layer.
 
 ### Phase 5 — Lineage/diagnostics closure (Goals 6, 7)
-- [ ] Coordinate with (not duplicate) `handoff-cutover-lifecycle-journal`'s
+- [x] Coordinate with (not duplicate) `handoff-cutover-lifecycle-journal`'s
   remaining open items: populate universal linkage fields, Stage 1
   predecessor framing, the `agent-worktrees handoff-trace` renderer, and
   feeding `health.find_orphaned_handoffs()`.
-- [ ] Confirm the vision's "single-successor discipline with recovery"
+  **Closed in the owning sibling effort:** see
+  `efforts/active/handoff-cutover-lifecycle-journal/README.md` Phase 3/4 and
+  the 2026-09-17 Journal entry there for the implementation record.
+- [x] Confirm the vision's "single-successor discipline with recovery"
   Behavior is realized once lifecycle-journal's Phase 3/4 land; file any
   residual gap as a narrowly-scoped follow-up rather than re-designing.
+  **Confirmed for the mux/CLI resident-monitor path:** the remaining deferred
+  item is the optional per-session `handoff-trace.jsonl` mirror, which is an
+  archival convenience gap, not a takeover/recovery-semantics gap.
 
 ### Phase 6 — Mux pane lifecycle primitives, isolated (Challenge 4)
 > Added 2026-09-17 after live production symptoms (panes spawning over each
@@ -402,9 +408,12 @@ Verbatim from the operator:
   `manual-only`/`off` -- no local harness exercises a real
   `@github/copilot-sdk` session connection, so that end-to-end piece still
   needs a real session or clean-room scenario before checking this off.)
-- [ ] Lineage: `agent-worktrees handoff-trace` (once landed) reconstructs a
+- [ ] Lineage: `agent-worktrees handoff-trace` reconstructs a
   full chain for a multi-hop handoff after every process in the chain has
   exited, on both a live worktree and one already reaped.
+  **Status:** hermetic renderer/health coverage now lives under the owning
+  lifecycle-journal effort; live multi-hop and post-reap validation remain
+  open there.
 - [ ] Clean-room scenario updates: extend `context-handoff-cutover` and
   `context-handoff-eval` to cover the force-tier and the coordinator-fallback
   path.
@@ -429,6 +438,19 @@ detail; a fuller Proposal will fill in once Phase 0's issue-filing and review
 gate land._
 
 ## Journal
+
+### 2026-09-17 — Phase 5 coordination closure
+- Closed this effort's Phase 5 by updating the owning
+  `handoff-cutover-lifecycle-journal` effort in place rather than creating a
+  second implementation narrative here.
+- Coordinated status: universal lineage fields, the
+  `agent-worktrees handoff-trace` renderer, and
+  `health.find_orphaned_handoffs()` stalled-stage reporting are now tracked as
+  landed on the sibling effort.
+- Residual gap check: the only deliberately deferred item is the optional
+  per-session `handoff-trace.jsonl` mirror, which does not reopen the vision's
+  single-successor / recovery semantics and therefore did not warrant a new
+  redesign or follow-up effort here.
 
 ### 2026-09-13 — Kickoff
 - Operator requested a from-scratch overhaul, starting with an adversarial
