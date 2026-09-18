@@ -7,7 +7,8 @@ from agent_containers.__main__ import main
 from agent_containers.native_transport import _ports
 
 
-def test_remote_preparation_applies_environment_without_consuming_program_stdin(tmp_path, monkeypatch):
+@pytest.mark.parametrize("reply_timeout", [False, True])
+def test_remote_preparation_applies_environment_without_consuming_program_stdin(tmp_path, monkeypatch, reply_timeout):
     import asyncio
     import io
     import shlex
@@ -18,6 +19,7 @@ def test_remote_preparation_applies_environment_without_consuming_program_stdin(
     command.write_text("node -", encoding="utf-8")
     program = b"process.stdout.write('prepared\\n');\r\n"
     output, errors = io.BytesIO(), io.BytesIO()
+    closed = []
 
     class Channel:
         returncode = 0
@@ -41,7 +43,7 @@ def test_remote_preparation_applies_environment_without_consuming_program_stdin(
             return Channel()
 
         async def close_stdio_channel(self, *args):
-            pass
+            closed.append("channel")
 
         async def disconnect_all(self):
             pass
@@ -63,15 +65,28 @@ def test_remote_preparation_applies_environment_without_consuming_program_stdin(
     monkeypatch.setattr(cli, "cleanup_remote_env", lambda *args: None)
     monkeypatch.setattr(native_transport, "sys", SimpleNamespace(
         stdin=SimpleNamespace(buffer=io.BytesIO(program)),
-        stdout=SimpleNamespace(buffer=output), stderr=SimpleNamespace(buffer=errors),
+        stdout=SimpleNamespace(buffer=output),
+        stderr=io.TextIOWrapper(errors, encoding="utf-8", write_through=True),
     ))
+    if reply_timeout:
+        real_wait_for = asyncio.wait_for
+
+        async def expire(awaitable, timeout):
+            return await real_wait_for(awaitable, timeout=0)
+
+        monkeypatch.setattr(native_transport.asyncio, "wait_for", expire)
     args = SimpleNamespace(name="fixture", command="remote-exec", command_file=str(command), stdin=True, timeout=10)
     prepared = {
         "ssh": {"host_alias": "fixture"}, "reverse_forwards": ["54321:127.0.0.1:12345"],
         "remote_env": "/prepared env", "user": "fixture",
     }
-    assert asyncio.run(native_transport._run(args, prepared, None)) == 0
-    assert output.getvalue() == b"prepared\n" and not errors.getvalue()
+    assert asyncio.run(native_transport._run(args, prepared, None)) == (124 if reply_timeout else 0)
+    if reply_timeout:
+        assert not output.getvalue()
+        assert b"execution outcome is uncertain" in errors.getvalue()
+    else:
+        assert output.getvalue() == b"prepared\n" and not errors.getvalue()
+    assert closed == ["channel"]
     assert args.native_cleanup_complete is True
 
 

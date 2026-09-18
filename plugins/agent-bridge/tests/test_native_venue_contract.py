@@ -124,3 +124,34 @@ async def test_invalid_wait_is_rejected_before_delivery(wait):
     with pytest.raises(NativeError):
         await transport.request("message", {"wait": True, "waitTimeout": wait})
     assert not transport.pending
+
+
+@pytest.mark.asyncio
+async def test_native_provider_reply_timeout_retains_delivery_uncertainty():
+    import asyncio
+    from types import SimpleNamespace
+
+    frames = []
+
+    class Pipe:
+        def write(self, raw):
+            frames.append(json.loads(raw))
+
+        async def drain(self):
+            pass
+
+    transport = ProviderTransport([], {"id": "execution", "generation": "generation"}, lambda: None)
+    transport.process = SimpleNamespace(stdin=Pipe())
+    real_wait_for = asyncio.wait_for
+
+    async def expire(future, timeout):
+        return await real_wait_for(future, timeout=0)
+
+    with patch("agent_bridge.native_manager.asyncio.wait_for", expire):
+        with pytest.raises(NativeError) as failure:
+            await transport.request("message", {"messageId": "same-message", "wait": True, "waitTimeout": 120})
+    assert failure.value.code == "reply_transport_timeout" and failure.value.status == 504
+    assert isinstance(failure.value.__cause__, asyncio.TimeoutError)
+    assert "delivery remains uncertain" in failure.value.detail
+    assert frames[0]["params"]["messageId"] == "same-message"
+    assert not transport.pending

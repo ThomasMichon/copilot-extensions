@@ -191,7 +191,7 @@ class ProviderTransport:
                 self.process.stdin.write((json.dumps(frame) + "\n").encode())
                 await self.process.stdin.drain()
             return await asyncio.wait_for(future, timeout)
-        except TimeoutError as exc:
+        except (TimeoutError, asyncio.TimeoutError) as exc:
             raise NativeError(
                 "reply_transport_timeout", "Provider reply deadline expired; delivery remains uncertain. "
                 "Inspect the result or reuse the same messageId.", 504,

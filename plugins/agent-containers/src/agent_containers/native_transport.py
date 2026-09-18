@@ -107,7 +107,7 @@ async def _run(args, prepared, identity):
                 sys.stdout.buffer.write(out)
                 sys.stderr.buffer.write(err)
                 return channel.returncode
-            except TimeoutError:
+            except (TimeoutError, asyncio.TimeoutError):
                 print("Remote command deadline expired; execution outcome is uncertain.", file=sys.stderr)
                 return 124
             finally:

@@ -5,6 +5,7 @@ import asyncio
 import base64
 import json
 import os
+import runpy
 import subprocess
 import struct
 import sys
@@ -191,7 +192,11 @@ def test_representative_error_fixture_matches_route() -> None:
     assert {"detail": raised.value.detail} == fixture["response"]["json"]
 
 
-def _historical_protocol(commit: str):
+def _historical_protocol(commit: str, captured_from: dict):
+    checker = runpy.run_path(str(REPO / "tools" / "check-agent-bridge-contracts.py"))
+    assert checker["_git_blob"](commit, SESSION_HOST_PROTOCOL_PATH) == captured_from["source_git_blob"]
+    assert checker["_git_file_sha256"](commit, SESSION_HOST_PROTOCOL_PATH) == captured_from["source_sha256"]
+    assert checker["_plugin_version_at"](commit) == captured_from["plugin_version"]
     environment = {
         key: value
         for key, value in os.environ.items()
@@ -277,7 +282,8 @@ def _message_frames(protocol) -> dict[str, dict[str, str]]:
         ("fixtures/session-host/current/messages.json", None),
         (
             "fixtures/session-host/prior-runtime-dev492/messages.json",
-            "e746dc19ca456e7e9e7f52107dd26a1348294df5",
+            # Published ancestor with the exact captured blob, unlike the pre-integration capture commit.
+            "c11418da112cb73ed459c0d469c56d4180c1a791",
         ),
         (
             "fixtures/session-host/prior-runtime-dev150/messages.json",
@@ -291,7 +297,7 @@ def test_session_host_fixture_matches_generation_one(
 ) -> None:
     fixture = _fixture(relative)
     protocol = (
-        _historical_protocol(historical_commit)
+        _historical_protocol(historical_commit, fixture["captured_from"])
         if historical_commit is not None
         else host_protocol
     )
