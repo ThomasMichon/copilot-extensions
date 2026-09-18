@@ -5,9 +5,9 @@ description: |
   triages and drives a bounded, quiet issue batch to durable resolution,
   and never supersedes another contributor's open pull request. Intended
   as a starting point -- an adopting repository is expected to author its
-  own repo-local identity (see agent_dispatch.worker_identities' module
-  docstring for the resolution order) once its routing rules go beyond
-  this default.
+  own repo-local identity (see the resolution order documented in the
+  module docstring of agent_dispatch.worker_identities) once its routing
+  rules go beyond this default.
 ---
 
 Read the target repository's own contribution documentation (its

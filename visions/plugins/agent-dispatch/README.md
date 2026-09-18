@@ -339,14 +339,14 @@ not a shared runtime.
 
 ### loop-recipes
 The layer ships the **shapes** of long-running agentic work — **reviewer**,
-**conflict-resolution**, **goal-driven** — as reusable **emitter/evaluator
-templates** (see *The recipe*). A domain **instantiates** one by registering a
-concrete emitter/evaluator pair and supplying the specifics (which repo, which
-review technology, which issue backend, which machine and account); the template
-fixes the suspend/resume rhythm and the resolution target for its class of work.
-Extension is expected where a domain needs more, but the default is **reuse**: the
-same template is the engine behind a standing automated service and an on-demand
-instance alike.
+**conflict-resolution**, **goal-driven**, and **repository-issue-loop** — as
+reusable **emitter/evaluator templates** (see *The recipe*). A domain
+**instantiates** one by registering a concrete emitter/evaluator pair and
+supplying the specifics (which repo, which review technology, which issue
+backend, which machine and account); the template fixes the suspend/resume
+rhythm and the resolution target for its class of work. Extension is expected
+where a domain needs more, but the default is **reuse**: the same template is
+the engine behind a standing automated service and an on-demand instance alike.
 
 ### concise-event-then-charter-pull
 The seed handed to a freshly embodied worker is a **short, event-classified
