@@ -40,6 +40,7 @@
 
 import { readFileSync } from "node:fs";
 import { parseRecoveryLocator } from "./cutover-seed.mjs";
+import { loadContextHandoffConfig } from "./config.mjs";
 import {
   checkHeadAlignment,
   storeHandoff, buildSeedForStored,
@@ -49,6 +50,7 @@ import {
   retryStoredHandoffCutover,
   triggerHandoff,
 } from "./handoff-core.mjs";
+import { manualHandoffEnabled } from "./mode.mjs";
 
 function parseArgs(argv) {
   const out = { _: [] };
@@ -114,6 +116,19 @@ function requireSid(command, args) {
   process.exit(2);
 }
 
+function requireManualHandoffsEnabled(command, cwd) {
+  const config = loadContextHandoffConfig(cwd);
+  if (manualHandoffEnabled(config.mode)) {
+    return;
+  }
+  process.stderr.write(
+    `handoff-cli ${command}: context handoff is disabled for this repository ` +
+    "(configured `mode: off` in .context-handoff/config.yaml or " +
+    "~/.context-handoff/config.yaml)\n",
+  );
+  process.exit(1);
+}
+
 function cmdSave(args) {
   const promptText = readPrompt(args);
   if (!promptText) {
@@ -122,6 +137,7 @@ function cmdSave(args) {
   }
   const sid = requireSid("save", args);
   const cwd = args.cwd || process.cwd();
+  requireManualHandoffsEnabled("save", cwd);
   const stored = storeHandoff({
     promptText,
     sid,
@@ -160,6 +176,7 @@ function cmdSave(args) {
 async function cmdTrigger(args) {
   const sid = requireSid("trigger", args);
   const cwd = args.cwd || process.cwd();
+  requireManualHandoffsEnabled("trigger", cwd);
   const promptText = readPrompt(args);
   if (!promptText && !args["handoff-token"]) {
     process.stderr.write(
@@ -204,6 +221,7 @@ async function cmdTrigger(args) {
 function cmdConsume(args) {
   const cwd = args.cwd || process.cwd();
   const sid = requireSid("consume", args);
+  requireManualHandoffsEnabled("consume", cwd);
   let taskId = args["task-id"];
   let handoffId = args["handoff-id"];
   let deferComplete = Boolean(args["defer-complete"]);
@@ -294,6 +312,7 @@ function cmdCheckHeads(args) {
 function cmdRetryCutover(args) {
   const cwd = args.cwd || process.cwd();
   const sid = requireSid("retry-cutover", args);
+  requireManualHandoffsEnabled("retry-cutover", cwd);
   const result = retryStoredHandoffCutover(cwd, sid);
   if (!result.ok) {
     process.stderr.write(
