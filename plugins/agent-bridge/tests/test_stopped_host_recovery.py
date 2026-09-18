@@ -878,11 +878,19 @@ async def test_stop_serializes_with_already_admitted_prompt(
 
 
 @pytest.mark.parametrize("outcome", ["healthy", "transport_lost", "child_exited", "shutdown"])
+@pytest.mark.parametrize("restart_status", [None, "starting"])
 async def test_startup_resume_nudge_respects_lock_order_and_transport_loss(
-    context, monkeypatch, mock_acp_client, outcome,
+    context, monkeypatch, mock_acp_client, outcome, restart_status,
 ):
     ctx = context
-    ctx.manager._host_index.set_resume_flag(ctx.session.session_id, True)
+    if restart_status is None:
+        ctx.manager._host_index.set_resume_flag(ctx.session.session_id, True)
+    else:
+        ctx.session.status = SessionStatus.STOPPED
+        ctx.session.restart_status = restart_status
+        ctx.db.update_session_status(
+            ctx.session.session_id, "stopped", time.time(), restart_status=restart_status,
+        )
     monkeypatch.setattr(
         ctx.manager, "_reattach_one", SessionManager._reattach_one.__get__(ctx.manager),
     )
@@ -932,6 +940,25 @@ async def test_startup_resume_nudge_respects_lock_order_and_transport_loss(
         mock_acp_client.send_prompt.assert_awaited_once_with("Resume")
     assert not ctx.session._turn_start_lock.locked()
     assert not ctx.session._lifecycle_lock.locked()
+
+
+async def test_starting_nudge_persistence_failure_retains_restart_intent(context, monkeypatch):
+    ctx = context
+    sid = ctx.session.session_id
+    ctx.session.status = SessionStatus.STOPPED
+    ctx.session.restart_status = "starting"
+    ctx.db.update_session_status(sid, "stopped", time.time(), restart_status="starting")
+    monkeypatch.setattr(ctx.manager, "_recover_remote_host_records", AsyncMock(return_value=0))
+    monkeypatch.setattr(ctx.manager, "_reattach_one", SessionManager._reattach_one.__get__(ctx.manager))
+    forward = AsyncMock(side_effect=AssertionError("must not attach before nudge intent is durable"))
+    monkeypatch.setattr(ctx.manager, "_ensure_forward", forward)
+    monkeypatch.setattr(ctx.manager._host_index, "_flush", Mock(side_effect=OSError("nudge arm failed")))
+    with pytest.raises(OSError, match="nudge arm failed"):
+        await ctx.manager.reattach_session_hosts()
+    forward.assert_not_awaited()
+    assert ctx.session.restart_status == "starting"
+    assert ctx.db.get_session(sid)["restart_status"] == "starting"
+    assert not ctx.manager._host_index.get(sid).resume_on_reattach
 
 
 @pytest.mark.parametrize("failure", ["draining", "before_turn", "after_turn", "clear"])

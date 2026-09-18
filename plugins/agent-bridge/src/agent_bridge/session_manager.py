@@ -3224,12 +3224,22 @@ class SessionManager:
         success.
 
         ``send_resume`` nudges a graceful-cancelled turn back to work with a
-        single "Resume". ``prune_on_fail`` drops the index record on failure
-        (startup path); the in-session driver leaves it for a later retry.
+        single "Resume". ``prune_on_fail`` permits ordered cleanup after a failed
+        attach, but never prunes a live local host or failed cleanup ownership.
         """
         from .session_host.acp_adapter import open_acp_streams
         from .session_host.client import SessionHostClient
         from .session_host.endpoints import CredentialRelayReadinessError
+
+        if send_resume and session.restart_status == SessionStatus.STARTING.value:
+            current = self._host_index.get(rec.session_id) if self._host_index is not None else None
+            if current is None:
+                raise RemoteHostRecoveryPendingError(
+                    f"Starting-session recovery has no durable host authority for {rec.session_id}"
+                )
+            if not current.resume_on_reattach:
+                self._host_index.set_resume_flag(rec.session_id, True)
+            rec = copy.deepcopy(current)
 
         def _on_acp_event(event_type: str, data: dict[str, Any]) -> None:
             if session.event_log:
