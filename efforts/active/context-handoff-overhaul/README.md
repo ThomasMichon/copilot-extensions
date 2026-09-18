@@ -424,7 +424,7 @@ Verbatim from the operator:
 - [ ] Clean-room scenario updates: extend `context-handoff-cutover` and
   `context-handoff-eval` to cover the force-tier and the coordinator-fallback
   path.
-- [ ] Mux pane lifecycle primitives: `pane_create` produces a confirmed,
+- [x] Mux pane lifecycle primitives: `pane_create` produces a confirmed,
   foregrounded pane against a live mux server via the new isolated harness
   (not just hermetic mocks); `pane_terminate` correctly distinguishes a
   genuine Copilot shutdown signature from a hung pane and falls back to a
@@ -435,8 +435,33 @@ Verbatim from the operator:
   spawn/retire + `restart_worktree_copilot`); the full `agent-worktrees`
   suite has one known pre-existing, unrelated failure block
   (`test_doctor.py`, confirmed reproducing on clean `origin/main`) but no
-  regression from this rewire. This checklist item stays open until the separate
-  isolated live-mux harness proof above is recorded.
+  regression from this rewire.
+  **Live-mux validation completed 2026-09-18** on tmichon-book2
+  (Windows/psmux) using disposable `--system` worktrees and the isolated
+  CLI harness (never the attached session, per the redesign's own runbook):
+  found and fixed two real safety/reliability bugs surfaced only by live
+  testing --
+  [#2886](https://github.com/ThomasMichon/copilot-extensions/issues/2886)
+  (psmux bare pane ids collide across sessions; a bare `%N` target could
+  silently resolve to an unrelated live session -- fixed in
+  [#2890](https://github.com/ThomasMichon/copilot-extensions/pull/2890) by
+  session-qualifying every mux verb and failing closed on genuine
+  ambiguity) and
+  [#2892](https://github.com/ThomasMichon/copilot-extensions/issues/2892)
+  (the session-scoped lookup added by #2890 only saw a session's
+  currently-active window, missing a predecessor pane in a non-active
+  window -- the actual real handoff-cutover shape -- fixed in
+  [#2894](https://github.com/ThomasMichon/copilot-extensions/pull/2894)).
+  After both fixes, `pane_create` + `pane_terminate` were verified
+  end-to-end against a real two-window disposable session (predecessor pane
+  in window 0, successor pane in window 1, mirroring live cutover): the
+  predecessor terminated cleanly (`gone: true`), the successor and the
+  operator's own attached session were confirmed untouched. One additional,
+  lower-severity finding
+  ([#2896](https://github.com/ThomasMichon/copilot-extensions/issues/2896):
+  `mux_focus_pane`'s bare-pane-id targeting makes `pane_create`'s foreground
+  step unreliable, though it fails closed rather than focusing the wrong
+  pane) remains open as a follow-up, not blocking this item.
 
 ## Proposal
 
@@ -909,3 +934,59 @@ gate land._
   as out of scope for this PR. The separate isolated live-mux harness
   proof for `pane_create`/`pane_terminate` remains open exactly as noted in
   the Validation Plan above.
+
+### 2026-09-18 — Live-mux validation of Phase 6's isolated harness (2 bugs found + fixed)
+
+- Ran the isolated `pane-create`/`pane-terminate` CLI harness against real
+  disposable `--system` worktrees/mux sessions on tmichon-book2
+  (Windows/psmux), per the effort's own manual-validation runbook (never
+  the attached session) — the one Validation Plan item this Phase's landed
+  work hadn't yet proven.
+- **Bug 1 ([#2886](https://github.com/ThomasMichon/copilot-extensions/issues/2886)):**
+  psmux pane ids (`%N`) are **not globally unique across sessions** (every
+  session's first pane is `%1`, unlike real tmux's server-global counter).
+  A diagnostic `capture-pane -t "%1"` run from my own attached session
+  silently returned *my own live pane's content* instead of the disposable
+  test target — a genuine safety hazard, since `pane_terminate` targeted
+  bare pane ids the same way and could have sent Ctrl-C/kill-pane to an
+  unrelated, live, attended session. Caught before anything destructive ran
+  (per the destructive-action/error-response discipline), filed, then fixed
+  in **PR #2890**: every mux verb now resolves a session-qualified
+  `session:window.pane` target when the session is known, and fails closed
+  with a new `method: "ambiguous-pane-id"` (listing `candidate_sessions`)
+  rather than guessing when it isn't. Also caught and fixed, before
+  merging, an unrelated accidental regression the fix PR's branch had
+  picked up (a revert of #2834's Picker `--project` threading fix) —
+  restored to `origin/main`'s content before merge.
+- **Bug 2 ([#2892](https://github.com/ThomasMichon/copilot-extensions/issues/2892)),
+  found immediately while re-verifying Bug 1's fix:** the new
+  session-scoped lookup used `list-panes -t <session>`, which per psmux's
+  own semantics only lists that session's *currently-active* window's
+  panes — silently missing a predecessor pane sitting in an older,
+  non-active window. That's the actual real handoff-cutover shape
+  (predecessor in window 0, successor freshly spawned into window 1), so
+  the very fix meant to make `pane_terminate` safe for that case couldn't
+  reliably find its target. Fixed in **PR #2894**: always list with `-a`
+  (every session/window) and filter by session name in code.
+- **End-to-end re-verification after both fixes**, against a real
+  two-window disposable session (predecessor pane in window 0, successor
+  in window 1, mirroring live cutover exactly): `pane_terminate` correctly
+  resolved the qualified target, ran the full Ctrl-C ladder, escalated to
+  hard-kill (expected — a plain shell doesn't respond to Ctrl-C the way
+  Copilot does), and confirmed `gone: true`. Verified afterward that only
+  the predecessor pane was removed — the successor pane and the operator's
+  own attached session were both untouched.
+- **One more, lower-severity finding** filed as
+  [#2896](https://github.com/ThomasMichon/copilot-extensions/issues/2896)
+  and left open (not blocking): `mux_focus_pane` (the function `redesign.md`
+  §6 called "already correct... reference pattern only," explicitly left
+  out of scope for the #2886/#2892 fixes) has the *same* bare-pane-id
+  targeting gap, making `pane_create`'s "foreground the pane as part of
+  the same call" step unreliable whenever a colliding id exists — though it
+  fails closed (returns `foregrounded: false`) rather than focusing the
+  wrong pane, so it's a reliability gap, not a safety hazard.
+- This closes the Phase 6 Validation Plan's mux-pane-lifecycle item: the
+  primitives are now proven against a real mux server, not just hermetic
+  mocks, and the two bugs the live test surfaced were exactly the kind of
+  thing this validation step exists to catch.
+
