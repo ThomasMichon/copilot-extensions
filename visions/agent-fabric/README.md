@@ -5,7 +5,7 @@
   spanning worktrees, machines, CodeSpaces, and containers.
 - **Scope:** branch (links per-plugin child visions as they are authored)
 - **Status:** Active
-- **Last revised:** 2026-09-04
+- **Last revised:** 2026-09-18
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/harness-runbook.md`](../../docs/harness-runbook.md) · each plugin's
   `docs/architecture.md`
@@ -245,14 +245,21 @@ without needing to reach the machine directly to check.
 What every agent is doing is **observable** — from a coarse Active / Recent /
 Completed floor with no service, up to granular live status surfaced into the
 worktree picker when the coordination layer is present. Legibility spans two
-complementary registers. A **durable disposition** the agent *asserts* —
-*resolved* vs. *has actionable follow-ups* — so a glance distinguishes a
-prune-able worktree from one still owed attention (a finalized worktree with an
-un-pushed change, an undeployed merge, or leftover temporary state is *not*
-done). And a **live activity pulse** *passively derived* from the agent's own
-intent signals, needing no cooperation, giving a rapid — if coarse — sense of
-current motion. The disposition is high-signal and slow; the pulse is low-signal
-and fast; neither is faked from the other.
+complementary registers. A **durable disposition** the agent *asserts* — a
+coarse *resolved* vs. *has actionable follow-ups* read for a glance — is the
+**reduction of a bounded collection of individually-addressable obligations**,
+each its own concise, actionable item with its own state and, where one
+applies, a reference to the claim, issue, pull request, effort, deployment, or
+external resource it concerns; a glance still reads the reduction, but a
+consumer that wants to settle one obligation without losing track of the
+others can address it directly. This distinguishes a prune-able worktree from
+one still owed attention (a finalized worktree with an un-pushed change, an
+undeployed merge, or leftover temporary state is *not* done — the itemized
+obligations name *which* of those it is). And a **live activity pulse**
+*passively derived* from the agent's own intent signals, needing no
+cooperation, giving a rapid — if coarse — sense of current motion. The
+disposition is high-signal and slow; the pulse is low-signal and fast; neither
+is faked from the other.
 
 ### legible-contribution-contract
 Landing work is **governed by rules that differ per repo** — whether a pull
@@ -525,15 +532,26 @@ behalf. Delegated and handed-off work leaves a durable, queryable result, not
 only a transcript.
 
 ### disposition-is-asserted-pulse-is-derived
-A worktree's **disposition** — *resolved* vs. *has actionable follow-ups* — is a
-**deliberate assertion** by the agent that worked it, never inferred from git or
-process state (which cannot tell *done* from *finalized-with-leftovers*). Its
-**live activity pulse**, by contrast, is **passively derived** from the agent's
-own activity with no cooperation required. The two never masquerade as each
+A worktree's **disposition** is a **deliberate assertion** by the agent that
+worked it, never inferred from git or process state (which cannot tell *done*
+from *finalized-with-leftovers*). The assertion is the **reduction of a
+bounded collection of individually-addressable obligations** — each with a
+stable identity, concise actionable text, an open/settled/transferred state,
+timestamps, provenance (which session asserted or settled it), and an
+optional typed reference to the authoritative claim, issue, pull request,
+effort, deployment, temporary resource, or external worktree it concerns —
+down to the coarse *resolved* vs. *has actionable follow-ups* signal a glance
+needs. The itemized obligations remain individually addressable: one can be
+settled, or transferred to a different tracked owner, without disturbing the
+others or collapsing the whole worktree's disposition prematurely. Its **live
+activity pulse**, by contrast, is **passively derived** from the agent's own
+activity with no cooperation required. The two never masquerade as each
 other: an **absent** assertion defaults to the safe, current behavior, and the
 derived pulse — being coarse and sometimes vague — **never** sets the durable
-disposition. Truly finishing a worktree and asserting it *resolved* are the same
-act; leaving a stopping point with work still owed is asserting *follow-ups*.
+disposition, nor does it settle or transfer an obligation. Truly finishing a
+worktree is settling or transferring every obligation and asserting the
+reduction *resolved*; leaving a stopping point with an obligation still open
+is asserting *follow-ups*.
 
 ### single-current-session-per-worktree
 A worktree has, at any moment, **one current session** — its head. An agent is a
@@ -673,6 +691,19 @@ opt-in, pressure changes nothing and the session behaves exactly as before.
   throwaway. Placed on the ground layer by the *derive-don't-duplicate /
   single-owning-layer* rule (the delegation layer coordinates over, not copies,
   it).
+- **2026-09-18** — Extended §Features/`legible-live-state` and
+  §Behaviors/`disposition-is-asserted-pulse-is-derived`: the asserted
+  **disposition** is now the *reduction* of a bounded collection of
+  individually-addressable **obligations** (stable identity, concise text,
+  open/settled/transferred state, timestamps, provenance, optional typed
+  reference), rather than a single opaque boolean. Mined from operator
+  friction: a worktree can carry several independent unsettled concerns (an
+  un-pushed change, an open PR, a pending deployment, a held external claim),
+  and a binary assertion could not identify which, settle one while retaining
+  another, or connect the disposition to the claim/issue/PR it concerns. The
+  asserted-vs-derived separation and the ground layer's ownership are
+  unchanged — only the *shape* of the asserted side deepens from a flag to a
+  bounded collection whose reduction still answers the coarse question.
 - **2026-07-21** — Added §Features/`address-any-project` and
   §Behaviors/`project-addressed-not-cwd-bound`: a project is a first-class,
   **CWD-independent** address across *every* layer, and the per-project `<repo>`
