@@ -1928,24 +1928,17 @@ def _carve_paired_knowledge(
     knowledge_branch = f"worktree/{knowledge_id}"
     knowledge_wt_root = cfg.derive_worktree_root(knowledge_anchor)
     knowledge_wt_path = str(Path(knowledge_wt_root) / knowledge_id)
-
-    Path(knowledge_wt_root).mkdir(parents=True, exist_ok=True)
-    print(f"Creating paired knowledge worktree on branch {knowledge_branch}...", file=sys.stderr,)
-    git_ops.create_worktree(
-        knowledge_anchor,
-        knowledge_wt_path,
-        knowledge_branch,
-        prepared.start_point,
-    )
-
     knowledge_ref = tracking.format_claim_ref(config.machine, knowledge_name, knowledge_id)
     knowledge_tracking_path = cfg.project_dir(knowledge_name) / "worktrees"
-    # pr-attribution-codenames Phase 2 (#2838): the paired knowledge worktree
-    # is a real, independently-lookup-able worktree record in its OWN
-    # project's tracking directory -- it needs its own codename (scoped to
-    # that project's wordlist), not a share of the harness's. Assignment +
-    # record-write share one allocation lock (see codename_tracking.py) so a
-    # concurrent carve can never pick the same candidate.
+
+    # pr-attribution-codenames Phase 2 (#2838): assign the paired knowledge
+    # worktree's own codename (scoped to its own project's tracking
+    # directory and wordlist, not a share of the harness's) BEFORE the git
+    # worktree/branch is created -- an allocation failure (an exhausted
+    # finite configured wordlist) must never leave an orphaned checkout with
+    # no tracking record. Assignment + the eventual record-write share one
+    # allocation lock (see codename_tracking.py) so a concurrent carve can
+    # never pick the same candidate.
     try:
         knowledge_config = cfg.load_config(project=knowledge_name)
         knowledge_wordlist = codename_tracking.wordlist_for_repo(knowledge_config)
@@ -1955,6 +1948,19 @@ def _carve_paired_knowledge(
         knowledge_codename = codename_tracking.assign_new_codename(
             knowledge_tracking_path, knowledge_wordlist
         )
+
+        Path(knowledge_wt_root).mkdir(parents=True, exist_ok=True)
+        print(
+            f"Creating paired knowledge worktree on branch {knowledge_branch}...",
+            file=sys.stderr,
+        )
+        git_ops.create_worktree(
+            knowledge_anchor,
+            knowledge_wt_path,
+            knowledge_branch,
+            prepared.start_point,
+        )
+
         tracking.create_new_record(
             worktree_id=knowledge_id,
             branch=knowledge_branch,
@@ -2254,27 +2260,30 @@ def _create_worktree_core(
             config, worktree_id, owner_ref, owner_locked=True
         ):
             raise RuntimeError(f"owner {owner_ref} cannot accept a new worktree obligation")
-        print(f"Creating worktree on branch {branch}...", file=sys.stderr)
-        git_ops.create_worktree(
-            repo.anchor,
-            worktree_path,
-            branch,
-            prepared.start_point,
-        )
 
-        # Write tracking YAML
+        # pr-attribution-codenames Phase 2 (#2838): assign one codename per
+        # worktree, from the repo's declared wordlist (or the built-in
+        # neutral one) -- BEFORE the git worktree/branch is created, so an
+        # allocation failure (an exhausted finite configured wordlist) never
+        # leaves an orphaned checkout with no tracking record. The read
+        # (existing codenames) -> pick -> record-write sequence is held
+        # under one cross-process lock so two concurrent `create` calls can
+        # never observe the same existing set and choose the same candidate.
         tracking_path = cfg.tracking_dir()
         tracking_path.mkdir(parents=True, exist_ok=True)
-        # pr-attribution-codenames Phase 2 (#2838): assign one codename per
-        # worktree at create time, from the repo's declared wordlist (or the
-        # built-in neutral one). The read (existing codenames) -> pick ->
-        # record-write sequence is held under one cross-process lock so two
-        # concurrent `create` calls can never observe the same existing set
-        # and choose the same candidate.
         with codename_tracking.allocation_lock(tracking_path):
             new_codename = codename_tracking.assign_new_codename(
                 tracking_path, codename_tracking.wordlist_for_repo(config)
             )
+            print(f"Creating worktree on branch {branch}...", file=sys.stderr)
+            git_ops.create_worktree(
+                repo.anchor,
+                worktree_path,
+                branch,
+                prepared.start_point,
+            )
+
+            # Write tracking YAML
             record = tracking.create_new_record(
                 worktree_id=worktree_id,
                 branch=branch,
@@ -2309,12 +2318,12 @@ def _create_worktree_core(
                 ),
                 # #2178: for a bridge spawn, record the caller worktree so the Picker can
                 # jump back to it.
-                    caller_worktree=caller_worktree or None,
-                    # resource-claims: the qualified backward owner link, for a worktree
-                    # spun up as another worktree's outbound resource (stamped by `run` /
-                    # an explicit --owner-ref). Absent = unclaimed.
-                    owner_ref=owner_ref or None,
-                )
+                caller_worktree=caller_worktree or None,
+                # resource-claims: the qualified backward owner link, for a worktree
+                # spun up as another worktree's outbound resource (stamped by `run` /
+                # an explicit --owner-ref). Absent = unclaimed.
+                owner_ref=owner_ref or None,
+            )
     finally:
         if owner_guard is not None:
             owner_guard.__exit__(None, None, None)
@@ -7282,6 +7291,19 @@ def _cmd_status_write(
     if not yaml_path.exists():
         output.err(f"Tracking file not found at {yaml_path}. Cannot annotate an unknown worktree.")
         return 1
+    # pr-attribution-codenames Phase 2 (#2838): an explicit status touch is
+    # exactly the "first touch" the backfill plan describes -- lazily assign
+    # a pre-Phase-2 record's missing codename. Done as its OWN independent
+    # locked step, strictly before the disposition RMW below, so the
+    # project-wide allocation lock and the per-record lock are never held
+    # nested/simultaneously in either order (a lock-ordering/deadlock hazard
+    # flagged in review: `create` acquires them allocation-lock-then-record-
+    # lock via `create_new_record`'s own `save_record`).
+    peek = tracking.load_record(yaml_path)
+    if not peek.codename:
+        codename_tracking.ensure_codename(
+            peek, cfg.tracking_dir(), codename_tracking.wordlist_for_repo(config)
+        )
     # Foreground verb (#4547): the whole load -> set_disposition -> save is a
     # critical RMW held under the blocking record lock, so a concurrent Picker
     # best-effort sweep skips rather than clobbering the disposition overlay.
@@ -7311,14 +7333,6 @@ def _cmd_status_write(
             session_id=session_id,
             save=False,
         )
-        # pr-attribution-codenames Phase 2 (#2838): an explicit status touch
-        # is exactly the "first touch" the backfill plan describes -- lazily
-        # assign a pre-Phase-2 record's missing codename in the same save.
-        if not record.codename:
-            with codename_tracking.allocation_lock(cfg.tracking_dir()):
-                record.codename = codename_tracking.assign_new_codename(
-                    cfg.tracking_dir(), codename_tracking.wordlist_for_repo(config)
-                )
         tracking.save_record(record)
         # Stage 5 (status_reported): once per session_id (held under the
         # same RecordLock as the write above so two concurrent writers can't
