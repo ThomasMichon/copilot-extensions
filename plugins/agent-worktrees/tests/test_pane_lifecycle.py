@@ -302,18 +302,17 @@ def test_pane_terminate_escalates_to_hard_kill_and_cleans_locks(monkeypatch):
 
 
 def test_pane_terminate_uses_session_qualified_targets_when_mux_session_known(monkeypatch):
-    state = {"killed": False, "targets": [], "list_targets": []}
+    state = {"killed": False, "targets": [], "list_calls": 0}
     monotonic_values = iter([0.0, 0.0, 0.1, 0.2, 0.4, 0.5, 0.8, 1.0, 1.1, 1.2])
 
     def _run(argv, **kwargs):
         command = argv[1]
         if command == "list-panes":
-            target = argv[argv.index("-t") + 1]
-            state["list_targets"].append(target)
+            assert argv[2] == "-a"
+            state["list_calls"] += 1
             if state["killed"]:
                 return _RunResult(stdout="")
-            assert target == "wt-demo"
-            return _RunResult(stdout="wt-demo\t0.0\t%5\n")
+            return _RunResult(stdout="wt-demo\t0.0\t%5\nwt-other\t0.0\t%1\n")
         if command in {"send-keys", "capture-pane", "kill-pane"}:
             state["targets"].append((command, argv[argv.index("-t") + 1]))
             if command == "kill-pane":
@@ -349,8 +348,64 @@ def test_pane_terminate_uses_session_qualified_targets_when_mux_session_known(mo
     assert [command for command, _target in state["targets"]].count("send-keys") == 3
     assert [command for command, _target in state["targets"]].count("kill-pane") == 1
     assert [command for command, _target in state["targets"]].count("capture-pane") >= 3
-    assert state["list_targets"]
-    assert all(target == "wt-demo" for target in state["list_targets"])
+    assert state["list_calls"]
+
+
+def test_pane_terminate_uses_qualified_target_for_pane_in_non_active_window(monkeypatch):
+    """Regression for issue #2892: a session-scoped ``list-panes`` query must
+    see every window in the session, not just its currently-active one --
+    otherwise a known-correct ``mux_session`` for a predecessor pane sitting
+    in an older, non-focused window falls through to the global ambiguity
+    scan and can falsely refuse as ``ambiguous-pane-id``."""
+    state = {"killed": False, "targets": []}
+    monotonic_values = iter([0.0, 0.0, 0.1, 0.2, 0.4, 0.5, 0.8, 1.0, 1.1, 1.2])
+
+    def _run(argv, **kwargs):
+        command = argv[1]
+        if command == "list-panes":
+            assert argv[2] == "-a"
+            if state["killed"]:
+                return _RunResult(stdout="")
+            # Two windows in the same session: %1 (window 0, NOT the active
+            # one) is the predecessor pane being retired; %3 (window 1) is
+            # the successor pane. A same-scoped ``-t <session>`` query would
+            # only see the active window (%3) and miss %1 entirely.
+            return _RunResult(
+                stdout="wt-cutover\t0.0\t%1\nwt-cutover\t1.0\t%3\n"
+            )
+        if command in {"send-keys", "capture-pane", "kill-pane"}:
+            state["targets"].append((command, argv[argv.index("-t") + 1]))
+            if command == "kill-pane":
+                state["killed"] = True
+        return _RunResult()
+
+    monkeypatch.setattr(sessions, "_mux_bin", lambda mux=None: "psmux")
+    monkeypatch.setattr(sessions, "_mux_last_window_guard", lambda *args, **kwargs: None)
+    monkeypatch.setattr(sessions, "_mux_pane_process_tree", lambda *args, **kwargs: {33})
+    monkeypatch.setattr(
+        pane_lifecycle,
+        "_cleanup_pane_lock_residue",
+        lambda pane_id, pane_session, process_tree: [],
+    )
+    monkeypatch.setattr(pane_lifecycle.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(pane_lifecycle.time, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr("subprocess.run", _run)
+
+    result = pane_lifecycle.pane_terminate(
+        "%1",
+        mux="psmux",
+        mux_session="wt-cutover",
+        overall_budget=0.6,
+        poll_interval=0.0,
+        ctrl_c_gap=0.0,
+        escalate_after=0.1,
+        hard_kill_settle=0.1,
+    )
+
+    assert result["method"] != "ambiguous-pane-id"
+    assert result["ok"] is True
+    assert result["method"] == "hard"
+    assert all(target == "wt-cutover:0.0" for _command, target in state["targets"])
 
 
 def test_pane_terminate_resolves_unambiguous_session_before_signaling(monkeypatch):

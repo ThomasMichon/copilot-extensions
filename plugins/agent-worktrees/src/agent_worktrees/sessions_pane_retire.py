@@ -38,20 +38,20 @@ def _list_matching_pane_targets(
 ) -> list[tuple[str, str]]:
     """Return ``(session_name, window.pane)`` matches for one pane id.
 
-    When ``session_name`` is known, scope the lookup to that exact session and
-    resolve the specific ``window.pane`` address needed to build an unambiguous
-    ``session:window.pane`` target. When it is unknown, scan across sessions so
-    callers can detect an ambiguous bare ``%N`` on psmux instead of guessing.
+    Always lists panes across every session/window (``-a``) and filters in
+    code -- ``list-panes -t <session>`` (without ``-a``) only returns that
+    session's *current/active* window's panes on psmux, not every window in
+    the session, which would silently miss a non-active window's pane (e.g.
+    a retiring predecessor pane sitting in an older window while a newer
+    successor window is focused -- the common handoff-cutover shape; see
+    issue #2892). When ``session_name`` is known, this scopes the *match*
+    to that exact session so callers can build an unambiguous
+    ``session:window.pane`` target; when it is unknown, every session is a
+    candidate so callers can detect a genuinely ambiguous bare ``%N``.
     """
     import subprocess
 
-    from . import sessions
-
-    argv = [mux_bin, "list-panes"]
-    if session_name:
-        argv += ["-t", sessions._mux_named_session_target(session_name, mux_bin)]
-    else:
-        argv.append("-a")
+    argv = [mux_bin, "list-panes", "-a"]
     argv += ["-F", "#{session_name}\t#{window_index}.#{pane_index}\t#{pane_id}"]
     try:
         result = subprocess.run(
