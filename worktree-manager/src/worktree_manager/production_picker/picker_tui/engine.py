@@ -6676,7 +6676,8 @@ class SubMenuScreen(ModalScreen[tuple]):
                 lock = ""
             t.append(f"\n session {sid}{lock}", style=C_DIM)
         def _asset_label(c):
-            r, n = c.get("ref") or "", c.get("note") or ""; return f"{r} — {n}" if r and n else r or n or "(unlabeled)"
+            ref, note = (c.get("ref") or "").strip(), (c.get("note") or "").strip()
+            return f"{ref} — {note}" if ref and note else ref or note or "(unlabeled)"
         details = list((rec.get("asset_hints") or {}).get("details") or [])
         if details:
             t.append("\n assets:\n" + "\n".join(
@@ -7823,8 +7824,7 @@ class WorktreesView:
                         pline.append(tok, style=tok_style)
                     has_content = True
                 if _assets.get("hints"):
-                    over = _assets.get("overflow") or 0
-                    pline.append(("  " if has_content else "") + " ".join(_assets["hints"]) + (f" +{over}" if over else ""), style=C_DIM)
+                    pline.append(("  " if has_content else "") + " ".join(_assets["hints"]) + (f" +{_assets['overflow']}" if _assets.get("overflow") else ""), style=C_DIM)
                     has_content = True
                 if _pulse and _intent:
                     if has_content:

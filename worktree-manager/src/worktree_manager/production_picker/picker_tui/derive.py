@@ -250,10 +250,11 @@ _ASSET_CODES = {
     "workdir": "DIR",
 }
 
-#: Held-claim dispositions (mirrors ``ResourceClaim.is_live`` /
-#: ``tracking._CLAIM_LIVE_STATES``): a claim not yet released/abandoned still
-#: rides on the worktree, so it belongs in the tile's asset summary. An empty
-#: state is the legacy default and normalizes to "active" (held).
+#: Held-claim dispositions: a claim not yet released/abandoned still rides on
+#: the worktree, so it belongs in the tile's asset summary. An empty state is
+#: the legacy default and normalizes to "active" (held). Mirrors the
+#: ``resources`` ledger's own held-vs-released disposition convention
+#: (``active``/``at-rest`` = held; ``released``/``abandoned`` = not held).
 _HELD_CLAIM_STATES = ("", "active", "at-rest")
 
 
