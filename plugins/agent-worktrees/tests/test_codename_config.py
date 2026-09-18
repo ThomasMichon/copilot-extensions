@@ -33,6 +33,16 @@ class TestParseCodename:
         cfg = parse_codename({"hook_command": "  my-hook  "})
         assert cfg.hook_command == "my-hook"
 
+    def test_non_string_hook_command_falls_back_to_empty(self) -> None:
+        # str(None) == "None" -- a truthy, non-empty "command" -- must never
+        # reach CodenameConfig.hook_command unguarded. This parser also
+        # serves the plain in-repo/machine config paths that skip
+        # config_dropins's schema validation, so this guard is load-bearing
+        # here, not just defense in depth.
+        for bad in (None, False, True, 7, 3.5, [], {}):
+            cfg = parse_codename({"hook_command": bad})
+            assert cfg.hook_command == ""
+
     def test_malformed_timeout_falls_back_to_default(self) -> None:
         cfg = parse_codename({"hook_timeout_seconds": "not-a-number"})
         assert cfg.hook_timeout_seconds == DEFAULT_HOOK_TIMEOUT_SECONDS

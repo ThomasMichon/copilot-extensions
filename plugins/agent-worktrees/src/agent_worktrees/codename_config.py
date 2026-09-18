@@ -39,6 +39,11 @@ def parse_codename(raw: Any) -> CodenameConfig:
     ``float("nan")``/``float("inf")`` parse without error but crash
     ``subprocess`` timeout handling downstream, so this is rejected here too
     (defense in depth alongside the runtime check in ``generate_via_hook``).
+    A non-string ``hook_command`` (``None``/``False``/an int/...) falls back
+    to the empty default too -- this parser also serves the plain in-repo
+    and machine config paths, which don't go through ``config_dropins``'s
+    schema validation first, so ``str(None)`` == ``"None"`` (a truthy,
+    non-empty "command") must never reach here unguarded.
     """
     if not isinstance(raw, dict):
         return CodenameConfig()
@@ -55,7 +60,10 @@ def parse_codename(raw: Any) -> CodenameConfig:
             timeout = DEFAULT_HOOK_TIMEOUT_SECONDS
     if not is_valid_hook_timeout(timeout):
         timeout = DEFAULT_HOOK_TIMEOUT_SECONDS
+    hook_command = raw.get("hook_command", "")
+    if not isinstance(hook_command, str):
+        hook_command = ""
     return CodenameConfig(
-        hook_command=str(raw.get("hook_command", "")).strip(),
+        hook_command=hook_command.strip(),
         hook_timeout_seconds=timeout,
     )
