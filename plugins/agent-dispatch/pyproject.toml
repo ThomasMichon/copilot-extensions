@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-dispatch"
-version = "0.1.2-dev115"
+version = "0.1.2-dev116"
 description = "Portable agent task-queue + per-host coordinator: a single-writer SQLite work queue so agents coordinate without push latency or an account per agent."
 readme = "README.md"
 license = "MIT"
@@ -41,11 +41,11 @@ agent-plugin-resolve = { path = "libs/plugin-resolve" }
 
 [project.optional-dependencies]
 mcp = [
-    "mcp>=2.0,<3",
+    "mcp>=2.1.1,<3",
 ]
 dev = [
     "pytest>=9.1.1",
-    "mcp>=2.0,<3",
+    "mcp>=2.1.1,<3",
     "httpx2",
 ]
 
