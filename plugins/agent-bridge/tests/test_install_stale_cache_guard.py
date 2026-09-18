@@ -41,6 +41,9 @@ _LOCAL_PATH_PACKAGES = (
     "agent-zdd",
     "agent-single-instance-lease",
     "agent-config-migrate",
+    "agent-plugin-resolve",
+    "agent-dropin-registry",
+    "agent-plugin-activation",
 )
 
 

@@ -1285,20 +1285,25 @@ do_install() {
         _fail "Cannot locate config-migrate library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer."
         exit 1
     fi
-    # --refresh-package agent-procutil: agent-procutil has no dedicated
-    # install call of its own (it is resolved transitively while installing
-    # agent-bridge below), so it never gets an explicit cache-bust anywhere
-    # else. uv's local-path build cache is keyed by source path, not source
-    # content -- a stale wheel from a prior build can silently be served
-    # instead of a fresh one. This is the confirmed root cause behind
-    # ThomasMichon/copilot-extensions#2863 (agent-dispatch's identical
-    # exposure) and directly implicated in a live LAUNCH_ACP "session host
-    # exited early" incident on the same host during the same outage window
-    # -- session_host/launcher.py imports agent_procutil at module level, so
-    # a stale build there crashes every headless-spawn session host launch.
+    # --refresh-package agent-procutil / agent-plugin-resolve /
+    # agent-dropin-registry / agent-plugin-activation: none of these has a
+    # dedicated install call of its own (all resolved transitively while
+    # installing agent-bridge below), so they never get an explicit
+    # cache-bust anywhere else. uv's local-path build cache is keyed by
+    # source path, not source content -- a stale wheel from a prior build can
+    # silently be served instead of a fresh one. This is the confirmed root
+    # cause behind ThomasMichon/copilot-extensions#2863 (agent-dispatch's
+    # identical exposure) and directly implicated in a live LAUNCH_ACP
+    # "session host exited early" incident on the same host during the same
+    # outage window -- session_host/launcher.py imports agent_procutil at
+    # module level, so a stale build there crashes every headless-spawn
+    # session host launch.
     if ! _uv_pip_install_resilient --python "$VENV_DIR/bin/python" \
             --reinstall-package agent-bridge --refresh-package agent-bridge \
             --reinstall-package agent-procutil --refresh-package agent-procutil \
+            --reinstall-package agent-plugin-resolve --refresh-package agent-plugin-resolve \
+            --reinstall-package agent-dropin-registry --refresh-package agent-dropin-registry \
+            --reinstall-package agent-plugin-activation --refresh-package agent-plugin-activation \
             "$PLUGIN_DIR" --quiet; then
         _fail "Package install failed"
         exit 1
@@ -1834,13 +1839,18 @@ _update_core() {
         _fail "Cannot locate config-migrate library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer."
         return 1
     fi
-    # --refresh-package agent-procutil: see the matching comment in the
-    # initial-install path above -- agent-procutil has no dedicated install
-    # call, is only ever resolved transitively here, and was directly
-    # implicated in a live LAUNCH_ACP "session host exited early" incident
-    # (#2863's sibling defect class) caused by exactly this gap.
+    # --refresh-package agent-procutil / agent-plugin-resolve /
+    # agent-dropin-registry / agent-plugin-activation: see the matching
+    # comment in the initial-install path above -- none has a dedicated
+    # install call, all are only ever resolved transitively here, and
+    # agent-procutil was directly implicated in a live LAUNCH_ACP "session
+    # host exited early" incident (#2863's sibling defect class) caused by
+    # exactly this gap.
     if ! _uv_pip_install_resilient --python "$VENV_DIR/bin/python" --reinstall-package agent-bridge --refresh-package agent-bridge \
             --reinstall-package agent-procutil --refresh-package agent-procutil \
+            --reinstall-package agent-plugin-resolve --refresh-package agent-plugin-resolve \
+            --reinstall-package agent-dropin-registry --refresh-package agent-dropin-registry \
+            --reinstall-package agent-plugin-activation --refresh-package agent-plugin-activation \
             "$PLUGIN_DIR" --quiet; then
         _fail "Package update failed"
         return 1
