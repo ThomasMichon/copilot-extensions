@@ -147,11 +147,12 @@ def load_wordlist(path: str | Path) -> Wordlist:
 
     Raises :class:`WordlistError` for anything that doesn't parse into
     exactly that shape: a missing file, invalid UTF-8, malformed JSON/YAML,
-    a missing or empty ``nouns``, a non-list value for any key (including
-    an explicit ``null``, distinguished from the key being absent
-    entirely), a non-string item, an item that isn't a lowercase-alnum word
-    (see :data:`MAX_WORD_LENGTH`), or a ``pairs`` entry that isn't a
-    2-item list/tuple.
+    an unrecognized top-level field (a typo like ``adjectivs`` is rejected,
+    not silently ignored), a missing or empty ``nouns``, a non-list value
+    for any key (including an explicit ``null``, distinguished from the
+    key being absent entirely), a non-string item, an item that isn't a
+    lowercase-alnum word (see :data:`MAX_WORD_LENGTH`), or a ``pairs``
+    entry that isn't a 2-item list/tuple.
     """
     file_path = Path(path)
     try:
@@ -169,6 +170,15 @@ def load_wordlist(path: str | Path) -> Wordlist:
         raise WordlistError(f"cannot parse wordlist file {file_path}: {exc}") from exc
     if not isinstance(data, dict):
         raise WordlistError(f"{file_path}: top level must be a mapping")
+    _KNOWN_KEYS = {"nouns", "adjectives", "pairs"}
+    unknown_keys = set(data) - _KNOWN_KEYS
+    if unknown_keys:
+        raise WordlistError(
+            f"{file_path}: unknown field(s) {sorted(unknown_keys)!r} -- "
+            f"only {sorted(_KNOWN_KEYS)!r} are recognized (a typo here "
+            "would otherwise silently fall back to defaults instead of "
+            "being rejected)"
+        )
 
     def _word_list(key: str, *, required: bool) -> tuple[str, ...]:
         if key not in data:

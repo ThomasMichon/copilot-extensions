@@ -190,6 +190,16 @@ class TestLoadWordlist:
         with pytest.raises(WordlistError):
             load_wordlist(path)
 
+    def test_unknown_top_level_field_raises(self, tmp_path: Path) -> None:
+        # A typo like 'adjectivs' must be rejected, not silently ignored
+        # (which would otherwise fall back to the built-in adjectives
+        # without ever surfacing the mistake).
+        path = self._write(
+            tmp_path, "words.yaml", "nouns: [cube]\nadjectivs: [red]\n"
+        )
+        with pytest.raises(WordlistError):
+            load_wordlist(path)
+
     def test_missing_nouns_raises(self, tmp_path: Path) -> None:
         path = self._write(tmp_path, "words.yaml", "adjectives: [red]\n")
         with pytest.raises(WordlistError):
