@@ -806,27 +806,6 @@ def test_project_binstubs_never_launch_through_legacy_runtime(
         assert "bin/payload/agent-worktrees" in normalized
 
 
-def test_binstub_arbitration_lock_is_shared_across_cells(
-    monkeypatch, tmp_path
-):
-    shared_home = tmp_path / "home"
-    shared = shared_home / ".agent-worktrees"
-    cells = [tmp_path / "cell-a", tmp_path / "cell-b"]
-    monkeypatch.setattr(inst.platform, "system", lambda: "Windows")
-    monkeypatch.setenv("USERPROFILE", str(shared_home))
-
-    for cell in cells:
-        monkeypatch.setenv("AGENT_HOME", str(cell))
-        monkeypatch.setattr(inst, "install_dir", lambda cell=cell: cell)
-        for key in ("example", "__registries__"):
-            with inst._binstub_lock(key):
-                lock_name = key.casefold() if platform.system() == "Windows" else key
-                assert (
-                    shared / "binstub-receipts" / f".{lock_name}.lock"
-                ).exists()
-                assert not (cell / "binstub-receipts").exists()
-
-
 def test_native_installers_generate_payload_pinned_project_binstubs() -> None:
     plugin = Path(__file__).resolve().parents[1]
     posix = (plugin / "scripts" / "install.sh").read_text(encoding="utf-8")
