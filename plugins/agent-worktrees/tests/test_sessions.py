@@ -381,15 +381,21 @@ class TestMuxFocusPane:
 
         def _run(argv, **kwargs):
             calls.append((list(argv), dict(kwargs)))
-            if argv == ["tmux", "display-message", "-p", "-t", "%9", "#{session_name}"]:
-                return _Result(stdout="wt-demo\n")
-            if argv == ["tmux", "display-message", "-p", "-t", "%9", "#{window_id}"]:
-                return _Result(stdout="@7\n")
-            if argv == ["tmux", "display-message", "-p", "-t", "=wt-demo", "#{window_id}"]:
-                if len([item for item in calls if item[0][1] == "select-window"]) == 0:
-                    return _Result(stdout="@2\n")
-                return _Result(stdout="@7\n")
-            if argv == ["tmux", "select-window", "-t", "@7"]:
+            if argv[1] == "list-panes":
+                assert argv == [
+                    "tmux", "list-panes", "-a", "-F",
+                    "#{session_name}\t#{window_index}.#{pane_index}\t#{pane_id}",
+                ]
+                # %9 lives in window 3 of wt-demo -- a session other than the
+                # currently-active window, exercising the all-windows-aware
+                # lookup (not just "current window") from issue #2892's fix.
+                return _Result(stdout="wt-demo\t3.0\t%9\n")
+            if argv == ["tmux", "display-message", "-p", "-t", "=wt-demo", "#{window_index}"]:
+                already_selected = any(
+                    call[1] == "select-window" for call, _ in calls
+                )
+                return _Result(stdout="3\n" if already_selected else "1\n")
+            if argv == ["tmux", "select-window", "-t", "=wt-demo:3"]:
                 return _Result()
             raise AssertionError(f"unexpected argv: {argv!r}")
 
@@ -397,19 +403,23 @@ class TestMuxFocusPane:
 
         assert mux_focus_pane("wt-demo", "%9", mux="tmux") is True
         assert [argv for argv, _ in calls] == [
-            ["tmux", "display-message", "-p", "-t", "%9", "#{session_name}"],
-            ["tmux", "display-message", "-p", "-t", "%9", "#{window_id}"],
-            ["tmux", "display-message", "-p", "-t", "=wt-demo", "#{window_id}"],
-            ["tmux", "select-window", "-t", "@7"],
-            ["tmux", "display-message", "-p", "-t", "=wt-demo", "#{window_id}"],
+            ["tmux", "list-panes", "-a", "-F",
+             "#{session_name}\t#{window_index}.#{pane_index}\t#{pane_id}"],
+            ["tmux", "display-message", "-p", "-t", "=wt-demo", "#{window_index}"],
+            ["tmux", "select-window", "-t", "=wt-demo:3"],
+            ["tmux", "display-message", "-p", "-t", "=wt-demo", "#{window_index}"],
         ]
-        assert calls[3][1]["capture_output"] is True
-        assert calls[3][1]["timeout"] == 5
+        assert calls[2][1]["capture_output"] is True
+        assert calls[2][1]["timeout"] == 5
 
     def test_refuses_to_focus_a_pane_from_another_session(self, monkeypatch):
         class _Result:
             returncode = 0
-            stdout = "wt-other\n"
+            # %9 genuinely exists, but in a DIFFERENT session -- the
+            # all-windows-aware, session-scoped lookup must find no match
+            # for "wt-demo" and refuse, rather than a bare id ever appearing
+            # to belong to whichever session happens to be ambient/current.
+            stdout = "wt-other\t0.0\t%9\n"
 
         monkeypatch.setattr("subprocess.run", lambda *args, **kwargs: _Result())
 

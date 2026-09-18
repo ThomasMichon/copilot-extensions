@@ -27,7 +27,6 @@ from .sessions_pane_retire import (
     _mux_last_window_guard,  # noqa: F401 -- re-export for tests
     _mux_pane_alive,
     _mux_pane_process_tree,
-    _mux_pane_session_name,
     _retire_failed_successor,
     mux_retire_pane,  # noqa: F401 -- re-export for callers (e.g. pane_reaper, __main__)
 )
@@ -2226,25 +2225,6 @@ def mux_session_for_pane(
     return current_mux_session(pane_id, mux=mux)
 
 
-def _mux_target_window_id(target: str, mux_bin: str) -> str | None:
-    """Return the window id for one mux target, or ``None`` when unavailable."""
-    import subprocess
-
-    try:
-        result = subprocess.run(
-            [mux_bin, "display-message", "-p", "-t", target, "#{window_id}"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode != 0:
-            return None
-        window_id = result.stdout.strip()
-        return window_id or None
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-
-
 def mux_focus_pane(
     session_name_or_worktree_id: str,
     pane_id: str,
@@ -2257,8 +2237,20 @@ def mux_focus_pane(
     adopted anchor or other caller-owned session) or a bare worktree id, in
     which case this resolves ``wt-<id>`` first. Returns ``False`` on any mux
     error or if the pane/session identity cannot be positively confirmed.
+
+    Resolves and targets a **session-qualified** window (``session:window``),
+    never a bare pane/window id -- psmux allocates both pane ids (``%N``) and
+    window ids (``@N``) *per session*, so a bare id collides across any two
+    sessions whose Nth pane/window happens to share a number (confirmed live;
+    see issue #2896). ``_mux_qualified_pane_target`` (already fixed for the
+    same class of bug in #2892/#2894) both confirms ``pane_id`` genuinely
+    belongs to ``session_name`` -- across *every* window in that session, not
+    just its currently-active one -- and yields the exact window index to
+    select.
     """
     import subprocess
+
+    from . import sessions_pane_retire
 
     if not session_name_or_worktree_id or not pane_id:
         return False
@@ -2266,20 +2258,39 @@ def mux_focus_pane(
     session_name = str(session_name_or_worktree_id).strip()
     if not session_name:
         return False
-    pane_session = _mux_pane_session_name(pane_id, mux_bin)
-    if pane_session != session_name and not session_name.startswith("wt-"):
+    if not session_name.startswith("wt-"):
         session_name = mux_session_name(session_name)
-    if pane_session != session_name:
+
+    pane_target = sessions_pane_retire._mux_qualified_pane_target(
+        pane_id, mux_bin, session_name=session_name,
+    )
+    if not pane_target:
         return False
-    target_window = _mux_target_window_id(pane_id, mux_bin)
-    if not target_window:
-        return False
+    # pane_target is "<session_target>:<window_index>.<pane_index>"; the
+    # window-select target is the same string minus the ".<pane_index>" tail.
+    window_target = pane_target.rsplit(".", 1)[0]
+    window_index = window_target.rsplit(":", 1)[1]
     session_target = _mux_named_session_target(session_name, mux_bin)
-    if _mux_target_window_id(session_target, mux_bin) == target_window:
+
+    def _current_window_index() -> str | None:
+        try:
+            result = subprocess.run(
+                [mux_bin, "display-message", "-p", "-t", session_target, "#{window_index}"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode != 0:
+                return None
+            return result.stdout.strip() or None
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+
+    if _current_window_index() == window_index:
         return True
     try:
         result = subprocess.run(
-            [mux_bin, "select-window", "-t", target_window],
+            [mux_bin, "select-window", "-t", window_target],
             capture_output=True,
             timeout=5,
         )
@@ -2287,7 +2298,7 @@ def mux_focus_pane(
             return False
     except (OSError, subprocess.TimeoutExpired):
         return False
-    return _mux_target_window_id(session_target, mux_bin) == target_window
+    return _current_window_index() == window_index
 
 
 def mux_binding_for_session(
