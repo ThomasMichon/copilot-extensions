@@ -657,7 +657,7 @@ def test_handoff_cutover_wires_assignment_profile_and_token(
     monkeypatch.setattr(m, "_build_launch_cmd", _build)
     monkeypatch.setattr(m, "_build_env", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(m, "_repo_session_env", lambda *_args, **_kwargs: {})
-    monkeypatch.setattr(m.sessions, "mux_new_window", _window)
+    monkeypatch.setattr(m.pane_lifecycle, "pane_create", _window)
     monkeypatch.setattr(m.activity, "log_event", lambda *_args, **_kwargs: None)
     args = argparse.Namespace(
         seed="continue",

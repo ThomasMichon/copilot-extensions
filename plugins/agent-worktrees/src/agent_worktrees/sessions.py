@@ -1514,31 +1514,7 @@ def graceful_quit_mux_session(
     ctrl_c_gap: float = 0.5,
     escalate_after: float = 1.5,
 ) -> bool:
-    """Ask the interactive Copilot in a worktree's mux session to quit cleanly.
-
-    Copilot CLI exits on a **double Ctrl-C** -- two interrupts ~300-800 ms
-    apart. We deliver them via the multiplexer's ``send-keys`` (tmux on
-    Linux/WSL, psmux on Windows), which is Copilot's *native* clean-quit path:
-    it lets Copilot tear down its own session rather than being signalled out
-    from under (a plain ``SIGTERM`` to the pane only ``SIGHUP``s Copilot when
-    its shell dies, which is no cleaner than the hard kill below). When Copilot
-    exits, the pane's only command ends, dropping the single-window
-    ``wt-<id>`` session.
-
-    **Escalation ladder (up to three Ctrl-C).** Two interrupts is the common
-    case, but some Copilot states swallow the second (a prompt mid-render, a
-    modal, a busy turn flushing state). So after the double-interrupt we wait a
-    *brief* ``escalate_after`` window; if the session is still alive we deliver
-    a **conditional third** Ctrl-C within the same burst before falling back to
-    the hard kill. The third still routes through Copilot's own interrupt
-    handling, so session state is persisted (letting a later ACP resume pick it
-    back up) rather than being severed by a signal.
-
-    Returns True if the session ended within ``settle_timeout`` (graceful quit
-    succeeded), False otherwise (the caller should fall back to a hard
-    ``kill_tmux_session``). A worktree with no live mux session counts as
-    already quit (True).
-    """
+    """Ask a worktree's interactive Copilot to quit via double/conditional-triple Ctrl-C."""
     import time
 
     if not has_mux_session(worktree_id):
@@ -1579,36 +1555,46 @@ def restart_worktree_copilot(
     graceful: bool = True,
     settle_timeout: float = 6.0,
 ) -> dict:
-    """Terminate the interactive Copilot holding a worktree, keeping the worktree.
-
-    The shared primitive behind the Picker **"Stop"** row action and
-    Neuron-Forge **"Take over"**: it stops the running interactive Copilot (its
-    ``wt-<id>`` tmux/psmux session) **without** removing the git worktree, so the
-    caller can relaunch interactively (Picker) or ACP-resume (NF) afterwards.
-
-    Ladder: with ``graceful`` (default), first ask Copilot to quit cleanly via a
-    double Ctrl-C (:func:`graceful_quit_mux_session`); if it does not exit within
-    ``settle_timeout``, hard-kill the mux session. With ``graceful=False`` it
-    hard-kills immediately.
-
-    Returns a JSON-able dict ``{worktree_id, had_session, method, ok}`` where
-    ``method`` is ``none`` (nothing was running), ``graceful``, ``hard``, or
-    ``failed``.
-    """
+    """Stop a worktree's interactive Copilot without removing the git worktree."""
     if not has_mux_session(worktree_id):
         _stamp_mux_live_quiet(worktree_id, False)
         return {
             "worktree_id": worktree_id, "had_session": False,
             "method": "none", "ok": True,
         }
-    if graceful and graceful_quit_mux_session(
-        worktree_id, settle_timeout=settle_timeout,
-    ):
-        _stamp_mux_live_quiet(worktree_id, False)
-        return {
-            "worktree_id": worktree_id, "had_session": True,
-            "method": "graceful", "ok": True,
-        }
+    if graceful:
+        from . import pane_lifecycle
+
+        active_pane = mux_active_pane(worktree_id)
+        if active_pane:
+            terminate = pane_lifecycle.pane_terminate(
+                active_pane,
+                mux_session=mux_session_name(worktree_id),
+                # Preserve the old graceful budget, then add the primitive's
+                # short post-kill settle window on top.
+                overall_budget=settle_timeout + 1.5,
+            )
+            method = str(terminate.get("method") or "")
+            if method in {"graceful", "graceful-signature-confirmed"} and terminate.get("ok"):
+                _stamp_mux_live_quiet(worktree_id, False)
+                return {
+                    "worktree_id": worktree_id, "had_session": True,
+                    "method": "graceful", "ok": True,
+                }
+            if method == "hard" and terminate.get("ok"):
+                _stamp_mux_live_quiet(worktree_id, False)
+                return {
+                    "worktree_id": worktree_id, "had_session": True,
+                    "method": "hard", "ok": True,
+                }
+            if method == "already-gone" and not has_mux_session(worktree_id):
+                _stamp_mux_live_quiet(worktree_id, False)
+                return {
+                    "worktree_id": worktree_id, "had_session": False,
+                    "method": "none", "ok": True,
+                }
+            # ``last-window-skip`` is right for handoff retire, but restart's
+            # explicit job is to stop that session, so keep falling back.
     killed = kill_tmux_session(worktree_id)
     if killed:
         _stamp_mux_live_quiet(worktree_id, False)
