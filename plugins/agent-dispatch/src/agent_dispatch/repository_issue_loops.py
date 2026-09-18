@@ -14,6 +14,7 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Protocol
 
 from .issue_loop_markers import _marker, _parse_marker
@@ -154,8 +155,9 @@ def _strings(data: Mapping[str, Any], key: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(value))
 
 
-def validate_config(data: Mapping[str, Any]) -> dict[str, Any]:
-    """Validate and normalize one complete adopter-owned declaration."""
+def validate_config(data: Mapping[str, Any], *, cwd: str | Path | None = None) -> dict[str, Any]:
+    """Validate/normalize a declaration. ``cwd`` (declaring repo root, if
+    known) threads a named ``worker_identity`` to its repo-local override."""
     if not isinstance(data, Mapping):
         raise RegistrarError("repository-issue-loop: expected a mapping")
     extra = sorted(set(data) - _KNOWN_KEYS)
@@ -330,7 +332,7 @@ def validate_config(data: Mapping[str, Any]) -> dict[str, Any]:
         )
     identity_name = ""
     if worker_identity:
-        identity = load_worker_identity(worker_identity)
+        identity = load_worker_identity(worker_identity, cwd=Path(cwd) if cwd else None)
         guidance = identity.rules
         identity_name = identity.name
     if not isinstance(allow_self_config, bool):
@@ -404,10 +406,21 @@ def validate_config(data: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def expand_repository_issue_loop(
-    data: Mapping[str, Any],
+    data: Mapping[str, Any], *, repo_root: str | Path | None = None
 ) -> tuple[ProfileDeclaration, ...]:
-    """Expand the high-level loop into one emitter and one worker lane."""
-    config = validate_config(data)
+    """Expand into one emitter + one worker lane. ``repo_root`` resolves
+    ``worker_identity`` here and is stamped as the emitter spec's ``cwd`` so
+    a later daemon tick's re-validation resolves the same override."""
+    config = validate_config(data, cwd=repo_root)
+    spec: dict[str, Any] = {
+        "id": f"{config['name']}-source",
+        "interval_seconds": config["tick_interval_seconds"],
+        "lease_scope": f"repository-issue-loop:{config['name']}",
+        "repository_issue_loop": dict(data),
+    }
+    if repo_root is not None:
+        # Absolute: a relative path would resolve wrong (registrar dir, not repo root).
+        spec["cwd"] = str(Path(repo_root).resolve())
     common = {
         "owner": config["owner"],
         "description": config["description"],
@@ -416,12 +429,7 @@ def expand_repository_issue_loop(
         {
             "name": f"{config['name']}-source",
             "kind": "emitter",
-            "spec": {
-                "id": f"{config['name']}-source",
-                "interval_seconds": config["tick_interval_seconds"],
-                "lease_scope": f"repository-issue-loop:{config['name']}",
-                "repository_issue_loop": dict(data),
-            },
+            "spec": spec,
             "filters": config["filters"],
             **common,
         }
@@ -1327,9 +1335,12 @@ def run_tick(
     provider: ForgeProvider | None = None,
     clock: Callable[[], float] = time.time,
     dry_run: bool = False,
+    cwd: str | Path | None = None,
 ) -> dict[str, Any]:
-    """Run one issue-source occurrence with visible reserve/create/reconcile."""
-    config = validate_config(config)
+    """Run one issue-source occurrence with visible reserve/create/reconcile.
+    ``cwd`` (declaring repo root, if known) re-threads ``worker_identity``
+    to its repo-local override rather than the daemon process's own cwd."""
+    config = validate_config(config, cwd=cwd)
     provider = provider or _forge_provider_for(config)
     now = clock()
     discovered = plan(client, config, provider=provider, now=now)

@@ -163,7 +163,7 @@ reusable **templates** — a recipe is **not a command you run**, it is a
 **template for an emitter/evaluator pair**. You **instantiate** one by
 **registering** a concrete emitter/evaluator pair, made real by the specifics its
 template leaves open: the target repo, the change-review technology, the issue
-backend, the actual machine and account names. Three archetypes are first-class:
+backend, the actual machine and account names. Four archetypes are first-class:
 
 1. **reviewer** — a cooperative, verdict-bearing loop that carries one target
    change to merge or deliberate abandonment. Its deeper contract lives in the
@@ -339,14 +339,14 @@ not a shared runtime.
 
 ### loop-recipes
 The layer ships the **shapes** of long-running agentic work — **reviewer**,
-**conflict-resolution**, **goal-driven** — as reusable **emitter/evaluator
-templates** (see *The recipe*). A domain **instantiates** one by registering a
-concrete emitter/evaluator pair and supplying the specifics (which repo, which
-review technology, which issue backend, which machine and account); the template
-fixes the suspend/resume rhythm and the resolution target for its class of work.
-Extension is expected where a domain needs more, but the default is **reuse**: the
-same template is the engine behind a standing automated service and an on-demand
-instance alike.
+**conflict-resolution**, **goal-driven**, and **repository-issue-loop** — as
+reusable **emitter/evaluator templates** (see *The recipe*). A domain
+**instantiates** one by registering a concrete emitter/evaluator pair and
+supplying the specifics (which repo, which review technology, which issue
+backend, which machine and account); the template fixes the suspend/resume
+rhythm and the resolution target for its class of work. Extension is expected
+where a domain needs more, but the default is **reuse**: the same template is
+the engine behind a standing automated service and an on-demand instance alike.
 
 ### concise-event-then-charter-pull
 The seed handed to a freshly embodied worker is a **short, event-classified
@@ -744,8 +744,9 @@ with no matching emitter, hand-authors a task by **propose + queue**) and the
 and its evaluator advances the work across events. The service tier is how
 *recurring* or *at-scale* work is automated; it is never a precondition for running
 a single loop. The minimum viable deployment is a **coordinator plus a worker
-body**, so the reviewer, conflict-resolution, and goal-driven templates are equally
-available to a full automated deployment and to a bare host that has none of it.
+body**, so the reviewer, conflict-resolution, goal-driven, and
+repository-issue-loop templates are equally available to a full automated
+deployment and to a bare host that has none of it.
 
 ### supervise-registers-and-returns
 Registering supervised work **adds the registration and completes**, emitting the

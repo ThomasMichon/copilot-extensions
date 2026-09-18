@@ -18,6 +18,31 @@ def test_builtin_identity_resolves():
     assert identity.rules
 
 
+@pytest.mark.guard
+def test_no_repo_specific_builtin_identity_shipped(tmp_path):
+    """Regression guard for the odsp-web-harness-backlog contamination.
+
+    The built-in tier is meant to be generic, package-owned content; an
+    adopter-private identity belongs in that adopter's own repo-local
+    override, not here. This asserts the removed adopter-specific identity
+    stays removed, rather than relying on the glob-based
+    ``test_builtin_identity_resolves`` above, which would still pass if a
+    private built-in were reintroduced alongside the generic default.
+
+    ``cwd=tmp_path`` (an empty directory) makes this deterministic: without
+    it, resolution defaults to the caller's own ``Path.cwd()``, and an
+    adopter that legitimately keeps its own repo-local
+    ``odsp-web-harness-backlog.identity.md`` override (tier 1 -- exactly what
+    this contamination fix expects such an adopter to do) would make this
+    guard pass or fail depending on which directory pytest happens to run
+    from, rather than on the package's own built-in tier.
+    """
+    names = {p.stem.replace(".identity", "") for p in _BUILTIN_DIR.glob("*.identity.md")}
+    assert "odsp-web-harness-backlog" not in names
+    with pytest.raises(RegistrarError, match="no identity file found"):
+        load_worker_identity("odsp-web-harness-backlog", cwd=tmp_path)
+
+
 def test_unknown_identity_raises():
     with pytest.raises(RegistrarError, match="no identity file found"):
         load_worker_identity("no-such-identity")
