@@ -37,6 +37,8 @@ import threading
 import time
 from collections.abc import Iterable
 
+from agent_procutil import no_window_flags
+
 # Deliberately generic and whimsical -- small mechanical/workshop objects and
 # their moods, not tied to any product, franchise, or brand. Kept short so
 # generated handles stay compact; extend either list to grow variety.
@@ -126,7 +128,14 @@ def _process_group_kwargs() -> dict:
     if os.name == "posix":
         return {"start_new_session": True}
     return {
-        "creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+        "creationflags": (
+            no_window_flags()
+            | getattr(
+                subprocess,
+                "CREATE_NEW_PROCESS_GROUP",  # headless-guard: allow bounded hook child in its own process group while stdout/stderr stay piped (same rationale as _start_project_session_hook in __main__.py)
+                0,
+            )
+        ),
     }
 
 
