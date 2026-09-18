@@ -653,4 +653,30 @@ other phases actually land in.
   exactly-once claim. No data corruption, but the duplicate spawn itself is
   a harness bug worth a follow-up fix.
 
+### 2026-09-17 - Correction: the packaged `odsp-web-harness-backlog` identity is gone
+
+The prior entries above (2026-09-08 legs) recorded the `odsp-web-harness-backlog`
+identity as **packaged** -- resolved from
+`agent_dispatch/identities/odsp-web-harness-backlog.identity.md` inside this
+repo's own built-in tier. That is no longer accurate:
+`ThomasMichon/copilot-extensions#2851` (fixed in
+`ThomasMichon/copilot-extensions#2854`) found that repo-specific identity
+should never have shipped as a package built-in -- it hardcoded
+`gim-home/odsp-web-harness`'s own repo name, skill paths, labels, and
+commands, which is adopter-private content, not generic package content.
+
+#2854 removes `odsp-web-harness-backlog.identity.md` from this package's
+built-in tier and replaces it with a generic
+`repository-issue-loop-default.identity.md`. The live `dotfiles` registrar
+declaration this effort wired up above (`worker_identity:
+odsp-web-harness-backlog`, landed via `tmichon_microsoft/dotfiles#2080`)
+keeps working unchanged, because `gim-home/odsp-web-harness#456` independently
+added the removed content as that repo's own **repo-local override**
+(`.copilot-extensions/agent-dispatch/identities/odsp-web-harness-backlog.identity.md`)
+-- tier 1 of `worker_identities.py`'s resolution order, which the live
+declaration always preferred over the built-in tier when run with that
+repo's checkout as `cwd`. Any reader relying on the 2026-09-08 entries'
+description of the packaged path should treat this entry as the current
+state instead.
+
 
