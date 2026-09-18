@@ -462,11 +462,19 @@ def discover_trusted(
     by_name: dict[str, tuple[str, ProfileDeclaration]] = {}
     for pointer in pts:
         owner = pointer.effective_owner()
-        declarations = (
-            read_repo_location_layers(pointer.location, owner=owner)
-            if pointer.kind == "repo"
-            else read_location(pointer.resolved_location(), owner=owner)
-        )
+        if pointer.kind == "repo":
+            declarations = read_repo_location_layers(pointer.location, owner=owner)
+        else:
+            location = pointer.resolved_location()
+            # A supported dir pointer may point directly at an in-repo
+            # registrar surface (e.g. `<repo>/.copilot-extensions/
+            # agent-dispatch/registrar`); derive that repo's root the same
+            # way the direct CLI declaration-read path does, so a
+            # repository-issue-loop declared there still resolves a
+            # repo-local worker_identity against the right repo rather than
+            # this process's own cwd or the generic built-in.
+            repo_root = repo_config.repo_root_from_surface_path(location, "registrar")
+            declarations = read_location(location, owner=owner, repo_root=repo_root)
         for decl in declarations:
             if decl.name in by_name:
                 prior_owner = by_name[decl.name][0]

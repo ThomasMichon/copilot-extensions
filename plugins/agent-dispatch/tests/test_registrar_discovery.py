@@ -588,6 +588,59 @@ def test_discover_repo_resolves_repo_local_worker_identity_for_issue_loop(tmp_pa
     assert source.spec["cwd"] == str(tmp_path.resolve())
 
 
+def test_discover_trusted_derives_repo_root_for_inrepo_dir_pointer(tmp_path):
+    """Regression guard: `registrar add-pointer` supports a plain ``dir``
+    pointer aimed directly at an in-repo registrar surface (not only a
+    ``repo`` pointer at the repo root). That path must still derive the
+    declaring repo's root for a repository-issue-loop declared there, so its
+    worker_identity resolves a repo-local override against that repo rather
+    than this process's own cwd or the generic built-in."""
+    identities_dir = (
+        tmp_path / ".copilot-extensions" / "agent-dispatch" / "identities"
+    )
+    identities_dir.mkdir(parents=True)
+    (identities_dir / "custom.identity.md").write_text(
+        "---\nname: custom\ndescription: A custom identity.\n---\n\n"
+        "Follow the custom rules.\n",
+        encoding="utf-8",
+    )
+    reg = tmp_path / INREPO_SUBDIR
+    reg.mkdir(parents=True)
+    (reg / "backlog.json").write_text(
+        json.dumps(
+            {
+                "name": "backlog",
+                "kind": "repository-issue-loop",
+                "repo": "example/project",
+                "source": "repository-backlog",
+                "cadence_seconds": 3600,
+                "tick_interval_seconds": 60,
+                "quiet_period_seconds": 0,
+                "include_labels": ["ready"],
+                "exclude_labels": ["bootstrap"],
+                "priority_labels": ["priority:high"],
+                "batch_size": 1,
+                "task_label": "repository-issue-work",
+                "forge": {"provider": "github", "producer_login": "issue-bot"},
+                "reservation": {
+                    "label": "agent-reserved",
+                    "comment": True,
+                    "orphan_after_seconds": 600,
+                },
+                "pool": {
+                    "max_active_processes": 1,
+                    "body": {"type": "headless", "agent": "issue-worker"},
+                },
+                "worker_identity": "custom",
+            }
+        ),
+        encoding="utf-8",
+    )
+    decls = discover([Pointer(name="p", location=str(reg), kind="dir")])
+    source = next(d for d in decls if d.kind == "emitter")
+    assert source.spec["cwd"] == str(tmp_path.resolve())
+
+
 def test_discover_repo_marketplace_overlay_replaces_base_declaration(tmp_path, monkeypatch):
     base = tmp_path / INREPO_SUBDIR
     overlay = (
