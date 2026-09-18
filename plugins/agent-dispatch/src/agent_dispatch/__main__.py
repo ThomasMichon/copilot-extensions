@@ -2042,50 +2042,37 @@ def _cmd_list(args: argparse.Namespace) -> int:
 
 
 def _cmd_doctor(args: argparse.Namespace) -> int:
-    """Diagnose held/suspended tasks (Boundary I / #2577): distinguish a
-    confirmed-orphaned task -- its expected worktree provably gone -- from
-    ordinary in-flight work or merely ambiguous liveness, and (with
-    ``--repair``) unbind + re-queue only the confirmed-orphaned ones. See
-    :mod:`agent_dispatch.doctor` for the full design rationale."""
-    repo = _scope_repo(args)
-    if not repo:
-        print(_REPO_UNRESOLVED, file=sys.stderr)
-        return 2
+    """Diagnose held/suspended tasks (Boundary I / #2577; #2884 session-
+    liveness / #2884). ``--task`` narrows to one exact task;
+    ``--check-live-sessions`` walks its full reservation history for a
+    shadowed-but-live earlier attempt. See :mod:`agent_dispatch.doctor`."""
     from . import doctor
 
     with _client(args) as c:
-        tasks = c.list(
-            repo=repo,
-            status=",".join(doctor.EXAMINED_STATUSES),
-            label=args.label,
-            limit=args.limit,
-        )
-        diagnoses = [
-            doctor.diagnose(
-                t,
-                stale_lease_grace_seconds=args.stale_lease_seconds,
-                # An explicit, call-time module-attribute lookup (not
-                # diagnose's own default parameter, which -- like any Python
-                # default -- binds once at def-time): this is what makes
-                # `monkeypatch.setattr(doctor, "resolve_worktree", ...)`
-                # actually take effect for callers of this CLI wrapper.
-                resolve=doctor.resolve_worktree,
+        if args.task:
+            try:
+                tasks = [c.get(args.task)]
+            except DispatchError as exc:
+                print(f"agent-dispatch: {exc}", file=sys.stderr)
+                return 1
+        else:
+            repo = _scope_repo(args)
+            if not repo:
+                print(_REPO_UNRESOLVED, file=sys.stderr)
+                return 2
+            tasks = c.list(
+                repo=repo,
+                status=",".join(doctor.EXAMINED_STATUSES),
+                label=args.label,
+                limit=args.limit,
             )
-            for t in tasks
-        ]
-        repairs = None
-        if args.repair:
-            repairs = [
-                doctor.repair(d, c, reason=f"agent-dispatch doctor: {d.detail}")
-                for d in diagnoses
-                if d.verdict == doctor.REPAIRABLE_VERDICT
-            ]
-    payload = {
-        "examined": len(diagnoses),
-        "diagnoses": [d.as_dict() for d in diagnoses],
-    }
-    if repairs is not None:
-        payload["repaired"] = repairs
+        payload = doctor.diagnose_many(
+            c,
+            tasks,
+            check_live_sessions=args.check_live_sessions,
+            stale_lease_seconds=args.stale_lease_seconds,
+            repair_orphaned=args.repair,
+        )
     return _emit(payload)
 
 
@@ -3682,10 +3669,23 @@ def build_parser() -> argparse.ArgumentParser:
         "only the confirmed-orphaned ones",
     )
     p.add_argument(
+        "--task",
+        help="diagnose exactly this one task id (any status), instead of "
+        "sweeping --repo/--label",
+    )
+    p.add_argument(
         "--repo", help="lane to examine (local name or remote URL); default: calling repo"
     )
     p.add_argument("--label", help="only examine tasks carrying this label")
     p.add_argument("--limit", type=int, default=200)
+    p.add_argument(
+        "--check-live-sessions",
+        action="store_true",
+        help="walk each task's full reservation history and probe every "
+        "attempt's embody-session liveness by session id -- reports "
+        "'earlier_attempt_live' when an earlier attempt is live but shadowed "
+        "by a later dead/unknown one. Opt-in (probes the bridge per attempt).",
+    )
     p.add_argument(
         "--stale-lease-seconds",
         type=float,

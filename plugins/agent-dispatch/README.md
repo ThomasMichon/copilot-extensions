@@ -1005,23 +1005,44 @@ still a live, resumable checkout.
 # report-only: never mutates anything
 agent-dispatch doctor --repo <lane>
 
+# diagnose exactly one task (any status), instead of sweeping --repo/--label
+agent-dispatch doctor --task <task-id>
+
+# also walk that task's full spawn-reservation history and probe every
+# attempt's actual embody-session liveness by session id (opt-in: one
+# extra bridge probe per recorded attempt) -- catches an earlier attempt
+# that's still alive but shadowed by a later dead/unknown one
+agent-dispatch doctor --task <task-id> --check-live-sessions
+
 # unbind + re-queue every task whose worktree is confirmed gone
 # (fails its stale reservation, then releases/yields the task back to queued)
 agent-dispatch doctor --repo <lane> --repair
 ```
 
-Each examined `claimed`/`started`/`suspended` task gets one of four verdicts:
-`orphaned_worktree_gone` (its worktree is `finalized`/`orphaned`/untracked --
-the only verdict `--repair` acts on), `stale_lease` (a `started` task's lease
-long expired with no reported activity, but the worktree itself couldn't be
-confirmed gone -- advisory only, never auto-repaired), `unknown` (no
-reservation/worktree on record to check), or `healthy`. `--repair` never
-re-creates a worker and never guesses from an indeterminate agent-worktrees
-lookup -- see [ThomasMichon/copilot-extensions#2577](https://github.com/ThomasMichon/copilot-extensions/issues/2577)
+Each examined `claimed`/`started`/`suspended` task gets one of these
+verdicts: `orphaned_worktree_gone` (its worktree is
+`finalized`/`orphaned`/untracked -- the only verdict `--repair` acts on),
+`stale_lease` (a `started` task's lease long expired with no reported
+activity, but the worktree itself couldn't be confirmed gone -- advisory
+only, never auto-repaired), `unknown` (no reservation/worktree on record to
+check), or `healthy`. `--repair` never re-creates a worker and never guesses
+from an indeterminate agent-worktrees lookup -- see [ThomasMichon/copilot-extensions#2577](https://github.com/ThomasMichon/copilot-extensions/issues/2577)
 for the full design rationale. Distinct from `agent-dispatch reviewer-loop
 doctor` (a single declared reviewer-loop's health across its emitter/
 evaluator/supervised-lane units, never mutating) -- this `doctor` is
 task-scoped and repo-wide, with an explicit opt-in mutation.
+
+`--check-live-sessions` adds two more possible verdicts, reported instead of
+(never alongside) the ones above: `earlier_attempt_live` -- an earlier
+spawn attempt's embody session is confirmed live but shadowed by a later
+dead/unknown one (the task's own `owner`/latest reservation always reflects
+only the *latest* attempt, which can hide this); the diagnosis names the
+live `live_attempt`, `live_session_id`, and (for a fleet body) `live_host` so
+an operator can `agent-bridge resume` it -- and
+`reservation_history_truncated` -- the task's reservation history page came
+back at the request limit, so the check was skipped rather than risk
+analyzing an incomplete page. Neither verdict is ever auto-repaired -- see
+[ThomasMichon/copilot-extensions#2884](https://github.com/ThomasMichon/copilot-extensions/issues/2884).
 
 ## Steer a blocked worker (`agent-dispatch card` / `steer`)
 
