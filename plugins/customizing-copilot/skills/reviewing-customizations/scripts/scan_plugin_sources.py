@@ -179,6 +179,31 @@ def _plugin_version(footprint: Path) -> str:
     return ""
 
 
+def _plugin_manifest_path(footprint: Path) -> Path:
+    """Return whichever manifest spelling exists, preferring the root one."""
+    root_manifest = footprint / "plugin.json"
+    if root_manifest.is_file():
+        return root_manifest
+    return footprint / ".claude-plugin" / "plugin.json"
+
+
+def _plugin_declares_agents(footprint: Path) -> bool:
+    """Whether the plugin manifest declares a truthy top-level `agents` field.
+
+    The runtime's documented behavior falls back to `plugin_root/agents` when
+    this field is absent, but every shipped example (e.g.
+    `copilot-extensions-harness`) declares it explicitly, and explicit is more
+    robust than implicit: it survives a future change to the default-path
+    fallback and gives a reviewer an unambiguous manifest to read. Mirrors
+    `_plugin_version`'s two-manifest-spelling lookup, but does not merge across
+    spellings: the first manifest found (root `plugin.json`, else
+    `.claude-plugin/plugin.json`) is authoritative, matching the runtime's own
+    precedence.
+    """
+    data = _load_json(_plugin_manifest_path(footprint))
+    return bool(data.get("agents"))
+
+
 def _plugin_hook_files(footprint: Path) -> set[Path]:
     """Return conventional and manifest-declared hook files for a plugin."""
     manifest_data: dict = {}
