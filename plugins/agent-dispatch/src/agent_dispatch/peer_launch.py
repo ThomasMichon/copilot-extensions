@@ -18,7 +18,7 @@ from typing import Any
 
 CONTEXT_ENV = "COPILOT_EXTENSIONS_CONTEXT"
 PEERS = {"agent-worktrees": "agent_worktrees", "agent-bridge": "agent_bridge"}
-OWNERS = {"agent-dispatch", "agent-codespaces", "agent-containers"}
+OWNERS = {"agent-dispatch", "agent-codespaces", "agent-containers", "agent-logger"}
 
 
 def no_window_kwargs() -> dict[str, int]:
@@ -82,7 +82,7 @@ def peer_environment(context: dict[str, Any], inherited: dict[str, str]) -> dict
             continue
         if upper.startswith((
             "AGENT_RT_", "AGENT_DISPATCH_", "AGENT_CODESPACES_", "AGENT_CONTAINERS_",
-            "AGENT_WORKTREES_", "AGENT_BRIDGE_",
+            "AGENT_LOGGER_", "AGENT_WORKTREES_", "AGENT_BRIDGE_",
         )) or (
             upper.startswith("AGENT_")
             and upper.endswith(("_ROOT", "_DIR", "_HOME", "_INSTALLATION_ID"))

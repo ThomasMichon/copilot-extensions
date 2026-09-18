@@ -16,6 +16,7 @@ Console: ``session-sync compact`` (see :mod:`agent_logger.sync.engine`).
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -26,8 +27,8 @@ from pathlib import Path
 
 from agent_procutil import no_window_kwargs
 
-from agent_logger import sessions
-from agent_logger.config import Config
+from agent_logger import _peer_launch, sessions
+from agent_logger.config import Config, home_dir
 from agent_logger.segmenter.platform import detect_machine
 from agent_logger.sessions import SessionRef
 
@@ -35,6 +36,8 @@ from agent_logger.sessions import SessionRef
 # ``~/.copilot/session-state``).
 from agent_logger.sync.lock import sync_lock
 from agent_logger.sync.origin import classify_for_sync, effective_harness
+
+log = logging.getLogger("agent-logger.compact")
 
 # On Windows, shelling out from a windowless parent (pythonw under a Scheduled
 # Task) flashes a console; suppress it. No-op on POSIX.
@@ -70,10 +73,28 @@ def tracked_worktree_paths() -> set[str] | None:
     whose worktree is *not* in it is one the picker never renders, and is safe
     to archive. (Pruning a worktree deletes its directory and its ``.<repo>``
     registry entry together, so a pruned worktree drops out of this set.)
-    Returns ``None`` when agent-worktrees is unavailable, so callers fall back
-    to an on-disk existence check -- reliable for the same reason.
+    Returns ``None`` when agent-worktrees is unavailable (legacy mode) or, under
+    an explicit installation context, when a valid owner genuinely has no
+    same-cell worktrees peer installed at all -- callers fall back to an
+    on-disk existence check, reliable for the same reason.
+
+    Under an explicit installation-cell context, resolution uses only the
+    validated same-cell peer boundary (never an ambient ``PATH`` command),
+    scoped to that cell. A genuine transient FAILURE (owner-validation error,
+    blocked governance, a probe error, or a malformed peer response) is
+    reported by raising :class:`_peer_launch.ContextRefused` rather than
+    quietly returning ``None`` -- ``None`` here means "confirmed nothing to
+    protect", and a caller that only guards ``tracked_paths is not None``
+    (rather than performing its own on-disk fallback) would otherwise treat a
+    transient failure as if it had confirmed there was nothing to protect.
+    Callers must catch :class:`_peer_launch.ContextRefused` explicitly and
+    choose their own safe behavior for an unresolved (not confirmed-absent)
+    protective set.
     """
-    exe = shutil.which("agent-worktrees")
+    explicit_context = os.environ.get(_peer_launch.CONTEXT_ENV, "")
+    if explicit_context:
+        return _tracked_worktree_paths_same_cell(explicit_context)
+    exe = shutil.which("agent-worktrees")  # marketplace-isolation: allow legacy-compatibility
     if not exe:
         return None
     try:
@@ -92,12 +113,135 @@ def tracked_worktree_paths() -> set[str] | None:
         data = json.loads(proc.stdout)
     except json.JSONDecodeError:
         return None
+    return _paths_from_list_response(data)
+
+
+def _paths_from_list_response(data: object) -> set[str] | None:
+    """Parse a ``list --json`` response, rejecting the WHOLE response on any
+    malformed row rather than silently omitting it. A response with a
+    malformed row (e.g. ``{"worktrees":[{}]}``) is not evidence that nothing
+    is tracked -- a partial/empty result here must not be trusted as
+    authoritative, since compaction treats an absent path as safe to archive.
+    """
+    if not isinstance(data, dict):
+        return None
+    worktrees = data.get("worktrees")
+    if not isinstance(worktrees, list):
+        return None
     paths: set[str] = set()
-    for wt in data.get("worktrees", []):
+    for wt in worktrees:
+        if not isinstance(wt, dict):
+            return None
         p = wt.get("path")
-        if p:
-            paths.add(_normalize_path(str(p)))
+        if not isinstance(p, str) or not p.strip() or "\x00" in p:
+            return None
+        paths.add(_normalize_path(p))
     return paths
+
+
+def _tracked_worktree_paths_same_cell(raw_context: str) -> set[str] | None:
+    """Same-cell resolution.
+
+    Genuine absence (valid owner, no same-cell peer installed) returns
+    ``None``. Every other failure -- invalid/foreign owner context, blocked
+    governance, a probe error, or a malformed peer response -- raises
+    :class:`_peer_launch.ContextRefused` instead, so a caller cannot mistake
+    an unresolved result for a confirmed-empty one.
+    """
+    own = _validate_owner_or_refuse(raw_context)
+    peer_root = Path(own["cellRoot"]) / "plugins" / "agent-worktrees"
+    if not peer_root.exists() and not peer_root.is_symlink():
+        return None
+    try:
+        prefix = _peer_launch.launch_prefix(
+            "agent-logger", Path(own["pluginRoot"]), raw_context, "agent-worktrees",
+        )
+        proc = subprocess.run(
+            [*prefix, "list", "--json"],
+            capture_output=True, encoding="utf-8", timeout=30,
+            **_peer_launch.no_window_kwargs(),
+        )
+    except (OSError, ValueError, ImportError, subprocess.SubprocessError) as error:
+        raise _peer_launch.ContextRefused(
+            f"Same-cell worktrees list failed: {error}"
+        ) from error
+    if proc.returncode != 0 or not (proc.stdout or "").strip():
+        raise _peer_launch.ContextRefused(
+            proc.stderr.strip() or "Same-cell worktrees list failed"
+        )
+    try:
+        data = json.loads(proc.stdout)
+    except ValueError as error:
+        raise _peer_launch.ContextRefused(
+            f"Invalid same-cell worktrees list response: {error}"
+        ) from error
+    paths = _paths_from_list_response(data)
+    if paths is None:
+        raise _peer_launch.ContextRefused(
+            "Same-cell worktrees list response is malformed"
+        )
+    return paths
+
+
+def _validate_owner_or_refuse(raw_context: str) -> dict[str, object]:
+    try:
+        return _peer_launch.validate_owner("agent-logger", home_dir(), raw_context)
+    except (OSError, ValueError, ImportError) as error:
+        raise _peer_launch.ContextRefused(
+            f"agent-logger installation context refused: {error}"
+        ) from error
+
+
+def _resolve_tracked_paths_or_none(require_untracked: bool) -> set[str] | None:
+    """Local-session-safe resolution: an unresolved lookup degrades to ``None``.
+
+    Used by :func:`select_compactable`, whose per-session ``_worktree_tracked``
+    already applies an on-disk existence fallback (erring toward "tracked")
+    whenever ``tracked_paths`` is ``None``. A same-cell
+    :class:`_peer_launch.ContextRefused` is therefore safe to fold into that
+    same ``None`` fallback here -- unlike :func:`resolve_hub_tracked_paths`,
+    used by hub compaction, which has no reliable per-session on-disk fallback
+    for foreign-machine hub sessions.
+    """
+    if not require_untracked:
+        return None
+    try:
+        return tracked_worktree_paths()
+    except _peer_launch.ContextRefused as error:
+        log.debug("agent-logger tracked-worktree lookup unresolved: %s", error)
+        return None
+
+
+def resolve_hub_tracked_paths(require_untracked: bool) -> tuple[set[str] | None, bool]:
+    """Hub-safe resolution: any non-affirmative result must fail closed.
+
+    Returns ``(tracked_paths, unresolved)``. Hub sessions may belong to a
+    foreign machine, so there is no reliable per-session on-disk fallback the
+    way :func:`select_compactable` has for its own live sessions -- and
+    genuine peer *absence* is no more informative than a *failure* here: "no
+    same-cell worktrees peer in this cell" is not evidence that nothing,
+    anywhere, is tracked. Every ``None`` from :func:`tracked_worktree_paths`
+    (absence, a legacy lookup miss, or a :class:`_peer_launch.ContextRefused`
+    failure) is therefore treated identically as ``unresolved``, and only a
+    genuinely resolved, non-``None`` set is passed through. The caller must
+    skip this compaction pass on ``unresolved`` rather than proceed with
+    ``tracked_paths=None`` -- ``FilesystemTarget.compact_backlog`` treats
+    ``None`` as "nothing to protect", not "protection unavailable".
+    """
+    if not require_untracked:
+        return None, False
+    try:
+        tracked = tracked_worktree_paths()
+    except _peer_launch.ContextRefused as error:
+        log.warning("agent-logger tracked-worktree lookup unresolved: %s", error)
+        return None, True
+    if tracked is None:
+        log.warning(
+            "agent-logger tracked-worktree lookup returned no result "
+            "(peer absent or legacy lookup unavailable); treating as unresolved"
+        )
+        return None, True
+    return tracked, False
 
 
 def _parse_iso(ts: str) -> datetime | None:
@@ -190,7 +334,7 @@ def select_compactable(
     require_untracked = opts["require_untracked_worktree"]
     state_root = cfg.sync_source / sessions.SESSION_STATE_SUBDIR
 
-    tracked_paths = tracked_worktree_paths() if require_untracked else None
+    tracked_paths = _resolve_tracked_paths_or_none(require_untracked)
 
     # Same repo-scope gate as run_sync: None => no filter (sync everything).
     allowlist = cfg.sync_repo_allowlist
