@@ -6,6 +6,19 @@ listener, remote host-wide credential, or browser policy. It realizes
 `session-hosting`'s host-owned mechanics and capability-honest control, and
 `agent-bridge`'s durable, frontend-independent ownership.
 
+## Scope and proposed AHP convergence
+
+This is a bridge-specific `ensure`/`release` provider protocol, not an AHP
+resource implementation. AHP 0.8 already defines relevant terminal and resource
+surfaces; their presence in the specification does not establish that a selected
+host supplies this protocol's authorization, idempotency, or resource-lifetime
+guarantees. Local provider policy and ownership journals remain necessary until
+an equivalent owner can safely assume those responsibilities.
+
+The [proposed convergence matrix](../../../efforts/active/agent-bridge-ahp-convergence/compatibility-baseline.md#proposed-bridge-owned-native-backend-reconciliation)
+is pending maintainer confirmation, not a resolved architecture HOLD or an
+implemented migration. It does not rename this private protocol as AHP.
+
 ## Local launch registration
 
 The trusted local launcher adds `--host-resources-file PATH` to the existing

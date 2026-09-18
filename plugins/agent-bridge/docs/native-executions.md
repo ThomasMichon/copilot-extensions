@@ -13,6 +13,26 @@ registered native session request a locally allowlisted resource after startup
 or presentation detach. Launching native mode does not require or start any
 resource. Browser/service policy remains with the locally registered provider.
 
+## Scope and proposed AHP convergence
+
+Here, `native` means a **bridge-owned CLI/PTY execution** using the existing
+Session Host, not the CLI's native AHP host. This path creates its own hosted
+execution; it is not an adapter that adopts an existing AHP-owned session or
+duplicates that host's authority. The execution ID/generation, `native.v1`
+terminal replay, and reduced-fidelity represented result positions are not AHP
+resource identities or AHP ordering/reconciliation.
+
+CodeSpace and trusted-container adapters share `ssh_manager.native_channel`,
+but that channel remains bridge-specific: it invokes the remote bridge's
+`native-host` commands. Sharing SSH mechanics does not make it an AHP adapter or
+a general terminal-projection contract.
+
+**Proposed, pending maintainer confirmation:** retain this as a bounded interim
+bridge-owned backend under the existing Session Host owner, with convergence
+governed by the AHP effort's
+[ownership/equivalence matrix and transition criteria](../../../efforts/active/agent-bridge-ahp-convergence/compatibility-baseline.md#proposed-bridge-owned-native-backend-reconciliation).
+This proposal does not resolve the architecture review HOLD or authorize landing.
+
 ## Stable CLI and receipts
 
 Use the resolved agent-bridge command:
