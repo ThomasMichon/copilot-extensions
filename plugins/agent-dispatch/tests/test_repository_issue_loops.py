@@ -1461,17 +1461,17 @@ def test_malformed_config_is_rejected(change, message):
 
 def test_worker_identity_resolves_rules_into_worker_guidance():
     config = validate_config(
-        _config(worker_identity="odsp-web-harness-backlog")
+        _config(worker_identity="repository-issue-loop-default")
     )
-    assert config["worker_identity"] == "odsp-web-harness-backlog"
-    assert "blocked-on-external-pr" in config["worker_guidance"]
+    assert config["worker_identity"] == "repository-issue-loop-default"
+    assert "supersede" in config["worker_guidance"]
 
 
 def test_worker_identity_and_worker_guidance_are_mutually_exclusive():
     with pytest.raises(RegistrarError, match="mutually exclusive"):
         validate_config(
             _config(
-                worker_identity="odsp-web-harness-backlog",
+                worker_identity="repository-issue-loop-default",
                 worker_guidance="inline prose",
             )
         )

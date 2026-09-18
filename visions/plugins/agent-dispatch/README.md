@@ -163,7 +163,7 @@ reusable **templates** — a recipe is **not a command you run**, it is a
 **template for an emitter/evaluator pair**. You **instantiate** one by
 **registering** a concrete emitter/evaluator pair, made real by the specifics its
 template leaves open: the target repo, the change-review technology, the issue
-backend, the actual machine and account names. Three archetypes are first-class:
+backend, the actual machine and account names. Four archetypes are first-class:
 
 1. **reviewer** — a cooperative, verdict-bearing loop that carries one target
    change to merge or deliberate abandonment. Its deeper contract lives in the
