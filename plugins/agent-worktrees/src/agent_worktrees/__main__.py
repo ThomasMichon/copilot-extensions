@@ -13792,7 +13792,16 @@ def _reap_worktree(
     failures = 0
 
     if not rec.checkout_managed:
-        tracking.retire_record(rec, tracking_path)
+        if not tracking.retire_record(rec, tracking_path):
+            # pr-attribution-codenames Phase 2 follow-up: a contended
+            # cross-process lock (e.g. a concurrent codename backfill)
+            # defers retirement rather than proceeding unsafely -- this
+            # external record is retried on a later reap pass.
+            warnings.append(
+                f"Tracking record for {rec.worktree_id} is busy (contended "
+                "lock) -- will retire on a later pass."
+            )
+            return 0, warnings
         disposition_history.remove(rec.worktree_id)
         handoff_trace.remove_trace(cfg.active_project(), rec.worktree_id)
         activity.log_event(
@@ -13848,10 +13857,19 @@ def _reap_worktree(
         permissions.merge_permissions(repo.anchor, rec.worktree_path)
         permissions.remove_trusted_folder(rec.worktree_path)
 
-    # Remove tracking YAML (or tombstone it, when paired -- #957/#220)
-    tracking.retire_record(rec, tracking_path)
-    disposition_history.remove(rec.worktree_id)
-    handoff_trace.remove_trace(cfg.active_project(), rec.worktree_id)
+    # Remove tracking YAML (or tombstone it, when paired -- #957/#220). The
+    # worktree checkout/branch are already gone by this point regardless of
+    # whether this succeeds -- a contended lock (pr-attribution-codenames
+    # Phase 2 follow-up) defers retirement to a later reap pass rather than
+    # deleting without real cross-process exclusivity.
+    if tracking.retire_record(rec, tracking_path):
+        disposition_history.remove(rec.worktree_id)
+        handoff_trace.remove_trace(cfg.active_project(), rec.worktree_id)
+    else:
+        warnings.append(
+            f"Tracking record for {rec.worktree_id} is busy (contended lock) "
+            "-- worktree/branch removed; record will retire on a later pass."
+        )
 
     activity.log_event(
         "worktree_reaped",

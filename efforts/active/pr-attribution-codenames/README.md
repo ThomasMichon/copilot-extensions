@@ -338,8 +338,7 @@ _Pending review._
   (~3s vs ~8s, no process spawning).
 
 ### 2026-09-18 — Phase 2 implemented, PR #2868 in review (7 rounds so far)
-- Implemented Phase 2 in a fresh worktree
-  (`lambda-core-wsl-20260918-014030-49c4`): `WorktreeRecord.codename` field
+- Implemented Phase 2 in a fresh worktree: `WorktreeRecord.codename` field
   + YAML round-trip (`tracking.py`); new `agent_worktrees.codename_tracking`
   module (kept separate -- `tracking.py`/`__main__.py` are at/near their
   module-size-baseline ceiling) with `existing_codenames`/
