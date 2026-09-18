@@ -130,11 +130,11 @@ process-boundary-driven pattern namespace providers (`codespace:`,
 `container:`) already use — to answer *"give me this session's content"* when
 no hosted or represented process can. The bridge tries its own live session
 ledger first; only when a target genuinely has nothing live registered does it
-ask a cold-store provider, which resolves whatever local-filesystem-vs-durable
--archive distinction its own domain requires and returns the content honestly.
-This keeps the bridge the single caller-facing surface for **any** session —
-live or not — without the bridge itself ever learning archival formats: that
-knowledge stays inside the provider that owns it.
+ask a cold-store provider, which resolves whatever distinction its own domain
+draws between a local filesystem copy and a durable archive, and returns the
+content honestly. This keeps the bridge the single caller-facing surface for
+**any** session — live or not — without the bridge itself ever learning
+archival formats: that knowledge stays inside the provider that owns it.
 
 ### session and event ledger
 
