@@ -342,17 +342,28 @@ predecessor and successor ids.
 | 70% of window | Urgent reminder: preserve the baton now and trigger directly; compaction remains at ~80% |
 | 79% of window | **Force tier:** the extension does it *for* the agent -- auto-drafts a handoff from whatever session facts are available, stores and triggers it via the same path `save_handoff_prompt`/`trigger_handoff` use, and denies further mutating tool calls (read-only inspection still allowed) for the rest of the session. This is the last chance to capture state before the runtime's own auto-compaction (~80%) destroys it -- it does not wait for the agent to act. Lifted only by a successful compaction (the operator may then keep working in the same session instead of switching to the handed-off one); at most one auto-handoff per session |
 
-An owning repository may override any of the three percentages in
-`.context-handoff/config.yaml`:
+An owning repository may override these defaults in `.context-handoff/config.yaml`,
+and a user may set lower-priority personal defaults in
+`~/.context-handoff/config.yaml`. The repo layer merges per key over the user
+layer, so a repo that only sets `mode` still inherits user-level thresholds.
 
 ```yaml
+mode: auto         # auto | manual-only | off
 thresholds:
   soft_percent: 65
-  hard_percent: 75
+  hard_tokens: 75000
   force_percent: 78
 ```
 
-Invalid config produces a visible warning and uses the 55% / 70% / 79%
-defaults. If the runtime does not report a window size, the extension reports
-utilization as unknown and does not invent an absolute threshold (the force
-tier, like soft/hard, never fires in that case either).
+`mode: auto` preserves today's behavior. `mode: manual-only` suppresses all
+pressure-driven nudges and the force-tier auto-trigger but leaves explicit
+manual tools available. `mode: off` disables both automatic behavior and the
+extension/CLI handoff entry points for that repo.
+
+Each threshold tier may use either `<tier>_percent` or `<tier>_tokens`. Mixed
+configs are allowed per tier; percent tiers resolve against the live session
+token limit, token tiers stay fixed. If a mixed config's effective ordering is
+only knowable once the live token limit arrives, that final ordering check is
+deferred until then. Invalid config produces a visible warning and uses the
+55% / 70% / 79% defaults. If the runtime does not report a window size,
+percent-based tiers remain unknown, while absolute-token tiers still work.

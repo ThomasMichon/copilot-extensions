@@ -60,10 +60,31 @@ import {
   FORCE_TIER_DENY_FEEDBACK,
   isReadOnlyPermissionRequest,
 } from "./force-tier.mjs";
-import { contextPressure, formatContextUsage } from "./thresholds.mjs";
+import {
+  automaticHandoffEnabled,
+  manualHandoffEnabled,
+} from "./mode.mjs";
+import {
+  contextPressure,
+  formatConfiguredThreshold,
+  formatContextUsage,
+} from "./thresholds.mjs";
 
 // --- State ---
 const handoffConfig = loadContextHandoffConfig(process.cwd());
+
+// Phase 4 judgment call: `mode: off` is a repo-level opt-out of the handoff
+// mechanism itself, not only the automatic pressure monitor. Refuse every
+// extension-provided manual entry point as well so the repository owner gets a
+// true disable instead of a "still works if you know the tool names" loophole.
+function handoffDisabledResult() {
+  return (
+    "Context handoff is disabled for this repository " +
+    "(configured `mode: off` in .context-handoff/config.yaml or " +
+    "~/.context-handoff/config.yaml). Re-enable it to generate, store, " +
+    "trigger, or consume handoffs here."
+  );
+}
 const state = {
   turnCount: 0,
   sessionId: null,
@@ -88,6 +109,7 @@ const state = {
   // (reset only on a successful compaction, mirroring the soft/hard resets).
   forceTriggered: false,
   blockMutatingTools: false,
+  thresholdWarningShown: false,
   // Context window tracking (from session.usage_info events)
   currentTokens: 0,
   tokenLimit: 0,
@@ -369,6 +391,9 @@ const session = await joinSession({
       },
       handler: async (args, invocation) => {
         ensureState(invocation);
+        if (!manualHandoffEnabled(handoffConfig.mode)) {
+          return handoffDisabledResult();
+        }
         const sid = state.sessionId || invocation?.sessionId || "unknown";
         const { data: handoffData, modifiedEntries } = collectHandoffData(sid, args);
 
@@ -495,6 +520,9 @@ const session = await joinSession({
       },
       handler: async (args, invocation) => {
         ensureState(invocation);
+        if (!manualHandoffEnabled(handoffConfig.mode)) {
+          return handoffDisabledResult();
+        }
         const sid = state.sessionId || invocation?.sessionId;
         if (!sid || sid === "unknown") {
           return "Cannot save handoff prompt: sessionId is unavailable.";
@@ -576,6 +604,12 @@ const session = await joinSession({
       },
       handler: async (args, invocation) => {
         ensureState(invocation);
+        if (!manualHandoffEnabled(handoffConfig.mode)) {
+          return {
+            textResultForLlm: handoffDisabledResult(),
+            resultType: "error",
+          };
+        }
         const cwd = state.cwd || process.cwd();
         const sid = state.sessionId || invocation?.sessionId || null;
         const taskId = (args?.task_id ?? "").toString().trim();
@@ -656,6 +690,9 @@ const session = await joinSession({
       },
       handler: async (args, invocation) => {
         ensureState(invocation);
+        if (!manualHandoffEnabled(handoffConfig.mode)) {
+          return handoffDisabledResult();
+        }
         const text = (args?.prompt_text ?? args?.prompt ?? "").toString().trim();
         const cwd = state.cwd || process.cwd();
         const sid = state.sessionId || invocation?.sessionId;
@@ -733,6 +770,10 @@ const session = await joinSession({
         "session-state marker.",
       handler: async (ctx) => {
         void ctx;
+        if (!manualHandoffEnabled(handoffConfig.mode)) {
+          await session.log(handoffDisabledResult(), { level: "warning" });
+          return;
+        }
         await session.send({
           prompt:
             "Perform a handoff now (the operator invoked /handoff-continue, " +
@@ -758,6 +799,10 @@ const session = await joinSession({
         "prompt into THIS session (foreground). Consumes the agent-dispatch " +
         "handoff task if present, else the newest matching worktree handoff file.",
       handler: async (ctx) => {
+        if (!manualHandoffEnabled(handoffConfig.mode)) {
+          await session.log(handoffDisabledResult(), { level: "warning" });
+          return;
+        }
         const cwd = state.cwd || process.cwd();
         const sid = state.sessionId || ctx?.sessionId || "unknown";
 
@@ -859,6 +904,10 @@ const session = await joinSession({
         "Compatibility alias for /consume-handoff. Asks this session to invoke " +
         "the canonical stored-handoff consumer.",
       handler: async () => {
+        if (!manualHandoffEnabled(handoffConfig.mode)) {
+          await session.log(handoffDisabledResult(), { level: "warning" });
+          return;
+        }
         await session.send({
           prompt:
             "Invoke /consume-handoff now to load this worktree's pending " +
@@ -1058,13 +1107,31 @@ session.on("session.usage_info", (event) => {
   state.toolDefinitionsTokens = d.toolDefinitionsTokens ?? 0;
   state.messagesLength = d.messagesLength;
   state.lastUtilization = d.tokenLimit > 0 ? d.currentTokens / d.tokenLimit : 0;
-
-  const pressure = contextPressure(
-    d.currentTokens,
-    d.tokenLimit,
-    handoffConfig.thresholds,
-  );
   const usage = formatContextUsage(d.currentTokens, d.tokenLimit);
+  if (!automaticHandoffEnabled(handoffConfig.mode)) {
+    persistState();
+    return;
+  }
+
+  let pressure;
+  try {
+    pressure = contextPressure(
+      d.currentTokens,
+      d.tokenLimit,
+      handoffConfig.thresholds,
+    );
+  } catch (error) {
+    if (!state.thresholdWarningShown) {
+      state.thresholdWarningShown = true;
+      const message = error instanceof Error ? error.message : String(error);
+      session.log(
+        `[Context Handoff] Invalid configured thresholds for this token window; ` +
+        `using defaults for automatic pressure handling instead: ${message}`,
+        { level: "warning" },
+      );
+    }
+    pressure = contextPressure(d.currentTokens, d.tokenLimit);
+  }
 
   // Force tier: crossing it auto-drafts/stores/triggers a handoff and blocks
   // further mutating tool calls, without waiting for the agent. Checked first
@@ -1079,7 +1146,7 @@ session.on("session.usage_info", (event) => {
     state.hardLogShown = true;
     state.softLogShown = true;
     session.log(
-      `[Context Handoff] 🛑 Force threshold reached (${pressure.forcePercent}%, ` +
+      `[Context Handoff] 🛑 Force threshold reached (${formatConfiguredThreshold(pressure, "force")}, ` +
       `${Math.round(pressure.forceThreshold).toLocaleString()} tokens; ` +
       `current ${usage.tokens}). Auto-generating and triggering a handoff now. ` +
       "Further mutating tool calls are denied for the remainder of this session.",
@@ -1118,7 +1185,7 @@ session.on("session.usage_info", (event) => {
       `conversation ${(d.conversationTokens ?? 0).toLocaleString()}, ` +
       `system ${(d.systemTokens ?? 0).toLocaleString()}, ` +
       `tool-defs ${(d.toolDefinitionsTokens ?? 0).toLocaleString()}). ` +
-      `Configured ${pressure.hardPercent}% hard threshold ` +
+      `Configured ${formatConfiguredThreshold(pressure, "hard")} hard threshold ` +
       `${Math.round(pressure.hardThreshold).toLocaleString()} ` +
       `tokens reached; auto-compaction still triggers at ~80%. ` +
       `Hand off NOW -- invoke the context-handoff skill and trigger the handoff ` +
@@ -1134,7 +1201,7 @@ session.on("session.usage_info", (event) => {
       `conversation ${(d.conversationTokens ?? 0).toLocaleString()}, ` +
       `system ${(d.systemTokens ?? 0).toLocaleString()}, ` +
       `tool-defs ${(d.toolDefinitionsTokens ?? 0).toLocaleString()}). ` +
-      `Configured ${pressure.softPercent}% threshold ` +
+      `Configured ${formatConfiguredThreshold(pressure, "soft")} threshold ` +
       `${Math.round(pressure.softThreshold).toLocaleString()} ` +
       `tokens reached. Preserve the baton at the next clean boundary and, if ` +
       `work still remains, trigger the handoff directly (invoke the ` +

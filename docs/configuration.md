@@ -60,7 +60,7 @@ then re-run adoption when the machine-local projection needs refreshing.
 | `<repo>/.copilot-extensions/agent-machines/` | Repo-owned requirement packages under `all/` and `machines/<machine>/`. Legacy `.agent-machines/` and `.github/machine-state/` remain readable. Explicit marketplace-specific overlays live under `.copilot-extensions/agent-machines/marketplaces/<marketplace-id>/`. | normal repo edit / `agent-machines migrate` |
 | `containers.yaml` | Container fleet defaults (control repo) | `containers-fleet` |
 | `.github/agents/<name>.mcp.yaml` | A **repo-scoped** agent-mcp bridge config | you (per the `agent-mcp:agent-mcp` skill) |
-| `<repo>/.context-handoff/config.yaml` | Optional repository-owned soft/hard context utilization percentages | context-handoff repo setup / normal repo edit |
+| `<repo>/.context-handoff/config.yaml` | Optional repository-owned context-handoff policy (`mode`, percent or absolute-token thresholds). Merges per key over the user-global `~/.context-handoff/config.yaml` defaults. | context-handoff repo setup / normal repo edit |
 | `<repo>/.copilot-extensions/efforts/config.json` | Exact repository adoption marker for required effort-backed planning (`version: 1`, `enforcement: required`) | `efforts:efforts-setup` / normal repo edit |
 | `tools/setup/setup.{ps1,sh}` | The session setup script run before Copilot launches | `create-setup-script` |
 
@@ -76,6 +76,7 @@ then re-run adoption when the machine-local projection needs refreshing.
 | `~/.{project}/config.yaml` | Per-machine overrides + the adapter that makes a *foreign* repo compatible | `register` (machine wiring) |
 | `~/.agent-bridge/config.yaml` · `auth.yaml` | Bridge service config + bearer token (**secret**) | `install`, `agent-bridge config adopt`, and the service |
 | `~/.agent-logger/config.yaml` | Session-logging config (store dir, sync target) | `install` / you |
+| `~/.context-handoff/config.yaml` | User-global default context-handoff policy for payload-only sessions (lower priority than a repo's `.context-handoff/config.yaml`) | you |
 | `~/.agent-mcp/bridges/<name>` | A **personal / cross-repo** agent-mcp bridge config | you (per the `agent-mcp:agent-mcp` skill) |
 | `~/.budget-guidance/config.json` | Inert, per-user current budget readings and source authority | you / `budget-guidance-setup` |
 | `~/.agent-*/deploy-manifest.json`, runtime state | Per-machine runtime footprint (version, source, venv) | `install` / `update` |
