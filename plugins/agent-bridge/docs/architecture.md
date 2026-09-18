@@ -494,6 +494,9 @@ restart does not inherently close the child's pipes.
   Successful resume-flag publications advance the same revision fence as host
   registration. Startup, heartbeat, stranded sweeps, and authority-result
   application capture and recheck that revision, including equal-value ABA.
+  Successful removals retain an in-process revision tombstone, so a probe that
+  began with no record cannot resurrect authority after an add/remove ABA.
+  Batched dead-record pruning follows the same publication and rollback rule.
   End cleanup for an already-removed container identity uses strict metadata
   cleanup and retains the session and lock when index removal fails.
   Missing-endpoint reaps also retain an unsuccessful cleanup task instead of

@@ -144,7 +144,8 @@ class HostIndex:
             except Exception:
                 self._records[session_id] = previous
                 raise
-            self._record_revisions.pop(session_id, None)
+            self._revision += 1
+            self._record_revisions[session_id] = self._revision
         return previous is not None
 
     def set_resume_flag(self, session_id: str, value: bool) -> bool:
@@ -180,7 +181,14 @@ class HostIndex:
         if dead:
             for r in dead:
                 self._records.pop(r.session_id, None)
-            self._flush()
+            try:
+                self._flush()
+            except Exception:
+                self._records.update((r.session_id, r) for r in dead)
+                raise
+            for r in dead:
+                self._revision += 1
+                self._record_revisions[r.session_id] = self._revision
         return dead
 
     # -- query -------------------------------------------------------------
@@ -188,7 +196,7 @@ class HostIndex:
         return self._records.get(session_id)
 
     def revision(self, session_id: str) -> int:
-        """Return the in-process publication token, including equal-value replacements."""
+        """Return the publication token, retaining tombstones for removed records."""
         return self._record_revisions.get(session_id, 0)
 
     def all(self) -> list[HostRecord]:

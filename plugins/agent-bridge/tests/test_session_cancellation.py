@@ -1298,6 +1298,62 @@ async def test_authority_result_rejects_equal_value_republication(owned_context,
     assert ctx.manager._host_index.get(record.session_id) is replacement
 
 
+@pytest.mark.parametrize("removal", ["remove", "prune"])
+async def test_absent_authority_probe_rejects_add_remove_aba(owned_context, monkeypatch, removal):
+    ctx = owned_context
+    record = _remote_record(ctx)
+    index = ctx.manager._host_index
+    index.remove(record.session_id)
+    absent_revision = index.revision(record.session_id)
+
+    async def recover(_session_id):
+        index.register(record)
+        published_revision = index.revision(record.session_id)
+        if removal == "remove":
+            index.remove(record.session_id)
+        else:
+            index.prune_dead(lambda _pid: False)
+        assert index.revision(record.session_id) > published_revision
+        return record
+
+    spawner = SimpleNamespace(
+        can_inspect_without_wake=AsyncMock(return_value=True),
+        recover_record=AsyncMock(side_effect=recover),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
+        Mock(return_value=spawner),
+    )
+    monkeypatch.setattr("agent_bridge.relay_state.get_live_relay_port", lambda: None)
+    assert await ctx.manager._recover_remote_host_records(background=True) == 0
+    assert index.get(record.session_id) is None
+    assert index.revision(record.session_id) > absent_revision
+
+
+@pytest.mark.parametrize("removal", ["remove", "prune"])
+async def test_removal_tombstone_is_published_only_after_flush(owned_context, monkeypatch, removal):
+    ctx = owned_context
+    record = _remote_record(ctx)
+    index = ctx.manager._host_index
+    revision = index.revision(record.session_id)
+    flush = index._flush
+    monkeypatch.setattr(index, "_flush", Mock(side_effect=OSError("removal write failed")))
+
+    def remove():
+        if removal == "remove":
+            return index.remove(record.session_id)
+        return index.prune_dead(lambda _pid: False)
+
+    with pytest.raises(OSError, match="removal write failed"):
+        remove()
+    assert index.get(record.session_id) == record
+    assert index.revision(record.session_id) == revision
+    monkeypatch.setattr(index, "_flush", flush)
+    remove()
+    assert index.get(record.session_id) is None
+    assert index.revision(record.session_id) > revision
+
+
 async def test_end_preserves_removed_identity_when_index_write_fails(owned_context, monkeypatch):
     ctx = owned_context
     record = _remote_record(ctx)
