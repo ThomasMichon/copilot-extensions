@@ -7807,9 +7807,8 @@ class WorktreesView:
                 add(self._row_text(rec, li, sel, width, lcols,
                                    preview, preview_ids),
                     stop=("L", li), data=rec)
-                # Second (detail) row, always rendered: status_markers,
-                # asset_hints (#6443/upstream #1979 -- per-kind claim
-                # breakdown; full detail in the action menu), live-pulse.
+                # Second (detail) row: status_markers, asset_hints
+                # (#6443/upstream #1979 -- per-kind claim breakdown), pulse.
                 _pulse = rec.get("live_pulse")
                 _intent = (rec.get("live_intent") or "").strip()
                 _markers = (rec.get("status_markers") or "").strip()
@@ -7824,7 +7823,8 @@ class WorktreesView:
                         pline.append(tok, style=tok_style)
                     has_content = True
                 if _assets.get("hints"):
-                    pline.append(("  " if has_content else "") + " ".join(_assets["hints"]) + (f" +{_assets['overflow']}" if _assets.get("overflow") else ""), style=C_DIM)
+                    over = _assets.get("overflow") or 0
+                    pline.append(("  " if has_content else "") + " ".join(_assets.get("hints") or []) + (f" +{over}" if over else ""), style=C_DIM)
                     has_content = True
                 if _pulse and _intent:
                     if has_content:
