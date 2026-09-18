@@ -44,7 +44,8 @@ class SettlementTransport:
         if self.failure == "stop":
             return {"state": "stopping", "retired": False}
         self.claimed = False
-        return {"state": "stopped", "retired": True, "recovery": {"ok": False}}
+        return {"executionId": "execution", "generation": "generation",
+                "state": "stopped", "retired": True, "recovery": {"ok": False}}
 
     async def close(self):
         self.calls.append("close")

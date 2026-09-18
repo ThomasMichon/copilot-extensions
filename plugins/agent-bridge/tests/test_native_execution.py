@@ -39,7 +39,8 @@ class Backend:
             type(self).launches += 1
         if method == "stop":
             type(self).stopped = True
-            return {"retired": True, "state": "stopped", "exitCode": 7, "recovery": {"ok": True}}
+            return {"executionId": self.row["id"], "generation": self.row["generation"],
+                    "retired": True, "state": "stopped", "exitCode": 7, "recovery": {"ok": True}}
         if method == "message":
             return {"delivered": True}
         return {
@@ -144,9 +145,12 @@ class Child:
         self.stdin = self
         self.writes = []
         self.sizes = []
+        self.written = asyncio.Event()
+        self.resized = asyncio.Event()
 
     def write(self, data):
         self.writes.append(data)
+        self.written.set()
 
     async def drain(self):
         pass
@@ -162,6 +166,7 @@ class Child:
 
     def resize(self, *size):
         self.sizes.append(size)
+        self.resized.set()
 
     def start(self):
         pass
@@ -187,7 +192,7 @@ async def test_native_partial_output_replay_probe_and_retirement_do_not_use_acp(
             await wrong.probe(nonce=b"wrong")
         await wrong.close()
         await first.write(b"still attached\n")
-        await asyncio.sleep(.01)
+        await asyncio.wait_for(child.written.wait(), 1)
         assert child.writes == [b"still attached\n"]
         await first.close()
         await asyncio.sleep(.03)
@@ -196,7 +201,7 @@ async def test_native_partial_output_replay_probe_and_retirement_do_not_use_acp(
         await second.attach(nonce=b"secret")
         assert (await asyncio.wait_for(anext(second.frames()), 1))[1] == data
         await second.resize(40, 100)
-        await asyncio.sleep(.01)
+        await asyncio.wait_for(child.resized.wait(), 1)
         assert child.sizes == [(40, 100)]
         retire = await SessionHostClient.connect(port=port)
         assert await asyncio.wait_for(retire.retire(child_pid=child.pid, nonce=b"secret"), 2) == 7

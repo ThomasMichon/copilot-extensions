@@ -316,7 +316,8 @@ async def test_native_status_carries_real_mailbox_request_after_frontend_detach(
                     raise ConnectionError("synthetic lost acknowledgement")
                 return mailbox.complete(execution, generation, params)
             if method == "stop":
-                return {"retired": True, "state": "stopped", "recovery": {"ok": False}}
+                return {"executionId": execution, "generation": generation,
+                        "retired": True, "state": "stopped", "recovery": {"ok": False}}
             return {"state": "ready", "sessionId": "session", "represented": True,
                     "activated": True, "resourceRequests": mailbox.pending(execution, generation)}
 

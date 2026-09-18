@@ -28,6 +28,7 @@ async def test_stop_reconnects_only_retirement_control_when_application_ports_fa
     class Transport:
         def __init__(self, prefix, row, on_reserved, on_progress=None):
             self.on_reserved = on_reserved
+            self.row = row
 
         async def start(self, *, resume, retirement_only=False):
             self.retirement_only = retirement_only
@@ -38,7 +39,8 @@ async def test_stop_reconnects_only_retirement_control_when_application_ports_fa
             nonlocal activated
             calls.append(method)
             if method == "stop":
-                return {"state": "stopped", "retired": True, "exitCode": 7, "recovery": {"ok": True}}
+                return {"executionId": self.row["id"], "generation": self.row["generation"],
+                        "state": "stopped", "retired": True, "exitCode": 7, "recovery": {"ok": True}}
             if broken:
                 raise NativeError("provider_operation_failed", "application listener unavailable")
             if method == "activate":
@@ -148,6 +150,8 @@ async def test_provider_retirement_argv_retains_identity_and_relay_but_not_ports
 @pytest.mark.asyncio
 @pytest.mark.parametrize("proof", [None, {"retired": True}, {"retired": True, "noLaunch": True}])
 async def test_no_launch_stop_requires_durable_retirement_proof(tmp_path, monkeypatch, proof):
+    if proof is not None:
+        proof = {**proof, "executionId": "execution", "generation": "generation", "owner": str(tmp_path)}
     manager = NativeManager(tmp_path / "controller", lambda: ["provider"])
     store = manager.store(create=True)
     store.reserve(

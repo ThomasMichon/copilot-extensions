@@ -82,6 +82,10 @@ class ProviderTransport:
         self.reader_task = self.stderr_task = None
         self.ready = None
         self.write_lock = asyncio.Lock()
+        self.close_lock = asyncio.Lock()
+        self.closing = False
+        self.disconnected = False
+        self.drain_task = None
 
     async def start(self, *, resume: bool, retirement_only: bool = False) -> None:
         spec = self.row["data"]["spec"]
@@ -163,6 +167,7 @@ class ProviderTransport:
             if not self.ready.done():
                 self.ready.set_exception(NativeError("provider_unavailable", "Invalid native transport response", 503))
         finally:
+            self.disconnected = True
             error = NativeError("provider_unavailable", "Native infrastructure transport disconnected", 503)
             if not self.ready.done():
                 self.ready.set_exception(error)
@@ -172,6 +177,8 @@ class ProviderTransport:
             self.pending.clear()
 
     async def request(self, method: str, params: dict | None = None) -> dict:
+        if self.closing or self.disconnected:
+            raise NativeError("provider_unavailable", "Native transport is closing or disconnected", 503)
         timeout = 180.0
         if method == "message" and (params or {}).get("wait"):
             import math
@@ -196,20 +203,31 @@ class ProviderTransport:
                 "reply_transport_timeout", "Provider reply deadline expired; delivery remains uncertain. "
                 "Inspect the result or reuse the same messageId.", 504,
             ) from exc
+        except OSError as exc:
+            self.disconnected = True
+            raise NativeError("provider_unavailable", "Native transport disconnected; delivery is uncertain", 503) from exc
         finally:
             self.pending.pop(request_id, None)
+            if not future.done():
+                future.cancel()
+            elif not future.cancelled():
+                future.exception()
 
     async def close(self) -> None:
-        if self.process is not None and self.process.returncode is None:
-            self.process.stdin.close()
-            await asyncio.wait_for(self.process.wait(), 30)
-        for task in (self.reader_task, self.stderr_task):
-            if task is not None:
-                task.cancel()
-        await asyncio.gather(
-            *(task for task in (self.reader_task, self.stderr_task) if task is not None),
-            return_exceptions=True,
-        )
+        from .native_process import DRAIN_SECONDS, close_owned_process
+
+        self.closing = True
+        async with self.close_lock:
+            await close_owned_process(self.process)
+            if self.drain_task is None:
+                self.drain_task = asyncio.gather(
+                    *(task for task in (self.reader_task, self.stderr_task) if task is not None),
+                    return_exceptions=True,
+                )
+            try:
+                await asyncio.wait_for(asyncio.shield(self.drain_task), DRAIN_SECONDS)
+            except (TimeoutError, asyncio.TimeoutError) as exc:
+                raise NativeError("retirement_unconfirmed", "Owned local transport streams remain open", 503) from exc
 
 
 class NativeManager:
@@ -220,6 +238,7 @@ class NativeManager:
         self.transports = {}
         self.tasks = {}
         self.locks = {}
+        self.stop_locks = {}
         self.monitor_task = None
         self.resource_tasks = {}
         self._host_resources = None
@@ -266,11 +285,63 @@ class NativeManager:
     async def _finish_retirement(self, execution, generation, **changes):
         """Persist provider settlement after its owned transport has closed."""
         store = self.store()
+        current = store.get(execution, generation)
+        if execution in self.transports or current["data"].get("transportCleanupPending"):
+            raise NativeError("retirement_unconfirmed", "Owned local transport cleanup is still unconfirmed", 503)
+        proof = current["data"].get("providerRetirementProof")
+        if proof is not None:
+            self._validate_retirement_proof(current, proof)
+            changes.update(recovery=proof.get("recovery"), exitCode=proof.get("exitCode"))
         row = store.update(execution, generation, retired=True, represented=False,
                            providerRetirementConfirmed=True, **changes)
         if row["data"].get("spec", {}).get("hostResources"):
             await self.host_resources().cleanup(execution, generation)
-        return receipt(store.update(execution, generation, state="stopped", phase="stopped"))
+        return receipt(store.update(execution, generation, state="stopped", phase="stopped", error=None))
+
+    async def _close_transport(self, execution, generation, transport) -> None:
+        store = self.store()
+        row = store.get(execution, generation)
+        if transport is None:
+            if row["data"].get("transportCleanupPending"):
+                raise NativeError("retirement_unconfirmed", "Owned local transport cleanup is still unconfirmed", 503)
+            return
+        if row["state"] == "stopping":
+            store.update(execution, generation, transportCleanupPending=True)
+        try:
+            await transport.close()
+        except (OSError, TimeoutError, asyncio.TimeoutError) as exc:
+            raise NativeError("retirement_unconfirmed", "Owned local transport cleanup is unconfirmed", 503) from exc
+        store.update(execution, generation, transportCleanupPending=False)
+        if self.transports.get(execution) is transport:
+            self.transports.pop(execution)
+
+    @staticmethod
+    def _validate_retirement_proof(row, proof, *, require_owner=False):
+        if not isinstance(proof, dict) or proof.get("retired") is not True:
+            raise NativeError("retirement_unconfirmed", "Native retirement was not verified", 503)
+        namespace, name = record_venue(row)
+        if (
+            proof.get("executionId") != row["id"] or proof.get("generation") != row["generation"]
+            or (require_owner and proof.get("owner") != row["owner"])
+            or ("owner" in proof and proof["owner"] != row["owner"])
+            or any(field in proof and (field != namespace or proof[field] != name)
+                   for field in ("codespace", "container"))
+            or ("target" in proof and proof["target"] != f"{namespace}:{name}")
+        ):
+            raise NativeError("identity_mismatch", "Native retirement receipt does not match")
+        return proof
+
+    def _remember_retirement(self, row, proof):
+        self._validate_retirement_proof(row, proof)
+        store = self.store()
+        current = store.get(row["id"], row["generation"])
+        store.update(
+            row["id"], row["generation"], providerRetirementProof=proof, retired=True, represented=False,
+            recovery=proof.get("recovery"), exitCode=proof.get("exitCode"),
+            transportCleanupPending=bool(
+                current["data"].get("transportCleanupPending") or row["id"] in self.transports
+            ),
+        )
 
     def store(self, *, create: bool = False) -> NativeStore | None:
         if not create and not (self.root / "native-controller.sqlite").exists() and not (
@@ -413,8 +484,7 @@ class NativeManager:
                     )
                 if transport is not None:
                     try:
-                        await transport.close()
-                        self.transports.pop(execution_id, None)
+                        await self._close_transport(execution_id, generation, transport)
                     except Exception:
                         pass
 
@@ -430,7 +500,10 @@ class NativeManager:
 
     @staticmethod
     def _save_result(store, execution_id, generation, result):
-        stopping = store.get(execution_id, generation)["state"] == "stopping"
+        current = store.get(execution_id, generation)
+        if current["data"].get("providerRetirementProof") or current["data"].get("providerRetirementConfirmed"):
+            return current
+        stopping = current["state"] == "stopping"
         return store.update(
             execution_id, generation, state="stopping" if stopping or result.get("retired") or result["state"] == "stopped" else result["state"],
             represented=not stopping and bool(result.get("represented")), sessionId=result.get("sessionId"),
@@ -477,8 +550,7 @@ class NativeManager:
                     transport = self.transports.get(execution_id)
                     if transport is not None:
                         try:
-                            await transport.close()
-                            self.transports.pop(execution_id, None)
+                            await self._close_transport(execution_id, row["generation"], transport)
                         except Exception:
                             pass
         return receipt(store.get(execution_id, row["generation"]))
@@ -513,13 +585,20 @@ class NativeManager:
         return endpoint
 
     async def stop(self, execution_id: str, generation: str) -> dict:
+        async with self.stop_locks.setdefault(execution_id, asyncio.Lock()):
+            return await self._stop(execution_id, generation)
+
+    async def _stop(self, execution_id: str, generation: str) -> dict:
         if not self.serving():
             raise NativeError("not_ready", "Native controller is rebinding", 503)
         store = self.store()
         if store is None:
             raise NativeError("not_found", "Native execution is not recorded", 404)
         row = store.get(execution_id, generation)
-        if row["state"] == "stopped" and row["data"].get("retired") and execution_id not in self.transports:
+        if (
+            row["state"] == "stopped" and row["data"].get("retired")
+            and execution_id not in self.transports and not row["data"].get("transportCleanupPending")
+        ):
             return receipt(row)
         store.update(execution_id, generation, state="stopping", represented=False, phase="stopping")
         resources = [task for key, task in self.resource_tasks.items() if key[:2] == (execution_id, generation)]
@@ -531,73 +610,90 @@ class NativeManager:
                 pending.cancel()
             await asyncio.gather(pending, return_exceptions=True)
         row = store.get(execution_id, generation)
+        transport = self.transports.get(execution_id)
         if row["data"].get("providerRetirementConfirmed"):
-            transport = self.transports.get(execution_id)
-            if transport is not None:
-                await transport.close()
-                self.transports.pop(execution_id, None)
+            await self._close_transport(execution_id, generation, transport)
+            return await self._finish_retirement(execution_id, generation)
+        proof = row["data"].get("providerRetirementProof")
+        if proof is not None:
+            self._validate_retirement_proof(row, proof)
+            await self._close_transport(execution_id, generation, transport)
             return await self._finish_retirement(execution_id, generation)
         if not row["data"].get("launchRequested"):
-            transport = self.transports.get(execution_id)
-            if transport is not None:
-                await transport.close()
-                self.transports.pop(execution_id, None)
-            from agent_procutil import no_window_kwargs
-
-            proc = await asyncio.create_subprocess_exec(
-                *self._row_provider(row), "native-abort", record_venue(row)[1],
-                "--owner", row["owner"], "--execution-id", execution_id, "--generation", generation,
-                cwd=row["owner"], stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, **no_window_kwargs(),
-            )
-            await asyncio.wait_for(proc.communicate(), 30)
-            if proc.returncode:
-                raise NativeError("retirement_unconfirmed", "Unlaunched native ownership could not be released")
+            await self._close_transport(execution_id, generation, transport)
+            await self._provider_control(row, "native-abort")
             proof = await self._retirement_receipt(row)
             if not proof or proof.get("noLaunch") is not True:
                 raise NativeError("retirement_unconfirmed", "Unlaunched native retirement receipt is unavailable")
+            self._remember_retirement(row, proof)
             return await self._finish_retirement(execution_id, generation)
-        if execution_id not in self.transports:
+        if transport is None:
+            await self._close_transport(execution_id, generation, None)
             cached = await self._retirement_receipt(row)
             if cached:
-                return await self._finish_retirement(
-                    execution_id, generation, recovery=cached.get("recovery"), exitCode=cached.get("exitCode"),
-                )
+                self._remember_retirement(row, cached)
+                return await self._finish_retirement(execution_id, generation)
             await self._prepare(execution_id, generation, retirement_only=True)
         transport = self.transports.get(execution_id)
         if transport is None:
             raise NativeError("retirement_unconfirmed", "Native infrastructure is unavailable; ownership retained", 503)
-        result = await transport.request("stop")
-        if result.get("retired") is not True:
-            raise NativeError("retirement_unconfirmed", "Native retirement was not verified")
-        await transport.close()
-        self.transports.pop(execution_id, None)
-        return await self._finish_retirement(
-            execution_id, generation, recovery=result.get("recovery"), exitCode=result.get("exitCode"),
-        )
+        try:
+            result = await transport.request("stop")
+        except (OSError, TimeoutError, asyncio.TimeoutError, NativeError) as exc:
+            if isinstance(exc, NativeError) and exc.code not in {
+                "provider_unavailable", "provider_operation_failed", "reply_transport_timeout",
+            }:
+                raise
+            try:
+                proof = await self._retirement_receipt(row)
+                if proof is not None:
+                    self._remember_retirement(row, proof)
+            finally:
+                await self._close_transport(execution_id, generation, transport)
+            if proof is None:
+                raise NativeError(
+                    "retirement_unconfirmed", "Native transport failed and no retirement proof is available; ownership retained", 503,
+                ) from exc
+        else:
+            self._remember_retirement(row, result)
+            await self._close_transport(execution_id, generation, transport)
+        return await self._finish_retirement(execution_id, generation)
 
-    async def _retirement_receipt(self, row: dict) -> dict | None:
+    async def _provider_control(self, row: dict, action: str) -> bytes:
         from agent_procutil import no_window_kwargs
+        from .native_process import close_owned_process
 
         prefix = self._row_provider(row)
         if not prefix:
             raise NativeError("provider_unavailable", "Native provider is unavailable", 503)
-        proc = await asyncio.create_subprocess_exec(
-            *prefix, "native-retirement", record_venue(row)[1], "--owner", row["owner"],
-            "--execution-id", row["id"], "--generation", row["generation"], cwd=row["owner"],
-            stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-            **no_window_kwargs(),
-        )
-        out, _ = await asyncio.wait_for(proc.communicate(), 30)
+        proc = None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *prefix, action, record_venue(row)[1], "--owner", row["owner"],
+                "--execution-id", row["id"], "--generation", row["generation"], cwd=row["owner"],
+                stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                **no_window_kwargs(),
+            )
+            out, _ = await asyncio.wait_for(proc.communicate(), 30)
+        except (OSError, TimeoutError, asyncio.TimeoutError) as exc:
+            await close_owned_process(proc, grace=0)
+            raise NativeError("retirement_unconfirmed", "Native provider settlement could not be read", 503) from exc
+        except asyncio.CancelledError:
+            await close_owned_process(proc, grace=0)
+            raise
         if proc.returncode:
             raise NativeError("retirement_unconfirmed", "Native retirement receipt could not be read", 503)
-        value = json.loads(out).get("receipt")
-        if value is not None and (
-            value.get("executionId") != row["id"] or value.get("generation") != row["generation"]
-            or value.get("owner") != row["owner"] or value.get("retired") is not True
-        ):
-            raise NativeError("identity_mismatch", "Native retirement receipt does not match")
-        return value
+        return out
+
+    async def _retirement_receipt(self, row: dict) -> dict | None:
+        try:
+            payload = json.loads(await self._provider_control(row, "native-retirement"))
+        except (ValueError, UnicodeError) as exc:
+            raise NativeError("retirement_unconfirmed", "Native retirement receipt is unreadable", 503) from exc
+        if not isinstance(payload, dict) or "receipt" not in payload:
+            raise NativeError("retirement_unconfirmed", "Native retirement receipt payload is invalid", 503)
+        value = payload["receipt"]
+        return self._validate_retirement_proof(row, value, require_owner=True) if value is not None else None
 
     async def represented(self, execution_id: str, generation: str, operation: str, params: dict) -> dict:
         if not self.serving():
@@ -658,7 +754,7 @@ class NativeManager:
         await asyncio.gather(*pending, return_exceptions=True)
         for execution_id, transport in list(self.transports.items()):
             try:
-                await transport.close()
-                self.transports.pop(execution_id, None)
+                row = self.store().get(execution_id)
+                await self._close_transport(execution_id, row["generation"], transport)
             except Exception:
                 pass
