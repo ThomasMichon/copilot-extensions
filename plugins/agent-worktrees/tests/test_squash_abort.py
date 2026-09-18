@@ -309,3 +309,27 @@ def test_push_changes_retries_on_non_fast_forward(tmp_path: Path, monkeypatch):
 
     assert ok is True
     assert push_calls["n"] == 2  # raced once, then succeeded after rebase
+
+
+# ---------------------------------------------------------------------------
+# finalize.push_changes -- untitled squash fallback never leaks worktree_id
+# ---------------------------------------------------------------------------
+
+def test_untitled_direct_push_squash_never_leaks_worktree_id(tmp_path: Path, monkeypatch):
+    """With no --title, no persisted record title, and >1 commit ahead (the
+    real squash path, not mocked), the squash commit message must never be
+    the raw worktree_id -- it can embed the authoring machine name and
+    creation timestamp, and this path lands directly on a (possibly public)
+    default branch."""
+    from agent_worktrees import finalize
+
+    repo, wt_id, config = _make_pushable_repo(tmp_path, 3, monkeypatch)
+    monkeypatch.setattr(finalize.git_ops, "push", lambda *a, **k: PushResult(ok=True))
+    monkeypatch.setattr(finalize.git_ops, "fetch", lambda *a, **k: None)
+
+    ok = finalize.push_changes(wt_id, config)
+
+    assert ok is True
+    subject = git_ops.git("log", "-1", "--format=%s", cwd=str(repo), check=False).stdout.strip()
+    assert wt_id not in subject
+    assert subject == f"squash: merge worktree {git_ops.worktree_suffix(wt_id)}"

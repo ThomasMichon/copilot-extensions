@@ -127,6 +127,38 @@ class TestFeatureBranchName:
         assert name.endswith("-abcd")
 
 
+class TestSafeWorktreeLabel:
+    """The last-resort fallback used when a worktree has no explicit title,
+    no persisted title, and no derivable commit-subject title. It must never
+    surface the raw worktree_id -- which embeds the authoring machine name
+    and creation timestamp -- since this label feeds a PR title, a PR branch
+    name, and a squash commit message, any of which can reach a public repo.
+    """
+
+    def test_never_contains_the_machine_name_or_timestamp(self):
+        worktree_id = "example-host-20260917-125245-3a94"
+        label = pr_ops._safe_worktree_label(worktree_id)
+        assert "example-host" not in label
+        assert "20260917" not in label
+        assert label == "Worktree 3a94 changes"
+
+    def test_worktree_suffix_matches_git_ops(self):
+        worktree_id = "example-host-20260917-125245-3a94"
+        assert pr_ops._worktree_suffix(worktree_id) == \
+            git_ops.worktree_suffix(worktree_id) == "3a94"
+
+    def test_no_dash_worktree_id_never_returned_verbatim(self):
+        """A worktree id with no dash has no trailing token to extract; the
+        suffix must still never be the raw id itself (a legacy/malformed
+        tracking id is exactly the kind of unusual input `create_pr` may
+        still see, so this can't be assumed away)."""
+        worktree_id = "nodashesatall"
+        suffix = git_ops.worktree_suffix(worktree_id)
+        assert suffix != worktree_id
+        assert pr_ops._safe_worktree_label(worktree_id) != f"Worktree {worktree_id} changes"
+        # Deterministic: the same input always yields the same digest.
+        assert git_ops.worktree_suffix(worktree_id) == suffix
+
 class TestPRHeadName:
     def test_snapshot_default_matches_feature_branch_name(self):
         prcfg = cfg.PRConfig(enabled=True, branch_prefix="feature", head_scheme="snapshot")
@@ -377,6 +409,28 @@ class TestCreatePR:
         assert res["branch"] == "feature/curated-title-aaaa"
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         assert rec.title == "Curated Title"
+
+    def test_true_last_resort_never_leaks_worktree_id(self, pr_repo, monkeypatch):
+        """When there is no --title, no persisted title, AND no derivable
+        commit-subject title (the actual last resort), create_pr must not
+        fall back to the raw worktree_id -- it embeds the authoring machine
+        name and creation timestamp, and would otherwise leak into the PR
+        branch name, the PR title, and the squash commit message on a
+        public repo."""
+        config, wid, wt_path, _ = pr_repo
+        monkeypatch.setattr(pr_ops, "_title_from_commits", lambda *a, **k: None)
+        res = pr_ops.create_pr(wid, config)
+        assert res["success"] is True, res
+        assert wid not in res["branch"]
+        assert res["branch"] == "feature/worktree-aaaa-changes-aaaa"
+        # The squash commit message is the fallback label too -- confirm it
+        # never contains the raw worktree_id.
+        subject = _git(
+            "log", "-1", "--format=%s", "feature/worktree-aaaa-changes-aaaa",
+            cwd=wt_path,
+        )
+        assert wid not in subject
+        assert subject == "Worktree aaaa changes"
 
 
 # ---------------------------------------------------------------------------

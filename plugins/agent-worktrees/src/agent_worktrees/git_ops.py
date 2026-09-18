@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import functools
+import hashlib
 import logging
 import os
 import platform
@@ -772,6 +773,26 @@ def fast_forward_worktree(
     return FastForwardResult(updated=True, reason="updated", behind=behind)
 
 
+def worktree_suffix(worktree_id: str) -> str:
+    """The final dash-delimited token of a worktree id (its short hash).
+
+    Worktree ids embed the authoring machine name and creation timestamp
+    (e.g. ``example-host-20260917-125245-3a94``). This suffix is the only
+    part safe to surface in content that may leave the machine (a commit
+    message, a PR title, a branch name): callers that need a fallback label
+    for an untitled worktree must use this instead of the raw ``worktree_id``,
+    which would otherwise leak the machine name and timestamp into public
+    repos.
+
+    A worktree id with no dash has no trailing token to extract -- returning
+    it verbatim would publish the whole (potentially identifying) id, so that
+    case instead derives a short, deterministic, non-reversible digest.
+    """
+    if "-" in worktree_id:
+        return worktree_id.rsplit("-", 1)[-1]
+    return hashlib.sha256(worktree_id.encode("utf-8")).hexdigest()[:8]
+
+
 def merge_squash(branch: str, worktree_id: str, *, cwd: str | Path) -> bool:
     """Squash merge with auto-commit. Returns True on success."""
     result = git("merge", branch, "--squash", "--quiet", cwd=cwd, check=False)
@@ -782,8 +803,11 @@ def merge_squash(branch: str, worktree_id: str, *, cwd: str | Path) -> bool:
     # the client-side guard hooks (the anchor-commit / default-branch pre-commit
     # guard), which exist to stop *stray* human/agent commits -- not this
     # mechanical finalize step. Mirrors the sibling squash path + rebase/push.
+    # The commit message uses only the worktree's short suffix, never the raw
+    # worktree_id -- which embeds the authoring machine name and timestamp and
+    # must not leak into a commit that can land on a public default branch.
     commit_r = git(
-        "commit", "--no-edit", "-m", f"squash: merge worktree/{worktree_id}",
+        "commit", "--no-edit", "-m", f"squash: merge worktree {worktree_suffix(worktree_id)}",
         cwd=cwd, check=False, no_hooks=True,
     )
     return commit_r.returncode == 0
