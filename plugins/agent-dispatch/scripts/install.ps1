@@ -943,12 +943,30 @@ function Install-Runtime {
     # `procutil.agent_worktrees_environment`, even though every verified copy
     # of the real dev111 *source* (git HEAD and the staged marketplace
     # snapshot both) has always defined it. Force a fresh build/install every
-    # time so a stale cache entry can never silently ship again.
+    # time so a stale cache entry can never silently ship again -- covering
+    # agent-dispatch itself AND its own local `[tool.uv.sources]` workspace
+    # path deps (agent-procutil, agent-zdd, agent-dropin-registry,
+    # agent-plugin-activation, agent-plugin-resolve), which are equally local
+    # PATH sources and equally vulnerable. #2863 also flagged a second,
+    # same-class ImportError in the self-update fallback
+    # (`from agent_procutil import ...`) -- agent-procutil is exactly one of
+    # these.
+    $StaleCacheRefreshPackages = @(
+        'agent-dispatch',
+        'agent-procutil',
+        'agent-zdd',
+        'agent-dropin-registry',
+        'agent-plugin-activation',
+        'agent-plugin-resolve'
+    )
     $installPkg = {
         param([string]$Spec)
         if (Get-Command uv -ErrorAction SilentlyContinue) {
-            $out = & uv pip install --reinstall-package agent-dispatch --refresh-package agent-dispatch `
-                --python $VenvPython $Spec 2>&1 | Out-String
+            $refreshFlags = @()
+            foreach ($pkg in $StaleCacheRefreshPackages) {
+                $refreshFlags += @('--reinstall-package', $pkg, '--refresh-package', $pkg)
+            }
+            $out = & uv pip install --python $VenvPython @refreshFlags $Spec 2>&1 | Out-String
         } else {
             & $VenvPython -m pip install --force-reinstall --no-deps $Spec 2>&1 | Out-Null
             $out = & $VenvPython -m pip install $Spec 2>&1 | Out-String

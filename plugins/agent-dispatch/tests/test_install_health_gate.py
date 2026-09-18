@@ -17,9 +17,12 @@ mismatch traced to two compounding gaps in `install.sh`/`install.ps1`:
 
 These tests are static-text guards (following the precedent in
 `test_install_sh_version_ordering.py`) ensuring both fixes stay in place:
-the local-path install always forces a fresh build, and the health gate
-actually exercises the lazily-imported `embody` chain before a slot is
-activated or reported healthy.
+the local-path install always forces a fresh build for agent-dispatch AND
+its own local `[tool.uv.sources]` workspace path deps (equally vulnerable
+local PATH sources -- #2863 separately flagged a same-class ImportError
+against one of them, `agent-procutil`, in the self-update fallback path),
+and the health gate actually exercises the lazily-imported `embody` chain
+before a slot is activated or reported healthy.
 """
 
 from __future__ import annotations
@@ -30,10 +33,24 @@ _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 _INSTALL_SH = (_PLUGIN_ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
 _INSTALL_PS1 = (_PLUGIN_ROOT / "scripts" / "install.ps1").read_text(encoding="utf-8")
 
+_LOCAL_PATH_PACKAGES = (
+    "agent-dispatch",
+    "agent-procutil",
+    "agent-zdd",
+    "agent-dropin-registry",
+    "agent-plugin-activation",
+    "agent-plugin-resolve",
+)
+
 
 def test_sh_pip_install_forces_fresh_build():
-    assert "--reinstall-package agent-dispatch" in _INSTALL_SH
-    assert "--refresh-package agent-dispatch" in _INSTALL_SH
+    assert "_STALE_CACHE_REFRESH_PACKAGES" in _INSTALL_SH
+    assert "--reinstall-package \"$pkg\" --refresh-package \"$pkg\"" in _INSTALL_SH
+    array_start = _INSTALL_SH.index("_STALE_CACHE_REFRESH_PACKAGES=(")
+    array_end = _INSTALL_SH.index(")", array_start)
+    array_body = _INSTALL_SH[array_start:array_end]
+    for pkg in _LOCAL_PATH_PACKAGES:
+        assert pkg in array_body
 
 
 def test_sh_health_gate_imports_embody():
@@ -44,8 +61,10 @@ def test_sh_health_gate_imports_embody():
 
 
 def test_ps1_pip_install_forces_fresh_build():
-    assert "--reinstall-package agent-dispatch" in _INSTALL_PS1
-    assert "--refresh-package agent-dispatch" in _INSTALL_PS1
+    for pkg in _LOCAL_PATH_PACKAGES:
+        assert f"'{pkg}'" in _INSTALL_PS1
+    assert "StaleCacheRefreshPackages" in _INSTALL_PS1
+    assert "--reinstall-package', $pkg, '--refresh-package', $pkg" in _INSTALL_PS1
 
 
 def test_ps1_health_gate_imports_embody():
