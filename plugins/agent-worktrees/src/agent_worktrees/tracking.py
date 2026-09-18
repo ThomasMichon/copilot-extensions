@@ -964,6 +964,12 @@ class WorktreeRecord:
     # hard-delete instead of re-tombstoning. Emitted only when set, so an
     # unpaired (or not-yet-reaped) record's YAML stays byte-identical.
     reaped_at: str | None = None
+    # pr-attribution-codenames Phase 2 (#2838): the public-safe handle
+    # assigned once per worktree (see ``agent_worktrees.codename``). Absent on
+    # a pre-Phase-2 record until lazily backfilled (``ensure_codename`` in
+    # ``codename_tracking.py``); emitted only when set, so a legacy YAML
+    # stays byte-identical.
+    codename: str | None = None
 
     @property
     def owner_claim_ref(self) -> ClaimRef | None:
@@ -2112,6 +2118,7 @@ def load_record(path: Path) -> WorktreeRecord:
         pair_kind=(data["pair_kind"]
                    if data.get("pair_kind") in ("worktree", "anchor") else None),
         reaped_at=(str(data["reaped_at"]) if data.get("reaped_at") else None),
+        codename=(str(data["codename"]) if data.get("codename") else None),
     )
     record._loaded_from = path
     return record
@@ -2614,6 +2621,10 @@ def _save_record_unlocked(
     # that was tombstoned by retire_record's paired-reap path).
     if record.reaped_at:
         content += f"reaped_at: {_yaml_scalar(record.reaped_at)}\n"
+    # pr-attribution-codenames Phase 2: emitted only when assigned, so a
+    # legacy/pre-Phase-2 worktree's YAML stays byte-identical.
+    if record.codename:
+        content += f"codename: {_yaml_scalar(record.codename)}\n"
     # agent-fabric resource-claims: the forward outbound list. Emitted only when
     # non-empty (the common case owns nothing), keeping legacy YAMLs identical.
     if record.resources:
@@ -3848,6 +3859,7 @@ def create_new_record(
     pair_role: str | None = None,
     pair_ref: str | None = None,
     pair_kind: str | None = None,
+    codename: str | None = None,
 ) -> WorktreeRecord:
     """Create and save a new worktree tracking record."""
     now = _now_iso()
@@ -3893,6 +3905,7 @@ def create_new_record(
         pair_role=pair_role or None,
         pair_ref=pair_ref or None,
         pair_kind=pair_kind or None,
+        codename=codename or None,
     )
     _mark_controller_projection_dirty(
         record,

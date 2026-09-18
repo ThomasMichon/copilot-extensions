@@ -316,6 +316,21 @@ class TestSaveLoadRoundTrip:
         assert "caller_worktree" not in path2.read_text()
         assert load_record(path2).caller_worktree is None
 
+    def test_codename_round_trip(self, tmp_path: Path):
+        # pr-attribution-codenames Phase 2 (#2838): the assigned codename
+        # survives save/load and is omitted (byte-identical legacy YAML)
+        # when unset.
+        rec = self._make_record(codename="rusty-gizmo")
+        path = tmp_path / "wt.yaml"
+        save_record(rec, path)
+        assert "codename: rusty-gizmo" in path.read_text()
+        assert load_record(path).codename == "rusty-gizmo"
+        rec2 = self._make_record()
+        path2 = tmp_path / "wt2.yaml"
+        save_record(rec2, path2)
+        assert "codename" not in path2.read_text()
+        assert load_record(path2).codename is None
+
     def test_owner_ref_round_trip(self, tmp_path: Path):
         # resource-claims: the backward owner link survives save/load, is
         # omitted when unset, and parses into a qualified ClaimRef.

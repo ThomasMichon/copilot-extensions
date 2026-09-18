@@ -98,6 +98,7 @@ from agent_procutil import (
 from . import (
     activity,
     claim_handoffs,
+    codename_tracking,
     disposition_history,
     effort_focus,
     git_ops,
@@ -1080,6 +1081,8 @@ def _worktree_to_dict(
         "title": rec.title,
         "resume_count": rec.resume_count,
     }
+    if rec.codename:
+        d["codename"] = rec.codename
     # Session ownership is durable record state, not live-scan enrichment.
     # Cache-only Picker rows must therefore carry the registered session count
     # and current head before any events/mux/process scan runs.  The head is the
@@ -2245,6 +2248,12 @@ def _create_worktree_core(
         # Write tracking YAML
         tracking_path = cfg.tracking_dir()
         tracking_path.mkdir(parents=True, exist_ok=True)
+        # pr-attribution-codenames Phase 2 (#2838): assign one codename per
+        # worktree at create time, from the repo's declared wordlist (or the
+        # built-in neutral one).
+        new_codename = codename_tracking.assign_new_codename(
+            tracking_path, codename_tracking.wordlist_for_repo(config)
+        )
         record = tracking.create_new_record(
             worktree_id=worktree_id,
             branch=branch,
@@ -2257,6 +2266,7 @@ def _create_worktree_core(
             owner=owner,
             interface=interface,
             origin=origin,
+            codename=new_codename,
             dispatch_attempt=(
                 tracking.DispatchAttempt(
                     task_id=str(dispatch_attempt["task_id"]),
@@ -4016,6 +4026,12 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     use_base = getattr(args, "base", False)
     use_new = getattr(args, "new_worktree", False) or getattr(args, "auto", False)
     requested_machine = getattr(args, "machine", None)
+    # pr-attribution-codenames Phase 2: --codename is an alternate selector for
+    # --worktree-id -- resolve it once, up front, so every existing worktree_id
+    # branch below works unchanged.
+    codename_arg = getattr(args, "codename", None)
+    if codename_arg and not getattr(args, "worktree_id", None):
+        args.worktree_id = resolve_worktree_id_by_codename(codename_arg)
 
     if use_json:
         args.no_mux = True
@@ -6280,6 +6296,7 @@ from .worktree_identity import (  # noqa: E402 -- re-export position matches ori
     _resolve_worktree_id,
     _worktree_id_from_git,
     _worktree_path_for_id,
+    resolve_worktree_id_by_codename,
 )
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -11958,6 +11975,9 @@ def cmd_list(args: argparse.Namespace) -> int:
     """
     records = _list_records_for_args(args)
     worktree_id = getattr(args, "worktree_id", None)
+    codename_arg = getattr(args, "codename", None)
+    if codename_arg and not worktree_id:
+        worktree_id = resolve_worktree_id_by_codename(codename_arg) or codename_arg
     if worktree_id:
         try:
             records = _filter_list_worktree(records, worktree_id)
@@ -22508,6 +22528,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--worktree-id", default=None, help="Worktree ID to resolve (required with --json)"
     )
     p.add_argument(
+        "--codename", default=None,
+        help="Codename to resolve (alternative to --worktree-id)",
+    )
+    p.add_argument(
         "--base", action="store_true", help="Resolve for the anchor repo (no picker, no worktree)"
     )
     p.add_argument(
@@ -23293,6 +23317,11 @@ def build_parser() -> argparse.ArgumentParser:
         "0 disables).",
     )
     p.add_argument("--worktree-id", help="Restrict the listing to one exact or unique-suffix ID")
+    p.add_argument(
+        "--codename", default=None,
+        help="Restrict the listing to the worktree with this codename "
+        "(alternative to --worktree-id)",
+    )
     p.add_argument(
         "--refresh",
         action="store_true",

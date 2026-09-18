@@ -268,3 +268,29 @@ def _resolve_worktree_id(raw_id: str) -> str:
 
     # No tracking match -- return as-is (caller will fail on missing YAML)
     return raw_id
+
+
+def resolve_worktree_id_by_codename(codename: str) -> str | None:
+    """Resolve a codename (see ``codename_tracking.py``) to its worktree id
+    within the current project's tracking directory.
+
+    Returns ``None`` for an empty/unmatched codename. Raises ``SystemExit``
+    on an ambiguous codename (should not happen in practice -- codenames are
+    assigned collision-free per project -- but a legacy/hand-edited YAML
+    could duplicate one, so this fails loudly rather than picking silently).
+    """
+    if not codename:
+        return None
+    tdir = cfg.tracking_dir()
+    matches = [
+        rec.worktree_id
+        for rec in tracking.list_records(tdir)
+        if rec.codename == codename
+    ]
+    if len(matches) > 1:
+        output.err(
+            f"Ambiguous codename '{codename}' matches {len(matches)} worktrees: "
+            f"{', '.join(sorted(matches))}"
+        )
+        raise SystemExit(1)
+    return matches[0] if matches else None
