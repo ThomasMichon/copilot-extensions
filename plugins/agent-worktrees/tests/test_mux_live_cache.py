@@ -194,8 +194,11 @@ def test_reaper_does_not_clear_hint_when_kill_fails(tmp_path):
 def test_restart_copilot_clears_hint_on_graceful_stop():
     calls = []
     with patch("agent_worktrees.sessions.has_mux_session", return_value=True), \
-         patch("agent_worktrees.sessions.graceful_quit_mux_session",
-               return_value=True), \
+         patch("agent_worktrees.sessions.mux_active_pane", return_value="%1"), \
+         patch("agent_worktrees.sessions.mux_session_name", return_value="wt-aaaa"), \
+         patch("agent_worktrees.pane_lifecycle.pane_terminate", return_value={
+             "ok": True, "pane": "%1", "gone": True, "method": "graceful",
+         }), \
          patch("agent_worktrees.tracking.stamp_mux_live",
                side_effect=lambda wt, live, **kw: calls.append((wt, live))):
         res = sessions.restart_worktree_copilot("aaaa")

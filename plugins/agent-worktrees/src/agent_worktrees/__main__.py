@@ -3147,7 +3147,7 @@ def _handoff_cutover_spawn_result(
             "handoff_successor_spawn_failed", error=error, **spawn_event_ctx)
     activity.log_event("handoff_successor_spawn_started", **spawn_event_ctx)
     try:
-        result = sessions.mux_new_window(
+        result = pane_lifecycle.pane_create(
             wt_id, work_dir, launch_cmd, env,
             initial_prompt=seed, session_name=mux_session)
     except Exception as exc:
@@ -3193,16 +3193,19 @@ def _handoff_cutover_spawn_result(
             )
             return 4, failure
 
-    response: dict[str, object] = {
-        "ok": True,
-        "session": mux_session or sessions.mux_session_name(wt_id),
-        "old_pane": old_pane,
-        "new_pane": new_pane,
-        "seed_len": len(seed),
-        "seeded": bool(result.get("prompt_received")),
-        "seed_ready": bool(result.get("prompt_received")),
-        "seed_method": "interactive-argv",
-    }
+    response: dict[str, object] = dict(result)
+    response.update(
+        {
+            "ok": True,
+            "session": mux_session or sessions.mux_session_name(wt_id),
+            "old_pane": old_pane,
+            "new_pane": new_pane,
+            "seed_len": len(seed),
+            "seeded": bool(result.get("prompt_received")),
+            "seed_ready": bool(result.get("prompt_received")),
+            "seed_method": "interactive-argv",
+        }
+    )
     if candidate_session:
         response["candidate_session"] = candidate_session
     if selection.assignment is not None:
@@ -3546,7 +3549,10 @@ def _handoff_cutover_retire_result(
             "current_mux_session": current_mux,
         }
     else:
-        result = sessions.mux_retire_pane(retire_pane)
+        result = pane_lifecycle.pane_terminate(
+            retire_pane,
+            mux_session=expected_mux,
+        )
     reap = {"checked": False}
     identity_skip = result.get("method") in {
         "process-identity-unavailable", "process-identity-mismatch",
