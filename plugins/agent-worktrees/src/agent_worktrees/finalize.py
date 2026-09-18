@@ -242,7 +242,12 @@ def push_changes(
         # 4. Pre-squash
         if wt_exists and ahead_count > 1:
             squash_title = title or (record.title if record else None)
-            squash_msg = squash_title or f"squash: merge worktree/{worktree_id}"
+            # Never fall back to the raw worktree_id in a commit message that
+            # can land on a public default branch (direct-push repos) -- it
+            # embeds the authoring machine name and creation timestamp. Use
+            # only the worktree's short suffix.
+            suffix = git_ops.worktree_suffix(worktree_id)
+            squash_msg = squash_title or f"squash: merge worktree {suffix}"
             print(f"Squashing {ahead_count} commits into one...")
             squashed, squash_reason = git_ops.squash_branch(
                 upstream, squash_msg, cwd=worktree_path

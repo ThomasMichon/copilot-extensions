@@ -13,8 +13,10 @@ from agent_worktrees.git_ops import (
     WorktreeStateInfo,
     git,
     is_cwd_inside,
+    merge_squash,
     refine_state_with_session,
     resolve_to_anchor,
+    worktree_suffix,
 )
 
 # ---------------------------------------------------------------------------
@@ -759,3 +761,51 @@ class TestClassifyGitStateFetchFailed:
         )
         assert info.fetch_requested is False
         assert info.fetch_failed is False
+
+
+# ---------------------------------------------------------------------------
+# worktree_suffix / merge_squash -- never publish the raw worktree_id
+# ---------------------------------------------------------------------------
+
+class TestWorktreeSuffix:
+    def test_extracts_trailing_dash_token(self):
+        assert worktree_suffix("example-host-20260917-125245-3a94") == "3a94"
+
+    def test_no_dash_id_is_not_returned_verbatim(self):
+        """No trailing token to extract -- must still never publish the raw
+        (potentially identifying) id verbatim."""
+        wid = "nodashesatall"
+        suffix = worktree_suffix(wid)
+        assert suffix != wid
+
+    def test_no_dash_id_is_deterministic(self):
+        wid = "nodashesatall"
+        assert worktree_suffix(wid) == worktree_suffix(wid)
+
+
+class TestMergeSquash:
+    def _repo(self, tmp_path: Path) -> Path:
+        repo = tmp_path / "r"
+        repo.mkdir()
+        git("init", "-b", "master", cwd=repo)
+        git("config", "user.email", "t@example.com", cwd=repo)
+        git("config", "user.name", "Test", cwd=repo)
+        (repo / "a.txt").write_text("one\n")
+        git("add", "-A", cwd=repo)
+        git("commit", "-m", "initial", cwd=repo)
+        return repo
+
+    def test_commit_message_never_contains_the_raw_worktree_id(self, tmp_path: Path):
+        repo = self._repo(tmp_path)
+        git("checkout", "-b", "feature", cwd=repo)
+        (repo / "b.txt").write_text("two\n")
+        git("add", "-A", cwd=repo)
+        git("commit", "-m", "feature work", cwd=repo)
+        git("checkout", "master", cwd=repo)
+
+        worktree_id = "example-host-20260917-125245-3a94"
+        assert merge_squash("feature", worktree_id, cwd=repo) is True
+
+        subject = git("log", "-1", "--format=%s", cwd=repo).stdout.strip()
+        assert worktree_id not in subject
+        assert subject == "squash: merge worktree 3a94"

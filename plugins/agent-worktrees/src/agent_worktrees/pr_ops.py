@@ -162,7 +162,16 @@ def feature_branch_name(prefix: str, title: str, worktree_id: str) -> str:
 
 def _worktree_suffix(worktree_id: str) -> str:
     """The final dash-delimited token of a worktree id (its short hash)."""
-    return worktree_id.rsplit("-", 1)[-1] if "-" in worktree_id else worktree_id
+    return git_ops.worktree_suffix(worktree_id)
+
+
+def _safe_worktree_label(worktree_id: str) -> str:
+    """A fallback title/label for an untitled worktree that never leaks the
+    raw ``worktree_id`` -- which embeds the authoring machine name and
+    creation timestamp -- into a PR title, branch name, or commit message
+    that can reach a public repo. Uses only the worktree's short suffix.
+    """
+    return f"Worktree {_worktree_suffix(worktree_id)} changes"
 
 
 def _sanitize_head_ref(name: str) -> str:
@@ -545,7 +554,12 @@ def create_pr(
             # construction), so an operator/PR title is never clobbered.
             if record and not (record.title and record.title != "null"):
                 record.title = derived
-    eff_title = eff_title or worktree_id
+    # Last resort: never fall back to the raw worktree_id. It embeds the
+    # authoring machine name and creation timestamp, and this title feeds the
+    # PR title, the PR branch-name slug, AND the squash commit message below
+    # -- any of which can land on a public repo. `_safe_worktree_label` keeps
+    # only the worktree's short suffix.
+    eff_title = eff_title or _safe_worktree_label(worktree_id)
 
     # Resolve the active PR and whether it is still live (can receive pushes).
     # A *terminal* active PR (merged/closed) must NOT have its branch reused --
@@ -781,8 +795,9 @@ def create_pr(
             record.prs.append(target_pr)
         tracking.save_record(record)
 
-    squash_msg = (record.title if record and record.title else None) \
-        or (eff_title if eff_title != worktree_id else f"{worktree_id} changes")
+    # `eff_title` is never the raw worktree_id (see the fallback above), so no
+    # separate machine-name guard is needed here.
+    squash_msg = (record.title if record and record.title else None) or eff_title
 
     # 1. Rebase the worktree commits onto the upstream default branch FIRST,
     #    with the individual commits intact -- BEFORE squashing. This lets
