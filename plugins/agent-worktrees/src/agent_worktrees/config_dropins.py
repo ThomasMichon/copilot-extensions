@@ -391,10 +391,13 @@ def _validate_codename(raw: object, *, location: str) -> str | None:
         return f"{location} must be a mapping"
     if "hook_command" in raw and not isinstance(raw["hook_command"], str):
         return f"{location}.hook_command must be a string"
-    if "hook_timeout_seconds" in raw and not isinstance(
-        raw["hook_timeout_seconds"], (int, float)
-    ):
-        return f"{location}.hook_timeout_seconds must be a number"
+    if "hook_timeout_seconds" in raw:
+        value = raw["hook_timeout_seconds"]
+        # bool is an int subclass -- exclude it explicitly, or
+        # hook_timeout_seconds: true/false would pass this check even
+        # though the parser (codename_config.parse_codename) rejects it.
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return f"{location}.hook_timeout_seconds must be a number"
     return None
 
 

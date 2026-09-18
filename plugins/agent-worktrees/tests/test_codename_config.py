@@ -46,6 +46,18 @@ class TestParseCodename:
             cfg = parse_codename({"hook_timeout_seconds": bad})
             assert cfg.hook_timeout_seconds == DEFAULT_HOOK_TIMEOUT_SECONDS
 
+    def test_boolean_timeout_falls_back_to_default(self) -> None:
+        # float(True) == 1.0 -- a bare float() coercion would silently
+        # accept a bool as a real numeric timeout; must be rejected before
+        # coercion instead.
+        for bad in (True, False):
+            cfg = parse_codename({"hook_timeout_seconds": bad})
+            assert cfg.hook_timeout_seconds == DEFAULT_HOOK_TIMEOUT_SECONDS
+
+    def test_oversized_integer_timeout_falls_back_to_default(self) -> None:
+        cfg = parse_codename({"hook_timeout_seconds": 10**400})
+        assert cfg.hook_timeout_seconds == DEFAULT_HOOK_TIMEOUT_SECONDS
+
     def test_integer_timeout_is_coerced_to_float(self) -> None:
         cfg = parse_codename({"hook_timeout_seconds": 3})
         assert cfg.hook_timeout_seconds == 3.0

@@ -18,6 +18,7 @@ from agent_worktrees.codename import (
     generate_handle,
     generate_via_hook,
     is_valid_handle,
+    is_valid_hook_timeout,
 )
 
 
@@ -109,6 +110,35 @@ def _py(code: str) -> str:
     return f'"{sys.executable}" -c "{code}"'
 
 
+class TestIsValidHookTimeout:
+    def test_accepts_positive_finite_numbers(self) -> None:
+        assert is_valid_hook_timeout(5.0)
+        assert is_valid_hook_timeout(5)
+        assert is_valid_hook_timeout(0.001)
+
+    def test_rejects_non_finite(self) -> None:
+        assert not is_valid_hook_timeout(float("nan"))
+        assert not is_valid_hook_timeout(float("inf"))
+        assert not is_valid_hook_timeout(float("-inf"))
+
+    def test_rejects_non_positive(self) -> None:
+        assert not is_valid_hook_timeout(0)
+        assert not is_valid_hook_timeout(-1)
+
+    def test_rejects_bool(self) -> None:
+        assert not is_valid_hook_timeout(True)
+        assert not is_valid_hook_timeout(False)
+
+    def test_rejects_non_numeric(self) -> None:
+        assert not is_valid_hook_timeout("5")
+        assert not is_valid_hook_timeout(None)
+
+    def test_rejects_oversized_integer_without_raising(self) -> None:
+        # math.isfinite() raises OverflowError for an int too large to
+        # convert to float -- must return False, not propagate.
+        assert not is_valid_hook_timeout(10**400)
+
+
 class TestGenerateViaHook:
     def test_empty_command_returns_none(self) -> None:
         assert generate_via_hook("") is None
@@ -168,6 +198,11 @@ class TestGenerateViaHook:
     def test_invalid_timeout_fails_closed_without_raising(self) -> None:
         for bad_timeout in (float("nan"), float("inf"), -1.0, 0.0, True):
             assert generate_via_hook(_py("print('quiet-gizmo')"), timeout=bad_timeout) is None
+
+    def test_oversized_integer_timeout_fails_closed_without_raising(self) -> None:
+        # math.isfinite() raises OverflowError for an int too large to
+        # convert to float -- must fail closed, not propagate.
+        assert generate_via_hook(_py("print('quiet-gizmo')"), timeout=10**400) is None
 
     def test_oversized_output_is_rejected_not_buffered_unbounded(self) -> None:
         # A hook that emits far more than a handle could ever need must be

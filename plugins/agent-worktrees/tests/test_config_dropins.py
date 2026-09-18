@@ -108,6 +108,17 @@ def test_codename_hook_timeout_must_be_number():
     assert error == "repos.sample.codename.hook_timeout_seconds must be a number"
 
 
+def test_codename_hook_timeout_rejects_boolean():
+    # bool is an int subclass -- must be excluded explicitly, or
+    # hook_timeout_seconds: true/false would pass isinstance(x, (int, float)).
+    for value in (True, False):
+        error = dropins._validate_codename(
+            {"hook_timeout_seconds": value},
+            location="repos.sample.codename",
+        )
+        assert error == "repos.sample.codename.hook_timeout_seconds must be a number"
+
+
 def test_codename_accepts_well_formed_block():
     error = dropins._validate_codename(
         {"hook_command": "my-hook", "hook_timeout_seconds": 3},

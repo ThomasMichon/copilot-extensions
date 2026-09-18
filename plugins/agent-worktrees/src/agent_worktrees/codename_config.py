@@ -42,11 +42,17 @@ def parse_codename(raw: Any) -> CodenameConfig:
     """
     if not isinstance(raw, dict):
         return CodenameConfig()
-    timeout = raw.get("hook_timeout_seconds", DEFAULT_HOOK_TIMEOUT_SECONDS)
-    try:
-        timeout = float(timeout)
-    except (TypeError, ValueError):
+    timeout: Any = raw.get("hook_timeout_seconds", DEFAULT_HOOK_TIMEOUT_SECONDS)
+    # Reject bool BEFORE coercion: float(True) == 1.0 is indistinguishable
+    # from a real numeric 1.0 afterward, so a bool must be caught here --
+    # is_valid_hook_timeout()'s own bool check can't see it once coerced.
+    if isinstance(timeout, bool):
         timeout = DEFAULT_HOOK_TIMEOUT_SECONDS
+    else:
+        try:
+            timeout = float(timeout)
+        except (TypeError, ValueError, OverflowError):
+            timeout = DEFAULT_HOOK_TIMEOUT_SECONDS
     if not is_valid_hook_timeout(timeout):
         timeout = DEFAULT_HOOK_TIMEOUT_SECONDS
     return CodenameConfig(

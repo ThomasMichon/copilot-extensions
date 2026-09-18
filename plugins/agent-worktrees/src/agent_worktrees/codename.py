@@ -109,13 +109,18 @@ def is_valid_hook_timeout(timeout: object) -> bool:
 
     Rejects ``NaN``/``inf``/``-inf`` (which raise inside
     :meth:`subprocess.Popen.wait`/``communicate`` instead of failing
-    closed), non-positive values, and ``bool`` (a ``bool`` is an ``int``
+    closed), non-positive values, ``bool`` (a ``bool`` is an ``int``
     subclass in Python, so ``isinstance(True, (int, float))`` is true --
-    checked explicitly to reject it before it silently becomes ``1``).
+    checked explicitly to reject it before it silently becomes ``1``), and
+    an integer too large to convert to ``float`` (``math.isfinite`` raises
+    ``OverflowError`` for one instead of returning ``False``).
     """
     if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
         return False
-    return math.isfinite(timeout) and timeout > 0
+    try:
+        return math.isfinite(timeout) and timeout > 0
+    except OverflowError:
+        return False
 
 
 def _process_group_kwargs() -> dict:
