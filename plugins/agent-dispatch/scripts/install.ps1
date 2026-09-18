@@ -935,20 +935,19 @@ function Install-Runtime {
     # -ReinstallPackage/-RefreshPackage (uv only): this installs from a local
     # PATH source (not a registry), and uv's local-path build cache is keyed
     # by source path, not source content. A version string that was ever
-    # built before -- at this exact path, or (per observed evidence) a
-    # different one -- can silently serve a stale cached wheel instead of
-    # rebuilding from what's actually on disk right now. This is the
-    # confirmed root cause behind ThomasMichon/copilot-extensions#2863: a
-    # deployed 0.1.2-dev111 venv was missing
-    # `procutil.agent_worktrees_environment`, even though every verified copy
-    # of the real dev111 *source* (git HEAD and the staged marketplace
-    # snapshot both) has always defined it. Force a fresh build/install every
-    # time so a stale cache entry can never silently ship again -- covering
-    # agent-dispatch itself AND its own local `[tool.uv.sources]` workspace
-    # path deps (agent-procutil, agent-zdd, agent-dropin-registry,
-    # agent-plugin-activation, agent-plugin-resolve), which are equally local
-    # PATH sources and equally vulnerable. #2863 also flagged a second,
-    # same-class ImportError in the self-update fallback
+    # built before -- at this exact path, or a different one -- can silently
+    # serve a stale cached wheel instead of rebuilding from what's actually
+    # on disk right now. This is the confirmed root cause behind
+    # ThomasMichon/copilot-extensions#2863: a deployed package was missing a
+    # function its own import site required, even though every verified copy
+    # of that release's actual source (git history and the exact snapshot
+    # used for the install alike) defined it correctly. Force a fresh
+    # build/install every time so a stale cache entry can never silently ship
+    # again -- covering agent-dispatch itself AND its own local
+    # `[tool.uv.sources]` workspace path deps (agent-procutil, agent-zdd,
+    # agent-dropin-registry, agent-plugin-activation, agent-plugin-resolve),
+    # which are equally local PATH sources and equally vulnerable. #2863 also
+    # flagged a second, same-class ImportError in the self-update fallback
     # (`from agent_procutil import ...`) -- agent-procutil is exactly one of
     # these.
     $StaleCacheRefreshPackages = @(
@@ -968,7 +967,14 @@ function Install-Runtime {
             }
             $out = & uv pip install --python $VenvPython @refreshFlags $Spec 2>&1 | Out-String
         } else {
-            & $VenvPython -m pip install --force-reinstall --no-deps $Spec 2>&1 | Out-Null
+            # The refresh pre-pass's own exit status must gate the real
+            # install: if it fails, letting the plain install below run
+            # anyway could silently succeed from a cached/existing wheel,
+            # defeating the whole stale-wheel guard.
+            $preOut = & $VenvPython -m pip install --force-reinstall --no-deps $Spec 2>&1 | Out-String
+            if ($LASTEXITCODE -ne 0) {
+                return [pscustomobject]@{ Code = $LASTEXITCODE; Output = $preOut }
+            }
             $out = & $VenvPython -m pip install $Spec 2>&1 | Out-String
         }
         [pscustomobject]@{ Code = $LASTEXITCODE; Output = $out }

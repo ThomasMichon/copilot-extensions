@@ -1,10 +1,10 @@
 """Regression guard for ThomasMichon/copilot-extensions#2863.
 
-A deployed `0.1.2-dev111` venv on lambda-core was missing
-`agent_dispatch.procutil.agent_worktrees_environment`, even though every
-verified copy of the actual dev111 *source* -- git HEAD and the staged
-marketplace snapshot alike -- has always defined it correctly. The
-mismatch traced to two compounding gaps in `install.sh`/`install.ps1`:
+A deployed agent-dispatch package was missing a function its own import site
+required, even though every verified copy of that release's actual source
+(git history and the exact snapshot used for the install alike) defined it
+correctly. The mismatch traced to two compounding gaps in
+`install.sh`/`install.ps1`:
 
 1. `uv pip install` on a local PATH source caches its build by source path,
    not source content, so a stale wheel built under a reused path/version
@@ -29,6 +29,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 _INSTALL_SH = (_PLUGIN_ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
 _INSTALL_PS1 = (_PLUGIN_ROOT / "scripts" / "install.ps1").read_text(encoding="utf-8")
@@ -43,6 +45,7 @@ _LOCAL_PATH_PACKAGES = (
 )
 
 
+@pytest.mark.guard
 def test_sh_pip_install_forces_fresh_build():
     assert "_STALE_CACHE_REFRESH_PACKAGES" in _INSTALL_SH
     assert "--reinstall-package \"$pkg\" --refresh-package \"$pkg\"" in _INSTALL_SH
@@ -53,6 +56,7 @@ def test_sh_pip_install_forces_fresh_build():
         assert pkg in array_body
 
 
+@pytest.mark.guard
 def test_sh_health_gate_imports_embody():
     assert "import agent_dispatch, agent_dispatch.embody" in _INSTALL_SH
     # Both the pre-activation slot gate and the final post-swap verification
@@ -60,6 +64,7 @@ def test_sh_health_gate_imports_embody():
     assert _INSTALL_SH.count("import agent_dispatch, agent_dispatch.embody") >= 2
 
 
+@pytest.mark.guard
 def test_ps1_pip_install_forces_fresh_build():
     for pkg in _LOCAL_PATH_PACKAGES:
         assert f"'{pkg}'" in _INSTALL_PS1
@@ -67,6 +72,7 @@ def test_ps1_pip_install_forces_fresh_build():
     assert "--reinstall-package', $pkg, '--refresh-package', $pkg" in _INSTALL_PS1
 
 
+@pytest.mark.guard
 def test_ps1_health_gate_imports_embody():
     assert "import agent_dispatch, agent_dispatch.embody" in _INSTALL_PS1
     assert _INSTALL_PS1.count("import agent_dispatch, agent_dispatch.embody") >= 2
