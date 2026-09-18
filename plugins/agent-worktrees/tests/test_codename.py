@@ -15,6 +15,7 @@ from agent_worktrees.codename import (
     CODENAME_ADJECTIVES,
     CODENAME_NOUNS,
     MAX_HANDLE_LENGTH,
+    MAX_HOOK_TIMEOUT_SECONDS,
     assign_codename,
     generate_handle,
     generate_via_hook,
@@ -139,6 +140,16 @@ class TestIsValidHookTimeout:
         # convert to float -- must return False, not propagate.
         assert not is_valid_hook_timeout(10**400)
 
+    def test_rejects_very_large_finite_float(self) -> None:
+        # "Finite" per math.isfinite() but large enough to risk overflowing
+        # a platform wait-timeout conversion downstream (Popen.wait/thread
+        # join) -- must be bounded, not just finite.
+        assert not is_valid_hook_timeout(1e308)
+
+    def test_accepts_up_to_the_max_bound(self) -> None:
+        assert is_valid_hook_timeout(MAX_HOOK_TIMEOUT_SECONDS)
+        assert not is_valid_hook_timeout(MAX_HOOK_TIMEOUT_SECONDS + 1)
+
 
 class TestGenerateViaHook:
     def test_empty_command_returns_none(self) -> None:
@@ -238,6 +249,18 @@ class TestGenerateViaHook:
         # rejected (too long once validated), and must not be read in full.
         huge = _py("print('x' * 1_000_000)")
         assert generate_via_hook(huge) is None
+
+    def test_truncated_output_is_rejected_not_validated_as_a_stripped_prefix(
+        self,
+    ) -> None:
+        """A hook printing a valid handle padded with enough trailing
+        whitespace to fill (and exceed) the read cap must be rejected
+        outright -- not truncated to the cap, `.strip()`-ed down to just
+        the valid-looking prefix, and accepted. That would let oversized
+        output "rescue" itself by front-loading a valid handle."""
+        # 'quiet-gizmo' + far more padding than the cap can hold.
+        padded = _py("print('quiet-gizmo' + ' ' * 1000)")
+        assert generate_via_hook(padded) is None
 
     def test_semantically_identifying_but_syntactically_valid_output_still_passes(
         self,

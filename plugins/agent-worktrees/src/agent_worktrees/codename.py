@@ -104,21 +104,37 @@ def generate_handle(*, words: int = 2, rng: random.Random | None = None) -> str:
     return f"{adjective}-{noun}"
 
 
+#: An upper bound on any accepted hook timeout. A codename hook has no
+#: business running for hours: this both keeps a misconfigured huge timeout
+#: from stalling worktree creation and avoids very large finite floats
+#: (e.g. ``1e308``) reaching ``Popen.wait``/thread-join timeout conversion,
+#: which can raise ``OverflowError`` on some platforms despite being
+#: "finite" per :func:`math.isfinite`.
+MAX_HOOK_TIMEOUT_SECONDS = 300.0
+
+
 def is_valid_hook_timeout(timeout: object) -> bool:
-    """Whether ``timeout`` is a finite, positive, non-boolean number.
+    """Whether ``timeout`` is a finite, positive, non-boolean number within
+    :data:`MAX_HOOK_TIMEOUT_SECONDS`.
 
     Rejects ``NaN``/``inf``/``-inf`` (which raise inside
     :meth:`subprocess.Popen.wait`/``communicate`` instead of failing
     closed), non-positive values, ``bool`` (a ``bool`` is an ``int``
     subclass in Python, so ``isinstance(True, (int, float))`` is true --
-    checked explicitly to reject it before it silently becomes ``1``), and
-    an integer too large to convert to ``float`` (``math.isfinite`` raises
-    ``OverflowError`` for one instead of returning ``False``).
+    checked explicitly to reject it before it silently becomes ``1``), an
+    integer too large to convert to ``float`` (``math.isfinite`` raises
+    ``OverflowError`` for one instead of returning ``False``), and any
+    value exceeding :data:`MAX_HOOK_TIMEOUT_SECONDS` (a very large but
+    technically finite float can still overflow a platform wait-timeout
+    conversion downstream).
     """
     if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
         return False
     try:
-        return math.isfinite(timeout) and timeout > 0
+        return (
+            math.isfinite(timeout)
+            and 0 < timeout <= MAX_HOOK_TIMEOUT_SECONDS
+        )
     except OverflowError:
         return False
 
@@ -188,21 +204,30 @@ def _kill_process_group(process: subprocess.Popen) -> None:
 
 def _read_bounded_stdout(
     process: subprocess.Popen, *, deadline: float
-) -> tuple[bytes, bool]:
+) -> tuple[bytes, bool, bool]:
     """Read at most :data:`_MAX_HOOK_STDOUT_BYTES` from ``process.stdout`` in
     a daemon thread, joined against ``deadline`` (a :func:`time.monotonic`
     timestamp) so a hook that never writes and never exits cannot block this
     process past its timeout.
 
-    Returns ``(data, timed_out)``. ``data`` is empty when ``timed_out`` is
-    true or the read otherwise failed.
+    Requests one byte *beyond* the cap so truncation is detectable: reading
+    exactly ``_MAX_HOOK_STDOUT_BYTES + 1`` bytes proves the hook's true
+    output is longer than the cap, which must be treated as an oversized
+    failure -- not silently accepted after ``strip()`` trims whatever
+    partial content happened to land in the truncated prefix (e.g. a valid
+    handle padded with enough trailing junk to fill the cap would otherwise
+    survive truncation-then-strip and pass validation).
+
+    Returns ``(data, timed_out, overflowed)``. ``data`` is capped at
+    :data:`_MAX_HOOK_STDOUT_BYTES` regardless of ``overflowed``. ``data`` is
+    empty when ``timed_out`` is true or the read otherwise failed.
     """
     box: dict[str, bytes] = {}
 
     def _reader() -> None:
         try:
             assert process.stdout is not None
-            box["data"] = process.stdout.read(_MAX_HOOK_STDOUT_BYTES)
+            box["data"] = process.stdout.read(_MAX_HOOK_STDOUT_BYTES + 1)
         except OSError:
             box["data"] = b""
 
@@ -211,8 +236,10 @@ def _read_bounded_stdout(
     remaining = max(0.0, deadline - time.monotonic())
     reader.join(remaining)
     if reader.is_alive():
-        return b"", True
-    return box.get("data", b""), False
+        return b"", True, False
+    raw = box.get("data", b"")
+    overflowed = len(raw) > _MAX_HOOK_STDOUT_BYTES
+    return raw[:_MAX_HOOK_STDOUT_BYTES], False, overflowed
 
 
 def generate_via_hook(
@@ -222,19 +249,20 @@ def generate_via_hook(
 ) -> str | None:
     """Run an adopter-configured external generator hook and return its
     handle, or ``None`` on any failure (invalid timeout, spawn failure,
-    timeout, non-zero exit, malformed/non-UTF-8/oversized output) --
-    **fail-closed**: the caller must fall back to :func:`generate_handle`,
-    never propagate an invalid value.
+    timeout, non-zero exit, malformed/non-UTF-8/oversized/truncated
+    output) -- **fail-closed**: the caller must fall back to
+    :func:`generate_handle`, never propagate an invalid value.
 
     ``command`` is executed via the shell (so an adopter can compose a
     pipeline), in its own process group/session so a timeout can kill the
     whole subtree, not just the immediate shell. At most
     :data:`_MAX_HOOK_STDOUT_BYTES` of stdout is read regardless of how much
     the hook tries to write (bounded memory); stderr is discarded entirely.
-    The result is stripped and validated with :func:`is_valid_handle` before
-    being accepted. This proves the output is branch-safe; it does NOT
-    prove the output is non-identifying -- see the module docstring's
-    trust-scope note.
+    Output that exceeds the cap is rejected outright (not truncated and
+    validated) -- see :func:`_read_bounded_stdout`. The result is stripped
+    and validated with :func:`is_valid_handle` before being accepted. This
+    proves the output is branch-safe; it does NOT prove the output is
+    non-identifying -- see the module docstring's trust-scope note.
     """
     if not command or not is_valid_hook_timeout(timeout):
         return None
@@ -250,7 +278,7 @@ def generate_via_hook(
     except OSError:
         return None
     try:
-        raw, timed_out = _read_bounded_stdout(process, deadline=deadline)
+        raw, timed_out, overflowed = _read_bounded_stdout(process, deadline=deadline)
         if timed_out:
             _kill_process_group(process)
             return None
@@ -266,7 +294,7 @@ def generate_via_hook(
                 process.stdout.close()
             except OSError:
                 pass
-    if process.returncode != 0:
+    if overflowed or process.returncode != 0:
         return None
     try:
         candidate = raw.decode("utf-8", errors="strict").strip()

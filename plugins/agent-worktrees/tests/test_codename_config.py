@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from agent_worktrees.codename import DEFAULT_HOOK_TIMEOUT_SECONDS
+from agent_worktrees.codename import (
+    DEFAULT_HOOK_TIMEOUT_SECONDS,
+    MAX_HOOK_TIMEOUT_SECONDS,
+)
 from agent_worktrees.codename_config import CodenameConfig, parse_codename
 
 
@@ -56,6 +59,16 @@ class TestParseCodename:
 
     def test_oversized_integer_timeout_falls_back_to_default(self) -> None:
         cfg = parse_codename({"hook_timeout_seconds": 10**400})
+        assert cfg.hook_timeout_seconds == DEFAULT_HOOK_TIMEOUT_SECONDS
+
+    def test_very_large_finite_timeout_falls_back_to_default(self) -> None:
+        cfg = parse_codename({"hook_timeout_seconds": 1e308})
+        assert cfg.hook_timeout_seconds == DEFAULT_HOOK_TIMEOUT_SECONDS
+
+    def test_timeout_beyond_max_bound_falls_back_to_default(self) -> None:
+        cfg = parse_codename(
+            {"hook_timeout_seconds": MAX_HOOK_TIMEOUT_SECONDS + 1}
+        )
         assert cfg.hook_timeout_seconds == DEFAULT_HOOK_TIMEOUT_SECONDS
 
     def test_integer_timeout_is_coerced_to_float(self) -> None:
