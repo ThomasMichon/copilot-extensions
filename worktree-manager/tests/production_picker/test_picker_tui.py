@@ -4567,6 +4567,19 @@ def test_describe_status_marker_expands_known_tokens():
     assert derive.describe_status_marker("NEW") == ("NEW", False)
 
 
+def test_describe_status_marker_handles_oversized_numeric_token():
+    """PR #2897 review: ``compact`` (the source of these tokens) is only
+    validated as a ``str`` by ``prune.interpret_descriptor_payload`` -- a
+    malformed/remote descriptor could hand a ``C``/``F`` token an absurdly
+    long digit run. ``int()`` raises ``ValueError`` past Python's configured
+    digit-conversion limit (3.11+); that must degrade to the verbatim
+    fallback, not crash the picker's render."""
+    huge = "C" + "9" * 5000
+    text, is_warn = derive.describe_status_marker(huge)
+    assert text == huge
+    assert is_warn is False
+
+
 def test_native_list_sticky_header(monkeypatch):
     """NF5-5 (#88): the native list pins the current section header above the list
     once that section's own header row has scrolled off the top; it is hidden at

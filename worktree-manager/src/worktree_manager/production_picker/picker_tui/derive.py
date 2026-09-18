@@ -266,11 +266,23 @@ def describe_status_marker(tok):
     unrecognized token (a future marker this helper doesn't know about yet)
     degrades to itself verbatim, still flagged as a warning if it carries the
     ``*`` unconfirmed-fact suffix, so a new marker never vanishes silently --
-    it just isn't prettied up yet."""
+    it just isn't prettied up yet.
+
+    ``compact`` (the source of these tokens) is only validated as a ``str``
+    by ``prune.interpret_descriptor_payload`` -- a malformed/remote descriptor
+    could hand this an absurdly long ``C``/``F`` digit run. ``int()`` raises
+    ``ValueError`` past Python's configured digit-conversion limit (PEP 651,
+    3.11+), so that conversion is guarded: a token that fails to parse simply
+    degrades to the verbatim fallback below, same as any other unrecognized
+    token, instead of crashing the picker's render.
+    """
     if tok in _STATUS_MARKER_TEXT:
         return _STATUS_MARKER_TEXT[tok], True
     if len(tok) > 1 and tok[0] in ("C", "F") and tok[1:].isdigit():
-        n = int(tok[1:])
+        try:
+            n = int(tok[1:])
+        except ValueError:
+            return tok, tok.endswith("*")
         noun = "held claim" if tok[0] == "C" else "follow-up"
         return f"{n} {noun}{'s' if n != 1 else ''}", False
     return tok, tok.endswith("*")
