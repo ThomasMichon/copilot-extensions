@@ -6,7 +6,7 @@
   machines, and venue providers.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-09-12
+- **Last revised:** 2026-09-18
 - **Reality docs:** [`plugins/agent-bridge/README.md`](../../../plugins/agent-bridge/README.md) ·
   [`plugins/agent-bridge/docs/architecture.md`](../../../plugins/agent-bridge/docs/architecture.md)
 
@@ -121,6 +121,20 @@ host keeps the child alive until deliberate drain, handoff, stop, or end. It is
 not the universal implementation for interactive Copilot: CLI/mux, graphical,
 SDK, and third-party hosts may own peer execution providers while the bridge
 coordinates with or represents them honestly.
+
+### cold-store providers
+
+Not every session the bridge is asked for is live. A **cold-store provider**
+registers with the bridge — the same `providers.d/` manifest-drop,
+process-boundary-driven pattern namespace providers (`codespace:`,
+`container:`) already use — to answer *"give me this session's content"* when
+no hosted or represented process can. The bridge tries its own live session
+ledger first; only when a target genuinely has nothing live registered does it
+ask a cold-store provider, which resolves whatever local-filesystem-vs-durable
+-archive distinction its own domain requires and returns the content honestly.
+This keeps the bridge the single caller-facing surface for **any** session —
+live or not — without the bridge itself ever learning archival formats: that
+knowledge stays inside the provider that owns it.
 
 ### session and event ledger
 
@@ -314,6 +328,16 @@ A caller can address agents in active worktrees and in configured projects the
 fabric knows how to resolve, including projects whose working body lives on
 another machine or venue provider. The reachable set is a catalog, not a
 collection of one-off connection recipes.
+
+### any-session-any-registered-worktree-regardless-of-liveness
+
+A caller asking for a specific session by ID gets an honest answer for **any
+worktree the fabric has ever registered** — not only the ones currently
+hosting a live process. Liveness changes *how* the answer is produced (a
+hosted child answers directly; a represented interactive session answers
+through its adapter; neither answers, and a cold-store provider is asked
+instead), never *whether* one is attempted. The caller is never required to
+already know a session is dead before asking for it.
 
 ### satellite-exposure-and-federation
 
@@ -591,6 +615,9 @@ machine may deliberately gate outbound reach until policy allows it.
   bridge's cross-machine reach rides on.
 - Venue provider: [agent-codespaces](../agent-codespaces/README.md) — a remote
   venue presented through the bridge's coordination contract.
+- Cold-store provider: [agent-logger](../agent-logger/README.md) — registers
+  with the bridge to answer for a session that has nothing live, resolving its
+  own local-filesystem-vs-durable-archive distinction internally.
 - Reality docs: [`plugins/agent-bridge/README.md`](../../../plugins/agent-bridge/README.md) ·
   [`plugins/agent-bridge/docs/architecture.md`](../../../plugins/agent-bridge/docs/architecture.md).
 
@@ -628,3 +655,18 @@ machine may deliberately gate outbound reach until policy allows it.
   binding the fabric's address-any-project guidance at the agent-* leaves. Closes
   the structural gap that agent-bridge had no canonical per-plugin vision leaf
   alongside its siblings.
+- **2026-09-18** — Added §Concepts/*cold-store providers* and
+  §Features/*any-session-any-registered-worktree-regardless-of-liveness*.
+  Course correction from a downstream facility's own build-out: retrieving a
+  cold (no longer live) session's content was drifting toward a bespoke
+  caller-side fallback (a consuming UI reaching around the bridge to a
+  domain-specific archival service directly) instead of staying inside the
+  bridge's existing single-caller-facing-surface promise. Generalized the
+  already-proven `providers.d/` namespace-provider pattern (`codespace:`,
+  `container:`) to a second provider *kind* — cold-store, keyed by capability
+  (session retrieval) rather than address namespace — so the bridge remains
+  the one thing every caller asks, whether the answer is live or not, while
+  archival-format knowledge (unpacked vs. packed, local vs. durable archive)
+  stays inside the provider that owns it. Paired with a new
+  §Features/*cold-store-provider-registration* on the agent-logger leaf,
+  which registers as the reference (and likely only) implementation.
