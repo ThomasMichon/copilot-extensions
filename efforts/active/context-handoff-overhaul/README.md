@@ -357,11 +357,15 @@ Verbatim from the operator:
   the existing `test_handoff_cutover.py` convention) plus a manual
   live-validation runbook using the new harness. **PR #2842**
   (`test_pane_lifecycle.py`; runbook added to `redesign.md` §6).
-- [ ] Rewire `handoff-cutover` (spawn + retire modes) and the Picker
+- [x] Rewire `handoff-cutover` (spawn + retire modes) and the Picker
   Stop/Take-over path to call the two hardened primitives instead of their
-  current bespoke/duplicated logic. **Deferred to a follow-up slice/PR**,
-  per this effort's established sequencing (land + prove the primitives
-  standalone first).
+  current bespoke/duplicated logic. Landed as the follow-up slice after
+  PR #2842: `handoff-cutover` now calls `pane_create`/`pane_terminate`
+  directly, and `restart_worktree_copilot` routes its graceful stop path
+  through `pane_terminate` on the session's active pane (falling back to the
+  legacy whole-session hard kill only when the pane primitive cannot
+  positively finish the stop, including the intentional `last-window-skip`
+  guard mismatch on this caller).
 
 ## Validation Plan
 
@@ -400,7 +404,13 @@ Verbatim from the operator:
   genuine Copilot shutdown signature from a hung pane and falls back to a
   hard kill + lock-file cleanup within the ~30s budget when it does; both
   behaviors are exercised standalone, without going through the full
-  handoff-cutover choreography.
+  handoff-cutover choreography. **Update after Phase 6 item 5:** the
+  production callers are now rewired and covered hermetically (`handoff-cutover`
+  spawn/retire + `restart_worktree_copilot`); the full `agent-worktrees`
+  suite has one known pre-existing, unrelated failure block
+  (`test_doctor.py`, confirmed reproducing on clean `origin/main`) but no
+  regression from this rewire. This checklist item stays open until the separate
+  isolated live-mux harness proof above is recorded.
 
 ## Proposal
 
@@ -782,3 +792,37 @@ gate land._
   a separate, focused rewire PR). Also still open: live-harness capture of
   Copilot's real clean-exit console text to tighten `pane_terminate`'s
   currently-provisional signature patterns.
+
+### 2026-09-17 — Phase 6 item 5 landed
+
+- Rewired the three production callers onto the new primitives without
+  changing their public CLI contracts: `_handoff_cutover_spawn_result()`
+  now calls `pane_create`, `_handoff_cutover_retire_result()` now calls
+  `pane_terminate`, and `restart_worktree_copilot()` now uses
+  `pane_terminate` against the session's active pane for the graceful stop
+  path.
+- Preserved the existing handoff activity-log contract (`handoff_successor_*`,
+  `handoff_cutover_spawn`, `handoff_predecessor_retire`) while letting the
+  primitive own its single `mux_session_assigned` emission. For the retire
+  path, the new `graceful-signature-confirmed` method is treated everywhere
+  that matters as equivalent to `graceful` (success classification, process
+  reap, predecessor conclusion, and event `outcome="gone"`).
+- Restart-path judgment call: `pane_terminate`'s `last-window-skip` guard is
+  correct for handoff retirement (never tear down the only live worktree
+  window when the caller merely wants to retire an old pane), but it is a
+  semantic mismatch for Picker Stop / Neuron-Forge Take-over, whose explicit
+  goal is to stop that session. So `restart_worktree_copilot()` treats
+  `last-window-skip` as "graceful pane retire declined; continue to the
+  legacy whole-session hard kill fallback" rather than reporting success or
+  inventing a new external method value.
+- Validation for this slice: new/updated hermetic coverage in
+  `test_handoff_cutover.py`, `test_restart_copilot.py`,
+  `test_mux_live_cache.py`, and `test_profile_assignment.py`; targeted
+  rewired-callers regression green; module-size and version-bump guards
+  green. Full `python tools/run-plugin-tests.py agent-worktrees --timeout
+  600 --plugin-timeout 3600` surfaces 10 pre-existing, unrelated failures in
+  `test_doctor.py` — verified to reproduce identically on a clean
+  `origin/main` checkout, so not attributed to this change; left untouched
+  as out of scope for this PR. The separate isolated live-mux harness
+  proof for `pane_create`/`pane_terminate` remains open exactly as noted in
+  the Validation Plan above.
