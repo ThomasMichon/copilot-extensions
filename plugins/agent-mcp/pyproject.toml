@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=83.0.0"]
+requires = ["setuptools>=84.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-mcp"
-version = "0.2.0-dev124"
+version = "0.2.0-dev125"
 description = "MCP swiss-army bridge -- wrap an upstream MCP server and apply auth + a decorator stack (filter, rename, defer, code-mode, storage, transform, gate, input_gate)"
 readme = "README.md"
 license = "MIT"
