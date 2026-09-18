@@ -128,6 +128,15 @@ _COLD_RESUME_RETRY_SECONDS = 300
 _MIN_RESERVING_TIMEOUT_SECONDS = 600
 
 
+class _ReservationsUnavailable(Exception):
+    """The coordinator couldn't be reached to list reservations.
+
+    Raised only for a ``strict``/capacity-critical caller that must
+    distinguish "genuinely none" from "unknown" (see ``_active_reservations``)
+    rather than treating a transport blip as if nothing were active.
+    """
+
+
 class Supervisor:
     """Reserve -> spawn -> record, with terminal-state reconciliation.
 
@@ -388,9 +397,25 @@ class Supervisor:
         return True
 
     def _active_reservations(self) -> list[dict]:
-        reservations = self._pool_reservations(
-            state=(f"{SpawnState.RESERVING},{SpawnState.SPAWNED},{SpawnState.RELEASING}")
-        )
+        try:
+            reservations = self._pool_reservations(
+                state=(f"{SpawnState.RESERVING},{SpawnState.SPAWNED},{SpawnState.RELEASING}"),
+                strict=True,
+            )
+        except _ReservationsUnavailable as exc:
+            # Capacity-critical: unlike every other _pool_reservations caller
+            # (which only skips optional work on an empty result), this count
+            # gates whether we spawn MORE work. Treating "couldn't determine"
+            # as "zero active" would risk spawning past max_concurrent during
+            # an outage. Fail closed instead: report full capacity so this
+            # cycle spawns nothing, and retry next interval.
+            log.warning(
+                "could not determine active reservation count (%s); treating "
+                "capacity as exhausted this cycle rather than risking an "
+                "over-spawn",
+                exc,
+            )
+            return [{}] * self.max_concurrent
         active: list[dict] = []
         for reservation in reservations:
             try:
@@ -402,19 +427,23 @@ class Supervisor:
                 active.append(reservation)
         return active
 
-    def _list_reservations_safe(self, **kwargs: Any) -> list[dict]:
+    def _list_reservations_safe(self, *, strict: bool = False, **kwargs: Any) -> list[dict]:
         """List reservations, treating a transport failure as "none found".
 
         Every caller of this is one sub-check inside a larger per-cycle
         sweep; an uncaught transport error here previously propagated and
         aborted the *entire* supervision cycle (copilot-extensions#2857),
         silently skipping every other sub-check that same pass. Retry next
-        interval instead.
+        interval instead -- unless ``strict``, in which case a capacity-
+        critical caller (see ``_active_reservations``) needs to know
+        "unknown" is not the same as "genuinely none" and handles it itself.
         """
         try:
             return self.client.list_reservations(**kwargs)
         except (DispatchError, httpx.TransportError) as exc:
             log.warning("failed to list reservations (%s): %s", kwargs, exc)
+            if strict:
+                raise _ReservationsUnavailable(str(exc)) from exc
             return []
 
     def _pool_reservations(
@@ -423,10 +452,12 @@ class Supervisor:
         state: str,
         conclusion_state: str | None = None,
         resume_requested: bool | None = None,
+        strict: bool = False,
     ) -> list[dict]:
         """List reservations filtered server-side to this pool before limit."""
         if not self.labels:
             return self._list_reservations_safe(
+                strict=strict,
                 state=state,
                 repo=self.repo,
                 conclusion_state=conclusion_state,
@@ -436,6 +467,7 @@ class Supervisor:
         by_key: dict[str, dict] = {}
         for label in self.labels:
             for reservation in self._list_reservations_safe(
+                strict=strict,
                 state=state,
                 repo=self.repo,
                 label=label,
@@ -447,6 +479,7 @@ class Supervisor:
                 if key:
                     by_key[key] = reservation
         return list(by_key.values())
+
 
     def _spawn_requires_reusable_worktree(self, task: dict) -> bool:
         selector = getattr(

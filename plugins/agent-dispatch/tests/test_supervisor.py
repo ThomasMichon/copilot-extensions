@@ -1080,6 +1080,38 @@ def test_pool_reservations_transient_transport_error_does_not_abort_cycle(
     assert q.get(blocked.id).status == Status.SUSPENDED
 
 
+def test_active_reservations_fails_closed_on_transport_error(q, client, monkeypatch):
+    """Capacity gating must not treat "unknown" as "zero active".
+
+    `_active_reservations` feeds directly into the active >= max_concurrent
+    capacity gate in `poll_once`. Swallowing a transient transport error into
+    an empty list there (as the generic `_pool_reservations` resilience does
+    for every other, non-capacity-critical caller) would make the supervisor
+    believe it has full spare capacity during an outage and over-spawn past
+    max_concurrent. It must instead fail closed: report capacity as fully
+    consumed so this cycle spawns nothing, and let the next interval retry
+    once the coordinator is reachable again.
+    """
+    queued = q.create("work")
+
+    def refused(*_args, **_kwargs):
+        raise httpx.ConnectError(
+            "[WinError 10061] No connection could be made because the target "
+            "machine actively refused it"
+        )
+
+    monkeypatch.setattr(client, "list_reservations", refused)
+    spawn = _ok_spawn()
+    sup = Supervisor(client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5)
+
+    active = sup._active_reservations()
+    assert len(active) == sup.max_concurrent
+
+    assert sup.poll_once() == []
+    assert spawn.calls == []
+    assert q.get(queued.id).status == Status.QUEUED
+
+
 def test_release_requested_legacy_missing_worktree_recovers_from_held_conclusion(
     q, client, tmp_path
 ):
