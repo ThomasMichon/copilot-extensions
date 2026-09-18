@@ -39,6 +39,8 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path  # noqa: F401 -- re-exported; tests patch Path.stat via this module
 from typing import Any
 
+import httpx
+
 from .bridge_events import BridgeSubscription, SupervisorEventWake
 from .client import DispatchClient, DispatchError
 from .loop_governance import LoopGovernance
@@ -400,6 +402,21 @@ class Supervisor:
                 active.append(reservation)
         return active
 
+    def _list_reservations_safe(self, **kwargs: Any) -> list[dict]:
+        """List reservations, treating a transport failure as "none found".
+
+        Every caller of this is one sub-check inside a larger per-cycle
+        sweep; an uncaught transport error here previously propagated and
+        aborted the *entire* supervision cycle (copilot-extensions#2857),
+        silently skipping every other sub-check that same pass. Retry next
+        interval instead.
+        """
+        try:
+            return self.client.list_reservations(**kwargs)
+        except (DispatchError, httpx.TransportError) as exc:
+            log.warning("failed to list reservations (%s): %s", kwargs, exc)
+            return []
+
     def _pool_reservations(
         self,
         *,
@@ -409,7 +426,7 @@ class Supervisor:
     ) -> list[dict]:
         """List reservations filtered server-side to this pool before limit."""
         if not self.labels:
-            return self.client.list_reservations(
+            return self._list_reservations_safe(
                 state=state,
                 repo=self.repo,
                 conclusion_state=conclusion_state,
@@ -418,7 +435,7 @@ class Supervisor:
             )
         by_key: dict[str, dict] = {}
         for label in self.labels:
-            for reservation in self.client.list_reservations(
+            for reservation in self._list_reservations_safe(
                 state=state,
                 repo=self.repo,
                 label=label,
