@@ -498,6 +498,11 @@ restart does not inherently close the child's pipes.
   failed client, and contains manager-owned forward/relay channels even after
   host launch commitment. Claims are released only after all cleanup succeeds
   and no retained host ownership remains.
+  Shutdown retries every in-memory partial launch, even when its descriptor is
+  durable. Ordinary stop likewise requires partial-launch abort confirmation
+  before acknowledging STOPPED, so a successfully stopped session leaves no
+  in-memory launch obligation for shutdown to revive later. Committed hosts
+  retain their existing stop/resume behavior.
   Remote cleanup also checks an in-process HostIndex publication revision,
   protecting equal-value replacement records from an older reap. Descriptor
   removal must persist before pending handles or container ownership are

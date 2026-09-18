@@ -173,8 +173,10 @@ async def test_cancelled_host_launch_aborts_or_retains_retry_authority(
         assert session.session_id in manager._pending_host_launches
         assert session.status in (SessionStatus.FAILED, SessionStatus.STOPPED)
         assert not manager._background_recovery_allowed(session)
-        await manager.stop_session(session.session_id)
+        with pytest.raises(RemoteSpawnCleanupPendingError, match="cleanup is inconclusive"):
+            await manager.stop_session(session.session_id)
         restarted = SessionManager(tmp_db, session_host_state_dir=state_dir)
+        await restarted.stop_session(session.session_id)
         with pytest.raises(RemoteSpawnCleanupPendingError, match="cleanup is pending"):
             await restarted.resume_session(session.session_id, drain=False)
         assert spawner.spawn.await_count == 1
@@ -264,7 +266,7 @@ def test_dead_host_pruning_retains_partial_launch_authority(tmp_db, tmp_path, mo
 @pytest.mark.asyncio
 @pytest.mark.parametrize("indexed", [False, True])
 @pytest.mark.parametrize("confirmed", [False, True])
-@pytest.mark.parametrize("operation", ["stop", "rollback"])
+@pytest.mark.parametrize("operation", ["stop", "ordinary-stop", "rollback"])
 async def test_partial_host_reaping_releases_only_confirmed_container_claim(
     tmp_db, tmp_path, monkeypatch, indexed, confirmed, operation,
 ):
@@ -296,8 +298,8 @@ async def test_partial_host_reaping_releases_only_confirmed_container_claim(
     reap = AsyncMock(side_effect=AssertionError("partial launch must use its abort handle"))
     monkeypatch.setattr(manager, "_remote_reap", reap)
     cleanup = (
-        manager.stop_session(session_id, reap_host=True)
-        if operation == "stop" else abort_pending_host_launch(manager, session_id)
+        manager.stop_session(session_id, reap_host=operation == "stop")
+        if operation != "rollback" else abort_pending_host_launch(manager, session_id)
     )
     if confirmed:
         await cleanup
@@ -307,6 +309,15 @@ async def test_partial_host_reaping_releases_only_confirmed_container_claim(
         assert session_id not in manager._pending_host_launches
         assert "launch_pending_session_id" not in session.target.container
         assert session.status == SessionStatus.STOPPED
+        if operation == "ordinary-stop":
+            from agent_bridge.session_teardown import detach_for_restart
+
+            probe = Mock(side_effect=AssertionError("stopped target must remain dormant"))
+            monkeypatch.setattr("agent_bridge.session_host.container_transport.build_container_spawner", probe)
+            assert await manager.reattach_session_hosts() == 0
+            assert await manager.recover_disconnected_hosts() == 0
+            await detach_for_restart(manager)
+            probe.assert_not_called()
     else:
         with pytest.raises(RemoteSpawnCleanupPendingError, match="cleanup is inconclusive"):
             await cleanup
@@ -314,7 +325,7 @@ async def test_partial_host_reaping_releases_only_confirmed_container_claim(
         assert manager._container_lock_sessions[session_id] == "example-container"
         assert session_id in manager._pending_host_launches
         assert session.target.container["launch_pending_session_id"] == session_id
-        assert session.status == (SessionStatus.FAILED if operation == "stop" else SessionStatus.STOPPED)
+        assert session.status == (SessionStatus.STOPPED if operation == "rollback" else SessionStatus.FAILED)
     spawner.abort_spawned.assert_awaited_once()
     reap.assert_not_awaited()
 
@@ -523,3 +534,54 @@ async def test_partial_rollback_retains_failed_channel_until_retry(tmp_db, tmp_p
     lock.release.assert_called_once()
     if phase == "terminate":
         sock.terminate.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_shutdown_retries_durable_partial_launch_until_abort_confirmed(tmp_db, tmp_path, monkeypatch):
+    from agent_bridge.session_host_ownership import _remember
+    from agent_bridge.session_teardown import detach_for_restart
+
+    manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path / "hosts"))
+    session = Session(
+        "example-session", "example-agent",
+        SpawnTarget(type="command", container={"name": "example-container"}),
+    )
+    session.status = SessionStatus.STARTING
+    tmp_db.create_session(
+        session.session_id, session.name, None, ".", "command", "starting",
+        time.time(), target_json=session.target.to_json(),
+    )
+    manager._sessions[session.session_id] = session
+    spawned = SpawnedHost(
+        local_port=51000, host_pid=123, child_pid=456, boundary="container",
+        protocol_version=PROTOCOL_VERSION, nonce="example-nonce",
+        state_file="/example/host.json",
+        endpoint={"kind": "container", "container": "example-container"},
+    )
+    entered, release = asyncio.Event(), asyncio.Event()
+    attempts = 0
+
+    async def abort(*_args):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return False
+        entered.set()
+        await release.wait()
+        return True
+
+    spawner = SimpleNamespace(abort_spawned=AsyncMock(side_effect=abort))
+    pending = _remember(manager, session.session_id, spawner, spawned)
+    assert pending.durable
+    monkeypatch.setattr("agent_bridge.session_teardown._SHUTDOWN_CLEANUP_RETRY_SECONDS", 0.01)
+    shutdown = asyncio.create_task(detach_for_restart(manager))
+    await asyncio.wait_for(entered.wait(), 2)
+    assert not shutdown.done()
+    assert manager._pending_host_launches[session.session_id] is pending
+    assert manager._host_index.get(session.session_id) is not None
+    release.set()
+    await asyncio.wait_for(shutdown, 2)
+    assert attempts == 2
+    assert manager._pending_host_launches == {}
+    assert manager._host_index.get(session.session_id) is None
+    assert session.status == SessionStatus.STOPPED

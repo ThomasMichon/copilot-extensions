@@ -53,10 +53,7 @@ async def _detach_for_restart_owned(manager: SessionManager) -> None:
         or session.session_id in manager._forwards
         or session.session_id in manager._relays
         or manager._remote_reap_pending(session.session_id)
-        or (
-            session.session_id in manager._pending_host_launches
-            and not manager._pending_host_launches[session.session_id].durable
-        )
+        or session.session_id in manager._pending_host_launches
     ]:
         log.error(
             "Shutdown blocked by unconfirmed cleanup for %s; retaining "
@@ -268,7 +265,7 @@ async def complete_stop(
     await join_remote_reaps(manager, session_id, retry_failed=reap_host)
     if not for_restart and manager._host_index is not None:
         manager._host_index.set_resume_flag(session_id, False)
-    if reap_host and session_id in manager._pending_host_launches:
+    if session_id in manager._pending_host_launches:
         from .session_host_ownership import abort_pending_host_launch
 
         await abort_pending_host_launch(manager, session_id)
