@@ -1,7 +1,8 @@
 # Same-cell peer launcher
 
 `peer_launch.py` is the canonical, dependency-free native process boundary for
-Agent Dispatch, Agent CodeSpaces, and Agent Containers. `tools/sync-peer-launch.py` packages
+Agent Dispatch, Agent CodeSpaces, Agent Containers, and Agent Logger.
+`tools/sync-peer-launch.py` packages
 byte-identical copies alongside each consumer's `_installation_context.py`;
 `tools/sync-installation-context.py` owns those validator bytes. Neither
 bootstrap imports a validator through an unvalidated payload pointer.
@@ -55,6 +56,20 @@ and in-process relay registration preserve context refusal before publishing
 an allowlist or touching the token store.
 The scrubber removes the Containers environment namespace as well as the other
 callers' credentials and routing overrides.
+
+Logger uses this boundary for its cold-session-compaction tracked-worktree
+check. Genuine absence -- a valid owner with no same-cell worktrees peer
+installed -- returns `None` from `tracked_worktree_paths()`; legacy lookup is
+unchanged without explicit context. Every other failure (owner-validation
+error, blocked governance, a probe error, or a malformed peer response) raises
+`ContextRefused` instead. Callers choose their own safe response to a `None`
+or a refusal: `select_compactable` already has a per-session on-disk existence
+fallback that errs toward keeping (not archiving) a session, so it folds
+either into that same fallback. The hub-compaction callers have no such
+fallback for a foreign machine's session, so "no peer in this cell" is no more
+informative than a failure there -- both are treated as unresolved, and the
+whole compaction pass fails closed rather than proceeding as if nothing
+needed protecting.
 
 ## Validation
 

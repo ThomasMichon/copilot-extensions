@@ -245,6 +245,66 @@ def _cmd_origin_backfill_corpus(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_tenants_list(args: argparse.Namespace) -> int:
+    """Discover the adopted-repo tenants resolved for this machine."""
+    from agent_logger import tenancy
+
+    machine = getattr(args, "machine", None) or detect_machine()
+    tenants = tenancy.discover_tenants(machine=machine)
+    payload = {
+        "machine": machine,
+        "tenants": [
+            {
+                "id": t.tenant_id,
+                "repo": t.repo_name,
+                "repo_path": str(t.repo_path),
+                "roles": list(t.roles),
+                "enabled": t.enabled,
+                "config_path": str(t.config_path),
+                "scope": t.scope_summary(),
+                "advisories": list(t.advisories),
+            }
+            for t in tenants
+        ],
+    }
+    print(json.dumps(payload, indent=2))
+    return 0
+
+
+def _cmd_tenants_sync(args: argparse.Namespace) -> int:
+    """Run one sync pass per adopted source tenant (the orchestrated tick).
+
+    With no adopted tenants (no agent-worktrees registry, or no repo declares a
+    tenant), fall back to the legacy single-home ``run_sync`` so a scheduler
+    wired to ``tenants sync`` keeps syncing on a plain single-tenant install.
+    """
+    from agent_logger import tenancy
+
+    machine = getattr(args, "machine", None) or detect_machine()
+    tenants = tenancy.discover_tenants(machine=machine)
+    if not tenants:
+        from agent_logger.config import load_config
+        from agent_logger.sync.engine import run_sync
+
+        code = run_sync(
+            load_config(),
+            dry_run=bool(getattr(args, "dry_run", False)),
+            prune=bool(getattr(args, "prune", False)),
+        )
+        print(json.dumps({"machine": machine, "tenants": [], "fallback": "single-tenant",
+                          "exit": code}, indent=2))
+        return code
+    result = tenancy.run_all(
+        tenants,
+        roles=("source",),
+        dry_run=bool(getattr(args, "dry_run", False)),
+        prune=bool(getattr(args, "prune", False)),
+        machine=machine,
+    )
+    print(json.dumps(result.as_dict(), indent=2))
+    return 0 if all(o.status != "failed" for o in result.outcomes) else 1
+
+
 def _cmd_config_migrate(_args: argparse.Namespace) -> int:
     """Migrate the machine-local config.yaml schema in place (idempotent + atomic)."""
     from agent_logger import config_migrations
@@ -348,6 +408,28 @@ def build_parser() -> argparse.ArgumentParser:
         "--force", action="store_true", help="run even when chronicle.enabled is false"
     )
     c_tick.set_defaults(func=_cmd_chronicle_tick)
+
+    p_tenants = sub.add_parser(
+        "tenants",
+        help="multi-tenant orchestration -- adopted-repo source/sink daemons",
+    )
+    t_sub = p_tenants.add_subparsers(dest="tenants_command", required=True)
+    t_list = t_sub.add_parser(
+        "list", help="show the adopted-repo tenants resolved for this machine"
+    )
+    t_list.add_argument("--machine", help="machine name (default: auto-detected)")
+    t_list.set_defaults(func=_cmd_tenants_list)
+    t_sync = t_sub.add_parser(
+        "sync", help="run one sync pass per adopted source tenant (fan-out tick)"
+    )
+    t_sync.add_argument("--machine", help="machine name (default: auto-detected)")
+    t_sync.add_argument(
+        "--dry-run", action="store_true", help="resolve + report without syncing"
+    )
+    t_sync.add_argument(
+        "--prune", action="store_true", help="prune destinations after each push"
+    )
+    t_sync.set_defaults(func=_cmd_tenants_sync)
 
     return parser
 

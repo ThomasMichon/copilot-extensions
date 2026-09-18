@@ -1,14 +1,48 @@
-import { existsSync, readFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tmpdir } from "node:os";
 
 const plugin = join(dirname(fileURLToPath(import.meta.url)), "..");
 const cli = join(
   plugin, "extensions", "context-handoff", "handoff-cli.mjs",
 );
+
+function withRepository(fn) {
+  const root = mkdtempSync(join(tmpdir(), "context-handoff-cli-"));
+  try {
+    writeFileSync(join(root, ".git"), "gitdir: elsewhere\n");
+    fn(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+function withIsolatedHome(fn) {
+  const home = mkdtempSync(join(tmpdir(), "context-handoff-cli-home-"));
+  try {
+    const homeDrive = home.slice(0, 2);
+    const homePath = home.slice(2);
+    fn({
+      HOME: home,
+      USERPROFILE: home,
+      HOMEDRIVE: homeDrive,
+      HOMEPATH: homePath,
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+}
 
 test("payload-local CLI exposes the extension fallback flow", () => {
   const result = spawnSync(process.execPath, [cli, "help"], {
@@ -28,56 +62,88 @@ test("payload-local CLI exposes the extension fallback flow", () => {
 });
 
 test("trigger requires either markdown input or a stored handoff token", () => {
-  const missing = spawnSync(
-    process.execPath,
-    [cli, "trigger", "--session-id", "predecessor-session"],
-    { encoding: "utf8" },
-  );
-  assert.equal(missing.status, 2);
-  assert.match(missing.stderr, /pass --prompt-file\/--prompt\/stdin or --handoff-token/);
+  withRepository((root) => withIsolatedHome((homeEnv) => {
+    const missing = spawnSync(
+      process.execPath,
+      [cli, "trigger", "--session-id", "predecessor-session"],
+      { cwd: root, encoding: "utf8", env: { ...process.env, ...homeEnv } },
+    );
+    assert.equal(missing.status, 2);
+    assert.match(missing.stderr, /pass --prompt-file\/--prompt\/stdin or --handoff-token/);
+  }));
+});
+
+test("CLI handoff commands refuse mode=off repositories", () => {
+  withRepository((root) => {
+    mkdirSync(join(root, ".context-handoff"));
+    writeFileSync(
+      join(root, ".context-handoff", "config.yaml"),
+      "mode: off\n",
+    );
+
+    withIsolatedHome((homeEnv) => {
+      for (const args of [
+        ["save", "--session-id", "session-1", "--prompt", "handoff body"],
+        ["trigger", "--session-id", "session-1", "--prompt", "handoff body"],
+        ["consume", "--session-id", "session-1", "--task-id", "task-1"],
+        ["retry-cutover", "--session-id", "session-1"],
+      ]) {
+        const result = spawnSync(process.execPath, [cli, ...args], {
+          cwd: root,
+          encoding: "utf8",
+          env: { ...process.env, ...homeEnv },
+        });
+        assert.equal(result.status, 1, `${args[0]}: ${result.stderr}`);
+        assert.match(result.stderr, /context handoff is disabled/i);
+      }
+    });
+  });
 });
 
 test("consume requires exactly one recovery target", () => {
-  const missing = spawnSync(
-    process.execPath,
-    [cli, "consume", "--session-id", "successor-session"],
-    { encoding: "utf8" },
-  );
-  assert.equal(missing.status, 2);
-  assert.match(missing.stderr, /exactly one of --locator/);
+  withRepository((root) => withIsolatedHome((homeEnv) => {
+    const common = { cwd: root, encoding: "utf8", env: { ...process.env, ...homeEnv } };
+    const missing = spawnSync(
+      process.execPath,
+      [cli, "consume", "--session-id", "successor-session"],
+      common,
+    );
+    assert.equal(missing.status, 2);
+    assert.match(missing.stderr, /exactly one of --locator/);
 
-  const ambiguous = spawnSync(
-    process.execPath,
-    [
-      cli,
-      "consume",
-      "--session-id",
-      "successor-session",
-      "--task-id",
-      "task-1",
-      "--handoff-id",
-      "handoff-1",
-    ],
-    { encoding: "utf8" },
-  );
-  assert.equal(ambiguous.status, 2);
-  assert.match(ambiguous.stderr, /exactly one of --locator/);
+    const ambiguous = spawnSync(
+      process.execPath,
+      [
+        cli,
+        "consume",
+        "--session-id",
+        "successor-session",
+        "--task-id",
+        "task-1",
+        "--handoff-id",
+        "handoff-1",
+      ],
+      common,
+    );
+    assert.equal(ambiguous.status, 2);
+    assert.match(ambiguous.stderr, /exactly one of --locator/);
 
-  const deferredFile = spawnSync(
-    process.execPath,
-    [
-      cli,
-      "consume",
-      "--session-id",
-      "successor-session",
-      "--locator",
-      "file:handoff-1",
-      "--defer-complete",
-    ],
-    { encoding: "utf8" },
-  );
-  assert.equal(deferredFile.status, 2);
-  assert.match(deferredFile.stderr, /only valid with a task target/);
+    const deferredFile = spawnSync(
+      process.execPath,
+      [
+        cli,
+        "consume",
+        "--session-id",
+        "successor-session",
+        "--locator",
+        "file:handoff-1",
+        "--defer-complete",
+      ],
+      common,
+    );
+    assert.equal(deferredFile.status, 2);
+    assert.match(deferredFile.stderr, /only valid with a task target/);
+  }));
 });
 
 test("extension and CLI delegate storage, signaling, and consumption to the same core", () => {

@@ -52,9 +52,7 @@ def bin_dir() -> Path:
 
 def local_bin() -> Path:
     """~/.local/bin"""
-    if platform.system() == "Windows":
-        return Path(os.environ.get("USERPROFILE", str(Path.home()))) / ".local" / "bin"
-    return Path.home() / ".local" / "bin"
+    return cfg._home() / ".local" / "bin"
 
 
 def find_package_source(repo_dir: str | Path) -> Path:
@@ -598,17 +596,12 @@ def _project_identity(project: str, repo_dir: str | Path | None = None) -> dict[
 
 
 def _command_arbitration_dir() -> Path:
-    """Shared command ledger rooted beside the real global bin directory.
+    """Command ledger shared by all installation cells in the harness home.
 
-    Deliberately ignores ``AGENT_HOME``: that override isolates harness state,
-    while every cell still arbitrates the same real ``~/.local/bin`` commands.
+    Follow the same home as local_bin(), including AGENT_HOME isolation.
     """
-    if platform.system() == "Windows":
-        home = Path(os.environ.get("USERPROFILE", str(Path.home())))
-    else:
-        home = Path.home()
     return (
-        home / ".agent-worktrees" / "binstub-receipts"
+        cfg.legacy_install_dir() / "binstub-receipts"
     )  # marketplace-isolation: allow globally arbitrated project command
 
 

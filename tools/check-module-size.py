@@ -22,18 +22,32 @@ against. This check makes the standard real:
   allowed and never itself a failure.
 
 Widening a file's ceiling is a **manual, reviewed edit** to the baseline
-JSON, never something this script does automatically -- growth past the
-grandfathered size must be a conscious, visible decision, not a silent
-side effect of running a refresh. ``--refresh-baseline`` only ever *lowers*
-an existing entry (when a file has shrunk) or *removes* one entirely (when
-a file has shrunk to or below the cap); it never raises an entry, even if a
-file has grown -- that case is a guard failure to fix, not baseline noise
-to absorb.
+JSON in the ordinary case, never something an ordinary PR run of this script
+does automatically -- growth past the grandfathered size must be a
+conscious, visible decision, not a silent side effect of running a refresh.
+Plain ``--refresh-baseline`` only ever *lowers* an existing entry (when a
+file has shrunk) or *removes* one entirely (when a file has shrunk to or
+below the cap); it never raises an entry, even if a file has grown -- that
+case is a guard failure to fix, not baseline noise to absorb.
+
+The one exception is the opt-in ``--allow-widen`` flag:
+concurrent-agent development can legitimately grow several already-baselined
+files within the same short window (a shared module touched by parallel,
+unrelated PRs), which then forces every subsequent PR -- even ones that never
+touched the grown file -- to carry an unrelated manual baseline-widening
+diff just to pass CI. ``--refresh-baseline --allow-widen`` additionally
+*raises* a ceiling up to a file's current size when it is over its recorded
+ceiling. This is still never silent: it is restricted by convention (see
+``.github/workflows/module-size-baseline-widen.yml``) to a scheduled/
+post-merge run directly against ``main`` after the fact, producing its own
+reviewable PR -- **never** something a PR branch's own CI run does to its
+own diff, which would let a PR silently launder its own growth past review.
 
 Usage::
 
     python tools/check-module-size.py                  # enforce (pre-push/CI)
     python tools/check-module-size.py --refresh-baseline  # tighten after shrinking a file
+    python tools/check-module-size.py --refresh-baseline --allow-widen  # post-merge only; see above
 
 Exit code 0 = conformant, 1 = a file exceeds its cap/ceiling.
 """
@@ -126,8 +140,28 @@ def check(baseline: dict[str, int]) -> list[str]:
     return violations
 
 
-def refresh_baseline(baseline: dict[str, int]) -> dict[str, int]:
-    """Tighten (never widen) the baseline against current file sizes."""
+def refresh_baseline(
+    baseline: dict[str, int], *, allow_widen: bool = False,
+) -> dict[str, int]:
+    """Tighten (and, with ``allow_widen``, ratchet up) the baseline.
+
+    Default behaviour never widens -- see the module docstring. With
+    ``allow_widen=True``, a baselined file that has grown past its recorded
+    ceiling has that ceiling raised to its current size instead of being left
+    as a guard failure. Shrinking always wins over widening for the same file
+    in the same call (a file can't have both happened).
+
+    ``allow_widen`` only ever ratchets an EXISTING baseline entry -- it never
+    newly grandfathers a file that has never been baselined before, even if
+    that file now exceeds the cap. A brand-new offender is a genuinely new
+    hard-cap violation (split it or, per the module docstring, a deliberate
+    manual JSON edit), never something the automated, main-only widen job
+    should silently absorb; that would let ordinary (non-widen) growth past
+    the cap sneak in through the automation's own back door. Plain
+    ``refresh_baseline`` (``allow_widen=False``) keeps its prior behaviour of
+    recording a new offender, since it is always a manual, deliberate,
+    reviewed invocation.
+    """
     updated = dict(baseline)
     for path in sorted(_tracked_py_files()):
         lines = _line_count(path)
@@ -136,10 +170,13 @@ def refresh_baseline(baseline: dict[str, int]) -> dict[str, int]:
                 del updated[path]  # graduated: no longer needs grandfathering
             elif lines < updated[path]:
                 updated[path] = lines  # shrunk: lock in the improvement
-            # else: unchanged or grown -- never raised here; a grown file
-            # still fails `check()` and must be fixed or manually widened.
-        elif lines > CAP_LINES:
-            updated[path] = lines  # newly discovered offender
+            elif allow_widen and lines > updated[path]:
+                updated[path] = lines  # grown: ratchet the ceiling up (opt-in only)
+            # else: unchanged, or grown without --allow-widen -- never raised
+            # here; a grown file still fails `check()` and must be fixed or
+            # manually widened.
+        elif lines > CAP_LINES and not allow_widen:
+            updated[path] = lines  # newly discovered offender (manual runs only)
     return updated
 
 
@@ -150,12 +187,23 @@ def main() -> int:
         action="store_true",
         help="Rewrite the baseline, tightening any shrunk entries (never widens).",
     )
+    parser.add_argument(
+        "--allow-widen",
+        action="store_true",
+        help=(
+            "With --refresh-baseline, also raise a grown file's ceiling to its "
+            "current size. Post-merge/main-only by convention -- never run this "
+            "against a PR branch's own diff (see module docstring)."
+        ),
+    )
     args = parser.parse_args()
+    if args.allow_widen and not args.refresh_baseline:
+        parser.error("--allow-widen requires --refresh-baseline")
 
     baseline = _load_baseline()
 
     if args.refresh_baseline:
-        updated = refresh_baseline(baseline)
+        updated = refresh_baseline(baseline, allow_widen=args.allow_widen)
         if updated != baseline:
             _write_baseline(updated)
             print(f"[OK] refreshed {BASELINE_PATH.relative_to(REPO)}")

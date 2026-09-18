@@ -2,8 +2,9 @@
 
 ``restart_worktree_copilot`` is the shared primitive behind the Picker "Stop"
 maintenance action and Neuron-Forge "Take over": it stops a worktree's
-interactive Copilot (graceful double-Ctrl-C, then hard mux kill-session) while
-keeping the git worktree, so the caller can relaunch or ACP-resume.
+interactive Copilot (active-pane retire first, then whole-session hard kill
+only when needed) while keeping the git worktree, so the caller can relaunch or
+ACP-resume.
 """
 
 from __future__ import annotations
@@ -26,17 +27,29 @@ def test_restart_no_session_is_noop():
 
 def test_restart_graceful_success():
     with patch.object(sessions, "has_mux_session", return_value=True), \
-         patch.object(sessions, "graceful_quit_mux_session", return_value=True), \
+         patch.object(sessions, "mux_active_pane", return_value="%2"), \
+         patch.object(sessions, "mux_session_name", return_value="wt-wt-2"), \
+         patch("agent_worktrees.pane_lifecycle.pane_terminate", return_value={
+             "ok": True, "pane": "%2", "gone": True,
+             "method": "graceful-signature-confirmed",
+         }) as terminate, \
          patch.object(sessions, "kill_tmux_session") as kill:
         out = sessions.restart_worktree_copilot("wt-2")
     assert out["method"] == "graceful"
     assert out["ok"] is True
+    terminate.assert_called_once_with(
+        "%2", mux_session="wt-wt-2", overall_budget=7.5,
+    )
     kill.assert_not_called()  # graceful succeeded -> never hard-kill
 
 
 def test_restart_graceful_falls_back_to_hard():
     with patch.object(sessions, "has_mux_session", return_value=True), \
-         patch.object(sessions, "graceful_quit_mux_session", return_value=False), \
+         patch.object(sessions, "mux_active_pane", return_value="%3"), \
+         patch.object(sessions, "mux_session_name", return_value="wt-wt-3"), \
+         patch("agent_worktrees.pane_lifecycle.pane_terminate", return_value={
+             "ok": False, "pane": "%3", "gone": False, "method": "failed",
+         }), \
          patch.object(sessions, "kill_tmux_session", return_value=True) as kill:
         out = sessions.restart_worktree_copilot("wt-3")
     assert out["method"] == "hard"
@@ -44,22 +57,71 @@ def test_restart_graceful_falls_back_to_hard():
     kill.assert_called_once_with("wt-3")
 
 
+def test_restart_last_window_skip_falls_back_to_session_kill():
+    with patch.object(sessions, "has_mux_session", return_value=True), \
+         patch.object(sessions, "mux_active_pane", return_value="%4"), \
+         patch.object(sessions, "mux_session_name", return_value="wt-wt-4"), \
+         patch("agent_worktrees.pane_lifecycle.pane_terminate", return_value={
+             "ok": True, "pane": "%4", "gone": False,
+             "method": "last-window-skip",
+         }), \
+         patch.object(sessions, "kill_tmux_session", return_value=True) as kill:
+        out = sessions.restart_worktree_copilot("wt-4")
+    assert out["method"] == "hard"
+    assert out["ok"] is True
+    kill.assert_called_once_with("wt-4")
+
+
+def test_restart_pane_hard_success_does_not_kill_session_again():
+    with patch.object(sessions, "has_mux_session", return_value=True), \
+         patch.object(sessions, "mux_active_pane", return_value="%5"), \
+         patch.object(sessions, "mux_session_name", return_value="wt-wt-5"), \
+         patch("agent_worktrees.pane_lifecycle.pane_terminate", return_value={
+             "ok": True, "pane": "%5", "gone": True, "method": "hard",
+         }), \
+         patch.object(sessions, "kill_tmux_session") as kill:
+        out = sessions.restart_worktree_copilot("wt-5")
+    assert out["method"] == "hard"
+    assert out["ok"] is True
+    kill.assert_not_called()
+
+
 def test_restart_no_graceful_hard_kills_directly():
     with patch.object(sessions, "has_mux_session", return_value=True), \
-         patch.object(sessions, "graceful_quit_mux_session") as graceful, \
+         patch("agent_worktrees.pane_lifecycle.pane_terminate") as terminate, \
          patch.object(sessions, "kill_tmux_session", return_value=True):
         out = sessions.restart_worktree_copilot("wt-4", graceful=False)
     assert out["method"] == "hard"
-    graceful.assert_not_called()
+    terminate.assert_not_called()
 
 
 def test_restart_hard_kill_failure_reports_failed():
     with patch.object(sessions, "has_mux_session", return_value=True), \
-         patch.object(sessions, "graceful_quit_mux_session", return_value=False), \
+         patch.object(sessions, "mux_active_pane", return_value="%6"), \
+         patch.object(sessions, "mux_session_name", return_value="wt-wt-6"), \
+         patch("agent_worktrees.pane_lifecycle.pane_terminate", return_value={
+             "ok": False, "pane": "%6", "gone": False, "method": "failed",
+         }), \
          patch.object(sessions, "kill_tmux_session", return_value=False):
-        out = sessions.restart_worktree_copilot("wt-5")
+        out = sessions.restart_worktree_copilot("wt-6")
     assert out["method"] == "failed"
     assert out["ok"] is False
+
+
+def test_restart_already_gone_without_live_session_maps_to_none():
+    with patch.object(sessions, "has_mux_session", side_effect=[True, False]), \
+         patch.object(sessions, "mux_active_pane", return_value="%7"), \
+         patch.object(sessions, "mux_session_name", return_value="wt-wt-7"), \
+         patch("agent_worktrees.pane_lifecycle.pane_terminate", return_value={
+             "ok": True, "pane": "%7", "gone": True, "method": "already-gone",
+         }), \
+         patch.object(sessions, "kill_tmux_session") as kill:
+        out = sessions.restart_worktree_copilot("wt-7")
+    assert out == {
+        "worktree_id": "wt-7", "had_session": False,
+        "method": "none", "ok": True,
+    }
+    kill.assert_not_called()
 
 
 # -- graceful_quit_mux_session ------------------------------------------------
