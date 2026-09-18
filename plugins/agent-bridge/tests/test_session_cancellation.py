@@ -1150,6 +1150,42 @@ async def test_stranded_sweep_counts_only_confirmed_remote_reaps(
     assert (ctx.manager._host_index.get(record.session_id) is None) is confirmed
 
 
+@pytest.mark.parametrize("failure", [None, "relay", "forward"])
+async def test_stranded_remote_reap_contains_channels_before_forgetting_authority(
+    owned_context, monkeypatch, failure,
+):
+    from agent_bridge.session_host.version_mux import HostDisposition
+
+    ctx = owned_context
+    record = _remote_record(ctx)
+    relay = SimpleNamespace(stop=AsyncMock())
+    forward = SimpleNamespace(cancel=AsyncMock())
+    ctx.manager._relays[record.session_id] = [relay]
+    ctx.manager._forwards[record.session_id] = forward
+    release = Mock()
+    monkeypatch.setattr(ctx.manager, "_release_container_lock", release)
+    monkeypatch.setattr(ctx.manager, "_remote_reap", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        "agent_bridge.session_host.version_mux.plan_host",
+        lambda **_kwargs: SimpleNamespace(disposition=HostDisposition.FORCE_REAP, reason="obsolete host"),
+    )
+    failing = relay.stop if failure == "relay" else forward.cancel
+    if failure is not None:
+        failing.side_effect = OSError("channel cleanup failed")
+        with pytest.raises(OSError, match="channel cleanup failed"):
+            await ctx.manager.sweep_stranded_hosts()
+        assert ctx.manager._host_index.get(record.session_id) == record
+        assert (record.session_id in ctx.manager._relays) is (failure == "relay")
+        assert (record.session_id in ctx.manager._forwards) is (failure == "forward")
+        release.assert_not_called()
+        failing.side_effect = None
+    assert await ctx.manager.sweep_stranded_hosts() == 1
+    assert ctx.manager._host_index.get(record.session_id) is None
+    assert record.session_id not in ctx.manager._relays
+    assert record.session_id not in ctx.manager._forwards
+    release.assert_called_once_with(record.session_id)
+
+
 @pytest.mark.parametrize("confirmed", [False, True])
 async def test_end_joins_existing_remote_reap_before_cleanup(owned_context, monkeypatch, confirmed):
     from agent_bridge.session_manager import RemoteHostRecoveryPendingError

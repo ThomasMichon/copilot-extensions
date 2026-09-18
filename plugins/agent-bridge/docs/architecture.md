@@ -486,6 +486,9 @@ restart does not inherently close the child's pipes.
   teardown as well as process termination to succeed before confirming cleanup.
   Independent cleanup steps still run after a failure; completed local handles
   are cleared while failed handles and durable authority remain available for retry.
+  Confirmed remote reaps strictly close local forward/relay ownership before
+  removing host metadata, including stranded sweeps; a cleanup failure retains
+  authority, and the publication fence is rechecked after asynchronous teardown.
   Remote cleanup also checks an in-process HostIndex publication revision,
   protecting equal-value replacement records from an older reap. Descriptor
   removal must persist before pending handles or container ownership are

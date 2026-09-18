@@ -147,6 +147,13 @@ async def reap_remote_record(
         if current == record and current_revision == record_revision:
             from .session_host_ownership import finish_host_metadata_cleanup
 
+            await manager._drop_forward(record.session_id, strict=True, preserve_ownership=True)
+            if (
+                manager._host_index is None
+                or manager._host_index.get(record.session_id) != record
+                or manager._host_index.revision(record.session_id) != record_revision
+            ):
+                return confirmed
             finish_host_metadata_cleanup(manager, record.session_id, record)
             owned = manager._remote_reaps_by_session.get(record.session_id)
             if owned is not None:
