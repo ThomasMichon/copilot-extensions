@@ -202,6 +202,29 @@ class TestPRConfigParsing:
         conf = cfg.load_config(cfgfile)
         assert conf.repos["ext"].pr.enabled is False
 
+    def test_codename_block_wires_through_load_config(self, tmp_path: Path):
+        """Integration regression: the codename block must actually reach
+        RepoConfig via load_config's _build_repo_config wiring, not just
+        parse_codename() in isolation -- a typo in that wiring would let
+        every loaded RepoConfig silently retain CodenameConfig defaults
+        while codename_config.py's own unit tests kept passing."""
+        cfgfile = tmp_path / "config.yaml"
+        self._write(
+            cfgfile,
+            "    codename:\n"
+            "      hook_command: my-hook --generate\n"
+            "      hook_timeout_seconds: 2.5\n",
+        )
+        codename = cfg.load_config(cfgfile).repos["ext"].codename
+        assert codename.hook_command == "my-hook --generate"
+        assert codename.hook_timeout_seconds == 2.5
+
+    def test_codename_absent_defaults_to_no_hook(self, tmp_path: Path):
+        cfgfile = tmp_path / "config.yaml"
+        self._write(cfgfile)
+        codename = cfg.load_config(cfgfile).repos["ext"].codename
+        assert codename.hook_command == ""
+
     def test_pr_notes_parsed(self, tmp_path: Path):
         cfgfile = tmp_path / "config.yaml"
         self._write(

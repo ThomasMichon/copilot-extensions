@@ -190,6 +190,7 @@ def _kill_process_group(process: subprocess.Popen) -> None:
                 capture_output=True,
                 timeout=5,
                 check=False,
+                creationflags=no_window_flags(),
             )
         except (OSError, subprocess.TimeoutExpired):
             try:
