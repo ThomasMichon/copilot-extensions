@@ -49,6 +49,7 @@ async def _detach_for_restart_owned(manager: SessionManager) -> None:
     while pending := [
         session for session in manager.list_sessions()
         if session._owned_process is not None
+        or session.client is not None
         or session.session_id in manager._forwards
         or session.session_id in manager._relays
         or manager._remote_reap_pending(session.session_id)
@@ -158,7 +159,7 @@ async def reap_remote_record(
             owned = manager._remote_reaps_by_session.get(record.session_id)
             if owned is not None:
                 owned.difference_update(task for task in list(owned) if task.done())
-                if not owned:
+                if not owned and manager._remote_reaps_by_session.get(record.session_id) is owned:
                     manager._remote_reaps_by_session.pop(record.session_id, None)
     elif (
         session is not None
@@ -411,10 +412,7 @@ async def end_session_locked(self: SessionManager, session: Session, *, force: b
                         f"Host authority changed during end for {session_id}; ownership retained"
                     )
             elif rec.boundary != "local":
-                self._kill_forward_sync(
-                    session_id,
-                    release_container_lock=False,
-                )
+                await self._drop_forward(session_id, strict=True, preserve_ownership=True)
                 await reap_remote_checked(self, session, rec)
                 self._set_container_launch_pending(session_id, False)
             else:

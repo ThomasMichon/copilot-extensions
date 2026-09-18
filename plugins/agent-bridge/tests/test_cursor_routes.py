@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -430,6 +430,7 @@ class TestStatusEndpoint:
         # host can answer it (elicitation backstop, dotfiles#1275).
         mgr = _seed_session(app)
         fake = MagicMock()
+        fake.shutdown = AsyncMock()
         fake.pending_ask_user.return_value = [
             {"tool_call_id": "tc-1", "message": "Proceed?",
              "requested_schema": {"type": "object", "properties": {}}}

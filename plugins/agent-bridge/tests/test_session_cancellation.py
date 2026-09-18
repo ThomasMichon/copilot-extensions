@@ -94,7 +94,7 @@ async def owned_context(tmp_db, tmp_path, monkeypatch):
             await stage("recreate")
             return "new-acp"
 
-        async def shutdown(self):
+        async def shutdown(self, *, strict=False):
             # Deliberately leave the child for the ownership fallback to reap.
             if state.block_cleanup:
                 state.cleanup_entered.set()
@@ -1595,3 +1595,97 @@ async def test_background_authority_probe_requires_turn_admission(owned_context,
     assert await ctx.manager._recover_remote_host_records(background=True) == 0
     spawner.can_inspect_without_wake.assert_awaited_once()
     spawner.recover_record.assert_awaited_once()
+
+
+async def test_stale_reap_callback_cannot_remove_replacement_task_set(owned_context, monkeypatch):
+    ctx = owned_context
+    record = _remote_record(ctx)
+    callbacks = []
+    completed = Mock()
+    completed.cancelled.return_value = False
+    completed.exception.return_value = None
+    completed.result.return_value = True
+    completed.done.return_value = True
+    completed.add_done_callback.side_effect = callbacks.append
+
+    def create_task(operation):
+        operation.close()
+        return completed
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            "agent_bridge.session_manager.asyncio.get_running_loop",
+            lambda: SimpleNamespace(create_task=create_task),
+        )
+        ctx.manager._schedule_remote_reap(record, "old cleanup")
+    old_set = ctx.manager._remote_reaps_by_session.pop(record.session_id)
+    newer = Mock()
+    newer.done.return_value = False
+    replacement = {newer}
+    ctx.manager._remote_reaps_by_session[record.session_id] = replacement
+    ctx.manager._remote_reap_tasks.add(newer)
+    callbacks[0](completed)
+    assert old_set == set()
+    assert ctx.manager._remote_reaps_by_session[record.session_id] is replacement
+    assert ctx.manager._remote_reap_pending(record.session_id)
+
+
+@pytest.mark.parametrize("channel", ["relay", "forward"])
+async def test_remote_end_retains_failed_channel_before_reaping(owned_context, monkeypatch, channel):
+    ctx = owned_context
+    record = _remote_record(ctx)
+    relay = SimpleNamespace(stop=AsyncMock())
+    forward = SimpleNamespace(cancel=AsyncMock())
+    ctx.manager._relays[record.session_id] = [relay]
+    ctx.manager._forwards[record.session_id] = forward
+    failing = relay.stop if channel == "relay" else forward.cancel
+    failing.side_effect = OSError("channel cleanup failed")
+    remote = AsyncMock(return_value=True)
+    monkeypatch.setattr(ctx.manager, "_remote_reap", remote)
+    with pytest.raises(OSError, match="channel cleanup failed"):
+        await ctx.manager.end_session(record.session_id, force=True)
+    remote.assert_not_awaited()
+    assert ctx.manager._host_index.get(record.session_id) == record
+    assert ctx.manager.get_session(record.session_id) is ctx.session
+    assert (record.session_id in ctx.manager._relays) is (channel == "relay")
+    assert (record.session_id in ctx.manager._forwards) is (channel == "forward")
+    failing.side_effect = None
+    await ctx.manager.end_session(record.session_id, force=True)
+    remote.assert_awaited_once()
+    assert ctx.manager.get_session(record.session_id) is None
+
+
+async def test_shutdown_retries_strict_acp_client_ownership(owned_context, monkeypatch):
+    from agent_bridge.acp_client import AcpClient
+    from agent_bridge.session_teardown import detach_for_restart
+
+    ctx = owned_context
+    client = AcpClient()
+    client._host_mode = True
+    entered, release = asyncio.Event(), asyncio.Event()
+    attempts = 0
+
+    async def close():
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError("ACP close failed")
+        entered.set()
+        await release.wait()
+
+    client._connection = SimpleNamespace(close=close)
+    client._host_closer = AsyncMock()
+    ctx.session.client = client
+    ctx.session.status = SessionStatus.IDLE
+    monkeypatch.setattr("agent_bridge.session_teardown._SHUTDOWN_CLEANUP_RETRY_SECONDS", 0.01)
+    shutdown = asyncio.create_task(detach_for_restart(ctx.manager))
+    await asyncio.wait_for(entered.wait(), 2)
+    assert not shutdown.done()
+    assert ctx.session.client is client
+    assert ctx.session.status == SessionStatus.FAILED
+    release.set()
+    await asyncio.wait_for(shutdown, 2)
+    assert attempts == 2
+    assert ctx.session.client is None
+    assert ctx.session.status == SessionStatus.STOPPED
+    assert ctx.session.restart_status == "idle"

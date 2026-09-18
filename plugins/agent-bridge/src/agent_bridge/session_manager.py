@@ -4063,7 +4063,7 @@ class SessionManager:
                 owned.discard(completed)
             else:
                 log.warning("Remote reap failed for %s; result retained for cleanup retry", rec.session_id)
-            if not owned:
+            if not owned and self._remote_reaps_by_session.get(rec.session_id) is owned:
                 self._remote_reaps_by_session.pop(rec.session_id, None)
 
         task.add_done_callback(settled)
@@ -5794,13 +5794,7 @@ class SessionManager:
     async def _quiesce_session(
         self, session: Session, *, cancel_turn: bool = True
     ) -> None:
-        """Best-effort teardown of a session's in-flight prompt + ACP client.
-
-        Must be resilient to a *mid-turn* session: cancelling an in-flight
-        prompt or shutting down a busy ACP client must never raise out of
-        stop/end. (A raising shutdown here surfaced as HTTP 500 when ending a
-        mid-turn session -- see the credential-hang showcase report.) Errors
-        are logged and swallowed so teardown always completes.
+        """Quiesce the prompt and strictly close ACP, retaining failed ownership.
 
         ``cancel_turn`` (default True): send an ACP ``session/cancel`` to the
         remote agent's in-flight turn. A redeploy/shutdown passes ``False``
@@ -5825,12 +5819,13 @@ class SessionManager:
                 await task
         if session.client:
             try:
-                await session.client.shutdown()
+                await session.client.shutdown(strict=True)
             except Exception:
                 log.warning(
                     "ACP client shutdown failed while tearing down session %s",
                     session.session_id, exc_info=True,
                 )
+                raise
             session.client = None
         from .session_ownership import cleanup_owned_process
 

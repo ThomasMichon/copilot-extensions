@@ -1008,54 +1008,17 @@ class AcpClient:
         if self._connection and self._acp_session_id and not self._prompt_complete:
             await self._connection.cancel(session_id=self._acp_session_id)
 
-    async def shutdown(self) -> None:
+    async def shutdown(self, *, strict: bool = False) -> None:
         """Shut down the ACP connection.
 
         In **host mode** this DETACHES only -- the Session Host keeps the child
         alive across a frontend restart (goal 1: no inadvertent reaping). In
         the classic process-owning mode it tree-kills the child as before.
+        Strict mode retains failed handles and raises for explicit cleanup retry.
         """
-        # Cancel any pending permission
-        if self._pending_permission_future and not self._pending_permission_future.done():
-            self._pending_permission_future.set_result(
-                RequestPermissionResponse(outcome={"outcome": "cancelled"})
-            )
-            self._pending_permission_future = None
+        from .acp_teardown import shutdown_client
 
-        # Drop any pending out-of-turn settle timer so it can't fire after
-        # teardown (it would touch a closed session's event log).
-        self._cancel_out_of_turn()
-
-        # Cancel any parked ask_user elicitations so the agent's blocked
-        # `elicitation/create` calls unwind instead of hanging on teardown.
-        for fut in self._pending_elicitations.values():
-            if not fut.done():
-                fut.set_result(CancelElicitationResponse(action="cancel"))
-        self._pending_elicitations.clear()
-        self._pending_ask_user_meta.clear()
-
-        if self._connection:
-            with contextlib.suppress(Exception):
-                await self._connection.close()
-            self._connection = None
-
-        if self._host_mode:
-            # Detach from the Session Host; the child survives. Reaping is a
-            # separate, explicit act (the host's TERMINATE), not a shutdown.
-            if self._host_closer is not None:
-                with contextlib.suppress(Exception):
-                    await self._host_closer()
-                self._host_closer = None
-        else:
-            proc = self._process
-            if proc and proc.returncode is None:
-                await _terminate_process_tree(proc)
-            self._process = None
-
-        # The process (and the in-process sub-agents it hosted) is gone; drop
-        # any background-task tracking so a discarded client never reports
-        # stale active tasks.
-        self._background_tasks.clear()
+        await shutdown_client(self, strict=strict)
 
     # -- Event emission ------------------------------------------------------
 

@@ -1273,7 +1273,7 @@ async def test_resync_excludes_prompt_admission_until_client_replacement(
     ctx.session.client = mock_acp_client
     entered, release, delivered = asyncio.Event(), asyncio.Event(), asyncio.Event()
 
-    async def shutdown():
+    async def shutdown(*, strict=False):
         entered.set()
         await release.wait()
 

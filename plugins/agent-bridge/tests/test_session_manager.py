@@ -2695,15 +2695,18 @@ class TestEndSession:
             await end_task
 
     @pytest.mark.asyncio
-    async def test_end_succeeds_when_shutdown_raises(
+    async def test_end_retains_client_when_shutdown_raises(
         self, session_manager, spawn_target, _patch_spawn, _patch_acp, mock_acp_client
     ) -> None:
-        # Report 4.4(a): ending a mid-turn session raised out of shutdown ->
-        # HTTP 500. Teardown must be best-effort so the session is always ended.
         session = await session_manager.start_session(spawn_target)
         sid = session.session_id
         mock_acp_client.shutdown = AsyncMock(side_effect=RuntimeError("busy mid-turn"))
-        # Must not raise, and must remove the session.
+        with pytest.raises(RuntimeError, match="busy mid-turn"):
+            await session_manager.end_session(sid)
+        assert session_manager.get_session(sid) is session
+        assert session.client is mock_acp_client
+        mock_acp_client.shutdown.assert_awaited_once_with(strict=True)
+        mock_acp_client.shutdown.side_effect = None
         await session_manager.end_session(sid)
         assert session_manager.get_session(sid) is None
 
@@ -2726,11 +2729,17 @@ class TestEndSession:
         assert rows.get(sid) == SessionStatus.ENDED.value
 
     @pytest.mark.asyncio
-    async def test_stop_succeeds_when_shutdown_raises(
+    async def test_stop_retains_client_when_shutdown_raises(
         self, session_manager, spawn_target, _patch_spawn, _patch_acp, mock_acp_client
     ) -> None:
         session = await session_manager.start_session(spawn_target)
         mock_acp_client.shutdown = AsyncMock(side_effect=RuntimeError("busy mid-turn"))
+        with pytest.raises(RuntimeError, match="busy mid-turn"):
+            await session_manager.stop_session(session.session_id)
+        assert session.status == SessionStatus.FAILED
+        assert session.client is mock_acp_client
+        mock_acp_client.shutdown.assert_awaited_once_with(strict=True)
+        mock_acp_client.shutdown.side_effect = None
         await session_manager.stop_session(session.session_id)
         assert session.status == SessionStatus.STOPPED
         assert session.client is None
@@ -4069,6 +4078,7 @@ class TestCodespaceExclusiveClaim:
             client = MagicMock()
             client.is_running = True
             client.pid = 12345
+            client.shutdown = AsyncMock()
             return client, "acp-test-123"
 
         monkeypatch.setattr(

@@ -489,6 +489,11 @@ restart does not inherently close the child's pipes.
   Confirmed remote reaps strictly close local forward/relay ownership before
   removing host metadata, including stranded sweeps; a cleanup failure retains
   authority, and the publication fence is rechecked after asynchronous teardown.
+  Stop/end use strict ACP shutdown: connection and host-closer failures retain
+  their handles and the client for retry rather than acknowledging containment.
+  Shutdown retries that client ownership, and remote end closes channels
+  strictly before reaping. Late reap callbacks remove only their own task set,
+  never a replacement set created by newer cleanup.
   Remote cleanup also checks an in-process HostIndex publication revision,
   protecting equal-value replacement records from an older reap. Descriptor
   removal must persist before pending handles or container ownership are
@@ -542,6 +547,8 @@ restart does not inherently close the child's pipes.
   definitions and status writes live in `db_core.py` and `db_sessions.py`,
   while atomic handoff queue transfers live in `db_prompts.py`.
   `session_host_ownership.py` owns the pre-client Session Host handoff.
+  `acp_teardown.py` implements retryable strict ACP cleanup while retaining the
+  client's best-effort default for callers that do not request strict shutdown.
   These extractions preserve factory injection seams and avoid widening the
   repository's shrink-only module-size baseline.
   Ordinary stop also stops per-session credential-relay supervisors and cancels

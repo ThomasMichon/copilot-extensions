@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import time
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -446,6 +446,7 @@ def test_all_projected_content_respects_text_budget(client, app) -> None:
         stop_reason="error:" + ("e" * 1000),
     )
     fake = MagicMock()
+    fake.shutdown = AsyncMock()
     fake.pending_ask_user.return_value = [
         {
             "tool_call_id": "t" * 1000,
@@ -486,6 +487,7 @@ def test_pending_input_is_unknown_without_live_client(client, app) -> None:
 def test_pending_input_is_bounded_when_live(client, app) -> None:
     _, session = _seed_session(app)
     fake = MagicMock()
+    fake.shutdown = AsyncMock()
     fake.pending_ask_user.return_value = [
         {
             "tool_call_id": "tc-1",
