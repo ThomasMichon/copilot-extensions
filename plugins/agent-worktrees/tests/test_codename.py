@@ -200,6 +200,20 @@ class TestLoadWordlist:
         with pytest.raises(WordlistError):
             load_wordlist(path)
 
+    def test_mixed_type_unknown_keys_still_raises_wordlist_error(
+        self, tmp_path: Path
+    ) -> None:
+        # A YAML mapping can mix a string key with a non-string one (e.g.
+        # a stray integer key); sorted() on a raw mix of types raises
+        # TypeError in Python 3, which would escape as an unwrapped
+        # exception instead of the documented WordlistError -- and bypass
+        # load_wordlist_or_default's fail-soft fallback entirely.
+        path = self._write(
+            tmp_path, "words.yaml", "nouns: [cube]\nadjectivs: [red]\n1: oops\n"
+        )
+        with pytest.raises(WordlistError):
+            load_wordlist(path)
+
     def test_missing_nouns_raises(self, tmp_path: Path) -> None:
         path = self._write(tmp_path, "words.yaml", "adjectives: [red]\n")
         with pytest.raises(WordlistError):
@@ -298,6 +312,14 @@ class TestLoadWordlistOrDefault:
     def test_invalid_utf8_file_falls_back_to_default(self, tmp_path: Path) -> None:
         path = tmp_path / "words.yaml"
         path.write_bytes(b"nouns: [\xff\xfe]\n")
+        wl = load_wordlist_or_default(str(path))
+        assert wl is DEFAULT_WORDLIST
+
+    def test_mixed_type_unknown_keys_fall_back_to_default(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "words.yaml"
+        path.write_text("nouns: [cube]\n1: oops\n", encoding="utf-8")
         wl = load_wordlist_or_default(str(path))
         assert wl is DEFAULT_WORDLIST
 

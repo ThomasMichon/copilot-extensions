@@ -173,11 +173,17 @@ def load_wordlist(path: str | Path) -> Wordlist:
     _KNOWN_KEYS = {"nouns", "adjectives", "pairs"}
     unknown_keys = set(data) - _KNOWN_KEYS
     if unknown_keys:
+        # sorted() on a raw set can raise TypeError if the mapping mixed
+        # key types (e.g. a stray YAML integer key alongside string
+        # keys) -- sort by repr so any mix of hashable, unsortable-among-
+        # themselves key types still produces a deterministic message
+        # instead of escaping this WordlistError-wrapping entirely.
         raise WordlistError(
-            f"{file_path}: unknown field(s) {sorted(unknown_keys)!r} -- "
-            f"only {sorted(_KNOWN_KEYS)!r} are recognized (a typo here "
-            "would otherwise silently fall back to defaults instead of "
-            "being rejected)"
+            f"{file_path}: unknown field(s) "
+            f"{sorted(unknown_keys, key=repr)!r} -- only "
+            f"{sorted(_KNOWN_KEYS)!r} are recognized (a typo here would "
+            "otherwise silently fall back to defaults instead of being "
+            "rejected)"
         )
 
     def _word_list(key: str, *, required: bool) -> tuple[str, ...]:
