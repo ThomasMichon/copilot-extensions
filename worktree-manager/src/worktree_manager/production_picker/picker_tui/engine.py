@@ -7835,6 +7835,11 @@ class WorktreesView:
                     has_content = True
                 if not has_content:
                     pline.append("·", style="grey30")
+                # Hard width guarantee: the pulse segment's own floor can
+                # still push a marker-carrying row past `width` (review
+                # finding) -- clip the assembled line once at the end.
+                if pline.cell_len > width:
+                    pline.truncate(width, overflow="ellipsis")
                 add(pline)
                 li += 1
 

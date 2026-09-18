@@ -356,6 +356,49 @@ def test_marker_and_asset_line_never_overflows_narrow_width(monkeypatch, tmp_pat
     assert "PR" in detail_lines[0]
 
 
+def _markers_and_pulse_source():
+    """A fleet with BOTH a ``status_markers`` closure descriptor AND a live
+    pulse/intent on the same row, no asset hints -- the second mixed case a
+    PR #2897 review flagged: the pulse segment's own width floor can still
+    push a marker-carrying row past the capture width even after the
+    markers/assets segment is itself bounded."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("anomalous-potato", "Win")
+    raws = [
+        {"id": "anomalous-potato-win-20260627-9999", "title": "Marker + pulse row",
+         "status": "active", "started_at": "2026-06-27T17:59:00",
+         "turn_count": 5, "state": "completed",
+         "live_intent": "a fairly long live-intent line to press the width budget",
+         "live_intent_at": "2026-06-27T17:59:00", "live_rest": "busy",
+         "closure": {
+             "version": 2, "label": "MERGED", "style": "merged-blocked",
+             "compact": "MERGED C1 U* OC*",
+             "claims": {"held": 1}, "follow_ups": {"open": 0},
+             "closure": {"final": False}, "action": {"disposition": "blocked"},
+         }},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+    return src
+
+
+def test_marker_and_pulse_line_never_overflows_narrow_width(monkeypatch, tmp_path):
+    """The combined status_markers + live-pulse detail line must never exceed
+    the capture width: the pulse segment's own ``avail = max(1, ...)`` floor
+    otherwise unconditionally appends a padded intent clip even when the
+    markers segment already used the whole row (PR #2897 review)."""
+    _isolate_pivots(monkeypatch, tmp_path)
+    grid = pcap.capture(_markers_and_pulse_source(), live=False, size=(60, 24))["text"]
+    lines = grid.splitlines()
+    widths = {len(line) for line in lines}
+    assert len(widths) == 1, f"ragged grid at narrow width: {sorted(widths)}"
+
+
 def test_capture_is_deterministic(monkeypatch, tmp_path):
     _isolate_pivots(monkeypatch, tmp_path)
     first = pcap.capture(_fixture_source(), live=False)["text"]
