@@ -351,6 +351,13 @@ Inspect the ledger any time with
 ownership is invariant: `AGENT_WORKTREES_OBLIGATION_GATE=warn|off` does not
 permit releasing unsettled resources without the affirmative handoff above.
 
+> **Investigating someone else's already-open PR or worktree, not your own
+> obligations?** The `owner_ref` recorded above is walkable in reverse: given
+> a worktree id (in any coordinated project), `claims <id> --json` reports
+> the worktree that created it, and `claimant-liveness <owner_ref> --json`
+> reports whether that creator is still live. See the **`tracing-claimant-graphs`**
+> skill for the full walk (including chaining multiple hops back to a root).
+
 #### Resources you create **out-of-band** aren't auto-journaled — claim them by hand
 
 Auto-journaling only covers resources created through the blessed paths: a

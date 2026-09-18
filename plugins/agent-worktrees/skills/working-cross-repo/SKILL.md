@@ -177,6 +177,12 @@ Always read the repo's `CONTRIBUTING.md` / `AGENTS.md` and its narrative
 > ```
 > See the `worktree` skill's finalize-gate section for the full model
 > (example-operator/dotfiles#1351 tracks auto-journaling these).
+>
+> **Investigating a PR someone else already opened in the target repo** (not
+> journaling your own)? Walk the claim in the other direction instead: see the
+> **`tracing-claimant-graphs`** skill to resolve the PR's originating worktree
+> back to its root owner and check whether that owner is still live before
+> commenting, reviewing, or opening a competing PR.
 
 ### 3. Prefer DELEGATION over reaching across machines
 
