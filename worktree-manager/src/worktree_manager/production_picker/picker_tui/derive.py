@@ -237,6 +237,67 @@ def _status_markers(w):
     return compact[len(label):].strip()
 
 
+#: Bounded per-kind short codes for the tile asset-hint line (#6443/upstream
+#: #1979). Falls back to an upper-cased 4-char code for a kind this map
+#: doesn't recognize, so a future ``ResourceKind`` addition degrades safely
+#: instead of vanishing from the tile.
+_ASSET_CODES = {
+    "pr": "PR",
+    "worktree": "WT",
+    "codespace": "CS",
+    "container": "CTR",
+    "ssh": "SSH",
+    "workdir": "DIR",
+}
+
+#: Held-claim dispositions (mirrors ``ResourceClaim.is_live`` /
+#: ``tracking._CLAIM_LIVE_STATES``): a claim not yet released/abandoned still
+#: rides on the worktree, so it belongs in the tile's asset summary. An empty
+#: state is the legacy default and normalizes to "active" (held).
+_HELD_CLAIM_STATES = ("", "active", "at-rest")
+
+
+def _asset_hints(w):
+    """Bounded type/count breakdown of the worktree's HELD outbound claims
+    (the ``resources`` ledger -- #6443/upstream #1979 Phase 6), e.g.
+    ``["PR", "WT×2"]`` -- distinct from ``status_markers``'s bare ``C<N>``
+    held-claims COUNT: this groups the same held claims by ``kind`` so a
+    cross-repo PR reads differently from a child worktree or a Codespace at a
+    glance. Bounded to 4 hint tokens (with an ``overflow`` count) so a
+    worktree carrying many claim kinds can never blow out the tile's width.
+    Also returns the full per-claim detail (kind/ref/note/state) for a
+    width-constrained consumer (the action menu) to render in full. Returns
+    ``{"hints": [...], "overflow": int, "details": [...]}`` -- empty lists
+    when the worktree holds no claims (never omitted, so a caller need not
+    guard for the key's absence).
+    """
+    raw = w.get("resources")
+    counts: dict[str, int] = {}
+    details = []
+    if isinstance(raw, list):
+        for claim in raw:
+            if not isinstance(claim, dict):
+                continue
+            state = str(claim.get("state") or "").strip()
+            if state not in _HELD_CLAIM_STATES:
+                continue
+            kind = str(claim.get("kind") or "").strip() or "resource"
+            code = _ASSET_CODES.get(kind, kind.upper()[:4] or "RES")
+            counts[code] = counts.get(code, 0) + 1
+            details.append({
+                "kind": kind,
+                "ref": str(claim.get("ref") or "").strip(),
+                "note": str(claim.get("note") or "").strip(),
+                "state": state or "active",
+            })
+    hints = [code if n == 1 else f"{code}×{n}" for code, n in counts.items()]
+    return {
+        "hints": hints[:4],
+        "overflow": max(0, len(hints) - 4),
+        "details": details,
+    }
+
+
 def _sess(w):
     if w.get("mux_attached"):
         return f"●{w.get('mux_clients', 1)}"
@@ -507,6 +568,7 @@ def norm(
         "state": _state(w),
         "state_style": _state_style(w),
         "status_markers": _status_markers(w),
+        "asset_hints": _asset_hints(w),
         "relation": reciprocal.short_label(reciprocal_relation),
         "reciprocal_relation": reciprocal_relation,
         "age": _age(

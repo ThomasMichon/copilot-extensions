@@ -714,6 +714,93 @@ def test_worktrees_view_component_renders_body():
     asyncio.run(run())
 
 
+def _resources_source():
+    """One worktree carrying two held claims (a PR + a child worktree) and one
+    released claim, plus a worktree with no claims at all -- exercises #6443/
+    upstream #1979's asset-hint tile line and the action-menu asset detail."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("anomalous-potato", "Win")
+    raws = [
+        {"id": "anomalous-potato-win-hasassets", "title": "Has assets",
+         "status": "active", "started_at": "2026-06-27T17:00:00",
+         "resources": [
+             {"kind": "pr", "ref": "https://example/pulls/9",
+              "state": "active"},
+             {"kind": "worktree", "ref": "host/repo/wt-child",
+              "state": "at-rest", "note": "child harness worktree"},
+             {"kind": "ssh", "ref": "released-remote", "state": "released"},
+         ]},
+        {"id": "anomalous-potato-win-noassets", "title": "No assets",
+         "status": "active", "started_at": "2026-06-27T16:00:00"},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+    return src
+
+
+def test_asset_hint_line_renders_only_held_claim_kinds():
+    """#6443/upstream #1979: the tile's detail line shows a bounded per-kind
+    hint for HELD claims only (active/at-rest) -- the released ssh claim is
+    excluded -- and a worktree with no claims renders no hint segment."""
+    src = _resources_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            recs = {r["title"]: r for r in scr.list_records()}
+
+            with_assets = recs["Has assets"]
+            assert with_assets["asset_hints"]["hints"] == ["PR", "WT"]
+            vrows = scr.build_body(118)
+            idx = vrows.index(next(
+                v for v in vrows if getattr(v, "data", None) is with_assets))
+            detail_line = vrows[idx + 1].text.plain
+            assert "PR" in detail_line and "WT" in detail_line
+            assert "released-remote" not in detail_line
+
+            no_assets = recs["No assets"]
+            assert no_assets["asset_hints"] == {
+                "hints": [], "overflow": 0, "details": []}
+
+    asyncio.run(run())
+
+
+def test_sub_menu_header_shows_full_asset_detail():
+    """#6443/upstream #1979: full per-claim detail (kind + ref/note) is
+    available in the row's action menu even though the tile line only shows
+    bounded type/count hints -- the width-constrained-tile escape hatch."""
+    src = _resources_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            recs = scr.list_records()
+            idx = next(i for i, r in enumerate(recs)
+                       if r["title"] == "Has assets")
+            scr.sel = ("L", idx)
+            scr._dispatch_key("enter")
+            await pilot.pause()
+            menu = _sub_menu(scr)
+            assert menu is not None
+            header = menu._header().plain
+            assert "pr: https://example/pulls/9" in header
+            assert "worktree: host/repo/wt-child — child harness worktree" in header
+            assert "released-remote" not in header
+
+    asyncio.run(run())
+
+
 def test_worktrees_enter_without_selection_opens_submenu():
     """Enter on a row with no multi-selection opens that row's sub-menu (which
     carries Open/Resume) -- the primary flow is preserved."""

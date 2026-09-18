@@ -6675,6 +6675,21 @@ class SubMenuScreen(ModalScreen[tuple]):
             else:
                 lock = ""
             t.append(f"\n session {sid}{lock}", style=C_DIM)
+        # #6443/upstream #1979 Phase 6: the tile's asset-hint line is bounded
+        # (kind + count only); the action menu is where a width-constrained
+        # tile's claims get their full detail (kind, ref/note, disposition).
+        details = list((rec.get("asset_hints") or {}).get("details") or [])
+        if details:
+            t.append("\n assets:", style=C_DIM)
+            for claim in details:
+                ref = claim.get("ref") or ""
+                note = claim.get("note") or ""
+                if ref and note:
+                    label = f"{ref} — {note}"
+                else:
+                    label = ref or note or "(unlabeled)"
+                t.append(f"\n   {claim.get('kind', 'resource')}: {label}",
+                          style=C_DIM)
         return t
 
     def on_mount(self) -> None:
@@ -7808,7 +7823,14 @@ class WorktreesView:
                 #    Phase 9: C<N>/F<N> held-claim/follow-up counts, dim;
                 #    U*/OC* unconfirmed-fact markers, warn-styled so a stale
                 #    fact stays scannable).
-                # 2. The live-pulse agent-intent sub-line (#2917/copilot-
+                # 2. `asset_hints` -- the bounded per-kind claim breakdown
+                #    (#6443/upstream #1979 Phase 6: PR/WT/CS/CTR/SSH hint
+                #    tokens), distinct from status_markers' bare COUNT --
+                #    lets the operator tell a held PR from a child worktree
+                #    at a glance. Full per-claim detail (kind/ref/note) rides
+                #    in the row's action menu (SubMenuScreen header) for a
+                #    width-constrained tile.
+                # 3. The live-pulse agent-intent sub-line (#2917/copilot-
                 #    extensions#228) -- unchanged glyph/colour rules, just no
                 #    longer gated on its own line's existence.
                 # A row with neither renders a single dim placeholder glyph
@@ -7817,6 +7839,9 @@ class WorktreesView:
                 _pulse = rec.get("live_pulse")
                 _intent = (rec.get("live_intent") or "").strip()
                 _markers = (rec.get("status_markers") or "").strip()
+                _assets = rec.get("asset_hints") or {}
+                _hints = list(_assets.get("hints") or [])
+                _overflow = int(_assets.get("overflow") or 0)
                 pline = Text("      ")
                 has_content = False
                 if _markers:
@@ -7825,6 +7850,13 @@ class WorktreesView:
                             pline.append(" ")
                         tok_style = C_WARN if tok.endswith("*") else C_DIM
                         pline.append(tok, style=tok_style)
+                    has_content = True
+                if _hints:
+                    if has_content:
+                        pline.append("  ")
+                    pline.append(" ".join(_hints), style=C_DIM)
+                    if _overflow:
+                        pline.append(f" +{_overflow}", style=C_DIM)
                     has_content = True
                 if _pulse and _intent:
                     if has_content:
