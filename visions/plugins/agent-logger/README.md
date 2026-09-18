@@ -7,7 +7,7 @@
 - **Scope:** leaf (a per-plugin vision; a **consumer** that rides the
   [agent-fabric](../../agent-fabric/README.md) delegation layer, not a layer of it)
 - **Status:** Draft
-- **Last revised:** 2026-09-03
+- **Last revised:** 2026-09-18
 - **Reality docs:** [`plugins/agent-logger/docs/architecture.md`](../../../plugins/agent-logger/docs/architecture.md) ·
   [`plugins/agent-logger/docs/deployment-topologies.md`](../../../plugins/agent-logger/docs/deployment-topologies.md) ·
   [`plugins/agent-logger/docs/manifest-contract.md`](../../../plugins/agent-logger/docs/manifest-contract.md)
@@ -127,6 +127,20 @@ itself. Execution is **pinned, not hot-failover**: if the elected place is
 asleep, the chronicle simply **waits and catches up** on its next run; it does
 not thrash execution to a standby.
 
+### The cold-store retrieval provider — a sibling capability, not the chronicler
+
+Distinct from the scheduled chronicle daemon above: agent-logger already knows
+where a session's raw material actually lives (a local live directory, a
+locally-synced-but-unarchived copy, a packed/tarball entry in a durable
+archive) because that same knowledge gates the session-source seam's settle
+window. That existing knowledge makes agent-logger the natural place to answer
+an **on-demand, single-session** retrieval request too — registering with
+agent-bridge as a **cold-store provider** (§agent-bridge/*cold-store
+providers*) rather than every caller reimplementing "is this unpacked or
+packed, local or archived" for itself. This is a **read** capability, wholly
+separate from the chronicler's own scheduled **write** job — it never files,
+schedules, or claims anything; it only resolves and returns.
+
 ## Features
 
 ### fleet-wide-background-chronicle
@@ -181,6 +195,18 @@ One recurring schedule, ordinary claimable per-session tasks, one lifecycle.
 The chronicle is a **searchable substrate** — structured so a later semantic
 index can turn *"has this been tried?"* into concrete hits back into prior work.
 Findability is the product; the prose is only its carrier.
+
+### cold-store-provider-registration
+agent-logger registers itself with agent-bridge as a **cold-store provider**
+(the same manifest-drop, process-boundary-driven pattern agent-codespaces and
+agent-containers already use for their own provider kind), so that when the
+bridge is asked for a session with nothing live registered, it can ask
+agent-logger for that session's content by ID. agent-logger resolves whether
+the session is still sitting unpacked locally or must be pulled from the
+durable packed archive, and returns it either way — the caller (and the
+bridge) never needs to know which. This makes agent-bridge the **single
+caller-facing surface for any session, live or not**, without teaching the
+bridge itself anything about archival formats.
 
 ## Behaviors
 
@@ -279,6 +305,10 @@ publish session material.
 - **Not partial execution of an invalid aggregate.** The chronicler does not
   proceed with unaffected-looking routes when another route is ambiguous or
   unsafe. Repairing the aggregate plan precedes all collection and publication.
+- **Not a session control surface.** The cold-store retrieval provider only
+  reads and returns session content; it never resumes, re-embodies, edits, or
+  otherwise acts on a session or worktree. That remains agent-bridge's (and,
+  beneath it, agent-worktrees') job.
 
 ## See Also
 
@@ -298,8 +328,23 @@ publish session material.
   (governed merge-queue landing + character-voice profile) and the **dotfiles**
   control harness (scoped daily direct-commit landing to its `logs/` tree) are
   the first two consumers driving these seams.
+- Registers with: [agent-bridge](../agent-bridge/README.md) — as a **cold-store
+  provider**, so any caller asking the bridge for a session with nothing live
+  gets an honest answer sourced from wherever agent-logger actually keeps it.
 
 ## Provenance
+
+- **2026-09-18** — Added §Concepts/*The cold-store retrieval provider* and
+  §Features/*cold-store-provider-registration*, plus a matching §Non-Goals
+  boundary. Course correction from a downstream facility's own build-out: a
+  consuming UI had drifted toward calling a domain-specific archival service
+  directly for cold-session content, instead of the fabric's existing
+  single-caller-facing-surface promise (agent-bridge). Generalizes the
+  session-source seam's existing local-vs-archived awareness into an
+  on-demand, single-session **read** capability, deliberately distinct from
+  the chronicler's own scheduled **write** job. Paired with a new
+  §Concepts/*cold-store providers* on the agent-bridge leaf, which this
+  registers against.
 
 - **2026-09-03** — Extended the vision from consumer-supplied source and sink
   seams to repository-owned declarations compiled across a machine. Established
