@@ -343,18 +343,62 @@ def test_reattach_happy_path_local():
     assert create_kwargs["source"] == "issue-loop"
     assert create_kwargs["origin_ref"] == "issue/1"
     assert create_kwargs["evaluator_ref"] == "eval/1"
+    # Pinned to the recovery handle itself -- unclaimable by any ordinary
+    # worker, closing the create->reserve_spawn->claim race window (#2889).
+    assert create_kwargs["target_worktree"] == worker_id
     assert client.reserve_calls == [("t-2", worker_id)]
     assert client.record_spawn_calls == [("resv-1", worker_id, None)]
     assert client.claim_calls == [
         {
             "worker_id": worker_id, "capabilities": ["cap-a"], "repo": "repo",
-            "machine": None, "worktree": None, "task_id": "t-2",
+            "machine": None, "worktree": worker_id, "task_id": "t-2",
         }
     ]
     assert client.start_calls == [("t-2", worker_id)]
     assert client.bind_calls == [("t-2", worker_id, "sess-1")]
     assert resumed["session_id"] == "sess-1"
     assert resumed["host"] is None
+
+
+def test_reattach_retires_source_reservation_when_exclusive_key_shared():
+    """`reserve_spawn` fences an `exclusive_key` across every task sharing it;
+    a terminal source task's reservation is never auto-released, so reattach
+    must retire it explicitly before minting the new one (#2889 review)."""
+    client = _FakeClient(
+        get_task=_task(
+            status="abandoned", exclusive_key="ex-1",
+            session_handle="local-body:old-sess",
+        ),
+    )
+    client._get_task["spawn_reservation"]["key"] = "old-resv-key"
+    reattach.reattach(client, "t-1", "sess-1", local_session_verdict=lambda sid: "live")
+    assert client.fail_spawn_calls[0][0] == "old-resv-key"
+    assert "ex-1" in client.fail_spawn_calls[0][1]
+
+
+def test_reattach_no_exclusive_key_never_retires_anything():
+    client = _FakeClient(get_task=_task(status="abandoned", exclusive_key=None))
+    reattach.reattach(client, "t-1", "sess-1", local_session_verdict=lambda sid: "live")
+    assert client.fail_spawn_calls == []
+
+
+def test_reattach_normalizes_fleet_host_in_handle_and_resume():
+    """An un-normalized `--host` must not leak into the persisted
+    session_handle/owner or the resume delivery (#2889 review)."""
+    resumed = {}
+
+    def _resume_fn(session_id, prompt, *, host=None):
+        resumed.update(host=host)
+        return True
+
+    result = reattach.reattach(
+        _FakeClient(get_task=_task(status="abandoned")),
+        "t-1", "sess-1", host=" Pool-A ",
+        fleet_session_verdict=lambda host, sid: "live",
+        resume_fn=_resume_fn,
+    )
+    assert result.worker_id == "fleet-body:pool-a:sess-1"
+    assert resumed["host"] == "pool-a"
 
 
 def test_reattach_folds_prior_progress_and_steer_into_new_prompt():

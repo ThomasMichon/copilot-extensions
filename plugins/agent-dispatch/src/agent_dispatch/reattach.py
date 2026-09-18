@@ -31,7 +31,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from . import bridge
+from . import bridge, bridge_remote
 from .client import DispatchError
 from .doctor import (
     SESSION_LIVE,
@@ -110,10 +110,20 @@ class ReattachResult:
 
 def _handle_for(session_id: str, host: str | None) -> str:
     """The ``local-body:``/``fleet-body:`` recovery-handle string for a
-    session -- used both as the atomic create-and-claim owner and as the
-    liveness-probe handle, so both always agree on exactly which body a
-    reattach targets."""
-    return f"fleet-body:{host}:{session_id}" if host else f"local-body:{session_id}"
+    session -- used as the claim owner, the persisted reservation
+    ``session_handle``, and the liveness-probe handle, so all three always
+    agree on exactly which body a reattach targets.
+
+    ``host`` is normalized (case/whitespace) *here*, at the single point
+    that mints the handle, rather than downstream at delivery time -- an
+    un-normalized alias would otherwise be baked into the persisted
+    ``session_handle`` and the resume prompt's literal ``--worker-id`` text
+    (which a leading/trailing space would split at, corrupting the CLI
+    invocation the prompt tells the worker to run).
+    """
+    if host is None:
+        return f"local-body:{session_id}"
+    return f"fleet-body:{bridge_remote.normalize_host(host)}:{session_id}"
 
 
 def _recovered_context(client: DispatchClient, old_task_id: str) -> str:
@@ -194,18 +204,26 @@ def reattach(
     to re-mint against, and it is **not** producer-managed (a
     ``producer_fence`` can't be safely replayed here -- see below).
 
-    On success: create the new task **unclaimed** (carrying forward the
-    source task's full metadata -- payload, requires/excludes/affinity,
-    exclusive_key, source/origin/evaluator refs -- plus its progress log and
-    answered steer folded into the new task's own prompt via
-    :func:`_recovered_context`, since neither transfers automatically),
+    On success: retire the source task's own stale reservation when it
+    shares an ``exclusive_key`` with the new one (``reserve_spawn`` checks
+    active reservations for that key across *every* task, and an
+    abandoned/dead-lettered task's reservation is never auto-released --
+    see below); create the new task **pinned to an unclaimable synthetic
+    target** (``target_worktree`` = the recovery-handle itself, which no
+    ordinary worker ever advertises -- closing the claim-race window between
+    ``create`` and this function's own ``claim`` call below), carrying
+    forward the source task's full metadata (payload, requires/excludes/
+    affinity, ``exclusive_key``, source/origin/evaluator refs) plus its
+    progress log and answered steer folded into the new task's own prompt
+    via :func:`_recovered_context` (neither transfers automatically);
     ``reserve_spawn`` + ``record_spawn`` (so the new task carries a real
     ``spawn_reservation`` with the recovery-handle as its ``session_handle``
     -- the thing doctor's and the abandon guard's liveness checks actually
-    read; a bare ``owner`` string alone is not liveness-tracked), then
-    ``claim`` (task-id-directed, under the recovery-handle owner), ``start``,
-    and ``bind_owner_session`` (the exact session id those same checks key
-    on) -- then, unless ``resume=False``, deliver a resume prompt via
+    read; a bare ``owner`` string alone is not liveness-tracked); then
+    ``claim`` (task-id-directed, under the recovery-handle owner, at the
+    same pinned target so the gate matches), ``start``, and
+    ``bind_owner_session`` (the exact session id those same checks key on)
+    -- then, unless ``resume=False``, deliver a resume prompt via
     agent-bridge so the live session picks its new task straight back up.
     ``resumed`` reports whether that delivery itself succeeded; a ``False``
     here does not undo the reattach -- the new task is claimed and started
@@ -220,6 +238,17 @@ def reattach(
     implicitly, so a producer-managed source task is rejected up front,
     before any mutation.
 
+    **Known limitation (abandon --override-live race):** overriding the
+    abandon guard leaves the source task's reservation active; supervisor
+    reconciliation may treat that terminal task's still-active reservation
+    as cleanup work and end its body before an operator gets to reattach.
+    This function's own liveness check re-verifies ``session_id`` immediately
+    before acting, so it never reattaches into a session that has actually
+    died in that window -- but the window itself (a real live session ended
+    by reconciliation before a *pending* reattach) is a known gap in the
+    broader abandon/reconciliation lifecycle, not something this function
+    alone can close; reattach promptly after an override-live abandon.
+
     The three probe/delivery callables default to ``None`` and are resolved
     to their module-attribute defaults *inside* the function body -- an
     explicit, call-time lookup (not a def-time-bound default parameter
@@ -231,6 +260,7 @@ def reattach(
     fleet_session_verdict = fleet_session_verdict or _default_fleet_session_verdict
     resume_fn = resume_fn or bridge.resume_session
     worker_id = _handle_for(session_id, host)
+    normalized_host = bridge_remote.normalize_host(host) if host is not None else None
     verdict, _, _ = session_handle_verdict(
         worker_id, local_verdict=local_session_verdict, fleet_verdict=fleet_session_verdict
     )
@@ -259,6 +289,23 @@ def reattach(
             "request id) or safely omit it (create would reject the reattach); "
             "recover it through its owning producer instead"
         )
+    exclusive_key = old_task.get("exclusive_key")
+    if exclusive_key:
+        # `reserve_spawn` fences an `exclusive_key` across EVERY task sharing
+        # it, not only the new one -- a terminal source task's reservation is
+        # never auto-released, so without retiring it here, the new task's
+        # own reserve_spawn below would find the stale reservation still
+        # ACTIVE and abort before claiming anything.
+        old_reservation = old_task.get("spawn_reservation") or {}
+        old_key = old_reservation.get("key")
+        if old_key:
+            client.fail_spawn(
+                old_key,
+                detail=(
+                    f"reattach: retiring stale reservation for exclusive_key "
+                    f"{exclusive_key!r} (superseded by a fresh reattach)"
+                ),
+            )
     recovered = _recovered_context(client, task_id)
     new_prompt = old_task.get("prompt") or ""
     if recovered:
@@ -274,14 +321,17 @@ def reattach(
         labels=old_task.get("labels") or [],
         payload_ref=old_task.get("payload_ref"),
         payload_inline=old_task.get("payload_inline"),
-        exclusive_key=old_task.get("exclusive_key"),
+        exclusive_key=exclusive_key,
         source=old_task.get("source"),
         origin_ref=old_task.get("origin_ref"),
         evaluator_ref=old_task.get("evaluator_ref"),
         goal=old_task.get("goal"),
         done_criteria=old_task.get("done_criteria"),
-        target_machine=old_task.get("target_machine"),
-        target_worktree=old_task.get("target_worktree"),
+        # Pinned to the recovery handle itself (never the source task's own
+        # target) -- no ordinary worker advertises this synthetic worktree,
+        # so nothing can claim the row in the create -> reserve_spawn ->
+        # claim window below except this function's own matching claim call.
+        target_worktree=worker_id,
         target_repo=old_task.get("target_repo"),
     )
     new_task_id = new_task["id"]
@@ -304,8 +354,8 @@ def reattach(
         worker_id=worker_id,
         capabilities=old_task.get("requires") or [],
         repo=old_task.get("repo"),
-        machine=old_task.get("target_machine"),
-        worktree=old_task.get("target_worktree"),
+        machine=None,
+        worktree=worker_id,
         task_id=new_task_id,
     )
     if claimed is None:
@@ -323,7 +373,8 @@ def reattach(
     resumed = False
     if resume:
         resumed = resume_fn(
-            session_id, prompt or _reattach_prompt(new_task_id, worker_id), host=host,
+            session_id, prompt or _reattach_prompt(new_task_id, worker_id),
+            host=normalized_host,
         )
     return ReattachResult(
         task_id=new_task_id, worker_id=worker_id, session_id=session_id, resumed=resumed,

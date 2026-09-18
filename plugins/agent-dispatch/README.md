@@ -1072,20 +1072,35 @@ that's already terminal, typically one just `abandon`ed for exactly this
 reason. It refuses (non-zero exit, no mutation) unless `session-id` is
 itself confirmed live, the source task is terminal, it carries a
 `dedup_key`, and it is **not** producer-managed (a `producer_fence` can't be
-safely replayed -- recover it through its owning producer instead). On
-success it re-mints a fresh task under that `dedup_key`, carrying forward
-the source task's full metadata (payload, capability requires/excludes/
-affinity, `exclusive_key`, source/origin/evaluator refs) plus its progress
-log and any answered steer folded into the new task's own prompt (neither
-transfers automatically -- they're keyed to the *old* task id); reserves and
-records a real spawn reservation (so the new task is genuinely liveness-
-tracked, not just owned by a bare string) whose `session_handle` is the
-`local-body:<session>` / `fleet-body:<host>:<session>` recovery-handle
-identity; claims, starts, and binds the exact session id for liveness
-tracking; and delivers a resume prompt via agent-bridge so the live session
-picks the new task straight back up -- explicitly told to pass that
-recovery-handle worker id on every owner-gated command going forward, since
-it won't resolve from the resumed session's own CWD identity.
+safely replayed -- recover it through its owning producer instead). If the
+source task carries an `exclusive_key`, its own (never auto-released)
+reservation is retired first, since `reserve_spawn` fences that key across
+every task sharing it. On success it re-mints a fresh task under that
+`dedup_key`, pinned to an unclaimable synthetic `target_worktree` (the
+recovery handle itself -- no ordinary worker advertises it, closing the race
+window between creating the row and this command's own claim), carrying
+forward the source task's full metadata (payload, capability requires/
+excludes/affinity, `exclusive_key`, source/origin/evaluator refs) plus its
+progress log and any answered steer folded into the new task's own prompt
+(neither transfers automatically -- they're keyed to the *old* task id);
+reserves and records a real spawn reservation (so the new task is genuinely
+liveness-tracked, not just owned by a bare string) whose `session_handle` is
+the `local-body:<session>` / `fleet-body:<host>:<session>` recovery-handle
+identity (a `--host` alias is normalized before it's baked into that handle
+or used to deliver the resume prompt); claims, starts, and binds the exact
+session id for liveness tracking; and delivers a resume prompt via
+agent-bridge so the live session picks the new task straight back up --
+explicitly told to pass that recovery-handle worker id on every owner-gated
+command going forward, since it won't resolve from the resumed session's own
+CWD identity.
+
+**Known limitation:** `abandon --override-live` (see below) leaves the
+source task's own reservation active; supervisor reconciliation may treat a
+terminal task's still-active reservation as cleanup and end its body before
+an operator reattaches. `reattach` re-verifies liveness immediately before
+acting, so it never reattaches into a session that has actually died in that
+window -- but reattach promptly after an override-live abandon to minimize
+the race.
 
 ### Guarding against discarding a live session (`abandon --override-live`)
 
