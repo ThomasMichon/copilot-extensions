@@ -53,6 +53,19 @@ def test_log_event_stamps_known_handoff_stage(patch_install_dir: Path):
     assert rec["stage_name"] == "handoff_triggered"
 
 
+def test_log_event_normalizes_universal_handoff_fields(patch_install_dir: Path):
+    activity.log_event(
+        "handoff_requested",
+        worktree_id="wt-1",
+        session_id="s1",
+        handoff_id="task-1",
+    )
+    rec = activity.read_events()[0]
+    assert rec["handoff_token"] == "task-1"
+    assert rec["predecessor_session_id"] == "s1"
+    assert rec["successor_session_id"] is None
+
+
 def test_log_event_maps_existing_events_to_their_stage(patch_install_dir: Path):
     activity.log_event(
         "handoff_cutover_claim", worktree_id="wt-1", outcome="acquired"

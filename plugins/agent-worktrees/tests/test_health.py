@@ -232,12 +232,22 @@ def _oh_rec(**over):
 
 
 class TestOrphanedHandoffs:
-    def test_detects_dark_stale_unlinked_handoff(self):
+    def test_detects_dark_stale_unlinked_handoff(self, monkeypatch):
         # The 453f scenario: lone handed-off tail, no successor, active, dark, stale.
+        monkeypatch.setattr(health.cfg, "active_project", lambda: "proj-a")
+        monkeypatch.setattr(
+            health.handoff_trace,
+            "read_trace",
+            lambda project, worktree_id: [
+                {"stage": 8, "stage_name": "handoff_successor_spawn_started"}
+            ],
+        )
         found = health.find_orphaned_handoffs([_oh_rec()], now=_NOW)
         assert len(found) == 1
         assert found[0].worktree_id == "wt" and found[0].session_id == "s1"
         assert round(found[0].age_h) == 2
+        assert found[0].last_stage == 8
+        assert found[0].last_stage_name == "handoff_successor_spawn_started"
 
     def test_skips_fresh_cutover(self):
         # A successor may still be registering -- must NOT be touched.

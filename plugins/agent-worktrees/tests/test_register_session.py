@@ -15,7 +15,7 @@ from pathlib import Path
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import config as cfg
-from agent_worktrees import activity, git_ops, session_projection, tracking
+from agent_worktrees import activity, git_ops, session_projection, sessions, tracking
 from agent_worktrees.tracking import WorktreeRecord, load_record, save_record
 
 
@@ -105,6 +105,12 @@ class TestRegisterSessionStdin:
         rec = load_record(tmp_tracking_dir / "wt-cutover.yaml")
         tracking.open_handoff(rec, "old", "task-123")
         monkeypatch.setenv("AGENT_WORKTREES_HANDOFF_TOKEN", "task-123")
+        successor_state = sessions._session_state_dir() / "new"
+        successor_state.mkdir(parents=True, exist_ok=True)
+        (successor_state / "handoff-request.json").write_text(
+            json.dumps({"handoffId": "task-123", "sessionId": "new"}),
+            encoding="utf-8",
+        )
 
         recorded: list[tuple[str, dict]] = []
         real_log_event = activity.log_event
@@ -129,7 +135,10 @@ class TestRegisterSessionStdin:
         assert matches[0]["worktree_id"] == "wt-cutover"
         assert matches[0]["session_id"] == "new"
         assert matches[0]["handoff_token"] == "task-123"
+        assert matches[0]["predecessor_session_id"] == "old"
         assert matches[0]["launch_id"] == "flow-9"
+        stamped = json.loads((successor_state / "handoff-request.json").read_text(encoding="utf-8"))
+        assert stamped["predecessor_session_id"] == "old"
 
     def test_session_start_emits_stage_10_and_11_on_handoff_claim(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch

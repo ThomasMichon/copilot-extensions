@@ -40,7 +40,9 @@ from pathlib import Path
 import yaml
 
 from . import config as cfg
+from . import handoff_trace
 from . import tracking
+from .handoff_diagnostics import HANDOFF_STAGES
 
 # Mirrors the serializer's quoting predicate in ``tracking.save_record`` so a
 # repaired scalar is quoted on exactly the same chars the writer would have.
@@ -443,6 +445,8 @@ class OrphanedHandoff:
     record: object
     session_id: str
     age_h: float
+    last_stage: int | None = None
+    last_stage_name: str | None = None
     reactivated: bool = False
 
     @property
@@ -511,6 +515,7 @@ def find_orphaned_handoffs(
     """
     now = time.time() if now is None else now
     out: list[OrphanedHandoff] = []
+    project = cfg.active_project()
     for r in records:
         if getattr(r, "status", None) != "active":
             continue
@@ -533,10 +538,33 @@ def find_orphaned_handoffs(
         last = _record_last_activity(r)
         if last is None or (now - last) < min_age_h * 3600:
             continue
+        last_stage = None
+        last_stage_name = None
+        if project:
+            try:
+                for event in handoff_trace.read_trace(project, getattr(r, "worktree_id", "")):
+                    raw_stage = event.get("stage")
+                    try:
+                        stage_num = int(raw_stage) if raw_stage is not None else None
+                    except (TypeError, ValueError):
+                        stage_num = None
+                    if stage_num is None:
+                        continue
+                    if last_stage is None or stage_num >= last_stage:
+                        last_stage = stage_num
+                        last_stage_name = (
+                            str(event.get("stage_name") or "").strip()
+                            or HANDOFF_STAGES.get(stage_num)
+                        )
+            except Exception:
+                last_stage = None
+                last_stage_name = None
         out.append(OrphanedHandoff(
             record=r,
             session_id=getattr(tail, "session_id", ""),
             age_h=(now - last) / 3600,
+            last_stage=last_stage,
+            last_stage_name=last_stage_name,
         ))
     return out
 

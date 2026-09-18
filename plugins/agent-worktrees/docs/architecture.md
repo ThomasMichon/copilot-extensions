@@ -858,12 +858,17 @@ tracking record
 is removed, so a reused worktree id never inherits a stale predecessor's
 trace.
 
-**Diagnosing a stuck cutover today.** A dedicated `agent-worktrees
-handoff-trace <worktree-id>` command that renders the ordered 13-stage
-sequence (reading `handoff_trace.read_trace()` plus both sessions'
-session-state trace files) is still open follow-on work
-(`efforts/active/handoff-cutover-lifecycle-journal` Phase 3). What exists
-today and is safe to reach for immediately:
+**Diagnosing a stuck cutover today.** `agent-worktrees handoff-trace
+<worktree-id|session-id> [--project <name>] [--token <handoff-token>]`
+now renders the ordered 13-stage sequence from the durable
+`handoff_trace.read_trace()` store, falls back to `activity.jsonl` for
+recent events, and visibly marks missing stages. It also surfaces
+`predecessor_session_id` / `successor_session_id` from the surviving
+session-state `handoff-request.json` records when those records still
+exist. The broader "write a full `handoff-trace.jsonl` into both session
+folders" archive embellishment remains deferred; the durable per-worktree
+trace is the archival source of truth today. Alongside it, these commands
+are safe to reach for immediately:
 
 - `agent-worktrees handoffs-check [--worktree-id <id>|--all] [--execute] [--json]`
   -- diagnoses (and, with `--execute`, retires) an unretired handoff: a

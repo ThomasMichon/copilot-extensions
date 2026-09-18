@@ -203,6 +203,9 @@ def log_event(
     session_id: str | None = None,
     launch_id: str | None = None,
     source: str = "python",
+    handoff_token: str | None = None,
+    predecessor_session_id: str | None = None,
+    successor_session_id: str | None = None,
     **fields: object,
 ) -> None:
     """Append a single high-level lifecycle event. Never raises.
@@ -243,6 +246,28 @@ def log_event(
             if value is not None:
                 record[key] = value
         stage_info = HANDOFF_STAGE_MAP.get(event)
+        normalized_handoff_token = (
+            str(handoff_token).strip() if handoff_token not in (None, "") else ""
+        ) or (
+            str(fields.get("handoff_id") or "").strip()
+        ) or None
+        if stage_info is not None:
+            stage_num, _stage_name = stage_info
+            if predecessor_session_id is None and session_id and stage_num in {6, 7, 8, 11, 13}:
+                predecessor_session_id = session_id
+            if successor_session_id is None and session_id and stage_num in {9, 10}:
+                successor_session_id = session_id
+            record["handoff_token"] = normalized_handoff_token
+            record["predecessor_session_id"] = predecessor_session_id
+            record["successor_session_id"] = successor_session_id
+        elif (
+            normalized_handoff_token is not None
+            or predecessor_session_id is not None
+            or successor_session_id is not None
+        ):
+            record["handoff_token"] = normalized_handoff_token
+            record["predecessor_session_id"] = predecessor_session_id
+            record["successor_session_id"] = successor_session_id
         if stage_info is not None:
             gate = _HANDOFF_STAGE_GATE.get(event)
             gated_out = gate is not None and record.get(gate[0]) != gate[1]
