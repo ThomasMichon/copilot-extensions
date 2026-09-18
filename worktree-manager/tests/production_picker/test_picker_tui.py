@@ -4571,9 +4571,10 @@ def test_describe_status_marker_handles_oversized_numeric_token():
     """PR #2897 review: ``compact`` (the source of these tokens) is only
     validated as a ``str`` by ``prune.interpret_descriptor_payload`` -- a
     malformed/remote descriptor could hand a ``C``/``F`` token an absurdly
-    long digit run. ``int()`` raises ``ValueError`` past Python's configured
-    digit-conversion limit (3.11+); that must degrade to the verbatim
-    fallback, not crash the picker's render."""
+    long digit run. The numeric suffix is length-bounded before conversion
+    (not just wrapped in a ``try``/``except``), so an over-length run
+    degrades to the verbatim fallback on every supported Python version, not
+    only on 3.11+ where ``int()`` itself would raise."""
     huge = "C" + "9" * 5000
     text, is_warn = derive.describe_status_marker(huge)
     assert text == huge

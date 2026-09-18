@@ -269,15 +269,21 @@ def describe_status_marker(tok):
 
     ``compact`` (the source of these tokens) is only validated as a ``str``
     by ``prune.interpret_descriptor_payload`` -- a malformed/remote descriptor
-    could hand this an absurdly long ``C``/``F`` digit run. ``int()`` raises
-    ``ValueError`` past Python's configured digit-conversion limit (PEP 651,
-    3.11+), so that conversion is guarded: a token that fails to parse simply
+    could hand this an absurdly long ``C``/``F`` digit run. No realistic
+    held-claim/follow-up count is more than a few digits, so the numeric
+    suffix is length-bounded BEFORE conversion (not just wrapped in a
+    ``try``/``except``): CPython 3.11+ raises ``ValueError`` past its
+    configured int-string-conversion digit limit, but an older interpreter
+    has no such limit and would otherwise happily (if slowly) convert an
+    arbitrarily long digit run. An over-length or unparseable suffix simply
     degrades to the verbatim fallback below, same as any other unrecognized
-    token, instead of crashing the picker's render.
+    token, instead of crashing (or stalling) the picker's render.
     """
+    _MAX_MARKER_DIGITS = 12
     if tok in _STATUS_MARKER_TEXT:
         return _STATUS_MARKER_TEXT[tok], True
-    if len(tok) > 1 and tok[0] in ("C", "F") and tok[1:].isdigit():
+    if (len(tok) > 1 and tok[0] in ("C", "F")
+            and 0 < len(tok) - 1 <= _MAX_MARKER_DIGITS and tok[1:].isdigit()):
         try:
             n = int(tok[1:])
         except ValueError:
