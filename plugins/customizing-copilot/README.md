@@ -47,6 +47,25 @@ for runtime evidence. It does not install a parser, execute skills, or send a
 model prompt. Formal evals are optional for ordinary edits. Collection impact
 previews are read-only and preserve per-skill behavior and evidence limits.
 
+### Wiring a consumer repo: generic guidance is projected, not hand-copied
+
+A consumer repo that always wants skill edits routed to `authoring-skills`
+and `reviewing-customizations` should not hand-author that routing text
+itself. That guidance is generic -- true for any consumer, not specific to
+one repo -- so it belongs in **this plugin's own**
+[static instruction projection](../../docs/patterns/session-scoped-dynamic-guidance.md)
+(`instruction-projections.json`, synced/scanned like
+[`delegation-guidance`](../delegation-guidance/) or
+[`copilot-extensions-harness`](../copilot-extensions-harness/)'s reviewed
+fallback policy), so every consumer gets the identical, centrally-maintained
+routing text and drift is caught by the same sync/scan gate. A consumer repo
+should only need to add its own repo-specific supplement: an optional
+[skill-review rulebook](skills/reviewing-customizations/references/skill-review.md)
+document plus a short, repo-owned pointer to it. Hand-authoring the generic
+routing paragraph directly in a consumer's `.github/instructions/` -- rather
+than consuming a projection from this plugin -- duplicates content this
+plugin owns and leaves it unenforced against upstream drift.
+
 ## Choosing a surface: declarative first
 
 Copilot CLI exposes two kinds of customization:
