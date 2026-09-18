@@ -106,31 +106,39 @@ def ensure_codename(
     unchanged, no write performed). Holds ``allocation_lock`` across the
     scan+pick+persist sequence so a concurrent backfill/create cannot pick
     the same candidate.
+
+    Lock order is always ``allocation_lock`` (outer) then the per-record
+    lock (inner) -- never the reverse -- to match every other codename call
+    site (the ``create`` paths hold the same order). Never acquire a
+    per-record lock and then this module's ``allocation_lock`` from the same
+    call stack; that reversed order is a real cross-process deadlock hazard
+    against a concurrent path holding them in this module's order.
     """
     if record.codename:
         return record
+    yaml_path = tracking_path / f"{record.worktree_id}.yaml"
     with allocation_lock(tracking_path):
-        # Re-check under the lock: another process may have backfilled (or
-        # even re-saved with other fields changed) this exact record between
-        # our caller's read and this call. Assign and save the freshly
-        # re-read on-disk copy (`current`), never the caller's possibly-stale
-        # in-memory `record` -- saving `record` here would silently clobber
-        # any concurrent lifecycle/title/status update `current` carries that
-        # `record` doesn't.
-        current = tracking.load_record_by_id(record.worktree_id, tracking_path=tracking_path)
-        if current is None:
-            # The record is genuinely gone -- e.g. reaped by `retire_record`
-            # between the caller's read and this call. Falling back to
-            # saving the caller's stale in-memory `record` would resurrect a
-            # deleted worktree's tracking file; return the caller's copy
-            # as-is (still codename-less) without persisting anything.
-            return record
-        if current.codename:
+        # Hold the per-record lock across the existence-check + re-read +
+        # save as ONE atomic unit (not just re-reading unlocked): otherwise
+        # `retire_record` could still remove the file between an unlocked
+        # read and `save_record`'s own (separate) lock acquisition, and that
+        # save would recreate the just-deleted tracking file. `save_record`
+        # re-locks the same path internally, but `_RecordLock` detects same-
+        # thread same-path reentry and safely no-ops the re-acquisition, so
+        # nesting here is safe.
+        with tracking._RecordLock(yaml_path, require_sidecar=True):
+            if not yaml_path.exists():
+                # Reaped (by `retire_record`) between the caller's original
+                # read and this lock -- never resurrect a deleted worktree's
+                # tracking file. Return the caller's copy as-is.
+                return record
+            current = tracking.load_record(yaml_path)
+            if current.codename:
+                record.codename = current.codename
+                return record
+            current.codename = assign_new_codename(tracking_path, wordlist)
+            tracking.save_record(current, yaml_path)
             record.codename = current.codename
-            return record
-        current.codename = assign_new_codename(tracking_path, wordlist)
-        tracking.save_record(current)
-        record.codename = current.codename
     return record
 
 

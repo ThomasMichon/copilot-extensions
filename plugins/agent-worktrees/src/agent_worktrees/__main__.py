@@ -2244,35 +2244,44 @@ def _create_worktree_core(
         label="repository",
     )
 
-    # Creator ownership is established before the resource exists, and its
-    # ledger lock stays held until the child tracking record is durable. Thus
-    # finalize cannot hand off/clean a not-yet-created child reference.
-    owner_guard = None
-    if owner_ref:
-        owner_path, _owner_id, owner_err = _resolve_owner_ref_record_path(owner_ref, config)
-        if owner_err or owner_path is None or not owner_path.exists():
-            raise RuntimeError(owner_err or f"owner ledger is missing: {owner_ref}")
-        owner_guard = tracking._RecordLock(owner_path, require_sidecar=True)
-        owner_guard.__enter__()
+    # pr-attribution-codenames Phase 2 (#2838): assign the codename FIRST --
+    # before the owner claim is journaled and before the git worktree/branch
+    # is created. An allocation failure (an exhausted finite configured
+    # wordlist) must never leave the owner ledger with a live obligation
+    # pointing at a worktree that was never created, nor an orphaned
+    # checkout with no tracking record. The whole sequence below (allocate
+    # -> acquire the owner record lock -> journal owner claim -> create the
+    # git worktree -> write the record) is held under one cross-process
+    # allocation lock so two concurrent `create` calls can never observe the
+    # same existing codename set and choose the same candidate.
+    #
+    # Lock order is always this module's `allocation_lock` (outer) then any
+    # per-record lock (inner) -- here, the owner's -- never the reverse.
+    # `codename_tracking.ensure_codename` (the resume/status backfill path)
+    # acquires them in this same order; reversing it here (owner lock, then
+    # allocation lock, as an earlier revision did) is a real cross-process
+    # deadlock hazard against a concurrent backfill of that same owner
+    # worktree's own codename.
+    tracking_path = cfg.tracking_dir()
+    tracking_path.mkdir(parents=True, exist_ok=True)
+    with codename_tracking.allocation_lock(tracking_path):
+        new_codename = codename_tracking.assign_new_codename(
+            tracking_path, codename_tracking.wordlist_for_repo(config)
+        )
 
-    try:
-        # pr-attribution-codenames Phase 2 (#2838): assign the codename
-        # FIRST -- before the owner claim is journaled and before the git
-        # worktree/branch is created. An allocation failure (an exhausted
-        # finite configured wordlist) must never leave the owner ledger with
-        # a live obligation pointing at a worktree that was never created,
-        # nor an orphaned checkout with no tracking record. The whole
-        # sequence below (allocate -> journal owner claim -> create the git
-        # worktree -> write the record) is held under one cross-process lock
-        # so two concurrent `create` calls can never observe the same
-        # existing codename set and choose the same candidate.
-        tracking_path = cfg.tracking_dir()
-        tracking_path.mkdir(parents=True, exist_ok=True)
-        with codename_tracking.allocation_lock(tracking_path):
-            new_codename = codename_tracking.assign_new_codename(
-                tracking_path, codename_tracking.wordlist_for_repo(config)
-            )
+        # Creator ownership is established before the resource exists, and
+        # its ledger lock stays held until the child tracking record is
+        # durable. Thus finalize cannot hand off/clean a not-yet-created
+        # child reference.
+        owner_guard = None
+        if owner_ref:
+            owner_path, _owner_id, owner_err = _resolve_owner_ref_record_path(owner_ref, config)
+            if owner_err or owner_path is None or not owner_path.exists():
+                raise RuntimeError(owner_err or f"owner ledger is missing: {owner_ref}")
+            owner_guard = tracking._RecordLock(owner_path, require_sidecar=True)
+            owner_guard.__enter__()
 
+        try:
             if owner_guard is not None and not _journal_owner_reciprocal_claim(
                 config, worktree_id, owner_ref, owner_locked=True
             ):
@@ -2327,9 +2336,9 @@ def _create_worktree_core(
                 # an explicit --owner-ref). Absent = unclaimed.
                 owner_ref=owner_ref or None,
             )
-    finally:
-        if owner_guard is not None:
-            owner_guard.__exit__(None, None, None)
+        finally:
+            if owner_guard is not None:
+                owner_guard.__exit__(None, None, None)
 
     # Clone permissions
     if permissions.clone_permissions(repo.anchor, worktree_path):
