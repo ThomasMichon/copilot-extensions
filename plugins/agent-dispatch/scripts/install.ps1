@@ -932,11 +932,49 @@ function Install-Runtime {
         exit 1
     }
 
+    # -ReinstallPackage/-RefreshPackage (uv only): this installs from a local
+    # PATH source (not a registry), and uv's local-path build cache is keyed
+    # by source path, not source content. A version string that was ever
+    # built before -- at this exact path, or a different one -- can silently
+    # serve a stale cached wheel instead of rebuilding from what's actually
+    # on disk right now. This is the confirmed root cause behind
+    # ThomasMichon/copilot-extensions#2863: a deployed package was missing a
+    # function its own import site required, even though every verified copy
+    # of that release's actual source (git history and the exact snapshot
+    # used for the install alike) defined it correctly. Force a fresh
+    # build/install every time so a stale cache entry can never silently ship
+    # again -- covering agent-dispatch itself AND its own local
+    # `[tool.uv.sources]` workspace path deps (agent-procutil, agent-zdd,
+    # agent-dropin-registry, agent-plugin-activation, agent-plugin-resolve),
+    # which are equally local PATH sources and equally vulnerable. #2863 also
+    # flagged a second, same-class ImportError in the self-update fallback
+    # (`from agent_procutil import ...`) -- agent-procutil is exactly one of
+    # these.
+    $StaleCacheRefreshPackages = @(
+        'agent-dispatch',
+        'agent-procutil',
+        'agent-zdd',
+        'agent-dropin-registry',
+        'agent-plugin-activation',
+        'agent-plugin-resolve'
+    )
     $installPkg = {
         param([string]$Spec)
         if (Get-Command uv -ErrorAction SilentlyContinue) {
-            $out = & uv pip install --python $VenvPython $Spec 2>&1 | Out-String
+            $refreshFlags = @()
+            foreach ($pkg in $StaleCacheRefreshPackages) {
+                $refreshFlags += @('--reinstall-package', $pkg, '--refresh-package', $pkg)
+            }
+            $out = & uv pip install --python $VenvPython @refreshFlags $Spec 2>&1 | Out-String
         } else {
+            # The refresh pre-pass's own exit status must gate the real
+            # install: if it fails, letting the plain install below run
+            # anyway could silently succeed from a cached/existing wheel,
+            # defeating the whole stale-wheel guard.
+            $preOut = & $VenvPython -m pip install --force-reinstall --no-deps $Spec 2>&1 | Out-String
+            if ($LASTEXITCODE -ne 0) {
+                return [pscustomobject]@{ Code = $LASTEXITCODE; Output = $preOut }
+            }
             $out = & $VenvPython -m pip install $Spec 2>&1 | Out-String
         }
         [pscustomobject]@{ Code = $LASTEXITCODE; Output = $out }
@@ -984,11 +1022,18 @@ function Install-Runtime {
     # mode. Remember the previously-active version as the gc keep target (a
     # not-yet-cycled daemon may still run it).
     $prevVersion = ''
+    # `embody` is only ever imported lazily, inside spawn_factories.
+    # make_headless_spawn -- so a bare `import agent_dispatch` never touches
+    # it, and a slot that is broken ONLY at that import (as in #2863) would
+    # otherwise sail through this gate and only fail on the first real spawn
+    # attempt, invisibly to `agent-dispatch health`/`daemon-status`. Import it
+    # explicitly here so that class of defect is caught before a slot is ever
+    # activated.
     if ($VersionedRuntime) {
         $prevVersion = Get-VersionedCurrent
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
-        & $VenvPython -c 'import agent_dispatch' 2>$null
+        & $VenvPython -c 'import agent_dispatch, agent_dispatch.embody' 2>$null
         $slotOk = ($LASTEXITCODE -eq 0)
         $ErrorActionPreference = $prevEAP
         if (-not $slotOk) {
@@ -1006,7 +1051,7 @@ function Install-Runtime {
     $ErrorActionPreference = 'Continue'
     $importOk = $false
     for ($i = 0; $i -lt 3; $i++) {
-        & $LinkPython -c 'import agent_dispatch' 2>$null
+        & $LinkPython -c 'import agent_dispatch, agent_dispatch.embody' 2>$null
         if ($LASTEXITCODE -eq 0) { $importOk = $true; break }
         Start-Sleep -Seconds 1
     }
