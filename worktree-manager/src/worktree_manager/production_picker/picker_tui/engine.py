@@ -6675,6 +6675,14 @@ class SubMenuScreen(ModalScreen[tuple]):
             else:
                 lock = ""
             t.append(f"\n session {sid}{lock}", style=C_DIM)
+        def _asset_label(c):
+            ref, note = (c.get("ref") or "").strip(), (c.get("note") or "").strip()
+            return f"{ref} — {note}" if ref and note else ref or note or "(unlabeled)"
+        details = list((rec.get("asset_hints") or {}).get("details") or [])
+        if details:
+            t.append("\n assets:\n" + "\n".join(
+                f"   {c.get('kind', 'resource')} [{c.get('state') or 'active'}]: {_asset_label(c)}"
+                for c in details), style=C_DIM)
         return t
 
     def on_mount(self) -> None:
@@ -7799,24 +7807,12 @@ class WorktreesView:
                 add(self._row_text(rec, li, sel, width, lcols,
                                    preview, preview_ids),
                     stop=("L", li), data=rec)
-                # Second (detail) row, always rendered -- one worktree, two
-                # lines. Decorative (no stop) so it is never focusable and
-                # never affects selection. Carries whatever the first row's
-                # narrower columns had no room for:
-                # 1. `status_markers` -- the closure descriptor's per-fact
-                #    freshness markers (worktree-finality-and-obligations
-                #    Phase 9: C<N>/F<N> held-claim/follow-up counts, dim;
-                #    U*/OC* unconfirmed-fact markers, warn-styled so a stale
-                #    fact stays scannable).
-                # 2. The live-pulse agent-intent sub-line (#2917/copilot-
-                #    extensions#228) -- unchanged glyph/colour rules, just no
-                #    longer gated on its own line's existence.
-                # A row with neither renders a single dim placeholder glyph
-                # rather than an empty line, so the two-line rhythm reads as
-                # deliberate spacing everywhere, not a blank gap on some rows.
+                # Second (detail) row: status_markers, asset_hints
+                # (#6443/upstream #1979 -- per-kind claim breakdown), pulse.
                 _pulse = rec.get("live_pulse")
                 _intent = (rec.get("live_intent") or "").strip()
                 _markers = (rec.get("status_markers") or "").strip()
+                _assets = rec.get("asset_hints") or {}
                 pline = Text("      ")
                 has_content = False
                 if _markers:
@@ -7825,6 +7821,10 @@ class WorktreesView:
                             pline.append(" ")
                         tok_style = C_WARN if tok.endswith("*") else C_DIM
                         pline.append(tok, style=tok_style)
+                    has_content = True
+                if _assets.get("hints"):
+                    over = _assets.get("overflow") or 0
+                    pline.append(("  " if has_content else "") + " ".join(_assets.get("hints") or []) + (f" +{over}" if over else ""), style=C_DIM)
                     has_content = True
                 if _pulse and _intent:
                     if has_content:
