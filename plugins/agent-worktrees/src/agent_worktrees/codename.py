@@ -146,10 +146,12 @@ def load_wordlist(path: str | Path) -> Wordlist:
           - [humming, sprocket]            # given and non-empty
 
     Raises :class:`WordlistError` for anything that doesn't parse into
-    exactly that shape: a missing file, malformed JSON/YAML, a missing or
-    empty ``nouns``, a non-list value for any key, a non-string item, an
-    item that isn't a lowercase-alnum word (see :data:`MAX_WORD_LENGTH`),
-    or a ``pairs`` entry that isn't a 2-item list/tuple.
+    exactly that shape: a missing file, invalid UTF-8, malformed JSON/YAML,
+    a missing or empty ``nouns``, a non-list value for any key (including
+    an explicit ``null``, distinguished from the key being absent
+    entirely), a non-string item, an item that isn't a lowercase-alnum word
+    (see :data:`MAX_WORD_LENGTH`), or a ``pairs`` entry that isn't a
+    2-item list/tuple.
     """
     file_path = Path(path)
     try:
@@ -169,11 +171,11 @@ def load_wordlist(path: str | Path) -> Wordlist:
         raise WordlistError(f"{file_path}: top level must be a mapping")
 
     def _word_list(key: str, *, required: bool) -> tuple[str, ...]:
-        value = data.get(key)
-        if value is None:
+        if key not in data:
             if required:
                 raise WordlistError(f"{file_path}: '{key}' is required")
             return ()
+        value = data[key]
         if not isinstance(value, list) or not value:
             raise WordlistError(f"{file_path}: '{key}' must be a non-empty list")
         for item in value:
@@ -187,9 +189,9 @@ def load_wordlist(path: str | Path) -> Wordlist:
     nouns = _word_list("nouns", required=True)
     adjectives = _word_list("adjectives", required=False) or CODENAME_ADJECTIVES
 
-    raw_pairs = data.get("pairs")
     pairs: tuple[tuple[str, str], ...] = ()
-    if raw_pairs is not None:
+    if "pairs" in data:
+        raw_pairs = data["pairs"]
         if not isinstance(raw_pairs, list) or not raw_pairs:
             raise WordlistError(f"{file_path}: 'pairs' must be a non-empty list")
         validated_pairs = []

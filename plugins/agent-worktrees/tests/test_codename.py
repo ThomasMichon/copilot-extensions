@@ -195,6 +195,27 @@ class TestLoadWordlist:
         with pytest.raises(WordlistError):
             load_wordlist(path)
 
+    def test_null_nouns_raises(self, tmp_path: Path) -> None:
+        path = self._write(tmp_path, "words.yaml", "nouns: null\n")
+        with pytest.raises(WordlistError):
+            load_wordlist(path)
+
+    def test_explicit_null_adjectives_raises(self, tmp_path: Path) -> None:
+        # An explicit `adjectives: null` must be treated as malformed, not
+        # silently equivalent to omitting the key (which falls back to the
+        # built-in adjectives) -- data.get(key) can't tell the two apart,
+        # only `key in data` can.
+        path = self._write(
+            tmp_path, "words.yaml", "nouns: [cube]\nadjectives: null\n"
+        )
+        with pytest.raises(WordlistError):
+            load_wordlist(path)
+
+    def test_explicit_null_pairs_raises(self, tmp_path: Path) -> None:
+        path = self._write(tmp_path, "words.yaml", "nouns: [cube]\npairs: null\n")
+        with pytest.raises(WordlistError):
+            load_wordlist(path)
+
     def test_empty_nouns_raises(self, tmp_path: Path) -> None:
         path = self._write(tmp_path, "words.yaml", "nouns: []\n")
         with pytest.raises(WordlistError):
