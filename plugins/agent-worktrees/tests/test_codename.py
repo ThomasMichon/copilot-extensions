@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import os
 import random
 import subprocess
@@ -237,6 +238,67 @@ class TestGenerateViaHook:
             "hook process was killed but never reaped -- would accumulate "
             "as a zombie across repeated timeouts"
         )
+
+    def test_successful_hook_still_cleans_up_a_backgrounded_descendant(
+        self,
+    ) -> None:
+        """A hook can print a valid handle and exit immediately while
+        leaving a *backgrounded* descendant alive in the same process
+        group/session (e.g. it spawned a detached child before exiting).
+        The shell process itself "succeeding" (no timeout) must not be
+        treated as proof nothing is still running -- the whole group must
+        be swept regardless of how the immediate process finished."""
+        marker = (
+            Path(tempfile.gettempdir())
+            / f"codename-hook-descendant-marker-{os.getpid()}"
+        )
+        if marker.exists():
+            marker.unlink()
+        try:
+            grandchild_code = (
+                "import time; time.sleep(5); "
+                f"open({marker.as_posix()!r}, 'w').close()"
+            )
+            # Base64-encode the grandchild source before embedding it in
+            # parent_code: repr() of a string containing single quotes (the
+            # marker path's own quoting, 'w') switches to double-quote
+            # wrapping, which collides with _py()'s outer double-quoted
+            # shell command -- nested-quote breakage, not a real subprocess
+            # bug. Base64 sidesteps quoting entirely.
+            encoded_grandchild = base64.b64encode(
+                grandchild_code.encode()
+            ).decode()
+            # The grandchild must not inherit the parent's stdout (our read
+            # pipe) -- otherwise the pipe never reaches EOF until the
+            # grandchild itself exits/closes it, which would make this hit
+            # the *timeout* path instead of the intended "shell exits
+            # cleanly, descendant lingers" success path. Give it its own
+            # devnull stdio, same process group (no new session).
+            parent_code = (
+                "import base64, subprocess, sys; "
+                f"src = base64.b64decode('{encoded_grandchild}').decode(); "
+                "subprocess.Popen([sys.executable, '-c', src], "
+                "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, "
+                "stdin=subprocess.DEVNULL); "
+                "print('quiet-gizmo')"
+            )
+            # The hook process spawns a detached-looking grandchild (which
+            # inherits the hook's process group/session since it is not
+            # given its own) and then prints a valid handle and exits
+            # immediately -- the "success" path, not the timeout path.
+            result = generate_via_hook(_py(parent_code), timeout=2.0)
+            assert result == "quiet-gizmo"
+            # Give a leaked (not-actually-killed) grandchild time to have
+            # written the marker if group-sweep-on-success were missing.
+            time.sleep(1.0)
+            assert not marker.exists(), (
+                "a descendant backgrounded by a successful hook kept "
+                "running after generate_via_hook returned -- the whole "
+                "process group was not swept on the success path"
+            )
+        finally:
+            if marker.exists():
+                marker.unlink()
 
     def test_nonexistent_command_fails_closed(self) -> None:
         assert generate_via_hook("this-command-does-not-exist-anywhere") is None

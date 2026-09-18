@@ -289,6 +289,15 @@ def generate_via_hook(
         except subprocess.TimeoutExpired:
             _kill_process_group(process)
             return None
+        else:
+            # The shell itself exited (successfully or not), but a command
+            # like `echo handle; nohup sleep 1000 &` can background a
+            # descendant that stays alive in the same process group/session
+            # after the shell is gone. Sweep the whole group now so nothing
+            # a hook spawns can outlive this call regardless of whether the
+            # immediate shell process "finished" -- a timeout on the shell
+            # is not the only way work can leak past this function.
+            _kill_process_group(process)
     finally:
         if process.stdout is not None:
             try:
