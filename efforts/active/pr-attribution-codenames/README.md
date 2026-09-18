@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions (agent-worktrees plugin)
 - **Branch(es):** `pr/<slug>` per phase
 - **Created:** 2026-09-17
-- **Status:** Draft <!-- Draft | Active | Blocked | Done -->
+- **Status:** Active <!-- Draft | Active | Blocked | Done -->
 - **Vision:** vision-extending — extends the existing `source_attribution`
   marker capability (today boolean: on/off) with a third, public-safe mode.
 - **Umbrella issue:** [#2838](https://github.com/ThomasMichon/copilot-extensions/issues/2838)
@@ -88,12 +88,14 @@ public marker (or, worse, a leaked branch name) ever exposes.
 ## Plan
 
 ### Phase 1 — Neutral codename generation (agent-worktrees-owned)
-- [ ] Add a small, dependency-free "handle" generator to `agent-worktrees`
+- [x] Add a small, dependency-free "handle" generator to `agent-worktrees`
   itself: 1–2 word, lowercase, hyphen-joined, branch/filename-safe, backed
   by a **generic, organization-neutral** word list (no product theming —
   this plugin is general-purpose; themed vocabularies are an adopter-side
-  concern, not a plugin default).
-- [ ] Support an optional **external generator hook**: a config value naming
+  concern, not a plugin default). Landed in `agent_worktrees.codename`
+  (mechanical/workshop-themed word list, `generate_handle`,
+  `is_valid_handle`).
+- [x] Support an optional **external generator hook**: a config value naming
   a shell command that prints one handle to stdout. When set, `create` shells
   out to it instead of the built-in generator. This lets a private control
   repo plug in its own themed generator without that vocabulary ever living
@@ -110,14 +112,22 @@ public marker (or, worse, a leaked branch name) ever exposes.
   guarantee therefore **only holds unconditionally for the built-in
   generator**; enabling an external hook on a `source_attribution: codename`
   repo is an explicit, documented trust decision the hook's *owner* makes —
-  document this plainly (a warning at config-load time when a repo combines
-  a non-default hook with `codename` mode is in scope for this phase), and
-  do not describe hook output as informationless by construction.
-- [ ] Collision-avoid against the local tracking store (retry on collision,
+  documented in the module/config docstrings. Landed in
+  `agent_worktrees.codename.generate_via_hook` +
+  `agent_worktrees.codename_config.CodenameConfig`/`parse_codename`, wired
+  into `RepoConfig`/`config_dropins` alongside the existing `pr:` block.
+  **Deferred to Phase 4:** the config-load *warning* for a repo combining a
+  non-default hook with `source_attribution: codename` — `codename` isn't a
+  valid `source_attribution` value until Phase 4 lands it, so there is
+  nothing yet to combine-and-warn about; the trust-scope documentation
+  above stands regardless.
+- [x] Collision-avoid against the local tracking store (retry on collision,
   same spirit as the existing registry-checked mode of comparable
   generators) — no new persistence primitive for the *local* check (Phase 3
   covers cross-machine uniqueness, which this local check cannot guarantee
-  alone).
+  alone). Landed as `agent_worktrees.codename.assign_codename(existing,
+  ...)`, generic over any iterable of already-used handles; Phase 2 wires
+  it to the actual tracking-store read.
 
 ### Phase 2 — Per-worktree codename assignment + local lookup
 - [ ] Assign one codename per worktree at `create` time; store it on the
@@ -204,14 +214,15 @@ public marker (or, worse, a leaked branch name) ever exposes.
 
 ## Validation Plan
 
-- [ ] Unit tests: handle generator format (lowercase, hyphen-joined,
+- [x] Unit tests: handle generator format (lowercase, hyphen-joined,
   branch-safe), collision retry, external-hook timeout/format-validation/
   fail-closed behavior on malformed or slow hook output.
 - [ ] Config-load test: a repo combining a non-default external generator
   hook with `source_attribution: codename` surfaces the documented
   trust-scope warning (format validation ≠ content/informationless
   guarantee — that guarantee only holds unconditionally for the built-in
-  generator).
+  generator). **Deferred to Phase 4** alongside the mode itself (see
+  Phase 1's Journal entry).
 - [ ] Unit tests: `source_attribution: codename` marker contains the
   codename and *no* machine/worktree/session/timestamp substrings, on
   **both** the initial `create-pr` body path and the
@@ -285,3 +296,26 @@ _Pending review._
   artifact: the PR body was updated with that statement in the same push
   cycle the review ran against, just after the review started; the live PR
   body already carries it.)
+
+### 2026-09-17 — Phase 1 implemented
+- Landed the built-in generator (`agent_worktrees.codename`: a mechanical/
+  workshop-themed word list, deliberately not product- or franchise-themed
+  per CONTRIBUTING.md's contribution boundary — the operator confirmed
+  keeping this facility's own Aperture/Portal-flavored word list private,
+  wired in only via the external hook, rather than as this public plugin's
+  default) and the external generator hook (`generate_via_hook`, bounded by
+  a timeout, syntax-validated, fail-closed on any failure, invoked at most
+  once per assignment rather than re-invoked on every collision retry).
+  `assign_codename()` composes both with local collision avoidance.
+  `CodenameConfig`/`parse_codename` landed in a new sibling module
+  (`codename_config.py`, kept separate from `config.py` which is near its
+  module-size ceiling) and are wired into `RepoConfig`/`config_dropins`
+  alongside the existing `pr:` block. 38 new tests; module-size,
+  version-bump, and version-consistency guards all pass; targeted
+  `agent-worktrees` test runs green.
+- **Deferred to Phase 4:** the config-load warning for a repo combining a
+  non-default hook with `source_attribution: codename` — that mode doesn't
+  exist yet (Phase 4 adds it), so there is nothing yet to combine-and-warn
+  about. The trust-scope documentation itself (hook output is
+  syntax-validated, not content-guaranteed) landed now regardless, in the
+  module and config docstrings.

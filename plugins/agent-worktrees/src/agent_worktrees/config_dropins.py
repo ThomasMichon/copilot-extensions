@@ -309,6 +309,10 @@ def _validate_repo_fragment(repo: object, *, location: str) -> str | None:
         error = _validate_pr(repo["pr"], location=f"{location}.pr")
         if error:
             return error
+    if "codename" in repo:
+        error = _validate_codename(repo["codename"], location=f"{location}.codename")
+        if error:
+            return error
     return None
 
 
@@ -379,6 +383,18 @@ def _validate_pr(raw: object, *, location: str) -> str | None:
                 f"{location}.{name} must be one of "
                 f"{', '.join(sorted(allowed))}"
             )
+    return None
+
+
+def _validate_codename(raw: object, *, location: str) -> str | None:
+    if not isinstance(raw, dict):
+        return f"{location} must be a mapping"
+    if "hook_command" in raw and not isinstance(raw["hook_command"], str):
+        return f"{location}.hook_command must be a string"
+    if "hook_timeout_seconds" in raw and not isinstance(
+        raw["hook_timeout_seconds"], (int, float)
+    ):
+        return f"{location}.hook_timeout_seconds must be a number"
     return None
 
 

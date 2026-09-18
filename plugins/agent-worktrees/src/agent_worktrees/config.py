@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .codename_config import CodenameConfig, parse_codename
+
 import yaml
 
 from . import config_migrations, project_state, registry_paths
@@ -402,6 +404,10 @@ class RepoConfig:
     service_paths: list[str] = field(default_factory=list)
     post_install_hook: dict[str, list[str]] = field(default_factory=dict)
     pr: PRConfig = field(default_factory=PRConfig)
+    codename: CodenameConfig = field(default_factory=CodenameConfig)
+    """Per-repo codename-generation settings (built-in neutral generator by
+    default; an adopter may configure an external hook -- see
+    ``codename_config.py``)."""
     base_repo: bool = False
     """When true, this repo is driven in **base-repo (no-worktree)** mode: the
     anchor checkout is used directly and no worktree is ever created. Used to
@@ -1532,6 +1538,7 @@ def _build_repo_config(
         service_paths=service_paths,
         post_install_hook=post_install_hook,
         pr=_parse_pr(data.get("pr")),
+        codename=parse_codename(data.get("codename")),
         base_repo=bool(data.get("base_repo", False)),
         stateless=bool(data.get("stateless", False)),
         requires_external_state_root=bool(
