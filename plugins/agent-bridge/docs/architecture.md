@@ -475,6 +475,9 @@ restart does not inherently close the child's pipes.
   restart teardown persists its original restart intent with FAILED; only a
   successful cleanup retry transitions it to recoverable STOPPED. FAILED
   itself remains ineligible for background recovery.
+  An inconclusive scheduled remote reap likewise retains existing restart
+  provenance in FAILED, without granting recovery until cleanup is retried
+  successfully; an operator stop with no provenance stays dormant.
   Remote cleanup also checks an in-process HostIndex publication revision,
   protecting equal-value replacement records from an older reap. Descriptor
   removal must persist before pending handles or container ownership are

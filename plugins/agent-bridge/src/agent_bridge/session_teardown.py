@@ -128,7 +128,10 @@ async def reap_remote_record(
         and current == record
         and current_revision == record_revision
     ):
-        manager._mark_session_failed(session, trigger="remote_reap_inconclusive")
+        manager._mark_session_failed(
+            session, trigger="remote_reap_inconclusive",
+            restart_status=session.restart_status,
+        )
     return confirmed
 
 

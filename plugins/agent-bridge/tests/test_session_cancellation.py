@@ -1274,6 +1274,57 @@ async def test_maintenance_candidate_rejects_equal_value_republication(owned_con
     assert not ctx.manager._host_candidate_current(*candidate)
 
 
+@pytest.mark.parametrize("change", ["generation", "stopped", "stranded"])
+async def test_maintenance_fence_rechecks_lifecycle_and_eligibility(owned_context, change):
+    ctx = owned_context
+    record = _remote_record(ctx)
+    candidate = next(item for item in ctx.manager._host_candidates() if item[0].session_id == record.session_id)
+    async with ctx.session._turn_start_lock, ctx.session._lifecycle_lock:
+        assert ctx.manager._host_candidate_current(*candidate)
+        if change == "generation":
+            ctx.session._lifecycle_generation += 1
+        elif change == "stopped":
+            ctx.session.status = SessionStatus.STOPPED
+            ctx.session.restart_status = None
+        else:
+            ctx.manager._sessions.pop(record.session_id)
+            assert ctx.manager._host_candidate_current(candidate[0], None, None, candidate[3])
+        assert ctx.manager._host_index.get(record.session_id) == candidate[0]
+        assert ctx.manager._host_index.revision(record.session_id) == candidate[3]
+        assert not ctx.manager._host_candidate_current(*candidate)
+
+
+@pytest.mark.parametrize("restart_status", [None, "idle"])
+async def test_failed_scheduled_reap_preserves_only_existing_restart_intent(
+    owned_context, monkeypatch, restart_status,
+):
+    ctx = owned_context
+    record = _remote_record(ctx)
+    ctx.session.status = SessionStatus.STOPPED
+    ctx.session.restart_status = restart_status
+    ctx.db.update_session_status(
+        record.session_id, "stopped", time.time(), restart_status=restart_status,
+    )
+    remote = AsyncMock(return_value=False)
+    monkeypatch.setattr(ctx.manager, "_remote_reap", remote)
+    ctx.manager._schedule_remote_reap(record, "existing cleanup")
+    task = next(iter(ctx.manager._remote_reaps_by_session[record.session_id]))
+    assert await task is False
+    await asyncio.sleep(0)
+    assert ctx.session.status == SessionStatus.FAILED
+    assert ctx.session.restart_status == restart_status
+    assert ctx.db.get_session(record.session_id)["restart_status"] == restart_status
+    restarted = SessionManager(ctx.db)
+    restored = restarted.get_session(record.session_id)
+    assert restored.restart_status == restart_status
+    assert not restarted._background_recovery_allowed(restored)
+    remote.return_value = True
+    await ctx.manager.stop_session(record.session_id, reap_host=True, for_restart=True)
+    assert ctx.session.status == SessionStatus.STOPPED
+    assert ctx.session.restart_status == restart_status
+    assert ctx.manager._background_recovery_allowed(ctx.session) is (restart_status is not None)
+
+
 async def test_authority_result_rejects_equal_value_republication(owned_context, monkeypatch):
     from dataclasses import replace
 
