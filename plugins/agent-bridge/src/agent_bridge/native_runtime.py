@@ -7,6 +7,7 @@ Launch retries inspect the recorded execution; they cannot spawn a replacement.
 from __future__ import annotations
 
 import asyncio
+import http.client
 import json
 import os
 import secrets
@@ -221,13 +222,19 @@ class NativeRuntime:
             status = "unreachable"
         session_id = row["data"].get("sessionId")
         represented = False
+        lookup_error = None
         if status == "starting" and session_id and db is not None:
+            from .client import BridgeClientError, BridgeConnectionError
             from .db import live_session_is_fresh
 
             try:
                 live = db.get_live_session(session_id)
-            except Exception:
+            except (
+                BridgeClientError, BridgeConnectionError, OSError,
+                http.client.HTTPException, json.JSONDecodeError, UnicodeDecodeError,
+            ):
                 live = None
+                lookup_error = "registration_lookup_failed"
             represented = bool(live and live_session_is_fresh(live, time.time()))
             status = "ready" if represented else "unrepresented"
         row = self.store.update(
@@ -239,6 +246,7 @@ class NativeRuntime:
             "sessionId": session_id, "represented": represented, "host": state,
             "exitCode": row["data"].get("exitCode"),
             "retired": retired, "activated": bool(state.get("native_started")),
+            "error": lookup_error,
         }
         if row["data"].get("resourceDefinitions") and represented:
             from .native_resources import ResourceMailbox

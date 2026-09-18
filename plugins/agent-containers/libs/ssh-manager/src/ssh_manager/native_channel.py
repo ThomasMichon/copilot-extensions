@@ -120,7 +120,14 @@ async def serve(
             value = json.loads(result.stdout)
         except (ValueError, TypeError) as exc:
             raise RuntimeError("official remote agent-bridge native hosting is unavailable or returned invalid data") from exc
-        if result.exit_code != 0 or not isinstance(value, dict) or value.get("error"):
+        status_diagnostic = (
+            action == "status" and isinstance(value, dict)
+            and value.get("error") == "registration_lookup_failed"
+            and value.get("state") == "unrepresented" and value.get("represented") is False
+            and value.get("retired") is False
+            and value.get("executionId") == args.execution_id and value.get("generation") == args.generation
+        )
+        if result.exit_code != 0 or not isinstance(value, dict) or (value.get("error") and not status_diagnostic):
             raise RuntimeError(
                 value.get("detail", "remote native operation failed") if isinstance(value, dict) else
                 "remote native operation returned invalid data"

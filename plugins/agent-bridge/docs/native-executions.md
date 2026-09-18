@@ -122,6 +122,16 @@ fails. A receipt can be `starting` while infrastructure is prepared and
 the real native registration and the owned transport.** Capabilities or a live
 PTY alone do not establish integrated readiness.
 
+If the hosting bridge's live-session registry lookup fails (HTTP/authentication,
+connection, or response-decoding/protocol failure), status remains unrepresented
+and unready and reports the scalar `error: "registration_lookup_failed"`.
+Exception messages, response bodies, credentials and endpoint URLs are not
+included. An ordinary missing registration (including HTTP 404), a late
+registration, or a stale/non-live row does not produce this diagnostic. A later
+successful lookup clears it; readiness still requires the unchanged freshness
+check. Unexpected implementation faults are not silently treated as missing
+registrations.
+
 Attach/resume reconnect only to the recorded execution. They do not invoke
 another launch. `Ctrl+]` detaches the presentation without stopping the venue
 process. Transport loss retries the same execution/generation; uncertain input
