@@ -340,16 +340,20 @@ def test_marker_and_asset_line_never_overflows_narrow_width(monkeypatch, tmp_pat
     exceed the capture width, even at a narrow 60-column width where the
     readable marker expansion alone could otherwise overrun the row (PR #2897
     review). Bounded by construction -- every grid row is exactly `width`
-    cells, so this just asserts the capture doesn't crash and stays a clean
-    rectangular grid at the narrow width."""
+    cells, so this asserts the capture doesn't crash and stays a clean
+    rectangular grid at the narrow width, AND that the asset hint specifically
+    survives on the detail line itself (not merely somewhere in the grid --
+    the `PR` column header would otherwise produce a false pass)."""
     _isolate_pivots(monkeypatch, tmp_path)
     grid = pcap.capture(_markers_and_assets_source(), live=False, size=(60, 24))["text"]
     lines = grid.splitlines()
     widths = {len(line) for line in lines}
     assert len(widths) == 1, f"ragged grid at narrow width: {sorted(widths)}"
-    # At least the asset hint survives -- markers were truncated to make room
-    # for it rather than crowding it out entirely.
-    assert "PR" in grid
+    detail_lines = [ln for ln in lines if "held claim" in ln]
+    assert len(detail_lines) == 1
+    # Asset hints are bounded and take priority: the marker text was
+    # truncated to make room for the hint rather than crowding it out.
+    assert "PR" in detail_lines[0]
 
 
 def test_capture_is_deterministic(monkeypatch, tmp_path):

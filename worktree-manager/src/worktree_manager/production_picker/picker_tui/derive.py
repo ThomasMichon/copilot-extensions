@@ -333,6 +333,27 @@ def status_marker_segments(markers, width):
     return segments
 
 
+def status_line_segments(markers, asset_hints, overflow, width):
+    """Combine the ``status_markers`` expansion with the tile's asset-hint
+    text into one bounded run of ``(text, is_warning)`` segments -- the
+    picker's detail-line render layer just appends these in order. Asset
+    hints are already bounded (<=4 tokens + an overflow count) and take
+    priority: their width is reserved BEFORE budgeting the (unbounded-length)
+    readable marker text, so a long marker expansion can't crowd them out."""
+    asset_text = ""
+    if asset_hints:
+        asset_text = " ".join(asset_hints) + (f" +{overflow}" if overflow else "")
+    segments = []
+    if markers:
+        reserve = len(asset_text) + 2 if asset_text else 0
+        segments = status_marker_segments(markers, max(0, width - reserve))
+    if asset_text:
+        prefix = "  " if segments else ""
+        used = sum(len(t) for t, _ in segments)
+        segments.append((truncate_text(prefix + asset_text, max(0, width - used)), False))
+    return segments
+
+
 #: Bounded per-kind short codes for the tile asset-hint line (#6443/upstream
 #: #1979). Falls back to an upper-cased 4-char code for a kind this map
 #: doesn't recognize, so a future ``ResourceKind`` addition degrades safely

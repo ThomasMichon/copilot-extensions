@@ -7815,16 +7815,11 @@ class WorktreesView:
                 _assets = rec.get("asset_hints") or {}
                 pline = Text("      ")
                 has_content = False
-                if _markers:
-                    # Human-readable marker text is longer than the compact
-                    # wire tokens -- bounded so it can't crowd out what follows.
-                    for text, is_warn in derive.status_marker_segments(_markers, width - pline.cell_len):
+                if _markers or _assets.get("hints"):
+                    for text, is_warn in derive.status_line_segments(
+                            _markers, _assets.get("hints"),
+                            _assets.get("overflow"), width - pline.cell_len):
                         pline.append(text, style=C_WARN if is_warn else C_DIM)
-                    has_content = True
-                if _assets.get("hints"):
-                    over = _assets.get("overflow") or 0
-                    asset_text = ("  " if has_content else "") + " ".join(_assets.get("hints") or []) + (f" +{over}" if over else "")
-                    pline.append(derive.truncate_text(asset_text, max(0, width - pline.cell_len)), style=C_DIM)
                     has_content = True
                 if _pulse and _intent:
                     if has_content:
