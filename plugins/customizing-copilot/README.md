@@ -32,6 +32,21 @@ Each skill supplements the base CLI documentation with this repo's authoring
 patterns, and points at authoritative GitHub Copilot CLI and Anthropic Agent
 Skills documentation where relevant.
 
+## One owner for skill review
+
+`reviewing-customizations` owns [holistic skill review](skills/reviewing-customizations/references/skill-review.md)
+and [actual installed-CLI conformance](skills/reviewing-customizations/references/skill-runtime-conformance.md).
+`authoring-skills` composes that review rather than duplicating it.
+A consumer can explicitly reference a non-skill Markdown rulebook from its
+repository or assigned harness instructions. Without one, the generic review
+works unchanged. Rulebooks add editorial guidance, not parser overrides or
+permission to weaken safety rules.
+
+The validator is Python-standard-library-only and requires the installed CLI
+for runtime evidence. It does not install a parser, execute skills, or send a
+model prompt. Formal evals are optional for ordinary edits. Collection impact
+previews are read-only and preserve per-skill behavior and evidence limits.
+
 ## Choosing a surface: declarative first
 
 Copilot CLI exposes two kinds of customization:
