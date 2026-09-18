@@ -3437,6 +3437,50 @@ def _maybe_emit_stage_13(
             claim_path.unlink()
 
 
+def _conclude_retired_predecessor(wt_id: str | None, session_id: str) -> None:
+    """Mark a retire-confirmed predecessor's ``SessionEntry`` concluded.
+
+    A confirmed ``--retire-pane`` (pane gone AND its Copilot process
+    positively verified dead by pid) is a deliberate, verified act -- not
+    liveness inference -- so it is safe to assert conclusion here, same as
+    ``conclude-session``'s own contract. Without this, a session whose
+    process died via a bare self-retire (no handoff-token successor link)
+    leaves its ``SessionEntry.state`` stuck at ``"active"`` forever, and
+    ``register_session``'s creation-guard then refuses to ever promote a
+    later successor to head -- a zombie head pointer.
+
+    Deliberately does NOT attempt to promote any other session found on the
+    record: ``conclude_session`` (and this repair, which shares its
+    contract) never infers a successor from list membership -- that's the
+    same invariant a plain ``conclude-session`` upholds ("another active
+    session is never promoted by list or timestamp order; a successor or
+    adopter must assert the next transition explicitly"). A session that
+    registered while this predecessor was still active is not necessarily
+    its successor -- it could be an unrelated parallel session -- so
+    guessing from "exactly one other active entry" would misattribute
+    succession exactly as easily as it would complete a deferred one. A
+    subsequent registration (any future hook/bind call) still correctly
+    claims the now-cleared head via ``register_session``'s own ordinary
+    path; closing the narrower race window where an already-registered
+    session is never re-triggered needs an explicit adoption/relationship
+    marker, which is a separate, larger change than this repair's scope.
+    Best-effort: unknown worktree/session or an already-concluded entry is a
+    silent no-op, never a hard failure of the retire itself.
+    """
+    if not wt_id or not session_id:
+        return
+    yaml_path = tracking._owning_tracking_dir(wt_id) / f"{wt_id}.yaml"
+    if not yaml_path.exists():
+        return
+    with contextlib.suppress(Exception), tracking._RecordLock(yaml_path):
+        record = tracking.load_record(yaml_path)
+        entry = record.session_entry(session_id)
+        if entry is None or entry.state != "active":
+            return
+        tracking.conclude_session(record, session_id, state="concluded", save=False)
+        tracking.save_record(record, yaml_path)
+
+
 def _handoff_cutover_retire_result(
     args: argparse.Namespace,
 ) -> tuple[int, dict[str, object]]:
@@ -3523,6 +3567,30 @@ def _handoff_cutover_retire_result(
     skipped_identity = result.get("method") == "identity-mismatch-skip"
     overall_ok = bool(result.get("ok")) and proc_ok
     result["ok"] = overall_ok
+    # A pane is only genuinely, positively confirmed retired when the real
+    # mux retire ran and reported it gone -- never for a synthetic
+    # "-skip" result (last-window guard, unresolved/mismatched mux identity,
+    # unverifiable process identity), each of which reports success without
+    # ever having signaled the pane. Concluding the predecessor on one of
+    # those would mark a still-running session as "concluded".
+    pane_confirmed_retired = bool(result.get("gone")) and result.get("method") not in {
+        "process-identity-unavailable", "process-identity-mismatch",
+        "identity-unavailable-skip", "identity-mismatch-skip",
+        "identity-unresolved-skip", "last-window-skip",
+    }
+    # Only repair a BARE retire (no handoff token at all) here. A token-bearing
+    # retire belongs to the ordinary handoff flow, where the successor's own
+    # `register_session(..., handoff_token=...)` -> `link_handoff` concludes
+    # the predecessor once it actually claims the token -- including the
+    # legitimate case where a candidate has been associated
+    # (`associate_handoff_candidate`) but not yet acknowledged: the
+    # predecessor is still `active` and its resident monitor may still retire
+    # it before that late acknowledgement lands. Concluding it here would
+    # make that acknowledgement fail (`link_handoff` refuses an explicitly
+    # concluded predecessor).
+    bare_retire = not getattr(args, "handoff_token", None)
+    if overall_ok and pane_confirmed_retired and bare_retire and session_id:
+        _conclude_retired_predecessor(wt_id, session_id)
     activity.log_event(
         "handoff_predecessor_retire",
         worktree_id=wt_id,

@@ -175,3 +175,58 @@ def test_refresh_baseline_discovers_a_new_offender(repo: Path):
 
     baseline = json.loads((repo / "tools" / "module-size-baseline.json").read_text())
     assert baseline == {"src/new_huge.py": 1200}
+
+
+def test_allow_widen_requires_refresh_baseline(repo: Path):
+    _write_lines(repo, "src/small.py", 50)
+    _commit_all(repo)
+
+    result = _run(repo, "--allow-widen")
+
+    assert result.returncode == 2
+    assert "--allow-widen requires --refresh-baseline" in result.stderr
+
+
+def test_refresh_baseline_allow_widen_raises_a_grown_ceiling(repo: Path):
+    _write_lines(repo, "src/legacy.py", 5001)
+    _write_baseline(repo, {"src/legacy.py": 5000})
+    _commit_all(repo)
+
+    result = _run(repo, "--refresh-baseline", "--allow-widen")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    baseline = json.loads((repo / "tools" / "module-size-baseline.json").read_text())
+    assert baseline == {"src/legacy.py": 5001}
+
+
+def test_refresh_baseline_allow_widen_still_lowers_a_shrunk_entry(repo: Path):
+    _write_lines(repo, "src/legacy.py", 4000)
+    _write_baseline(repo, {"src/legacy.py": 5000})
+    _commit_all(repo)
+
+    result = _run(repo, "--refresh-baseline", "--allow-widen")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    baseline = json.loads((repo / "tools" / "module-size-baseline.json").read_text())
+    assert baseline == {"src/legacy.py": 4000}
+
+
+def test_refresh_baseline_allow_widen_never_auto_baselines_a_new_offender(repo: Path):
+    # A brand-new file crossing the hard cap is a genuinely new violation --
+    # --allow-widen only ratchets EXISTING baseline entries. Silently
+    # grandfathering a never-baselined file here would let ordinary growth
+    # past the cap sneak in through the automation's own back door.
+    _write_lines(repo, "src/new_huge.py", 1200)
+    _write_baseline(repo, {})
+    _commit_all(repo)
+
+    result = _run(repo, "--refresh-baseline", "--allow-widen")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    baseline = json.loads((repo / "tools" / "module-size-baseline.json").read_text())
+    assert baseline == {}
+
+    # The un-widened file still fails the ordinary check.
+    check_result = _run(repo)
+    assert check_result.returncode == 1
+    assert "src/new_huge.py" in check_result.stdout
