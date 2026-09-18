@@ -114,6 +114,58 @@ class TestEnsureCodename:
         assert result.codename is None  # returned as-is, still codename-less
         assert not (tmp_path / "wt-gone.yaml").exists()  # never resurrected
 
+    def test_never_resurrects_concurrently_with_retire_record(self, tmp_path: Path) -> None:
+        # Real concurrency (not just "already gone before we started"):
+        # ensure_codename and tracking.retire_record race against the SAME
+        # record from separate threads. Both now serialize through the same
+        # per-record `_RecordLock`, so retire_record's unconditional delete
+        # (unpaired records) and ensure_codename's existence-check + save can
+        # never interleave -- whichever runs last determines the outcome, and
+        # since retire_record always deletes an unpaired record, the file
+        # must be gone once both have finished, regardless of which one
+        # actually won the race to go first.
+        import threading
+
+        from agent_worktrees import tracking
+
+        yaml_path = tmp_path / "wt-race.yaml"
+        errors: list[BaseException] = []
+
+        for _ in range(20):
+            rec = create_new_record(
+                "wt-race", "worktree/wt-race", "/tmp/wt-race", "repo", "machine", "wsl",
+                tmp_path,
+            )
+            assert yaml_path.exists()
+
+            barrier = threading.Barrier(2)
+
+            def _retire(barrier=barrier, rec=rec) -> None:
+                try:
+                    barrier.wait(timeout=5)
+                    tracking.retire_record(rec, tmp_path)
+                except BaseException as exc:
+                    errors.append(exc)
+
+            def _backfill(barrier=barrier, rec=rec) -> None:
+                try:
+                    barrier.wait(timeout=5)
+                    ensure_codename(rec, tmp_path)
+                except BaseException as exc:
+                    errors.append(exc)
+
+            t_retire = threading.Thread(target=_retire)
+            t_backfill = threading.Thread(target=_backfill)
+            t_retire.start()
+            t_backfill.start()
+            t_retire.join(timeout=5)
+            t_backfill.join(timeout=5)
+
+            assert not errors, f"race produced exception(s): {errors}"
+            # retire_record always deletes an unpaired record -- no
+            # interleaving can leave a resurrected file behind.
+            assert not yaml_path.exists()
+
 
 class TestFindRecordByCodename:
     def test_empty_codename_returns_none(self, tmp_path: Path) -> None:

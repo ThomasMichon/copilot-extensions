@@ -2931,32 +2931,52 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> None:
 
     Fail-safe: if a tombstone write raises for any reason, falls back to a
     plain unlink -- a reap must never be blocked by this bookkeeping.
+
+    **Locking (pr-attribution-codenames Phase 2 follow-up):** every delete
+    (and the sibling delete, in the both-reaped hard-delete branch) is now
+    taken under ``_RecordLock`` -- not just the tombstone rewrite, which
+    already went through ``save_record``'s own locking. Without this, a
+    concurrent reader/backfiller (e.g. ``codename_tracking.ensure_codename``,
+    which holds the SAME record's ``_RecordLock`` across its own
+    existence-check + save) could observe the record as present an instant
+    before this function unlinks it out from under that read, or -- worse --
+    ``ensure_codename`` could recreate a record this function just deleted.
+    Uses the default ``blocking=True, require_sidecar=False`` mode (graceful
+    degradation after a short timeout, never ``TimeoutError``), preserving
+    the existing "a reap must never be blocked by this bookkeeping"
+    guarantee: the reap proceeds on the in-process lock alone even if the
+    cross-process sidecar can't be acquired promptly.
     """
     path = tracking_path / f"{record.worktree_id}.yaml"
-    if record.is_paired:
-        sibling: WorktreeRecord | None = None
-        try:
-            sibling = find_paired_record(record)
-        except Exception:
-            sibling = None
-        if sibling is not None and sibling.reaped_at:
-            ref = record.pair_claim_ref
-            if ref is not None and ref.is_qualified and ref.project:
-                (cfg.project_dir(ref.project) / "worktrees"
-                 / f"{ref.worktree_id}.yaml").unlink(missing_ok=True)
-            path.unlink(missing_ok=True)
-            return
-        try:
-            now = _now_iso()
-            record.status = "finalized"
-            if record.completed_at is None:
-                record.completed_at = now
-            record.reaped_at = now
-            save_record(record, path=path)
-            return
-        except Exception:
-            pass
-    path.unlink(missing_ok=True)
+    with _RecordLock(path):
+        if record.is_paired:
+            sibling: WorktreeRecord | None = None
+            try:
+                sibling = find_paired_record(record)
+            except Exception:
+                sibling = None
+            if sibling is not None and sibling.reaped_at:
+                ref = record.pair_claim_ref
+                if ref is not None and ref.is_qualified and ref.project:
+                    sibling_path = (
+                        cfg.project_dir(ref.project) / "worktrees"
+                        / f"{ref.worktree_id}.yaml"
+                    )
+                    with _RecordLock(sibling_path):
+                        sibling_path.unlink(missing_ok=True)
+                path.unlink(missing_ok=True)
+                return
+            try:
+                now = _now_iso()
+                record.status = "finalized"
+                if record.completed_at is None:
+                    record.completed_at = now
+                record.reaped_at = now
+                save_record(record, path=path)
+                return
+            except Exception:
+                pass
+        path.unlink(missing_ok=True)
 
 
 
