@@ -2109,6 +2109,41 @@ def test_multiple_possible_outputs_block(
     )
 
 
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        (
+            'import sys\n'
+            'def main(failed):\n'
+            '    if failed:\n'
+            '        print("refused", file=sys.stderr)\n'
+            '        sys.stdout.write("{}")\n'
+            '        return 126\n'
+            '    sys.stdout.write("{}")\n'
+            '    return 0\n',
+            True,
+        ),
+        ('import sys\nprint(\n    "diagnostic",\n    file=sys.stderr,\n)\nsys.stdout.write("{}")\n', True),
+        ('"""Example: print("not executed")"""\nimport sys\nsys.stdout.write("{}")\n', True),
+        ('print("model-facing text")\n', False),
+        ('printer.print("unknown destination")\n', False),
+        ('import sys\nprint("model-facing text", file=sys.stdout)\n', False),
+        ('import sys\nprint("unknown", file=stream)\n', False),
+        ('import sys\nprint("unknown", file=sys.stderr, **options)\n', False),
+        ('import sys\nsys.stdout.write("{}")\nsys.stdout.write("context")\n', False),
+        ('import sys\nsys.stdout.write(json.dumps({"additionalContext": "context"}))\n', False),
+        ('import sys\nsys.stdout.write("{}"\n', False),
+    ],
+)
+def test_python_output_free_contract_distinguishes_stderr(
+    tmp_path: Path, body: str, expected: bool,
+):
+    script = tmp_path / "write_session_guidance.py"
+    script.write_text(body, encoding="utf-8")
+
+    assert scan._script_has_output_free_contract(script) is expected
+
+
 def test_suite_session_start_stack_is_output_free_without_authority():
     root = Path(__file__).resolve().parents[5]
     sources = []
