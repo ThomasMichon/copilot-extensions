@@ -23,6 +23,7 @@ from .managed_runtime import (
     ManagedRuntimeError,
     _assert_safe_descendant,
     _authority,
+    _cache_authority,
     _canonical_digest,
     _cell_path,
     _cell_key,
@@ -205,6 +206,9 @@ def _inspect_cell(root: Path, cell: Path, authority: dict | None = None) -> dict
         or _cell_key(receipt) != cell.name
     ):
         raise ManagedRuntimeError("managed retention cell receipt is invalid or mismatched")
+    # An identity-scoped cell narrows plugin_version out of authority_digest
+    # (see _cache_authority); compare through the same narrowing here.
+    identity_scoped = bool((receipt.get("snapshot") or {}).get("identity_paths"))
     if schema == 2:
         owner = receipt["ownership"]
         if (
@@ -214,7 +218,14 @@ def _inspect_cell(root: Path, cell: Path, authority: dict | None = None) -> dict
             or owner["cell"] != str(cell)
             or type(owner["windows"]) is not bool
             or not isinstance(owner["authority"], dict)
-            or (authority is not None and owner["authority"] != authority)
+            or (
+                authority is not None
+                and (
+                    set(owner["authority"]) != set(authority)
+                    or _cache_authority(owner["authority"], identity_scoped=identity_scoped)
+                    != _cache_authority(authority, identity_scoped=identity_scoped)
+                )
+            )
         ):
             raise ManagedRuntimeError("managed retention cell ownership is ambiguous")
         authority = owner["authority"]
@@ -244,7 +255,24 @@ def _inspect_cell(root: Path, cell: Path, authority: dict | None = None) -> dict
                 for key in ("plugin_root", "plugin_owner", "plugin_source_path", "plugin_version")
             )
             or not isinstance(authority["activation_scopes"], list)
-            or _canonical_digest(authority) != receipt["authority_digest"]
+            or (
+                _canonical_digest(
+                    _cache_authority(authority, identity_scoped=identity_scoped)
+                )
+                != receipt["authority_digest"]
+                # A cell built before this narrowing shipped (or by a release
+                # still storing the full authority) keyed its authority_digest
+                # off the *unnarrowed* authority even when identity-scoped;
+                # accept that legacy form too instead of rejecting a
+                # still-valid pre-existing cell as inconsistent.
+                and not (
+                    identity_scoped
+                    and _canonical_digest(
+                        _cache_authority(authority, identity_scoped=False)
+                    )
+                    == receipt["authority_digest"]
+                )
+            )
             or _plugin_identity(authority) != cell.parent.name
         ):
             raise ManagedRuntimeError("managed retention cell authority is inconsistent")
@@ -756,128 +784,228 @@ class ManagedRuntimeRetention:
                     protected.update(Path(item["cell"]) for item in reference["cells"])
         return protected, preservation_roots
 
-    def cleanup(self) -> CleanupResult:
-        """Reclaim only fully attested, unreferenced cells after a complete preflight."""
-        if not self.root.exists():
-            _reject_link(self.root, description="managed retention root")
-            return CleanupResult((), (), 0)
-        root = _ensure_safe_root(self.root)
-        with _RootLock(root):
-            _ordinary_tree(root)
-            metadata_root = root / ".retention"
-            if metadata_root.exists() and any(
-                path.name not in ("leases", "selections") or not path.is_dir()
-                for path in metadata_root.iterdir()
-            ):
-                raise ManagedRuntimeError("managed retention metadata layout is ambiguous")
-            domain = self.domain_source()
-            if not _digest(domain):
-                raise ManagedRuntimeError("managed cleanup process authority is unavailable")
-            protected: set[Path] = set()
-            stale: list[tuple[Path, str, dict]] = []
-            scopes: dict[str, dict] = {}
-            selected_scopes: set[str] = set()
-            for kind in ("leases", "selections"):
-                parent = root / ".retention" / kind
-                if not parent.exists():
-                    continue
-                for path in sorted(parent.iterdir()):
-                    record, cells = self._check_record(
-                        path, kind, check_references=kind != "leases"
-                    )
-                    scope_key = _canonical_digest(record["scope"])
-                    scopes[scope_key] = record["scope"]
-                    if kind == "leases" and self._stale(record, domain):
-                        stale.append((path, scope_key, record))
-                    else:
-                        if kind == "leases":
-                            _, cells = self._check_record(path, kind)
-                        protected.update(cells)
-                    if kind == "selections":
-                        selected_scopes.add(scope_key)
-            interrupted_scopes: set[str] = set()
-            preservation_roots: set[Path] = set()
-            receipt_dirs = {
-                Path(scope["receipt_dir"])
-                for scope in scopes.values()
-                if isinstance(scope.get("receipt_dir"), str)
-            }
-            for scope_key, scope in scopes.items():
+    def _still_unreferenced(self, root: Path, domain: str, cell: Path) -> bool:
+        """Revalidate one deletion candidate immediately before unpublishing it.
+
+        A standalone re-scan (deliberately duplicated, not shared state),
+        mirroring the preflight: a *stale* lease's cell reference does not
+        by itself protect a cell, but its launch-state/transition-group
+        must still be checked (a crashed launch can leave a receipt that
+        pins cells even once its lease is stale), so every scope is still
+        visited -- only the stale lease's own reference is excluded from
+        ``protected``. materialize()/validate() take only a plugin-scoped
+        lock, so a same-plugin build can reuse/validate this cell and
+        release that lock before this loop reaches it, without yet
+        registering a fresh lease (a later, separate call); re-deriving
+        protection under that same lock narrows this gap.
+        """
+        protected: set[Path] = set()
+        preservation_roots: set[Path] = set()
+        receipt_dirs: set[Path] = set()
+        for kind in ("leases", "selections"):
+            parent = root / ".retention" / kind
+            if not parent.exists():
+                continue
+            for path in sorted(parent.iterdir()):
+                record, cells = self._check_record(
+                    path, kind, check_references=kind != "leases"
+                )
+                stale = kind == "leases" and self._stale(record, domain)
+                if kind == "leases" and not stale:
+                    # check_references=False leaves `cells` empty for a
+                    # lease; the default True call (as the preflight also
+                    # does) resolves the cells a live lease protects.
+                    _, cells = self._check_record(path, kind)
+                if not stale:
+                    protected.update(cells)
+                scope = record["scope"]
                 if scope["domain"] == domain:
                     launch_cells, launch_roots = self._launch_state(scope)
                     protected.update(launch_cells)
                     preservation_roots.update(launch_roots)
-                    if launch_roots or (launch_cells and scope_key not in selected_scopes):
-                        interrupted_scopes.add(scope_key)
-            for receipt_dir in sorted(receipt_dirs):
-                group_cells, group_roots = self._transition_group_state(receipt_dir)
-                protected.update(group_cells)
-                preservation_roots.update(group_roots)
-            # A gated first-launch receipt is selected state too. Keep its discovery
-            # lease until recovery retires it or publishes a durable selection.
-            stale_paths: list[Path] = []
-            for path, scope_key, record in stale:
-                try:
-                    _, cells = self._check_record(path, "leases")
-                except (ManagedRuntimeError, OSError) as exc:
-                    preservation_roots.update(self._preservation_roots(record["reference"]))
-                    logging.getLogger("agent-dispatch.companion").warning(
-                        "preserving stale managed lease with invalid reference %s: %s", path, exc
-                    )
-                    continue
-                if scope_key in interrupted_scopes:
-                    protected.update(cells)
+                receipt_dir = scope.get("receipt_dir")
+                if isinstance(receipt_dir, str):
+                    receipt_dirs.add(Path(receipt_dir))
+        for receipt_dir in sorted(receipt_dirs):
+            group_cells, group_roots = self._transition_group_state(receipt_dir)
+            protected.update(group_cells)
+            preservation_roots.update(group_roots)
+        if cell in protected:
+            return False
+        return not any(cell.is_relative_to(root_) for root_ in preservation_roots)
+
+    def cleanup(self) -> CleanupResult:
+        """Reclaim only fully attested, unreferenced cells after a complete preflight.
+
+        This scan takes no lock: every read goes through ``_read_metadata``,
+        which already rejects a torn concurrent write, so a stale-but-
+        consistent snapshot is the worst case, and every mutation below
+        re-verifies its own narrow slice immediately before acting. Holding
+        the root lock for this whole method (as before) would let a single
+        slow per-cell wait (now up to ``_LOCK_WAIT_SECONDS``) block every
+        other plugin's legacy-lock handshake.
+        """
+        if not self.root.exists():
+            _reject_link(self.root, description="managed retention root")
+            return CleanupResult((), (), 0)
+        root = _ensure_safe_root(self.root)
+        _ordinary_tree(root)
+        metadata_root = root / ".retention"
+        if metadata_root.exists() and any(
+            path.name not in ("leases", "selections") or not path.is_dir()
+            for path in metadata_root.iterdir()
+        ):
+            raise ManagedRuntimeError("managed retention metadata layout is ambiguous")
+        domain = self.domain_source()
+        if not _digest(domain):
+            raise ManagedRuntimeError("managed cleanup process authority is unavailable")
+        protected: set[Path] = set()
+        stale: list[tuple[Path, str, dict]] = []
+        scopes: dict[str, dict] = {}
+        selected_scopes: set[str] = set()
+        for kind in ("leases", "selections"):
+            parent = root / ".retention" / kind
+            if not parent.exists():
+                continue
+            for path in sorted(parent.iterdir()):
+                record, cells = self._check_record(
+                    path, kind, check_references=kind != "leases"
+                )
+                scope_key = _canonical_digest(record["scope"])
+                scopes[scope_key] = record["scope"]
+                if kind == "leases" and self._stale(record, domain):
+                    stale.append((path, scope_key, record))
                 else:
-                    stale_paths.append(path)
-            candidates: dict[tuple[str, str, str], list[tuple[float, Path]]] = {}
-            for cells_root in (root / "cells", root / "c"):
-                if not cells_root.exists():
-                    continue
-                for owner in sorted(cells_root.iterdir()):
-                    if not owner.is_dir() or not re.fullmatch(r"[0-9a-f]{16}", owner.name):
-                        raise ManagedRuntimeError("managed runtime owner directory is ambiguous")
-                    for cell in sorted(owner.iterdir()):
-                        if any(cell.is_relative_to(parent) for parent in preservation_roots):
-                            protected.add(cell)
-                            continue
-                        receipt = _inspect_cell(root, cell)
-                        if (
-                            receipt["schema_version"] == 1
-                            or cell in protected
-                        ):
-                            protected.add(cell)
-                            continue
-                        key = (owner.name, receipt["name"], receipt["profile"])
-                        candidates.setdefault(key, []).append(
-                            ((cell / RECEIPT_NAME).stat().st_mtime, cell)
-                        )
-            now = self.clock()
-            if not isinstance(now, (int, float)) or not 0 < now < float("inf"):
-                raise ManagedRuntimeError("managed retention clock is invalid")
-            delete = []
-            for entries in candidates.values():
-                for index, (created, cell) in enumerate(sorted(entries, reverse=True)):
+                    if kind == "leases":
+                        _, cells = self._check_record(path, kind)
+                    protected.update(cells)
+                if kind == "selections":
+                    selected_scopes.add(scope_key)
+        interrupted_scopes: set[str] = set()
+        preservation_roots: set[Path] = set()
+        receipt_dirs = {
+            Path(scope["receipt_dir"])
+            for scope in scopes.values()
+            if isinstance(scope.get("receipt_dir"), str)
+        }
+        for scope_key, scope in scopes.items():
+            if scope["domain"] == domain:
+                launch_cells, launch_roots = self._launch_state(scope)
+                protected.update(launch_cells)
+                preservation_roots.update(launch_roots)
+                if launch_roots or (launch_cells and scope_key not in selected_scopes):
+                    interrupted_scopes.add(scope_key)
+        for receipt_dir in sorted(receipt_dirs):
+            group_cells, group_roots = self._transition_group_state(receipt_dir)
+            protected.update(group_cells)
+            preservation_roots.update(group_roots)
+        # A gated first-launch receipt is selected state too. Keep its discovery
+        # lease until recovery retires it or publishes a durable selection.
+        stale_paths: list[Path] = []
+        for path, scope_key, record in stale:
+            try:
+                _, cells = self._check_record(path, "leases")
+            except (ManagedRuntimeError, OSError) as exc:
+                preservation_roots.update(self._preservation_roots(record["reference"]))
+                logging.getLogger("agent-dispatch.companion").warning(
+                    "preserving stale managed lease with invalid reference %s: %s", path, exc
+                )
+                continue
+            if scope_key in interrupted_scopes:
+                protected.update(cells)
+            else:
+                stale_paths.append(path)
+        candidates: dict[tuple[str, str, str], list[tuple[float, Path]]] = {}
+        for cells_root in (root / "cells", root / "c"):
+            if not cells_root.exists():
+                continue
+            for owner in sorted(cells_root.iterdir()):
+                if not owner.is_dir() or not re.fullmatch(r"[0-9a-f]{16}", owner.name):
+                    raise ManagedRuntimeError("managed runtime owner directory is ambiguous")
+                for cell in sorted(owner.iterdir()):
+                    if any(cell.is_relative_to(parent) for parent in preservation_roots):
+                        protected.add(cell)
+                        continue
+                    receipt = _inspect_cell(root, cell)
                     if (
-                        index < self.policy.keep_generations
-                        or now - created < self.policy.minimum_age_seconds
+                        receipt["schema_version"] == 1
+                        or cell in protected
                     ):
                         protected.add(cell)
-                    else:
-                        delete.append(cell)
-            # No mutation precedes the full preflight, including conservative exclusions.
-            for path in stale_paths:
-                path.unlink()
-            deleted: list[Path] = []
-            for cell in delete:
-                _assert_safe_descendant(root, cell, description="managed cleanup target")
-                _inspect_cell(root, cell)
-                parent = _safe_directory(root, ".deleting")
-                staging = parent / uuid.uuid4().hex
-                _assert_safe_descendant(root, staging, description="managed deletion staging")
-                if staging.exists():
-                    raise ManagedRuntimeError("managed deletion staging destination already exists")
+                        continue
+                    key = (owner.name, receipt["name"], receipt["profile"])
+                    candidates.setdefault(key, []).append(
+                        ((cell / RECEIPT_NAME).stat().st_mtime, cell)
+                    )
+        now = self.clock()
+        if not isinstance(now, (int, float)) or not 0 < now < float("inf"):
+            raise ManagedRuntimeError("managed retention clock is invalid")
+        delete = []
+        for entries in candidates.values():
+            for index, (created, cell) in enumerate(sorted(entries, reverse=True)):
+                if (
+                    index < self.policy.keep_generations
+                    or now - created < self.policy.minimum_age_seconds
+                ):
+                    protected.add(cell)
+                else:
+                    delete.append(cell)
+        # No mutation precedes the full preflight, including conservative exclusions.
+        # Each mutation below takes only a brief, narrowly-scoped lock and
+        # re-verifies its own target immediately before acting -- never the
+        # machine-wide root lock for the duration of a wait (see the
+        # docstring above).
+        removed_stale = 0
+        for path in stale_paths:
+            with _RootLock(root):
+                try:
+                    record, _ = self._check_record(path, "leases")
+                except (ManagedRuntimeError, OSError):
+                    continue
+                if not self._stale(record, domain):
+                    continue
+                try:
+                    path.unlink()
+                except OSError:
+                    continue
+            removed_stale += 1
+        deleted: list[Path] = []
+        for cell in delete:
+            _assert_safe_descendant(root, cell, description="managed cleanup target")
+            if not cell.exists():
+                continue  # a concurrent cleanup already reclaimed it
+            _inspect_cell(root, cell)
+            parent = _safe_directory(root, ".deleting")
+            staging = parent / uuid.uuid4().hex
+            _assert_safe_descendant(root, staging, description="managed deletion staging")
+            if staging.exists():
+                raise ManagedRuntimeError("managed deletion staging destination already exists")
+            # Never hold two of these locks at once: release the (possibly
+            # long) per-owner wait before the brief, unscoped pin-writer lock.
+            with _RootLock(root, cell.parent.name):
+                if not self._still_unreferenced(root, domain, cell):
+                    protected.add(cell)
+                    continue
+            with _RootLock(root):
+                if not cell.exists():
+                    continue  # a concurrent cleanup already reclaimed it
+                # State can change in the gap since the check above;
+                # re-verify before unpublishing.
+                if not self._still_unreferenced(root, domain, cell):
+                    protected.add(cell)
+                    continue
+                try:
+                    _inspect_cell(root, cell)
+                except ManagedRuntimeError as exc:
+                    logging.getLogger("agent-dispatch.companion").warning(
+                        "managed cell changed since preflight; preserving %s: %s", cell, exc
+                    )
+                    protected.add(cell)
+                    continue
                 try:
                     os.replace(cell, staging)
+                except FileNotFoundError:
+                    continue  # a concurrent cleanup already reclaimed it
                 except OSError as exc:
                     logging.getLogger("agent-dispatch.companion").warning(
                         "cannot unpublish managed cell; preserving %s: %s", cell, exc
@@ -886,4 +1014,5 @@ class ManagedRuntimeRetention:
                     continue
                 deleted.append(cell)
                 _remove_deletion_staging(root, staging)
-            return CleanupResult(tuple(deleted), tuple(sorted(protected)), len(stale_paths))
+        return CleanupResult(tuple(deleted), tuple(sorted(protected)), removed_stale)
+

@@ -29,9 +29,11 @@ from agent_dispatch.managed_runtime import (
     ManagedRuntimeError,
     ManagedRuntimeLockTimeout,
     ManagedRuntimeMaterializer,
+    _authority,
     _canonical_digest,
     _cell_key,
     _layout_version,
+    _plugin_identity,
     _quarantine_cell,
     _RootLock,
     _runtime_dir,
@@ -241,6 +243,10 @@ def test_managed_retention_partial_deletion_never_wedges_published_cells(
         if path.parent != deleting:
             return real_rmtree(path, *args, **kwargs)
         assert path.is_relative_to(h.policy.root)
+        # The final unpublish + its recursive staging cleanup happen under
+        # the brief, unscoped root lock (shared with the pin writers:
+        # prepare()/launched()/select()) -- never nested with the earlier,
+        # potentially long per-owner wait, to avoid a wait/wait cycle.
         with pytest.raises(ManagedRuntimeLockTimeout):
             with _RootLock(h.policy.root, timeout=0):
                 pytest.fail("recursive deletion must hold the root lock")
@@ -1066,6 +1072,47 @@ def test_managed_retention_rejects_lexical_escape_in_snapshot(retention_harness)
     assert snapshot.runtimes[0].cell.exists()
 
 
+def test_legacy_identity_scoped_cell_survives_authority_narrowing(retention_harness):
+    """A cell keyed before ``_cache_authority`` narrowing shipped must still
+    inspect cleanly under retention, instead of ``_inspect_cell`` raising
+    "authority is inconsistent" and aborting the whole cleanup pass on every
+    pre-existing identity-scoped (e.g. torch/transformers) cell.
+    """
+    from agent_dispatch.managed_retention import _inspect_cell
+    from agent_dispatch.managed_runtime import _cache_authority
+
+    h = retention_harness
+    registration = _registration(h.plugin)
+    registration["spec"]["managed_runtime"]["runtimes"][0]["identity_paths"] = [
+        "example_service"
+    ]
+    registration["runtime_revision"]["managed_runtime"] = registration["spec"][
+        "managed_runtime"
+    ]
+    runtime = h.materializer.materialize(registration)[0]
+
+    receipt_path = runtime.cell / RECEIPT_NAME
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    authority = receipt["ownership"]["authority"]
+    legacy_digest = _canonical_digest(_cache_authority(authority, identity_scoped=False))
+    assert legacy_digest != receipt["authority_digest"]  # sanity: narrowing did apply
+
+    # Simulate a cell built before the narrowing shipped: keyed and stamped
+    # from the full, unnarrowed authority even though it declares
+    # identity_paths.
+    receipt["authority_digest"] = legacy_digest
+    legacy_key = _cell_key(receipt)
+    legacy_cell = runtime.cell.parent / legacy_key
+    shutil.copytree(runtime.cell, legacy_cell)
+    receipt["ownership"]["cell"] = str(legacy_cell)
+    (legacy_cell / RECEIPT_NAME).write_text(
+        json.dumps(receipt, sort_keys=True), encoding="utf-8"
+    )
+
+    inspected = _inspect_cell(h.policy.root, legacy_cell, authority)
+    assert inspected["authority_digest"] == legacy_digest
+
+
 def test_managed_retention_root_lock_serializes_real_materialization_process(
     retention_harness, tmp_path
 ):
@@ -1113,9 +1160,18 @@ def test_managed_retention_root_lock_serializes_real_materialization_process(
         while not marker.exists() and worker.poll() is None and time.monotonic() < deadline:
             time.sleep(0.02)
         assert marker.exists(), worker.communicate(timeout=1)
+        plugin_identity = _plugin_identity(_authority(_registration(h.plugin))[0])
+        other_registration = _registration(_project(tmp_path / "unrelated-plugin"))
+        other_identity = _plugin_identity(_authority(other_registration)[0])
+        assert other_identity != plugin_identity
         with pytest.raises(ManagedRuntimeLockTimeout, match="timed out"):
-            with _RootLock(policy_root, timeout=0.1):
-                pytest.fail("materialization owns the root lock")
+            with _RootLock(policy_root, plugin_identity, timeout=0.1):
+                pytest.fail("materialization owns its plugin-scoped root lock")
+        # A different plugin's scoped lock is completely uncontended -- the
+        # in-flight build must not starve an unrelated companion's own
+        # materialize()/validate() call.
+        with _RootLock(policy_root, other_identity, timeout=0.1):
+            pass
         cleaner = subprocess.Popen(
             [
                 sys.executable,

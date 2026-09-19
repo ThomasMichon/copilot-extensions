@@ -1143,6 +1143,90 @@ def test_self_update_ordering_releases_lease_before_spawn():
     assert order == ["release", "spawn", "release"]  # finally's redundant release is harmless
 
 
+def test_self_update_defers_while_a_managed_runtime_build_is_in_flight():
+    """Self-update must not spawn a successor while a materialize()/cleanup()
+    task is still running: the successor's legacy-lock handshake only
+    samples the lock once, so it cannot by itself force a wait for an
+    old-process worker that has not yet reached its own lock acquisition --
+    deferring avoids that overlapping old/new build race entirely."""
+    from concurrent.futures import Future
+
+    client = FakeClient([_reg("a")])
+    launcher = FakeLauncher()
+    lock = FakeLock(granted=True)
+    spawned: list[object] = []
+    clock = Clock(0.0)
+    d = _daemon(
+        client, launcher, lock=lock, clock=clock,
+        self_update_enabled=True,
+        self_update_poll_interval=1.0,
+        self_update_argv=["supervise", "serve"],
+        self_update_stale_target=lambda _root, _v: object(),
+        self_update_spawn=lambda t, _argv: spawned.append(t),
+    )
+    in_flight: Future = Future()
+    d._managed_runtime_futures["a"] = ("plugin-a", in_flight)
+    d._managed_runtime_inflight.add(in_flight)
+
+    result = d._maybe_self_update()
+
+    assert result is False
+    assert spawned == []  # deferred -- no successor spawned
+    assert lock.released is False  # lease untouched, still running this version
+
+    in_flight.set_result(())
+    clock.t += 10.0  # past the poll interval, well under the cooldown default
+    result = d._maybe_self_update()
+    assert result is True
+    assert spawned  # now completes once the build finished
+
+
+def test_self_update_still_waits_on_a_cancelled_but_running_materialize_future():
+    """cancel() is a no-op once a materialize() task is already running (not
+    merely queued); a withdrawn/changed registration's future is still
+    popped from _managed_runtime_futures in that case. The handoff barrier
+    must keep waiting on it anyway (via _managed_runtime_inflight), not lose
+    track of a build that is still actually in progress.
+    """
+    from concurrent.futures import Future
+
+    client = FakeClient([_reg("a")])
+    launcher = FakeLauncher()
+    lock = FakeLock(granted=True)
+    spawned: list[object] = []
+    clock = Clock(0.0)
+    d = _daemon(
+        client, launcher, lock=lock, clock=clock,
+        self_update_enabled=True,
+        self_update_poll_interval=1.0,
+        self_update_argv=["supervise", "serve"],
+        self_update_stale_target=lambda _root, _v: object(),
+        self_update_spawn=lambda t, _argv: spawned.append(t),
+    )
+    in_flight: Future = Future()
+    # Simulate: submitted, tracked in both places, then the registration is
+    # withdrawn/changed and cancel() is attempted on an already-running task
+    # (a no-op -- it stays "not done"), which drops it from
+    # _managed_runtime_futures but must not drop it from the inflight set.
+    d._managed_runtime_futures["a"] = ("plugin-a", in_flight)
+    d._managed_runtime_inflight.add(in_flight)
+    in_flight.set_running_or_notify_cancel()  # simulate: a worker already claimed it
+    assert in_flight.cancel() is False  # no-op: already running, not merely queued
+    d._managed_runtime_futures.pop("a", None)
+
+    result = d._maybe_self_update()
+
+    assert result is False
+    assert spawned == []  # still deferred -- the inflight future is not done
+    assert lock.released is False
+
+    in_flight.set_result(())
+    clock.t += 10.0
+    result = d._maybe_self_update()
+    assert result is True
+    assert spawned
+
+
 def test_self_update_reclaims_lease_when_spawn_fails():
     """A spawn failure must not leave the daemon believing it still owns the
     lease it already released -- it reclaims the lease and keeps running."""
