@@ -5658,6 +5658,65 @@ def test_native_list_no_rowwrap_and_incremental_repaint(monkeypatch):
     asyncio.run(run())
 
 
+def test_native_list_refreshes_on_same_count_content_swap():
+    """PR #2911 review: a same-cardinality reload that swaps a row's content
+    (title/state) must still rebuild the native list -- ``nrows`` alone can't
+    see it, so the signature needs a content fingerprint too."""
+    import datetime
+    import types
+
+    from worktree_manager.production_picker.picker_tui import derive
+
+    def _src():
+        derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+        local = ("anomalous-potato", "Win")
+        raws = [{"id": "anomalous-potato-win-20260627-r00", "title": "Original title",
+                 "status": "idle", "started_at": "2026-06-27T17:00:00",
+                 "turn_count": 0, "state": "idle"}]
+        s = types.SimpleNamespace()
+        s.LOCAL = local
+        s.LOCAL_LABEL = "lc"
+        s.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+        s.bucket = derive.bucket
+        s.for_machine = derive.for_machine
+        s.load = lambda: [derive.norm(w, *local) for w in raws]
+        return s
+
+    def _find_row(nl, needle):
+        for i in range(nl.option_count):
+            p = nl.get_option_at_index(i).prompt
+            text = p.plain if hasattr(p, "plain") else str(p)
+            if needle in text:
+                return text
+        return None
+
+    async def run():
+        app = PickerApp(_src(), live=False)
+        async with app.run_test(size=(100, 14)) as pilot:
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            scr.sel = ("L", 0)
+            scr.refresh()
+            await pilot.pause()
+            nl = scr.query_one("#nf-body-data")
+            assert _find_row(nl, "Original title") is not None
+
+            # Simulate a same-cardinality reload in place: the row count is
+            # unchanged (still 1), but its content (title/state) is swapped --
+            # exactly the case the signature's nrows-only probe used to miss.
+            for rec in scr.data:
+                rec["title"] = "Renamed title"
+                rec["state"] = "active"
+            scr.refresh()
+            await pilot.pause()
+
+            assert _find_row(nl, "Renamed title") is not None
+            assert _find_row(nl, "Original title") is None
+
+    asyncio.run(run())
+
+
 def test_native_list_checkbox_click_toggles(monkeypatch):
     """NF5-5 (#88): clicking the checkbox gutter (first cells) of a native-list
     row toggles its multi-select *without* activating it; clicking the row body

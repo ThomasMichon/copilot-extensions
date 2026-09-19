@@ -672,21 +672,29 @@ class _PickerNativeData(OptionList):
         kind = scr._kind()
         # A cheap per-pivot data-size probe so the options rebuild when the
         # active pivot's rows change (tasks load, maintenance candidates), not
-        # only when the worktrees list does.
+        # only when the worktrees list does. ``fp`` (review finding, #2228 P4)
+        # additionally fingerprints each row's id/title/state -- nrows alone
+        # cannot see a same-cardinality reload that swaps a row's content
+        # (title/state/liveness change), which would otherwise leave a
+        # query/sort-narrowed view silently stale.
         try:
             if kind == "registered":
-                nrows = len(scr._task_rows())
+                rows = scr._task_rows()
             elif kind == "maintenance":
-                nrows = len(scr.maint_records())
+                rows = scr.maint_records()
             else:
-                nrows = len(scr.list_records())
+                rows = scr.list_records()
+            nrows = len(rows)
+            fp = tuple((r.get("id"), r.get("title"), r.get("state"))
+                       for r in rows)
         except Exception:
-            nrows = -1
+            nrows, fp = -1, ()
         return (kind, scr.htab, scr.machine_idx, nrows, wt,
                 getattr(scr, "pulse", 0), getattr(scr, "update_state", None),
                 scr.size.width, getattr(scr, "cmd_mode", False),
                 getattr(scr.list_view, "query", ""),
-                getattr(scr.list_view, "sort_index", 0))
+                getattr(scr.list_view, "sort_index", 0), fp)
+
 
     def _rebuild(self):
         scr = self._screen

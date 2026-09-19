@@ -96,3 +96,33 @@ def test_clear_resets_query_but_not_sort():
     lv.clear()
     assert lv.query == ""
     assert lv.sort_label(keys) == "b"
+
+
+def test_resolve_index_preserves_no_anchor_as_none():
+    """PR #2911 review: when there was no captured index to begin with
+    (``old_idx is None`` -- e.g. no range anchor yet), a re-filter/sort must
+    not manufacture one at row 0; it must stay ``None``."""
+    from worktree_manager.production_picker.picker_tui.listview import (
+        resolve_index,
+    )
+
+    assert resolve_index(None, None, ["a", "b", "c"]) is None
+    # An empty list still yields None regardless of old_idx.
+    assert resolve_index(None, None, []) is None
+    assert resolve_index(None, 1, []) is None
+
+
+def test_resolve_index_still_clamps_a_real_vanished_index():
+    """A real captured index for a row that's now gone still clamps to the
+    equivalent (possibly shorter) list -- only the "no anchor" case (above)
+    stays None."""
+    from worktree_manager.production_picker.picker_tui.listview import (
+        resolve_index,
+    )
+
+    # Key found: resolves to its new position regardless of old_idx.
+    assert resolve_index("b", 5, ["x", "b", "y"]) == 1
+    # Key gone, old_idx present: clamp into the new (shorter) list.
+    assert resolve_index("gone", 4, ["x", "y"]) == 1
+    assert resolve_index("gone", 0, ["x", "y", "z"]) == 0
+

@@ -120,14 +120,16 @@ def resolve_index(key, old_idx, ids):
     """Resolve a captured row ``key`` to its new position in ``ids``, or --
     when that row is gone entirely (filtered/removed, not just moved) -- the
     equivalent index clamped into ``ids`` (Phase 3's "focus stays at the
-    equivalent index" rule); ``None`` only when ``ids`` is now empty.
-    Shared by every picker index (focus/anchor/remembered row) that must
-    survive a reorder or re-filter, #2228 Phase 4 review."""
+    equivalent index" rule); ``None`` when ``ids`` is empty OR when there was
+    no captured index to begin with (``old_idx is None`` -- review finding:
+    a nonexistent anchor/remembered-row must stay absent, never manufactured
+    at row 0). Shared by every picker index (focus/anchor/remembered row)
+    that must survive a reorder or re-filter, #2228 Phase 4 review."""
     if key is not None and key in ids:
         return ids.index(key)
-    if not ids:
+    if old_idx is None or not ids:
         return None
-    return min(old_idx, len(ids) - 1) if old_idx is not None else 0
+    return min(old_idx, len(ids) - 1)
 
 
 def capture_row_refs(ids, sel, wt_anchor, last_l):
