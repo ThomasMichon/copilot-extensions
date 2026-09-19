@@ -450,6 +450,7 @@ def spawn_embodied_worker(
     all_repos: bool = False,
     verify_timeout: int = 0,
     timeout: float | None = None,
+    seed: str | None = None,
 ) -> subprocess.CompletedProcess:
     """Spawn a CLI-backed autopilot worker via ``agent-worktrees embody``.
 
@@ -468,17 +469,24 @@ def spawn_embodied_worker(
 
     ``verify_timeout`` (seconds) optionally makes embody wait for the mux
     session to come up before returning (0 = don't wait).
+
+    ``seed`` overrides the default autopilot seed with a caller-supplied prompt
+    -- used by :mod:`agent_dispatch.interactive_embody` (Phase 1 item 3) to
+    launch the SAME CLI-backed session mechanism with a deliberately lighter,
+    non-railroaded ``--interactive`` seed instead of the autopilot one. Every
+    existing call site (which never passes ``seed``) is unaffected.
     """
     exe_prefix = _agent_worktrees_launch_prefix()
     if exe_prefix is None:
         raise EmbodyUnavailable("agent-worktrees CLI not found on PATH")
-    seed = autopilot_worker_prompt(
-        task_id,
-        worker_id=worker_id,
-        route=route,
-        repo=repo,
-        all_repos=all_repos,
-    )
+    if seed is None:
+        seed = autopilot_worker_prompt(
+            task_id,
+            worker_id=worker_id,
+            route=route,
+            repo=repo,
+            all_repos=all_repos,
+        )
     cmd = list(exe_prefix)
     if project:
         # `--project` is an agent-worktrees GLOBAL option -- it precedes the

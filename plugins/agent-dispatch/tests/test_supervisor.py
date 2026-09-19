@@ -81,8 +81,11 @@ class QueueBackedClient:
         )
         return [asdict(r) for r in rows]
 
-    def reserve_spawn(self, task_id, *, reserved_by=None):
-        res, ok = self._q.reserve_spawn(task_id, reserved_by=reserved_by)
+    def reserve_spawn(self, task_id, *, reserved_by=None, allow_suspended_reembodiment=False):
+        res, ok = self._q.reserve_spawn(
+            task_id, reserved_by=reserved_by,
+            allow_suspended_reembodiment=allow_suspended_reembodiment,
+        )
         return {"reserved": ok, "reservation": asdict(res)}
 
     def record_spawn(self, key, *, session_handle=None, worktree=None):
@@ -367,6 +370,25 @@ def test_poll_spawns_eligible_task_once(q, client):
     # a second cycle does NOT spawn again (active spawned reservation)
     assert sup.poll_once() == []
     assert spawn.calls == [t.id]
+
+
+def test_poll_skips_a_held_queued_task(q, client):
+    """PR #2913 review finding: `Supervisor._eligible()` must exclude a
+    queued task with a durable operator hold (Phase 1's Pause primitive) --
+    otherwise a spawn reservation is minted for it, its follow-up
+    `claim_one` fails on the hold, and the stray reservation is left
+    behind."""
+    t = q.create("work")
+    q.set_hold(t.id, reason="operator paused before spawn", actor="tmichon")
+    spawn = _ok_spawn()
+    sup = Supervisor(client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5)
+
+    assert sup.poll_once() == []
+    assert spawn.calls == []
+    assert q.latest_reservation(t.id) is None
+
+    q.clear_hold(t.id, actor="tmichon")
+    assert sup.poll_once() == [t.id]
 
 
 def test_poll_treats_a_sessionless_success_as_a_failure(q, client):
@@ -2279,14 +2301,17 @@ def test_requeued_task_is_not_double_spawned(q, client):
     """A spawned-but-requeued task (lease expired, embody maybe still alive)
     must never be spawned a second time."""
     t = q.create("work")
-    spawn = _ok_spawn()
+    # Headless (local-body-prefixed handle): reconcile_liveness's requeue
+    # path is unchanged only for a headless body (Phase 1 item 2) -- a
+    # CLI-embodied one now auto-suspends instead.
+    spawn = _ok_spawn({"session": "local-body:sess-1", "worktree": "wt-1"})
     sup = Supervisor(client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5)
     sup.poll_once()  # spawn #1
 
     # simulate: embody claimed + started, then its worker went away -> re-queued
     q.claim_one("m/wt", task_id=t.id, machine="m", worktree="wt")
     q.start(t.id, "m/wt")
-    q.reconcile_liveness(lambda wt, mc, sid: "gone")
+    q.reconcile_liveness(headless_local_verdict=lambda sid: "gone")
     assert q.get(t.id).status == Status.QUEUED  # back in the queue
 
     # the supervisor must NOT re-spawn it (reservation still 'spawned')
@@ -5732,10 +5757,13 @@ def test_recover_gone_releases_stale_reservation_and_respawns(q, client):
     """A *confirmed-gone* embody's stale reservation is released so the task is
     re-embodied (the replacement resumes from progress_log)."""
     t = q.create("work")
-    spawn = _ok_spawn()
+    # Headless (local-body-prefixed handle) -- see
+    # test_requeued_task_is_not_double_spawned's comment.
+    spawn = _ok_spawn({"session": "local-body:sess-1", "worktree": "wt-1"})
     sup = Supervisor(
         client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5,
         verdict_fn=lambda wt, mc, sid: "gone",
+        local_body_verdict_fn=lambda sid: "gone",
     )
     sup.poll_once()  # spawn #1 -> reservation SPAWNED
     assert spawn.calls == [t.id]
@@ -5743,7 +5771,7 @@ def test_recover_gone_releases_stale_reservation_and_respawns(q, client):
     # embody claimed + started, then its worker vanished -> coordinator GC requeues
     q.claim_one("m/wt-1", task_id=t.id, machine="m", worktree="wt-1")
     q.start(t.id, "m/wt-1")
-    q.reconcile_liveness(lambda wt, mc, sid: "gone")
+    q.reconcile_liveness(headless_local_verdict=lambda sid: "gone")
     assert q.get(t.id).status == Status.QUEUED
 
     # next cycle: recover_gone releases the stale reservation, then re-embodies
@@ -5895,17 +5923,20 @@ def test_recover_leaves_live_or_unknown(q, client, verdict):
     """Recovery never fires on a live or can't-tell verdict (the safety guarantee
     behind liveness-not-lease): the reservation is held, no re-spawn."""
     t = q.create("work")
-    spawn = _ok_spawn()
+    # Headless (local-body-prefixed handle) -- see
+    # test_requeued_task_is_not_double_spawned's comment.
+    spawn = _ok_spawn({"session": "local-body:sess-1", "worktree": "wt-1"})
     sup = Supervisor(
         client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5,
         verdict_fn=lambda *_: verdict,
+        local_body_verdict_fn=lambda *_: verdict,
     )
     sup.poll_once()  # spawn #1
     assert spawn.calls == [t.id]
 
     q.claim_one("m/wt-1", task_id=t.id, machine="m", worktree="wt-1")
     q.start(t.id, "m/wt-1")
-    q.reconcile_liveness(lambda wt, mc, sid: "gone")  # queue requeues
+    q.reconcile_liveness(headless_local_verdict=lambda sid: "gone")  # queue requeues
     assert q.get(t.id).status == Status.QUEUED
 
     # supervisor's OWN verdict is not 'gone' -> hold, never re-spawn on ignorance

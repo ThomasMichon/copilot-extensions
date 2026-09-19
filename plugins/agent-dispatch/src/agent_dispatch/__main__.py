@@ -1717,6 +1717,105 @@ def _cmd_release(args: argparse.Namespace) -> int:
         return _emit(c.release(args.task_id, worker_id, reason=args.reason))
 
 
+def _hold_actor(args: argparse.Namespace) -> str:
+    """The acting operator identity for a pause/unpause -- an explicit
+    ``--actor``, else whatever worktree identity resolves (for audit-trail
+    legibility only; pause/unpause are operator actions, never owner-gated)."""
+    return getattr(args, "actor", None) or _owner_from_identity(args) or "operator"
+
+
+def _cmd_pause(args: argparse.Namespace) -> int:
+    with _client(args) as c:
+        return _emit(
+            c.set_hold(
+                args.task_id,
+                reason=args.reason,
+                actor=_hold_actor(args),
+                expected_status=args.expected_status,
+            )
+        )
+
+
+def _cmd_unpause(args: argparse.Namespace) -> int:
+    with _client(args) as c:
+        return _emit(
+            c.clear_hold(
+                args.task_id,
+                actor=_hold_actor(args),
+                expected_status=args.expected_status,
+            )
+        )
+
+
+def _cmd_embody_interactive(args: argparse.Namespace) -> int:
+    """Run Phase 1's interactive-embodiment transaction and print its result.
+
+    The caller (an operator's own shell, or the Picker acting on their
+    behalf) is the machine the new/resumed worktree lives on -- resolved from
+    CWD via agent-worktrees, or an explicit ``--machine`` override for a
+    CWD-neutral caller (e.g. a service acting on an operator's request).
+    """
+    from .identity import resolve_machine
+    from .interactive_embody import InteractiveEmbodimentError, launch_interactive_embodiment
+
+    machine = getattr(args, "machine", None) or resolve_machine()
+    if not machine:
+        print(
+            "agent-dispatch: could not resolve this machine's identity "
+            "(agent-worktrees absent?). Pass --machine explicitly.",
+            file=sys.stderr,
+        )
+        return 2
+    with _client(args) as c:
+        try:
+            result = launch_interactive_embodiment(
+                c,
+                args.task_id,
+                machine=machine,
+                project=args.project,
+            )
+        except InteractiveEmbodimentError as exc:
+            print(f"agent-dispatch: {exc}", file=sys.stderr)
+            return 1
+    return _emit(result)
+
+
+def _cmd_force_stop(args: argparse.Namespace) -> int:
+    from .force_stop import ForceStopError, force_stop
+    from .identity import resolve_machine
+
+    actor = getattr(args, "actor", None) or _owner_from_identity(args)
+    with _client(args) as c:
+        try:
+            result = force_stop(
+                c,
+                args.task_id,
+                local_machine=getattr(args, "machine", None) or resolve_machine(),
+                actor=actor,
+            )
+        except ForceStopError as exc:
+            print(f"agent-dispatch: {exc}", file=sys.stderr)
+            return 1
+    return _emit(result)
+
+
+def _cmd_reset(args: argparse.Namespace) -> int:
+    if args.to != "proposed":
+        print(
+            f"agent-dispatch: reset only supports --to proposed today, not {args.to!r}",
+            file=sys.stderr,
+        )
+        return 2
+    with _client(args) as c:
+        return _emit(
+            c.reset(
+                args.task_id,
+                reason=args.reason,
+                expected_status=args.expected_status,
+            )
+        )
+
+
 def _cmd_progress(args: argparse.Namespace) -> int:
     worker_id = _resolve_owner(args, verb="progress")
     if worker_id is None:
@@ -1823,6 +1922,7 @@ def _cmd_steer(args: argparse.Namespace) -> int:
             sender=sender,
             wake=args.wake,
             message=args.message,
+            expected_status=args.expected_status,
         )
         woken = result.pop("steer_woken", None)
         wake_status = result.pop("steer_wake_status", None)
@@ -3495,12 +3595,108 @@ def build_parser() -> argparse.ArgumentParser:
         help="with --resolve, the base branch the worktree unwinds onto "
         "(default: the branch's tracked upstream)",
     )
+    p.add_argument(
+        "--expected-status",
+        dest="expected_status",
+        help="reject with 'task changed; refresh and retry' if the task's "
+        "current status doesn't match this (a stale cached row)",
+    )
     from . import reattach as _reattach
     _reattach.add_abandon_override_live_argument(p)
     p.set_defaults(func=_cmd_abandon)
 
     p = _reattach.build_reattach_subparser(sub)
     p.set_defaults(func=_cmd_reattach)
+
+    p = sub.add_parser(
+        "pause",
+        help="set a durable operator hold on a task (Phase 1's Pause primitive)",
+    )
+    p.add_argument("task_id")
+    p.add_argument("--reason", required=True, help="required reason recorded in the audit trail")
+    p.add_argument("--actor", help="operator identity recorded in the audit trail")
+    p.add_argument(
+        "--expected-status",
+        dest="expected_status",
+        help="reject with 'task changed; refresh and retry' if the task's "
+        "current status doesn't match this (a stale cached row)",
+    )
+    p.set_defaults(func=_cmd_pause)
+
+    p = sub.add_parser(
+        "unpause",
+        help="clear a hold set by `pause`",
+    )
+    p.add_argument("task_id")
+    p.add_argument("--actor", help="operator identity recorded in the audit trail")
+    p.add_argument(
+        "--expected-status",
+        dest="expected_status",
+        help="reject with 'task changed; refresh and retry' if the task's "
+        "current status doesn't match this (a stale cached row) -- ignored "
+        "when the task is already unheld (a harmless no-op)",
+    )
+    p.set_defaults(func=_cmd_unpause)
+
+    p = sub.add_parser(
+        "embody",
+        help="Phase 1's interactive-embodiment transaction: open a task into "
+        "an interactive CLI-backed session (currently requires --interactive)",
+    )
+    p.add_argument("task_id")
+    p.add_argument(
+        "--interactive",
+        action="store_true",
+        required=True,
+        help="run the interactive-embodiment transaction (the only mode "
+        "implemented so far -- an unattended/autopilot `embody` equivalent "
+        "already exists via the supervisor's own spawn path, not this verb)",
+    )
+    p.add_argument(
+        "--machine",
+        help="override the resolved machine identity (default: this host, "
+        "via agent-worktrees)",
+    )
+    p.add_argument(
+        "--project",
+        help="target project name (default: resolved from the task's repo)",
+    )
+    p.set_defaults(func=_cmd_embody_interactive)
+
+    p = sub.add_parser(
+        "force-stop",
+        help="terminate a started task's exact current session and park it "
+        "suspended, without a durable pause hold",
+    )
+    p.add_argument("task_id")
+    p.add_argument(
+        "--machine",
+        help="this machine's identity, for deciding whether the task's "
+        "session is local or on a fleet host (default: resolved via "
+        "agent-worktrees)",
+    )
+    p.add_argument("--actor", help="operator identity recorded in the audit trail")
+    p.set_defaults(func=_cmd_force_stop)
+
+    p = sub.add_parser(
+        "reset",
+        help="Phase 2's gentler 'not like this': discard the current attempt's "
+        "embodiment state and re-admit the task for a fresh attempt",
+    )
+    p.add_argument("task_id")
+    p.add_argument(
+        "--to",
+        default="proposed",
+        help="target state (only 'proposed' is implemented today)",
+    )
+    p.add_argument("--reason", help="optional note recorded in the audit trail")
+    p.add_argument(
+        "--expected-status",
+        dest="expected_status",
+        help="reject with 'task changed; refresh and retry' if the task's "
+        "current status doesn't match this (a stale cached row)",
+    )
+    p.set_defaults(func=_cmd_reset)
 
     p = sub.add_parser("heartbeat", help="extend the lease on a held task")
     p.add_argument("task_id")
@@ -3634,6 +3830,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ssm.add_argument("--sender", help="who is answering (default: resolved identity)")
     ssm.add_argument("--message", help="override the wake nudge text")
+    ssm.add_argument(
+        "--expected-status",
+        dest="expected_status",
+        help="reject with 'task changed; refresh and retry' if the task's "
+        "current status doesn't match this (a stale cached row)",
+    )
     ssm.add_argument(
         "--no-wake",
         dest="wake",

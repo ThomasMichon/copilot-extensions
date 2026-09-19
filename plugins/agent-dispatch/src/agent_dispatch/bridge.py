@@ -302,6 +302,41 @@ def end_worker(session_id: str, *, timeout: float | None = 20.0) -> bool:
     return completed.returncode == 0
 
 
+def force_end_session(session_id: str, *, timeout: float | None = 20.0) -> bool:
+    """Unconditionally end ANY local session (headless ACP or interactive
+    CLI) via ``agent-bridge end <id> --force`` -- torn down even with active
+    background work, unlike :func:`end_worker`'s idle-only ``--if-idle``.
+
+    The execution primitive behind Phase 2's ``force-stop`` CLI verb: the
+    operator's deliberate "stop it now" action, distinct from the durable
+    :meth:`agent_dispatch.queue.TaskQueue.set_hold` pause (which does not
+    itself terminate a live session). Returns ``False`` (never raises) on any
+    failure -- no bridge on PATH, an unknown session id, a transport error --
+    so the caller can still fence the task's own state transition even when
+    the live session could not be confirmed torn down.
+    """
+    exe = _agent_bridge_launch_prefix()
+    if exe is None:
+        return False
+    try:
+        completed = subprocess.run(  # noqa: S603 -- fixed argv + validated id
+            [*exe, "end", session_id, "--force"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            **no_window_kwargs(),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        # The docstring promises this never raises -- an unlaunchable binary
+        # or a stuck/timed-out process is exactly the "transport error"
+        # case callers (force-stop's fenced suspend) already expect to
+        # degrade to `False` (PR #2913 review).
+        return False
+    return completed.returncode == 0
+
+
+
 def resume_worker(
     session_id: str,
     prompt: str,

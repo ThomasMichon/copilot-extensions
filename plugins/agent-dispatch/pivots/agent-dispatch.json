@@ -11,6 +11,17 @@
     "group": "group",
     "badges": ["activity", "labels"]
   },
+  "columns": [
+    {"key": "id", "header": "ID", "width": 9, "priority": 2},
+    {"key": "group", "header": "PHASE", "width": 10, "palette": "task_phase", "priority": 3},
+    {"key": "repo_name", "header": "REPO", "width": 15, "priority": 6},
+    {"key": "title", "header": "TITLE", "width": 40, "priority": 1},
+    {"key": "target_worktree", "header": "WT", "width": 5, "priority": 4},
+    {"key": "turn_count", "header": "T", "width": 4, "align": "r", "priority": 7},
+    {"key": "wt_live", "header": "LIVE", "width": 13, "priority": 5},
+    {"key": "artifacts_summary", "header": "ARTIFACTS", "width": 18, "priority": 8}
+  ],
+  "group_field": "group",
   "empty_hint": "No active or recently-finished tasks for this machine.",
   "actions": [
     {
@@ -21,17 +32,41 @@
       "title_from": "card.title",
       "body_from": "card.body",
       "run": [
-        "agent-dispatch", "steer", "submit", "{task_id}", "{fields}"
+        "agent-dispatch", "steer", "submit", "{task_id}", "{fields}",
+        "--expected-status", "{status}"
       ],
       "when": {"group": "Blocked"},
       "description": "Read the card prose and answer its form, then wake the worker. The agent acts on your answer only — including casting a PR verdict solely when a card's form asks for one and you pick it (review cards), never autonomously."
+    },
+    {
+      "key": "charter",
+      "label": "View charter — what this task is",
+      "kind": "card",
+      "title_from": "charter.title",
+      "status_from": "charter.status",
+      "link_from": "charter.link",
+      "body_from": "charter.body",
+      "when": {"has_charter": "true"},
+      "description": "Read this task's charter: a short description plus structured metadata (registrar, source, linked artifacts). Read-only — never mutates the task. Not yet populated by the real board (see `board_cli._build`'s `has_charter` note) — gated off rather than shown blank until it is."
+    },
+    {
+      "key": "worktree-status",
+      "label": "Worktree status — session, claims, commits",
+      "kind": "card",
+      "title_from": "worktree_status.title",
+      "status_from": "worktree_status.status",
+      "link_from": "worktree_status.link",
+      "body_from": "worktree_status.body",
+      "when": {"has_worktree": "true"},
+      "description": "Drill into the claiming worktree: session lineage, an expanded status descriptor (turns, commits, claims), and its claim graph. Read-only."
     },
     {
       "key": "open-cli",
       "label": "Open into a CLI session",
       "kind": "internal",
       "verb": "open-cli",
-      "description": "Open this task's target worktree into a Copilot CLI session (resume /resume-handoff there to consume a handoff)."
+      "when": {"cli_openable": "true"},
+      "description": "PROPOSED — not yet wired. Would open (or, for Proposed/Queued, create) this task's worktree into an interactive Copilot CLI session via Phase 1 item 3's ownership transaction (`agent-dispatch embody --interactive`). Currently gated off (`board_cli`'s `cli_openable` is hard-`False`): the generic Worktrees `open-cli` internal verb this action currently names has no `target_worktree` to find for a Proposed/Queued task and bypasses the ownership transaction for a Suspended one. Needs its own dedicated internal verb before this can be safely enabled -- Phase 7's own scope (pure UI wiring onto Phase 2's now-landed CLI verbs)."
     },
     {
       "key": "kick",
@@ -41,12 +76,44 @@
       "description": "Spawn a background bridge agent on this machine to work the task."
     },
     {
-      "key": "abandon",
-      "label": "Abandon the task",
-      "run": ["agent-dispatch", "abandon", "{task_id}", "--permit", "--reason", "abandoned from picker"],
-      "when": {"group": ["Blocked", "Proposed", "Queued", "Started"]},
+      "key": "pause",
+      "label": "Pause the agent (user hold — blocks re-queue)",
+      "run": ["agent-dispatch", "pause", "{task_id}", "--reason", "paused from picker", "--expected-status", "{status}"],
+      "when": {"embodied": "true", "held": "false"},
       "confirm": true,
-      "description": "Terminally abandon this task (active tasks only)."
+      "description": "Suspends the assigned agent's re-queue eligibility AND blocks agent-dispatch from re-queuing this task until you explicitly unpause it. Distinct from anything an agent would do on its own; remember to come back and unpause it."
+    },
+    {
+      "key": "unpause",
+      "label": "Unpause the agent",
+      "run": ["agent-dispatch", "unpause", "{task_id}", "--expected-status", "{status}"],
+      "when": {"held": "true"},
+      "confirm": true,
+      "description": "Clears a hold set by Pause, re-admitting the task to re-queue/resume eligibility on its normal schedule."
+    },
+    {
+      "key": "force-stop",
+      "label": "Force-stop the agent",
+      "run": ["agent-dispatch", "force-stop", "{task_id}"],
+      "when": {"embodied": "true"},
+      "confirm": true,
+      "description": "Immediately terminates the process embodying this task (best-effort) and parks it Suspended. The task itself is not abandoned — it becomes eligible for resume/re-embodiment on the normal schedule."
+    },
+    {
+      "key": "reset-proposed",
+      "label": "Reset to Proposed",
+      "run": ["agent-dispatch", "reset", "{task_id}", "--to", "proposed", "--expected-status", "{status}"],
+      "when": {"group": ["Blocked", "Suspended", "Started", "Queued"]},
+      "confirm": true,
+      "description": "Sends the task back to Proposed (unapproved) — the gentler way to say \"not like this\" without terminally abandoning the idea. Preserves the task's durable goal/done-criteria/progress log for a fresh attempt."
+    },
+    {
+      "key": "abandon",
+      "label": "Force-abandon the task",
+      "run": ["agent-dispatch", "abandon", "{task_id}", "--permit", "--reason", "abandoned from picker", "--expected-status", "{status}"],
+      "when": {"group": ["Blocked", "Proposed", "Queued", "Started", "Suspended"]},
+      "confirm": true,
+      "description": "Terminally abandon this task — the user's way to say \"No\"."
     }
   ]
 }

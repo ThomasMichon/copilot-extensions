@@ -1,0 +1,109 @@
+{
+  "schema_version": 1,
+  "label": "Tasks",
+  "after": "Worktrees",
+  "list": ["agent-dispatch-board", "--machine", "{machine}"],
+  "entry": {
+    "id": "id",
+    "title": "title",
+    "worktree": "target_worktree",
+    "subtitle": "repo_name",
+    "group": "group",
+    "badges": ["activity"]
+  },
+  "columns": [
+    {"key": "id", "header": "ID", "width": 9},
+    {"key": "group", "header": "PHASE", "width": 10, "palette": "task_phase"},
+    {"key": "repo_name", "header": "REPO", "width": 15},
+    {"key": "title", "header": "TITLE", "width": 40},
+    {"key": "target_worktree", "header": "WT", "width": 5},
+    {"key": "turn_count", "header": "T", "width": 4, "align": "r"},
+    {"key": "wt_live", "header": "LIVE", "width": 13},
+    {"key": "artifacts_summary", "header": "ARTIFACTS", "width": 18}
+  ],
+  "group_field": "group",
+  "empty_hint": "No active or recently-finished tasks for this machine.",
+  "actions": [
+    {
+      "key": "steer",
+      "label": "Steer — read the card & answer",
+      "kind": "form",
+      "fields_from": "card.request_input",
+      "title_from": "card.title",
+      "body_from": "card.body",
+      "run": [
+        "agent-dispatch", "steer", "submit", "{task_id}", "{fields}"
+      ],
+      "when": {"group": "Blocked"},
+      "description": "Read the card prose and answer its form, then wake the worker. The agent acts on your answer only — including casting a PR verdict solely when a card's form asks for one and you pick it (review cards), never autonomously."
+    },
+    {
+      "key": "charter",
+      "label": "View charter — what this task is",
+      "kind": "card",
+      "title_from": "charter.title",
+      "status_from": "charter.status",
+      "link_from": "charter.link",
+      "body_from": "charter.body",
+      "description": "Read this task's charter: a short description plus structured metadata (registrar, source, linked artifacts). Read-only — never mutates the task."
+    },
+    {
+      "key": "worktree-status",
+      "label": "Worktree status — session, claims, commits",
+      "kind": "card",
+      "title_from": "worktree_status.title",
+      "status_from": "worktree_status.status",
+      "link_from": "worktree_status.link",
+      "body_from": "worktree_status.body",
+      "when": {"has_worktree": "true"},
+      "description": "Drill into the claiming worktree: session lineage, an expanded status descriptor (turns, commits, claims), and its claim graph. Read-only."
+    },
+    {
+      "key": "open-cli",
+      "label": "Open into a CLI session",
+      "kind": "internal",
+      "verb": "open-cli",
+      "when": {"cli_openable": "true"},
+      "description": "PROPOSED — semantics not yet implemented. Opens (or, for Proposed/Queued, creates) this task's worktree into an interactive Copilot CLI session, seeded via --interactive with a succinct prompt: the task's charter, current phase, and its own tooling to move the task's state (complete/abandon/reset-to-proposed/re-queue) as the operator wraps up. The operator drives; the agent's job is to advance the task toward its next phase and keep the task's recorded state honest when the operator is done — never to keep working unattended after the session ends. Never spawns through the pool or a dedicated worker identity — those apply rails (a fixed acting theme/focus/rules) to keep an unattended headless agent on target, which is exactly what the operator does NOT want here: this is deliberately direct, open-ended, user-driven control. Never offered for an embodied task with a LIVE headless agent (Blocked/Started) — CLI and ACP cannot co-drive one session — nor for a Queued task already claimed by a pool."
+    },
+    {
+      "key": "kick",
+      "label": "Kick to a headless bridge agent",
+      "run": ["agent-bridge", "create", "{machine}", "{title}", "--no-wait"],
+      "when": {"group": ["Proposed", "Queued"]},
+      "description": "Spawn a background bridge agent on this machine to work the task."
+    },
+    {
+      "key": "pause",
+      "label": "Pause the agent (user hold — blocks re-queue)",
+      "run": ["agent-dispatch", "pause", "{task_id}", "--reason", "paused from picker"],
+      "when": {"embodied": "true"},
+      "confirm": true,
+      "description": "PROPOSED — not yet implemented. Suspends the assigned agent AND blocks agent-dispatch from re-queuing this task until you explicitly unpause it. Distinct from anything an agent would do on its own; remember to come back and unpause it."
+    },
+    {
+      "key": "force-stop",
+      "label": "Force-stop the agent",
+      "run": ["agent-dispatch", "force-stop", "{task_id}"],
+      "when": {"embodied": "true"},
+      "confirm": true,
+      "description": "PROPOSED — not yet implemented. Immediately terminates the process embodying this task. The task itself is not abandoned — it becomes eligible for re-queue on the normal schedule."
+    },
+    {
+      "key": "reset-proposed",
+      "label": "Reset to Proposed",
+      "run": ["agent-dispatch", "reset", "{task_id}", "--to", "proposed"],
+      "when": {"group": ["Blocked", "Suspended", "Started", "Queued"]},
+      "confirm": true,
+      "description": "PROPOSED — not yet implemented. Sends the task back to Proposed (unapproved) — the gentler way to say \"not like this\" without terminally abandoning the idea."
+    },
+    {
+      "key": "abandon",
+      "label": "Force-abandon the task",
+      "run": ["agent-dispatch", "abandon", "{task_id}", "--permit", "--reason", "abandoned from picker"],
+      "when": {"group": ["Blocked", "Proposed", "Queued", "Started", "Suspended"]},
+      "confirm": true,
+      "description": "Terminally abandon this task — the user's way to say \"No\"."
+    }
+  ]
+}

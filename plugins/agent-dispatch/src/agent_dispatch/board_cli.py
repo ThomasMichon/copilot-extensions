@@ -113,6 +113,33 @@ def _activity(task: dict, now: float) -> str | None:
     return value if now - observed <= ACTIVITY_TTL_SECONDS else None
 
 
+def _wt_live(activity: str | None, task: dict, now: float) -> str | None:
+    """The Tasks pane's ``LIVE`` column (Phase 3): a compact, at-a-glance
+    liveness string reusing ``activity``/``activity_updated_at`` -- fields
+    already computed above, self-reported by a **headless** worker via
+    ``agent-dispatch activity`` -- rather than a fresh subprocess/bridge probe
+    (this board client is stdlib-only and re-runs on every Picker refresh, so
+    a per-row liveness probe was ruled out; see the effort's Runbook).
+
+    Returns ``"active"`` / ``"stalled Nm"`` (elapsed minutes since the last
+    beat) for a headless body with a fresh signal, else ``None`` (blank) --
+    including for a CLI-embodied task (item 3), which never calls
+    ``set_activity`` and so has no cheap liveness signal available here. A
+    blank cell is therefore "no headless liveness signal", not a confirmed
+    "not live" -- a real interactive session may still be running.
+    """
+    if activity == "ACTIVE":
+        return "active"
+    if activity == "STALLED":
+        try:
+            observed = float(task.get("activity_updated_at"))
+        except (TypeError, ValueError):
+            return "stalled"
+        minutes = max(0, int((now - observed) // 60))
+        return f"stalled {minutes}m"
+    return None
+
+
 def _repo_name(value: object) -> str | None:
     text = str(value or "").rstrip("/")
     return text.rsplit("/", 1)[-1].removesuffix(".git") if text else None
@@ -146,6 +173,53 @@ def _build(tasks: list[dict], *, machine: str, recent_mins: int) -> list[dict]:
         row = dict(task)
         row["group"] = group
         row["activity"] = _activity(task, now)
+        row["wt_live"] = _wt_live(row["activity"], task, now)
+        # PR #2913 review: the manifest's mutating/card actions gate on these
+        # booleans -- an unpopulated field degrades to falsy in the picker's
+        # `when` matcher, so leaving one out doesn't crash anything, but it
+        # DOES silently hide (or, worse, wrongly show) the action it gates.
+        # Populate every field the manifest actually depends on today from
+        # data already on the task; only `cli_openable` and `has_charter`
+        # stay hard-`False` pending their own follow-on phases (see the two
+        # comments below for exactly why).
+        row["has_worktree"] = bool(task.get("target_worktree"))
+        # `embodied` gates Pause/Force-stop: true only for a task with a
+        # genuinely LIVE session (`started`). A "Blocked" task's real status
+        # is `suspended` (see `set_card`'s own docstring: posting a card with
+        # a form atomically suspends the task so its worker process CAN be
+        # stopped) -- so `embodied` must NOT include Blocked, or force-stop
+        # would be offered on a task with no live session to stop.
+        row["embodied"] = task.get("status") == "started"
+        row["held"] = bool(task.get("hold_reason"))
+        # `cli_openable` is deliberately hard-`False` for now: the manifest's
+        # `open-cli` action is `kind: internal, verb: open-cli`, which the
+        # Picker dispatches to `_open_worktree_cli` -- the GENERIC Worktrees
+        # open-into-CLI handler. That handler assumes an already-existing
+        # worktree row and has no idea about Phase 1 item 3's ownership
+        # transaction (`launch_interactive_embodiment` / `agent-dispatch
+        # embody --interactive`): a Proposed/Queued task has no
+        # `target_worktree` yet (nothing for the generic handler to find),
+        # and a Suspended task's re-embodiment needs the fenced
+        # claim/adopt-owner-session dance the generic handler bypasses
+        # entirely. Wiring a dedicated internal verb that calls
+        # `agent-dispatch embody --interactive` is Phase 7's own scope
+        # ("pure UI wiring, no new backend logic") -- until that lands,
+        # keeping this `False` keeps the action schema-visible (a reviewer
+        # or operator can see it's designed-for) but never actually
+        # reachable, rather than reachable-and-wrong.
+        row["cli_openable"] = False
+        # `has_charter` similarly stays `False`: nothing today populates a
+        # real `charter.*` object (title/status/link/body), so leaving the
+        # action ungated would render an empty card. Gating it behind this
+        # field (mirroring `worktree-status`'s own `has_worktree` gate)
+        # keeps it schema-visible without showing a broken empty card.
+        row["has_charter"] = False
+        # Phase 3 lands the column *plumbing* only; Phase 5 owns the real
+        # claims/artifacts-tracking computation (see the Plan's own note that
+        # the two phases must not both claim this field). Always None today
+        # -- a placeholder so the manifest/column-fit path is exercised now
+        # without duplicating Phase 5's ownership.
+        row["artifacts_summary"] = None
         row.setdefault("repo_name", _repo_name(task.get("repo")))
         progress = row.get("latest_progress")
         if isinstance(progress, str) and progress:

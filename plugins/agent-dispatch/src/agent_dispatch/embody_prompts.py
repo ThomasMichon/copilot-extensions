@@ -177,6 +177,66 @@ def autopilot_worker_prompt(
     )
 
 
+def interactive_worker_prompt(
+    task_id: str,
+    *,
+    status: str | None = None,
+) -> str:
+    """Build the lightweight seed for Phase 1 item 3's interactive-embodiment
+    transaction -- a CLI-backed session an OPERATOR watches/drives, not an
+    unattended autopilot worker.
+
+    Deliberately different from :func:`autopilot_worker_prompt`: it never
+    injects a worker identity or pool/recipe framing (this transaction never
+    resolves a pool or a named worker identity -- see
+    :mod:`agent_dispatch.interactive_embody`), and it is explicitly
+    non-railroaded: the agent works the task's next phase but may stop and ask
+    the operator directly at any point, and the operator -- not a done-criteria
+    check -- decides when the session wraps up. Per the operator's own framing
+    (Phase 0 feedback round 1): whenever the session ends, the agent's job is
+    to leave the task's recorded state honest (complete / abandon / reset to
+    proposed / suspended-for-resume), never to keep working unattended after
+    the session ends.
+
+    The task is already claimed and started under this worktree's own
+    identity by the transaction itself (the same ownership/generation fencing
+    a normal claim uses) -- unlike the autopilot seed, this prompt does not ask
+    the agent to claim/start; it opens already inside an owned, in-progress
+    task.
+    """
+    status_note = f" (current status: `{status}`)" if status else ""
+    return (
+        f"You are driving agent-dispatch task {task_id}{status_note} in this "
+        f"worktree, with tools auto-approved (--allow-all-tools). This session "
+        f"is interactive -- an operator may be watching or will check in -- "
+        f"not an unattended autopilot worker: you are NOT a named worker "
+        f"identity and this task was NOT assigned to you through a pool. "
+        f"Start by reading the task with `agent-dispatch show {task_id}` to see "
+        f"its prompt/payload, phase, and any durable **goal**/**done_criteria** "
+        f"plus accumulated **progress log**. If it carries a goal, RESUME from "
+        f"the recorded progress rather than restarting. Work toward the task's "
+        f"next phase, reporting progress as you go with `agent-dispatch progress "
+        f"{task_id} --phase <phase> --summary \"<one line>\"` at real "
+        f"transitions (plan settled, implementation done, a PR opened, a "
+        f"blocker hit) -- but you may pause and ask the operator directly for "
+        f"instructions at any point; that is expected, not an escape hatch. "
+        f"The OPERATOR decides when this session wraps up, not a done-criteria "
+        f"check alone. Whenever this session ends -- whether you judge the "
+        f"goal met or the operator says to stop -- leave the task's recorded "
+        f"state honest before finishing: `agent-dispatch complete {task_id} "
+        f"--result-ref <ref>` only if the goal is genuinely met; "
+        f"`agent-dispatch suspend {task_id} --reason \"<why>\"` to pause and "
+        f"preserve this worktree/session identity for a later resume (the "
+        f"default if you are simply pausing mid-work); or, only if the task "
+        f"itself is a duplicate/obsolete/permanently blocked, `agent-dispatch "
+        f"abandon {task_id} --permit --reason \"<why>\"` (`--duplicate-of <ref>` "
+        f"when citing an existing task/PR/issue) to retire it terminally rather "
+        f"than leaving it silently stalled. "
+        f"Never keep working unattended after the session ends -- that is the "
+        f"one hard rule this prompt carries."
+    )
+
+
 def fleet_autopilot_worker_prompt(
     task_id: str,
     *,
