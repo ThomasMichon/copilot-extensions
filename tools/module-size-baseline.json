@@ -54,6 +54,7 @@
   "plugins/agent-index/scripts/installation-context/installation_context.py": 9169,
   "plugins/agent-index/scripts/versioned_runtime.py": 1245,
   "plugins/agent-index/src/agent_index/__main__.py": 1903,
+  "plugins/agent-index/src/agent_index/store/content_store.py": 1019,
   "plugins/agent-index/src/agent_index/store/multi_model_store.py": 1116,
   "plugins/agent-logger/scripts/installation-context/installation_context.py": 9169,
   "plugins/agent-logger/scripts/versioned_runtime.py": 1245,

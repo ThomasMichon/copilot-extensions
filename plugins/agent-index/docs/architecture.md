@@ -267,7 +267,13 @@ plugin payload;
 than committing unsearchable content;
 - degraded JSON responses for unavailable search/cluster/status paths instead of
 tracebacks;
-- capability-aware embed batch sizing and configurable embed read timeout.
+- capability-aware embed batch sizing and configurable embed read timeout;
+- FTS (BM25) index maintenance self-heals from a non-retryable incremental
+  rebuild failure (e.g. a lancedb/lance-index panic against stale on-disk
+  index state) by escalating once to a full `create_fts_index(replace=True)`
+  rebuild in the same cycle, rather than backing off a failure that can never
+  resolve on its own; a genuinely retryable commit conflict still uses the
+  existing capped-backoff retry instead.
 
 ## Planned or not present
 
