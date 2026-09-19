@@ -27,6 +27,7 @@ from ..session_manager import (
     ProviderTargetRefreshError,
     SessionManager,
 )
+from ..worktree_sessions_views import lineage_fields
 
 log = logging.getLogger("agent-bridge")
 
@@ -1257,6 +1258,12 @@ async def list_worktree_sessions(
     authoritative, branch-independent session registry maintained by
     agent-worktrees -- it counts sessions launched by the picker *and* by
     agent-bridge / Mission Control (which carry no ``branch`` field).
+
+    Also forwards the ledger's head-succession/fork-lineage data (see
+    :func:`_lineage_fields`) so a caller can render not just the current
+    head but the full handoff chain -- including a genuine fork (more than
+    one pending handoff opened off the same/different predecessors, the
+    exact shape a stuck-or-forked handoff bug produces).
     """
     cache = get_cache()
     await cache.crawl_if_empty()
@@ -1294,11 +1301,13 @@ async def list_worktree_sessions(
     # Phase 4). Derived straight from the ground-layer envelope -- the bridge
     # keeps no head of its own (derive-dont-duplicate).
     head_session = data.get("head_session") if isinstance(data, dict) else None
+    envelope = data if isinstance(data, dict) else {}
     return {
         "worktree_id": worktree_id,
         "agent_name": agent_name,
         "head_session": head_session if isinstance(head_session, str) else None,
         "sessions": sessions if isinstance(sessions, list) else [],
+        **lineage_fields(envelope),
     }
 
 

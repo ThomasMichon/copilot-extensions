@@ -307,10 +307,17 @@ session-state has nothing for that session (its `session-transcript` verb
 answers an absent session with an empty list, not an error). Both mark the
 cold-store answer `read_only`/`at_rest` in their existing response shape.
 `GET /api/v1/worktrees/{id}/sessions` (the worktree-scoped *listing*) does
-**not** fall through yet — the cold-store contract is session-ID-keyed
-(`session-fetch <id>`), not worktree-keyed, so there is no provider verb to
-enumerate a worktree's sessions; adding one is a follow-up slice, not a
-wiring gap in the existing mechanism.
+**not** fall through to a cold-store provider yet — the cold-store contract
+is session-ID-keyed (`session-fetch <id>`), not worktree-keyed, so there is
+no provider verb to enumerate a worktree's sessions; adding one is a
+follow-up slice, not a wiring gap in the existing mechanism. It does,
+however, now forward the ground layer's full head-succession/fork-lineage
+data (`head_revision`, `handoffs`, `controller_revision`, `controllers`,
+`controller_findings`) alongside the session list and resolved
+`head_session` — previously dropped entirely, this is exactly the shape a
+stuck-or-forked handoff chain needs to be diagnosable from the API instead
+of requiring a direct `agent-worktrees head-session` shell-out (see
+`agent_bridge.worktree_sessions_views.lineage_fields`).
 agent-logger is the reference cold-store provider (see its own plugin docs);
 `agent-bridge doctor` reports findings for both `providers.d` and
 `cold-store-providers.d`.

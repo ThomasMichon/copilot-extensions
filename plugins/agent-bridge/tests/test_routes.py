@@ -1411,6 +1411,91 @@ class TestWorktreeRoutes:
         assert by_id["s2"]["is_head"] is True
         assert by_id["s1"]["state"] == "handed-off"
 
+    def test_list_worktree_sessions_forwards_lineage_and_forks(
+        self, client, app,
+    ) -> None:
+        """The ground-layer envelope's handoffs/controller/lineage data is
+        forwarded verbatim -- the exact shape a stuck/forked handoff chain
+        (more than one pending handoff) needs to be visible to a caller,
+        not just the resolved current head."""
+        from unittest.mock import AsyncMock, patch
+
+        wt_id = "anomalous-potato-wsl-20250101-191500-fork"
+        self._seed_worktree("test-agent", wt_id)
+        self._register_agent(app, "test-agent")
+
+        payload = json.dumps({
+            "head_session": "s3",
+            "head_revision": 4,
+            "sessions": [{"id": "s3", "is_head": True}],
+            "handoffs": [
+                {
+                    "ordinal": 1,
+                    "token": "tok-a",
+                    "predecessor": "s1",
+                    "opened_at": "2026-09-18T17:29:33",
+                    "candidate": "s2",
+                    "candidate_at": "2026-09-19T00:29:52",
+                },
+                {
+                    "ordinal": 2,
+                    "token": "tok-b",
+                    "predecessor": "s2",
+                    "opened_at": "2026-09-18T19:01:07",
+                    "candidate": "s3",
+                    "candidate_at": "2026-09-19T02:01:30",
+                },
+            ],
+            "controller_revision": 1,
+            "controllers": [{"kind": "session", "controller_session_id": "s0"}],
+            "controller_findings": [
+                {"status": "resolved", "lineage": ["s0", "s1", "s2", "s3"]},
+            ],
+        })
+        with patch(
+            "agent_bridge.routes.worktrees._run_for_agent",
+            new=AsyncMock(return_value=payload),
+        ):
+            resp = client.get(f"/api/v1/worktrees/{wt_id}/sessions")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["head_revision"] == 4
+        assert len(data["handoffs"]) == 2
+        assert data["handoffs"][0]["candidate"] == "s2"
+        assert data["handoffs"][1]["predecessor"] == "s2"
+        assert data["controller_revision"] == 1
+        assert data["controllers"][0]["controller_session_id"] == "s0"
+        assert data["controller_findings"][0]["lineage"] == [
+            "s0", "s1", "s2", "s3",
+        ]
+
+    def test_list_worktree_sessions_lineage_absent_defaults_empty(
+        self, client, app,
+    ) -> None:
+        """A legacy/malformed envelope without lineage fields defaults to
+        empty/zero, never a KeyError or a 500."""
+        from unittest.mock import AsyncMock, patch
+
+        wt_id = "anomalous-potato-wsl-20250101-191600-nolineage"
+        self._seed_worktree("test-agent", wt_id)
+        self._register_agent(app, "test-agent")
+
+        payload = '{"sessions": [{"id": "s1"}]}'
+        with patch(
+            "agent_bridge.routes.worktrees._run_for_agent",
+            new=AsyncMock(return_value=payload),
+        ):
+            resp = client.get(f"/api/v1/worktrees/{wt_id}/sessions")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["head_revision"] == 0
+        assert data["handoffs"] == []
+        assert data["controller_revision"] == 0
+        assert data["controllers"] == []
+        assert data["controller_findings"] == []
+
     def test_list_worktree_sessions_head_absent_is_none(self, client, app) -> None:
         # A legacy ground-layer envelope without head_session -> null, not a KeyError.
         from unittest.mock import AsyncMock, patch
