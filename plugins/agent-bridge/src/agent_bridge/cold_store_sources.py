@@ -46,9 +46,11 @@ this verb and maps its exit-code contract.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import stat
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -59,11 +61,14 @@ from dropin_registry import (
     Finding,
     ScanAuthority,
     ScanSnapshot,
+    WarningTracker,
     scan_directory,
 )
 from plugin_activation import ActivationReport, resolve_active_plugins
 
 from .install_paths import effective_config_dir, normalized_path
+
+log = logging.getLogger("agent-bridge")
 
 REGISTRY_NAME = "cold-store-providers.d"
 
@@ -470,3 +475,73 @@ def discover_cold_store_manifests(
 ) -> dict[str, ColdStoreManifest]:
     """Compatibility wrapper returning the active capability map."""
     return dict(scan_cold_store_registry(directory).manifests)
+
+
+class ColdStoreProviderRegistry:
+    """Owns the throttled scan/reconcile state for cold-store providers.
+
+    Extracted from :class:`agent_bridge.agent_registry.AgentResolver` (which
+    holds one instance) so the scan/reconcile logic -- a twin of
+    ``AgentResolver.refresh_provider_resolvers`` -- lives next to the manifest
+    schema it reconciles rather than growing that already-large module.
+    """
+
+    def __init__(self, *, scan_ttl: float = 10.0) -> None:
+        self._scan_ts: float = 0.0
+        self._scan_ttl = scan_ttl
+        self._entries: dict[str, ColdStoreManifest] = {}
+        self._manifests: dict[str, ColdStoreManifest] = {}
+        self._warning_tracker = WarningTracker()
+
+    def refresh(self, *, force: bool = False) -> None:
+        """Rescan ``cold-store-providers.d`` and reconcile the capability map.
+
+        Throttled to at most once per ``scan_ttl`` seconds unless ``force``.
+        """
+        now = time.monotonic()
+        if not force and (now - self._scan_ts) < self._scan_ttl:
+            return
+        self._scan_ts = now
+
+        try:
+            report = scan_cold_store_registry(previous=self._entries)
+        except Exception:
+            log.warning("Cold-store-provider manifest discovery failed", exc_info=True)
+            return
+
+        warning_batch = self._warning_tracker.select(list(report.findings))
+        for finding in warning_batch.emitted:
+            target = f" target={finding.target}" if finding.target else ""
+            log.warning(
+                "%s: %s (%s)%s; run `agent-bridge doctor`",
+                finding.registry,
+                finding.entry,
+                finding.reason,
+                target,
+            )
+        if warning_batch.suppressed:
+            log.warning(
+                "cold-store-providers.d: %d additional finding(s) suppressed; "
+                "run `agent-bridge doctor`",
+                warning_batch.suppressed,
+            )
+        if warning_batch.recovered:
+            log.info(
+                "cold-store-providers.d: %d prior finding(s) recovered",
+                warning_batch.recovered,
+            )
+
+        self._manifests = dict(report.manifests)
+        self._entries = dict(report.entries)
+
+    def get_client(self, capability: str):
+        """Return a :class:`agent_bridge.cold_store.ColdStoreClient` for
+        ``capability``'s registered provider, or ``None`` if unregistered."""
+        from .cold_store import ColdStoreClient
+
+        self.refresh()
+        manifest = self._manifests.get(capability)
+        if manifest is None:
+            return None
+        return ColdStoreClient(manifest.command, capability=capability)
+

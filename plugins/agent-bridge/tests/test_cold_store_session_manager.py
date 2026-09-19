@@ -18,12 +18,22 @@ async def test_fetch_cold_store_session_no_resolver_is_none(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_fetch_cold_store_session_no_registry_is_none(tmp_path):
+    mgr = SessionManager(Database(tmp_path / "s.db"))
+    mgr.set_resolver(object())  # legacy/mock resolver with no cold_store attribute
+    assert await mgr.fetch_cold_store_session("x") is None
+
+
+@pytest.mark.asyncio
 async def test_fetch_cold_store_session_no_client_registered_is_none(tmp_path):
     mgr = SessionManager(Database(tmp_path / "s.db"))
 
-    class _Resolver:
-        def get_cold_store_client(self, capability):
+    class _Registry:
+        def get_client(self, capability):
             return None
+
+    class _Resolver:
+        cold_store = _Registry()
 
     mgr.set_resolver(_Resolver())
     assert await mgr.fetch_cold_store_session("x") is None
@@ -36,19 +46,15 @@ async def test_fetch_cold_store_session_delegates_to_client(tmp_path):
     fake_client = AsyncMock()
     fake_client.fetch_session.return_value = expected
 
-    class _Resolver:
-        def get_cold_store_client(self, capability):
+    class _Registry:
+        def get_client(self, capability):
             assert capability == "session-fetch"
             return fake_client
+
+    class _Resolver:
+        cold_store = _Registry()
 
     mgr.set_resolver(_Resolver())
     result = await mgr.fetch_cold_store_session("abc")
     assert result is expected
     fake_client.fetch_session.assert_awaited_once_with("abc")
-
-
-@pytest.mark.asyncio
-async def test_fetch_cold_store_session_resolver_without_method_is_none(tmp_path):
-    mgr = SessionManager(Database(tmp_path / "s.db"))
-    mgr.set_resolver(object())  # legacy/mock resolver with no cold-store support
-    assert await mgr.fetch_cold_store_session("x") is None

@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 
 from .. import elevated
+from ..cold_store_views import cold_store_session_info
 from ..attention_wait import (
     AttentionHistoryChangedError,
     AttentionTokenError,
@@ -475,47 +476,6 @@ def _persisted_session_info(
     )
 
 
-def _parse_cold_store_timestamp(value: str | None):
-    """Best-effort parse of a cold-store provider's timestamp field.
-
-    A provider's archival timestamps may not be strict ISO-8601 (or may be
-    absent for older records); this never raises -- an unparseable/missing
-    value falls back to the current time so the response always validates.
-    """
-    from datetime import datetime, timezone
-
-    if value:
-        try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00"))
-        except ValueError:
-            pass
-    return datetime.now(timezone.utc)
-
-
-def _cold_store_session_info(cold) -> SessionInfo:  # noqa: ANN001
-    """Convert a :class:`agent_bridge.cold_store.ColdStoreSession` to the
-    same public :class:`SessionInfo` shape a live/persisted session uses --
-    the cold-store-provider fallback changes *where* the answer comes from,
-    never the caller-facing response shape (see this effort's Phase 2b plan).
-    """
-    try:
-        status = SessionStatus(cold.status) if cold.status else SessionStatus.ENDED
-    except ValueError:
-        status = SessionStatus.ENDED
-    return SessionInfo(
-        session_id=cold.session_id,
-        name=cold.session_id,
-        target_dir=cold.cwd,
-        project=cold.project,
-        worktree_id=cold.worktree_id,
-        read_only=True,
-        status=status,
-        created_at=_parse_cold_store_timestamp(cold.created_at),
-        updated_at=_parse_cold_store_timestamp(cold.updated_at),
-        at_rest=True,
-    )
-
-
 # Session states considered "alive" and therefore reusable for caller affinity.
 # Terminal/stopped states are excluded -- reusing them would hand back a session
 # with no running process, so the caller should get a fresh spawn instead.
@@ -869,13 +829,10 @@ async def get_session(session_id: str, request: Request):
     session = mgr.get_session(session_id)
     if session:
         return _session_info(session)
-    # Nothing live for this ID -- ask a registered cold-store provider before
-    # giving up (see cold_store.py / cold_store_sources.py). A provider
-    # answering "not found" is indistinguishable from none being registered:
-    # both fall through to the same 404 a live-only ledger would have raised.
+    # Nothing live -- ask a registered cold-store provider before giving up.
     cold = await mgr.fetch_cold_store_session(session_id)
     if cold is not None:
-        return _cold_store_session_info(cold)
+        return cold_store_session_info(cold)
     raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
 

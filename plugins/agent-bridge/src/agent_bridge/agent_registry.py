@@ -37,8 +37,7 @@ from typing import Any
 from agent_procutil import no_window_flags
 from dropin_registry import Finding, WarningTracker
 
-from .cold_store import ColdStoreClient
-from .cold_store_sources import ColdStoreManifest, scan_cold_store_registry
+from .cold_store_sources import ColdStoreProviderRegistry
 from .provider_sources import ProviderManifest, scan_provider_registry
 from .topology import MachineConfig, SshEnvironment
 from .transport import PluginRef, SpawnTarget
@@ -1945,14 +1944,7 @@ class AgentResolver:
         self._provider_manifests: dict[str, ProviderManifest] = {}
         self._provider_namespaces: set[str] = set()
         self._provider_warning_tracker = WarningTracker()
-        # Throttle + state for the declarative cold-store-providers.d re-scan
-        # -- same shape as the providers.d block above, but keyed by
-        # capability rather than namespace (see .cold_store_sources).
-        self._cold_store_scan_ts: float = 0.0
-        self._cold_store_scan_ttl: float = 10.0
-        self._cold_store_entries: dict[str, ColdStoreManifest] = {}
-        self._cold_store_manifests: dict[str, ColdStoreManifest] = {}
-        self._cold_store_warning_tracker = WarningTracker()
+        self.cold_store = ColdStoreProviderRegistry()  # capability-keyed providers
         # Build alias -> (machine, env) index for fast lookup
         self._alias_index: dict[str, tuple[MachineConfig, SshEnvironment]] = {}
         for machine in machines.values():
@@ -2166,62 +2158,6 @@ class AgentResolver:
                     manifest.namespace, manifest.source_path, exc_info=True,
                 )
         self._provider_entries = dict(report.entries)
-
-    def refresh_cold_store_providers(self, *, force: bool = False) -> None:
-        """Rescan ``cold-store-providers.d`` and reconcile the capability map.
-
-        Twin of :meth:`refresh_provider_resolvers` for cold-store providers
-        (see :mod:`agent_bridge.cold_store_sources`): keyed by *capability*
-        instead of address *namespace*, and simply replaces
-        ``_cold_store_manifests`` -- there is no live resolver object to
-        register/unregister here, just the manifest a caller later drives
-        through :class:`agent_bridge.cold_store.ColdStoreClient` on demand.
-        Throttled to at most once per ``_cold_store_scan_ttl`` seconds unless
-        ``force``.
-        """
-        now = time.monotonic()
-        if not force and (now - self._cold_store_scan_ts) < self._cold_store_scan_ttl:
-            return
-        self._cold_store_scan_ts = now
-
-        try:
-            report = scan_cold_store_registry(previous=self._cold_store_entries)
-        except Exception:
-            log.warning("Cold-store-provider manifest discovery failed", exc_info=True)
-            return
-
-        warning_batch = self._cold_store_warning_tracker.select(list(report.findings))
-        for finding in warning_batch.emitted:
-            target = f" target={finding.target}" if finding.target else ""
-            log.warning(
-                "%s: %s (%s)%s; run `agent-bridge doctor`",
-                finding.registry,
-                finding.entry,
-                finding.reason,
-                target,
-            )
-        if warning_batch.suppressed:
-            log.warning(
-                "cold-store-providers.d: %d additional finding(s) suppressed; "
-                "run `agent-bridge doctor`",
-                warning_batch.suppressed,
-            )
-        if warning_batch.recovered:
-            log.info(
-                "cold-store-providers.d: %d prior finding(s) recovered",
-                warning_batch.recovered,
-            )
-
-        self._cold_store_manifests = dict(report.manifests)
-        self._cold_store_entries = dict(report.entries)
-
-    def get_cold_store_client(self, capability: str) -> ColdStoreClient | None:
-        """Return a client for the registered provider of ``capability``, if any."""
-        self.refresh_cold_store_providers()
-        manifest = self._cold_store_manifests.get(capability)
-        if manifest is None:
-            return None
-        return ColdStoreClient(manifest.command, capability=capability)
 
     def _parse_namespaced_agent(
         self, agent_name: str,

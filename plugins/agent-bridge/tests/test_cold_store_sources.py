@@ -235,7 +235,7 @@ def test_disabled_v1_provider_withdraws_prior_entry(tmp_path):
     assert second.findings[0].reason == "not-enabled"
 
 
-# -- AgentResolver.refresh_cold_store_providers / get_cold_store_client ----------
+# -- AgentResolver.cold_store (ColdStoreProviderRegistry) ------------------------
 
 
 def _bridge_cold_store_dir(monkeypatch, tmp_path):
@@ -249,17 +249,17 @@ def test_refresh_registers_from_manifest(monkeypatch, tmp_path):
            {"capability": "session-fetch", "command": [sys.executable]})
 
     resolver = AgentResolver({}, {})
-    resolver.refresh_cold_store_providers(force=True)
+    resolver.cold_store.refresh(force=True)
 
-    client = resolver.get_cold_store_client("session-fetch")
+    client = resolver.cold_store.get_client("session-fetch")
     assert isinstance(client, ColdStoreClient)
     assert client.capability == "session-fetch"
 
 
-def test_get_cold_store_client_returns_none_when_unregistered(monkeypatch, tmp_path):
+def test_get_client_returns_none_when_unregistered(monkeypatch, tmp_path):
     _bridge_cold_store_dir(monkeypatch, tmp_path)
     resolver = AgentResolver({}, {})
-    assert resolver.get_cold_store_client("session-fetch") is None
+    assert resolver.cold_store.get_client("session-fetch") is None
 
 
 def test_refresh_removes_deleted_provider(monkeypatch, tmp_path):
@@ -267,21 +267,22 @@ def test_refresh_removes_deleted_provider(monkeypatch, tmp_path):
     _write(tmp_path, "logger.json",
            {"capability": "session-fetch", "command": [sys.executable]})
     resolver = AgentResolver({}, {})
-    resolver.refresh_cold_store_providers(force=True)
-    assert resolver.get_cold_store_client("session-fetch") is not None
+    resolver.cold_store.refresh(force=True)
+    assert resolver.cold_store.get_client("session-fetch") is not None
 
     (tmp_path / "logger.json").unlink()
-    resolver.refresh_cold_store_providers(force=True)
-    assert resolver.get_cold_store_client("session-fetch") is None
+    resolver.cold_store.refresh(force=True)
+    assert resolver.cold_store.get_client("session-fetch") is None
 
 
 def test_refresh_throttled_without_force(monkeypatch, tmp_path):
     _bridge_cold_store_dir(monkeypatch, tmp_path)
     resolver = AgentResolver({}, {})
-    resolver.refresh_cold_store_providers(force=True)
+    resolver.cold_store.refresh(force=True)
 
     _write(tmp_path, "logger.json",
            {"capability": "session-fetch", "command": [sys.executable]})
     # Without force, the throttle keeps the just-created manifest invisible.
-    resolver.refresh_cold_store_providers()
-    assert resolver.get_cold_store_client("session-fetch") is None
+    resolver.cold_store.refresh()
+    assert resolver.cold_store.get_client("session-fetch") is None
+

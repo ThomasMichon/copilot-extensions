@@ -166,3 +166,27 @@ class ColdStoreClient:
             events=tuple(events),
             raw=session_data,
         )
+
+
+async def fetch_cold_store_session(
+    resolver: Any, session_id: str
+) -> ColdStoreSession | None:
+    """Ask ``resolver``'s registered cold-store provider for ``session_id``.
+
+    Shared by :meth:`agent_bridge.session_manager.SessionManager.fetch_cold_store_session`
+    -- kept here (rather than inline in that already-large module) so the
+    ``resolver`` duck-typing (a bare mock in tests may carry no ``cold_store``
+    attribute at all) lives next to the client it drives. Returns ``None``
+    when ``resolver`` is unset, carries no cold-store registry, or the
+    registered provider has nothing for this ID.
+    """
+    if resolver is None:
+        return None
+    registry = getattr(resolver, "cold_store", None)
+    if registry is None:
+        return None
+    client = registry.get_client(SESSION_FETCH_CAPABILITY)
+    if client is None:
+        return None
+    return await client.fetch_session(session_id)
+
