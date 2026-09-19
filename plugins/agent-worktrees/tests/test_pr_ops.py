@@ -127,20 +127,11 @@ class TestFeatureBranchName:
         assert name.endswith("-abcd")
 
 
-class TestSafeWorktreeLabel:
-    """The last-resort fallback used when a worktree has no explicit title,
-    no persisted title, and no derivable commit-subject title. It must never
-    surface the raw worktree_id -- which embeds the authoring machine name
-    and creation timestamp -- since this label feeds a PR title, a PR branch
-    name, and a squash commit message, any of which can reach a public repo.
+class TestWorktreeSuffixHelper:
+    """`_worktree_suffix` (used for branch-name suffixes) must never surface
+    the raw worktree_id -- which embeds the authoring machine name and
+    creation timestamp -- since branch names can reach a public repo.
     """
-
-    def test_never_contains_the_machine_name_or_timestamp(self):
-        worktree_id = "example-host-20260917-125245-3a94"
-        label = pr_ops._safe_worktree_label(worktree_id)
-        assert "example-host" not in label
-        assert "20260917" not in label
-        assert label == "Worktree 3a94 changes"
 
     def test_worktree_suffix_matches_git_ops(self):
         worktree_id = "example-host-20260917-125245-3a94"
@@ -153,11 +144,10 @@ class TestSafeWorktreeLabel:
         tracking id is exactly the kind of unusual input `create_pr` may
         still see, so this can't be assumed away)."""
         worktree_id = "nodashesatall"
-        suffix = git_ops.worktree_suffix(worktree_id)
+        suffix = pr_ops._worktree_suffix(worktree_id)
         assert suffix != worktree_id
-        assert pr_ops._safe_worktree_label(worktree_id) != f"Worktree {worktree_id} changes"
         # Deterministic: the same input always yields the same digest.
-        assert git_ops.worktree_suffix(worktree_id) == suffix
+        assert pr_ops._worktree_suffix(worktree_id) == suffix
 
 class TestPRHeadName:
     def test_snapshot_default_matches_feature_branch_name(self):
@@ -410,27 +400,121 @@ class TestCreatePR:
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         assert rec.title == "Curated Title"
 
-    def test_true_last_resort_never_leaks_worktree_id(self, pr_repo, monkeypatch):
+    def test_true_last_resort_requires_explicit_title(self, pr_repo, monkeypatch):
         """When there is no --title, no persisted title, AND no derivable
         commit-subject title (the actual last resort), create_pr must not
-        fall back to the raw worktree_id -- it embeds the authoring machine
-        name and creation timestamp, and would otherwise leak into the PR
-        branch name, the PR title, and the squash commit message on a
-        public repo."""
+        invent one -- it embeds the authoring machine name and creation
+        timestamp in worktree_id, and any synthetic placeholder could still
+        leak into the PR branch name, the PR title, and the squash commit
+        message on a public repo. Require the caller to supply --title
+        instead."""
         config, wid, wt_path, _ = pr_repo
         monkeypatch.setattr(pr_ops, "_title_from_commits", lambda *a, **k: None)
+        orig_head = _git("rev-parse", "HEAD", cwd=wt_path)
+
         res = pr_ops.create_pr(wid, config)
+
+        assert res["success"] is False
+        assert "title" in res["error"].lower()
+        assert wid not in res["error"]
+        # Nothing was mutated: no branch created, no commits touched.
+        assert _git("rev-parse", "HEAD", cwd=wt_path) == orig_head
+        rec_path = cfg.tracking_dir() / f"{wid}.yaml"
+        if rec_path.exists():
+            rec = tracking.load_record(rec_path)
+            assert rec.pr is None
+
+    def test_true_last_resort_succeeds_with_explicit_title(self, pr_repo, monkeypatch):
+        """The same no-derivable-title scenario succeeds once the caller
+        supplies an explicit --title."""
+        config, wid, _wt_path, _ = pr_repo
+        monkeypatch.setattr(pr_ops, "_title_from_commits", lambda *a, **k: None)
+        res = pr_ops.create_pr(wid, config, title="Add feature")
         assert res["success"] is True, res
-        assert wid not in res["branch"]
-        assert res["branch"] == "feature/worktree-aaaa-changes-aaaa"
-        # The squash commit message is the fallback label too -- confirm it
-        # never contains the raw worktree_id.
-        subject = _git(
-            "log", "-1", "--format=%s", "feature/worktree-aaaa-changes-aaaa",
-            cwd=wt_path,
-        )
-        assert wid not in subject
-        assert subject == "Worktree aaaa changes"
+        assert res["branch"] == "feature/add-feature-aaaa"
+
+    def test_whitespace_only_title_does_not_bypass_the_requirement(
+        self, pr_repo, monkeypatch,
+    ):
+        """A whitespace-only --title is not a real title -- it must not slip
+        past the requirement and reach branch generation or the squash
+        message as a blank string. The error must also correctly describe a
+        whitespace-only input, not just an omitted one."""
+        config, wid, wt_path, _ = pr_repo
+        monkeypatch.setattr(pr_ops, "_title_from_commits", lambda *a, **k: None)
+        orig_head = _git("rev-parse", "HEAD", cwd=wt_path)
+
+        res = pr_ops.create_pr(wid, config, title="   \n\t  ")
+
+        assert res["success"] is False
+        assert "title" in res["error"].lower()
+        assert "no --title was given" not in res["error"].lower()
+        assert _git("rev-parse", "HEAD", cwd=wt_path) == orig_head
+
+    def test_control_characters_normalized_in_title_and_persisted_record(
+        self, pr_repo,
+    ):
+        """A --title containing control characters (CR, tabs) must not
+        survive raw into either the squash commit or the persisted tracking
+        record -- both must reflect the same normalized value."""
+        config, wid, wt_path, _ = pr_repo
+        res = pr_ops.create_pr(wid, config, title="Fix\r\tthe\nbug")
+        assert res["success"] is True, res
+        subject = _git("log", "-1", "--format=%s", f"worktree/{wid}", cwd=wt_path)
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert subject == rec.title
+        assert "\r" not in subject and "\t" not in subject
+
+    def test_whitespace_only_persisted_title_does_not_block_commit_derivation(
+        self, pr_repo,
+    ):
+        """A stale, whitespace-only `record.title` (e.g. persisted by an
+        older version of the tool) is truthy but not meaningful -- it must
+        not skip the commit-subject derivation fallback the way a genuinely
+        curated title would."""
+        config, wid, _wt_path, _ = pr_repo
+        yaml_path = cfg.tracking_dir() / f"{wid}.yaml"
+        rec = tracking.load_record(yaml_path)
+        rec.title = "   "
+        tracking.save_record(rec)
+
+        res = pr_ops.create_pr(wid, config)
+
+        assert res["success"] is True, res
+        # Fixture's newest worktree commit is "work 2" -- the derivation
+        # fallback ran and produced a real title, not a rejection.
+        assert res["branch"] == "feature/work-2-aaaa"
+
+    def test_whitespace_only_title_does_not_erase_persisted_title(
+        self, pr_repo,
+    ):
+        """A whitespace-only --title must not overwrite an existing,
+        genuinely curated persisted title with a blank one -- it is not a
+        real update."""
+        config, wid, wt_path, _ = pr_repo
+        yaml_path = cfg.tracking_dir() / f"{wid}.yaml"
+        rec = tracking.load_record(yaml_path)
+        rec.title = "A real curated title"
+        tracking.save_record(rec)
+
+        res = pr_ops.create_pr(wid, config, title="   \n\t  ")
+
+        assert res["success"] is True, res
+        rec_after = tracking.load_record(yaml_path)
+        assert rec_after.title == "A real curated title"
+        subject = _git("log", "-1", "--format=%s", f"worktree/{wid}", cwd=wt_path)
+        assert subject == "A real curated title"
+
+    def test_long_title_is_not_truncated_for_publication(self, pr_repo):
+        """A long --title must reach the squash commit message verbatim --
+        the mux/Picker display cap (tracking.TITLE_MAX) is a UI concern for
+        the status bar, not a limit on the actual PR/commit title."""
+        config, wid, wt_path, _ = pr_repo
+        long_title = "A" * (tracking.TITLE_MAX + 20)
+        res = pr_ops.create_pr(wid, config, title=long_title)
+        assert res["success"] is True, res
+        subject = _git("log", "-1", "--format=%s", f"worktree/{wid}", cwd=wt_path)
+        assert subject == long_title
 
 
 # ---------------------------------------------------------------------------
