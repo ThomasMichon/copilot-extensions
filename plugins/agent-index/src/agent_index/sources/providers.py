@@ -39,9 +39,19 @@ treated as empty or trusted as-is:
 - ``content-current-commit --source <source>`` -> ``{"commit": "<sha>" |
   null}``
 
-A manifest whose ``source_name`` collides with an already-registered prefix
-(a built-in connector, or another provider) is skipped with a warning finding
--- it never silently overwrites the existing registration.
+A response's own ``"source"`` field(s) (in ``entries`` or ``content-list-
+paths``' keys) are **verified against the requested ``--source``** -- an
+entry must claim exactly that source or a strict descendant of it
+(``source == requested`` or ``source.startswith(requested + ":")``); anything
+else is rejected as :class:`ProviderError`. This bounds a provider's blast
+radius to the subtree it was actually invoked for -- a misbehaving or
+compromised provider cannot attribute content to an unrelated source.
+
+A manifest whose ``source_name`` **overlaps** an already-registered prefix --
+exactly, or hierarchically in either direction (``"git"`` vs. ``"git:foo"``)
+-- is skipped with a warning finding, whether the collision is against a
+built-in connector or another provider (including one discovered in the same
+scan) -- it never silently shadows part of an existing registration.
 
 Not yet implemented in this first slice (tracked as follow-up, not a silent
 gap): mid-call cancellation of a running provider subprocess (``cancel_check``
@@ -367,12 +377,32 @@ class CliSourceConnector:
                     f"content-domain provider {self._manifest.source_name!r} "
                     f"{verb!r} entry {i} 'metadata' must be an object"
                 )
+            if not self._owns_source(source):
+                raise ProviderError(
+                    f"content-domain provider {self._manifest.source_name!r} "
+                    f"{verb!r} entry {i} claims source {source!r}, outside the "
+                    f"requested {self._source!r} subtree -- rejected"
+                )
             out.append(
                 FileEntry(
                     path=path, content=content, language=language, source=source, metadata=metadata
                 )
             )
         return out
+
+    def _owns_source(self, source: str) -> bool:
+        """Whether ``source`` is the requested source itself or a strict
+        descendant of it (``self._source`` or ``self._source + ":..."``).
+
+        A provider is invoked for exactly one source (``--source
+        <self._source>``); trusting an arbitrary ``source`` value in its
+        response verbatim would let a misbehaving or compromised provider
+        inject content that agent-index attributes to a *different* source --
+        outside the subtree it was asked about, and potentially interfering
+        with another connector's data. Rejecting out-of-subtree entries keeps
+        a provider's blast radius limited to what it was actually invoked for.
+        """
+        return source == self._source or source.startswith(f"{self._source}:")
 
     def discover(self, cancel_check: Callable[[], None] | None = None) -> list[FileEntry]:
         if cancel_check is not None:
@@ -411,6 +441,12 @@ class CliSourceConnector:
                     f"content-domain provider {self._manifest.source_name!r} "
                     f"'content-list-paths' entry {key!r} is malformed"
                 )
+            if not self._owns_source(key):
+                raise ProviderError(
+                    f"content-domain provider {self._manifest.source_name!r} "
+                    f"'content-list-paths' claims source {key!r}, outside the "
+                    f"requested {self._source!r} subtree -- rejected"
+                )
             result[key] = set(values)
         return result
 
@@ -430,14 +466,23 @@ class CliSourceConnector:
         return commit
 
 
+def _prefixes_overlap(a: str, b: str) -> bool:
+    """Whether source-name prefixes ``a`` and ``b`` would shadow each other in
+    :func:`agent_index.sources.get_connector`'s longest-prefix-match lookup --
+    an exact match, or either being a hierarchical ancestor of the other
+    (``"git"`` vs. ``"git:foo"``, in either direction)."""
+    return a == b or a.startswith(f"{b}:") or b.startswith(f"{a}:")
+
+
 def discover_and_register_providers(
     directory: str | os.PathLike[str] | None = None,
 ) -> ProviderRegistryReport:
     """Scan ``providers.d`` and register a :class:`CliSourceConnector` factory
     per active manifest into the connector registry (additive; never touches
-    built-in in-process connectors -- a manifest whose ``source_name`` collides
-    with an already-registered prefix, built-in or otherwise, is skipped with a
-    warning finding rather than silently overwriting it). Findings for
+    built-in in-process connectors -- a manifest whose ``source_name``
+    **overlaps** an already-registered prefix -- exactly, or hierarchically in
+    either direction (``"git"`` vs. ``"git:foo"``) -- is skipped with a
+    warning finding rather than silently shadowing part of it). Findings for
     skipped/malformed/colliding entries are logged as warnings, never raised --
     one bad manifest never blocks startup or the other, valid providers.
     """
@@ -445,9 +490,17 @@ def discover_and_register_providers(
 
     report = scan_provider_registry(directory)
     findings = list(report.findings)
-    already_registered = registered_source_prefixes()
-    for name, manifest in report.manifests.items():
-        if name in already_registered:
+    # Seeded from the registry as it stands before this scan (built-ins plus
+    # anything already registered by an earlier scan), then grown as THIS
+    # scan's providers are accepted -- so two providers in the same pass that
+    # hierarchically overlap each other are caught too, not just overlaps
+    # against pre-existing registrations.
+    claimed = set(registered_source_prefixes())
+    for name, manifest in sorted(report.manifests.items()):
+        colliding = next(
+            (existing for existing in claimed if _prefixes_overlap(name, existing)), None
+        )
+        if colliding is not None:
             findings.append(
                 Finding(
                     registry=REGISTRY_NAME,
@@ -456,10 +509,13 @@ def discover_and_register_providers(
                     reason="prefix-collision",
                     target=name,
                     remedy=(
-                        f"Choose a source_name that doesn't collide with an "
-                        f"already-registered connector, or remove {manifest.source_path}."
+                        f"Choose a source_name that doesn't overlap "
+                        f"{colliding!r}, or remove {manifest.source_path}."
                     ),
-                    detail=f"{name!r} is already registered by a built-in or another provider",
+                    detail=(
+                        f"{name!r} overlaps the already-registered prefix "
+                        f"{colliding!r} (a built-in or another provider)"
+                    ),
                 )
             )
             continue
@@ -467,6 +523,7 @@ def discover_and_register_providers(
             name,
             lambda *, source, _manifest=manifest, **_kwargs: CliSourceConnector(source, _manifest),
         )
+        claimed.add(name)
     for finding in findings:
         log.warning("content-domain provider issue: %s", finding.to_dict())
     return ProviderRegistryReport(manifests=report.manifests, findings=tuple(findings))

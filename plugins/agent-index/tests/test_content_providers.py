@@ -181,6 +181,47 @@ def test_discover_and_register_providers_skips_builtin_collision(tmp_path):
     assert any(f.reason == "prefix-collision" for f in report.findings)
 
 
+def test_discover_and_register_providers_skips_hierarchical_collision(tmp_path):
+    """A manifest that would shadow *part of* a built-in family (e.g. 'git:foo'
+    under the built-in 'git' prefix) must be rejected too, not just an exact
+    source_name match."""
+    from agent_index import sources as sources_mod
+
+    provider = _write_script(tmp_path / "provider.py", "pass\n")
+    _write_manifest(
+        tmp_path, "gitsub", source_name="git:foo", command=[sys.executable, str(provider)]
+    )
+    report = discover_and_register_providers(tmp_path)
+    assert "git:foo" not in sources_mod.registered_source_prefixes()
+    assert any(f.reason == "prefix-collision" and f.target == "git:foo" for f in report.findings)
+
+
+def test_discover_and_register_providers_skips_intra_scan_hierarchical_collision(tmp_path):
+    """Two providers in the SAME scan that hierarchically overlap each other
+    must not both register -- the second is rejected against the first."""
+    from agent_index import sources as sources_mod
+
+    provider = _write_script(tmp_path / "provider.py", "pass\n")
+    _write_manifest(
+        tmp_path, "a-parent", source_name="myfamily", command=[sys.executable, str(provider)]
+    )
+    _write_manifest(
+        tmp_path, "b-child", source_name="myfamily:sub", command=[sys.executable, str(provider)]
+    )
+    try:
+        report = discover_and_register_providers(tmp_path)
+        registered_after = sources_mod.registered_source_prefixes()
+        assert "myfamily" in registered_after
+        assert "myfamily:sub" not in registered_after
+        assert any(
+            f.reason == "prefix-collision" and f.target == "myfamily:sub"
+            for f in report.findings
+        )
+    finally:
+        sources_mod._CONNECTORS.pop("myfamily", None)
+        sources_mod._CONNECTORS.pop("myfamily:sub", None)
+
+
 # ---------------------------------------------------------------------------
 # CliSourceConnector -- the process-boundary adapter
 # ---------------------------------------------------------------------------
@@ -246,8 +287,10 @@ _ARGV_ECHO_PROVIDER_BODY = """
 import json
 import sys
 
+args = sys.argv[1:]
+source = args[args.index("--source") + 1]
 print(json.dumps({"entries": [
-    {"path": "argv.txt", "content": " ".join(sys.argv[1:]), "language": "text", "source": "gitea"},
+    {"path": "argv.txt", "content": " ".join(args), "language": "text", "source": source},
 ]}))
 """
 
@@ -335,6 +378,36 @@ def test_entry_non_string_field_fails_closed(tmp_path):
     connector = _bad_provider_connector(tmp_path, body)
     with pytest.raises(ProviderError, match="non-string"):
         connector.discover()
+
+
+def test_entry_outside_requested_source_fails_closed(tmp_path):
+    """A provider invoked for 'gitea' must not be able to inject content
+    attributed to an unrelated source (e.g. 'github:owner/repo')."""
+    body = (
+        "import json\n"
+        'print(json.dumps({"entries": [{"path": "a.md", "content": "x", '
+        '"language": "md", "source": "github:owner/repo"}]}))\n'
+    )
+    connector = _bad_provider_connector(tmp_path, body)
+    with pytest.raises(ProviderError, match="outside the requested"):
+        connector.discover()
+
+
+def test_entry_exact_source_match_is_allowed(tmp_path):
+    body = (
+        "import json\n"
+        'print(json.dumps({"entries": [{"path": "a.md", "content": "x", '
+        '"language": "md", "source": "gitea"}]}))\n'
+    )
+    connector = _bad_provider_connector(tmp_path, body)
+    assert connector.discover()[0].source == "gitea"
+
+
+def test_list_paths_outside_requested_source_fails_closed(tmp_path):
+    body = 'import json\nprint(json.dumps({"paths": {"github:owner/repo": ["a.md"]}}))\n'
+    connector = _bad_provider_connector(tmp_path, body)
+    with pytest.raises(ProviderError, match="outside the requested"):
+        connector.list_paths()
 
 
 def test_list_paths_malformed_fails_closed(tmp_path):
