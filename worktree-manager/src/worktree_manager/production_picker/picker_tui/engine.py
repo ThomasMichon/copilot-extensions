@@ -714,7 +714,6 @@ class _PickerNativeData(OptionList):
                 getattr(scr.list_view, "query", ""),
                 getattr(scr.list_view, "sort_index", 0), fp)
 
-
     def _rebuild(self):
         scr = self._screen
         W = scr.size.width or 100
@@ -1605,6 +1604,8 @@ class PickerScreen(Widget):
     def _setup_live_pivots(self):
         """Scan contributed pivots without delaying local or fleet rows."""
         pivot_payload = self._scan_pivot_payload()
+        from . import tasks as _tasks_mod
+        _tasks_mod.prewarm_optional_modules()
 
         def apply():
             self._install_pivot_payload(pivot_payload)
@@ -6814,7 +6815,6 @@ class SubMenuScreen(ModalScreen[tuple]):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
-
 
 
 class FocusGroup(Widget):

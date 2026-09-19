@@ -59,6 +59,86 @@ def test_picker_init_skips_pivot_scan(monkeypatch):
     assert "worktrees" in kinds
 
 
+def test_setup_live_pivots_prewarms_optional_modules(monkeypatch):
+    """``_setup_live_pivots`` (already a background thread, alongside the
+    pivot filesystem scan) must warm ``tasks.prewarm_optional_modules`` --
+    see that function's own docstring for why: a registered pivot's first
+    switch/render previously paid a real, synchronous multi-module import
+    hitch on the render/key-handling thread, profiled at roughly 40% of the
+    total switch latency -- exactly the momentary freeze reported against
+    the Tasks pivot."""
+    pytest.importorskip("textual")
+    from worktree_manager.production_picker.picker_tui import engine as eng
+    from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
+
+    calls = []
+    monkeypatch.setattr(tasks_mod, "prewarm_optional_modules", lambda: calls.append(1))
+
+    class Src:
+        LOCAL = ("host", "Win")
+
+    screen = eng.PickerScreen(Src(), live=True)
+    monkeypatch.setattr(screen, "_scan_pivot_payload", lambda: None)
+    screen._setup_live_pivots()
+
+    assert calls == [1]
+
+
+def test_prewarm_optional_modules_imports_data_ssh(monkeypatch):
+    """Unlike the call-count test above (which spies on the seam so
+    ``_setup_live_pivots`` stays independently testable), this exercises the
+    real function to confirm it actually imports ``data_ssh`` -- not merely
+    *some* import. Spies on ``builtins.__import__`` (the function uses
+    ``from . import data_ssh``) rather than popping the module from
+    ``sys.modules``: popping doesn't clear the parent package's own cached
+    attribute, so a subsequent ``from . import x`` can silently rebind the
+    stale attribute without ever re-registering the module in
+    ``sys.modules`` -- an import-system quirk that made an earlier version
+    of this test spuriously fail."""
+    pytest.importorskip("textual")
+    from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
+
+    imported = []
+    import builtins
+
+    real_import = builtins.__import__
+
+    def import_spy(name, globals=None, locals=None, fromlist=(), level=0):
+        mod = real_import(name, globals, locals, fromlist, level)
+        if level and fromlist:
+            for item in fromlist:
+                if item == "data_ssh":
+                    imported.append(item)
+        return mod
+
+    monkeypatch.setattr(builtins, "__import__", import_spy)
+
+    tasks_mod.prewarm_optional_modules()
+
+    assert "data_ssh" in imported
+
+
+def test_prewarm_optional_modules_survives_import_error(monkeypatch):
+    """Best-effort: a broken/uninstallable optional module must not crash
+    the background pivot-scan thread it shares with (#B pivot filesystem
+    scan)."""
+    pytest.importorskip("textual")
+    from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
+
+    import builtins
+
+    real_import = builtins.__import__
+
+    def boom(name, *a, **k):
+        if name.endswith(".data_ssh"):
+            raise ImportError("simulated broken optional module")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", boom)
+
+    tasks_mod.prewarm_optional_modules()  # must not raise
+
+
 def test_skeleton_does_not_touch_src_local():
     pytest.importorskip("textual")
     from worktree_manager.production_picker.picker_tui import engine as eng
