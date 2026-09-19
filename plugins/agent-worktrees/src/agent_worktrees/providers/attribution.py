@@ -26,6 +26,7 @@ own tracking store.
 from __future__ import annotations
 
 import re
+import string
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -102,15 +103,20 @@ def parse_marker(body: str) -> dict[str, str] | None:
 
 # Matches a bare ``{machine}``/``{worktree_id}`` token AND any valid
 # ``str.format`` conversion/format-spec variant of it (e.g. ``{machine!s}``,
-# ``{machine:>10}``, ``{machine!r:^20}``) -- ``pr_head_name`` renders
-# ``head_pattern`` with ``str.format(**tokens)``, which accepts all of these
-# and substitutes the SAME underlying value. Used by
-# ``validate_effective_head``'s own defensive "unresolved marker" check
-# against an ALREADY-RESOLVED head string (any caller's chosen branch name,
-# not specifically a rendered ``head_pattern``) -- a literal ``{worktree_id}``
-# surviving there is suspicious regardless of whether that token is part of
-# ``pr_head_name``'s actual rendering contract.
-_UNRESOLVED_TOKEN_RE = re.compile(r"\{(machine|worktree_id)(?:![a-zA-Z])?(?::[^{}]*)?\}")
+# ``{machine:>10}``, ``{machine:{width}}`` with a NESTED replacement field)
+# -- ``pr_head_name`` renders ``head_pattern`` with ``str.format(**tokens)``,
+# which accepts all of these and substitutes the SAME underlying value.
+# Field names are extracted with :class:`string.Formatter` (never a regex)
+# because ``str.format``'s mini-language allows nested replacement fields
+# inside a format spec (``{machine:{width}}``) that a regex cannot reliably
+# recognize; ``Formatter.parse`` is the same parser ``str.format`` itself
+# uses, so it can never miss (or misidentify) a field ``str.format`` would
+# actually substitute. Used by ``validate_effective_head``'s own defensive
+# "unresolved marker" check against an ALREADY-RESOLVED head string (any
+# caller's chosen branch name, not specifically a rendered ``head_pattern``)
+# -- a literal ``{worktree_id}`` surviving there is suspicious regardless of
+# whether that token is part of ``pr_head_name``'s actual rendering contract.
+_UNRESOLVED_TOKEN_NAMES = frozenset({"machine", "worktree_id"})
 
 # The static config-only audit (``head_pattern_leak_risk``) inspects a
 # *configured* ``head_pattern`` string, not a resolved head -- so it must
@@ -121,7 +127,28 @@ _UNRESOLVED_TOKEN_RE = re.compile(r"\{(machine|worktree_id)(?:![a-zA-Z])?(?::[^{
 # is caught, falling back to the safe legacy default pattern; that literal
 # text never reaches a published branch. Flagging it as risky here would be
 # a false positive the audit cannot actually observe at ``create-pr`` time.
-_HEAD_PATTERN_RISKY_TOKEN_RE = re.compile(r"\{(machine)(?:![a-zA-Z])?(?::[^{}]*)?\}")
+_HEAD_PATTERN_RISKY_TOKEN_NAMES = frozenset({"machine"})
+
+
+def _referenced_field_names(text: str) -> list[str]:
+    """Field names ``str.format`` would substitute from *text*, in order.
+
+    Uses :class:`string.Formatter` -- the same parser ``str.format`` itself
+    uses -- rather than a regex, so a field referenced only inside a NESTED
+    replacement field within a format spec (e.g. ``{machine:{width}}``,
+    where ``width`` is itself a field) is still recognized. Malformed
+    ``str.format`` syntax (unbalanced braces) is treated as containing no
+    recognized fields -- ``str.format`` itself would raise on it, so it can
+    never reach a published branch either.
+    """
+    try:
+        return [
+            field_name
+            for _, field_name, _, _ in string.Formatter().parse(text or "")
+            if field_name
+        ]
+    except ValueError:
+        return []
 
 
 class BranchLeakError(ValueError):
@@ -175,7 +202,10 @@ def validate_effective_head(
     for candidate in dict.fromkeys(m for m in machines if m):
         if candidate.casefold() in head_folded:
             reasons.append(f"machine name {candidate!r}")
-    unresolved = list(dict.fromkeys(_UNRESOLVED_TOKEN_RE.findall(head)))
+    unresolved = [
+        tok for tok in dict.fromkeys(_referenced_field_names(head))
+        if tok in _UNRESOLVED_TOKEN_NAMES
+    ]
     if unresolved:
         reasons.append(
             "unresolved template marker "
@@ -196,8 +226,9 @@ def head_pattern_leak_risk(head_pattern: str) -> list[str]:
 
     Used by the migration audit (Phase 5) to flag repos whose
     ``pr.head_pattern`` embeds ``{machine}`` (in any ``str.format``
-    conversion/spec variant) while ``pr.source_attribution`` isn't ``true``
-    -- a risk that is visible from config alone, without needing a live
+    conversion/spec variant, including a nested replacement field like
+    ``{machine:{width}}``) while ``pr.source_attribution`` isn't ``true`` --
+    a risk that is visible from config alone, without needing a live
     ``create-pr`` run. Deliberately does NOT flag ``{worktree_id}``: it is
     not part of ``pr_head_name``'s actual rendering contract (only
     ``prefix``/``slug``/``suffix``/``username``/``machine`` are), so a
@@ -207,7 +238,10 @@ def head_pattern_leak_risk(head_pattern: str) -> list[str]:
     itself know the repo's ``source_attribution`` setting -- callers pair
     this with that check (see ``audit_source_attribution_risk``).
     """
-    return list(dict.fromkeys(_HEAD_PATTERN_RISKY_TOKEN_RE.findall(head_pattern or "")))
+    return [
+        tok for tok in dict.fromkeys(_referenced_field_names(head_pattern))
+        if tok in _HEAD_PATTERN_RISKY_TOKEN_NAMES
+    ]
 
 
 def audit_source_attribution_risk(

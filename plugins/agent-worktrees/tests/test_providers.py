@@ -387,6 +387,21 @@ class TestValidateEffectiveHead:
                 source_attribution=False,
             )
 
+    def test_unresolved_nested_format_spec_is_blocked(self):
+        # str.format's mini-language allows a NESTED replacement field
+        # inside a format spec (`{machine:{width}}`) -- a regex cannot
+        # reliably recognize this, but the parser str.format itself uses
+        # (string.Formatter) can. Must still be caught as unresolved.
+        with pytest.raises(
+            attribution.BranchLeakError, match="unresolved template marker"
+        ):
+            attribution.validate_effective_head(
+                "session-{machine:{width}}",
+                worktree_id="wt-abcd",
+                machine="",
+                source_attribution=False,
+            )
+
     def test_blocked_under_codename_mode_too(self):
         # codename mode is still "not true" -- a raw identifier reaching the
         # branch name defeats the whole point of the codename marker.
@@ -431,6 +446,15 @@ class TestAuditSourceAttributionRisk:
         # the audit must not silently pass it as safe.
         findings = attribution.audit_source_attribution_risk(
             source_attribution=False, head_pattern="user/{machine!s:>10}/{slug}",
+        )
+        assert len(findings) == 1
+
+    def test_risky_nested_format_spec_flagged(self):
+        # {machine:{width}} nests a replacement field inside the format
+        # spec -- a regex cannot reliably recognize this, but the audit
+        # (via string.Formatter) must still flag it.
+        findings = attribution.audit_source_attribution_risk(
+            source_attribution=False, head_pattern="user/{machine:{width}}/{slug}",
         )
         assert len(findings) == 1
 

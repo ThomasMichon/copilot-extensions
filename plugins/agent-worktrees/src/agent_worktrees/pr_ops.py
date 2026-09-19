@@ -221,8 +221,14 @@ def audit_attribution_risk(config: Config) -> list[str]:
     risk when ``pr.source_attribution`` is not exactly ``true`` -- ``false``
     **or omitted entirely** (the key defaults to ``false``, so an absent key
     is just as much at risk as an explicit one) -- and its configured
-    ``head_pattern`` embeds ``{machine}``/``{worktree_id}``, which could carry
-    a private identifier into a published branch name. Returns a list of
+    ``head_pattern`` embeds ``{machine}`` (in any ``str.format``
+    conversion/format-spec variant), which could carry a private identifier
+    into a published branch name. ``{worktree_id}`` is deliberately never
+    flagged: it is not part of ``pr_head_name``'s actual rendering contract
+    (only ``prefix``/``slug``/``suffix``/``username``/``machine`` are), so a
+    pattern containing it raises inside ``str.format`` and falls back to the
+    safe default rather than ever publishing that literal text -- see
+    ``providers.attribution.head_pattern_leak_risk``. Returns a list of
     human-readable findings (empty when this repo's config is not at risk).
     """
     from .providers.attribution import audit_source_attribution_risk

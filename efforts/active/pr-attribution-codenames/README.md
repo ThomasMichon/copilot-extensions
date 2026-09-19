@@ -648,6 +648,20 @@ reverse lookup, no new registry).
   (`{worktree_id}` never flagged alone; `{machine}` still flagged when
   paired with `{worktree_id}`); full `test_pr_ops.py`/`test_providers.py`/
   `test_config.py` suite: 464 passed.
+- **Review round 8** caught that the token-detection regex missed a NESTED
+  replacement field inside a format spec (`{machine:{width}}` -- valid
+  `str.format` syntax that still substitutes the leaking value, but a
+  regex cannot reliably recognize arbitrary nesting). Replaced the regex
+  entirely with `string.Formatter().parse()` -- the same parser
+  `str.format` itself uses, so it can never miss (or misidentify) a field
+  `str.format` would actually substitute -- for both
+  `validate_effective_head`'s defensive unresolved-marker check and
+  `head_pattern_leak_risk`'s static audit. Also corrected
+  `pr_ops.audit_attribution_risk`'s docstring, which still said the audit
+  flags `{machine}`/`{worktree_id}` (it only flags `{machine}`, per round
+  7). 2 new tests (nested-spec unresolved-marker block, nested-spec
+  static-audit finding); full `test_pr_ops.py`/`test_providers.py`/
+  `test_config.py` suite: 466 passed.
 
 Remaining: Phase 3 (descoped SSH-based reverse lookup, not yet
 rewritten/implemented). This effort is not `Done` until Phase 3 lands too.
