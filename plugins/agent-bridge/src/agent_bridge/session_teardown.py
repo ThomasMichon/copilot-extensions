@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from .session_ownership import cleanup_owned_process, finish_owned
+from .session_ownership import (
+    claim_cleanup_pending, cleanup_owned_process, finish_owned,
+    release_unowned_launch_claim, set_claim_cleanup_pending,
+)
 
 _SHUTDOWN_CLEANUP_RETRY_SECONDS = 5.0
 
@@ -36,6 +39,7 @@ async def _detach_for_restart_owned(manager: SessionManager) -> None:
             or session.client is not None
             or session._owned_process is not None
             or session._pending_host_attachment is not None
+            or claim_cleanup_pending(manager, session)
             or session.session_id in manager._forward_cleanup_backlog
             or session._turn_start_lock.locked()
             or session._lifecycle_lock.locked()
@@ -49,7 +53,10 @@ async def _detach_for_restart_owned(manager: SessionManager) -> None:
                     force=True,
                     cancel_turn=manager.cancel_turns_on_redeploy,
                     for_restart=True,
-                    reap_host=session.session_id in manager._pending_host_launches,
+                    reap_host=(
+                        session.session_id in manager._pending_host_launches
+                        or session.target.codespace_claim_cleanup_pending
+                    ),
                 )
             except Exception:
                 log.warning(
@@ -62,6 +69,7 @@ async def _detach_for_restart_owned(manager: SessionManager) -> None:
         or restart_commit_pending(session)
         or session.client is not None
         or session._pending_host_attachment is not None
+        or claim_cleanup_pending(manager, session)
         or session.session_id in manager._forward_cleanup_backlog
         or session.session_id in manager._forwards
         or session.session_id in manager._relays
@@ -73,7 +81,7 @@ async def _detach_for_restart_owned(manager: SessionManager) -> None:
                 session.session_id not in manager._pending_host_launches
                 and not manager._remote_reap_pending(session.session_id)
             ):
-                require_no_pending_host_launch(manager, session.session_id)
+                require_no_pending_host_launch(manager, session.session_id, allow_claim_cleanup=True)
             if manager._remote_reap_pending(session.session_id):
                 _remote_retry_record(manager, session.session_id)
         log.error(
@@ -91,6 +99,7 @@ async def _detach_for_restart_owned(manager: SessionManager) -> None:
                     reap_host=(
                         session.session_id in manager._pending_host_launches
                         or manager._remote_reap_pending(session.session_id)
+                        or session.target.codespace_claim_cleanup_pending
                     ),
                 )
             except Exception:
@@ -125,7 +134,7 @@ def _remote_retry_record(manager: SessionManager, session_id: str) -> HostRecord
         raise RemoteHostRecoveryPendingError(
             f"Remote reap for {session_id} has no authority record; cleanup remains unconfirmed"
         )
-    if not record.endpoint:
+    if not record.endpoint and not manager._host_index.reap_termination_confirmed(session_id):
         raise RemoteHostRecoveryPendingError(
             f"Remote reap for {session_id} has no cleanup endpoint; cleanup remains unconfirmed"
         )
@@ -190,7 +199,9 @@ async def reap_remote_record(
     record = copy.deepcopy(current)
     record_revision = index.revision(record.session_id)
     endpoint = getattr(record, "endpoint", None) or {}
-    if endpoint:
+    if index.reap_termination_confirmed(record.session_id):
+        confirmed = True
+    elif endpoint:
         confirmed = await manager._remote_reap(record, endpoint)
     else:
         log.warning("Cannot confirm remote reap without endpoint for %s", record.session_id)
@@ -201,6 +212,9 @@ async def reap_remote_record(
         if current == record and current_revision == record_revision:
             from .session_host_ownership import finish_host_metadata_cleanup
 
+            index.mark_reap_confirmed(record.session_id)
+            record = copy.deepcopy(index.get(record.session_id))
+            record_revision = index.revision(record.session_id)
             await manager._drop_forward(record.session_id, strict=True, preserve_ownership=True)
             if (
                 manager._host_index is None
@@ -271,6 +285,7 @@ async def stop_session_admitted(
     )
 
     session_id = session.session_id
+    reap_host = reap_host or session.target.codespace_claim_cleanup_pending
     async with session._lifecycle_lock:
         if self._sessions.get(session_id) is not session:
             raise KeyError(f"Session {session_id} not found")
@@ -328,6 +343,7 @@ async def complete_stop(
 
         await abort_pending_host_launch(manager, session_id)
     if reap_host:
+        set_claim_cleanup_pending(manager, session, True)
         record = manager._host_index.get(session_id) if manager._host_index is not None else None
         if record is None and session_id in manager._remote_recovery_inconclusive:
             raise RemoteHostRecoveryPendingError(
@@ -350,7 +366,8 @@ async def complete_stop(
         )
     from .session_host_ownership import has_host_ownership, require_no_pending_host_launch
 
-    require_no_pending_host_launch(manager, session_id)
+    require_no_pending_host_launch(manager, session_id, allow_claim_cleanup=True)
+    await release_unowned_launch_claim(manager, session, include_target=reap_host)
     if reap_host:
         if not has_host_ownership(manager, session_id):
             manager._release_container_lock(session_id)
@@ -376,8 +393,6 @@ async def end_session_locked(self: SessionManager, session: Session, *, force: b
         RemoteHostRecoveryPendingError,
         SessionBusyError,
         SessionStatus,
-        _codespace_claim_key,
-        _release_codespace_claim,
         contextlib,
         log,
         time,
@@ -449,6 +464,7 @@ async def end_session_locked(self: SessionManager, session: Session, *, force: b
     await self._quiesce_session(session)
     await cleanup_owned_process(session)
     await self._drop_forward(session_id, strict=True, preserve_ownership=True)
+    set_claim_cleanup_pending(self, session, True)
 
     # Session-Host mode: an explicit end is a *sanctioned terminate*, so it
     # must REAP the child -- unlike stop, whose host-mode shutdown only
@@ -492,18 +508,10 @@ async def end_session_locked(self: SessionManager, session: Session, *, force: b
     ):
         self._release_container_lock(session_id)
 
+    await release_unowned_launch_claim(self, session)
     session.status = SessionStatus.ENDED
     with contextlib.suppress(Exception):
         self._clear_pending_queue(session, reason="ended")
-    # #897: release the exclusive CodeSpace claim this session held, so the
-    # box is immediately re-dispatchable by another worktree instead of
-    # waiting for the liveness/TTL sweep. Best-effort and idempotent (the
-    # CLI only releases a claim this owner actually holds). Keyed off the
-    # persisted target, so it is correct even after a daemon restart.
-    with contextlib.suppress(Exception):
-        claim_key = _codespace_claim_key(session.target)
-        if claim_key is not None:
-            _release_codespace_claim(*claim_key)
     with contextlib.suppress(Exception):
         self._db.update_session_status(
             session_id, SessionStatus.ENDED.value, time.time()
@@ -514,3 +522,35 @@ async def end_session_locked(self: SessionManager, session: Session, *, force: b
         self._db.delete_session(session_id)
     self._sessions.pop(session_id, None)
     log.info("Session %s (%s) ended and cleaned up", session_id, session.name)
+
+
+async def settle_exited_host_child(
+    manager: SessionManager, session: Session, record: HostRecord, *, exit_code: int | None = None,
+) -> None:
+    """Retain failed child-exit teardown owners instead of publishing a false stop."""
+    from .session_manager import SessionStatus, time
+
+    client = session.client
+    if exit_code is None and client is not None:
+        exit_code = client.host_child_exit_code
+    try:
+        await manager._join_exited_child_prompt(session)
+        if client is not None:
+            await client.shutdown(strict=True)
+            session.client = None
+        if record.boundary == "local":
+            manager._reap_host_record(record, "Session Host child exited")
+        else:
+            await reap_remote_checked(manager, session, record)
+        session.status = SessionStatus.STOPPED
+        session.restart_status = None
+        manager.db.update_session_status(record.session_id, SessionStatus.STOPPED.value, time.time())
+        if session.event_log:
+            session.event_log.append("session_state_changed", {
+                "status": SessionStatus.STOPPED.value, "host_child_exited": True,
+                "exit_code": exit_code,
+            })
+    except Exception:
+        manager._remote_recovery_inconclusive.add(record.session_id)
+        manager._mark_session_failed(session, trigger="child_exit_cleanup_failed")
+        raise

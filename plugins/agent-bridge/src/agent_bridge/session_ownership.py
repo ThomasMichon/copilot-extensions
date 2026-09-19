@@ -99,7 +99,7 @@ async def cleanup_resume_attempt(
                 await manager._drop_forward(
                     session.session_id, strict=True, preserve_ownership=True,
                 )
-        await release_unowned_launch_claim(manager, session)
+        await release_unowned_launch_claim(manager, session, include_target=False)
         if not has_host_ownership(manager, session.session_id):
             manager._release_container_lock(session.session_id)
     except Exception:
@@ -108,25 +108,63 @@ async def cleanup_resume_attempt(
         raise
 
 
-async def release_unowned_launch_claim(manager: SessionManager, session: Session) -> None:
-    """Release only this failed launch's claim after its host ownership is gone."""
+def claim_cleanup_pending(manager: SessionManager, session: Session) -> bool:
+    from .session_host_ownership import has_host_ownership
+
+    return session.target.codespace_claim_cleanup_pending or (
+        session._launch_codespace_claim is not None
+        and not has_host_ownership(manager, session.session_id)
+    )
+
+
+def set_claim_cleanup_pending(
+    manager: SessionManager, session: Session, pending: bool,
+) -> None:
+    """Persist accepted claim cleanup independently of provider-owned metadata."""
+    from dataclasses import replace
+    from .session_manager import _codespace_claim_key
+
+    if pending and _codespace_claim_key(session.target) is None:
+        return
+    target = replace(session.target, codespace_claim_cleanup_pending=pending)
+    manager.db.update_session_target(session.session_id, target.to_json(), target.cwd or ".")
+    session.target = target
+
+
+async def release_unowned_launch_claim(
+    manager: SessionManager, session: Session, *, include_target: bool = True,
+) -> None:
+    """Release terminal claims only after ownership is gone; retain failed releases."""
     from .session_host_ownership import has_host_ownership
     from .session_manager import _codespace_claim_key, _release_codespace_claim
 
     key = session._launch_codespace_claim
-    if key is None or has_host_ownership(manager, session.session_id):
+    if key is None and (include_target or session.target.codespace_claim_cleanup_pending):
+        key = _codespace_claim_key(session.target)
+    if key is None:
         return
+    if has_host_ownership(manager, session.session_id):
+        return
+    if session.client is not None or session._owned_process is not None:
+        raise RuntimeError(f"Claim cleanup still owns frontend resources for {session.session_id}")
+    session._launch_codespace_claim = key
+    set_claim_cleanup_pending(manager, session, True)
     for other in manager.list_sessions():
         if other is not session and (
             other._launch_codespace_claim == key
-            or (_codespace_claim_key(other.target) == key and has_host_ownership(manager, other.session_id))
+            or (_codespace_claim_key(other.target) == key and (
+                has_host_ownership(manager, other.session_id)
+                or other.client is not None or other._owned_process is not None
+            ))
         ):
+            set_claim_cleanup_pending(manager, session, False)
             session._launch_codespace_claim = None
             return
     if not await asyncio.to_thread(_release_codespace_claim, *key):
         raise RuntimeError(
             f"Launch claim cleanup failed for {session.session_id}; ownership retained"
         )
+    set_claim_cleanup_pending(manager, session, False)
     session._launch_codespace_claim = None
 
 

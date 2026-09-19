@@ -24,11 +24,12 @@ import json
 import os
 import tempfile
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 RESUME_NUDGE_TURN_INDEX = "resume_nudge_turn_index"
 REAP_CLEANUP_PENDING = "reap_cleanup_pending"
+REAP_TERMINATION_CONFIRMED = "reap_termination_confirmed"
 
 
 @dataclass
@@ -93,6 +94,7 @@ class HostIndex:
         self._records: dict[str, HostRecord] = {}
         self._revision = 0
         self._record_revisions: dict[str, int] = {}
+        self._confirmed_reaps: set[tuple[str, int]] = set()
         self._load()
 
     # -- persistence -------------------------------------------------------
@@ -192,6 +194,25 @@ class HostIndex:
         self._revision += 1
         self._record_revisions[session_id] = self._revision
         return True
+
+    def reap_termination_confirmed(self, session_id: str) -> bool:
+        record = self.get(session_id)
+        return record is not None and (
+            bool(record.extra.get(REAP_TERMINATION_CONFIRMED))
+            or (session_id, self.revision(session_id)) in self._confirmed_reaps
+        )
+
+    def mark_reap_confirmed(self, session_id: str) -> None:
+        """Keep the receipt even if its durable write needs an in-process retry."""
+        record = self._records[session_id]
+        if record.extra.get(REAP_TERMINATION_CONFIRMED):
+            return
+        receipt = (session_id, self.revision(session_id))
+        self._confirmed_reaps.add(receipt)
+        self.register(replace(record, extra={
+            **record.extra, REAP_TERMINATION_CONFIRMED: True,
+        }))
+        self._confirmed_reaps.discard(receipt)
 
     def prune_dead(self, is_alive: Callable[[int], bool]) -> list[HostRecord]:
         """Drop records whose host process is gone. Returns the pruned records."""

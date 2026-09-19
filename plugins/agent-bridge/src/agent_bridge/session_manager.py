@@ -2132,7 +2132,7 @@ class SessionManager:
             and container.get("launch_pending_session_id") == session.session_id
         ):
             return False
-        if session.status in {SessionStatus.ENDED, SessionStatus.FAILED}:
+        if session.target.codespace_claim_cleanup_pending or session.status in {SessionStatus.ENDED, SessionStatus.FAILED}:
             return False
         return session.status != SessionStatus.STOPPED or session.restart_status in {
             SessionStatus.RUNNING.value,
@@ -3308,25 +3308,10 @@ class SessionManager:
             await close_pending_host_attachment(self, session)
 
         async def _settle_dead_child(exit_code: int) -> None:
-            await self._join_exited_child_prompt(session)
-            client_obj = session.client
-            if client_obj is not None:
-                client_obj.mark_host_child_exited(exit_code)
-            self._reap_host_record(
-                rec, f"Session Host child exited (code={exit_code})"
-            )
-            session.client = None
-            session.status = SessionStatus.STOPPED
-            session.restart_status = None
-            self._db.update_session_status(
-                rec.session_id, SessionStatus.STOPPED.value, time.time()
-            )
-            if session.event_log:
-                session.event_log.append("session_state_changed", {
-                    "status": SessionStatus.STOPPED.value,
-                    "host_child_exited": True,
-                    "exit_code": exit_code,
-                })
+            from .session_ownership import finish_owned
+            from .session_teardown import settle_exited_host_child
+
+            await finish_owned(settle_exited_host_child(self, session, rec, exit_code=exit_code))
 
         try:
             await self._ensure_forward(
@@ -3833,25 +3818,10 @@ class SessionManager:
                     client is not None
                     and client.host_child_exit_code is not None
                 ):
-                    await self._join_exited_child_prompt(session)
-                    with contextlib.suppress(Exception):
-                        await client.shutdown()
-                    self._reap_host_record(
-                        rec,
-                        "Session Host child exit observed by attached client",
-                    )
-                    session.client = None
-                    session.status = SessionStatus.STOPPED
-                    session.restart_status = None
-                    self._db.update_session_status(
-                        rec.session_id, SessionStatus.STOPPED.value, time.time()
-                    )
-                    if session.event_log:
-                        session.event_log.append("session_state_changed", {
-                            "status": SessionStatus.STOPPED.value,
-                            "host_child_exited": True,
-                            "exit_code": client.host_child_exit_code,
-                        })
+                    from .session_ownership import finish_owned
+                    from .session_teardown import settle_exited_host_child
+
+                    await finish_owned(settle_exited_host_child(self, session, rec))
                     continue
                 # A live, running client needs nothing; surface a stall and move on.
                 if client is not None and client.is_running:
@@ -4053,12 +4023,7 @@ class SessionManager:
         else:
             # Remote (CodeSpace / mesh) boundary: host_pid/child_pid live on the
             # FAR side -- killing those pid numbers locally would hit unrelated
-            # local processes. Tear down the local forward and best-effort kill
-            # the remote host (its PR_SET_PDEATHSIG takes the child with it).
-            self._kill_forward_sync(
-                rec.session_id,
-                release_container_lock=False,
-            )
+            # local processes. The tracked reap owns strict local channel cleanup.
             self._schedule_remote_reap(rec, reason)
             return
         self._forget_host_record(rec)

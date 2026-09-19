@@ -257,10 +257,7 @@ async def test_stop_serializes_destructive_recovery_settlement(
         ctx.session.client = SimpleNamespace(
             host_child_exit_code=0, shutdown=blocked,
         )
-        monkeypatch.setattr(
-            ctx.manager, "_reap_host_record",
-            lambda *_args: ctx.manager._host_index.remove(ctx.session.session_id),
-        )
+        monkeypatch.setattr(ctx.manager, "_remote_reap", AsyncMock(return_value=True))
         operation = ctx.manager.recover_disconnected_hosts()
     else:
         if kind == "dead":
@@ -897,7 +894,7 @@ async def test_startup_resume_nudge_respects_lock_order_and_transport_loss(
     )
     monkeypatch.setattr(ctx.manager, "_recover_remote_host_records", AsyncMock(return_value=0))
     monkeypatch.setattr(ctx.manager, "_ensure_forward", AsyncMock())
-    monkeypatch.setattr(ctx.manager, "_reap_host_record", Mock())
+    monkeypatch.setattr(ctx.manager, "_remote_reap", AsyncMock(return_value=True))
     sock = SimpleNamespace(attach=AsyncMock(), close=AsyncMock(), send_status=AsyncMock())
     streams = SimpleNamespace(
         reader=Mock(), writer=Mock(),
@@ -1178,7 +1175,7 @@ async def test_child_exit_settlement_joins_late_prompt_state_writer(
     await asyncio.sleep(0)
     mock_acp_client.host_child_exit_code = 0
     ctx.session.client = mock_acp_client
-    monkeypatch.setattr(ctx.manager, "_reap_host_record", Mock())
+    monkeypatch.setattr(ctx.manager, "_remote_reap", AsyncMock(return_value=True))
     recovery = asyncio.create_task(ctx.manager.recover_disconnected_hosts())
     await asyncio.wait_for(cancelled.wait(), 1)
     assert not recovery.done()

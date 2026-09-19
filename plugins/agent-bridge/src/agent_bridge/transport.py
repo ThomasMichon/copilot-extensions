@@ -129,6 +129,7 @@ class SpawnTarget:
     #                            Persisted unchanged so the bridge never invents
     #                            a parallel venue identity.
     auth_hooks: list[dict] = field(default_factory=list)  # serializable auth hook dicts
+    codespace_claim_cleanup_pending: bool = False  # bridge-owned teardown intent
 
     def to_json(self) -> str:
         """Serialize for DB persistence."""

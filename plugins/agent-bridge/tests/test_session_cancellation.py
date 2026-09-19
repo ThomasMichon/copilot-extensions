@@ -23,6 +23,176 @@ from agent_bridge.transport import AgentProcess, SpawnTarget
 pytestmark = pytest.mark.asyncio
 
 
+@pytest.mark.parametrize("restart", [False, True])
+async def test_claim_cleanup_survives_failed_release_and_shutdown(owned_context, monkeypatch, restart):
+    from agent_bridge.session_teardown import detach_for_restart
+
+    ctx = owned_context
+    ctx.session.target = SpawnTarget(
+        type="command", codespace={"name": "example-space"}, caller_worktree="/example/worktree",
+    )
+    ctx.db.update_session_target(ctx.session.session_id, ctx.session.target.to_json(), ".")
+    record = HostRecord(
+        session_id=ctx.session.session_id, port=12345, host_pid=123, child_pid=456,
+        boundary="codespace", endpoint={"host": "example"},
+    )
+    ctx.manager._host_index.register(record)
+    monkeypatch.setattr(ctx.manager, "_remote_reap", AsyncMock(return_value=True))
+    release = Mock(return_value=False)
+    monkeypatch.setattr("agent_bridge.session_manager._release_codespace_claim", release)
+    with pytest.raises(RuntimeError, match="claim cleanup failed"):
+        await ctx.manager.stop_session(record.session_id, reap_host=True)
+    assert ctx.manager._host_index.get(record.session_id) is None
+    assert ctx.session.status == SessionStatus.FAILED
+    assert ctx.session.target.codespace_claim_cleanup_pending
+    manager = (
+        SessionManager(ctx.db, session_host_state_dir=str(ctx.manager._host_index._path.parent))
+        if restart else ctx.manager
+    )
+    remote = AsyncMock(side_effect=AssertionError("removed host must not be contacted"))
+    monkeypatch.setattr(manager, "_remote_reap", remote)
+    release.return_value = True
+    await asyncio.wait_for(detach_for_restart(manager), 2)
+    release.assert_called_with("example-space", "/example/worktree")
+    assert release.call_count == 2
+    assert not manager.get_session(record.session_id).target.codespace_claim_cleanup_pending
+    remote.assert_not_awaited()
+
+
+@pytest.mark.parametrize("retained", ["host", "peer", "retry", "none"])
+async def test_claim_release_preserves_retained_owners(owned_context, monkeypatch, retained):
+    from agent_bridge.session_ownership import release_unowned_launch_claim
+
+    ctx = owned_context
+    ctx.session.target = SpawnTarget(
+        codespace={"name": "example-space"}, caller_worktree="/example/worktree",
+    )
+    release = Mock(return_value=True)
+    monkeypatch.setattr("agent_bridge.session_manager._release_codespace_claim", release)
+    if retained == "host":
+        _remote_record(ctx)
+    elif retained == "peer":
+        peer = Session("peer-session", "peer", ctx.session.target)
+        peer.client = SimpleNamespace()
+        ctx.manager._sessions[peer.session_id] = peer
+    await release_unowned_launch_claim(ctx.manager, ctx.session, include_target=retained != "retry")
+    assert release.call_count == (1 if retained == "none" else 0)
+
+
+async def test_claim_cleanup_blocks_recovery_and_survives_failed_end(owned_context, monkeypatch):
+    from agent_bridge.session_host.spawner import RemoteSpawnCleanupPendingError
+
+    ctx = owned_context
+    ctx.session.target = SpawnTarget(
+        codespace={"name": "example-space"}, caller_worktree="/example/worktree",
+    )
+    release = Mock(return_value=False)
+    monkeypatch.setattr("agent_bridge.session_manager._release_codespace_claim", release)
+    with pytest.raises(RuntimeError, match="claim cleanup failed"):
+        await ctx.manager.end_session(ctx.session.session_id)
+    assert ctx.manager.get_session(ctx.session.session_id) is ctx.session
+    assert ctx.db.get_session(ctx.session.session_id) is not None
+    ctx.session.status = SessionStatus.IDLE
+    assert not ctx.manager._background_recovery_allowed(ctx.session)
+    ctx.session.status = SessionStatus.STOPPED
+    with pytest.raises(RemoteSpawnCleanupPendingError, match="claim cleanup is pending"):
+        await ctx.manager.resume_session(ctx.session.session_id)
+    release.return_value = True
+    await ctx.manager.end_session(ctx.session.session_id)
+    assert ctx.db.get_session(ctx.session.session_id) is None
+
+
+async def test_shutdown_preserves_claim_transferred_to_retained_host(owned_context, monkeypatch):
+    from agent_bridge.session_teardown import detach_for_restart
+
+    ctx = owned_context
+    record = _remote_record(ctx)
+    ctx.session._launch_codespace_claim = ("example-space", "/example/worktree")
+    release = Mock(side_effect=AssertionError("retained host still owns the claim"))
+    monkeypatch.setattr("agent_bridge.session_manager._release_codespace_claim", release)
+    await asyncio.wait_for(detach_for_restart(ctx.manager), 2)
+    assert ctx.manager._host_index.get(record.session_id) is not None
+    release.assert_not_called()
+
+
+@pytest.mark.parametrize("failure", ["channel", "metadata", "receipt"])
+@pytest.mark.parametrize("restart", [False, True])
+async def test_confirmed_remote_reap_retries_without_remote_contact(
+    owned_context, monkeypatch, failure, restart,
+):
+    from agent_bridge.session_teardown import reap_remote_record
+
+    ctx = owned_context
+    record = _remote_record(ctx)
+    remote = AsyncMock(return_value=True)
+    monkeypatch.setattr(ctx.manager, "_remote_reap", remote)
+    index = ctx.manager._host_index
+    if failure == "channel":
+        close = ctx.manager._drop_forward
+        monkeypatch.setattr(ctx.manager, "_drop_forward", AsyncMock(side_effect=OSError("cleanup failed")))
+    elif failure == "metadata":
+        close = ctx.manager._forget_host_record
+        monkeypatch.setattr(ctx.manager, "_forget_host_record", Mock(side_effect=OSError("cleanup failed")))
+    else:
+        index.mark_reap_pending(record.session_id)
+        close = index._flush
+        monkeypatch.setattr(index, "_flush", Mock(side_effect=OSError("cleanup failed")))
+    with pytest.raises(OSError, match="cleanup failed"):
+        await reap_remote_record(ctx.manager, record)
+    assert index.reap_termination_confirmed(record.session_id)
+    if failure == "channel":
+        monkeypatch.setattr(ctx.manager, "_drop_forward", close)
+    elif failure == "metadata":
+        monkeypatch.setattr(ctx.manager, "_forget_host_record", close)
+    else:
+        monkeypatch.setattr(index, "_flush", close)
+        # A failed disk cannot supply a restart receipt until persistence retries.
+        index.mark_reap_confirmed(record.session_id)
+    manager = (
+        SessionManager(ctx.db, session_host_state_dir=str(index._path.parent))
+        if restart else ctx.manager
+    )
+    remote.side_effect = AssertionError("termination already confirmed")
+    monkeypatch.setattr(manager, "_remote_reap", remote)
+    assert await reap_remote_record(manager, manager._host_index.get(record.session_id))
+    remote.assert_awaited_once()
+    assert manager._host_index.get(record.session_id) is None
+
+
+async def test_child_exit_retains_failed_client_cleanup(owned_context, monkeypatch):
+    ctx = owned_context
+    record = _remote_record(ctx)
+    ctx.session.status = SessionStatus.IDLE
+    client = SimpleNamespace(host_child_exit_code=0, shutdown=AsyncMock(side_effect=OSError("socket open")))
+    ctx.session.client = client
+    remote = AsyncMock(return_value=True)
+    monkeypatch.setattr(ctx.manager, "_remote_reap", remote)
+    with pytest.raises(OSError, match="socket open"):
+        await ctx.manager.recover_disconnected_hosts()
+    client.shutdown.assert_awaited_once_with(strict=True)
+    assert ctx.session.client is client
+    assert ctx.manager._host_index.get(record.session_id) is not None
+    assert ctx.session.status == SessionStatus.FAILED
+    remote.assert_not_awaited()
+
+
+async def test_scheduled_reap_does_not_discard_failed_forward(owned_context, monkeypatch):
+    ctx = owned_context
+    record = _remote_record(ctx)
+    forward = SimpleNamespace(cancel=AsyncMock(side_effect=OSError("forward live")))
+    ctx.manager._forwards[record.session_id] = forward
+    monkeypatch.setattr(ctx.manager, "_remote_reap", AsyncMock(return_value=True))
+    sync = Mock(side_effect=AssertionError("best-effort sync teardown loses ownership"))
+    monkeypatch.setattr(ctx.manager, "_kill_forward_sync", sync)
+    ctx.manager._reap_host_record(record, "explicit cleanup")
+    task = next(iter(ctx.manager._remote_reaps_by_session[record.session_id]))
+    with pytest.raises(OSError, match="forward live"):
+        await task
+    assert ctx.manager._forwards[record.session_id] is forward
+    assert ctx.manager._host_index.get(record.session_id) is not None
+    sync.assert_not_called()
+
+
 @pytest_asyncio.fixture
 async def owned_context(tmp_db, tmp_path, monkeypatch):
     manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path / "hosts"))
@@ -973,7 +1143,11 @@ async def test_remote_index_removal_failure_retains_cleanup_ownership(
     with pytest.raises(OSError, match="remove failed"):
         await task
     await asyncio.sleep(0)
-    assert ctx.manager._host_index.get(session_id) == record
+    from dataclasses import replace
+    from agent_bridge.session_host.host_index import REAP_TERMINATION_CONFIRMED
+    assert ctx.manager._host_index.get(session_id) == replace(
+        record, extra={**record.extra, REAP_TERMINATION_CONFIRMED: True},
+    )
     assert ctx.manager._remote_reap_pending(session_id)
     assert ctx.session.target.container["launch_pending_session_id"] == session_id
     assert json.loads(ctx.db.get_session(session_id)["target_json"])["container"]["launch_pending_session_id"] == session_id
@@ -1185,7 +1359,11 @@ async def test_stranded_remote_reap_contains_channels_before_forgetting_authorit
         failing.side_effect = OSError("channel cleanup failed")
         with pytest.raises(OSError, match="channel cleanup failed"):
             await ctx.manager.sweep_stranded_hosts()
-        assert ctx.manager._host_index.get(record.session_id) == record
+        from dataclasses import replace
+        from agent_bridge.session_host.host_index import REAP_TERMINATION_CONFIRMED
+        assert ctx.manager._host_index.get(record.session_id) == replace(
+            record, extra={**record.extra, REAP_TERMINATION_CONFIRMED: True},
+        )
         assert (record.session_id in ctx.manager._relays) is (failure == "relay")
         assert (record.session_id in ctx.manager._forwards) is (failure == "forward")
         release.assert_not_called()

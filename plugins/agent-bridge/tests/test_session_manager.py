@@ -4189,7 +4189,7 @@ class TestCodespaceExclusiveClaim:
         released: list[tuple[str, str]] = []
         monkeypatch.setattr(
             "agent_bridge.session_manager._release_codespace_claim",
-            lambda name, owner: released.append((name, owner)),
+            lambda name, owner: released.append((name, owner)) or True,
         )
         manager, session, _calls = await self._start(
             tmp_db, monkeypatch,

@@ -459,6 +459,19 @@ restart does not inherently close the child's pipes.
   still fences its venue after restart without any provider probe.
   Failed initial CodeSpace launches release their attempted claim only after
   host cleanup is confirmed and no other session still owns that claim.
+  Terminal cleanup derives the claim key from the persisted target, while
+  intermediate resume retries release only claims acquired by that attempt.
+  Accepted claim cleanup is persisted in the bridge-owned target field
+  `codespace_claim_cleanup_pending`; failed releases retain the session and
+  block successful stop/end/shutdown until retried, including after restart.
+  Ordinary stops preserve the claim of a retained host.
+  Remote reaps persist a termination receipt before local channel/metadata
+  cleanup. Subsequent cleanup retries do not contact the terminated endpoint,
+  including after restart. A failed receipt write retains an in-memory,
+  record-revision-fenced confirmation until persistence can retry.
+  Child-exit settlement uses strict ACP cleanup and confirmed reaping before
+  reporting STOPPED; synchronous remote-reap entry points delegate all channel
+  teardown to the tracked strict cleanup job.
   Direct resync refuses pending remote reaps before mutating session state.
   Confirmed remote reap clears container markers and target locks only if the
   current host record still equals the reaped snapshot; replacement records

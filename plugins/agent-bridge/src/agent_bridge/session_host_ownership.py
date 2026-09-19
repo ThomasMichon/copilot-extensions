@@ -102,12 +102,19 @@ def has_pending_host_launch(manager: SessionManager, session_id: str) -> bool:
     ))
 
 
-def require_no_pending_host_launch(manager: SessionManager, session_id: str) -> None:
+def require_no_pending_host_launch(
+    manager: SessionManager, session_id: str, *, allow_claim_cleanup: bool = False,
+) -> None:
     """Refuse another launch until partial-host cleanup is resolved."""
     if has_pending_host_launch(manager, session_id):
         raise RemoteSpawnCleanupPendingError(
             f"Session Host launch cleanup is pending for {session_id}; "
             "retained authority must be cleaned up before another launch"
+        )
+    session = manager._sessions.get(session_id)
+    if not allow_claim_cleanup and session is not None and session.target.codespace_claim_cleanup_pending:
+        raise RemoteSpawnCleanupPendingError(
+            f"CodeSpace claim cleanup is pending for {session_id}; retry stop before launch"
         )
 
 
