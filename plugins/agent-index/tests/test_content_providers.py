@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import stat
+import subprocess
 import sys
 from pathlib import Path
 
@@ -118,6 +119,23 @@ def test_scan_rejects_relative_command(tmp_path):
     assert report.findings[0].reason == "target-unusable"
 
 
+def test_resolve_command_treats_stat_oserror_as_target_unusable(tmp_path, monkeypatch):
+    """A ``stat()`` failure other than "missing" (e.g. permission denied) must
+    become a clean ``target-unusable``, not bubble up as an indeterminate scan
+    result that could keep a stale manifest alive."""
+    from agent_index.sources import providers as providers_mod
+
+    provider = tmp_path / "provider"
+    provider.write_text("", encoding="utf-8")
+
+    def _denied(self):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(Path, "stat", _denied)
+    with pytest.raises(providers_mod.TargetUnusableError, match="not accessible"):
+        providers_mod._resolve_command((str(provider),))
+
+
 def test_scan_dedupes_duplicate_source_name(tmp_path):
     provider = _write_script(tmp_path / "provider.py", "pass\n")
     _write_manifest(tmp_path, "a", source_name="gitea", command=[sys.executable, str(provider)])
@@ -222,6 +240,54 @@ def test_current_commit_returns_string(tmp_path):
 def test_source_name_property(tmp_path):
     connector = _entry_connector(tmp_path)
     assert connector.source_name == "gitea"
+
+
+_ARGV_ECHO_PROVIDER_BODY = """
+import json
+import sys
+
+print(json.dumps({"entries": [
+    {"path": "argv.txt", "content": " ".join(sys.argv[1:]), "language": "text", "source": "gitea"},
+]}))
+"""
+
+
+def test_discover_passes_source_argument(tmp_path):
+    provider = _write_script(tmp_path / "provider.py", _ARGV_ECHO_PROVIDER_BODY)
+    manifest = ProviderManifest(
+        source_name="gitea", command=(sys.executable, str(provider))
+    )
+    connector = CliSourceConnector("gitea:owner/repo", manifest)
+    entries = connector.discover()
+    argv = entries[0].content.split()
+    assert argv[0] == "content-discover"
+    assert "--source" in argv
+    assert argv[argv.index("--source") + 1] == "gitea:owner/repo"
+
+
+def test_run_uses_no_window_kwargs(tmp_path, monkeypatch):
+    """The provider subprocess must be spawned with console-suppression kwargs
+    (Windows) and explicit UTF-8 decoding, matching every other subprocess call
+    site in agent-index."""
+    from unittest import mock
+
+    connector = _entry_connector(tmp_path)
+    captured: dict = {}
+
+    def _fake_run(*args, **kwargs):
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(
+            args=args[0], returncode=0, stdout='{"entries": []}', stderr=""
+        )
+
+    monkeypatch.setattr(
+        "agent_index.sources.providers.no_window_kwargs", lambda: {"creationflags": 999}
+    )
+    with mock.patch("agent_index.sources.providers.subprocess.run", side_effect=_fake_run):
+        connector.discover()
+    assert captured.get("encoding") == "utf-8"
+    assert captured.get("errors") == "replace"
+    assert captured.get("creationflags") == 999
 
 
 def _bad_provider_connector(tmp_path: Path, body: str) -> CliSourceConnector:

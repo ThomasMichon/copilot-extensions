@@ -62,6 +62,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agent_procutil import no_window_kwargs
 from dropin_registry import EntryDecision, Finding, scan_directory
 
 from agent_index.sources.base import FileEntry
@@ -170,7 +171,16 @@ def _resolve_command(command: tuple[str, ...]) -> tuple[str, ...]:
         raise TargetUnusableError(
             f"provider command must be an absolute path, got {first!r}"
         )
-    info = candidate.stat()
+    try:
+        info = candidate.stat()
+    except FileNotFoundError:
+        raise
+    except OSError as exc:
+        # A missing file is the distinct "missing-target" finding (handled by
+        # the caller); anything else (permission denied, a broken reparse
+        # point, ...) is a clean "target-unusable" rather than bubbling up as
+        # an indeterminate scan result that could keep a stale manifest alive.
+        raise TargetUnusableError(f"provider command is not accessible: {exc}") from exc
     if not stat.S_ISREG(info.st_mode):
         raise TargetUnusableError("provider command is not a regular file")
     if os.name != "nt" and not os.access(candidate, os.X_OK):
@@ -297,8 +307,11 @@ class CliSourceConnector:
                 cmd,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=_verb_timeout(),
                 check=False,
+                **no_window_kwargs(),
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise ProviderError(
