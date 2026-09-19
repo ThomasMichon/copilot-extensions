@@ -607,6 +607,16 @@ reverse lookup, no new registry).
   "configured" scenario via direct dataclass construction rather than
   `_parse_pr`); full `test_pr_ops.py`/`test_providers.py`/`test_config.py`
   suite: 459 passed.
+- **Review round 5** caught a real gap (case-sensitive matching -- a branch
+  like `user/Test/reused-head` passed against a recorded machine `test`)
+  plus two documentation nits (the branch-name-leak paragraph only
+  mentioned `create-pr`, not `push-changes`'s identical enforcement; the
+  new `attribution-audit` command was missing from
+  `docs/cli-reference.md`). Case-folded both the `worktree_id` and
+  `machine` containment checks in `validate_effective_head`; updated both
+  docs. 2 new unit tests (case-insensitive machine match, case-insensitive
+  worktree-id match); full `test_pr_ops.py`/`test_providers.py`/
+  `test_config.py` suite: 461 passed.
 
 Remaining: Phase 3 (descoped SSH-based reverse lookup, not yet
 rewritten/implemented). This effort is not `Done` until Phase 3 lands too.

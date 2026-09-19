@@ -132,9 +132,12 @@ def validate_effective_head(
     identifying branch name unchecked against the live config alone), or an
     unresolved ``{machine}``/``{worktree_id}`` template marker (a defensive
     check: neither token should ever survive unsubstituted into a published
-    ref, but a config bug must not silently leak one). Raises
-    :class:`BranchLeakError` naming the offending reason(s); callers must
-    surface this as a hard error and refuse to push, never warn-and-continue.
+    ref, but a config bug must not silently leak one). The *worktree_id* and
+    *machine* containment checks are case-insensitive (case-folded), since a
+    branch or hostname is commonly re-cased somewhere along the path and the
+    identifier still leaks either way. Raises :class:`BranchLeakError` naming
+    the offending reason(s); callers must surface this as a hard error and
+    refuse to push, never warn-and-continue.
 
     A repo that has opted into the full raw marker
     (``source_attribution: true``) already accepts machine/worktree/session
@@ -143,12 +146,13 @@ def validate_effective_head(
     """
     if source_attribution is True or not head:
         return
+    head_folded = head.casefold()
     machines = (machine,) if isinstance(machine, str) else tuple(machine)
     reasons: list[str] = []
-    if worktree_id and worktree_id in head:
+    if worktree_id and worktree_id.casefold() in head_folded:
         reasons.append(f"raw worktree id {worktree_id!r}")
     for candidate in dict.fromkeys(m for m in machines if m):
-        if candidate in head:
+        if candidate.casefold() in head_folded:
             reasons.append(f"machine name {candidate!r}")
     unresolved = list(dict.fromkeys(_UNRESOLVED_TOKEN_RE.findall(head)))
     if unresolved:

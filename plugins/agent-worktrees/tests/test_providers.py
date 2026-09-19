@@ -343,6 +343,24 @@ class TestValidateEffectiveHead:
             source_attribution=False,
         )
 
+    def test_machine_match_is_case_insensitive(self):
+        with pytest.raises(attribution.BranchLeakError, match="machine name"):
+            attribution.validate_effective_head(
+                "user/Test/reused-head",
+                worktree_id="wt-abcd",
+                machine="test",
+                source_attribution=False,
+            )
+
+    def test_worktree_id_match_is_case_insensitive(self):
+        with pytest.raises(attribution.BranchLeakError, match="raw worktree id"):
+            attribution.validate_effective_head(
+                "worktree/LAMBDA-CORE-20260101-ABCD",
+                worktree_id="lambda-core-20260101-abcd",
+                machine="",
+                source_attribution=False,
+            )
+
     def test_unresolved_template_marker_is_blocked(self):
         with pytest.raises(
             attribution.BranchLeakError, match="unresolved template marker"
