@@ -103,6 +103,7 @@ def _registry(repo: Path, commit: str, blob: str) -> dict[str, Any]:
             "attention_wait": 10,
             "remote_operations": 11,
             "conditional_idle_end": 12,
+            "dispatch_task_session": 12,
         },
         "durable_records": [],
         "source_paths": [
@@ -222,6 +223,7 @@ def repo(tmp_path: Path) -> Path:
                 "ATTENTION_WAIT_PROTOCOL_VERSION = 10",
                 "REMOTE_OPERATIONS_PROTOCOL_VERSION = 11",
                 "CONDITIONAL_IDLE_END_PROTOCOL_VERSION = 12",
+                "DISPATCH_TASK_SESSION_PROTOCOL_VERSION = 12",
                 "",
             ]
         ),
@@ -295,6 +297,25 @@ def test_valid_registry_passes(repo: Path) -> None:
     result = _run(repo)
     assert result.returncode == 0, result.stderr
     assert "OK (2 contracts, 2 fixtures)" in result.stdout
+
+
+def test_capability_constant_mismatch_fails(repo: Path) -> None:
+    """The capability-versions cross-check (``_HTTP_CAPABILITY_CONSTANTS``)
+    must actually catch a registry value that disagrees with the production
+    constant -- proven here against ``dispatch_task_session``, the capability
+    this test file previously left unexercised (a wrong or missing mapping
+    would otherwise silently compare ``None`` to ``None``)."""
+
+    def mutation(data: dict[str, Any]) -> None:
+        http_contract = next(
+            c for c in data["contracts"] if c["id"] == "agent-bridge.http-wire"
+        )
+        http_contract["capability_versions"]["dispatch_task_session"] = 999
+
+    _mutate_registry(repo, mutation)
+    result = _run(repo)
+    assert result.returncode != 0
+    assert "capability dispatch_task_session does not match" in result.stderr
 
 
 def test_missing_provenance_commit_recovers_history_once(

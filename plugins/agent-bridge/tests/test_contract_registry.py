@@ -93,6 +93,9 @@ def test_http_protocol_constant_fixture_matches_production() -> None:
             bridge_protocol.REMOTE_EVENT_MULTIPLEX_PROTOCOL_VERSION
         ),
         "remote_commands": bridge_protocol.REMOTE_COMMANDS_PROTOCOL_VERSION,
+        "dispatch_task_session": (
+            bridge_protocol.DISPATCH_TASK_SESSION_PROTOCOL_VERSION
+        ),
     }
 
 
