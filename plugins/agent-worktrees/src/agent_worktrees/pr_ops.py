@@ -1081,8 +1081,33 @@ def _open_via_provider(
         # HTML comment as-is (it could break the marker or inject visible
         # PR-body content) -- `is_valid_handle` gates it the same as the
         # missing-codename case.
+        #
+        # A pre-Phase-2 (or newly-migrated) record may genuinely have NO
+        # codename yet if it was never touched by `resolve`/`resume`/
+        # `status --write` (each of which lazily backfills one). Backfill it
+        # here too, on first use by `create-pr` itself, rather than silently
+        # skipping the marker on this PR -- the same `ensure_codename`
+        # first-touch path those other verbs use. Deliberately narrower than
+        # "any invalid codename": only a genuinely MISSING (falsy) codename
+        # is backfilled -- a present-but-MALFORMED one (tampered/corrupted
+        # data) is never auto-regenerated/overwritten here, preserving the
+        # existing skip-the-marker safety behavior for that case.
         from . import codename as codename_mod
+        from . import codename_tracking
         codename = record.codename if record else None
+        if record is not None and not codename:
+            # Mutate `record.codename` IN PLACE -- never reassign `record`
+            # itself here. `ensure_codename` may return a freshly-reloaded
+            # object from disk; swapping `record` to that copy would silently
+            # detach it from `target_pr` (a separate parameter this function
+            # mutates directly and appends onto `record.prs` upstream), so a
+            # later `tracking.save_record(record)` would drop those
+            # mutations entirely.
+            backfilled = codename_tracking.ensure_codename(
+                record, cfg.tracking_dir(), codename_tracking.wordlist_for_repo(config),
+            )
+            record.codename = backfilled.codename
+            codename = record.codename
         marker_published = bool(
             isinstance(codename, str) and codename_mod.is_valid_handle(codename)
         )

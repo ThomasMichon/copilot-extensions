@@ -243,13 +243,19 @@ def resolve_claimant_alive(
                                   timeout=timeout)
 
 
-def _resolve_machine_ssh(machine_key: str) -> tuple[str, str] | None:
+def resolve_machine_ssh(machine_key: str) -> tuple[str, str] | None:
     """Resolve ``(alias, shell)`` for a machine key from the registry.
 
     Returns None when the registry is unavailable, the key is unknown/not
     Copilot-enabled/not ssh-ready, or it has no ssh environment with an alias.
     Picks the first ready ssh environment that carries an alias; the machine's
     top-level ``alias`` is a fallback.
+
+    Public (not module-private) because it is the shared "how do I SSH to
+    this machine key" resolver: reused by
+    ``codename_reverse_lookup`` (pr-attribution-codenames Phase 3's
+    cross-machine codename scan) in addition to this module's own
+    claimant-liveness probe.
     """
     try:
         config = cfg.load_config()
@@ -274,6 +280,12 @@ def _resolve_machine_ssh(machine_key: str) -> tuple[str, str] | None:
     if m.alias:
         return (m.alias, "bash")
     return None
+
+
+#: Back-compat alias: this module's own probe (below) and its tests refer to
+#: the underscore-prefixed name. Keep it as a thin alias rather than touching
+#: every call site.
+_resolve_machine_ssh = resolve_machine_ssh
 
 
 def _remote_probe_cmd(shell: str, project: str, owner_ref: str) -> str:

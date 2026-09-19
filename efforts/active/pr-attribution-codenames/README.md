@@ -163,29 +163,58 @@ kill, no encoding-from-a-subprocess concern, no zombie/leak risk.
   `list --json`.
 
 ### Phase 3 — Cross-machine reverse lookup
-- [ ] Define a **typed codename registry** — lookup, atomic reservation, and
-  retirement semantics — as its own small store. The existing `claims
-  mirror-status` plumbing mirrors a claim's *disposition* into a lease; it
-  has no key/value lookup or reservation schema, so it is not sufficient
-  as-is. Either extend that store with a genuine reservation primitive or
-  build a small dedicated one; do not assume the existing plumbing already
-  provides this.
-- [ ] **Atomic cross-machine reservation, not just a local check.** Phase 1's
-  local-store collision check cannot prevent two machines allocating the
-  same handle concurrently. A codename must be reserved through the shared
-  registry (test-and-set or equivalent) before it is considered assigned,
-  so a later cross-machine lookup always resolves to exactly one worktree.
-- [ ] The mirrored value must carry enough to actually resolve remotely:
-  `{machine, project/repo, worktree_id}` at minimum — `embody` operates
-  against a specific project's tracking directory
-  (`cfg.tracking_dir()/...`), so a bare `{machine, worktree_id}` pair omits
-  the project needed to locate the record at all. Where the codename's
-  worktree lives on a **different** machine than the one doing the lookup,
-  `embody --codename <name>` cannot start a local mux directly — it must
-  either delegate through the facility's existing remote handoff/dispatch
-  path (agent-bridge) to that machine, or fail closed with a clear
-  "resolve on machine X" message. Define which explicitly; do not leave it
-  implicit.
+
+**Descoped design (operator steer, 2026-09-18):** NOT a shared
+atomic-reservation registry (the original draft below this note, now
+superseded). The "cross-machine registry" is exactly what it sounds like —
+**SSH into each known machine and read its own local tracking store** — no
+new persistence primitive, no atomic reservation. This trades collision
+*prevention* for collision *detection*: two machines can still (rarely)
+generate the same codename concurrently, and a cross-machine scan reports
+that as an explicit ambiguous-collision error rather than silently
+resolving to one of them, instead of a shared store making it impossible in
+the first place.
+
+- [x] SSH-endpoint verb (`codename-lookup <codename> --json`, mirroring the
+  existing `claimant-liveness` cross-machine-reap-safety pattern exactly):
+  reports whether the active project's LOCAL tracking store has a worktree
+  with the given codename, on whatever machine it runs on. Landed in
+  `__main__.py` (`cmd_codename_lookup`), reusing
+  `worktree_identity.resolve_worktree_id_by_codename` (the existing Phase 2
+  local resolver, unchanged).
+- [x] Cross-machine scan module (`codename_reverse_lookup.py`): enumerates
+  every other known, Copilot-enabled, ssh-ready machine from `machines.yaml`
+  (excluding self), SSHes to each and invokes `codename-lookup` there via
+  the project's own binstub (same pwsh-EncodedCommand-on-Windows /
+  `bash -lc`-elsewhere wrapping as `claimant.py`'s remote probe), and
+  aggregates the results. `resolve_codename_cross_machine` returns every
+  match (0, 1, or — a genuine collision — more than 1);
+  `resolve_codename_cross_machine_unique` raises `AmbiguousCodenameError` on
+  more than one match rather than silently picking one. Promoted
+  `claimant._resolve_machine_ssh` to public `resolve_machine_ssh` (kept a
+  private alias for its own call site + existing tests) so both modules
+  share one "how do I SSH to this machine key" resolver instead of forking
+  the logic.
+- [x] **The mirrored value carries enough to actually resolve remotely.**
+  The remote probe is scoped to `project` — the current active project's
+  name, threaded into the SSH command exactly as the original checklist
+  required, without needing a `{machine, project/repo, worktree_id}` mirror
+  record: the SSH endpoint always answers for whatever project its own
+  binstub represents, so the caller supplying its own current project name
+  is sufficient (a codename is only assigned/collision-checked within one
+  project's tracking directory in Phase 1/2, so a cross-machine lookup for
+  "the same codename I have locally" is only meaningful against the SAME
+  project name elsewhere).
+- [x] **Remote resolution fails closed, never delegates.** Where the
+  codename's worktree lives on a **different** machine than the one doing
+  the lookup, `resolve --codename <name>` / `embody --codename <name>`
+  cannot start a local mux directly — landed as the explicit choice the
+  original checklist asked to make: **fail closed** with a clear
+  "resolves to worktree '<id>' on machine '<machine>' ... remote launch is
+  not supported" message (`_resolve_codename_anywhere` in `__main__.py`),
+  not an agent-bridge delegation. `embody` gained a `--codename` selector
+  (it previously only accepted `--worktree-id`/`--new`) wired to the same
+  local-then-cross-machine resolution as `resolve`.
 
 ### Phase 4 — `source_attribution: codename` mode
 - [x] Extend `source_attribution` from boolean to accept `true | false |
@@ -272,20 +301,58 @@ kill, no encoding-from-a-subprocess concern, no zombie/leak risk.
   (`TestCreatePRAutoOpen`) and `test_pr_ops.py`
   (`TestPRFinalizeAndPush`), including the no-codename-assigned case
   (skip, never downgrade to the raw marker).
-- [ ] Integration test: `create` → codename assigned and persisted →
+- [x] Integration test: `create` → codename assigned and persisted →
   `resolve --codename` / `embody --codename` round-trip on the same
-  machine.
-- [ ] Integration test: pre-existing (backfilled) worktree record with no
+  machine. Landed in `test_codename_cli.py`'s existing
+  `TestCodenameSelectorWiring` class:
+  `test_cmd_resolve_matched_codename_sets_worktree_id_before_launch_logic`
+  (already present from Phase 2) plus the new
+  `test_cmd_embody_matched_codename_sets_raw_id_before_launch_logic`,
+  which also asserts the cross-machine scan is never invoked on a local
+  hit.
+- [x] Integration test: pre-existing (backfilled) worktree record with no
   codename → `source_attribution: codename` newly enabled → first
-  `create-pr` allocates and persists a codename correctly.
-- [ ] Integration test: concurrent codename reservation from two machines
-  for the same generated candidate resolves to exactly one owner (the
-  other retries/gets a different handle) — proves the atomic reservation,
-  not just the local collision check.
-- [ ] Integration test: cross-machine mirror write + read (or a mocked
-  discovery store) resolves a codename created on machine A from machine B,
-  including the qualified project reference needed to actually locate the
-  record.
+  `create-pr` allocates and persists a codename correctly. Was a genuine
+  BEHAVIOR gap (not just missing coverage), found and fixed this session
+  while verifying this item: `_open_via_provider`'s `codename` branch
+  previously only READ `record.codename` and silently skipped the marker
+  when missing, never calling `codename_tracking.ensure_codename` the way
+  `resolve`/`resume`/`status --write` do. A legacy/never-touched worktree
+  that newly enabled `codename` mode got NO attribution on its first PR.
+  Fixed by backfilling (in place, never reassigning `record` -- that would
+  silently detach it from `target_pr`'s later mutations) when the codename
+  is genuinely missing; a present-but-MALFORMED codename still skips (that
+  safety behavior is unchanged). Landed as
+  `test_codename_mode_backfills_a_missing_codename`
+  (`test_providers.py`), with the three sibling "skip" tests
+  (`test_codename_mode_skip_strips_a_stale_marker_from_the_body`,
+  `test_codename_mode_skip_does_not_record_attribution_head`, the
+  malformed-codename test) updated to use a malformed (not missing)
+  codename to keep exercising the still-skips-on-malformed path.
+- [x] ~~Integration test: concurrent codename reservation from two machines
+  for the same generated candidate resolves to exactly one owner~~ —
+  **N/A under the descoped design**: there is no atomic reservation to
+  test (the operator explicitly rejected that primitive). Replaced by:
+  Integration test that a genuine cross-machine collision (two machines
+  both reporting a match for the same codename) surfaces as
+  `AmbiguousCodenameError` and is never silently resolved to one of them.
+  Landed as
+  `TestResolveCodenameCrossMachine::test_collision_raises_ambiguous`
+  (`test_codename_reverse_lookup.py`).
+- [x] ~~Integration test: cross-machine mirror write + read~~ — **replaced**
+  under the descoped design by a direct SSH-scan test: a codename created
+  on a mocked "machine B" is resolved from "machine A" by scanning
+  `machines.yaml`, SSHing to every other ssh-ready machine, and invoking
+  `codename-lookup` there — no mirror/discovery store involved. Landed as
+  `test_codename_reverse_lookup.py` (21 tests: `_known_machine_keys`,
+  `_remote_probe_cmd`/`_parse_lookup`, `_probe_machine`,
+  `resolve_codename_cross_machine`/`_unique`, mocking `subprocess.run`
+  exactly like `test_claimant.py`'s remote-probe tests) plus
+  `test_cli_routing.py`'s `codename-lookup` CLI tests (the SSH endpoint
+  itself: parser/registration, JSON found/not-found, plain mode) and its
+  `TestResolveCodenameAnywhere` class + `test_embody_codename_remote_fails_closed`
+  (`resolve`/`embody`'s shared fail-closed behavior when a match is on a
+  different machine, or ambiguous across more than one).
 - [x] Regression: existing `source_attribution: true`/`false` behavior on
   private repos is unchanged (no marker content or format change for those
   modes). Verified: the leak-guard is a no-op whenever `source_attribution
@@ -677,4 +744,72 @@ reverse lookup, no new registry).
 
 Remaining: Phase 3 (descoped SSH-based reverse lookup, not yet
 rewritten/implemented). This effort is not `Done` until Phase 3 lands too.
+
+### 2026-09-18 — Phase 3 landed (descoped SSH-based cross-machine reverse lookup)
+
+- Rewrote the Phase 3 checklist (see above) to match the descoped design
+  the operator steered toward earlier this session: no shared
+  atomic-reservation registry, a direct SSH scan of each known machine's
+  own local tracking store instead.
+- New `codename_reverse_lookup.py`: `resolve_codename_cross_machine`
+  (returns every match -- 0, 1, or, on a genuine collision, more than 1)
+  and `resolve_codename_cross_machine_unique` (raises
+  `AmbiguousCodenameError` rather than silently picking one). Fans out
+  over SSH to every other known, Copilot-enabled, ssh-ready machine from
+  `machines.yaml`, invoking a new `codename-lookup <codename> --json` CLI
+  endpoint there (mirrors `claimant.py`'s `claimant-liveness` cross-machine
+  reap-safety pattern byte-for-byte: same pwsh-EncodedCommand-on-Windows /
+  `bash -lc`-elsewhere wrapping, same "every failure degrades silently"
+  contract). Promoted `claimant._resolve_machine_ssh` to public
+  `resolve_machine_ssh` (kept the private name as a back-compat alias for
+  its own call site + existing tests) so both modules share one "resolve
+  how to SSH to this machine key" helper instead of forking the logic.
+- `resolve --codename` and the newly-added `embody --codename` (embody
+  previously only accepted `--worktree-id`/`--new`) share
+  `_resolve_codename_anywhere`: local match first (unchanged Phase 2
+  behavior, no network call), then the cross-machine scan. A match on a
+  **different** machine fails closed -- reports the resolving machine and
+  worktree id, never attempts a remote launch -- the explicit choice the
+  original checklist asked to make instead of an implicit agent-bridge
+  delegation.
+- Tests: 21 new in `test_codename_reverse_lookup.py` (machine enumeration,
+  remote-probe command building + response parsing, the SSH probe itself,
+  the scan + collision-detection), 8 new CLI-level tests in
+  `test_cli_routing.py` (`codename-lookup`'s parser/registration/JSON/plain
+  modes, `_resolve_codename_anywhere`'s four outcomes, `embody`'s
+  fail-closed remote path), 1 new integration test in `test_codename_cli.py`
+  (`embody --codename` same-machine round-trip, alongside the existing
+  Phase-2 `resolve --codename` one). Full `test_pr_ops.py`-adjacent run
+  plus the whole plugin suite: 639 passed (the same 10 pre-existing
+  `test_doctor.py` failures, unrelated, confirmed against `origin/main`
+  before this session started).
+- Docs: `docs/cli-reference.md` (`resolve`/`embody` rows),
+  `docs/config-reference.md` (`source_attribution` row),
+  `skills/worktree/references/pr-workflow.md`, and
+  `providers/attribution.py`'s module docstring all updated to describe
+  the cross-machine scan instead of "not implemented yet."
+- **Bonus fix, found while verifying the last unchecked Validation Plan
+  item** (not part of Phase 3's own scope, but a genuine, if minor,
+  pre-existing BEHAVIOR gap this session closed): `create_pr`
+  (`_open_via_provider` in `pr_ops.py`) read `record.codename` and, when
+  it was missing, deliberately SKIPPED the marker entirely (by design,
+  never downgrading to the raw marker) -- it never called
+  `codename_tracking.ensure_codename` to backfill one the way the
+  `resolve`/`resume`/`status --write` touch paths do. A legacy worktree
+  that newly enabled `codename` mode and went straight to `create-pr`
+  (without an intervening `resolve`/`resume`/`status` touch) got no
+  attribution marker on its first PR at all. Fixed: backfill in place
+  (never reassigning `record` itself, which would silently detach it from
+  `target_pr`'s later mutations) when the codename is genuinely missing;
+  a present-but-malformed codename still skips unchanged (that safety
+  behavior was intentional and untouched). 1 test rewritten
+  (`test_codename_mode_backfills_a_missing_codename`, was
+  `test_codename_mode_skips_marker_without_a_codename`) plus 2 sibling
+  "skip" tests switched to a malformed (not missing) codename fixture so
+  they keep exercising the still-skips-on-malformed path.
+
+**This is the last Phase.** With Phase 3 landed, every Phase 3 checklist
+item and every Phase 3 Validation Plan item -- including the pre-existing
+Phase 4 item this session's verification pass caught and fixed -- is
+checked off.
 
