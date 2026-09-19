@@ -90,6 +90,48 @@ def test_pr_required_body_sections_rejects_non_string_shape():
     assert error == "repos.sample.pr.required_body_sections must be a list"
 
 
+def test_pr_source_attribution_accepts_codename_string():
+    error = dropins._validate_pr(
+        {"source_attribution": "codename"},
+        location="repos.sample.pr",
+    )
+
+    assert error is None
+
+
+def test_pr_source_attribution_accepts_booleans():
+    assert dropins._validate_pr(
+        {"source_attribution": True}, location="repos.sample.pr",
+    ) is None
+    assert dropins._validate_pr(
+        {"source_attribution": False}, location="repos.sample.pr",
+    ) is None
+
+
+def test_pr_source_attribution_rejects_other_strings():
+    error = dropins._validate_pr(
+        {"source_attribution": "always"},
+        location="repos.sample.pr",
+    )
+
+    assert error == (
+        'repos.sample.pr.source_attribution must be a boolean or the '
+        'string "codename"'
+    )
+
+
+def test_pr_source_attribution_rejects_non_bool_non_string():
+    error = dropins._validate_pr(
+        {"source_attribution": 1},
+        location="repos.sample.pr",
+    )
+
+    assert error == (
+        'repos.sample.pr.source_attribution must be a boolean or the '
+        'string "codename"'
+    )
+
+
 def test_codename_wordlist_path_must_be_string():
     error = dropins._validate_codename(
         {"wordlist_path": 7},

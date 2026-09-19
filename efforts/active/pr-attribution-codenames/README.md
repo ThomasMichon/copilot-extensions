@@ -188,20 +188,30 @@ kill, no encoding-from-a-subprocess concern, no zombie/leak risk.
   implicit.
 
 ### Phase 4 — `source_attribution: codename` mode
-- [ ] Extend `source_attribution` from boolean to accept `true | false |
+- [x] Extend `source_attribution` from boolean to accept `true | false |
   codename`. `codename` emits a hidden PR-body marker carrying **only** the
-  codename — no machine, worktree id, session id, or timestamp.
-- [ ] **Cover both marker-writing paths, not just PR creation.** There are
+  codename — no machine, worktree id, session id, or timestamp. Landed as
+  `PRConfig.source_attribution: SourceAttribution` (`bool | Literal["codename"]`,
+  tightened after review from an initial `bool | str`), parsed in `config.py`
+  (case-insensitive `"codename"`, any other string falls back to `False`
+  rather than silently enabling the raw marker) and validated in
+  `config_dropins._validate_pr`.
+- [x] **Cover both marker-writing paths, not just PR creation.** There are
   two places a marker is written: the initial `create-pr` body, and
   `refresh_source_attribution` (used when a later push updates an existing
   PR's head). Both must honor `codename` mode identically — an
   implementation that only updates the initial-body path would leave the
   refresh path free to write the full raw marker on the very next push,
   reintroducing the leak on an already-open PR. Test both paths under
-  `codename` mode, not just PR creation.
-- [ ] Document the three modes and when each is appropriate (private
+  `codename` mode, not just PR creation. Landed as
+  `attribution.build_codename_marker` used from both `_open_via_provider`
+  and `refresh_source_attribution`; a worktree with no assigned codename
+  (should not happen post-Phase-2, but defensively) skips the marker
+  entirely rather than downgrading to the raw one.
+- [x] Document the three modes and when each is appropriate (private
   closed-circuit repo vs. public repo that still wants author-side
-  traceability vs. fully anonymous).
+  traceability vs. fully anonymous). Landed in
+  `docs/config-reference.md` and `skills/worktree/references/pr-workflow.md`.
 
 ### Phase 5 — Close the branch-name leak class
 - [ ] **Validate the effective published ref, not just the `head_scheme`
@@ -236,10 +246,13 @@ kill, no encoding-from-a-subprocess concern, no zombie/leak risk.
   malformed-word `nouns`, explicit `pairs` overriding the cross-product,
   fail-soft fallback to the built-in wordlist on any load error). 52 tests
   landed in `test_codename.py`/`test_codename_config.py`.
-- [ ] Unit tests: `source_attribution: codename` marker contains the
+- [x] Unit tests: `source_attribution: codename` marker contains the
   codename and *no* machine/worktree/session/timestamp substrings, on
   **both** the initial `create-pr` body path and the
-  `refresh_source_attribution` path.
+  `refresh_source_attribution` path. 4 tests landed in `test_providers.py`
+  (`TestCreatePRAutoOpen`) and `test_pr_ops.py`
+  (`TestPRFinalizeAndPush`), including the no-codename-assigned case
+  (skip, never downgrade to the raw marker).
 - [ ] Integration test: `create` → codename assigned and persisted →
   `resolve --codename` / `embody --codename` round-trip on the same
   machine.
@@ -432,3 +445,49 @@ _Pending review._
 - **Phase 2 is done.** Phases 3-5 (cross-machine reverse lookup,
   `source_attribution: codename` mode, closing the branch-name-leak class)
   remain -- see the Plan section above for the next slice.
+
+### 2026-09-18 — Phase 4 landed (`source_attribution: codename` mode)
+
+Picked up from a handoff after a separate session-local investigation (in a
+downstream/private control repo, not part of this effort) had already
+independently found and fixed the same class of leak this effort targets --
+the raw `worktree_id`-as-fallback-title bug -- confirming the underlying
+concern is real and recurring, not hypothetical.
+
+**Design decision on Phase 3 (recorded here since it changes that phase's
+scope):** the operator confirmed the cross-machine "registry" should be
+exactly what it sounds like -- SSH into each known machine and read its own
+local tracking store -- not a new shared atomic-reservation primitive. This
+descopes Phase 3's originally-planned dedicated registry store; a codename
+collision across two machines minting concurrently is treated as an
+accepted (astronomically unlikely, ~4,900-combination local word list)
+residual risk rather than something requiring cross-machine locking.
+Phase 3 itself is not yet implemented — this note exists so it starts from
+the corrected scope rather than the original registry design.
+
+**Phase 4 implementation:**
+- `PRConfig.source_attribution` widened from `bool` to `bool | str`;
+  `config.py` parses a case-insensitive `"codename"` string, falling back
+  to `False` (never silently upgrading to the raw-marker `True` mode) for
+  any other string value. `config_dropins._validate_pr` updated to accept
+  either shape instead of a strict boolean.
+- `attribution.build_codename_marker(codename)` emits
+  `<!-- agent-worktrees:source codename=<name> -->` -- no other fields.
+- Both marker-writing paths updated identically, per the Phase 4 checklist's
+  explicit warning: `_open_via_provider` (initial `create-pr` body) and
+  `refresh_source_attribution` (later-push refresh). Both skip the marker
+  entirely (never downgrade to the raw marker) when the worktree
+  unexpectedly has no assigned codename.
+- Documented the three modes in `docs/config-reference.md` and
+  `skills/worktree/references/pr-workflow.md`.
+- Tests: 4 new (2 create-pr-path, 2 refresh-path) covering the codename
+  marker's exact shape, absence of raw identifiers, and the no-codename
+  skip case; 3 new config-parsing tests (accepted, case-insensitive,
+  rejected-typo-falls-back-to-false); 4 new `config_dropins` validation
+  tests. Full suite: 495 passed across `test_config.py`/`test_pr_ops.py`/
+  `test_providers.py`/`test_codename*.py` (7 pre-existing + new).
+
+Next: Phase 5 (close the branch-name leak class -- the actual open security
+gap per this effort's own framing) and the descoped Phase 3 (SSH-based
+reverse lookup, no new registry).
+

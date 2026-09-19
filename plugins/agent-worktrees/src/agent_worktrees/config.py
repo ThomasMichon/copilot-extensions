@@ -17,7 +17,7 @@ import re
 import socket
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 
@@ -141,6 +141,13 @@ class PRRoleOverride:
     fork: ForkConfig | None = None
 
 
+#: The three supported `pr.source_attribution` values -- see `PRConfig`'s
+#: docstring for what each means. Tightened from a bare `bool | str` so the
+#: type itself documents (and a type checker enforces) that no other string
+#: is ever a valid value here.
+SourceAttribution = bool | Literal["codename"]
+
+
 @dataclass(frozen=True)
 class PRConfig:
     """Pull-request workflow configuration for a managed repo.
@@ -213,9 +220,18 @@ class PRConfig:
     token_command: str = ""
     labels: tuple[str, ...] = ()
     auto_open: bool = False        # opt-in: open the PR via the provider after push
-    # Embed raw worktree/machine/session provenance in a hidden PR-body marker.
-    # Closed-circuit systems may opt in; public repos should leave this false.
-    source_attribution: bool = False
+    # Embed source-worktree provenance in a hidden PR-body marker:
+    # - False (default) -- no marker. Correct default for a public repo with
+    #   no author-side traceability need.
+    # - True -- the full raw marker (worktree id, machine, session, head).
+    #   Closed-circuit systems only; never a public repo.
+    # - "codename" -- a public-safe marker carrying ONLY the worktree's
+    #   assigned codename (see `agent_worktrees.codename`) -- no machine,
+    #   worktree id, session, or timestamp. For a public repo that still
+    #   wants an author to trace a stalled PR back to its worktree, without
+    #   publishing anything that decodes on its own (effort
+    #   pr-attribution-codenames Phase 4).
+    source_attribution: SourceAttribution = False
     # Markdown headings whose sections must contain visible text before
     # create-pr may auto-open a PR. Empty keeps the generic default permissive.
     required_body_sections: tuple[str, ...] = ()
@@ -1699,6 +1715,18 @@ def _parse_pr(raw: Any) -> PRConfig:
         s = str(value).strip().lower()
         return s if s in allowed else default
 
+    def _source_attribution(value: Any) -> SourceAttribution:
+        """Normalize ``pr.source_attribution`` to ``False``, ``True``, or
+        the literal string ``"codename"`` -- anything else (any other
+        string, including a quoted ``"true"``/``"1"``/``"yes"``, or a
+        truthy non-bool YAML value like ``1``/``[1]``/a mapping) is rejected
+        back to ``False``, never silently promoted to the full raw-marker
+        mode. Only an actual YAML-native boolean ``true`` enables raw
+        attribution."""
+        if isinstance(value, str):
+            return "codename" if value.strip().lower() == "codename" else False
+        return value is True
+
     head_scheme = str(raw.get("head_scheme", "refspec")).strip().lower()
     if head_scheme not in ("snapshot", "refspec"):
         # A present-but-garbage value signals misconfiguration -- fall back to
@@ -1719,7 +1747,7 @@ def _parse_pr(raw: Any) -> PRConfig:
         token_command=str(raw.get("token_command", "")),
         labels=labels,
         auto_open=bool(raw.get("auto_open", False)),
-        source_attribution=bool(raw.get("source_attribution", False)),
+        source_attribution=_source_attribution(raw.get("source_attribution", False)),
         required_body_sections=_str_tuple(raw.get("required_body_sections", ())),
         automerge_label=str(raw.get("automerge_label", "")).strip(),
         hold_labels=_str_tuple(raw.get("hold_labels", ())),

@@ -331,7 +331,6 @@ def _validate_pr(raw: object, *, location: str) -> str | None:
         "enabled",
         "required",
         "auto_open",
-        "source_attribution",
         "approval_required",
         "allow_stale_approval",
         "squash",
@@ -368,6 +367,15 @@ def _validate_pr(raw: object, *, location: str) -> str | None:
     for name in boolean_fields:
         if name in raw and not isinstance(raw[name], bool):
             return f"{location}.{name} must be a boolean"
+    if "source_attribution" in raw:
+        value = raw["source_attribution"]
+        is_valid_bool = isinstance(value, bool)
+        is_valid_str = isinstance(value, str) and value.strip().lower() == "codename"
+        if not (is_valid_bool or is_valid_str):
+            return (
+                f"{location}.source_attribution must be a boolean or the "
+                'string "codename"'
+            )
     for name in string_fields:
         if name in raw and not isinstance(raw[name], str):
             return f"{location}.{name} must be a string"

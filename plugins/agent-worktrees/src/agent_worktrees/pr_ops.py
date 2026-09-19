@@ -40,7 +40,7 @@ from pathlib import Path
 
 from . import config as cfg
 from . import git_ops, hooks, tracking
-from .config import Config
+from .config import Config, SourceAttribution
 from .tracking import PRRecord
 
 HOLD_LABEL = "do-not-merge"
@@ -1002,7 +1002,7 @@ def _open_via_provider(
     head_sha: str,
     *,
     draft: bool = False,
-    attribution: bool = False,
+    attribution: SourceAttribution = False,
 ) -> None:
     """Open the PR through the provider plugin and auto-record it (best-effort)."""
     from . import providers
@@ -1015,13 +1015,40 @@ def _open_via_provider(
         live = [s for s in record.sessions if not s.ended_at]
         session = (live[-1] if live else record.sessions[-1]).session_id
 
-    if attribution:
+    if attribution == "codename":
+        # Public-safe mode: only the assigned codename, never the raw
+        # worktree/machine/session identifiers -- and never a silent
+        # downgrade to the full marker if the codename is missing or
+        # malformed. Tracking records load from YAML without validation, so
+        # a tampered/corrupted codename must never be interpolated into the
+        # HTML comment as-is (it could break the marker or inject visible
+        # PR-body content) -- `is_valid_handle` gates it the same as the
+        # missing-codename case.
+        from . import codename as codename_mod
+        codename = record.codename if record else None
+        marker_published = bool(
+            isinstance(codename, str) and codename_mod.is_valid_handle(codename)
+        )
+        full_body = (
+            attr.append_marker(body or "", attr.build_codename_marker(codename))
+            if marker_published
+            # Never leave a stale/caller-supplied source marker in place when
+            # publication is skipped -- it could still carry raw identifiers
+            # from some other source (a copy-pasted body, an older template).
+            else attr.strip_marker(body or "")
+        )
+    elif attribution is True:
         marker = attr.build_marker(
             worktree_id, machine=machine, session=session, head=head_sha,
         )
         full_body = attr.append_marker(body or "", marker)
+        marker_published = True
     else:
-        full_body = body or ""
+        # Attribution disabled entirely -- strip any marker that might
+        # already be present in the caller-supplied body for the same
+        # "never leave a stale one in place" reason.
+        full_body = attr.strip_marker(body or "")
+        marker_published = False
     scope = providers.scope_from_create_result(
         result, title=title, body=full_body, prcfg=prcfg, machine=machine,
     )
@@ -1051,7 +1078,7 @@ def _open_via_provider(
         # produced this PR -- but never clobber an explicit one.
         if not record.parent_session and session:
             record.parent_session = session
-        if attribution:
+        if marker_published:
             target_pr.attribution_head = head_sha
         tracking.save_record(record)
     result["pr_opened"] = True
@@ -1098,15 +1125,32 @@ def refresh_source_attribution(
     if record.sessions:
         live = [item for item in record.sessions if not item.ended_at]
         session = (live[-1] if live else record.sessions[-1]).session_id
-    try:
-        provider = providers.get_provider(provider_name)
-        token = providers.account_token_for_slug(target_pr.repo, prcfg)
+    if prcfg.source_attribution == "codename":
+        # Public-safe mode -- see `_open_via_provider`'s matching branch for
+        # the same "skip, never downgrade to the raw marker" rule, and for
+        # why the codename is validated (not just checked for presence)
+        # before being interpolated into the HTML comment.
+        from . import codename as codename_mod
+        if not isinstance(record.codename, str) or not codename_mod.is_valid_handle(
+            record.codename
+        ):
+            return ""
+        marker = attribution.build_codename_marker(record.codename)
+    elif prcfg.source_attribution is True:
         marker = attribution.build_marker(
             worktree_id,
             machine=record.machine,
             session=session,
             head=head_sha,
         )
+    else:
+        # Neither exact mode -- config parsing should never produce this,
+        # but never publish the raw marker for anything other than an
+        # explicit `True`.
+        return ""
+    try:
+        provider = providers.get_provider(provider_name)
+        token = providers.account_token_for_slug(target_pr.repo, prcfg)
         error = provider.publish_source_marker(
             target_pr.repo,
             int(target_pr.number),
