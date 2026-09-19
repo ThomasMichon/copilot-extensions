@@ -945,18 +945,19 @@ function Install-Runtime {
     # build/install every time so a stale cache entry can never silently ship
     # again -- covering agent-dispatch itself AND its own local
     # `[tool.uv.sources]` workspace path deps (agent-procutil, agent-zdd,
-    # agent-dropin-registry, agent-plugin-activation, agent-plugin-resolve),
-    # which are equally local PATH sources and equally vulnerable. #2863 also
-    # flagged a second, same-class ImportError in the self-update fallback
-    # (`from agent_procutil import ...`) -- agent-procutil is exactly one of
-    # these.
+    # agent-dropin-registry, agent-plugin-activation, agent-plugin-resolve,
+    # agent-single-instance-lease), which are equally local PATH sources and
+    # equally vulnerable. #2863 also flagged a second, same-class ImportError
+    # in the self-update fallback (`from agent_procutil import ...`) --
+    # agent-procutil is exactly one of these.
     $StaleCacheRefreshPackages = @(
         'agent-dispatch',
         'agent-procutil',
         'agent-zdd',
         'agent-dropin-registry',
         'agent-plugin-activation',
-        'agent-plugin-resolve'
+        'agent-plugin-resolve',
+        'agent-single-instance-lease'
     )
     $installPkg = {
         param([string]$Spec)
