@@ -330,7 +330,12 @@ DevOps) -- and **auto-records** the url/number on the worktree (no manual
 `set-pr`). A closed-circuit repo may additionally set
 `pr.source_attribution: true` to embed a hidden marker containing the raw source
 worktree, machine, session, and head SHA. The marker is **off by default** and
-must stay off for public PRs. Useful flags: `--no-open` (push only),
+must stay off for public PRs. A public repo that still wants author-side
+traceability can instead set `pr.source_attribution: codename`, which embeds
+**only** the worktree's assigned codename -- resolve it back via
+`resolve --codename` when it is the same machine; on a different machine the
+author must manually SSH there and check its tracking store (there is no
+automated cross-machine lookup yet). Useful flags: `--no-open` (push only),
 `--no-attribution` (suppress a configured marker), `--body`/`--body-file`,
 `--repo owner/name`. If the provider call fails the branch is still pushed, and
 the result carries `pr_open_error` so you can fall back to Steps 2-3 below. A

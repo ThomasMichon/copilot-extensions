@@ -11,6 +11,16 @@ machine, worktree, and session identifiers are inappropriate for public repos.
 The marker is a single HTML comment, invisible in rendered Markdown:
 
     <!-- agent-worktrees:source worktree=<id> machine=<m> session=<sid> head=<sha> -->
+
+A third mode, ``pr.source_attribution: codename`` (effort
+``pr-attribution-codenames`` Phase 4), is for a public repo that still wants
+author-side traceability: it emits :func:`build_codename_marker` instead --
+**only** the worktree's assigned codename, no machine/worktree-id/session/
+head. The codename decodes to nothing on its own; the author resolves it back
+to a worktree locally (``resolve --codename``). On another machine there is
+no automated lookup yet (Phase 3, a cross-machine reverse lookup, is not
+implemented) -- the author must manually SSH there and check that machine's
+own tracking store.
 """
 
 from __future__ import annotations
@@ -42,6 +52,16 @@ def build_marker(
     return f"<!-- agent-worktrees:source {' '.join(parts)} -->"
 
 
+def build_codename_marker(codename: str) -> str:
+    """Build the codename-only source-attribution comment (``codename``
+    mode). Carries **no** machine, worktree id, session id, or timestamp --
+    only the assigned codename, which decodes to nothing without local
+    access to the authoring machine's own tracking store (or a manual SSH
+    session onto it -- there is no automated cross-machine lookup yet).
+    """
+    return f"<!-- agent-worktrees:source codename={codename} -->"
+
+
 def append_marker(body: str, marker: str) -> str:
     """Append *marker* to a PR *body*, replacing any existing source marker."""
     stripped = _MARKER_RE.sub("", body or "").rstrip()
@@ -61,3 +81,4 @@ def parse_marker(body: str) -> dict[str, str] | None:
     if not m:
         return None
     return dict(_FIELD_RE.findall(m.group("fields")))
+
