@@ -117,6 +117,27 @@ def test_pid_alive_unknown_oserror_reads_alive_on_posix(monkeypatch):
     assert pid_alive(4242) is True
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-only liveness path")
+def test_pid_alive_ctypes_argument_error_reads_alive_on_windows(monkeypatch):
+    # The declared ``argtypes`` make ctypes validate ``pid`` against a DWORD
+    # before the Win32 call runs; a non-numeric/malformed recorded pid raises
+    # ``ctypes.ArgumentError`` there instead of reaching OpenProcess. A
+    # reaper/self-retire check iterating over untrusted table data must never
+    # crash on this -- it's exactly the same "can't tell" case as any other
+    # platform-probe failure, so it must read alive too.
+    import ctypes
+
+    class _RaisingDLL:
+        def __getattr__(self, _name):
+            def _raise(*_a, **_k):
+                raise ctypes.ArgumentError("bad argument")
+
+            return _raise
+
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *_a, **_k: _RaisingDLL())
+    assert pid_alive(os.getpid()) is True
+
+
 
 def test_bad_generation_value_stays_alive():
     table = {"active": {"pid": 2, "generation": "NaN", "port": 1, "bind": "127.0.0.1"}}
@@ -145,6 +166,46 @@ def test_ipv6_wildcard_bind_maps_to_loopback():
     table = _table(pid=222, generation=8, bind="::")
     assert is_superseded(table, my_pid=111, my_generation=7, is_listening=probe) is True
     assert seen["host"] == "::1"
+
+
+def test_missing_bind_stays_alive_without_probing():
+    # A malformed active record (no ``bind`` field) must never default to a
+    # loopback probe target -- that could coincidentally find something else
+    # listening on the recorded port and produce a false-positive
+    # supersession (a live daemon incorrectly self-retiring).
+    called = []
+
+    def probe(host, port):
+        called.append((host, port))
+        return True
+
+    table = {"active": {"pid": 222, "generation": 8, "port": 9281}}
+    assert is_superseded(table, my_pid=111, my_generation=7, is_listening=probe) is False
+    assert called == []
+
+
+def test_empty_string_bind_stays_alive_without_probing():
+    called = []
+
+    def probe(host, port):
+        called.append((host, port))
+        return True
+
+    table = _table(pid=222, generation=8, bind="")
+    assert is_superseded(table, my_pid=111, my_generation=7, is_listening=probe) is False
+    assert called == []
+
+
+def test_non_string_bind_stays_alive_without_probing():
+    called = []
+
+    def probe(host, port):
+        called.append((host, port))
+        return True
+
+    table = _table(pid=222, generation=8, bind=123)
+    assert is_superseded(table, my_pid=111, my_generation=7, is_listening=probe) is False
+    assert called == []
 
 
 def test_zero_port_stays_alive():

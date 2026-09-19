@@ -73,7 +73,16 @@ def pid_alive(pid: int | None) -> bool:
             # every OpenProcess failure as "dead" would violate this function's
             # own fail-open contract for the access-denied case.
             return ctypes.get_last_error() != ERROR_INVALID_PARAMETER
-        except OSError:
+        except (OSError, ctypes.ArgumentError):
+            # OSError: the platform call itself failed (can't tell -> alive).
+            # ctypes.ArgumentError: the declared ``argtypes`` make ctypes
+            # validate ``pid`` as a DWORD before the Win32 call even runs, so
+            # a non-numeric/malformed recorded pid raises here instead of
+            # reaching the branch above -- still a "can't tell", never a
+            # crash for a reaper/self-retire check iterating over untrusted
+            # table data. (Verified empirically: an out-of-range but
+            # genuinely integer pid is silently truncated by ctypes, not
+            # raised -- only a non-int-like value hits this path.)
             return True
     try:
         os.kill(pid, 0)
@@ -157,6 +166,15 @@ def is_superseded(
         return False
     if port <= 0:
         return False
-    host = _client_host(str(raw.get("bind", "")))
+    raw_bind = raw.get("bind")
+    if not isinstance(raw_bind, str) or not raw_bind:
+        # A missing/malformed ``bind`` means the active record itself is
+        # unparseable -- the documented fail-safe contract requires staying
+        # alive for that, not defaulting to a loopback probe that could
+        # coincidentally find *something* listening on the recorded port and
+        # produce a false-positive supersession (a live daemon incorrectly
+        # deciding to self-retire).
+        return False
+    host = _client_host(raw_bind)
     # Require a *live* successor: the newer generation must actually be serving.
     return bool(is_listening(host, port))
