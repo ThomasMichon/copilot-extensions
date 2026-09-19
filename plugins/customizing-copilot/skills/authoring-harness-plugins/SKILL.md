@@ -228,14 +228,32 @@ golden path.)
 
 ### What the two skills should contain
 
-- **`contributing-to-<repo>`** — repo layout; the contribution flow (branch/PR
-  or worktree, per the repo's policy); the **gotchas that silently swallow work**
-  (for a marketplace repo, the mandatory version bump); test/lint/contract gates;
-  deploy-after-merge; and the "edit the source, never the deployed copy" rule.
-- **`diagnosing-<repo>`** — where the deployed artifacts live; a
-  **symptom → cause → action** table for the common failures; the key diagnostic
-  commands; and any reset/baseline escape hatch. Lead with
-  **diagnose-before-remediate** discipline.
+**`diagnosing-<repo>` is the harness's primary, hard-guidance skill** — every
+consumer needs it, whether or not it ever contributes. It must give an agent
+two things unconditionally:
+
+1. **Where the deployed artifacts live** — installed payload paths, runtime
+   roots, binstubs, config/enablement files — so an agent can tell at a glance
+   which local scripts, processes, and files belong to this system before it
+   reasons about any of them.
+2. **The no-monkey-patch rule.** Never hand-edit an installed/deployed copy or
+   a running runtime to work around a bug — that fix is invisible to every
+   other consumer and is silently overwritten on the next update. When
+   something is wrong, there are exactly two sanctioned responses: **file a bug
+   upstream** (sanitized per the repo's own publication rules — no PII,
+   internal paths, hostnames, or proprietary context) **or run the repo's
+   auto-update/reset path**. A **symptom → cause → action** table, the key
+   diagnostic commands, and a reset/baseline escape hatch round this out. Lead
+   with **diagnose-before-remediate** discipline throughout.
+
+**`contributing-to-<repo>` is secondary** — it exists for the subset of
+consumers who choose to become contributors with a local checkout. It covers
+repo layout; the contribution flow (branch/PR or worktree, per the repo's
+policy); the **gotchas that silently swallow work** (for a marketplace repo,
+the mandatory version bump); test/lint/contract gates; deploy-after-merge; and
+the "edit the source, never the deployed copy" rule — the contributor-side
+mirror of the no-monkey-patch rule above, for the case where the agent *is*
+about to make a real, versioned fix rather than a throwaway local patch.
 
 Two focused skills beat one sprawling skill: contributors and diagnosers arrive
 with different triggers.

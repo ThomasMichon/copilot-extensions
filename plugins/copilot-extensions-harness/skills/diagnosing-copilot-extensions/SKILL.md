@@ -2,11 +2,13 @@
 name: diagnosing-copilot-extensions
 description: >
   Diagnose problems with deployed copilot-extensions plugins -- a plugin update
-  that "succeeds" but changes nothing, a missing binstub or command-not-found, a
-  skill that won't load, the agent-bridge service not responding, MCP tools
-  unavailable in a sub-agent, or a stale runtime. Symptom -> cause -> action, the
-  key paths and diagnostic commands, and the baseline-reset escape hatch. Use
-  when something is wrong with an installed plugin or its runtime.
+  that "succeeds" but changes nothing, a missing binstub, a skill that won't
+  load, the agent-bridge service not responding, MCP tools unavailable in a
+  sub-agent, or a stale runtime. The primary, hard-guidance skill for any
+  consumer: identify what belongs to this system, and never hand-patch a
+  deployed copy -- file a bug upstream or auto-update instead. Symptom -> cause
+  -> action, key paths, diagnostic commands, and the baseline-reset escape
+  hatch. Use when something is wrong with an installed plugin or its runtime.
   Trigger phrases include:
   - 'agent-worktrees not found'
   - 'agent-bridge not responding'
@@ -18,6 +20,9 @@ description: >
   - 'mcp tools unavailable'
   - 'diagnose copilot-extensions'
   - 'reset copilot extensions'
+  - 'should I patch this myself'
+  - 'hotfix a plugin locally'
+  - 'work around a copilot-extensions bug'
 ---
 
 # Diagnosing copilot-extensions
@@ -26,6 +31,36 @@ Something's wrong with a deployed plugin. **Diagnose before remediating** — an
 error names a symptom, not a root cause. Read the literal error, form a
 hypothesis, gather evidence, and only then act. For an idempotent step a single
 retry is a fine first move; never force-deploy or kill a process on a hunch.
+
+## Hard rule: identify it, don't patch it
+
+This is the primary purpose of this skill, and it binds **every** consumer of
+the suite, whether or not they ever contribute:
+
+1. **Identify what belongs to this system first.** Before reasoning about any
+   local script, process, config file, or running service, check it against
+   **Where things live** below. If a path, binstub, or process isn't listed
+   there, don't assume it's ours.
+2. **Never monkey-patch.** Do not hand-edit an installed/deployed plugin
+   payload (`~/.copilot/installed-plugins/...`) or a running runtime
+   (`~/.agent-*`) to work around a bug, "just this once" or otherwise. A local
+   edit is invisible to every other consumer, gets silently overwritten by the
+   next update, and leaves the real defect unfixed. There are exactly two
+   sanctioned responses when something is actually broken:
+   - **File a bug upstream** — open (or find and comment on) a GitHub issue on
+     `ThomasMichon/copilot-extensions`, written in generic, sanitized terms: no
+     PII, internal paths/hostnames, account details, or proprietary/downstream
+     context (see `contributing-to-copilot-extensions`'s *Sanitization* rule
+     and its worked examples in
+     [`references/sanitization-examples.md`](../../references/sanitization-examples.md)). This is the right move even if
+     you never intend to fix it yourself.
+   - **Run the auto-update/reset path** — `<repo> update` (or `--force`), or
+     the baseline reset below, if the deployed copy is simply stale or
+     corrupted rather than genuinely buggy.
+   - The **only** other sanctioned path is becoming a real contributor: fixing
+     the repo source itself and landing it through
+     `contributing-to-copilot-extensions`'s worktree/PR flow — never the
+     deployed copy directly.
 
 ## Where things live
 
@@ -95,5 +130,6 @@ Your source repos and their `.worktrees` are never touched.
 
 `docs/architecture.md` (runtimes, ports, the payload/runtime split),
 `docs/install-contract.md` (the runtime-plugin contract), and each plugin's own
-`docs/getting-started.md`. To land a fix once you've found the cause, use
+`docs/getting-started.md`. **Only if you're actually contributing a real,
+versioned fix** — not patching the deployed copy — does the path continue to
 `contributing-to-copilot-extensions`.
