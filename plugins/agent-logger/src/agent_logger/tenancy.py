@@ -339,6 +339,7 @@ class ResolvedTenant:
             "repo_denylist": cfg.sync_repo_denylist,
             "repo_allowlist_fail_closed": cfg.sync_repo_allowlist_fail_closed,
             "harness_repos": cfg.sync_harness_repos,
+            "require_repo_opt_in": cfg.sync_require_repo_opt_in,
             "target": cfg.sync_target,
         }
 
@@ -561,6 +562,7 @@ def _source_include(tenant: ResolvedTenant) -> tuple[str, set[str] | None]:
     machine = cfg.machine_name or detect_machine()
     allowlist = cfg.sync_repo_allowlist
     denylist = cfg.sync_repo_denylist
+    require_repo_opt_in = cfg.sync_require_repo_opt_in
     effective = effective_harness(allowlist, cfg.sync_harness_repos, denylist)
     include = _included_sessions(
         cfg.sync_source,
@@ -569,6 +571,7 @@ def _source_include(tenant: ResolvedTenant) -> tuple[str, set[str] | None]:
         effective,
         machine,
         denylist,
+        require_repo_opt_in,
     )
     return str(cfg.sync_source), include
 
