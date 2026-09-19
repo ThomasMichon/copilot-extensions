@@ -1561,6 +1561,8 @@ def _cmd_show(args: argparse.Namespace) -> int:
         # progress in one call and resumes from it rather than restarting.
         task = dict(task)
         task["progress_log"] = c.progress_log(args.task_id)
+        if getattr(args, "history", False):
+            task["attachments"] = c.attachments(args.task_id)
     from . import tracking
 
     return _emit(tracking.enrich_task(_enrich(task)))
@@ -3997,6 +3999,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("show", help="show one task")
     p.add_argument("task_id")
+    p.add_argument(
+        "--history",
+        action="store_true",
+        help="also include the task's durable attachment history "
+        "(every session that has ever attached, newest first)",
+    )
     p.set_defaults(func=_cmd_show)
 
     p = sub.add_parser(
