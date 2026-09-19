@@ -39,6 +39,14 @@ from ..update_stage import indicator_state
 from . import derive
 from .selection import ListSelection
 from .listview import ListView, capture_row_refs, remap_row_refs, render_command_bar
+from .styles import (
+    C_BAND, C_BTN, C_BTN_LAST, C_BTN_SEL, C_CAUTION, C_DIM, C_DISABLED,
+    C_DISPO, C_ENV, C_FAINT, C_HEADER, C_HINT, C_HINT_ON, C_LABEL, C_LOAD,
+    C_META, C_MUTED, C_PR_MERGED, C_PULSE, C_PULSE_AWAIT, C_READY, C_SECTION,
+    C_SEL, C_SEL_BG, C_SEL_ON, C_SPIN, C_STATE, C_TAB_ACTIVE,
+    C_TAB_FOCUS_ON, C_TABOFF, C_WARN, DISPO_MARK, SPINNER,
+    canonical_key,
+)
 
 log = logging.getLogger("agent-worktrees.picker")
 
@@ -116,66 +124,6 @@ def _resolve_version() -> str:
 
 VERSION = _resolve_version()
 
-# ---- palette (highlight-and-invert; subtle borders) -------------------------
-C_DIM = "grey42"          # subtle separators / borders
-C_HEADER = "bold white"
-C_BAND = "bold orange1"   # band headers (scope)
-C_SECTION = "bold grey70"
-# Tabs/pivots: ACTIVE-but-unfocused is SUBTLE (no invert) so it doesn't compete
-# with the focus cursor; only the FOCUSED tab inverts.
-C_TAB_ACTIVE = "bold white on grey23"   # selected pivot, zone not focused
-C_TAB_FOCUS = "reverse bold"            # selected pivot, zone focused (cursor)
-C_TAB_FOCUS_ON = "reverse bold orange1"  # focused AND active view tab / ⚙ chip
-C_TABOFF = "grey58"
-C_SEL = "reverse"         # focused row -> invert (the cursor)
-# Worktrees multi-select highlight states (#2258 follow-up): the focus cursor
-# inverts (reverse); a green invert means the cursor is ALSO in the selection,
-# a plain (white) invert means the cursor sits on an UNselected row, and a grey
-# background marks a selected row the cursor has moved off. Layered on top of the
-# per-cell styles, so the whole row reads as one state.
-C_SEL_ON = "reverse green3"     # focused AND selected -> green invert
-C_SEL_BG = "on grey30"          # selected but not focused -> grey background
-C_SPIN = "yellow"
-C_WARN = "red"
-C_PR_MERGED = "green"
-C_HINT = "grey46"         # scroll-hint arrows (subtle)
-C_HINT_ON = "orange1"     # scroll hint when there IS more content that way
-# copilot-extensions#228: the live-pulse sub-line's "needs me" accent -- an amber
-# highlight (vs. the dim ⟳ of a busy/idle pulse) for a session parked on the
-# operator (``live_rest`` == awaiting-operator).
-C_PULSE_AWAIT = "bold #d7af00"
-# Secondary-text shades (de-emphasized foreground). Named so the many ad-hoc
-# grey/style literals scattered through the render methods route through ONE
-# semantic vocabulary instead of bare shade codes (#85 item E). Exact values
-# preserved -- this is a naming pass, not a recolor.
-C_META = "grey70"         # secondary / metadata / hint text
-C_LABEL = "grey78"        # inline minor labels + counts
-C_FAINT = "grey62"        # fainter descriptive / panel-body text
-C_MUTED = "grey54"        # most de-emphasized (pending rows, ellipses, "…")
-C_CAUTION = "yellow"      # inline caution / warning (⚠) inside dialogs
-# Glowy pulse for live indicators (two phases, cycled by a timer).
-C_PULSE = ["green", "bold bright_green"]
-C_BTN = "bold white on grey27"   # button at rest
-C_BTN_LAST = "bold grey85 on grey19"  # group's last-focused button (subtle)
-C_BTN_SEL = "bold black on orange1"  # button focused (the cursor, but "glows")
-C_STATE = {
-    # Match the PSMux/TMux status segment (_SEGMENT_STYLE) so the picker and the
-    # status bar use one vocabulary + palette (test-chamber #1290).
-    "DIRTY": "#d70000",    # red (colour160)
-    "WIP": "#d7af00",      # amber (colour178)
-    "FINAL": "#00af00",    # green (colour034) -- COMPLETED, refreshed + settled
-    "MERGED": "#ff8700",   # orange (colour208) -- COMPLETED but not yet
-                           # provably settled (Phase 5 closure descriptor);
-                           # distinct from WIP's amber so "landed but not
-                           # closed out" never reads as "still being written".
-    "UNUSED": "grey58",    # grey (colour244)
-    "CONVO": "#00afaf",    # teal (colour037) -- UNUSED + conversation
-    "ORPHAN": "#af00ff",   # magenta (colour129)
-    "ACTIVE": "#00afff",   # blue (colour039)
-    "GONE": "grey35",      # dark grey (colour238)
-    "?": "grey35",
-}
-
 PAD = "   "  # inter-column padding (3 spaces -> info breathes)
 
 # worktree-finality-and-obligations Phase 9 / iconify-relation: the RELATION
@@ -229,41 +177,8 @@ def _palette_style(name, value):
     return pal.get(str(value).strip().upper(), "")
 
 
-# Animated SSH-connect spinner (braille "dots going around").
-SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-C_READY = "green"
-C_LOAD = "yellow"
-C_DISABLED = "grey37"
-# Environment colors, echoing the PSMux/TMux status region:
-# Win = blue, WSL = purple, Linux = orange. Truecolor HEX (not ANSI names) so a
-# terminal's palette theme can't remap blue->purple / magenta->red.
-C_ENV = {"Win": "#4aa3ff", "WSL": "#b96bff", "Linux": "#ff9e3b"}
-# Maintenance disposition (blended verdict+reason) -> colored chip.
-# Green = positive/safe-to-go; yellow = needs review; red = broken/blocked.
-C_DISPO = {"SAFE": "black on green", "REVIEW": "black on yellow",
-           "UNSAFE": "white on red3"}
-DISPO_MARK = {"SAFE": "✓", "REVIEW": "!", "UNSAFE": "✗"}
-
-
 # ---- key canonicalization ---------------------------------------------------
-# Textual delivers some keys under framework-specific names/aliases; fold them
-# to ONE canonical token here so the render methods match keys declaratively and
-# the framework's naming quirks stay localized (#88 F2). This is the seam a
-# later move to Textual ``BINDINGS`` (F3) builds on.
-KEY_ALIASES = {
-    "left_square_bracket": "[",
-    "right_square_bracket": "]",
-    "slash": "/",  # Textual names the "/" key "slash" (#2228 Phase 4 command bar).
-    # Ctrl+Space is NUL, which Textual surfaces as "ctrl+at"; the picker treats
-    # it as a Ctrl-held Space toggle, identical to "ctrl+space".
-    "ctrl+at": "ctrl+space",
-}
-
-
-def canonical_key(key):
-    """Fold a Textual key name to the picker's canonical token (identity for a
-    key with no alias)."""
-    return KEY_ALIASES.get(key, key)
+# (KEY_ALIASES / canonical_key moved to styles.py, module-size)
 
 
 # ---- column fitter ----------------------------------------------------------
@@ -581,17 +496,16 @@ class _PickerSegment(Widget):
 class _FocusRegion(Widget):
     """Base for a focusable chrome/data region in the NF3 compose tree (#88).
 
-    A region widget holds native framework focus and mirrors the picker's manual
-    ``sel`` model, forming the bridge that lets native Tab move between regions
-    while the manual dispatcher still owns the actual navigation (retired only at
-    NF5):
+    A region widget holds native framework focus and mirrors the picker's
+    manual ``sel`` model, bridging native Tab-between-regions with the
+    manual dispatcher, which still owns actual navigation (retired at NF5):
 
-    * ``on_focus`` -- the framework put focus here (Tab, or click): point ``sel``
-      at this region's head (unless it already sits in this region).
-    * ``on_key`` -- forward every key to the manual ``_dispatch_key`` (the single
-      source of truth), then mirror focus back onto whatever region ``sel`` now
-      names and repaint. Consuming the key here suppresses Textual's own Tab so
-      region movement runs through ``region_heads`` exactly as before.
+    * ``on_focus`` -- framework put focus here (Tab/click): point ``sel``
+      at this region's head (unless already in this region).
+    * ``on_key`` -- forward every key to ``_dispatch_key`` (single source
+      of truth), then mirror focus back onto whatever region ``sel`` now
+      names and repaint. Consuming the key suppresses Textual's own Tab
+      so region movement runs through ``region_heads`` exactly as before.
 
     Subclasses set ``_zone`` (the ``sel`` zone this region represents) and
     implement ``render``.
@@ -2043,29 +1957,21 @@ class PickerScreen(Widget):
         # worktree loader / live mode, so a card posted by another session shows
         # up without a manual reload (#staleness).
         self._maybe_repoll_pivot()
-        # Poll the launcher's update stage ~twice a second (#1430). While a
-        # stage is in flight the spinner should animate, so keep the tick busy.
+        # Poll the launcher's update stage ~twice a second (#1430), keeping
+        # the tick busy (spinner animating) while a stage is in flight.
         if self.frame % 5 == 0:
             self._poll_update_state()
         if self.update_state == "checking":
             busy = True
-        # The cleanup/sync/profiles progress run and the recent-messages viewer
-        # drive themselves now: both are native Textual ``ModalScreen``s
-        # (``ProgressScreen`` / ``MsgViewScreen``, #88 F4) that tick their own
-        # advancement / load-repaint on an interval, so the background tick no
-        # longer nudges them (advancing progress here would double-step the mock
-        # walker; the viewer repaints itself while its loader thread resolves).
-        # Full 10 fps only while something is actually animating (the SSH
-        # connect spinner or a running progress dialog). When idle, throttle to
-        # ~2 fps: keystrokes already repaint synchronously (on_key -> refresh),
-        # so this only paces the cosmetic live-glyph pulse -- and it stops the
-        # picker from flooding an SSH/tmux link with continuous full-screen
-        # repaints (the over-SSH sluggishness the legacy picker never had).
-        # Held-arrow flood guard: a pending navigation refresh is serviced here
-        # (coalesced to the tick) instead of synchronously per keystroke, so a
-        # held arrow can never queue full-screen re-composites faster than they
-        # drain. The native OptionList already moved its cursor; this catches
-        # the sel-dependent chrome up at tick rate.
+        # ProgressScreen/MsgViewScreen (#88 F4) are native ModalScreens that
+        # tick their own advancement/repaint now, so this tick no longer
+        # nudges them.
+        # Full 10fps only while something animates (SSH spinner/progress
+        # dialog); idle throttles to ~2fps since keystrokes already repaint
+        # synchronously -- this only paces the cosmetic pulse and avoids
+        # flooding an SSH/tmux link with full-screen repaints.
+        # Held-arrow flood guard: a pending nav refresh is coalesced to the
+        # tick instead of firing per keystroke, so it can't outrun draining.
         nav = self._nav_dirty
         self._nav_dirty = False
         if busy or nav or self.frame % 5 == 0:
@@ -4126,11 +4032,10 @@ class PickerScreen(Widget):
         # token (e.g. "slash") represents, for the "/" bar composer (#2228 P4).
         key = canonical_key(key)
         if self.cmd_mode:
-            refs = self._wt_capture_row_refs()
-            result = self.list_view.handle_compose_key(key, character)
+            result = self._wt_remap(
+                lambda: self.list_view.handle_compose_key(key, character))
             if result in ("commit", "cancel"):
                 self.cmd_mode = False
-            self._wt_restore_row_refs(refs)
             return
         # Remember the grid row before any navigation, so Tab out/in restores it.
         if self.sel and self.sel[0] == "PR":
@@ -4160,9 +4065,7 @@ class PickerScreen(Widget):
             self.cmd_mode = True
             return
         if key == "s" and self._kind() == "worktrees":
-            refs = self._wt_capture_row_refs()
-            self.list_view.cycle_sort(derive.WT_SORT_KEYS)
-            self._wt_restore_row_refs(refs)
+            self._wt_remap(lambda: self.list_view.cycle_sort(derive.WT_SORT_KEYS))
             return
 
         zone = self.sel[0]
@@ -4248,9 +4151,7 @@ class PickerScreen(Widget):
             # Esc: filter clear, then selection collapse (#2258 P3-5), then
             # quit-confirm (#1429) -- only when all three are already clear.
             if key == "escape" and self.list_view.query:
-                refs = self._wt_capture_row_refs()
-                self.list_view.clear()
-                self._wt_restore_row_refs(refs)
+                self._wt_remap(self.list_view.clear)
                 return
             if key == "escape" and self._wt_collapse_selection():
                 return
@@ -4259,6 +4160,14 @@ class PickerScreen(Widget):
     def _wt_capture_row_refs(self):
         """Snapshot focus/anchor/last_l by stable key (listview.py)."""
         return capture_row_refs(self._l_ids(), self.sel, self.wt_anchor, self.last_l)
+
+    def _wt_remap(self, fn):
+        """Run ``fn`` (a Worktrees list mutation) with focus/anchor/last_l
+        remapped across it by stable row key (#2228 Phase 4)."""
+        refs = self._wt_capture_row_refs()
+        result = fn()
+        self._wt_restore_row_refs(refs)
+        return result
 
     def _wt_restore_row_refs(self, refs):
         """Remap a _wt_capture_row_refs() snapshot onto the new list."""
@@ -5578,10 +5487,8 @@ class PickerScreen(Widget):
         # query first (so the jump can't silently fail) then resolve index.
         full_match = any(
             (r.get("raw") or {}).get("id") == wid for r in self.list_records())
-        refs = self._wt_capture_row_refs()
         if full_match and self.list_view.query:
-            self.list_view.clear()
-        self._wt_restore_row_refs(refs)
+            self._wt_remap(self.list_view.clear)
         records = self._wt_visible_records()
         target_i = next(
             (i for i, r in enumerate(records)
@@ -5770,28 +5677,26 @@ class PickerScreen(Widget):
     def _run_bg(self, label, work, done=None, *, quiet=False):
         """Run a blocking cross-process / IO callable OFF the Textual render flow.
 
-        Every pivot / worktree / config action shells out (agent-dispatch, git,
-        ssh, ...); running that subprocess *inline* in the key or modal-dismiss
-        handler blocked the whole event loop for up to the action timeout (30s),
-        which froze the TUI and read as a crash. Here ``work()`` (the blocking
-        call) runs on a daemon thread, and ``done(result)`` (the UI updates) is
-        marshalled back onto the event loop via Textual's ``call_from_thread`` --
-        so the render flow is never blocked and no widget is mutated off-thread.
-        A worker exception surfaces on the status line instead of killing the
-        thread. Returns immediately.
+        Every pivot/worktree/config action shells out (agent-dispatch, git,
+        ssh, ...); running that inline in the key/modal-dismiss handler
+        blocked the event loop for up to the action timeout (30s), freezing
+        the TUI and reading as a crash. Here ``work()`` runs on a daemon
+        thread, and ``done(result)`` (UI updates) is marshalled back onto
+        the event loop via Textual's ``call_from_thread`` -- so the render
+        flow is never blocked and no widget is mutated off-thread. A
+        worker exception surfaces on the status line instead of killing
+        the thread. Returns immediately.
 
-        While it runs, the footer shows the shared **animated spinner** + ``label``
-        (via ``_busy_label``) so the action never looks inert. Pass ``quiet=True``
-        when a *different* surface already shows the load state (e.g. the Actions
-        menu's own footer spinner while it refines in place) -- then the main
-        footer is left alone and ``done`` is still invoked (with ``None`` on
-        error) so the caller can always finalize (drop its spinner).
+        While it runs, the footer shows the shared animated spinner +
+        ``label`` (via ``_busy_label``). Pass ``quiet=True`` when a
+        different surface already shows the load state -- then the main
+        footer is left alone and ``done`` is still invoked (``None`` on
+        error) so the caller can always finalize.
 
         The worker is tracked on ``self._bg_threads`` and honors
-        ``self._bg_cancel``, an ``Event`` set by ``on_unmount`` when the picker
-        itself is torn down (a launch decision, cancel, or quit). A worker
-        still running at that point drops its outcome quietly once
-        ``work()`` returns, instead of racing ``app.call_from_thread`` against
+        ``self._bg_cancel``, set by ``on_unmount`` when the picker is torn
+        down. A worker still running then drops its outcome quietly once
+        ``work()`` returns, instead of racing ``call_from_thread`` against
         an app that may already be gone."""
         if not quiet:
             self._busy_label = label
@@ -6347,18 +6252,15 @@ class QuitConfirmScreen(ModalScreen[bool]):
     """Native modal confirm for Esc/q on a top-level picker view (#88 F4;
     native-focus internals NF1).
 
-    Migrated off the manual render/dispatch model onto a Textual ``ModalScreen``:
-    Textual owns the screen stack, the dim backdrop, and key routing, and the
-    screen returns its verdict via ``dismiss(bool)`` -- ``True`` quits, ``False``
-    stays.
+    Textual owns the screen stack, the dim backdrop, and key routing; the
+    screen returns its verdict via ``dismiss(bool)`` -- ``True`` quits,
+    ``False`` stays.
 
     **Native-focus internals (#88 NF1):** the ``[Quit] [Stay]`` row is a
-    :class:`FocusGroup` (one tab-stop; ◀▶ to choose, Enter/Space to activate),
-    replacing the former hand-rolled ``idx`` + ``on_key`` over a static ``Panel``.
-    *Stay* is the group's initial choice, so a reflexive Enter never quits. The
-    prompt and key-hint are ``Static``s in the same orange-framed ``Vertical`` as
-    the menus. The y / n / Esc / q shortcuts stay as screen ``BINDINGS`` so they
-    fire regardless of child focus.
+    :class:`FocusGroup` (one tab-stop; ◀▶ to choose, Enter/Space to
+    activate). *Stay* is the group's initial choice, so a reflexive Enter
+    never quits. The y/n/Esc/q shortcuts stay as screen ``BINDINGS`` so
+    they fire regardless of child focus.
     """
 
     CSS = """
@@ -6407,18 +6309,15 @@ class ProfConfirmScreen(ModalScreen[bool]):
     """Native modal confirm for a Profiles *Apply* (#88 F4; native-focus
     internals NF1).
 
-    Migrated off the manual render/dispatch model onto a Textual ``ModalScreen``.
-    It lists the exact terminal profiles each changed host column will gain (``+``)
-    or lose (``-``) before anything is written, and returns its verdict via
-    ``dismiss(True|False)`` -- ``True`` runs the per-host Apply, ``False`` cancels.
-    The regeneration is destructive to the terminal app's profile list, so the
-    explicit add/remove diff is always shown first.
+    Lists the exact terminal profiles each changed host column will gain
+    (``+``) or lose (``-``) before anything is written, and returns its
+    verdict via ``dismiss(True|False)`` -- ``True`` runs the per-host
+    Apply, ``False`` cancels. The regeneration is destructive to the
+    terminal app's profile list, so the diff is always shown first.
 
     **Native-focus internals (#88 NF1):** the ``[Apply] [Cancel]`` row is a
-    :class:`FocusGroup` (one tab-stop; ◀▶ to choose, Enter/Space to activate),
-    replacing the former hand-rolled ``on_key`` over a static ``Panel``. The diff,
-    the destructive-change warning, and the key-hint are ``Static``s in the same
-    orange-framed ``Vertical`` as the menus. Esc/q cancel via ``BINDINGS``.
+    :class:`FocusGroup` (one tab-stop; ◀▶ to choose, Enter/Space to
+    activate). Esc/q cancel via ``BINDINGS``.
     """
 
     CSS = """
@@ -6519,15 +6418,13 @@ class TaskMenuScreen(ModalScreen[int]):
     native-focus internals NF1).
 
     Lists the focused task's declared actions and returns the chosen action
-    *index* via ``dismiss(int)``, or ``dismiss(None)`` on cancel; the caller runs
-    the selected action.
+    *index* via ``dismiss(int)``, or ``dismiss(None)`` on cancel; the
+    caller runs the selected action.
 
-    **Native-focus internals (#88 NF1):** the action list is a native Textual
-    ``OptionList`` -- the framework owns focus, up/down, and Enter-to-select --
-    below a header (task title + subtitle) and above a description pane that
-    tracks the highlighted action (via ``OptionHighlighted``). Esc/q cancel via
-    ``BINDINGS`` actions. Replaces the former hand-rolled ``idx`` + ``on_key``
-    over a static ``Panel``.
+    **Native-focus internals (#88 NF1):** the action list is a native
+    Textual ``OptionList`` (framework owns focus/up-down/Enter) below a
+    header (task title + subtitle) and above a description pane tracking
+    the highlighted action. Esc/q cancel via ``BINDINGS``.
     """
 
     CSS = """
@@ -6604,28 +6501,20 @@ class TaskMenuScreen(ModalScreen[int]):
 class SubMenuScreen(ModalScreen[tuple]):
     """Native modal per-worktree action menu (#88 F4; native-focus internals NF1).
 
-    A picker overlay migrated off the manual render/dispatch model onto a Textual
-    ``ModalScreen``. It renders the focused worktree's header (title + meta) and
-    its available verbs (Open/Resume, Messages, Sync, Cleanup, Finalize, Stop,
-    Jump to host/caller, plus any contributed actions), and returns the chosen
+    Renders the focused worktree's header (title + meta) and its available
+    verbs (Open/Resume, Messages, Sync, Cleanup, Finalize, Stop, Jump to
+    host/caller, plus contributed actions), and returns the chosen
     ``(action_label, no_mux, ahp)`` via ``dismiss(tuple)`` -- or
-    ``dismiss(None)`` on
-    cancel; the caller dispatches the verb.
+    ``dismiss(None)`` on cancel; the caller dispatches the verb.
 
-    **Native-focus internals (#88 NF1):** the verbs are a native Textual
-    ``OptionList`` -- the framework owns focus, up/down, and Enter-to-select --
-    below a header (title + meta + session id) and above a description pane that
-    tracks the highlight (via ``OptionHighlighted``). **No-mux** is an
-    arrow-reachable **toggle row** at the bottom of that same list (shown when a
-    primary launch verb -- *Open* or *Resume* -- is offered, since it modifies
-    the launch, #4043): the operator's "no
-    special keyboarding" steer, made reachable purely by the arrow keys -- ↓ onto
-    the ``☐ No Mux`` row, Enter/Space flips it to ``☑`` and stays open; Enter on a
-    verb dismisses. (An earlier take used a separate ``Checkbox`` only reachable
-    by Tab, which the operator couldn't reach with the arrows -- folding it into
-    the list fixes that.) ``no_mux`` is plain screen state. Esc/q cancel via
-    ``BINDINGS``. Replaces the former hand-rolled ``idx`` + ``on_key`` over a
-    static ``Panel``.
+    **Native-focus internals (#88 NF1):** verbs are a native Textual
+    ``OptionList`` (framework owns focus/up-down/Enter) below a header and
+    above a description pane tracking the highlight. **No-mux** is an
+    arrow-reachable toggle row at the bottom of that list (shown when a
+    primary launch verb -- Open/Resume -- is offered, since it modifies the
+    launch, #4043): ↓ onto ``☐ No Mux``, Enter/Space flips it and stays
+    open; Enter on a verb dismisses. ``no_mux`` is plain screen state.
+    Esc/q cancel via ``BINDINGS``.
     """
 
     CSS = """
@@ -6986,22 +6875,20 @@ class ScopeDlgScreen(ModalScreen[bool]):
     """Native modal scope dialog for Clean/Sync and New-worktree options (#88 F4;
     native-focus internals #88 NF1).
 
-    Shared by ``cleanup`` (Clean/Sync) and ``optmenu`` (New-worktree options): a
-    multi-select list of option toggles, a ``[Confirm] [Cancel]`` row, and -- for
-    the Clean/Sync variant -- a **read-only impact list** naming exactly which
-    worktrees the current toggle selection will act on. Returns ``dismiss(True)``
-    on Confirm / ``dismiss(False)`` on Cancel or Esc; the option toggles are
-    mirrored back onto the passed ``dlg`` dict (``opts[i]["on"]``) so the caller
-    reads the confirmed selection straight off it, and ``_union()`` /
-    ``_impact_fn`` stay valid live.
+    Shared by ``cleanup`` (Clean/Sync) and ``optmenu`` (New-worktree
+    options): a multi-select list of option toggles, a ``[Confirm]
+    [Cancel]`` row, and -- for Clean/Sync -- a read-only impact list naming
+    exactly which worktrees the current selection will act on. Returns
+    ``dismiss(True)`` on Confirm / ``dismiss(False)`` on Cancel or Esc; the
+    toggles are mirrored back onto the passed ``dlg`` dict
+    (``opts[i]["on"]``) so the caller reads the confirmed selection
+    straight off it, and ``_union()``/``_impact_fn`` stay valid live.
 
     **Native-focus internals (#88 NF1):** the toggles are a native Textual
-    ``SelectionList`` (one tab-stop; arrow to move, Space to toggle -- the
-    framework owns focus + checkbox state) and the button row is a
-    :class:`FocusGroup` (one tab-stop; ◀▶ to choose, Enter to activate). Tab
-    moves between the two -- the two-section model, now framework-native --
-    replacing the former hand-rolled ``section``/``idx``/``bidx`` + ``on_key``
-    over a static ``Panel``. Esc/q cancel via ``BINDINGS`` actions.
+    ``SelectionList`` (one tab-stop; arrow to move, Space to toggle) and
+    the button row is a :class:`FocusGroup` (one tab-stop; ◀▶ to choose,
+    Enter to activate). Tab moves between the two. Esc/q cancel via
+    ``BINDINGS``.
     """
 
     CSS = """
@@ -7143,18 +7030,15 @@ class ScopeDlgScreen(ModalScreen[bool]):
 class CfgMenuScreen(ModalScreen[int]):
     """Native modal ⚙ Configuration menu (#88 F4; native-focus internals #88 NF1).
 
-    A picker overlay migrated off the manual render/dispatch model onto a Textual
-    ``ModalScreen``. It lists the config-hosted pivots (Profiles) plus any
-    contributed Configuration sections and returns the chosen item *index* via
-    ``dismiss(int)``, or ``dismiss(None)`` on cancel; the caller acts on the
-    selection (switch to that pivot / run that section).
+    Lists the config-hosted pivots (Profiles) plus any contributed
+    Configuration sections and returns the chosen item *index* via
+    ``dismiss(int)``, or ``dismiss(None)`` on cancel; the caller acts on
+    the selection (switch to that pivot / run that section).
 
-    **Native-focus internals (#88 NF1):** the menu list is now a native Textual
-    ``OptionList`` -- the framework owns focus, up/down movement, and
-    Enter-to-select -- replacing the former hand-rolled ``idx`` + ``on_key`` over
-    a static ``Panel``. The title rides the frame border; a muted hint line sits
-    inside (matching Maint/Task); Esc/q cancel via ``BINDINGS`` actions.
-    ``dismiss(event.option_index)`` returns the choice.
+    **Native-focus internals (#88 NF1):** the menu list is a native
+    Textual ``OptionList`` (framework owns focus/up-down/Enter). Esc/q
+    cancel via ``BINDINGS``. ``dismiss(event.option_index)`` returns the
+    choice.
     """
 
     CSS = """
@@ -7207,17 +7091,15 @@ class CfgMenuScreen(ModalScreen[int]):
 class MaintMenuScreen(ModalScreen[int]):
     """Native modal Maintenance actions menu (#88 F4; native-focus internals NF1).
 
-    A picker overlay migrated off the manual render/dispatch model onto a Textual
-    ``ModalScreen``. It lists the maintenance actions available for the selected
-    worktree set (Sync / Cleanup / Finalize / Stop) and returns the chosen action
-    *index* via ``dismiss(int)``, or ``dismiss(None)`` on cancel; the caller runs
-    the selection.
+    Lists the maintenance actions available for the selected worktree set
+    (Sync/Cleanup/Finalize/Stop) and returns the chosen action *index* via
+    ``dismiss(int)``, or ``dismiss(None)`` on cancel; the caller runs the
+    selection.
 
-    **Native-focus internals (#88 NF1):** the action list is now a native Textual
-    ``OptionList`` -- the framework owns focus, up/down movement, and
-    Enter-to-select -- replacing the former hand-rolled ``idx`` + ``on_key`` over
-    a static ``Panel``. A description pane below the list tracks the highlighted
-    action (via ``OptionHighlighted``); Esc/q cancel via ``BINDINGS`` actions.
+    **Native-focus internals (#88 NF1):** the action list is a native
+    Textual ``OptionList`` (framework owns focus/up-down/Enter). A
+    description pane below the list tracks the highlighted action;
+    Esc/q cancel via ``BINDINGS``.
     """
 
     CSS = """
@@ -7278,22 +7160,21 @@ class MaintMenuScreen(ModalScreen[int]):
 class ProgressScreen(ModalScreen[None]):
     """Native modal maintenance/profiles progress run (#88 F4).
 
-    The last live overlay migrated off the manual render/dispatch model onto a
-    Textual ``ModalScreen``. It renders the engine's ``progress`` sub-dialog --
-    each selected worktree (or profiles host column) as a row that advances
-    pending(·) -> running(spinner) -> done(✓)/failed(✗) -- and, unlike the other
-    (static) migrated overlays, it is **live**: an ``on_mount`` interval ticks
-    the run forward (the mock walker, or a real ``MaintenanceExecutor`` poll) and
-    repaints. It mirrors the former ``_key_progress`` exactly: an unarmed run
-    shows the beyond-clean confirm gate (Enter proceeds/arms, Esc cancels), a
-    done run closes on Enter/Esc.
+    Renders the engine's ``progress`` sub-dialog -- each selected worktree
+    (or profiles host column) as a row that advances pending(·) ->
+    running(spinner) -> done(✓)/failed(✗) -- and, unlike the other
+    (static) migrated overlays, is **live**: an ``on_mount`` interval ticks
+    the run forward (the mock walker, or a real ``MaintenanceExecutor``
+    poll) and repaints. Mirrors the former ``_key_progress`` exactly: an
+    unarmed run shows the beyond-clean confirm gate (Enter proceeds/arms,
+    Esc cancels), a done run closes on Enter/Esc.
 
-    The run's state lives on the engine (``eng.progress`` / ``eng.executor``),
+    The run's state lives on the engine (``eng.progress``/``eng.executor``),
     because several entry points build it (``_confirm_cleanup``,
-    ``_run_op_progress``, ``_start_profiles_run``) and the state-transition core
-    (``_advance_progress`` / ``_key_progress``) stays unit-tested there. This
-    screen is the native shell that drives and renders that state, dismissing
-    itself once the engine clears ``progress``.
+    ``_run_op_progress``, ``_start_profiles_run``) and the state-transition
+    core (``_advance_progress``/``_key_progress``) stays unit-tested there.
+    This screen is the native shell that drives and renders that state,
+    dismissing itself once the engine clears ``progress``.
     """
 
     CSS = """
@@ -7466,19 +7347,21 @@ class ProgressScreen(ModalScreen[None]):
 class MsgViewScreen(ModalScreen[None]):
     """Native modal recent-messages viewer (#88 F4) -- the last overlay migrated.
 
-    A read-only peek at a worktree's latest-session conversation tail plus its
-    session registry (every session's FULL id + title, so the operator can copy
-    an id out for a manual ``copilot --resume <id>``). Like ``ProgressScreen`` it
-    is **live**: the payload loads on a daemon thread (``_msgview_worker``) that
-    populates the engine-owned ``self.msgview`` dict under a lock, and an
-    ``on_mount`` interval repaints while ``loading`` (plus once more on the
-    loading -> loaded transition) so the result appears promptly. It mirrors the
-    former ``_key_msgview`` exactly (↑/↓ scroll; Esc/q/Tab/Enter close).
+    A read-only peek at a worktree's latest-session conversation tail plus
+    its session registry (every session's FULL id + title, so the operator
+    can copy an id out for a manual ``copilot --resume <id>``). Like
+    ``ProgressScreen`` it is **live**: the payload loads on a daemon thread
+    (``_msgview_worker``) that populates the engine-owned ``self.msgview``
+    dict under a lock, and an ``on_mount`` interval repaints while
+    ``loading`` (plus once more on the loading -> loaded transition) so the
+    result appears promptly. Mirrors the former ``_key_msgview`` exactly
+    (↑/↓ scroll; Esc/q/Tab/Enter close).
 
     The state + loader stay on the engine because the worker references
-    ``self.msgview`` by identity (a late result for a viewer the operator already
-    closed / reopened is dropped). This screen is the native shell that renders
-    and scrolls that state, dismissing itself once the engine clears it.
+    ``self.msgview`` by identity (a late result for a viewer the operator
+    already closed/reopened is dropped). This screen is the native shell
+    that renders and scrolls that state, dismissing itself once the engine
+    clears it.
     """
 
     CSS = """
@@ -7631,27 +7514,21 @@ from .steering import (
 class MaintenanceView:
     """Encapsulated Maintenance-pivot body sub-view (#88 F5, slice 5a).
 
-    A cohesive sub-view carved out of the picker's monolithic
-    ``PickerScreen.build_body`` into its own component, mirroring
-    :class:`ProfilesView` and per the incremental componentization strategy
-    (#88 F5): peel cohesive sub-views off the God-object one at a time, under a
-    moratorium on new full-screen-at-once renders, until the shared
-    ``sel=(zone,index)`` focus model shrinks to just the chrome.
+    A cohesive sub-view carved out of ``PickerScreen.build_body``, mirroring
+    :class:`ProfilesView` per the incremental componentization strategy
+    (#88 F5): peel cohesive sub-views off the God-object one at a time until
+    the shared ``sel=(zone,index)`` focus model shrinks to just the chrome.
 
-    This component owns the Maintenance pivot's **rendering** (slice 5a -- the
-    body entry ``build`` plus the four row helpers ``_selectall_row`` /
-    ``_header`` / ``_group_row`` / ``_row``) and now its **selection model**
-    (slice 5b): the state ``maint_sel`` plus the grouping / multi-select
-    behaviour (``maint_groups`` / ``maint_records`` / ``_maint_ids`` /
-    ``_toggle_maint`` / ``_toggle_maint_all`` / ``_toggle_group``).
-    ``PickerScreen`` exposes a ``maint_sel`` ``@property`` shim and one-line
-    delegating methods so its call sites (``_open_maint_menu``, ``_dispatch_key``,
-    ``_activate``, the executor poll) and the test suite address them unchanged.
-    The component reads engine-owned shared infrastructure via ``self._eng``: the
-    scoped ``cleanup_rows`` data layer (used by non-Maintenance code too), the
-    ``_checkbox`` glyph helper (shared with the Worktrees gutter), the status
-    line (``debug``), the tab bar, and the button row. A later slice makes this a
-    focusable Textual widget.
+    Owns the Maintenance pivot's **rendering** (slice 5a -- ``build`` plus
+    ``_selectall_row``/``_header``/``_group_row``/``_row``) and its
+    **selection model** (slice 5b): ``maint_sel`` plus grouping/multi-select
+    (``maint_groups``/``maint_records``/``_maint_ids``/``_toggle_maint``/
+    ``_toggle_maint_all``/``_toggle_group``). ``PickerScreen`` exposes a
+    ``maint_sel`` ``@property`` shim and one-line delegating methods so its
+    call sites and the test suite address them unchanged. Reads
+    engine-owned shared infrastructure via ``self._eng``: ``cleanup_rows``,
+    the ``_checkbox`` glyph helper, the status line, tab bar, and button row.
+    A later slice makes this a focusable Textual widget.
     """
 
     def __init__(self, eng) -> None:
@@ -7816,25 +7693,26 @@ class MaintenanceView:
 class WorktreesView:
     """Encapsulated Worktrees-list body sub-view (#88 F5, slice 7).
 
-    The picker's **primary** body -- the machine's worktree list, grouped into
-    Active / Recent / Completed / Unowned sections, with the multi-select
+    The picker's **primary** body -- the machine's worktree list, grouped
+    into Active/Recent/Completed/Unowned sections, with the multi-select
     checkbox gutter, per-row disposition/preview dimming, focus + selection
     highlight layering, and the decorative live worktree-status-core pulse
-    sub-lines. It is the largest and most-coupled body, so it is carved out
-    **last**, once the componentization pattern was proven three times over
-    (Profiles / Maintenance / Tasks).
+    sub-lines. Largest and most-coupled body, so carved out **last**, once
+    the componentization pattern was proven three times over (Profiles /
+    Maintenance / Tasks).
 
     This slice moves the **rendering** -- the whole Worktrees branch of
     ``build_body`` into ``build``. Because the list's multi-select **state**
-    (``wt_sel`` / ``wt_anchor``) and its range/toggle behaviour thread deeply
+    (``wt_sel``/``wt_anchor``) and its range/toggle behaviour thread deeply
     through the shared key-dispatch + focus machinery (``_dispatch_key``,
-    ``_reconcile_wt_sel``, range-select, focus tracking) -- which is exactly the
+    ``_reconcile_wt_sel``, range-select, focus tracking) -- exactly the
     ``sel``/``stops`` chrome the *final* native-focus step addresses -- that
-    state stays on ``PickerScreen`` and is read here via ``self._eng``, along
-    with the list data (``current_list`` / ``list_records``), the multi-select
-    predicates (``_wt_multiselect_active`` / ``_cleanable``), the shared
-    ``_checkbox`` glyph, and the chrome rows (``tab_bar`` / ``new_worktree_row``
-    / ``active_button``). A later slice makes this a focusable Textual widget.
+    state stays on ``PickerScreen`` and is read here via ``self._eng``,
+    along with the list data (``current_list``/``list_records``), the
+    multi-select predicates (``_wt_multiselect_active``/``_cleanable``),
+    the shared ``_checkbox`` glyph, and the chrome rows
+    (``tab_bar``/``new_worktree_row``/``active_button``). A later slice
+    makes this a focusable Textual widget.
     """
 
     def __init__(self, eng) -> None:
@@ -8228,26 +8106,24 @@ class TasksView:
 class ProfilesView:
     """Encapsulated Profiles-configurator sub-view (#88 F5, slices 1-3).
 
-    A cohesive sub-view carved out of the picker's monolithic
-    ``PickerScreen.build_body`` into its own component, per the incremental
-    componentization strategy (#88 F5): rather than convert the whole
-    ``sel=(zone,index)`` focus model to widgets in one big-bang, we peel cohesive
-    sub-views off the God-object one at a time and impose a **moratorium on new
-    full-screen-at-once renders**.
+    A cohesive sub-view carved out of ``PickerScreen.build_body``, per the
+    incremental componentization strategy (#88 F5): peel cohesive sub-views
+    off the God-object one at a time, under a moratorium on new
+    full-screen-at-once renders.
 
-    This component owns the Profiles pivot's **entire rendering** (slices 1-2) and
-    now its **grid-editing model** (slice 3): the state -- ``grid`` (pending
-    edits), ``applied`` (last-applied snapshot), ``pcol`` (cursor column),
-    ``targets`` / ``host_cols`` (the matrix axes), ``_prof_unavailable`` -- plus
-    the pure grid behaviour (``grid_dirty`` / ``pending_count`` / ``cell_locked``
-    / ``profiles_present`` / ``_column_sels`` / ``toggle_cell``). ``PickerScreen``
-    exposes thin ``@property`` / method **shims** onto these so its existing call
-    sites (``setup``, ``_dispatch_key``, the Apply/progress path) and the test
-    suite address them unchanged. The Apply/load *plumbing* (``_apply_profiles``,
-    ``_start_profiles_run``, ``_commit_applied_profiles``, the background column
-    loader) still lives on the engine and reads this state through the shims, to
-    be pulled in by a follow-up slice. A later slice makes this a focusable
-    Textual widget.
+    Owns the Profiles pivot's **entire rendering** (slices 1-2) and its
+    **grid-editing model** (slice 3): the state -- ``grid`` (pending edits),
+    ``applied`` (last-applied snapshot), ``pcol`` (cursor column),
+    ``targets``/``host_cols`` (the matrix axes), ``_prof_unavailable`` --
+    plus the pure grid behaviour (``grid_dirty``/``pending_count``/
+    ``cell_locked``/``profiles_present``/``_column_sels``/``toggle_cell``).
+    ``PickerScreen`` exposes thin ``@property``/method shims onto these so
+    its existing call sites and the test suite address them unchanged. The
+    Apply/load plumbing (``_apply_profiles``, ``_start_profiles_run``,
+    ``_commit_applied_profiles``, the background column loader) still lives
+    on the engine and reads this state through the shims, to be pulled in
+    by a follow-up slice. A later slice makes this a focusable Textual
+    widget.
     """
 
     def __init__(self, eng) -> None:
