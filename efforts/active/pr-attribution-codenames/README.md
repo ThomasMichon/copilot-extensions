@@ -838,3 +838,20 @@ checked off.
 - Full plugin suite: 640 passed (same 10 pre-existing `test_doctor.py`
   failures, unrelated).
 
+### 2026-09-19 — Phase 3 PR review round 2 (PR #2922)
+
+- **Best-effort backfill (medium severity):** `codename_tracking.ensure_codename`
+  can raise (notably `TimeoutError` if its cross-process allocation lock
+  can't be acquired in time), and the new backfill call in
+  `_open_via_provider` was unguarded -- a lock-contention failure would
+  crash `create-pr`'s provider-open flow and abort opening the PR
+  entirely, even though the codename marker itself is explicitly
+  best-effort (a missing/invalid codename already degrades to "skip the
+  marker," never a hard failure). Wrapped the backfill call in a bare
+  `except Exception: pass` so any failure degrades to the same
+  pre-existing skip behavior instead of propagating. 1 new test
+  (`test_codename_backfill_failure_degrades_to_skip_not_crash`, mocks
+  `ensure_codename` to raise `TimeoutError`, asserts the PR still opens
+  successfully with no marker). Full plugin suite: 640 passed (same 10
+  pre-existing `test_doctor.py` failures, unrelated).
+
