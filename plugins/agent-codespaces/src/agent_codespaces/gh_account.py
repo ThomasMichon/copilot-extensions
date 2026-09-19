@@ -128,6 +128,48 @@ def env_for_repo(slug: str | None, base: dict | None = None) -> dict:
     return env_for_account(account_for_repo(slug), base)
 
 
+def _codespace_owner_login(name: str) -> str | None:
+    """Return the gh login that OWNS CodeSpace ``name`` (its ``.owner.login``).
+
+    Reads the authoritative owner from the API under ambient ``gh`` (the create
+    ran under it). This is distinct from the *billable* owner, which for an
+    org-paid repo is the org (no personal ``gh`` token). Returns None on any
+    failure.
+    """
+    if not name or shutil.which("gh") is None:
+        return None
+    try:
+        result = subprocess.run(
+            ["gh", "api", f"user/codespaces/{name}", "--jq", ".owner.login"],
+            capture_output=True, text=True, timeout=15,
+            stdin=subprocess.DEVNULL, creationflags=_creation_flags(),
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def owning_account(name: str, prefer: str | None = None) -> str | None:
+    """Resolve the gh account that owns CodeSpace ``name`` AND can mint a token.
+
+    Prefers ``prefer`` when it already authenticates (``gh`` can mint its
+    token); otherwise reads the CodeSpace's real ``.owner.login`` and returns it
+    only when that owner is itself an authenticated ``gh`` account. Returns None
+    when no token-bearing owner resolves -- callers then use ambient auth rather
+    than binding a tokenless slug (e.g. a billable org), which would otherwise
+    break owner-token minting for native hosting (the account bound to a
+    CodeSpace must be one whose ``gh`` token can be minted).
+    """
+    if prefer and token_for_account(prefer):
+        return prefer
+    login = _codespace_owner_login(name)
+    if login and token_for_account(login):
+        return login
+    return None
+
+
 def mapped_accounts() -> tuple[str, ...]:
     """Keep namespaced account reads fresh across cells and receipt changes."""
     if worktrees.explicit_context():

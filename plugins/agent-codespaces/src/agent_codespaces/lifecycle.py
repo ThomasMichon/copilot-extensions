@@ -179,11 +179,22 @@ def account_for_codespace(name: str) -> str | None:
     """
     validate_context()
     try:
-        from . import account_binding
+        from . import account_binding, gh_account
 
         bound = account_binding.bound_account(name)
         if bound:
-            return bound
+            if gh_account.token_for_account(bound):
+                return bound
+            # Stale/tokenless binding (e.g. a billable-org slug from an older
+            # create): re-resolve a token-bearing owner so native hosting can
+            # mint the owner token, and persist the correction.
+            owner = gh_account.owning_account(name)
+            if owner:
+                try:
+                    account_binding.bind(name, owner, "")
+                except Exception:
+                    pass
+                return owner
         for cs in list_codespaces():
             if cs.name == name:
                 if cs.account:
@@ -427,12 +438,20 @@ def create_codespace(
         name = result.stdout.strip()
 
     if account:
-        try:
-            from . import account_binding
+        # Bind to a token-bearing OWNER, not the billable-org slug that
+        # `account-for` may return for an org-paid repo (that org has no gh
+        # token, so a later `token_for_account` for native hosting fails). The
+        # create ran under ambient auth when `account` had no token, so resolve
+        # the CodeSpace's real owner and bind that instead.
+        binding = gh_account.owning_account(name, prefer=account)
+        if binding:
+            try:
+                from . import account_binding
 
-            account_binding.bind(name, account, repo)
-        except Exception:
-            pass
+                account_binding.bind(name, binding, repo)
+            except Exception:
+                pass
+        account = binding or ""
     return CodespaceInfo(
         name=name,
         display_name=display_name or name,
