@@ -5,7 +5,7 @@
   Copilot execution.
 - **Scope:** leaf (cross-cutting capability within the agent fabric)
 - **Status:** Active
-- **Last revised:** 2026-09-04
+- **Last revised:** 2026-09-18
 - **Reality docs:** [`plugins/agent-bridge/docs/architecture.md`](../../plugins/agent-bridge/docs/architecture.md) ·
   [`plugins/agent-worktrees/docs/architecture.md`](../../plugins/agent-worktrees/docs/architecture.md)
 
@@ -104,6 +104,31 @@ Pickers, applications, CLIs, handoff tools, and coordinating agents are clients
 of the hosting boundary. They choose and request outcomes; they do not absorb
 provider implementations.
 
+### Durable liveness snapshot
+
+A provider's own process is not exempt from the same loss it is meant to detect
+for others — its host process can itself die, restart, or run on a machine that
+reboots entirely, discarding whatever it held only in memory. A provider that
+wants to honestly answer *"who was I hosting"* after **any** restart of its own —
+not only a graceful one — persists that answer to durable storage independent of
+its own process lifetime, updating it at meaningful lifecycle transitions (a leg
+starting, retiring, or handing off) in addition to any periodic cadence, so the
+window in which the record can be stale stays small. The snapshot is still only
+ever as fresh as its last write, and reconciliation at startup must treat it
+that way: a leg the snapshot names that current reality no longer shows alive is
+**candidate** host-loss evidence, not an automatic verdict — the same leg may
+simply have retired cleanly between the last write and the restart, and a leg
+that started after the last write is not itself proof of anything either way. A
+provider reconciling a possibly-stale snapshot marks an unconfirmed leg as
+exactly that (mirroring the fabric's own
+`§Behaviors/uncertainty-is-marked-not-multiplied` on the agent-worktrees
+vision) rather than asserting loss it cannot actually back, and corroborates
+with an independent liveness check before treating a named leg as genuinely
+gone. This is what makes
+a provider's host-loss observation (`§Concepts/Host-owned execution identity`)
+honest across the harder case a full machine restart represents, not only the
+case where some part of the provider survives to notice its own child died.
+
 ## Features
 
 ### interchangeable-session-hosts
@@ -148,6 +173,19 @@ A human control plane can present launch, resume, join, and handoff actions
 across available providers while preserving the user's preferred Copilot
 experience.
 
+### recoverable-across-full-restart
+
+Whatever a provider was hosting remains discoverable even after the machine it
+ran on restarts entirely — not only after the provider's own process dies while
+the machine keeps running. Because the provider's durable liveness snapshot
+(`§Concepts/Durable liveness snapshot`) survives independently of any one
+process's memory, the provider's next startup can compare that snapshot against
+current reality and publish the same attributable host-loss observation it
+would have published had it merely crashed and restarted in place. A client
+built against that observation — the Picker's bulk-resume, for one — never
+needs a special case for "the whole machine went away" versus "just this host
+process did."
+
 ## Behaviors
 
 ### host-owns-mechanics-agency-layer-owns-meaning
@@ -160,6 +198,21 @@ duplicates the other's authority.
 
 A transition is durable before any endpoint is pinged or observer is expected
 to react. Notification loss delays action but does not lose the request.
+
+### snapshot-outlives-the-process
+
+A provider's record of what it is currently hosting is written to storage that
+survives the provider's own process ending, not held only in memory. A provider
+that never persists this cannot honestly distinguish "nothing was lost" from
+"I simply don't remember" after it restarts — the guarantee exists specifically
+so that distinction stays truthful across the provider's own worst case, a full
+machine restart, not only its process exiting cleanly. Because the persisted
+record is only ever as current as its last write, a stale entry is reconciled as
+an **unconfirmed** candidate, never asserted as loss outright — the same
+honesty-under-staleness the fabric already requires elsewhere
+(`§Behaviors/uncertainty-is-marked-not-multiplied` on the agent-worktrees
+vision), applied here to the provider's own bookkeeping instead of a
+worktree's.
 
 ### launch-receipts-are-provisional
 
@@ -246,3 +299,14 @@ continuation.
   `session_backend.is_ahp` config branch threaded through agent-worktrees'
   `__main__.py`, `tracking.py`, `finalize.py`, and `config_dropins.py` (landed
   via #1657 / PR #1998). Tracked by #2062.
+- **2026-09-18** — Added §Concepts/*Durable liveness snapshot*,
+  §Features/*recoverable-across-full-restart*, and
+  §Behaviors/*snapshot-outlives-the-process*. Prompted by a direct follow-up to
+  the Picker's newly-added `fleet-recovery-relaunch` bulk-resume feature
+  (`copilot-extensions visions/picker`): that feature depends on a provider
+  honestly naming which execution legs it lost, but a provider whose own
+  process restarted has no memory to name them from unless it had already
+  persisted that record somewhere durable. Generalizes the guarantee from
+  "survives this host process dying" to "survives the machine it runs on
+  restarting entirely" — the harder, and more common in practice, failure mode
+  an operator's laptop or any facility machine periodically produces.
