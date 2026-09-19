@@ -227,7 +227,11 @@ kill, no encoding-from-a-subprocess concern, no zombie/leak risk.
   `providers.attribution.validate_effective_head`/`BranchLeakError`, called
   from `create_pr` immediately after `feature_branch` is resolved (covers
   the explicit `--branch`, live-active-PR-reuse, and rendered-`head_pattern`
-  paths uniformly, before the dry-run response and before any push).
+  paths uniformly, before the dry-run response and before any push) — and
+  from `finalize.push_changes`'s two publish paths (`_push_changes_pr`,
+  `_push_changes_pr_refspec`), which republish `record.pr.branch` on every
+  re-push independent of `create_pr` and needed the same guard (review
+  round 2 caught this second boundary).
 - [x] **Hard error, not a warning.** A warning still lets the push proceed
   with an identifying ref. When `source_attribution` isn't `true` and the
   effective head would carry a private identifier, this must be a hard
@@ -559,6 +563,17 @@ reverse lookup, no new registry).
 - Also bumped `.github/plugin/marketplace.json`'s top-level
   `metadata.version` (a separate, easy-to-miss requirement for any
   `agent-worktrees` change per `AGENTS.md`), caught by review.
+- **Review round 2** caught a real gap in the guard's coverage: it only ran
+  inside `create_pr`, but `finalize.push_changes` republishes
+  `record.pr.branch` directly on every re-push (both the snapshot and
+  refspec publish paths), and that branch can be set independently via
+  `set-pr --branch` or simply predate this guard on an existing worktree.
+  Reused `validate_effective_head` at that second publish boundary too
+  (`_push_changes_pr` and `_push_changes_pr_refspec` in `finalize.py`), so a
+  leaking recorded branch can no longer be (re)published through
+  `push-changes` either. 2 new tests (`TestPRFinalizeAndPush`-adjacent,
+  snapshot + refspec modes); full `test_pr_ops.py`/`test_providers.py`/
+  `test_config.py` suite: 453 passed.
 
 Remaining: Phase 3 (descoped SSH-based reverse lookup, not yet
 rewritten/implemented). This effort is not `Done` until Phase 3 lands too.

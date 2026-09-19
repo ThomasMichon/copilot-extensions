@@ -1567,6 +1567,36 @@ class TestPRFinalizeAndPush:
         assert rec.pr.head_sha == local_head
         assert rec.pr.state == "open"
 
+    def test_push_changes_blocks_a_leaking_recorded_branch(self, pr_repo):
+        # pr-attribution-codenames Phase 5 (round 2): create-pr's guard only
+        # covers the branch IT chooses -- a leaking name recorded some other
+        # way (e.g. `set-pr --branch`) must still be blocked when
+        # push-changes later republishes `record.pr.branch` directly.
+        from agent_worktrees import finalize as fin
+        config, wid, wt_path, _remote_dir = pr_repo
+        pr_ops.create_pr(wid, config, title="Add feature")
+
+        leaking_branch = f"worktree/{wid}"
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        rec.pr.branch = leaking_branch
+        tracking.save_record(rec)
+
+        # push-changes' snapshot-mode "on worktree/<id>" path resolves the
+        # branch to (re)snapshot from the active PR's recorded branch --
+        # simulate the ordinary post-create-pr state (HEAD back on the
+        # worktree branch with a feedback commit) rather than checking out
+        # the leaking name itself.
+        _git("checkout", f"worktree/{wid}", cwd=wt_path)
+        (wt_path / "c.txt").write_text("feedback\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "address feedback", cwd=wt_path)
+
+        ok = fin.push_changes(wid, config)
+        assert ok is False
+        assert not git_ops.remote_branch_exists(
+            "origin", leaking_branch, cwd=str(wt_path)
+        )
+
     def test_push_changes_refreshes_marker_and_preserves_body(
         self, pr_repo, monkeypatch
     ):
@@ -1876,6 +1906,29 @@ class TestPRFinalizeAndPush:
         _git("checkout", "-b", "sidebar", cwd=wt_path)
         ok = fin.push_changes(wid, config)
         assert ok is False
+
+    def test_push_changes_refspec_blocks_a_leaking_recorded_branch(self, pr_repo):
+        # Same guard as the snapshot-mode test above, exercised on the
+        # refspec publish path.
+        from agent_worktrees import finalize as fin
+        config, wid, wt_path, _ = pr_repo
+        config = self._refspec_config(config)
+        pr_ops.create_pr(wid, config, title="Add feature")
+
+        leaking_branch = f"worktree/{wid}"
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        rec.pr.branch = leaking_branch
+        tracking.save_record(rec)
+
+        (wt_path / "c.txt").write_text("feedback\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "address feedback", cwd=wt_path)
+
+        ok = fin.push_changes(wid, config)
+        assert ok is False
+        assert not git_ops.remote_branch_exists(
+            "origin", leaking_branch, cwd=str(wt_path)
+        )
 
     def test_push_changes_refspec_dirty_refused(self, pr_repo):
         from agent_worktrees import finalize as fin
