@@ -177,6 +177,35 @@ class TestResolveCodenameCrossMachine:
             assert crl.resolve_codename_cross_machine(malformed) == []
         assert called == []
 
+    def test_malformed_explicit_project_never_reaches_ssh(self, monkeypatch):
+        # Same command-injection concern as the codename, for an explicitly
+        # supplied `project` argument -- also interpolated into the remote
+        # shell command by `_remote_probe_cmd`.
+        monkeypatch.delenv(crl.NO_REMOTE_ENV, raising=False)
+        called = []
+        monkeypatch.setattr(crl, "_probe_machine",
+                            lambda *a, **k: called.append(1))
+        for malformed_project in (
+            "'; rm -rf / #",
+            "$(whoami)",
+            "project`touch pwned`",
+            "project;evil",
+            "",
+        ):
+            assert crl.resolve_codename_cross_machine(
+                "sturdy-crate", project=malformed_project,
+            ) == []
+        assert called == []
+
+    def test_valid_explicit_project_is_accepted(self, monkeypatch):
+        monkeypatch.delenv(crl.NO_REMOTE_ENV, raising=False)
+        monkeypatch.setattr(cfg, "load_config", lambda *a, **k: _cfg("lambda-core"))
+        monkeypatch.setattr(crl, "_known_machine_keys", lambda *, exclude: [])
+        # Must not raise / must not be rejected as malformed.
+        assert crl.resolve_codename_cross_machine(
+            "sturdy-crate", project="test-chamber",
+        ) == []
+
     def test_scans_every_known_machine_and_collects_matches(self, monkeypatch):
         monkeypatch.delenv(crl.NO_REMOTE_ENV, raising=False)
         monkeypatch.setattr(cfg, "project_name", lambda: "test-chamber")
