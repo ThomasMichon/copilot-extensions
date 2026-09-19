@@ -213,6 +213,31 @@ the claimant session id to the user and offer to file a bug (do not file one
 automatically): repeated or racing consumption of the same handoff is
 typically a sign of a real defect upstream, not routine behavior.
 
+### Extension-host disconnected mid-call
+
+A handoff tool call -- `consume_handoff` most commonly -- can fail with
+something like "Extension disconnected before responding to tool call" when
+the Copilot CLI's extension host restarts mid-call, for example while a
+background plugin update or reconciliation pass is being applied. A following
+notification that the available tool set changed (tools disappearing and
+reappearing) is a strong corroborating signal that this is what happened.
+
+This is a **transport-level failure, not a semantic answer**. Unlike an
+already-claimed response (which always names a claimant session), a
+disconnect carries no information about whether the underlying store was
+read, mutated, or left untouched -- it is not evidence that no handoff is
+pending.
+
+1. Do not conclude "nothing is pending" or reconstruct a different objective
+   from session history solely because the call errored this way.
+2. Once the tool set stabilizes (previously-lost tools become available
+   again), retry the identical call once.
+3. If the tool remains unavailable, or the retry fails the same way, fall
+   back to the payload-local CLI (`consume --locator`, `facts`,
+   `check-heads`) -- it talks to the durable stores directly and does not
+   depend on the extension host being up.
+4. Only report "nothing pending" once that CLI-backed retry also finds none.
+
 ## Handoff-lifecycle observability
 
 `trigger_handoff` is stage 6 of a wider 13-stage cutover lifecycle spanning

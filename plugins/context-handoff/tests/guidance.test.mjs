@@ -174,6 +174,26 @@ test("skill states the mechanism is known from turn one, independent of handoff 
   assert.match(skill, /whether or not it began\s*\n?\s*from a handoff/);
 });
 
+test("skill and README agree on the extension-host disconnect recovery", () => {
+  const skill = readFileSync(
+    join(plugin, "skills", "context-handoff", "SKILL.md"),
+    "utf8",
+  ).replace(/\s+/g, " ");
+  const readme = readFileSync(
+    join(plugin, "README.md"),
+    "utf8",
+  ).replace(/\s+/g, " ");
+
+  for (const source of [skill, readme]) {
+    assert.match(source, /Extension disconnected before responding to tool call/);
+    assert.match(source, /transport-level failure, not a semantic answer/);
+    assert.match(source, /retry the identical call once/);
+    assert.match(source, /payload-local CLI/);
+    assert.match(source, /does not depend on the extension host/);
+    assert.match(source, /Only report "nothing pending" once/);
+  }
+});
+
 test("consume command remains the canonical resume surface", () => {
   const extension = readFileSync(
     join(plugin, "extensions", "context-handoff", "extension.mjs"),
