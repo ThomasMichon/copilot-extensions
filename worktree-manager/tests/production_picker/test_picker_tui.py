@@ -4646,6 +4646,58 @@ def test_command_bar_escape_clears_filter_before_backing_out(monkeypatch):
     asyncio.run(run())
 
 
+def test_command_bar_idle_escape_preserves_focus_by_key(monkeypatch):
+    """PR #2911 review: the idle-Escape filter-clear path (distinct from the
+    composing-Escape path in `_dispatch_cmd_key`) must ALSO remap focus by
+    the row's stable key -- clearing the filter re-expands the list, and a
+    plain index-out-of-range check would leave `sel` pointing at whatever
+    row now sits at the old index instead of the one actually focused."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("anomalous-potato", "Win")
+    raws = [
+        {"id": "anomalous-potato-win-20260627-aaaa", "title": "Alt match",
+         "status": "active", "started_at": "2026-06-27T17:00:00",
+         "turn_count": 1, "state": "wip"},
+        {"id": "anomalous-potato-win-20260627-bbbb", "title": "Zzz match",
+         "status": "active", "started_at": "2026-06-27T16:00:00",
+         "turn_count": 1, "state": "wip"},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            await _focus_wt_list(app, pilot, scr)
+            await pilot.press("/")
+            for ch in "zzz":
+                await pilot.press(ch)
+            await pilot.press("enter")
+            await pilot.pause()
+            assert [w["title"] for w in scr.list_records()] == ["Zzz match"]
+            assert scr.sel == ("L", 0)
+            await pilot.press("escape")
+            await pilot.pause()
+            assert scr.list_view.query == ""
+            assert [w["title"] for w in scr.list_records()] == ["Alt match", "Zzz match"]
+            # Zzz match moved from index 0 (filtered) to index 1 (unfiltered) --
+            # focus must have followed it there, not stayed at index 0.
+            focused = scr.list_records()[scr.sel[1]]
+            assert focused["title"] == "Zzz match"
+
+    asyncio.run(run())
+
+
 def test_command_bar_never_hides_a_live_worktree(monkeypatch):
     """Cross-effort record-shape contract (README, Phase 4): a filter must
     never silently drop a live worktree just because its title doesn't match

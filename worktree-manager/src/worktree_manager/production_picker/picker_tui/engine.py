@@ -4231,9 +4231,9 @@ class PickerScreen(Widget):
             # filter clears first, then a multi-selection collapses; only a
             # press with neither reaches the quit prompt.
             if key == "escape" and self.list_view.query:
+                refs = self._wt_capture_row_refs()
                 self.list_view.clear()
-                if self.sel not in self.stops():
-                    self.sel = self.default_sel()
+                self._wt_restore_row_refs(refs)
                 return
             if key == "escape" and self._wt_collapse_selection():
                 return
