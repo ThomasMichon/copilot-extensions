@@ -54,7 +54,11 @@ the work advances. The task is then a *resumable statement of an outcome to
 reach*, not just an instruction. That durability is what lets a task genuinely
 outlive the specific agent pursuing it: a worker that vanishes mid-goal is
 replaced by one that **resumes from the recorded progress**, not one that starts
-the goal over.
+the goal over. Every change of a task's *current* owner session is also
+recorded in a durable **attachment history** (see *durable-attachment-history*
+in Features) — `GET /tasks/{id}/attachments` — so a consumer resolving "what
+session worked this task" can still answer for a prior attempt even after the
+task has moved on to a new owner or been released.
 
 ### The coordinator — the single-writer store
 A **coordinator** owns the queue: a single-writer store that hands out
