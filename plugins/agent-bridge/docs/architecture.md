@@ -532,6 +532,11 @@ restart does not inherently close the child's pipes.
   handle, including after restart and for orphan records. Shutdown retries that
   accepted intent; retained stopped-host metadata alone never grants permission
   to reap. Pending reap intent also fences recovery until cleanup is confirmed.
+  Every new-host resume/recreate attempt rechecks retained authoritative host
+  ownership. A failure after host commitment cannot fall through to another
+  spawn, and failed attempts cannot leave a success-shaped IDLE state.
+  Shutdown retries FAILED sessions with valid restart provenance even after
+  all live handles were closed, completing the remaining persistence transition.
   Remote cleanup also checks an in-process HostIndex publication revision,
   protecting equal-value replacement records from an older reap. Descriptor
   removal must persist before pending handles or container ownership are

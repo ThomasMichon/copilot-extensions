@@ -3587,6 +3587,22 @@ class SessionManager:
         load_existing: bool = True,
     ) -> tuple[AcpClient, str] | None:
         """Replace a dead remote Host and load/create its ACP session."""
+        from .session_host_ownership import require_no_pending_host_launch
+
+        require_no_pending_host_launch(self, session.session_id)
+        record = self._host_index.get(session.session_id) if self._host_index is not None else None
+        if (
+            self._remote_reap_pending(session.session_id)
+            or (record is None and session.session_id in self._remote_recovery_inconclusive)
+            or (
+                record is not None
+                and (record.boundary == "local" or record.extra.get("remote_authority_v2"))
+            )
+        ):
+            raise RemoteHostRecoveryPendingError(
+                f"New-host attempt refused for {session.session_id}: retained host authority "
+                "must be reattached or explicitly cleaned up first"
+            )
         target = session.target
         container_target = (
             target.container

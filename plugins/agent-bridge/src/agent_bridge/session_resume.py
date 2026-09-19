@@ -58,6 +58,7 @@ async def resume_session_admitted(
     from .session_manager import (
         AcpClient,
         DaemonDrainingError,
+        RemoteHostRecoveryPendingError,
         SessionStatus,
         _MAX_RESUME_ROUNDS,
         _default_cwd,
@@ -123,11 +124,6 @@ async def resume_session_admitted(
 
         await self._refresh_provider_target(session)
 
-        session.status = SessionStatus.STARTING
-        self._db.update_session_status(
-            session_id, SessionStatus.STARTING.value, time.time()
-        )
-
         def on_acp_event(event_type: str, data: dict[str, Any]) -> None:
             if session.event_log:
                 session.event_log.append(event_type, data)
@@ -141,6 +137,8 @@ async def resume_session_admitted(
         for attempt in range(1, _MAX_RESUME_ROUNDS + 1):
             client = None
             try:
+                session.status = SessionStatus.STARTING
+                self._db.update_session_status(session_id, SessionStatus.STARTING.value, time.time())
                 load_existing = bool(session.acp_session_id)
                 host_result = await self._resume_via_new_remote_host(
                     session,
@@ -228,7 +226,7 @@ async def resume_session_admitted(
                 )
                 raise
             except Exception as exc:
-                if isinstance(exc, RemoteSpawnCleanupPendingError):
+                if isinstance(exc, (RemoteSpawnCleanupPendingError, RemoteHostRecoveryPendingError)):
                     session.status = SessionStatus.STOPPED
                     self._db.update_session_status(
                         session_id,
@@ -252,6 +250,8 @@ async def resume_session_admitted(
                 # stop->resume); re-rolls the launch against the SAME ACP
                 # session, preserving prior-turn context.
                 await cleanup_failed_resume(self, session, client)
+                session.status = SessionStatus.STOPPED
+                self._db.update_session_status(session_id, SessionStatus.STOPPED.value, time.time())
                 if session.event_log:
                     session.event_log.append("acp_resume_retry", {
                         "attempt": attempt,
@@ -306,6 +306,8 @@ async def resume_session_admitted(
         if session.status != SessionStatus.IDLE:
             recreate_client: AcpClient | None = None
             try:
+                session.status = SessionStatus.STARTING
+                self._db.update_session_status(session_id, SessionStatus.STARTING.value, time.time())
                 host_result = await self._resume_via_new_remote_host(
                     session,
                     on_acp_event=on_acp_event,

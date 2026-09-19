@@ -22,11 +22,17 @@ async def detach_for_restart(manager: SessionManager) -> None:
 async def _detach_for_restart_owned(manager: SessionManager) -> None:
     """Detach active sessions and close owned channels at frontend shutdown."""
     from .session_host_ownership import has_pending_host_launch, require_no_pending_host_launch
-    from .session_manager import asyncio, log
+    from .session_manager import SessionStatus, asyncio, log
+
+    def restart_commit_pending(session: Session) -> bool:
+        return session.status == SessionStatus.FAILED and session.restart_status in {
+            SessionStatus.RUNNING.value, SessionStatus.IDLE.value, SessionStatus.STARTING.value,
+        }
 
     for session in manager.list_sessions():
         if (
             manager._background_recovery_allowed(session)
+            or restart_commit_pending(session)
             or session.client is not None
             or session._owned_process is not None
             or session._pending_host_attachment is not None
@@ -53,6 +59,7 @@ async def _detach_for_restart_owned(manager: SessionManager) -> None:
     while pending := [
         session for session in manager.list_sessions()
         if session._owned_process is not None
+        or restart_commit_pending(session)
         or session.client is not None
         or session._pending_host_attachment is not None
         or session.session_id in manager._forward_cleanup_backlog

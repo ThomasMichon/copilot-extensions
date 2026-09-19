@@ -1479,6 +1479,102 @@ async def test_repeated_scheduling_keeps_one_active_reap_owner(owned_context, mo
     remote.assert_awaited_once()
 
 
+@pytest.mark.parametrize("mode", ["retry", "recreate", "no_retry"])
+async def test_resume_never_respawns_committed_host_after_persistence_failure(
+    owned_context, monkeypatch, mode,
+):
+    from agent_bridge.session_manager import RemoteHostRecoveryPendingError
+
+    ctx = owned_context
+    ctx.session.target = SpawnTarget(
+        type="command",
+        codespace={"name": "example-space", "repo": "example/repo", "acp_command": "example-agent"},
+    )
+    client = SimpleNamespace(shutdown=AsyncMock(), stderr_tail=lambda: "", pid=456, is_running=True)
+    factory = Mock(return_value=SimpleNamespace(transport=object()))
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.build_codespace_spawner", factory,
+    )
+    monkeypatch.setattr("agent_bridge.session_manager._resolve_relay_launch_env", lambda *_args: ("", None))
+    monkeypatch.setattr("agent_bridge.session_manager._resolve_remote_ai_plugin_dirs", AsyncMock(return_value=[]))
+    monkeypatch.setattr("agent_bridge.relay_state.get_live_relay_port", lambda: None)
+    monkeypatch.setattr("agent_bridge.session_manager._MAX_RESUME_ROUNDS", 2 if mode == "retry" else 1)
+    monkeypatch.setattr(
+        ctx.manager, "_resume_via_new_remote_host",
+        SessionManager._resume_via_new_remote_host.__get__(ctx.manager),
+    )
+
+    async def commit_host(*_args, **_kwargs):
+        ctx.manager._host_index.register(HostRecord(
+            session_id=ctx.session.session_id, port=51000, host_pid=123, child_pid=456,
+            boundary="codespace", extra={"remote_authority_v2": True},
+        ))
+        return client, ctx.session.acp_session_id
+
+    connect = AsyncMock(side_effect=commit_host)
+    monkeypatch.setattr(ctx.manager, "_connect_via_session_host", connect)
+    update = ctx.db.update_session_status
+    failed = False
+
+    def fail_idle(session_id, status, *args, **kwargs):
+        nonlocal failed
+        if status == "idle" and not failed:
+            failed = True
+            raise OSError("idle persistence failed")
+        return update(session_id, status, *args, **kwargs)
+
+    monkeypatch.setattr(ctx.db, "update_session_status", fail_idle)
+    expected = OSError if mode == "no_retry" else RemoteHostRecoveryPendingError
+    message = "idle persistence failed" if mode == "no_retry" else "retained host authority"
+    with pytest.raises(expected, match=message):
+        await ctx.manager.resume_session(
+            ctx.session.session_id, allow_recreate=mode == "recreate", drain=False,
+        )
+    connect.assert_awaited_once()
+    factory.assert_called_once()
+    assert ctx.manager._host_index.get(ctx.session.session_id) is not None
+    assert ctx.session.client is None
+    assert ctx.session.status == SessionStatus.STOPPED
+    assert ctx.db.get_session(ctx.session.session_id)["status"] == "stopped"
+    assert ctx.processes == []
+
+
+@pytest.mark.parametrize("rehydrate_failure", [False, True])
+async def test_shutdown_retries_restart_commit_after_handles_are_closed(
+    owned_context, monkeypatch, rehydrate_failure,
+):
+    from agent_bridge.session_teardown import detach_for_restart
+
+    ctx = owned_context
+    ctx.phase = "success"
+    await ctx.manager.resume_session(ctx.session.session_id, drain=False)
+    original_release = ctx.db.release_worktree_ownership
+    attempts = 0
+
+    def release_ownership(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError("ownership persistence failed")
+        return original_release(*args, **kwargs)
+
+    monkeypatch.setattr(ctx.db, "release_worktree_ownership", release_ownership)
+    monkeypatch.setattr("agent_bridge.session_teardown._SHUTDOWN_CLEANUP_RETRY_SECONDS", 0.01)
+    manager = ctx.manager
+    if rehydrate_failure:
+        with pytest.raises(OSError, match="ownership persistence failed"):
+            await manager.stop_session(ctx.session.session_id, for_restart=True)
+        assert ctx.session.client is None
+        assert ctx.session._owned_process is None
+        assert ctx.db.get_session(ctx.session.session_id)["restart_status"] == "idle"
+        manager = SessionManager(ctx.db, session_host_state_dir=str(ctx.manager._host_index._path.parent))
+    await asyncio.wait_for(detach_for_restart(manager), 2)
+    assert attempts == 2
+    assert manager.get_session(ctx.session.session_id).status == SessionStatus.STOPPED
+    assert ctx.db.get_session(ctx.session.session_id)["restart_status"] == "idle"
+    assert all(process.returncode is not None for process in ctx.processes)
+
+
 @pytest.mark.parametrize("failure_stage", ["marker", "index"])
 async def test_dead_authority_metadata_failure_retains_container_lock(
     owned_context, monkeypatch, failure_stage,
