@@ -121,9 +121,10 @@ simply have retired cleanly between the last write and the restart, and a leg
 that started after the last write is not itself proof of anything either way. A
 provider reconciling a possibly-stale snapshot marks an unconfirmed leg as
 exactly that (mirroring the fabric's own
-`§Behaviors/marked-not-multiplied-uncertainty` on the picker vision) rather than
-asserting loss it cannot actually back, and corroborates with an independent
-liveness check before treating a named leg as genuinely gone. This is what makes
+`§Behaviors/uncertainty-is-marked-not-multiplied` on the agent-worktrees
+vision) rather than asserting loss it cannot actually back, and corroborates
+with an independent liveness check before treating a named leg as genuinely
+gone. This is what makes
 a provider's host-loss observation (`§Concepts/Host-owned execution identity`)
 honest across the harder case a full machine restart represents, not only the
 case where some part of the provider survives to notice its own child died.
@@ -209,8 +210,9 @@ machine restart, not only its process exiting cleanly. Because the persisted
 record is only ever as current as its last write, a stale entry is reconciled as
 an **unconfirmed** candidate, never asserted as loss outright — the same
 honesty-under-staleness the fabric already requires elsewhere
-(`§Behaviors/marked-not-multiplied-uncertainty` on the picker vision), applied
-here to the provider's own bookkeeping instead of a worktree's.
+(`§Behaviors/uncertainty-is-marked-not-multiplied` on the agent-worktrees
+vision), applied here to the provider's own bookkeeping instead of a
+worktree's.
 
 ### launch-receipts-are-provisional
 
