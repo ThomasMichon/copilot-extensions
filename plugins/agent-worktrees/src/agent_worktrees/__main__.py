@@ -3536,6 +3536,40 @@ def _conclude_retired_predecessor(wt_id: str | None, session_id: str) -> None:
         tracking.save_record(record, yaml_path)
 
 
+def _resolve_retire_pane_mux_session(
+    retire_pane: str | None,
+    expected_mux: str | None,
+) -> str | None:
+    """Return the mux session that actually owns ``retire_pane``, safely.
+
+    ``sessions.current_mux_session()``/``mux_session_for_pane()`` runs a
+    *bare* ``display-message -t <pane_id>`` -- unqualified by session. Live
+    validation of a real ``handoff-cutover --retire-pane`` invocation from
+    outside the target pane's own session (e.g. an orchestrator, not a
+    predecessor self-retiring) showed psmux resolving that bare target to
+    the *caller's own current/default session* rather than the session that
+    genuinely contains ``retire_pane``, even with no real pane-id collision
+    -- producing a false ``identity-mismatch-skip`` that silently no-ops a
+    legitimate retire. Mirror the already-safe pattern used by
+    ``pane_terminate``/``mux_focus_pane`` (#2890/#2892/#2896): check
+    membership in the expected session first via a session-scoped
+    ``list-panes -a`` filter, and only fall back to an unscoped lookup (also
+    ``list-panes -a``-based, never a bare ``display-message``) when the pane
+    isn't there.
+    """
+    if not expected_mux or not retire_pane:
+        return None
+    mux_bin = sessions_pane_retire._mux_bin()
+    if sessions_pane_retire._list_matching_pane_targets(
+        retire_pane, mux_bin, session_name=expected_mux,
+    ):
+        return expected_mux
+    try:
+        return sessions_pane_retire._resolve_unambiguous_pane_session(retire_pane, mux_bin)
+    except sessions_pane_retire.MuxPaneTargetAmbiguityError:
+        return None
+
+
 def _handoff_cutover_retire_result(
     args: argparse.Namespace,
 ) -> tuple[int, dict[str, object]]:
@@ -3551,7 +3585,7 @@ def _handoff_cutover_retire_result(
     strict_process_identity = (
         expected_copilot_pid is not None or expected_copilot_start is not None
     )
-    current_mux = sessions.mux_session_for_pane(retire_pane) if expected_mux else None
+    current_mux = _resolve_retire_pane_mux_session(retire_pane, expected_mux)
     pane_not_in_expected_mux = bool(expected_mux and current_mux != expected_mux)
     binding = (
         sessions.mux_binding_for_session(session_id)
