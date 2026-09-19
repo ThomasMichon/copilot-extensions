@@ -1497,7 +1497,7 @@ class TestWorktreeRoutes:
             mgr, "fetch_cold_store_session", AsyncMock(return_value=cold)
         ):
             resp = client.get(
-                "/api/v1/worktrees/does-not-exist/sessions/archived-tx/transcript",
+                "/api/v1/worktrees/some-other-worktree/sessions/archived-tx/transcript",
             )
 
         assert resp.status_code == 200
@@ -1507,6 +1507,60 @@ class TestWorktreeRoutes:
         assert data["meta"]["read_only"] is True
         assert data["meta"]["at_rest"] is True
         assert data["meta"]["worktree_id"] == "some-other-worktree"
+
+    def test_get_transcript_cold_store_empty_archive_is_not_a_404(
+        self, client, app,
+    ) -> None:
+        """A cold-store hit with zero events is a legitimate found-but-empty
+        archive, not a miss -- ``cold is not None`` is the identity match,
+        not ``cold.events`` truthiness (a real empty transcript must not be
+        treated the same as no provider answer at all)."""
+        from agent_bridge.cold_store import ColdStoreSession
+
+        mgr = app.state.session_manager
+        cold = ColdStoreSession(
+            session_id="archived-empty",
+            status="ended",
+            worktree_id="wt-empty-archive",
+            events=(),
+        )
+        with patch.object(
+            mgr, "fetch_cold_store_session", AsyncMock(return_value=cold)
+        ):
+            resp = client.get(
+                "/api/v1/worktrees/wt-empty-archive/sessions/archived-empty/transcript",
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["events"] == []
+        assert data["meta"]["read_only"] is True
+        assert data["meta"]["at_rest"] is True
+
+    def test_get_transcript_cold_store_worktree_mismatch_is_rejected(
+        self, client, app,
+    ) -> None:
+        """The cold-store contract is session-ID-keyed, not worktree-keyed --
+        a provider answer for a *different* worktree_id than the URL asked
+        for must not be accepted as this worktree's transcript."""
+        from agent_bridge.cold_store import ColdStoreSession
+
+        mgr = app.state.session_manager
+        cold = ColdStoreSession(
+            session_id="cross-worktree-session",
+            status="ended",
+            worktree_id="the-real-worktree",
+            events=({"type": "user.message", "text": "wrong worktree"},),
+        )
+        with patch.object(
+            mgr, "fetch_cold_store_session", AsyncMock(return_value=cold)
+        ):
+            resp = client.get(
+                "/api/v1/worktrees/a-different-worktree"
+                "/sessions/cross-worktree-session/transcript",
+            )
+
+        assert resp.status_code == 404
 
     def test_get_transcript_falls_through_to_cold_store_when_local_events_empty(
         self, client, app,

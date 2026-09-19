@@ -1355,7 +1355,18 @@ async def get_worktree_session_transcript(
     if not events:
         mgr: SessionManager = request.app.state.session_manager
         cold = await mgr.fetch_cold_store_session(session_id)
-        if cold is not None and cold.events:
+        # ``cold is not None`` is already the provider's validated identity
+        # hit -- a legitimate archive can have zero events, so gating on
+        # ``cold.events`` truthiness would wrongly 404 a real, empty
+        # transcript. Guard on ``worktree_id`` instead: this route is
+        # worktree-scoped, but the cold-store contract is keyed by
+        # session_id alone, so a provider answer for a *different*
+        # worktree_id must not be accepted as this worktree's transcript
+        # (a caller-supplied worktree_id/session_id mismatch stays
+        # unresolved, same as if cold-store had nothing).
+        if cold is not None and (
+            cold.worktree_id is None or cold.worktree_id == worktree_id
+        ):
             events = list(cold.events)
             meta = {
                 "read_only": True,
