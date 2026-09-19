@@ -109,7 +109,22 @@ while ($rest.Count -ge 2) {
     } else {
         break
     }
-    $rest = if ($rest.Count -gt 2) { @($rest[2..($rest.Count - 1)]) } else { @() }
+    # NOT `$rest = if (...) { @(...) } else { @() }` -- PowerShell's if-as-
+    # expression assignment silently UNWRAPS a single-element array result to
+    # a bare scalar (confirmed empirically: `if ($true) { @("x") }` assigned
+    # directly yields a [string], not a 1-element [object[]], even though the
+    # branch itself uses `@()`). That corrupts every downstream array op once
+    # $rest narrows to exactly one remaining token (the common case: a
+    # single-token payload command, e.g. bare `copilot`, with an initial
+    # prompt in transport) -- `$rest[0]` then indexes a CHARACTER of that
+    # scalar string, not the intended command token, and the child launch
+    # silently fails. Assigning inside each branch (a plain statement, not an
+    # expression whose result is captured) does not exhibit the unwrap.
+    if ($rest.Count -gt 2) {
+        $rest = @($rest[2..($rest.Count - 1)])
+    } else {
+        $rest = @()
+    }
 }
 
 if ($rest.Count -eq 0) { exit 0 }
