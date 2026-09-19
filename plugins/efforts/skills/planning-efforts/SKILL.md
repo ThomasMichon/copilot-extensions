@@ -210,15 +210,9 @@ gate before executing:
 
 **The operator may waive their *own* review — but the agent's review-gate is
 non-optional when automated review is available.** Always route the plan through
-it before starting the project. Three reasons this matters:
-
-- **Reviewed plan** — execution proceeds from a plan something checked, not a
-  first draft.
-- **Cross-agent visibility** — a committed, merged effort is visible to *other*
-  agents, who can dedupe against it or co-work on it instead of starting parallel
-  work.
-- **Crash recovery** — if the driving agent dies, the committed effort is a
-  recovery point; work resumes from the file.
+it before starting the project: it guarantees a reviewed plan, cross-agent
+visibility (others can dedupe/co-work instead of starting parallel work), and a
+crash-recovery point if the driving agent dies.
 
 **Graceful degradation:** if the repo has no automated PR review (or isn't
 PR-gated at all), the gate collapses to "commit the plan, then execute" — there
@@ -266,40 +260,25 @@ target all mean **host-owned orchestration**. Do not execute target code, source
 target files, or fetch individual remote files to manufacture a capability
 answer.
 
-After that check, choose among the placement models below (see
-[`references/efforts.md`](references/efforts.md) § Cross-repo placement for the
-fuller rationale).
+After that check, choose among the placement models below. **Host-owned
+orchestration is the default** — capability permits a target to own one
+canonical target-local effort, it does not silently move ownership out of the
+host. Full description of each model, and the several-hosts-one-target rule:
+[`references/efforts.md`](references/efforts.md) § Cross-repo placement.
 
-**Host-owned orchestration is the default.** A compatible target may own one
-canonical target-local effort when the stretch is predominantly about that
-target and placing the plan with its work and reviewers is an explicit,
-deliberate choice. Capability permits that placement; it does not silently move
-ownership out of the host.
+- **Local / tracking-only (default)** — the folder stays in *this* repo and
+  tracks work landing elsewhere.
+- **Build directly in the target repo** — only when the exact probe proves
+  adoption *and* the stretch is genuinely about that repo; author it there,
+  through that repo's own flow, keeping only a one-way reference back in the
+  host.
+- **Hybrid (split public/private)** — a canonical public/generalized effort
+  plus a private one that links to and elaborates it, never the reverse.
 
-- **Local / tracking-only (default).** The effort folder lives in *this*
-  (control) repo and coordinates work that lands elsewhere — the folder tracks,
-  the real changes happen in the target. Use when the work spans several targets,
-  or the target repo hasn't adopted `efforts/`.
-- **Build directly in the target repo.** If the **target repo has adopted
-  `efforts/`** according to the exact probe and the stretch is genuinely *about
-  that repo*, **prefer to author** one canonical target-owned effort **there**,
-  through *that repo's* flow — its grouping, tracker, review gate, and addendum —
-  instead of here. The host keeps only its own orchestration context and a
-  one-way reference to the target effort; the target effort does not point back
-  into host-private state.
-- **Hybrid (split public/private).** Keep a **generalized** effort in a
-  **public / portable** repo *and* a **fuller, downstream-private** effort in the
-  control repo that **links to it**. The **public effort is canonical** — it is
-  what other agents cite and what the plan is reviewed as; the private effort
-  *elaborates* it with deployment-specific context (private names, hosts, downstream
-  wiring) and links back. Keep the public artifact **generic** — no
-  downstream-private names — per the repo's public-artifact rule.
-
-When several hosts collaborate on one compatible target, the first host creates
-or claims the target-local effort through the target's normal coordination
-flow; later hosts discover and reference that same effort. Each host retains
-only its own orchestration context. Never create drifting peer copies, reciprocal
-ownership links, or a second target-local effort for the same scope.
+Never create drifting peer copies, reciprocal ownership links, or a second
+target-local effort for the same scope: the first host to collaborate on a
+compatible target claims it through that target's normal coordination flow,
+and later hosts discover and reference that same effort.
 
 **One ordering rule holds across all three: propose before you do.** Reviewers
 can't meaningfully comment on external work that's already committed, so:
