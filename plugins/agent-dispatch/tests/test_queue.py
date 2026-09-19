@@ -967,6 +967,55 @@ def test_bind_owner_session_is_owner_and_generation_fenced(q):
         )
 
 
+def test_attachment_history_records_bind_release_and_handoff(q):
+    """durable-attachment-history: releasing/re-embodying a task must NOT
+    discard the prior session's identity -- reproduces the aperture-labs
+    incident (a stuck Intelligence Dampener review released twice, each
+    release silently losing the previous session's record)."""
+    task = q.create("headless", target_worktree="wt-1", target_machine="m1")
+    q.claim_one("w1", task_id=task.id, machine="m1", worktree="wt-1")
+    q.start(task.id, "w1")
+    q.bind_owner_session(task.id, "w1", "session-a", now=1000.0)
+
+    # A plain suspend/resume of the SAME session is not a new attachment.
+    q.suspend(task.id, "w1", reason="idle", now=1010.0)
+    q.resume(task.id, "w1", now=1020.0)
+    history = q.attachment_history(task.id)
+    assert len(history) == 1
+    assert history[0].session_id == "session-a"
+    assert history[0].detached_at is None
+    assert history[0].worktree_id == "wt-1"
+    assert history[0].machine == "m1"
+
+    # Releasing for a fresh embodiment detaches session-a and, once a new
+    # session binds, records session-b as a SEPARATE, non-destructive entry.
+    q.suspend(task.id, "w1", reason="stuck", now=1030.0)
+    q.release_suspended(task.id, "w1", reason="reset for fresh embodiment", now=1040.0)
+    history = q.attachment_history(task.id)
+    assert len(history) == 1
+    assert history[0].session_id == "session-a"
+    assert history[0].detached_at == 1040.0
+    assert history[0].detach_reason == "reset for fresh embodiment"
+
+    q.claim_one("w2", task_id=task.id, machine="m1", worktree="wt-1", now=1050.0)
+    q.start(task.id, "w2", now=1050.0)
+    q.bind_owner_session(task.id, "w2", "session-b", now=1050.0)
+    history = q.attachment_history(task.id)
+    assert [h.session_id for h in history] == ["session-b", "session-a"]
+    assert history[0].detached_at is None
+    # session-a's record from the first release is preserved, not discarded.
+    assert history[1].detached_at == 1040.0
+
+    # A handoff (adopt_owner_session_id) detaches the retiring session and
+    # attaches the successor, all within resume -- no release round-trip.
+    q.suspend(task.id, "w2", reason="context exhaustion", now=1060.0)
+    q.resume(task.id, "w2", adopt_owner_session_id="session-c", now=1070.0)
+    history = q.attachment_history(task.id)
+    assert [h.session_id for h in history] == ["session-c", "session-b", "session-a"]
+    assert history[0].detached_at is None
+    assert history[1].detached_at == 1070.0
+
+
 def test_set_activity_cannot_restore_activity_on_suspended_task(q):
     t = q.create("dormant")
     reservation, _ = q.reserve_spawn(t.id)

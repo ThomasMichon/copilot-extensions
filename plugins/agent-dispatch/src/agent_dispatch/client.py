@@ -117,6 +117,11 @@ class DispatchClient(RegistrationClientMixin):
         """The accumulated append-only progress log for a task (oldest first)."""
         return self._unwrap(self._http.get(f"/tasks/{task_id}/progress-log"))
 
+    def attachments(self, task_id: str) -> list[dict]:
+        """A task's durable attachment history, newest first -- every session
+        that has ever attached, distinct from its current owner session."""
+        return self._unwrap(self._http.get(f"/tasks/{task_id}/attachments"))
+
     def payload(self, task_id: str) -> dict:
         return self._unwrap(self._http.get(f"/tasks/{task_id}/payload"))
 
